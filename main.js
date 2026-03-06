@@ -1,14 +1,18 @@
-const { app, BrowserWindow, ipcMain, shell, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, globalShortcut, clipboard } = require('electron');
 const path = require('path');
 require('dotenv').config();
 
-const { handleChat } = require('./src/AI_Brain/Gemini_API');
+const { handleChat, resetChat, getChatTranscript } = require('./src/AI_Brain/Gemini_API');
 const { openApp } = require('./src/Automation_Layer/open_app');
 const { openWebsite, openSearch } = require('./src/Automation_Layer/open_website');
 const { performWebAutomation } = require('./src/Automation_Layer/browser_automation');
+const { createFolder, openFile, deleteFile } = require('./src/Automation_Layer/file_operations');
+const { getSystemInfo, getWeather } = require('./src/System/system_info');
+const { readConfig, writeConfig } = require('./src/System/config_manager');
 const { parseCommand } = require('./src/Command_Parser/parser');
 
 let mainWindow;
+let settingsWindow = null;
 let tray = null;
 
 function createWindow() {
@@ -41,7 +45,27 @@ function createWindow() {
     });
 }
 
-
+function createSettingsWindow() {
+    if (settingsWindow) {
+        settingsWindow.focus();
+        return;
+    }
+    settingsWindow = new BrowserWindow({
+        width: 440,
+        height: 560,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload-settings.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+        },
+        frame: false,
+        transparent: true,
+        resizable: false,
+        parent: mainWindow,
+    });
+    settingsWindow.loadFile('src/UI/settings.html');
+    settingsWindow.on('closed', () => { settingsWindow = null; });
+}
 
 app.whenReady().then(() => {
     createWindow();
@@ -69,16 +93,17 @@ app.on('will-quit', () => {
     globalShortcut.unregisterAll();
 });
 
-// IPC Handlers
+// =====================
+// IPC Handlers — Chat
+// =====================
 ipcMain.handle('chat-message', async (event, message) => {
     try {
         const rawResponse = await handleChat(message);
         const aiResponse = parseCommand(rawResponse);
 
-        // Execute action if present
         if (aiResponse.action && aiResponse.action.type !== 'none') {
             try {
-                executeAction(aiResponse.action);
+                await executeAction(aiResponse.action);
             } catch (err) {
                 console.error("Action execution error:", err);
                 aiResponse.response += "\n\n(Note: I tried to execute the action, but an error occurred.)";
@@ -94,12 +119,75 @@ ipcMain.handle('chat-message', async (event, message) => {
 
 ipcMain.on('close-window', (event) => {
     if (mainWindow) {
-        event.preventDefault(); // Ensure it doesn't kill the process
+        event.preventDefault();
         mainWindow.hide();
     }
 });
 
-function executeAction(action) {
+ipcMain.handle('reset-chat', () => {
+    resetChat();
+    return { success: true };
+});
+
+ipcMain.handle('get-chat-history', () => {
+    return getChatTranscript();
+});
+
+// =====================
+// IPC Handlers — Settings
+// =====================
+ipcMain.handle('open-settings', () => {
+    createSettingsWindow();
+});
+
+ipcMain.handle('get-settings', () => {
+    return readConfig();
+});
+
+ipcMain.handle('save-settings', (event, config) => {
+    const result = writeConfig(config);
+    // 🔔 Notify main chat window immediately
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('settings-changed', config);
+    }
+    return result;
+});
+
+ipcMain.on('close-settings', () => {
+    if (settingsWindow) settingsWindow.close();
+});
+
+ipcMain.handle('open-external', (event, url) => {
+    shell.openExternal(url);
+});
+
+// =====================
+// IPC Handlers — Clipboard
+// =====================
+ipcMain.handle('clipboard-read', () => {
+    return clipboard.readText();
+});
+
+ipcMain.handle('clipboard-write', (event, text) => {
+    clipboard.writeText(text);
+    return { success: true };
+});
+
+// =====================
+// IPC Handlers — System Info
+// =====================
+ipcMain.handle('get-system-info', async () => {
+    return getSystemInfo();
+});
+
+ipcMain.handle('get-weather', async (event, city) => {
+    return getWeather(city);
+});
+
+// =====================
+// Action Executor
+// =====================
+async function executeAction(action) {
     console.log("Executing action:", action);
 
     switch (action.type) {
@@ -114,6 +202,18 @@ function executeAction(action) {
             break;
         case 'web_automation':
             performWebAutomation(action.target);
+            break;
+        case 'create_folder':
+            createFolder(action.target);
+            break;
+        case 'open_file':
+            await openFile(action.target);
+            break;
+        case 'delete_file':
+            await deleteFile(action.target);
+            break;
+        case 'clipboard_write':
+            clipboard.writeText(action.target);
             break;
     }
 }

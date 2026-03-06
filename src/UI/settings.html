@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mint — Settings</title>
+    <link rel="stylesheet" href="settings.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="settings-container">
+        <header class="settings-header drag-region">
+            <div class="header-left">
+                <span class="settings-icon">⚙️</span>
+                <h1>Settings</h1>
+            </div>
+            <button class="close-btn" id="close-btn" aria-label="Close">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </header>
+
+        <main class="settings-body">
+
+            <!-- API Key -->
+            <section class="setting-section">
+                <h2 class="section-title">🔑 Gemini API Key</h2>
+                <div class="setting-row">
+                    <label for="api-key-input">API Key</label>
+                    <div class="input-group">
+                        <input type="password" id="api-key-input" placeholder="Enter your Gemini API Key..."
+                            autocomplete="off">
+                        <button class="toggle-visibility" id="toggle-key" title="Show/Hide">👁</button>
+                    </div>
+                    <p class="hint">ได้รับ API Key ได้ที่ <a href="#" id="ai-studio-link">Google AI Studio</a></p>
+                </div>
+            </section>
+
+            <hr class="divider">
+
+            <!-- Theme -->
+            <section class="setting-section">
+                <h2 class="section-title">🎨 Theme</h2>
+                <div class="theme-grid">
+                    <button class="theme-card" data-theme="dark" id="theme-dark">
+                        <div class="theme-preview dark-preview"></div>
+                        <span>Dark</span>
+                    </button>
+                    <button class="theme-card" data-theme="light" id="theme-light">
+                        <div class="theme-preview light-preview"></div>
+                        <span>Light</span>
+                    </button>
+                    <button class="theme-card" data-theme="midnight" id="theme-midnight">
+                        <div class="theme-preview midnight-preview"></div>
+                        <span>Midnight</span>
+                    </button>
+                </div>
+            </section>
+
+            <hr class="divider">
+
+            <!-- Accent Color -->
+            <section class="setting-section">
+                <h2 class="section-title">🖌️ Accent Color</h2>
+                <div class="setting-row accent-row">
+                    <div class="color-presets">
+                        <button class="color-dot" data-color="#8b5cf6" style="background:#8b5cf6"
+                            title="Purple"></button>
+                        <button class="color-dot" data-color="#06b6d4" style="background:#06b6d4" title="Cyan"></button>
+                        <button class="color-dot" data-color="#10b981" style="background:#10b981"
+                            title="Green"></button>
+                        <button class="color-dot" data-color="#f59e0b" style="background:#f59e0b"
+                            title="Amber"></button>
+                        <button class="color-dot" data-color="#ef4444" style="background:#ef4444" title="Red"></button>
+                        <button class="color-dot" data-color="#ec4899" style="background:#ec4899" title="Pink"></button>
+                    </div>
+                    <div class="custom-color">
+                        <label for="custom-color">Custom:</label>
+                        <input type="color" id="custom-color" value="#8b5cf6">
+                    </div>
+                </div>
+            </section>
+
+        </main>
+
+        <footer class="settings-footer">
+            <button class="btn-secondary" id="reset-btn">Reset to Default</button>
+            <button class="btn-primary" id="save-btn">Save Settings</button>
+        </footer>
+    </div>
+
+    <script src="settings.js"></script>
+</body>
+
+</html>

@@ -11,6 +11,24 @@
   --glass-blur: blur(12px);
 }
 
+[data-theme="light"] {
+  --bg-gradient: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+  --panel-bg: rgba(255, 255, 255, 0.8);
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --border: rgba(0, 0, 0, 0.1);
+  --shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="midnight"] {
+  --bg-gradient: linear-gradient(135deg, #020617 0%, #0c0a2e 100%);
+  --panel-bg: rgba(10, 10, 40, 0.85);
+  --text-main: #e2e8f0;
+  --text-muted: #64748b;
+  --border: rgba(99, 102, 241, 0.2);
+  --shadow: 0 4px 30px rgba(0, 0, 0, 0.8);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -107,6 +125,44 @@ h1 {
 .close-btn:hover {
   background: rgba(239, 68, 68, 0.2);
   color: #ef4444;
+}
+
+.clear-btn {
+  -webkit-app-region: no-drag;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.clear-btn:hover {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.settings-btn {
+  -webkit-app-region: no-drag;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.settings-btn:hover {
+  background: rgba(139, 92, 246, 0.15);
+  color: var(--accent);
 }
 
 /* Chat Area */
