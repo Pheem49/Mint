@@ -15,11 +15,11 @@ Mint เป็น Desktop Agent ที่ขับเคลื่อนด้ว
 | 🌐 Open URL | สั่งเปิดเว็บไซต์ได้เลย |
 | 🔍 Web Search | ค้นหา Google โดยอัตโนมัติ |
 | 🚀 Open App | สั่งเปิดโปรแกรมบนเครื่อง |
-| 🤖 Web Automation | ทำงานอัตโนมัติบนเว็บด้วย Puppeteer |
+| 🤖 Multi-Step Web Automation | ระบบ Agentic Loop ทำงานอัตโนมัติบนเว็บเป็นขั้นเป็นตอน (ค้นหา -> อ่าน -> สรุป) |
 | 📁 File Operations | สร้างโฟลเดอร์, เปิดไฟล์, ลบไฟล์ผ่านคำสั่ง AI |
 | 📋 Clipboard | สั่งให้ copy ข้อความไปยัง Clipboard ได้เลย |
 | 🌡️ System Info | ถาม RAM, CPU, เวลา หรืออากาศได้ทุกเมื่อ |
-| ⚙️ Settings | ตั้งค่า API Key, Theme, Accent Color ผ่าน UI |
+| ⚙️ Settings | ตั้งค่า API Key, Theme, Accent Color, และเว็บเบราว์เซอร์อัตโนมัติ (Chromium/Firefox) ผ่าน UI |
 | 🎨 Multiple Themes | Dark / Light / Midnight + Custom Accent Color |
 | 🎙️ Voice Input | พูดสั่งด้วย Web Speech API ภาษาไทย |
 | 📥 Tray Icon | รันซ่อนใน Background ผ่าน System Tray เข้าถึงง่าย |
@@ -30,8 +30,8 @@ Mint เป็น Desktop Agent ที่ขับเคลื่อนด้ว
 ## 🛠️ Tech Stack
 
 - **[Electron](https://www.electronjs.org/)** — Framework สำหรับ Desktop App
-- **[Google Gemini API](https://ai.google.dev/)** (`@google/genai`) — AI Brain
-- **[Puppeteer](https://pptr.dev/)** — Web Automation
+- **[Google Gemini API](https://ai.google.dev/)** (`@google/genai`) — AI Brain & Planner
+- **[Puppeteer](https://pptr.dev/)** — Web Automation (รองรับ Bundled Chromium & System Firefox)
 - **[dotenv](https://github.com/motdotla/dotenv)** — จัดการ Environment Variables
 
 ---
@@ -81,6 +81,7 @@ npm start
 "อากาศที่กรุงเทพวันนี้เป็นยังไง"      → ดึงข้อมูลอากาศ
 "Copy ข้อความ Hello World"            → copy ไป Clipboard
 "แปลข้อความในรูปนี้ให้หน่อย"          → (ใช้คู่กับปุ่ม Vision 👁️ หรือลากรูปลงช่องแชท)
+"หาข่าวล่าสุดเกี่ยวกับ AI แล้วสรุปให้ฟังหน่อย" → AI วางแผนและเชื่อมต่อเบราว์เซอร์หาข้อมูลให้เป็นขั้นเป็นตอน
 ```
 
 ---

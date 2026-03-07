@@ -25,6 +25,11 @@ function applyConfig(config) {
     // Apply API key
     document.getElementById('api-key-input').value = config.apiKey || '';
 
+    // Apply Automation Browser
+    if (config.automationBrowser) {
+        document.getElementById('automation-browser-select').value = config.automationBrowser;
+    }
+
     // Update active theme card
     document.querySelectorAll('.theme-card').forEach(card => {
         card.classList.toggle('active', card.dataset.theme === config.theme);
@@ -94,6 +99,8 @@ document.getElementById('custom-color').addEventListener('input', (e) => {
 // Save
 document.getElementById('save-btn').addEventListener('click', async () => {
     currentConfig.apiKey = document.getElementById('api-key-input').value.trim();
+    currentConfig.automationBrowser = document.getElementById('automation-browser-select').value;
+    
     await window.settingsApi.saveSettings(currentConfig);
     const btn = document.getElementById('save-btn');
     btn.textContent = '✅ Saved!';

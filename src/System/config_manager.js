@@ -8,7 +8,8 @@ const DEFAULT_CONFIG = {
     theme: 'dark',
     accentColor: '#8b5cf6',
     apiKey: '',
-    language: 'th-TH'
+    language: 'th-TH',
+    automationBrowser: 'chromium'
 };
 
 function readConfig() {

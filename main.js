@@ -139,7 +139,11 @@ ipcMain.handle('chat-message', async (event, message, base64Image = null) => {
 
         if (aiResponse.action && aiResponse.action.type !== 'none') {
             try {
-                await executeAction(aiResponse.action);
+                const actionResult = await executeAction(aiResponse.action);
+                // If the action returned a string result (e.g. from Web Automation), append it.
+                if (actionResult && typeof actionResult === 'string') {
+                    aiResponse.response += `\n\n${actionResult}`;
+                }
             } catch (err) {
                 console.error("Action execution error:", err);
                 aiResponse.response += "\n\n(Note: I tried to execute the action, but an error occurred.)";
@@ -301,8 +305,7 @@ async function executeAction(action) {
             openApp(action.target);
             break;
         case 'web_automation':
-            performWebAutomation(action.target);
-            break;
+            return await performWebAutomation(action.target);
         case 'create_folder':
             createFolder(action.target);
             break;
