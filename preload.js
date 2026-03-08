@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
     sendMessage: (message, base64Image) => ipcRenderer.invoke('chat-message', message, base64Image),
     closeWindow: () => ipcRenderer.send('close-window'),
+    maximizeWindow: () => ipcRenderer.send('maximize-window'),
     resetChat: () => ipcRenderer.invoke('reset-chat'),
     getChatHistory: () => ipcRenderer.invoke('get-chat-history'),
     openSettings: () => ipcRenderer.invoke('open-settings'),

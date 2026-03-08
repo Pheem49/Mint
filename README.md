@@ -12,6 +12,7 @@ Mint เป็น Desktop Agent ที่ขับเคลื่อนด้ว
 | 💬 AI Chat | คุยด้วยภาษาธรรมชาติผ่าน Google Gemini พร้อมจำบทสนทนา |
 | ✨ Proactive Assistant | AI วิเคราะห์หน้าจอ + พฤติกรรมผู้ใช้ แล้วเสนอความช่วยเหลือก่อนถูกถาม (ทำงานเมื่อเปิด Smart Context) |
 | 🧠 Smart Context AI | จับหน้าจอแบบ Silent อัตโนมัติทุกครั้งที่ส่งข้อความ เพื่อให้ AI เข้าใจบริบทโดยไม่ต้องอัปโหลดเอง |
+| 📚 Local Knowledge (RAG) | คุยและถามตอบความรู้จากไฟล์ในเครื่องของคุณ (txt, md) โดย AI จะอ้างอิงข้อมูลเฉพาะจากไฟล์ |
 | 👁️ Screen Vision | ให้ AI ดูหน้าจอ หรือแคปรูปเฉพาะส่วนไปวิเคราะห์ได้เลย |
 | 🖼️ Image Drop | รองรับการ Copy & Paste และ Drag & Drop ไฟล์รูปภาพ |
 | 🌐 Open URL | สั่งเปิดเว็บไซต์ได้เลย |
@@ -22,7 +23,8 @@ Mint เป็น Desktop Agent ที่ขับเคลื่อนด้ว
 | 📋 Clipboard | สั่งให้ copy ข้อความไปยัง Clipboard ได้เลย |
 | 🌡️ System Info | ถาม RAM, CPU, เวลา หรืออากาศได้ทุกเมื่อ |
 | ⚙️ Settings | ตั้งค่า API Key, Theme, Accent Color, เว็บเบราว์เซอร์, และ Proactive Interval ผ่าน UI |
-| 🎨 Multiple Themes | Dark / Light / Midnight + Custom Accent Color |
+| 🎨 Premium Themes | Dark / Light / Midnight พร้อม Glassmorphism Effect และ Custom Accent Color |
+| 🖥️ Window Management | ย่อ ขยาย (Maximize) หรือรันซ่อนใน Background ผ่าน System Tray เข้าถึงง่าย |
 | 🎙️ Voice Input | พูดสั่งด้วย Web Speech API ภาษาไทย |
 | 📥 Tray Icon | รันซ่อนใน Background ผ่าน System Tray เข้าถึงง่าย |
 | ⌨️ Global Shortcut | `Ctrl+Shift+Space` เรียก Mint ได้ทุกที่ |
@@ -56,6 +58,15 @@ Gemini วิเคราะห์ context + Behavior Memory
 |---|---|---|
 | ความถี่ Capture | 30วิ – 5นาที | 60 วิ |
 | ช่วงพักระหว่าง Suggestion | 1 – 10 นาที | 2 นาที |
+
+---
+
+## ⚡ Performance Optimizations
+
+Mint ถูกออกแบบมาให้ประหยัดทรัพยากรเครื่องที่สุด แม้จะมีฟีเจอร์ AI แบบ Real-time:
+- **JPEG Downscaling:** บีบอัดภาพหน้าจอลง 50% และแปลงเป็น JPEG (Quality 60) ก่อนส่งให้ AI
+- **Smart Idle Detection:** เมื่อไม่ได้ใช้งานเมาส์/คีย์บอร์ดเกิน 5 นาที ระบบ Proactive + Screen Capture จะหยุดพักตัวเองเพื่อประหยัดแบตเตอรี่และ CPU อัตโนมัติ
+- **UI IPC Throttling:** ป้องกันแอปค้างจากการสแปมหน้าต่างแชท
 
 ---
 
@@ -114,6 +125,7 @@ npm start
 "Copy ข้อความ Hello World"                         → copy ไป Clipboard
 "แปลข้อความในรูปนี้ให้หน่อย"                       → (ใช้คู่กับปุ่ม Vision 👁️ หรือลากรูปลงช่องแชท)
 "หาข่าวล่าสุดเกี่ยวกับ AI แล้วสรุปให้ฟังหน่อย"    → AI วางแผนและเชื่อมต่อเบราว์เซอร์หาข้อมูลให้
+"จดจำไฟล์ /path/to/my_notes.txt"                   → AI จะดึงเนื้อหาจากไฟล์มารวมเข้ากับ Knowledge Base (RAG)
 ```
 
 ---
@@ -132,9 +144,10 @@ Mint/
 ├── .env                            # API Keys (ห้ามขึ้น Git!)
 └── src/
     ├── AI_Brain/
-    │   ├── Gemini_API.js           # Gemini Chat Session (มี History & Vision)
+    │   ├── Gemini_API.js           # Gemini Chat Session + RAG Injection
     │   ├── proactive_engine.js     # วิเคราะห์หน้าจอ + สร้าง Proactive Suggestion
-    │   └── behavior_memory.js      # จำพฤติกรรมและ Context ของผู้ใช้
+    │   ├── behavior_memory.js      # จำพฤติกรรมและ Context ของผู้ใช้
+    │   └── knowledge_base.js       # Local RAG System สร้าง Vector ค้นหาเอกสาร
     ├── Automation_Layer/
     │   ├── open_app.js             # เปิดโปรแกรม
     │   ├── open_website.js         # เปิดเว็บ / ค้นหา

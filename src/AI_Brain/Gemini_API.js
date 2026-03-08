@@ -11,7 +11,7 @@ Always respond exactly with valid JSON containing NO MARKDOWN FORMATTING (do not
 {
   "response": "Your conversational reply to the user here.",
   "action": {
-    "type": "none" | "open_url" | "open_app" | "search" | "web_automation" | "create_folder" | "open_file" | "delete_file" | "clipboard_write" | "system_info" | "plugin",
+    "type": "none" | "open_url" | "open_app" | "search" | "web_automation" | "create_folder" | "open_file" | "delete_file" | "clipboard_write" | "system_info" | "plugin" | "learn_file",
     "pluginName": "only if type is plugin",
     "target": "target string based on type or plugin instruction"
   }
@@ -29,6 +29,7 @@ Definitions of action types:
 - 'clipboard_write': When the user asks to copy something to clipboard. Target is the text to copy.
 - 'system_info': When the user asks about CPU, RAM, system specs, time, date, or weather. Target should be empty "" for general info, or a city name for weather (e.g., "Bangkok").
 - 'plugin': Use this when the user asks to perform an action supported by one of the active plugins. Set "pluginName" to the specific plugin name, and target to the instruction for the plugin.
+- 'learn_file': Use this ONLY when the user asks you to read, learn, remember, or index a specific local text or markdown document. Target must be the absolute path to the file.
 
 Example: Create a folder named "Projects"
 Output:
@@ -88,8 +89,24 @@ function createChat(history = []) {
 // Initialize on startup
 createChat(readChatHistory());
 
+const { searchKnowledge } = require('./knowledge_base');
+
 async function handleChat(message, base64Image = null) {
   try {
+    let finalMessage = message;
+    
+    // Inject Local RAG Context
+    if (message && message.trim().length > 0) {
+        const retrievedDocs = await searchKnowledge(message);
+        if (retrievedDocs && retrievedDocs.length > 0) {
+            let contextString = `\n\n[LOCAL KNOWLEDGE BASE - USE THIS CONTEXT TO ANSWER]\n`;
+            retrievedDocs.forEach(doc => {
+                contextString += `Source: ${doc.source}\nContent: ${doc.text}\n\n`;
+            });
+            finalMessage = message + contextString;
+        }
+    }
+
     let aiResponse;
     if (base64Image) {
         // Remove data URL prefix if present (e.g., 'data:image/png;base64,')
@@ -97,7 +114,7 @@ async function handleChat(message, base64Image = null) {
         
         aiResponse = await chat.sendMessage({
             message: [
-                { text: message || "Analyze this image." },
+                { text: finalMessage || "Analyze this image." },
                 {
                     inlineData: {
                         mimeType: "image/png",
@@ -107,7 +124,7 @@ async function handleChat(message, base64Image = null) {
             ]
         });
     } else {
-        aiResponse = await chat.sendMessage({ message });
+        aiResponse = await chat.sendMessage({ message: finalMessage });
     }
 
     writeChatHistory(chat.getHistory(true));

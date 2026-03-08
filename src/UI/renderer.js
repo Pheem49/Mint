@@ -2,6 +2,7 @@ const chatContainer = document.getElementById('chat-container');
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const closeBtn = document.getElementById('close-btn');
+const maximizeBtn = document.getElementById('maximize-btn');
 const clearBtn = document.getElementById('clear-btn');
 const settingsBtn = document.getElementById('settings-btn');
 const micBtn = document.getElementById('mic-btn');
@@ -124,15 +125,33 @@ closeBtn.addEventListener('click', () => {
     window.api.closeWindow();
 });
 
+maximizeBtn.addEventListener('click', () => {
+    window.api.maximizeWindow();
+});
+
 // Settings button
 settingsBtn.addEventListener('click', () => {
     window.api.openSettings();
 });
 
+// Throttle utility to prevent UI spam
+function throttle(func, limit) {
+    let inThrottle;
+    return function() {
+        const args = arguments;
+        const context = this;
+        if (!inThrottle) {
+            func.apply(context, args);
+            inThrottle = true;
+            setTimeout(() => inThrottle = false, limit);
+        }
+    }
+}
+
 // Vision system
-visionBtn.addEventListener('click', async () => {
+visionBtn.addEventListener('click', throttle(async () => {
     await window.api.startVision();
-});
+}, 1000));
 
 window.api.onVisionReady((base64Image) => {
     currentBase64Image = base64Image;
@@ -260,7 +279,7 @@ async function loadChatHistory() {
     }
 }
 
-chatForm.addEventListener('submit', async (e) => {
+chatForm.addEventListener('submit', throttle(async (e) => {
     e.preventDefault();
     const text = chatInput.value.trim();
     
@@ -334,7 +353,7 @@ chatForm.addEventListener('submit', async (e) => {
         appendMessage("Sorry, I encountered an error communicating with the main process.", 'ai');
         console.error(error);
     }
-});
+}, 500));
 
 // --- Image Paste and Drag-n-Drop Support ---
 function handleImageFile(file) {

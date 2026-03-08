@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, globalShortcut, clipboard, Tray, Menu, nativeImage, desktopCapturer, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, globalShortcut, clipboard, Tray, Menu, nativeImage, desktopCapturer, screen, powerMonitor } = require('electron');
 const path = require('path');
 require('dotenv').config();
 
@@ -13,6 +13,7 @@ const { parseCommand } = require('./src/Command_Parser/parser');
 const pluginManager = require('./src/Plugins/plugin_manager');
 const { analyzeAndSuggest } = require('./src/AI_Brain/proactive_engine');
 const { recordBehavior, getBehaviorSummary } = require('./src/AI_Brain/behavior_memory');
+const { indexFile } = require('./src/AI_Brain/knowledge_base');
 
 let mainWindow;
 let settingsWindow = null;
@@ -29,7 +30,10 @@ async function runProactiveCycle() {
     try {
         // Silent screen capture
         const primaryDisplay = screen.getPrimaryDisplay();
-        const { width, height } = primaryDisplay.size;
+        // Downscale to 50% for performance
+        const width = Math.floor(primaryDisplay.size.width * 0.5);
+        const height = Math.floor(primaryDisplay.size.height * 0.5);
+        
         const sources = await desktopCapturer.getSources({
             types: ['screen'],
             thumbnailSize: { width, height }
@@ -37,7 +41,9 @@ async function runProactiveCycle() {
         const primarySource = sources[0];
         if (!primarySource || !primarySource.thumbnail) return;
 
-        const base64Image = primarySource.thumbnail.toDataURL();
+        // Compress image to JPEG to save huge base64 payload size and memory
+        // .toJPEG(quality) where quality is 0-100
+        const base64Image = primarySource.thumbnail.toJPEG(60).toString('base64');
         const behaviorSummary = getBehaviorSummary();
 
         const result = await analyzeAndSuggest(base64Image, behaviorSummary);
@@ -77,6 +83,30 @@ function stopProactiveLoop() {
     }
 }
 
+// Check idle state every minute to pause/resume background tasks
+const IDLE_THRESHOLD_SEC = 300; // 5 minutes
+setInterval(() => {
+    if (!proactiveIntervalHandle) return; // Only manage if it's supposed to be active (Smart Context is ON)
+    
+    // powerMonitor.getSystemIdleTime() is available after app is ready
+    if (app.isReady()) {
+        const idleSec = powerMonitor.getSystemIdleTime();
+        if (idleSec >= IDLE_THRESHOLD_SEC) {
+            console.log(`[System Idle] User idle for ${idleSec}s. Pausing Proactive loop to save resources.`);
+            stopProactiveLoop();
+            
+            // Wait for user to come back
+            const resumeChecker = setInterval(() => {
+                if (powerMonitor.getSystemIdleTime() < 10) {
+                    console.log('[System Idle] User returned. Resuming Proactive loop.');
+                    clearInterval(resumeChecker);
+                    startProactiveLoop();
+                }
+            }, 5000);
+        }
+    }
+}, 60000);
+
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 400,
@@ -89,7 +119,7 @@ function createWindow() {
         },
         frame: false,
         transparent: true,
-        resizable: false,
+        resizable: true,
         show: false
     });
 
@@ -222,6 +252,16 @@ ipcMain.on('close-window', (event) => {
     if (mainWindow) {
         event.preventDefault();
         mainWindow.hide();
+    }
+});
+
+ipcMain.on('maximize-window', (event) => {
+    if (mainWindow) {
+        if (mainWindow.isMaximized()) {
+            mainWindow.unmaximize();
+        } else {
+            mainWindow.maximize();
+        }
     }
 });
 
@@ -383,6 +423,7 @@ ipcMain.handle('execute-proactive-action', async (event, action) => {
             web_automation: result || 'ดำเนินการเสร็จแล้วค่ะ ✅',
             create_folder:  `สร้างโฟลเดอร์ "${action.target}" แล้วค่ะ 📁`,
             clipboard_write: `คัดลอกข้อความแล้วค่ะ 📋`,
+            learn_file: result || `เรียนรู้เอกสารเรียบร้อยค่ะ 📚`,
         };
         return {
             success: true,
@@ -445,6 +486,8 @@ async function executeAction(action) {
         case 'clipboard_write':
             clipboard.writeText(action.target);
             break;
+        case 'learn_file':
+            return await indexFile(action.target);
         case 'plugin':
             return await pluginManager.executePlugin(action.pluginName, action.target);
     }
