@@ -190,11 +190,75 @@ function historyToTranscript(history) {
   return transcript;
 }
 
-function getChatTranscript() {
-  if (chat) {
-    return historyToTranscript(chat.getHistory(true));
-  }
-  return historyToTranscript(readChatHistory());
+async function getChatTranscript() {
+    if (chat) {
+        return historyToTranscript(await chat.getHistory(true));
+    }
+    return historyToTranscript(readChatHistory());
 }
 
-module.exports = { handleChat, resetChat, getChatTranscript };
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableTranslateError(err) {
+    const status = err?.status ?? err?.error?.code ?? err?.code;
+    return status === 502 || status === 503;
+}
+
+/**
+ * Super fast, single-turn vision translation
+ * Extracts English text from the image and translates it to Thai.
+ */
+async function translateImageContent(base64Image) {
+    const maxAttempts = 3;
+    const retryDelayMs = [1000, 2500];
+
+    try {
+        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            try {
+                const response = await ai.models.generateContent({
+                    model: 'gemini-2.5-flash',
+                    contents: [
+                        {
+                            role: 'user',
+                            parts: [
+                                { text: "Extract any English text you see in this image and translate it to Thai. Return ONLY the Thai translation. If there is no text, return 'ไม่พบข้อความ'." },
+                                { inlineData: { mimeType: "image/png", data: base64Data } }
+                            ]
+                        }
+                    ]
+                });
+
+                return {
+                    text: response.text,
+                    retryableFailure: false
+                };
+            } catch (err) {
+                const shouldRetry = isRetryableTranslateError(err) && attempt < maxAttempts;
+                if (shouldRetry) {
+                    const delayMs = retryDelayMs[attempt - 1] ?? retryDelayMs[retryDelayMs.length - 1];
+                    console.warn(`Live translation retry ${attempt}/${maxAttempts - 1} after ${delayMs}ms due to ${err.status || err.code || 'retryable error'}`);
+                    await sleep(delayMs);
+                    continue;
+                }
+
+                throw err;
+            }
+        }
+    } catch (err) {
+        console.error("Live translation error:", err);
+        return {
+            text: "ขออภัย เกิดข้อผิดพลาดในการแปล",
+            retryableFailure: isRetryableTranslateError(err)
+        };
+    }
+}
+
+module.exports = {
+    handleChat,
+    resetChat,
+    getChatTranscript,
+    translateImageContent
+};

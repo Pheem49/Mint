@@ -1,192 +1,142 @@
-# 🌿 Mint — AI Desktop Agent
+# Mint
 
-Mint เป็น Desktop Agent ที่ขับเคลื่อนด้วย AI (Google Gemini) สร้างด้วย Electron  
-พิมพ์หรือพูดคำสั่งภาษาธรรมชาติ แล้วให้ Mint จัดการให้ทุกอย่าง
+Mint is an Electron desktop assistant powered by Google Gemini. It combines chat, screen capture, local automation, proactive suggestions, and a small plugin system in a single desktop app.
 
----
+## Current Features
 
-## ✨ Features
+- AI chat backed by `@google/genai`
+- Screen Vision for sending a selected screen region into chat
+- Live Translate mode for continuously translating a selected on-screen area
+- Smart Context / Proactive Assistant with periodic screen analysis
+- Local knowledge indexing for `.txt` and `.md` files
+- Clipboard read/write helpers
+- Weather and system info commands
+- Web automation via Puppeteer
+- Voice input through the browser Speech Recognition API
+- Tray integration and global shortcut
+- Plugin loading for Spotify, Docker, and a placeholder Discord plugin
 
-| ความสามารถ | รายละเอียด |
-|-----------|-----------|
-| 💬 AI Chat | คุยด้วยภาษาธรรมชาติผ่าน Google Gemini พร้อมจำบทสนทนา |
-| ✨ Proactive Assistant | AI วิเคราะห์หน้าจอ + พฤติกรรมผู้ใช้ แล้วเสนอความช่วยเหลือก่อนถูกถาม (ทำงานเมื่อเปิด Smart Context) |
-| 🧠 Smart Context AI | จับหน้าจอแบบ Silent อัตโนมัติทุกครั้งที่ส่งข้อความ เพื่อให้ AI เข้าใจบริบทโดยไม่ต้องอัปโหลดเอง |
-| 📚 Local Knowledge (RAG) | คุยและถามตอบความรู้จากไฟล์ในเครื่องของคุณ (txt, md) โดย AI จะอ้างอิงข้อมูลเฉพาะจากไฟล์ |
-| 👁️ Screen Vision | ให้ AI ดูหน้าจอ หรือแคปรูปเฉพาะส่วนไปวิเคราะห์ได้เลย |
-| 🖼️ Image Drop | รองรับการ Copy & Paste และ Drag & Drop ไฟล์รูปภาพ |
-| 🌐 Open URL | สั่งเปิดเว็บไซต์ได้เลย |
-| 🔍 Web Search | ค้นหา Google โดยอัตโนมัติ |
-| 🚀 Open App | สั่งเปิดโปรแกรมบนเครื่อง |
-| 🤖 Multi-Step Web Automation | ระบบ Agentic Loop ทำงานอัตโนมัติบนเว็บเป็นขั้นเป็นตอน (ค้นหา → อ่าน → สรุป) |
-| 📁 File Operations | สร้างโฟลเดอร์, เปิดไฟล์, ลบไฟล์ผ่านคำสั่ง AI |
-| 📋 Clipboard | สั่งให้ copy ข้อความไปยัง Clipboard ได้เลย |
-| 🌡️ System Info | ถาม RAM, CPU, เวลา หรืออากาศได้ทุกเมื่อ |
-| ⚙️ Settings | ตั้งค่า API Key, Theme, Accent Color, เว็บเบราว์เซอร์, และ Proactive Interval ผ่าน UI |
-| 🎨 Premium Themes | Dark / Light / Midnight พร้อม Glassmorphism Effect และ Custom Accent Color |
-| 🖥️ Window Management | ย่อ ขยาย (Maximize) หรือรันซ่อนใน Background ผ่าน System Tray เข้าถึงง่าย |
-| 🎙️ Voice Input | พูดสั่งด้วย Web Speech API ภาษาไทย |
-| 📥 Tray Icon | รันซ่อนใน Background ผ่าน System Tray เข้าถึงง่าย |
-| ⌨️ Global Shortcut | `Ctrl+Shift+Space` เรียก Mint ได้ทุกที่ |
-| 🔌 Plugin System | รองรับ Plugin เพิ่มเติม (Spotify, Discord, Docker ฯลฯ) |
+## Live Translate
 
----
+The current screen picker supports two flows:
 
-## 🤖 Proactive Assistant
+- Standard Screen Vision: capture a region once and send it back to the chat window
+- Live Translate: drag a box over text on screen and keep translating that area continuously
 
-Proactive Assistant คือระบบที่ทำให้ Mint **เริ่มบทสนทนาก่อน** โดยไม่ต้องรอให้ผู้ใช้สั่ง
+Current behavior:
 
-```
-เปิด Smart Context Toggle
-        ↓
-AI จับหน้าจอทุก N วินาที (ปรับได้ใน Settings)
-        ↓
-Gemini วิเคราะห์ context + Behavior Memory
-        ↓
-ถ้าพบสิ่งที่น่าช่วย → ✨ Suggestion Bar โผล่ขึ้นมา
-        ↓
-[ใช่ค่ะ] → AI ดำเนินการทันที   [✕] → ปิด
-```
+- After selecting a region, the screen returns to normal brightness
+- The selected translation box outline remains visible
+- Mouse clicks and middle-mouse scrolling pass through to the app underneath
+- Press `Esc` to exit Live Translate
 
-**ตัวอย่าง:**
-- เปิด Chrome → AI: "คุณต้องการเปิด YouTube ไหมคะ?"
-- กำลัง Code นานๆ → AI: "ต้องการค้นหาข้อมูลอะไรไหมคะ?"
-- เปิด Spotify → AI: "ต้องการเล่นเพลงเลยไหมคะ?"
+Reliability safeguards:
 
-**ปรับได้ใน ⚙️ Settings:**
-| ค่า | ช่วง | ค่าเริ่มต้น |
-|---|---|---|
-| ความถี่ Capture | 30วิ – 5นาที | 60 วิ |
-| ช่วงพักระหว่าง Suggestion | 1 – 10 นาที | 2 นาที |
+- Retry automatically on Gemini `502` and `503` errors
+- Prevent overlapping translation requests
+- Apply a `15s` cooldown after repeated retryable failures
 
----
+## Settings
 
-## ⚡ Performance Optimizations
+The Settings window currently exposes:
 
-Mint ถูกออกแบบมาให้ประหยัดทรัพยากรเครื่องที่สุด แม้จะมีฟีเจอร์ AI แบบ Real-time:
-- **JPEG Downscaling:** บีบอัดภาพหน้าจอลง 50% และแปลงเป็น JPEG (Quality 60) ก่อนส่งให้ AI
-- **Smart Idle Detection:** เมื่อไม่ได้ใช้งานเมาส์/คีย์บอร์ดเกิน 5 นาที ระบบ Proactive + Screen Capture จะหยุดพักตัวเองเพื่อประหยัดแบตเตอรี่และ CPU อัตโนมัติ
-- **UI IPC Throttling:** ป้องกันแอปค้างจากการสแปมหน้าต่างแชท
+- Gemini API key
+- Automation browser engine
+- Theme
+- Accent color
+- Proactive capture interval
+- Proactive suggestion cooldown
 
----
+Config is stored in Electron user data as `mint-config.json`.
 
-## 🛠️ Tech Stack
+## Plugins
 
-- **[Electron](https://www.electronjs.org/)** — Framework สำหรับ Desktop App
-- **[Google Gemini API](https://ai.google.dev/)** (`@google/genai`) — AI Brain, Planner & Proactive Engine
-- **[Puppeteer](https://pptr.dev/)** — Web Automation (รองรับ Bundled Chromium & System Firefox)
-- **[dotenv](https://github.com/motdotla/dotenv)** — จัดการ Environment Variables
+Plugins are loaded from `src/Plugins/`.
 
----
+Current bundled plugins:
 
-## 🚀 Getting Started
+- `spotify`: controls playback using `playerctl`
+- `docker`: list/start/stop/restart containers
+- `discord`: placeholder command handler
 
-### 1. Clone โปรเจกต์
+## Requirements
 
-```bash
-git clone https://github.com/Pheem49/Luna-Mint.git
-cd Luna-Mint
-```
+- Node.js
+- npm
+- A Gemini API key
 
-### 2. ติดตั้ง Dependencies
+Optional but useful:
+
+- `playerctl` for Spotify control on Linux
+- Docker CLI for Docker plugin commands
+- Firefox installed at `/usr/bin/firefox` if you want to use the system Firefox automation option
+
+## Getting Started
+
+### 1. Install dependencies
 
 ```bash
 npm install
 ```
 
-### 3. ตั้งค่า Environment Variables
-
-สร้างไฟล์ `.env` ที่ root ของโปรเจกต์:
+### 2. Create `.env`
 
 ```env
-GEMINI_API_KEY=your_google_gemini_api_key_here
+GEMINI_API_KEY=your_google_gemini_api_key
 ```
 
-> 🔑 ขอ API Key ได้ที่ [Google AI Studio](https://aistudio.google.com/)  
-> หรือตั้งค่าผ่านหน้า **⚙️ Settings** ใน app ได้เลย
+You can also update the API key later from the Settings window.
 
-### 4. รัน App
+### 3. Start the app
 
 ```bash
 npm start
 ```
 
----
+## Usage Notes
 
-## 💬 ตัวอย่างคำสั่ง
+- Global shortcut: `Ctrl+Shift+Space`
+- Closing the main window hides the app to tray instead of quitting
+- Smart Context only runs when enabled from the UI
+- Proactive analysis pauses when the system is idle
 
-```
-"เปิด YouTube"                                    → เปิดเว็บ YouTube
-"เปิด VS Code"                                    → เปิดโปรแกรม
-"ค้นหาข่าว AI วันนี้"                              → ค้นหา Google
-"สร้างโฟลเดอร์ชื่อ Projects"                       → สร้างโฟลเดอร์บน Desktop
-"RAM เหลือเท่าไหร่"                                → แสดงข้อมูลระบบ
-"อากาศที่กรุงเทพวันนี้เป็นยังไง"                   → ดึงข้อมูลอากาศ
-"Copy ข้อความ Hello World"                         → copy ไป Clipboard
-"แปลข้อความในรูปนี้ให้หน่อย"                       → (ใช้คู่กับปุ่ม Vision 👁️ หรือลากรูปลงช่องแชท)
-"หาข่าวล่าสุดเกี่ยวกับ AI แล้วสรุปให้ฟังหน่อย"    → AI วางแผนและเชื่อมต่อเบราว์เซอร์หาข้อมูลให้
-"จดจำไฟล์ /path/to/my_notes.txt"                   → AI จะดึงเนื้อหาจากไฟล์มารวมเข้ากับ Knowledge Base (RAG)
-```
+## Example Commands
 
----
+- `เปิด YouTube`
+- `เปิด VS Code`
+- `copy ข้อความ Hello World`
+- `อากาศที่กรุงเทพเป็นยังไง`
+- `สร้างโฟลเดอร์ชื่อ Projects`
+- `หาข่าว AI ล่าสุดแล้วสรุปให้หน่อย`
+- `จดจำไฟล์ /absolute/path/to/notes.md`
 
-## 📁 Project Structure
+## Project Structure
 
-```
+```text
 Mint/
 ├── assets/
-│   └── icon.png                    # App Icon
-├── main.js                         # Entry point (Electron Main Process)
-├── preload.js                      # Preload — Chat window
-├── preload-settings.js             # Preload — Settings window
-├── preload-picker.js               # Preload — Vision Picker window
+├── main.js
+├── preload.js
+├── preload-picker.js
+├── preload-settings.js
 ├── package.json
-├── .env                            # API Keys (ห้ามขึ้น Git!)
 └── src/
     ├── AI_Brain/
-    │   ├── Gemini_API.js           # Gemini Chat Session + RAG Injection
-    │   ├── proactive_engine.js     # วิเคราะห์หน้าจอ + สร้าง Proactive Suggestion
-    │   ├── behavior_memory.js      # จำพฤติกรรมและ Context ของผู้ใช้
-    │   └── knowledge_base.js       # Local RAG System สร้าง Vector ค้นหาเอกสาร
     ├── Automation_Layer/
-    │   ├── open_app.js             # เปิดโปรแกรม
-    │   ├── open_website.js         # เปิดเว็บ / ค้นหา
-    │   ├── browser_automation.js   # Puppeteer automation
-    │   └── file_operations.js      # สร้าง/เปิด/ลบไฟล์
-    ├── Plugins/
-    │   ├── plugin_manager.js       # โหลดและจัดการ Plugin
-    │   ├── spotify.js              # Spotify Plugin
-    │   └── ...                     # Plugin เพิ่มเติม
-    ├── System/
-    │   ├── system_info.js          # RAM, CPU, เวลา, อากาศ
-    │   ├── config_manager.js       # อ่าน/เขียน config.json
-    │   └── chat_history_manager.js # จัดการประวัติการสนทนา
     ├── Command_Parser/
-    │   └── parser.js               # แปลง AI response เป็น action
+    ├── Plugins/
+    ├── System/
     └── UI/
-        ├── index.html              # Chat Window
-        ├── styles.css              # Styling + Themes + Proactive Bar
-        ├── renderer.js             # Chat Logic + Proactive UI
-        ├── settings.html           # Settings Window
-        ├── settings.css            # Settings Styling
-        ├── settings.js             # Settings Logic
-        ├── screenPicker.html       # Vision Screen Overlay
-        └── screenPicker.js         # Vision Logic & Region Selector
 ```
 
----
+Key files:
 
-## ⌨️ Global Shortcut
+- `main.js`: Electron main process, IPC, tray, capture loops
+- `src/AI_Brain/Gemini_API.js`: chat and image translation calls
+- `src/UI/renderer.js`: main chat window logic
+- `src/UI/screenPicker.js`: screen selection and Live Translate overlay
+- `src/System/config_manager.js`: persistent app settings
 
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl + Shift + Space` | แสดง / ซ่อน Mint |
+## License
 
----
-
-## 📝 License
-
-**MIT + Commons Clause**
-
-ใช้งานและแก้ไขได้อิสระ แต่ **ห้ามนำไปขายหรือทำกำไร**  
-ดูรายละเอียดเพิ่มเติมได้ที่ [LICENSE](./LICENSE)
+This project uses the license terms in [LICENSE](./LICENSE).

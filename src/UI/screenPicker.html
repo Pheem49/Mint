@@ -11,7 +11,7 @@
             width: 100vw;
             height: 100vh;
             overflow: hidden;
-            background: rgba(0, 0, 0, 0.4);
+            background: transparent;
             cursor: crosshair;
             user-select: none;
             font-family: 'Inter', sans-serif;
@@ -87,22 +87,111 @@
             border-color: #bd2130;
         }
 
+        .btn-translate {
+            background: #8b5cf6;
+            color: white;
+            border-color: #7c3aed;
+        }
+
+        .btn-translate:hover {
+            background: #7c3aed;
+            border-color: #6d28d9;
+        }
+
+        .btn.active {
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.5);
+            transform: scale(0.95);
+        }
+
         .hint {
             font-size: 12px;
             color: #aaa;
             margin-right: 15px;
         }
+
+        /* Floating Translation Box */
+        #translation-box {
+            position: absolute;
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid #444;
+            color: #fff;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.6);
+            z-index: 100;
+            max-width: 400px;
+            display: none;
+            pointer-events: auto; /* Allow text selection */
+        }
+
+        #translation-box.interactive {
+            pointer-events: auto;
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Close Button inside Translation Box */
+        .close-translate-btn {
+            position: absolute;
+            top: -18px;
+            right: -14px;
+            background: #dc3545;
+            color: white;
+            border: 2px solid rgba(20, 20, 20, 0.95);
+            border-radius: 999px;
+            min-width: 40px;
+            height: 24px;
+            padding: 0 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            pointer-events: auto;
+            transition: background 0.2s;
+        }
+        .close-translate-btn:hover {
+            background: #c82333;
+        }
     </style>
 </head>
 <body>
     <div id="toolbar">
-        <span class="hint">Click and drag to select a region</span>
+        <span class="hint" id="hint-text">Click and drag to select a region</span>
+        <button class="btn btn-translate" id="btn-translate">🌐 Live Translate</button>
         <button class="btn btn-primary" id="btn-fullscreen">Full Screen</button>
         <button class="btn btn-danger" id="btn-cancel">Cancel</button>
     </div>
 
     <canvas id="bg-canvas"></canvas>
     <canvas id="overlay-canvas"></canvas>
+    
+    <!-- Translation Results Wrapper -->
+    <div id="translation-box">
+        <div class="close-translate-btn" id="btn-close-translate">Esc</div>
+        <div id="translation-content"></div>
+    </div>
 
     <script src="screenPicker.js"></script>
 </body>

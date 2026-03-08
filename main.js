@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, globalShortcut, clipboard, Tray, Men
 const path = require('path');
 require('dotenv').config();
 
-const { handleChat, resetChat, getChatTranscript } = require('./src/AI_Brain/Gemini_API');
+const { handleChat, resetChat, getChatTranscript, translateImageContent } = require('./src/AI_Brain/Gemini_API');
 const { openApp } = require('./src/Automation_Layer/open_app');
 const { openWebsite, openSearch } = require('./src/Automation_Layer/open_website');
 const { performWebAutomation } = require('./src/Automation_Layer/browser_automation');
@@ -388,7 +388,109 @@ ipcMain.on('vision-selection', (event, base64Image) => {
     }
 });
 
+let translateIntervalHandle = null;
+let isTranslateRequestInFlight = false;
+let translateCooldownUntil = 0;
+const TRANSLATE_REFRESH_MS = 3000;
+const TRANSLATE_FAILURE_COOLDOWN_MS = 15000;
+
+// Start Continuous Live Translate
+ipcMain.on('vision-translate-start', async (event, rect) => {
+    if (!screenPickerWindow) return;
+
+    screenPickerWindow.setIgnoreMouseEvents(true, { forward: true });
+    isTranslateRequestInFlight = false;
+    translateCooldownUntil = 0;
+
+    // Stop any existing loop
+    if (translateIntervalHandle) clearInterval(translateIntervalHandle);
+
+    // Initial capture immediately
+    captureAndTranslate(rect);
+
+    // Then start ticking every 3 seconds
+    translateIntervalHandle = setInterval(() => {
+        captureAndTranslate(rect);
+    }, TRANSLATE_REFRESH_MS);
+});
+
+// Stop Continuous Live Translate
+ipcMain.on('vision-translate-stop', () => {
+    if (translateIntervalHandle) {
+        clearInterval(translateIntervalHandle);
+        translateIntervalHandle = null;
+    }
+    if (screenPickerWindow && !screenPickerWindow.isDestroyed()) {
+        screenPickerWindow.setIgnoreMouseEvents(false);
+    }
+    isTranslateRequestInFlight = false;
+    translateCooldownUntil = 0;
+});
+
+ipcMain.on('vision-overlay-interactable', (event, isInteractable) => {
+    if (!screenPickerWindow || screenPickerWindow.isDestroyed()) return;
+    screenPickerWindow.setIgnoreMouseEvents(!isInteractable, { forward: true });
+});
+
+async function captureAndTranslate(rect) {
+    if (!screenPickerWindow || screenPickerWindow.isDestroyed()) return;
+    if (isTranslateRequestInFlight) return;
+    if (Date.now() < translateCooldownUntil) return;
+    
+    try {
+        isTranslateRequestInFlight = true;
+        const primaryDisplay = screen.getPrimaryDisplay();
+        const sources = await desktopCapturer.getSources({
+            types: ['screen'],
+            thumbnailSize: { 
+                width: primaryDisplay.size.width, 
+                height: primaryDisplay.size.height 
+            }
+        });
+        
+        if (sources.length > 0) {
+            const screenImage = sources[0].thumbnail;
+            
+            // Crop the specific rect out of the full screen image
+            // We use standard scale (assuming 1:1 scale for exact rect, although hidpi might vary. 
+            // In a robust implementation we might need `Math.floor(rect.x * display.scaleFactor)`)
+            const croppedImage = screenImage.crop({
+                x: Math.round(rect.x),
+                y: Math.round(rect.y),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+            });
+
+            // Convert to JPEG Base64 for faster processing
+            const base64Crop = croppedImage.toJPEG(70).toString('base64');
+            const dataUri = `data:image/jpeg;base64,${base64Crop}`;
+            
+            const translationResult = await translateImageContent(dataUri);
+            if (translationResult.retryableFailure) {
+                translateCooldownUntil = Date.now() + TRANSLATE_FAILURE_COOLDOWN_MS;
+                console.warn(`Live translation cooldown active for ${TRANSLATE_FAILURE_COOLDOWN_MS / 1000}s after retryable API failure.`);
+            } else {
+                translateCooldownUntil = 0;
+            }
+            
+            if (screenPickerWindow && !screenPickerWindow.isDestroyed()) {
+                screenPickerWindow.webContents.send('vision-translate-result', translationResult.text);
+            }
+        }
+    } catch (err) {
+        console.error("Continuous translation loop failed:", err);
+    } finally {
+        isTranslateRequestInFlight = false;
+    }
+}
+
 ipcMain.on('vision-cancel', () => {
+    if (translateIntervalHandle) {
+        clearInterval(translateIntervalHandle);
+        translateIntervalHandle = null;
+    }
+    isTranslateRequestInFlight = false;
+    translateCooldownUntil = 0;
     if (screenPickerWindow) screenPickerWindow.close();
     if (mainWindow) mainWindow.show();
 });
