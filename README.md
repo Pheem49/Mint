@@ -1,6 +1,28 @@
-# Mint
+# Luna Mint
 
-Mint is an Electron desktop assistant powered by Google Gemini. It combines chat, screen capture, local automation, proactive suggestions, and a small plugin system in a single desktop app.
+**Luna Mint** is an advanced AI Desktop Companion built with Electron and Google Gemini. It seamlessly integrates real-time screen translation, web automation via Puppeteer, local knowledge search, and a modular plugin system to enhance your desktop workflow with a friendly, persona-driven experience.
+
+<p align="center">
+  <img src="assets/icon.png" alt="Luna Mint Icon" width="160">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=for-the-badge" alt="License">
+</p>
+
+## Screenshots
+
+<p align="center">
+  <img src="assets/Agent_Mint.png" alt="Agent Mint UI" width="45%">
+  <br>
+  <em>Main chat interface with proactive suggestions</em>
+</p>
+
+<p align="center">
+  <img src="assets/Settings.png" alt="Settings Window" width="45%">
+  <br>
+  <em>Settings window for personalizing your assistant</em>
+</p>
 
 ## Current Features
 
