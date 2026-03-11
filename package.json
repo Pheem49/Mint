@@ -1,7 +1,7 @@
 {
   "name": "mint",
   "version": "1.0.0",
-  "description": "",
+  "description": "A powerful Electron-based AI desktop assistant powered by Google Gemini, featuring screen vision, web automation, and proactive suggestions.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
