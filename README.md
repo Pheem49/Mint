@@ -17,7 +17,7 @@
 
 ---
 
-**Luna Mint** is a powerful AI Desktop Companion built with **Electron** and **Google Gemini**. It seamlessly integrates real-time screen vision, web automation via Puppeteer, local knowledge search, and a modular plugin system to enhance your desktop workflow with a friendly, persona-driven experience.
+**Mint** is a powerful AI Desktop Companion built with **Electron** and **Google Gemini**. It seamlessly integrates real-time screen vision, web automation via Puppeteer, local knowledge search, and a modular plugin system to enhance your desktop workflow with a friendly, persona-driven experience.
 
 ## ✨ Highlights
 
