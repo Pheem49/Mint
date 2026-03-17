@@ -257,6 +257,7 @@ h1 {
   border-left: 1px solid var(--border-light);
   border-bottom-left-radius: 4px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+  color: #f8fafc; /* Stable text color for AI messages */
 }
 
 /* Typing Indicator */
@@ -342,7 +343,8 @@ h1 {
 }
 
 #chat-input::placeholder {
-  color: var(--text-muted);
+  color: var(--text-main);
+  opacity: 0.6;
 }
 
 #send-btn,
@@ -433,7 +435,8 @@ h1 {
 
 .smart-context-label {
   font-size: 0.85rem;
-  color: var(--text-muted);
+  color: var(--text-main);
+  opacity: 0.9;
   font-weight: 500;
 }
 

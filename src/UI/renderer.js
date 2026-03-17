@@ -20,19 +20,44 @@ const proactiveDismissBtn = document.getElementById('proactive-dismiss-btn');
 let currentBase64Image = null;
 
 // --- Theme Loading ---
-function applyTheme(theme, accentColor) {
+function applyTheme(theme, accentColor, systemTextColor, config = {}) {
     document.documentElement.setAttribute('data-theme', theme || 'dark');
     const accent = accentColor || '#8b5cf6';
+    const textColor = systemTextColor || '#f8fafc';
     document.documentElement.style.setProperty('--accent', accent);
     document.documentElement.style.setProperty('--accent-hover', lightenColor(accent, 20));
+    document.documentElement.style.setProperty('--text-main', textColor);
+
+    if (theme === 'custom') {
+        if (config.customBgStart && config.customBgEnd) {
+            const gradient = `linear-gradient(135deg, ${config.customBgStart} 0%, ${config.customBgEnd} 100%)`;
+            document.documentElement.style.setProperty('--bg-gradient', gradient);
+        }
+        if (config.customPanelBg) {
+            const rgb = hexToRgb(config.customPanelBg);
+            document.documentElement.style.setProperty('--panel-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.75)`);
+        }
+    } else {
+        document.documentElement.style.removeProperty('--bg-gradient');
+        document.documentElement.style.removeProperty('--panel-bg');
+    }
+}
+
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : { r: 15, g: 23, b: 42 };
 }
 
 async function loadTheme() {
     try {
         const config = await window.api.getSettings();
-        applyTheme(config.theme, config.accentColor);
+        applyTheme(config.theme, config.accentColor, config.systemTextColor, config);
     } catch (e) {
-        applyTheme('dark', '#8b5cf6');
+        applyTheme('dark', '#8b5cf6', '#f8fafc');
     }
 }
 
@@ -48,7 +73,7 @@ function lightenColor(hex, amount) {
 
 // 🔔 Real-time theme sync from Settings window
 window.api.onSettingsChanged((config) => {
-    applyTheme(config.theme, config.accentColor);
+    applyTheme(config.theme, config.accentColor, config.systemTextColor, config);
 });
 
 // --- Voice Input Setup ---

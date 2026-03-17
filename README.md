@@ -1,4 +1,4 @@
-# Luna Mint
+# Mint
 
 <p align="center">
   <img src="assets/icon.png" alt="Luna Mint Icon" width="160">
@@ -22,8 +22,10 @@
 ## ✨ Highlights
 
 - **Persona-Driven**: Features **Mint**, a bubbly, cheerful, and polite assistant.
+- **Natural Replies**: Longer AI responses are split into multiple chat bubbles with human-like pacing.
 - **Vision-Ready**: Capture and translate any part of your screen in real-time.
 - **Automation First**: Control your system and browser via natural language.
+- **Advanced Customization**: Create **Custom Themes** with your own background gradients, panel colors, and system text colors.
 - **Privacy Conscious**: Local knowledge indexing and customizable data handling.
 
 ---
@@ -45,8 +47,10 @@
 ### 🧠 Intelligent Core
 - **Cute AI Persona (Mint)**: A friendly assistant with a distinct cheerful personality.
 - **Multilingual Support**: Detects and responds in multiple languages (English, Thai, etc.) while staying in character.
+- **Multi-Bubble Responses**: AI replies can appear in 1–3 short bubbles with a subtle typing delay for a more natural feel.
 - **Optimized Chat History**: Sliding window management for consistent performance.
 - **Voice-Ready**: Enhanced audio capture with Noise Suppression and Auto Gain Control.
+- **Multilingual UI**: The entire settings and main interface is now localized into English and Thai.
 
 ### 👁️ Screen Vision & Translation
 - **Live Translate**: Drag a box over any window to translate text dynamically.
@@ -58,6 +62,8 @@
 - **Web Automation**: Puppeteer-driven browser control for searching or extracting data.
 - **Local Knowledge**: Index and search your `.txt` and `.md` files for quick recall.
 - **Plugin Ecosystem**: Dedicated modules for Spotify, Docker, and more.
+- **Shortcut Guide**: Built-in keyboard shortcut documentation in the Settings panel.
+- **Explicit Quit**: A dedicated "Quit Application" button for complete app termination.
 
 ---
 

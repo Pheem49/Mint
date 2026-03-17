@@ -134,7 +134,8 @@ h1 {
 .setting-section h2.section-title {
     font-size: 0.85rem;
     font-weight: 500;
-    color: var(--text-muted);
+    color: var(--text-main);
+    opacity: 0.7;
     margin-bottom: 14px;
     letter-spacing: 0.5px;
     text-transform: uppercase;
@@ -240,17 +241,13 @@ h1 {
     border-radius: 8px;
 }
 
-.dark-preview {
+.dark-preview { background: linear-gradient(135deg, #090e17 0%, #1e1b4b 100%); }
+
+.light-preview { background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); }
+.midnight-preview { background: linear-gradient(135deg, #02040a 0%, #08061f 100%); }
+.custom-preview {
     background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
-}
-
-.light-preview {
-    background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
-    border: 1px solid #e2e8f0;
-}
-
-.midnight-preview {
-    background: linear-gradient(135deg, #020617 0%, #0c0a2e 100%);
+    border: 1px dashed rgba(255,255,255,0.3);
 }
 
 /* Accent Colors */
@@ -347,6 +344,27 @@ h1 {
     color: var(--text-main);
 }
 
+.btn-danger {
+    -webkit-app-region: no-drag;
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    transition: all 0.2s;
+}
+
+.btn-danger:hover {
+    background: #ef4444;
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
 /* Range Slider (Proactive Settings) */
 .slider-group {
     display: flex;
@@ -404,4 +422,43 @@ h1 {
     font-weight: 500;
     color: var(--text-main);
     margin-bottom: 8px;
+}
+
+/* Shortcuts Guide */
+.shortcut-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: rgba(0, 0, 0, 0.15);
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+}
+
+.shortcut-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.88rem;
+    color: var(--text-main);
+}
+
+.keys {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+kbd {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--accent);
+    box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
 }

@@ -406,6 +406,11 @@ ipcMain.on('close-settings', () => {
     if (settingsWindow) settingsWindow.close();
 });
 
+ipcMain.on('quit-app', () => {
+    app.isQuiting = true;
+    app.quit();
+});
+
 // =====================
 // IPC Handlers — Spotlight
 // =====================

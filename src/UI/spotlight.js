@@ -120,3 +120,45 @@ window.addEventListener('focus', () => {
     spotlightInput.focus();
     spotlightInput.select();
 });
+
+// Sync theme settings
+window.spotlightAPI.onSettingsChanged((config) => {
+    if (config.systemTextColor) {
+        document.documentElement.style.setProperty('--text-main', config.systemTextColor);
+    }
+    applyThemeVariables(config);
+});
+
+// Load initial settings
+window.spotlightAPI.getSettings().then(config => {
+    if (config.systemTextColor) {
+        document.documentElement.style.setProperty('--text-main', config.systemTextColor);
+    }
+    applyThemeVariables(config);
+});
+
+function applyThemeVariables(config) {
+    document.documentElement.setAttribute('data-theme', config.theme || 'dark');
+    if (config.theme === 'custom') {
+        if (config.customBgStart && config.customBgEnd) {
+            const gradient = `linear-gradient(135deg, ${config.customBgStart} 0%, ${config.customBgEnd} 100%)`;
+            document.documentElement.style.setProperty('--bg-gradient', gradient);
+        }
+        if (config.customPanelBg) {
+            const rgb = hexToRgb(config.customPanelBg);
+            document.documentElement.style.setProperty('--panel-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.75)`);
+        }
+    } else {
+        document.documentElement.style.removeProperty('--bg-gradient');
+        document.documentElement.style.removeProperty('--panel-bg');
+    }
+}
+
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : { r: 15, g: 23, b: 42 };
+}

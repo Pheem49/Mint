@@ -37,7 +37,7 @@
                             autocomplete="off">
                         <button class="toggle-visibility" id="toggle-key" title="Show/Hide">👁</button>
                     </div>
-                    <p class="hint">ได้รับ API Key ได้ที่ <a href="#" id="ai-studio-link">Google AI Studio</a></p>
+                    <p class="hint">Get your API Key at <a href="#" id="ai-studio-link">Google AI Studio</a></p>
                 </div>
             </section>
 
@@ -75,6 +75,25 @@
                         <div class="theme-preview midnight-preview"></div>
                         <span>Midnight</span>
                     </button>
+                    <button class="theme-card" data-theme="custom" id="theme-custom">
+                        <div class="theme-preview custom-preview" id="custom-theme-preview-box"></div>
+                        <span>Custom</span>
+                    </button>
+                </div>
+
+                <div id="custom-theme-controls" style="display: none; margin-top: 16px; padding: 16px; background: rgba(0,0,0,0.2); border-radius: 12px; border: 1px dashed var(--border);">
+                    <div class="setting-row" style="margin-bottom: 12px;">
+                        <label>Background Gradient</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="color" id="custom-bg-start" title="Start Color">
+                            <span style="font-size: 1.2rem;">→</span>
+                            <input type="color" id="custom-bg-end" title="End Color">
+                        </div>
+                    </div>
+                    <div class="setting-row">
+                        <label for="custom-panel-bg">Panel Background</label>
+                        <input type="color" id="custom-panel-bg">
+                    </div>
                 </div>
             </section>
 
@@ -104,36 +123,78 @@
 
             <hr class="divider">
 
+            <!-- System Text Color -->
+            <section class="setting-section">
+                <h2 class="section-title">✍️ System Text Color</h2>
+                <div class="setting-row">
+                    <div class="custom-color" style="justify-content: flex-start; gap: 12px;">
+                        <label for="system-text-color">Choose Color:</label>
+                        <input type="color" id="system-text-color" value="#f8fafc">
+                    </div>
+                    <p class="hint" style="margin-top: 8px;">Adjust system text color (menu, headers) excluding chat messages.</p>
+                </div>
+            </section>
+
+            <hr class="divider">
+
             <!-- Proactive Assistant -->
             <section class="setting-section">
                 <h2 class="section-title">✨ Proactive Assistant</h2>
 
                 <div class="setting-row">
-                    <label for="proactive-interval">ความถี่ในการ Capture หน้าจอ</label>
+                    <label for="proactive-interval">Screen Capture Frequency</label>
                     <div class="slider-group">
                         <input type="range" id="proactive-interval"
                             min="30" max="300" step="30" value="60"
                             class="range-slider">
-                        <span class="range-value" id="proactive-interval-display">60 วิ</span>
+                        <span class="range-value" id="proactive-interval-display">60 sec</span>
                     </div>
-                    <p class="hint">ทุกกี่วินาที AI จะวิเคราะห์หน้าจอ (น้อย = ตอบสนองเร็ว แต่กิน API มากขึ้น)</p>
+                    <p class="hint">Interval for AI screen analysis (lower = faster response, but higher API usage)</p>
                 </div>
 
                 <div class="setting-row" style="margin-top: 14px;">
-                    <label for="proactive-cooldown">ช่วงพักระหว่าง Suggestion</label>
+                    <label for="proactive-cooldown">Suggestion Cooldown</label>
                     <div class="slider-group">
                         <input type="range" id="proactive-cooldown"
                             min="60" max="600" step="60" value="120"
                             class="range-slider">
-                        <span class="range-value" id="proactive-cooldown-display">2 นาที</span>
+                        <span class="range-value" id="proactive-cooldown-display">2 min</span>
                     </div>
-                    <p class="hint">ห้าม AI ถามซ้ำภายในกี่วินาที (มาก = รบกวนน้อยลง)</p>
+                    <p class="hint">Min time between repeat suggestions (higher = less intrusive)</p>
+                </div>
+            </section>
+
+            <hr class="divider">
+
+            <!-- Keyboard Shortcuts -->
+            <section class="setting-section">
+                <h2 class="section-title">⌨️ Keyboard Shortcuts</h2>
+                <div class="shortcut-list">
+                    <div class="shortcut-item">
+                        <span>Show/Hide Mint Window</span>
+                        <div class="keys">
+                            <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd>
+                        </div>
+                    </div>
+                    <div class="shortcut-item">
+                        <span>Open Spotlight</span>
+                        <div class="keys">
+                            <kbd>Alt</kbd>+<kbd>Space</kbd>
+                        </div>
+                    </div>
+                    <div class="shortcut-item">
+                        <span>Close / Dismiss</span>
+                        <div class="keys">
+                            <kbd>Esc</kbd>
+                        </div>
+                    </div>
                 </div>
             </section>
 
         </main>
 
         <footer class="settings-footer">
+            <button class="btn-danger" id="quit-btn" style="margin-right: auto;">Quit Application</button>
             <button class="btn-secondary" id="reset-btn">Reset to Default</button>
             <button class="btn-primary" id="save-btn">Save Settings</button>
         </footer>
