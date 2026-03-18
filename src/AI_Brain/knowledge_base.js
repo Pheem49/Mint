@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { GoogleGenAI } = require('@google/genai');
+const { readConfig } = require('../System/config_manager');
 
 // Handle electron dependency safely for benchmarks/tests
 let app;
@@ -11,7 +12,38 @@ try {
     app = null;
 }
 
-const ai = new GoogleGenAI({});
+let ai = null;
+let activeApiKey = '';
+const initialEnvKey = (process.env.GEMINI_API_KEY || '').trim();
+
+function resolveApiKey() {
+    let settingsKey = '';
+    try {
+        const cfg = readConfig();
+        settingsKey = (cfg.apiKey || '').trim();
+    } catch (e) {
+        settingsKey = '';
+    }
+
+    const envKey = initialEnvKey;
+    const selectedKey = settingsKey || envKey || '';
+
+    if (selectedKey !== (process.env.GEMINI_API_KEY || '')) {
+        process.env.GEMINI_API_KEY = selectedKey;
+    }
+
+    activeApiKey = selectedKey;
+    return selectedKey;
+}
+
+function getAiClient() {
+    const prevKey = activeApiKey;
+    const nextKey = resolveApiKey();
+    if (!ai || nextKey !== prevKey) {
+        ai = new GoogleGenAI({});
+    }
+    return ai;
+}
 
 function getDbPath() {
     if (app && app.getPath) {
@@ -38,7 +70,8 @@ function saveDb(db) {
 }
 
 async function generateEmbedding(text) {
-    const response = await ai.models.embedContent({
+    const client = getAiClient();
+    const response = await client.models.embedContent({
         model: 'gemini-embedding-001',
         contents: text,
     });

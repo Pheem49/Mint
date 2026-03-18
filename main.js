@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, globalShortcut, clipboard, Tray, Men
 const path = require('path');
 require('dotenv').config();
 
-const { handleChat, resetChat, getChatTranscript, translateImageContent } = require('./src/AI_Brain/Gemini_API');
+const { handleChat, resetChat, getChatTranscript, translateImageContent, refreshApiKeyFromConfig } = require('./src/AI_Brain/Gemini_API');
 const { openApp } = require('./src/Automation_Layer/open_app');
 const { openWebsite, openSearch } = require('./src/Automation_Layer/open_website');
 const { performWebAutomation } = require('./src/Automation_Layer/browser_automation');
@@ -391,6 +391,8 @@ ipcMain.handle('get-settings', () => {
 
 ipcMain.handle('save-settings', (event, config) => {
     const result = writeConfig(config);
+    // Refresh API key if user updated it in settings
+    refreshApiKeyFromConfig();
     // 🔔 Notify main chat window immediately
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('settings-changed', config);

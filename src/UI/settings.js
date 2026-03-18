@@ -98,6 +98,39 @@ document.getElementById('toggle-key').addEventListener('click', () => {
     input.type = input.type === 'password' ? 'text' : 'password';
 });
 
+async function saveApiKeyOnly() {
+    const input = document.getElementById('api-key-input');
+    const status = document.getElementById('api-save-status');
+    const btn = document.getElementById('save-api-key');
+    const apiKey = input.value.trim();
+
+    try {
+        const baseConfig = await window.settingsApi.getSettings();
+        const nextConfig = { ...baseConfig, apiKey };
+        await window.settingsApi.saveSettings(nextConfig);
+        currentConfig.apiKey = apiKey;
+
+        btn.textContent = 'Saved!';
+        status.textContent = 'API key saved';
+        setTimeout(() => {
+            btn.textContent = 'Save API Key';
+            status.textContent = '';
+        }, 1500);
+    } catch (err) {
+        console.error('Failed to save API key:', err);
+        status.textContent = 'Save failed';
+        setTimeout(() => { status.textContent = ''; }, 1500);
+    }
+}
+
+document.getElementById('save-api-key').addEventListener('click', saveApiKeyOnly);
+document.getElementById('api-key-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        saveApiKeyOnly();
+    }
+});
+
 // AI Studio link
 document.getElementById('ai-studio-link').addEventListener('click', () => {
     window.settingsApi.openExternal('https://aistudio.google.com/');

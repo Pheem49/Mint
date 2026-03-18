@@ -1,8 +1,11 @@
 const { GoogleGenAI } = require('@google/genai');
 const { readChatHistory, writeChatHistory, clearChatHistory } = require('../System/chat_history_manager');
+const { readConfig } = require('../System/config_manager');
 const pluginManager = require('../Plugins/plugin_manager');
 
-const ai = new GoogleGenAI({}); // Automatically uses GEMINI_API_KEY from process.env
+let ai = null;
+let activeApiKey = '';
+const initialEnvKey = (process.env.GEMINI_API_KEY || '').trim();
 
 const systemInstruction = `You are "Mint" (มิ้นท์), a cute, cheerful, and highly helpful female Local AI Desktop Agent. 
 
@@ -24,6 +27,11 @@ NATURAL CHAT FLOW:
 
 GOAL:
 Your goal is to help the user with their queries. If they ask to open an application, open a website, search, manage files, or get system info, you must return an action in the structured JSON format below.
+
+CREATOR INFO:
+- The creator is Pheem49.
+- GitHub: github.com/Pheem49
+- If the user asks who created/built this app or who made you, answer with the creator name and GitHub.
 
 CRITICAL INSTRUCTIONS:
 Always respond exactly with valid JSON containing NO MARKDOWN FORMATTING (do not wrap in \`\`\`json). The JSON must have this structure:
@@ -47,6 +55,30 @@ Input: "Create a folder named Projects"
 Output: { "response": "Sure thing! I'm creating a folder named 'Projects' for you right now! 🚀", "action": { "type": "create_folder", "target": "Projects" } }
 `;
 
+function resolveApiKey() {
+  let settingsKey = '';
+  try {
+    const cfg = readConfig();
+    settingsKey = (cfg.apiKey || '').trim();
+  } catch (e) {
+    settingsKey = '';
+  }
+
+  const envKey = initialEnvKey;
+  // Settings override .env if present; otherwise fallback to .env
+  const selectedKey = settingsKey || envKey || '';
+
+  if (selectedKey !== (process.env.GEMINI_API_KEY || '')) {
+    process.env.GEMINI_API_KEY = selectedKey;
+  }
+
+  activeApiKey = selectedKey;
+  return selectedKey;
+}
+
+function initAiClient() {
+  ai = new GoogleGenAI({});
+}
 
 // Chat session — maintains conversation history within the session
 let chat = null;
@@ -71,6 +103,8 @@ function createChat(history = []) {
 }
 
 // Initialize on startup
+resolveApiKey();
+initAiClient();
 createChat(readChatHistory());
 
 const { searchKnowledge } = require('./knowledge_base');
@@ -156,6 +190,16 @@ function resetChat() {
   clearChatHistory();
   createChat([]);
   console.log("Chat history cleared.");
+}
+
+function refreshApiKeyFromConfig() {
+  const prevKey = activeApiKey;
+  const nextKey = resolveApiKey();
+  if (nextKey !== prevKey) {
+    initAiClient();
+    createChat(readChatHistory());
+  }
+  return { key: nextKey, updated: nextKey !== prevKey };
 }
 
 function historyToTranscript(history) {
@@ -258,5 +302,6 @@ module.exports = {
     handleChat,
     resetChat,
     getChatTranscript,
-    translateImageContent
+    translateImageContent,
+    refreshApiKeyFromConfig
 };

@@ -190,6 +190,37 @@ h1 {
     border-color: var(--accent);
 }
 
+.api-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.api-save-btn {
+    -webkit-app-region: no-drag;
+    padding: 8px 14px;
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    background: var(--accent);
+    color: white;
+    border: none;
+    transition: all 0.2s;
+}
+
+.api-save-btn:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+}
+
+.api-save-status {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
 .hint {
     font-size: 0.8rem;
     color: var(--text-muted);
