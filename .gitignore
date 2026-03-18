@@ -12,6 +12,8 @@ node_modules/
 .env.local
 .env.*.local
 
+
+BUILD_AND_RELEASE.md
 # ==========================
 # Electron Build Output
 # ==========================
