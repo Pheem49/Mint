@@ -5,16 +5,38 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:linux": "electron-builder --linux"
   },
   "keywords": [],
-  "author": "",
+  "author": {
+    "name": "Pheem49",
+    "email": "killerpheem13@gmail.com"
+  },
   "license": "AGPL-3.0-only",
   "type": "commonjs",
   "dependencies": {
     "@google/genai": "^1.44.0",
     "dotenv": "^17.3.1",
-    "electron": "^40.7.0",
     "puppeteer": "^24.38.0"
+  },
+  "devDependencies": {
+    "electron": "^40.7.0",
+    "electron-builder": "^26.8.1"
+  },
+
+  "build": {
+  "appId": "com.yourname.mint",
+  "productName": "Mint",
+  "files": [
+    "**/*",
+    "!node_modules/.cache/**"
+  ],
+  "linux": {
+    "icon": "assets/icon.png",
+    "target": ["AppImage", "deb"],
+    "category": "Utility"
   }
+}
+
 }

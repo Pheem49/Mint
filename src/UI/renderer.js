@@ -86,6 +86,8 @@ let speechHadResult = false;
 let speechFallbackTimer = null;
 let voiceMode = null; // 'speech' | 'recorder' | null
 let voiceSendQueue = Promise.resolve();
+let speechPausedForReply = false;
+let resumeSpeechAfterResponse = false;
 const DEFAULT_PLACEHOLDER = "Type or speak a command...";
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -102,6 +104,31 @@ function queueVoiceTextSend(text) {
     const clean = (text || '').trim();
     if (!clean) return;
     voiceSendQueue = voiceSendQueue.then(() => sendTextMessage(clean, { allowSmartContext: false }));
+}
+
+function pauseSpeechForReply() {
+    if (!speechRecognition || !isSpeechStreaming) return;
+    resumeSpeechAfterResponse = true;
+    speechPausedForReply = true;
+    try {
+        speechRecognition.stop();
+    } catch (_) {}
+}
+
+function resumeSpeechIfNeeded() {
+    if (!speechRecognition || !isSpeechStreaming) {
+        resumeSpeechAfterResponse = false;
+        speechPausedForReply = false;
+        return;
+    }
+    if (!resumeSpeechAfterResponse) return;
+    resumeSpeechAfterResponse = false;
+    speechPausedForReply = false;
+    try {
+        speechRecognition.start();
+    } catch (e) {
+        console.error("Speech recognition resume error:", e);
+    }
 }
 
 function setupSpeechRecognition() {
@@ -143,6 +170,7 @@ function setupSpeechRecognition() {
             const textToSend = finalTranscript.trim();
             speechInterim = '';
             chatInput.value = '';
+            pauseSpeechForReply();
             queueVoiceTextSend(textToSend);
         } else {
             speechInterim = interimTranscript;
@@ -161,6 +189,9 @@ function setupSpeechRecognition() {
         if (speechFallbackTimer) {
             clearTimeout(speechFallbackTimer);
             speechFallbackTimer = null;
+        }
+        if (speechPausedForReply) {
+            return;
         }
         if (isSpeechStreaming && !speechHadResult) {
             fallbackToMediaRecorder();
@@ -245,7 +276,7 @@ async function sendVoiceMessage(base64Audio) {
         
         // Show AI response
         const msgDiv = await appendAiMessages(response.response, { allowDelay: true });
-        speakText(normalizeAiText(response.response));
+        await speakText(normalizeAiText(response.response), { onEnd: resumeSpeechIfNeeded });
         notifyAiIfNeeded();
 
         if (response.action && response.action.type !== 'none') {
@@ -255,6 +286,7 @@ async function sendVoiceMessage(base64Audio) {
         removeTyping();
         appendMessage("ขออภัยค่ะ เกิดข้อผิดพลาดในการประมวลผลเสียง", 'ai');
         console.error(error);
+        resumeSpeechIfNeeded();
     } finally {
         resetMicUI();
     }
@@ -263,6 +295,8 @@ async function sendVoiceMessage(base64Audio) {
 function fallbackToMediaRecorder() {
     if (voiceMode === 'recorder') return;
     isSpeechStreaming = false;
+    speechPausedForReply = false;
+    resumeSpeechAfterResponse = false;
     voiceMode = 'recorder';
     try {
         if (speechRecognition) {
@@ -327,20 +361,37 @@ micBtn.addEventListener('click', (e) => {
 });
 
 // --- Speech Synthesis Setup ---
-function speakText(text) {
-    if ('speechSynthesis' in window) {
+function speakText(text, options = {}) {
+    const onEnd = typeof options.onEnd === 'function' ? options.onEnd : null;
+    return new Promise((resolve) => {
+        if (!('speechSynthesis' in window)) {
+            if (onEnd) onEnd();
+            resolve();
+            return;
+        }
+
         // Stop any currently playing audio
         window.speechSynthesis.cancel();
 
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'th-TH'; // Assuming Thai voice
 
+        let finished = false;
+        const done = () => {
+            if (finished) return;
+            finished = true;
+            if (onEnd) onEnd();
+            resolve();
+        };
+
         // Optional: tweak pitch and rate
         // utterance.pitch = 1.1; 
         // utterance.rate = 1.0;
 
+        utterance.onend = done;
+        utterance.onerror = done;
         window.speechSynthesis.speak(utterance);
-    }
+    });
 }
 
 // Close window handler (hides to tray)
@@ -651,7 +702,7 @@ async function sendTextMessage(text, options = {}) {
         const msgDiv = await appendAiMessages(response.response, { allowDelay: true });
 
         // Speak AI response
-        speakText(normalizeAiText(response.response));
+        await speakText(normalizeAiText(response.response), { onEnd: resumeSpeechIfNeeded });
         notifyAiIfNeeded();
 
         // Append action card if applicable
@@ -662,6 +713,7 @@ async function sendTextMessage(text, options = {}) {
         removeTyping();
         appendMessage("Sorry, I encountered an error communicating with the main process.", 'ai');
         console.error(error);
+        resumeSpeechIfNeeded();
     }
 }
 
