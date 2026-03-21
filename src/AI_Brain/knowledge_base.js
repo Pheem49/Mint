@@ -1,6 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const { GoogleGenAI } = require('@google/genai');
+const pdf = require('pdf-parse');
+const mammoth = require('mammoth');
+const xlsx = require('xlsx');
+const axios = require('axios');
+const cheerio = require('cheerio');
 const { readConfig } = require('../System/config_manager');
 
 // Handle electron dependency safely for benchmarks/tests
@@ -104,17 +109,62 @@ function chunkText(text, maxChars = 1000, overlap = 200) {
 }
 
 /**
- * Reads a local file, chunks it, generates embeddings, and saves to knowledge base.
+ * Reads a local file or URL, chunks its text, generates embeddings, and saves to knowledge base.
  */
-async function indexFile(filePath) {
+async function indexFile(resourcePath) {
     try {
-        if (!fs.existsSync(filePath)) return `ไม่พบไฟล์: ${filePath}`;
+        if (!resourcePath || resourcePath.trim() === '') return "ไม่พบข้อมูล กรุณาระบุ Path หรือ URL ค่ะ";
         
-        const stats = fs.statSync(filePath);
-        if (stats.size > 2 * 1024 * 1024) return `ขนาดไฟล์ใหญ่เกินไป (> 2MB): ${filePath}`;
-        
-        const content = fs.readFileSync(filePath, 'utf8');
-        if (!content || content.trim().length === 0) return `ไฟล์ว่างเปล่า: ${filePath}`;
+        let content = '';
+        let sourceName = '';
+        let resourceId = '';
+
+        // Handle Web URLs
+        if (resourcePath.startsWith('http://') || resourcePath.startsWith('https://')) {
+            sourceName = resourcePath;
+            resourceId = resourcePath;
+            try {
+                const response = await axios.get(resourcePath);
+                const $ = cheerio.load(response.data);
+                $('script, style, noscript, nav, footer, header').remove();
+                content = $('body').text().replace(/\s+/g, ' ').trim();
+            } catch (e) {
+                return `ไม่สามารถดึงข้อมูลจากเว็บไซต์ได้ค่ะ: ${e.message}`;
+            }
+        } 
+        // Handle Local Files
+        else {
+            const filePath = resourcePath;
+            if (!fs.existsSync(filePath)) return `ไม่พบไฟล์: ${filePath}`;
+            
+            const stats = fs.statSync(filePath);
+            if (stats.size > 5 * 1024 * 1024) return `ขนาดไฟล์ใหญ่เกินไป (> 5MB): ${filePath}`; 
+            
+            sourceName = path.basename(filePath);
+            resourceId = filePath;
+            const ext = path.extname(filePath).toLowerCase();
+
+            if (ext === '.pdf') {
+                const dataBuffer = fs.readFileSync(filePath);
+                const data = await pdf(dataBuffer);
+                content = data.text;
+            } else if (ext === '.docx') {
+                const result = await mammoth.extractRawText({path: filePath});
+                content = result.value;
+            } else if (ext === '.xlsx') {
+                const workbook = xlsx.readFile(filePath);
+                content = '';
+                for (const sheetName of workbook.SheetNames) {
+                    const sheet = workbook.Sheets[sheetName];
+                    const csv = xlsx.utils.sheet_to_csv(sheet);
+                    content += `\n--- Sheet: ${sheetName} ---\n` + csv;
+                }
+            } else {
+                content = fs.readFileSync(filePath, 'utf8');
+            }
+        }
+
+        if (!content || content.trim().length === 0) return `ข้อมูลว่างเปล่าหรือไม่มีข้อความ: ${resourcePath}`;
         
         const chunks = chunkText(content);
         const db = loadDb();
@@ -122,16 +172,16 @@ async function indexFile(filePath) {
         for (let i = 0; i < chunks.length; i++) {
             const embedding = await generateEmbedding(chunks[i]);
             db.documents.push({
-                id: `${filePath}#${i}-${Date.now()}`,
-                source: path.basename(filePath),
-                path: filePath,
+                id: `${resourceId}#${i}-${Date.now()}`,
+                source: sourceName,
+                path: resourcePath,
                 text: chunks[i],
                 embedding
             });
         }
         
         saveDb(db);
-        return `✅ เรียนรู้ข้อมูลจากไฟล์ ${path.basename(filePath)} เรียบร้อยแล้ว (แบ่งเป็น ${chunks.length} ส่วน)`;
+        return `✅ เรียนรู้ข้อมูลจาก ${sourceName} เรียบร้อยแล้ว (แบ่งเป็น ${chunks.length} ส่วน)`;
     } catch (err) {
         console.error('[KnowledgeBase] Indexing error:', err);
         return `❌ เกิดข้อผิดพลาดในการเรียนรู้ไฟล์: ${err.message}`;

@@ -16,17 +16,19 @@ contextBridge.exposeInMainWorld('api', {
     // Settings
     getSettings: () => ipcRenderer.invoke('get-settings'),
     // Listen for settings changes from other window
-    onSettingsChanged: (callback) => ipcRenderer.on('settings-changed', (_event, config) => callback(config)),
+    onSettingsChanged: (callback) => ipcRenderer.on('settings-changed', (event, data) => callback(data)),
     // Vision
     startVision: () => ipcRenderer.invoke('start-screen-capture'),
-    onVisionReady: (callback) => ipcRenderer.on('vision-ready', (_event, image) => callback(image)),
+    onVisionReady: (callback) => ipcRenderer.on('vision-ready', (event, data) => callback(data)),
     captureSilentScreen: () => ipcRenderer.invoke('capture-silent-screen'),
     // Proactive Assistant
-    onProactiveSuggestion: (callback) => ipcRenderer.on('proactive-suggestion', (_event, data) => callback(data)),
+    onProactiveSuggestion: (callback) => ipcRenderer.on('proactive-suggestion', (event, data) => callback(data)),
+    onProactiveNotification: (callback) => ipcRenderer.on('proactive-notification', (event, data) => callback(data)),
     toggleProactive: (isOn) => ipcRenderer.send('toggle-proactive', isOn),
     recordBehavior: (context) => ipcRenderer.send('record-behavior', context),
     executeProactiveAction: (action) => ipcRenderer.invoke('execute-proactive-action', action),
     onSpotlightToChat: (callback) => ipcRenderer.on('spotlight-to-chat', (_event, query) => callback(query)),
     notifyAiResponse: () => ipcRenderer.send('ai-notify'),
-    clearAiNotifications: () => ipcRenderer.send('ai-notify-clear')
+    clearAiNotifications: () => ipcRenderer.send('ai-notify-clear'),
+    getTtsUrls: (text) => ipcRenderer.invoke('get-tts-urls', text)
 });

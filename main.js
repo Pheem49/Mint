@@ -15,6 +15,9 @@ const { analyzeAndSuggest } = require('./src/AI_Brain/proactive_engine');
 const { recordBehavior, getBehaviorSummary } = require('./src/AI_Brain/behavior_memory');
 const { indexFile } = require('./src/AI_Brain/knowledge_base');
 const SystemAutomation = require('./src/System/system_automation');
+const systemEvents = require('./src/System/system_events');
+const customWorkflows = require('./src/System/custom_workflows');
+const googleTTS = require('google-tts-api');
 
 let mainWindow;
 let settingsWindow = null;
@@ -291,6 +294,26 @@ app.whenReady().then(() => {
     createWindow();
     createTray();
     createFloatingWindow();
+    
+    // Start monitoring system events (battery, wifi, etc.)
+    systemEvents.startMonitoring();
+    customWorkflows.startMonitoring(mainWindow.webContents);
+
+    systemEvents.on('low-battery', (level) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('proactive-notification', {
+                message: `⚠️ แบตเตอรี่เหลือน้อยแล้วนะคะ (${level}%) อย่าลืมเสียบสายชาร์จนะค๊า ✨`,
+                type: 'warning'
+            });
+        }
+    });
+
+    systemEvents.on('connection-change', (isOnline) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            const msg = isOnline ? '✅ เชื่อมต่ออินเทอร์เน็ตได้แล้วค่ะ ✨' : '❌ การเชื่อมต่ออินเทอร์เน็ตขาดหายไปนะคะ';
+            mainWindow.webContents.send('proactive-notification', { message: msg, type: 'info' });
+        }
+    });
 
     globalShortcut.register('CommandOrControl+Shift+Space', () => {
         if (mainWindow) {
@@ -413,6 +436,15 @@ ipcMain.on('quit-app', () => {
     app.quit();
 });
 
+ipcMain.handle('open-custom-workflows', () => {
+    customWorkflows.openConfigFile();
+});
+
+ipcMain.handle('reload-custom-workflows', () => {
+    customWorkflows.loadWorkflows();
+    return { success: true };
+});
+
 // =====================
 // IPC Handlers — Spotlight
 // =====================
@@ -484,6 +516,27 @@ ipcMain.handle('clipboard-read', () => {
 ipcMain.handle('clipboard-write', (event, text) => {
     clipboard.writeText(text);
     return { success: true };
+});
+
+// =====================
+// IPC Handlers — TTS
+// =====================
+ipcMain.handle('get-tts-urls', async (event, text) => {
+    try {
+        const isThai = /[\u0E00-\u0E7F]/.test(text);
+        const lang = isThai ? 'th' : 'en';
+
+        const results = googleTTS.getAllAudioUrls(text, {
+            lang: lang,
+            slow: false,
+            host: 'https://translate.google.com',
+            splitPunct: ',.?!;:',
+        });
+        return results;
+    } catch (e) {
+        console.error("TTS Error:", e);
+        return [];
+    }
 });
 
 // =====================

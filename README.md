@@ -60,10 +60,15 @@
 ### 🛠️ System & Tools
 - **App Launcher**: Quick access to binaries, Flatpaks, and Snaps on Linux.
 - **Web Automation**: Puppeteer-driven browser control for searching or extracting data.
-- **Local Knowledge**: Index and search your `.txt` and `.md` files for quick recall.
-- **Plugin Ecosystem**: Dedicated modules for Spotify, Docker, and more.
+- **Proactive Automation (Custom Workflows)**: Define "If This Then Mint" JSON rules (e.g. open Zoom -> check mic) to trigger AI behaviors automatically!
+- **Extended Local Knowledge (RAG)**: Index and search `.txt`, `.md`, `.pdf`, `.docx`, `.xlsx`, and live **Website URLs** for quick recall.
+- **Rich Plugin Ecosystem**: Dedicated modules for Obsidian/Notion, Google Calendar, Developer Tools (Git), System Metrics, Spotify, Docker, and more.
 - **Shortcut Guide**: Built-in keyboard shortcut documentation in the Settings panel.
 - **Explicit Quit**: A dedicated "Quit Application" button for complete app termination.
+
+### 🎨 Customization & Privacy
+- **Interactive Themes**: Personalize Mint with dynamic background gradients, custom Google Fonts (like Mali and Outfit), and adjustable Glassmorphism blur levels.
+- **Local LLM Support (Ollama)**: Want 100% privacy? Switch from Google Gemini to a Local LLM via Ollama (`llama3`) directly from the settings panel.
 
 ---
 
@@ -115,7 +120,10 @@ Plugins are located in `src/Plugins/` and can be toggled as needed.
 
 - **Spotify**: Control playback using `playerctl`.
 - **Docker**: Manage containers (list/start/stop) directly from chat.
-- **Discord**: API integration helpers (experimental).
+- **Obsidian/Notion**: Search, read, and write to local markdown notes.
+- **Google Calendar**: Quickly create and schedule events.
+- **DevTools**: Read Git status, branches, and commit histories.
+- **System Metrics**: Monitor CPU and RAM usage on the fly.
 
 ---
 

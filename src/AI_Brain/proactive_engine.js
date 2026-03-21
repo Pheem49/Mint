@@ -2,12 +2,15 @@ const { GoogleGenAI } = require('@google/genai');
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
+const { readConfig } = require('../System/config_manager');
 
 // ============================================================
 // Proactive Engine — Smart Suggestion Engine (Multi-Choice)
 // ============================================================
 
 const ai = new GoogleGenAI({});
+const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite-preview';
+let lastLoggedModel = '';
 
 const PROACTIVE_SYSTEM_PROMPT = `You are a Smart Suggestion Engine built into a Desktop AI Agent called "Mint".
 Your job: observe the user's screen + behavior, then offer MULTIPLE relevant quick-action options — NOT just one question.
@@ -61,6 +64,16 @@ BAD examples (return null):
 let lastSuggestionContext = '';
 let lastSuggestionTime = 0;
 
+function resolveGeminiModel() {
+    try {
+        const cfg = readConfig();
+        const model = (cfg.geminiModel || '').trim();
+        return model || DEFAULT_GEMINI_MODEL;
+    } catch {
+        return DEFAULT_GEMINI_MODEL;
+    }
+}
+
 function getMinSuggestionIntervalMs() {
     try {
         const CONFIG_PATH = path.join(app.getPath('userData'), 'mint-config.json');
@@ -82,6 +95,12 @@ function getMinSuggestionIntervalMs() {
  */
 async function analyzeAndSuggest(base64Image, behaviorSummary) {
     try {
+        const model = resolveGeminiModel();
+        if (model && model !== lastLoggedModel) {
+            console.log(`[Gemini] Proactive Engine model: ${model}`);
+            lastLoggedModel = model;
+        }
+
         const now = Date.now();
         const minInterval = getMinSuggestionIntervalMs();
 
@@ -106,7 +125,7 @@ Rules: Only suggest if you see a clear opportunity. Return 2–4 relevant chips.
         ];
 
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model,
             config: {
                 systemInstruction: PROACTIVE_SYSTEM_PROMPT,
                 responseMimeType: 'application/json'

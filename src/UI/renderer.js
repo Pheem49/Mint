@@ -28,6 +28,10 @@ function applyTheme(theme, accentColor, systemTextColor, config = {}) {
     document.documentElement.style.setProperty('--accent-hover', lightenColor(accent, 20));
     document.documentElement.style.setProperty('--text-main', textColor);
 
+    // Dynamic UI Customizations
+    document.documentElement.style.setProperty('--glass-blur', config.glassBlur || 'blur(16px)');
+    document.body.style.fontFamily = config.fontFamily || "'Outfit', sans-serif";
+
     if (theme === 'custom') {
         if (config.customBgStart && config.customBgEnd) {
             const gradient = `linear-gradient(135deg, ${config.customBgStart} 0%, ${config.customBgEnd} 100%)`;
@@ -361,37 +365,85 @@ micBtn.addEventListener('click', (e) => {
 });
 
 // --- Speech Synthesis Setup ---
+let currentAudioPlayer = null;
+
 function speakText(text, options = {}) {
     const onEnd = typeof options.onEnd === 'function' ? options.onEnd : null;
-    return new Promise((resolve) => {
-        if (!('speechSynthesis' in window)) {
-            if (onEnd) onEnd();
-            resolve();
-            return;
+    return new Promise(async (resolve) => {
+        // Stop any currently playing audio
+        if (currentAudioPlayer) {
+            currentAudioPlayer.pause();
+            currentAudioPlayer.currentTime = 0;
+            currentAudioPlayer = null;
+        }
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
         }
 
-        // Stop any currently playing audio
-        window.speechSynthesis.cancel();
-
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'th-TH'; // Assuming Thai voice
-
-        let finished = false;
-        const done = () => {
-            if (finished) return;
-            finished = true;
+        if (!text || !text.trim()) {
             if (onEnd) onEnd();
-            resolve();
-        };
+            return resolve();
+        }
 
-        // Optional: tweak pitch and rate
-        // utterance.pitch = 1.1; 
-        // utterance.rate = 1.0;
+        try {
+            const urls = await window.api.getTtsUrls(text);
+            if (urls && urls.length > 0) {
+                let i = 0;
+                const playNext = () => {
+                    if (i >= urls.length) {
+                        if (onEnd) onEnd();
+                        return resolve();
+                    }
+                    const audio = new Audio(urls[i].url);
+                    currentAudioPlayer = audio;
+                    audio.onended = () => {
+                        i++;
+                        playNext();
+                    };
+                    audio.onerror = () => {
+                        console.error("TTS Audio error", urls[i]);
+                        i++;
+                        playNext();
+                    };
+                    audio.play().catch(e => {
+                        console.error("Audio playback prevented:", e);
+                        fallbackSpeak(text, onEnd, resolve);
+                    });
+                };
+                playNext();
+                return;
+            }
+        } catch (err) {
+            console.error("Cloud TTS Error, falling back to local:", err);
+        }
 
-        utterance.onend = done;
-        utterance.onerror = done;
-        window.speechSynthesis.speak(utterance);
+        // Fallback
+        fallbackSpeak(text, onEnd, resolve);
     });
+}
+
+function fallbackSpeak(text, onEnd, resolve) {
+    if (!('speechSynthesis' in window)) {
+        if (onEnd) onEnd();
+        resolve();
+        return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'th-TH'; 
+    
+    let finished = false;
+    const done = () => {
+        if (finished) return;
+        finished = true;
+        if (onEnd) onEnd();
+        resolve();
+    };
+
+    utterance.onend = done;
+    utterance.onerror = done;
+    window.speechSynthesis.speak(utterance);
 }
 
 // Close window handler (hides to tray)
@@ -779,6 +831,14 @@ window.addEventListener('DOMContentLoaded', async () => {
     chatInput.focus();
     await loadTheme();
     await loadChatHistory();
+});
+
+// Proactive OS Notifications (Battery, Network, etc.)
+window.api.onProactiveNotification((data) => {
+    if (!data || !data.message) return;
+    appendMessage(data.message, 'ai');
+    // Also speak the notification automatically
+    speakText(data.message);
 });
 
 window.addEventListener('focus', () => {

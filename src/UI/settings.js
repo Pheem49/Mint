@@ -6,9 +6,14 @@ const DEFAULT_CONFIG = {
     customBgEnd: '#1e1b4b',
     customPanelBg: '#1e293b',
     apiKey: '',
+    geminiModel: 'gemini-3.1-flash-lite-preview',
     language: 'th-TH',
     proactiveInterval: 60,
-    proactiveCooldown: 120
+    proactiveCooldown: 120,
+    glassBlur: 'blur(16px)',
+    fontFamily: "'Outfit', sans-serif",
+    aiProvider: 'gemini',
+    ollamaModel: 'llama3:latest'
 };
 
 let currentConfig = { ...DEFAULT_CONFIG };
@@ -41,10 +46,32 @@ function applyConfig(config) {
     // Apply API key
     document.getElementById('api-key-input').value = config.apiKey || '';
 
+    // Apply Gemini model
+    applyModelSelection(config.geminiModel);
+    
+    // Apply AI Provider
+    const providerSelect = document.getElementById('ai-provider-select');
+    if (providerSelect) {
+        providerSelect.value = config.aiProvider || 'gemini';
+        toggleProviderOptions(providerSelect.value);
+    }
+    
+    const ollamaInput = document.getElementById('ollama-model-input');
+    if (ollamaInput) {
+        ollamaInput.value = config.ollamaModel || 'llama3:latest';
+    }
+
     // Apply Automation Browser
     if (config.automationBrowser) {
         document.getElementById('automation-browser-select').value = config.automationBrowser;
     }
+
+    // Apply UI Customizations
+    document.getElementById('glass-blur-select').value = config.glassBlur || 'blur(16px)';
+    document.documentElement.style.setProperty('--glass-blur', config.glassBlur || 'blur(16px)');
+
+    document.getElementById('font-family-select').value = config.fontFamily || "'Outfit', sans-serif";
+    document.body.style.fontFamily = config.fontFamily || "'Outfit', sans-serif";
 
     // Update active theme card
     document.querySelectorAll('.theme-card').forEach(card => {
@@ -83,6 +110,34 @@ function lightenColor(hex, amount) {
     const g = Math.min(255, ((num >> 8) & 0x00FF) + amount);
     const b = Math.min(255, (num & 0x0000FF) + amount);
     return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+}
+
+function applyModelSelection(model) {
+    const select = document.getElementById('gemini-model-select');
+    const customRow = document.getElementById('gemini-model-custom-row');
+    const customInput = document.getElementById('gemini-model-custom');
+    const normalized = (model || '').trim();
+    const optionValues = Array.from(select.options).map(opt => opt.value);
+
+    if (normalized && optionValues.includes(normalized)) {
+        select.value = normalized;
+        customRow.style.display = 'none';
+        customInput.value = '';
+    } else {
+        select.value = 'custom';
+        customRow.style.display = 'block';
+        customInput.value = normalized;
+    }
+}
+
+function getSelectedModel() {
+    const select = document.getElementById('gemini-model-select');
+    const customInput = document.getElementById('gemini-model-custom');
+    if (select.value === 'custom') {
+        const custom = (customInput.value || '').trim();
+        return custom || DEFAULT_CONFIG.geminiModel;
+    }
+    return select.value;
 }
 
 // --- Event Listeners ---
@@ -129,6 +184,45 @@ document.getElementById('api-key-input').addEventListener('keydown', (e) => {
         e.preventDefault();
         saveApiKeyOnly();
     }
+});
+
+// Gemini model select
+document.getElementById('gemini-model-select').addEventListener('change', (e) => {
+    const customRow = document.getElementById('gemini-model-custom-row');
+    if (e.target.value === 'custom') {
+        customRow.style.display = 'block';
+        currentConfig.geminiModel = (document.getElementById('gemini-model-custom').value || '').trim();
+    } else {
+        customRow.style.display = 'none';
+        currentConfig.geminiModel = e.target.value;
+    }
+});
+
+document.getElementById('gemini-model-custom').addEventListener('input', (e) => {
+    currentConfig.geminiModel = e.target.value.trim();
+});
+
+// AI Provider toggle
+function toggleProviderOptions(provider) {
+    const geminiOptions = document.getElementById('gemini-options');
+    const ollamaOptions = document.getElementById('ollama-options');
+    
+    if (provider === 'ollama') {
+        geminiOptions.style.display = 'none';
+        ollamaOptions.style.display = 'block';
+    } else {
+        geminiOptions.style.display = 'block';
+        ollamaOptions.style.display = 'none';
+    }
+}
+
+document.getElementById('ai-provider-select').addEventListener('change', (e) => {
+    currentConfig.aiProvider = e.target.value;
+    toggleProviderOptions(e.target.value);
+});
+
+document.getElementById('ollama-model-input').addEventListener('input', (e) => {
+    currentConfig.ollamaModel = e.target.value.trim();
 });
 
 // AI Studio link
@@ -234,10 +328,15 @@ document.getElementById('proactive-cooldown').addEventListener('input', (e) => {
 // Save
 document.getElementById('save-btn').addEventListener('click', async () => {
     currentConfig.apiKey = document.getElementById('api-key-input').value.trim();
+    currentConfig.geminiModel = getSelectedModel();
+    currentConfig.aiProvider = document.getElementById('ai-provider-select').value;
+    currentConfig.ollamaModel = document.getElementById('ollama-model-input').value.trim();
     currentConfig.automationBrowser = document.getElementById('automation-browser-select').value;
     currentConfig.proactiveInterval = Number(document.getElementById('proactive-interval').value);
     currentConfig.proactiveCooldown = Number(document.getElementById('proactive-cooldown').value);
     currentConfig.systemTextColor = document.getElementById('system-text-color').value;
+    currentConfig.glassBlur = document.getElementById('glass-blur-select').value;
+    currentConfig.fontFamily = document.getElementById('font-family-select').value;
     
     currentConfig.customBgStart = document.getElementById('custom-bg-start').value;
     currentConfig.customBgEnd = document.getElementById('custom-bg-end').value;
@@ -248,6 +347,23 @@ document.getElementById('save-btn').addEventListener('click', async () => {
     btn.textContent = '✅ Saved!';
     setTimeout(() => { btn.textContent = 'Save Settings'; }, 1500);
 });
+
+// Custom Workflows functionality
+const openWorkflowsBtn = document.getElementById('open-workflows-btn');
+const reloadWorkflowsBtn = document.getElementById('reload-workflows-btn');
+if (openWorkflowsBtn) {
+    openWorkflowsBtn.addEventListener('click', () => {
+        window.settingsApi.openCustomWorkflows();
+    });
+}
+if (reloadWorkflowsBtn) {
+    reloadWorkflowsBtn.addEventListener('click', async () => {
+        await window.settingsApi.reloadCustomWorkflows();
+        const originalText = reloadWorkflowsBtn.textContent;
+        reloadWorkflowsBtn.textContent = '✅ Reloaded!';
+        setTimeout(() => { reloadWorkflowsBtn.textContent = originalText; }, 1500);
+    });
+}
 
 // Quit App
 document.getElementById('quit-btn').addEventListener('click', () => {

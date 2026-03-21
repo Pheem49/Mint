@@ -12,10 +12,13 @@ const DEFAULT_CONFIG = {
     customBgEnd: '#1e1b4b',
     customPanelBg: '#1e293b',
     apiKey: '',
+    geminiModel: 'gemini-3.1-flash-lite-preview',
     language: 'th-TH',
     automationBrowser: 'chromium',
     proactiveInterval: 60,   // seconds between screen captures
-    proactiveCooldown: 120   // seconds minimum between actual suggestions
+    proactiveCooldown: 120,   // seconds minimum between actual suggestions
+    aiProvider: 'gemini',
+    ollamaModel: 'llama3:latest'
 };
 
 function readConfig() {

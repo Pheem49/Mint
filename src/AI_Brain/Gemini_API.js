@@ -6,6 +6,7 @@ const pluginManager = require('../Plugins/plugin_manager');
 let ai = null;
 let activeApiKey = '';
 const initialEnvKey = (process.env.GEMINI_API_KEY || '').trim();
+const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite-preview';
 
 const systemInstruction = `You are "Mint" (มิ้นท์), a cute, cheerful, and highly helpful female Local AI Desktop Agent. 
 
@@ -80,8 +81,20 @@ function initAiClient() {
   ai = new GoogleGenAI({});
 }
 
+function resolveGeminiModel() {
+  try {
+    const cfg = readConfig();
+    const model = (cfg.geminiModel || '').trim();
+    return model || DEFAULT_GEMINI_MODEL;
+  } catch (e) {
+    return DEFAULT_GEMINI_MODEL;
+  }
+}
+
 // Chat session — maintains conversation history within the session
 let chat = null;
+let activeModel = resolveGeminiModel();
+let lastLoggedModel = '';
 const MAX_HISTORY_MESSAGES = 20; // Keep only the last 20 messages (approx 10 turns)
 
 function createChat(history = []) {
@@ -92,8 +105,13 @@ function createChat(history = []) {
   // Truncate history to avoid slow responses and high token usage
   const truncatedHistory = history.slice(-MAX_HISTORY_MESSAGES);
 
+  activeModel = resolveGeminiModel();
+  if (activeModel && activeModel !== lastLoggedModel) {
+    console.log(`[Gemini] Using model: ${activeModel}`);
+    lastLoggedModel = activeModel;
+  }
   chat = ai.chats.create({
-    model: 'gemini-2.5-flash',
+    model: activeModel,
     config: {
       systemInstruction: dynamicPrompt,
       responseMimeType: "application/json"
@@ -111,6 +129,9 @@ const { searchKnowledge } = require('./knowledge_base');
 
 async function handleChat(message, base64Image = null, base64Audio = null) {
   try {
+    const config = readConfig();
+    const provider = config.aiProvider || 'gemini';
+
     let finalMessage = message;
     
     // Inject Local RAG Context
@@ -123,6 +144,16 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
             });
             finalMessage = message + contextString;
         }
+    }
+
+    if (provider === 'ollama') {
+        const axios = require('axios');
+        return await handleOllamaChat(finalMessage, base64Image, base64Audio, config, axios);
+    }
+
+    const desiredModel = resolveGeminiModel();
+    if (!chat || activeModel !== desiredModel) {
+        createChat(readChatHistory());
     }
 
     let aiResponse;
@@ -181,9 +212,68 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
     return parsedResult;
 
   } catch (error) {
-    console.error("Gemini API Error:", error);
+    console.error("AI API Error:", error);
     throw error;
   }
+}
+
+async function handleOllamaChat(finalMessage, base64Image, base64Audio, config, axios) {
+    const history = readChatHistory() || [];
+    pluginManager.loadPlugins();
+    
+    const ollamaMessages = [
+        { role: 'system', content: systemInstruction + pluginManager.getPromptDescriptions() }
+    ];
+    
+    for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
+        const role = msg.role === 'model' ? 'assistant' : 'user';
+        let text = '';
+        if (Array.isArray(msg.parts)) {
+             text = msg.parts.map(p => p.text || '').join('\n');
+        }
+        if (text) ollamaMessages.push({ role, content: text });
+    }
+    
+    let currentContent = finalMessage || 'Analyze this input.';
+    let images = [];
+    if (base64Image) {
+        images.push(base64Image.replace(/^data:image\/\w+;base64,/, ''));
+    }
+    
+    if (base64Audio && !base64Image && !finalMessage) {
+        currentContent = "Please analyze this audio requirement based on text if any was transacted, otherwise reply with appropriate action.";
+    }
+    
+    const userMessage = { role: 'user', content: currentContent };
+    if (images.length > 0) userMessage.images = images;
+    
+    ollamaMessages.push(userMessage);
+    
+    const response = await axios.post('http://localhost:11434/api/chat', {
+        model: config.ollamaModel || 'llama3:latest',
+        messages: ollamaMessages,
+        format: 'json',
+        stream: false
+    });
+    
+    const outputText = response.data.message.content;
+    
+    history.push({ role: 'user', parts: [{ text: currentContent }] });
+    history.push({ role: 'model', parts: [{ text: outputText }] });
+    writeChatHistory(history.slice(-MAX_HISTORY_MESSAGES));
+    
+    let parsedResult;
+    try {
+        parsedResult = JSON.parse(outputText);
+    } catch(e) {
+        const jsonMatch = outputText.match(/```json\n([\s\S]*?)\n```/) || outputText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            parsedResult = JSON.parse(jsonMatch[jsonMatch.length > 1 ? 1 : 0]);
+        } else {
+            parsedResult = { response: outputText, action: { type: "none", target: "" } };
+        }
+    }
+    return parsedResult;
 }
 
 function resetChat() {
@@ -261,7 +351,7 @@ async function translateImageContent(base64Image) {
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             try {
                 const response = await ai.models.generateContent({
-                    model: 'gemini-2.5-flash',
+                    model: resolveGeminiModel(),
                     contents: [
                         {
                             role: 'user',

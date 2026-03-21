@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mint — Settings</title>
     <link rel="stylesheet" href="settings.css">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Mali:wght@400;500;600&family=Prompt:wght@400;500&family=Sarabun:wght@400;500&display=swap" rel="stylesheet">
 </head>
 
 <body>
@@ -42,6 +42,49 @@
                         <span class="api-save-status" id="api-save-status" aria-live="polite"></span>
                     </div>
                     <p class="hint">Get your API Key at <a href="#" id="ai-studio-link">Google AI Studio</a></p>
+                </div>
+            </section>
+
+            <hr class="divider">
+
+            <!-- AI Provider & Model -->
+            <section class="setting-section">
+                <h2 class="section-title">🧠 AI Engine</h2>
+                <div class="setting-row">
+                    <label for="ai-provider-select">Provider</label>
+                    <div class="input-group">
+                        <select id="ai-provider-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--border); outline: none;">
+                            <option value="gemini">Google Gemini (Cloud)</option>
+                            <option value="ollama">Ollama (Local / Private)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Gemini Options -->
+                <div id="gemini-options" style="margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.1);">
+                    <div class="setting-row">
+                        <label for="gemini-model-select">Gemini Model</label>
+                        <div class="input-group">
+                            <select id="gemini-model-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--border); outline: none;">
+                                <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                                <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview</option>
+                                <option value="custom">Custom...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="setting-row" id="gemini-model-custom-row" style="display: none; margin-top: 10px;">
+                        <label for="gemini-model-custom">Custom Model</label>
+                        <input type="text" id="gemini-model-custom" placeholder="e.g. gemini-3.1-flash-lite-preview">
+                    </div>
+                </div>
+
+                <!-- Ollama Options -->
+                <div id="ollama-options" style="display: none; margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.1);">
+                    <div class="setting-row">
+                        <label for="ollama-model-input">Ollama Model</label>
+                        <input type="text" id="ollama-model-input" placeholder="e.g. llama3:latest">
+                        <p class="hint" style="margin-top: 8px; color: #fbbf24;">Make sure Ollama is running at http://localhost:11434</p>
+                    </div>
                 </div>
             </section>
 
@@ -127,6 +170,36 @@
 
             <hr class="divider">
 
+            <!-- UI Customizations (Glassmorphism & Font) -->
+            <section class="setting-section">
+                <h2 class="section-title">✨ UI Customization</h2>
+                <div class="setting-row" style="margin-bottom: 12px;">
+                    <label for="glass-blur-select">Glassmorphism (Blur)</label>
+                    <div class="input-group">
+                        <select id="glass-blur-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--border); outline: none;">
+                            <option value="blur(4px)">Low (4px)</option>
+                            <option value="blur(16px)">Medium (16px) - Default</option>
+                            <option value="blur(32px)">High (32px)</option>
+                            <option value="none">Off (Solid)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <label for="font-family-select">Font Family</label>
+                    <div class="input-group">
+                        <select id="font-family-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--border); outline: none;">
+                            <option value="'Outfit', sans-serif">Outfit (Default)</option>
+                            <option value="'Mali', cursive">Mali (Cute Thai Font)</option>
+                            <option value="'Prompt', sans-serif">Prompt (Modern Thai)</option>
+                            <option value="'Sarabun', sans-serif">Sarabun (Formal Thai)</option>
+                        </select>
+                    </div>
+                    <p class="hint" style="margin-top: 8px;">Mint supports beautiful Google Fonts!</p>
+                </div>
+            </section>
+
+            <hr class="divider">
+
             <!-- System Text Color -->
             <section class="setting-section">
                 <h2 class="section-title">✍️ System Text Color</h2>
@@ -165,6 +238,20 @@
                         <span class="range-value" id="proactive-cooldown-display">2 min</span>
                     </div>
                     <p class="hint">Min time between repeat suggestions (higher = less intrusive)</p>
+                </div>
+            </section>
+
+            <hr class="divider">
+
+            <!-- Custom Workflows -->
+            <section class="setting-section">
+                <h2 class="section-title">⚙️ Custom Workflows</h2>
+                <div class="setting-row">
+                    <p class="hint">Edit "If This Then Mint" rules (e.g. "If I open Zoom, check mic") directly via the JSON configuration file.</p>
+                </div>
+                <div class="setting-row" style="margin-top: 10px; display: flex; gap: 10px;">
+                    <button class="btn-secondary" id="open-workflows-btn">Open workflows.json</button>
+                    <button class="btn-primary" id="reload-workflows-btn">Reload Rules</button>
                 </div>
             </section>
 

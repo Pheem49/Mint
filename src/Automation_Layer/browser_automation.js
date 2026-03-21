@@ -3,6 +3,8 @@ const { GoogleGenAI } = require('@google/genai');
 const { readConfig } = require('../System/config_manager');
 
 const ai = new GoogleGenAI({});
+const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite-preview';
+let lastLoggedModel = '';
 
 const BROWSER_SYSTEM_PROMPT = `You are an Autonomous Browser Agent. Your goal is to fulfill the user's web instruction by driving a headless browser.
 
@@ -21,6 +23,16 @@ Actions:
 - "done": Task finished. Target MUST be the final summary or answer to present to the user.
 
 You will receive the result of your previous action in the next message. If you get stuck or fail, try another approach or use "done" to report the failure.`;
+
+function resolveGeminiModel() {
+    try {
+        const cfg = readConfig();
+        const model = (cfg.geminiModel || '').trim();
+        return model || DEFAULT_GEMINI_MODEL;
+    } catch {
+        return DEFAULT_GEMINI_MODEL;
+    }
+}
 
 async function performWebAutomation(query) {
     if (!query) return "No query provided.";
@@ -50,8 +62,14 @@ async function performWebAutomation(query) {
 
         const page = await browser.newPage();
         
+        const model = resolveGeminiModel();
+        if (model && model !== lastLoggedModel) {
+            console.log(`[Gemini] Web Automation model: ${model}`);
+            lastLoggedModel = model;
+        }
+
         const chat = ai.chats.create({
-            model: 'gemini-2.5-flash',
+            model,
             config: {
                 systemInstruction: BROWSER_SYSTEM_PROMPT,
                 responseMimeType: "application/json"
