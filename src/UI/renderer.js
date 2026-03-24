@@ -775,15 +775,19 @@ async function sendTextMessage(text, options = {}) {
 
         // Handle system_info action: fetch data and append to AI message
         if (response.action && response.action.type === 'system_info') {
-            const city = response.action.target || '';
-            if (city) {
+            const city = (response.action.target || '').trim();
+            // Only treat as weather if city looks like a real location name (not blank, not 'date', not 'time')
+            const weatherKeywords = ['date', 'time', 'วัน', 'เวลา', 'today', 'now'];
+            const isWeather = city && !weatherKeywords.some(k => city.toLowerCase().includes(k));
+            
+            if (isWeather) {
                 // Weather query
                 const weather = await window.api.getWeather(city);
                 response.response += `\n\n🌡️ ${weather.data}`;
             } else {
-                // General system info
+                // General system info (date, time, RAM, CPU)
                 const info = await window.api.getSystemInfo();
-                response.response += `\n\n💻 RAM: ${info.ram.used} / ${info.ram.total} (${info.ram.percent})\n🕐 เวลา: ${info.time} — ${info.date}\n🖥️ CPU: ${info.cpu.cores} cores`;
+                response.response += `\n\n📅 วันนี้: ${info.date}\n⏰ เวลา: ${info.time}\n💻 RAM: ${info.ram.used} / ${info.ram.total} (${info.ram.percent})`;
             }
         }
 
