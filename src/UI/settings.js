@@ -13,7 +13,16 @@ const DEFAULT_CONFIG = {
     glassBlur: 'blur(16px)',
     fontFamily: "'Outfit', sans-serif",
     aiProvider: 'gemini',
-    ollamaModel: 'llama3:latest'
+    ollamaModel: 'llama3:latest',
+    enableVoiceReply: true,
+    enableCustomWorkflows: true,
+    ttsProvider: 'google',
+    ttsVolume: 1.0,
+    ttsSpeed: 1.0,
+    ttsPitch: 1.0,
+    pluginSpotifyEnabled: true,
+    pluginCalendarEnabled: false,
+    pluginDiscordEnabled: false
 };
 
 let currentConfig = { ...DEFAULT_CONFIG };
@@ -61,9 +70,50 @@ function applyConfig(config) {
         ollamaInput.value = config.ollamaModel || 'llama3:latest';
     }
 
+    const voiceReplyToggle = document.getElementById('enable-voice-reply');
+    if (voiceReplyToggle) {
+        voiceReplyToggle.checked = config.enableVoiceReply !== false;
+    }
+
+    const ttsProviderSelect = document.getElementById('tts-provider-select');
+    if (ttsProviderSelect) ttsProviderSelect.value = config.ttsProvider || 'google';
+
+    const ttsVolume = document.getElementById('tts-volume');
+    if (ttsVolume) {
+        ttsVolume.value = config.ttsVolume !== undefined ? config.ttsVolume : 1.0;
+        document.getElementById('tts-volume-val').textContent = `${Math.round(ttsVolume.value * 100)}%`;
+    }
+
+    const ttsSpeed = document.getElementById('tts-speed');
+    if (ttsSpeed) {
+        ttsSpeed.value = config.ttsSpeed !== undefined ? config.ttsSpeed : 1.0;
+        document.getElementById('tts-speed-val').textContent = `${parseFloat(ttsSpeed.value).toFixed(1)}x`;
+    }
+
+    const ttsPitch = document.getElementById('tts-pitch');
+    if (ttsPitch) {
+        ttsPitch.value = config.ttsPitch !== undefined ? config.ttsPitch : 1.0;
+        document.getElementById('tts-pitch-val').textContent = parseFloat(ttsPitch.value).toFixed(1);
+    }
+
+    const enableWorkflowsToggle = document.getElementById('enable-custom-workflows');
+    if (enableWorkflowsToggle) {
+        enableWorkflowsToggle.checked = config.enableCustomWorkflows !== false;
+    }
+
+    // Plugins logic
+    updatePluginButton('spotify', config.pluginSpotifyEnabled);
+    updatePluginButton('calendar', config.pluginCalendarEnabled);
+    updatePluginButton('discord', config.pluginDiscordEnabled);
+
     // Apply Automation Browser
     if (config.automationBrowser) {
         document.getElementById('automation-browser-select').value = config.automationBrowser;
+    }
+
+    const showWidgetToggle = document.getElementById('show-desktop-widget');
+    if (showWidgetToggle) {
+        showWidgetToggle.checked = config.showDesktopWidget !== false;
     }
 
     // Apply UI Customizations
@@ -325,12 +375,52 @@ document.getElementById('proactive-cooldown').addEventListener('input', (e) => {
     updateCooldownDisplay(e.target.value);
 });
 
+// TTS slider UI updates
+if (document.getElementById('tts-volume')) {
+    document.getElementById('tts-volume').addEventListener('input', (e) => {
+        document.getElementById('tts-volume-val').textContent = `${Math.round(e.target.value * 100)}%`;
+    });
+}
+if (document.getElementById('tts-speed')) {
+    document.getElementById('tts-speed').addEventListener('input', (e) => {
+        document.getElementById('tts-speed-val').textContent = `${parseFloat(e.target.value).toFixed(1)}x`;
+    });
+}
+if (document.getElementById('tts-pitch')) {
+    document.getElementById('tts-pitch').addEventListener('input', (e) => {
+        document.getElementById('tts-pitch-val').textContent = parseFloat(e.target.value).toFixed(1);
+    });
+}
+
 // Save
 document.getElementById('save-btn').addEventListener('click', async () => {
     currentConfig.apiKey = document.getElementById('api-key-input').value.trim();
     currentConfig.geminiModel = getSelectedModel();
     currentConfig.aiProvider = document.getElementById('ai-provider-select').value;
     currentConfig.ollamaModel = document.getElementById('ollama-model-input').value.trim();
+    
+    const voiceReplyToggle = document.getElementById('enable-voice-reply');
+    if (voiceReplyToggle) {
+        currentConfig.enableVoiceReply = voiceReplyToggle.checked;
+    }
+
+    const ttsProviderSelect = document.getElementById('tts-provider-select');
+    if (ttsProviderSelect) currentConfig.ttsProvider = ttsProviderSelect.value;
+    
+    if (document.getElementById('tts-volume')) currentConfig.ttsVolume = parseFloat(document.getElementById('tts-volume').value);
+    if (document.getElementById('tts-speed')) currentConfig.ttsSpeed = parseFloat(document.getElementById('tts-speed').value);
+    if (document.getElementById('tts-pitch')) currentConfig.ttsPitch = parseFloat(document.getElementById('tts-pitch').value);
+
+    const enableWorkflowsToggle = document.getElementById('enable-custom-workflows');
+    if (enableWorkflowsToggle) {
+        currentConfig.enableCustomWorkflows = enableWorkflowsToggle.checked;
+    }
+
+    const showWidgetToggle = document.getElementById('show-desktop-widget');
+    if (showWidgetToggle) {
+        currentConfig.showDesktopWidget = showWidgetToggle.checked;
+    }
+
     currentConfig.automationBrowser = document.getElementById('automation-browser-select').value;
     currentConfig.proactiveInterval = Number(document.getElementById('proactive-interval').value);
     currentConfig.proactiveCooldown = Number(document.getElementById('proactive-cooldown').value);
@@ -378,5 +468,46 @@ document.getElementById('reset-btn').addEventListener('click', () => {
     applyConfig(currentConfig);
 });
 
+function updatePluginButton(pluginName, isEnabled) {
+    const btn = document.getElementById(`btn-plugin-${pluginName}`);
+    if (!btn) return;
+    
+    if (isEnabled) {
+        btn.textContent = 'Disconnect';
+        btn.classList.remove('btn-connect');
+        btn.classList.add('btn-disconnect');
+    } else {
+        btn.textContent = 'Connect';
+        btn.classList.add('btn-connect');
+        btn.classList.remove('btn-disconnect');
+    }
+}
+
+// Bind plugin buttons
+['spotify', 'calendar', 'discord'].forEach(plugin => {
+    const btn = document.getElementById(`btn-plugin-${plugin}`);
+    if (btn) {
+        btn.addEventListener('click', () => {
+            const key = `plugin${plugin.charAt(0).toUpperCase() + plugin.slice(1)}Enabled`;
+            currentConfig[key] = !currentConfig[key];
+            updatePluginButton(plugin, currentConfig[key]);
+        });
+    }
+});
+
 // Init
+// Sidebar Tab Navigation
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const target = btn.dataset.target;
+        // Deactivate all
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+        // Activate selected
+        btn.classList.add('active');
+        const pane = document.getElementById(target);
+        if (pane) pane.classList.add('active');
+    });
+});
+
 window.addEventListener('DOMContentLoaded', loadSettings);

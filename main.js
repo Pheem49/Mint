@@ -24,6 +24,7 @@ let settingsWindow = null;
 let screenPickerWindow = null;
 let spotlightWindow = null;
 let floatingWindow = null;
+let widgetWindow = null;
 let tray = null;
 let floatingUnreadCount = 0;
 
@@ -187,8 +188,10 @@ function createSettingsWindow() {
         return;
     }
     settingsWindow = new BrowserWindow({
-        width: 440,
-        height: 560,
+        width: 720,
+        height: 620,
+        minWidth: 640,
+        minHeight: 560,
         icon: path.join(__dirname, 'assets', 'icon.png'),
         webPreferences: {
             preload: path.join(__dirname, 'preload-settings.js'),
@@ -197,7 +200,7 @@ function createSettingsWindow() {
         },
         frame: false,
         transparent: true,
-        resizable: false,
+        resizable: true,
         parent: mainWindow,
     });
     settingsWindow.loadFile('src/UI/settings.html');
@@ -278,6 +281,42 @@ function createFloatingWindow() {
     });
 }
 
+function createWidgetWindow() {
+    if (widgetWindow) return;
+    
+    widgetWindow = new BrowserWindow({
+        width: 150,
+        height: 150,
+        frame: false,
+        transparent: true,
+        resizable: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        show: true,
+        webPreferences: {
+            preload: require('path').join(__dirname, 'src/UI/preload-widget.js'),
+            nodeIntegration: false,
+            contextIsolation: true
+        }
+    });
+
+    widgetWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    widgetWindow.setAlwaysOnTop(true, 'floating');
+    
+    // Position Top-Right loosely
+    try {
+        const primaryDisplay = require('electron').screen.getPrimaryDisplay();
+        const { width, height, x, y } = primaryDisplay.workArea;
+        widgetWindow.setPosition(x + width - 150 - 40, y + 40);
+    } catch (e) {}
+
+    widgetWindow.loadFile('src/UI/widget.html');
+
+    widgetWindow.on('closed', () => {
+        widgetWindow = null;
+    });
+}
+
 function updateFloatingUnread() {
     if (floatingWindow && !floatingWindow.isDestroyed()) {
         floatingWindow.webContents.send('floating-notify', floatingUnreadCount);
@@ -294,10 +333,14 @@ app.whenReady().then(() => {
     createWindow();
     createTray();
     createFloatingWindow();
+    createWidgetWindow();
     
     // Start monitoring system events (battery, wifi, etc.)
     systemEvents.startMonitoring();
-    customWorkflows.startMonitoring(mainWindow.webContents);
+    const config = readConfig();
+    if (config.enableCustomWorkflows !== false) {
+        customWorkflows.startMonitoring(mainWindow.webContents);
+    }
 
     systemEvents.on('low-battery', (level) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -424,7 +467,29 @@ ipcMain.handle('save-settings', (event, config) => {
     if (proactiveIntervalHandle) {
         startProactiveLoop(config.proactiveInterval);
     }
+    if (config.enableCustomWorkflows !== false) {
+        customWorkflows.startMonitoring(mainWindow.webContents);
+    } else {
+        customWorkflows.stopMonitoring();
+    }
+    
+    // Toggle Desktop Widget
+    if (config.showDesktopWidget === false) {
+        if (widgetWindow && !widgetWindow.isDestroyed()) {
+            widgetWindow.close();
+            widgetWindow = null;
+        }
+    } else {
+        createWidgetWindow();
+    }
+
     return result;
+});
+
+ipcMain.on('set-ai-state', (event, state) => {
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+        widgetWindow.webContents.send('widget-state', state);
+    }
 });
 
 ipcMain.on('close-settings', () => {

@@ -18,7 +18,17 @@ const DEFAULT_CONFIG = {
     proactiveInterval: 60,   // seconds between screen captures
     proactiveCooldown: 120,   // seconds minimum between actual suggestions
     aiProvider: 'gemini',
-    ollamaModel: 'llama3:latest'
+    ollamaModel: 'llama3:latest',
+    enableVoiceReply: true,
+    enableCustomWorkflows: true,
+    ttsProvider: 'google',
+    ttsVolume: 1.0,
+    ttsSpeed: 1.0,
+    ttsPitch: 1.0,
+    pluginSpotifyEnabled: true,
+    pluginCalendarEnabled: false,
+    pluginDiscordEnabled: false,
+    showDesktopWidget: true
 };
 
 function readConfig() {

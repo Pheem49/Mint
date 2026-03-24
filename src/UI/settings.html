@@ -27,7 +27,18 @@
 
         <main class="settings-body">
 
-            <!-- API Key -->
+            <nav class="settings-sidebar" id="settings-sidebar">
+                <button class="tab-btn active" data-target="sect-general">⚙️ General</button>
+                <button class="tab-btn" data-target="sect-audio">🔊 Audio & Voice</button>
+                <button class="tab-btn" data-target="sect-automation">🤖 Automation</button>
+                <button class="tab-btn" data-target="sect-theme">🎨 Theme & UI</button>
+                <button class="tab-btn" data-target="sect-plugins">🧩 Plugins</button>
+                <button class="tab-btn" data-target="sect-shortcuts">⌨️ Shortcuts</button>
+            </nav>
+            <div class="settings-content" id="settings-content">
+
+                <div class="tab-pane active" id="sect-general">
+                    <!-- API Key -->
             <section class="setting-section">
                 <h2 class="section-title">🔑 Gemini API Key</h2>
                 <div class="setting-row">
@@ -44,18 +55,15 @@
                     <p class="hint">Get your API Key at <a href="#" id="ai-studio-link">Google AI Studio</a></p>
                 </div>
             </section>
-
-            <hr class="divider">
-
-            <!-- AI Provider & Model -->
+                    <!-- AI Provider & Model -->
             <section class="setting-section">
                 <h2 class="section-title">🧠 AI Engine</h2>
                 <div class="setting-row">
                     <label for="ai-provider-select">Provider</label>
                     <div class="input-group">
-                        <select id="ai-provider-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--border); outline: none;">
-                            <option value="gemini">Google Gemini (Cloud)</option>
-                            <option value="ollama">Ollama (Local / Private)</option>
+                        <select id="ai-provider-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
+                            <option value="gemini" style="background: var(--bg-color)">Google Gemini (Cloud)</option>
+                            <option value="ollama" style="background: var(--bg-color)">Ollama (Local / Private)</option>
                         </select>
                     </div>
                 </div>
@@ -65,10 +73,10 @@
                     <div class="setting-row">
                         <label for="gemini-model-select">Gemini Model</label>
                         <div class="input-group">
-                            <select id="gemini-model-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--border); outline: none;">
-                                <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                                <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview</option>
-                                <option value="custom">Custom...</option>
+                            <select id="gemini-model-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
+                                <option value="gemini-2.5-flash" style="background: var(--bg-color)">gemini-2.5-flash</option>
+                                <option value="gemini-3.1-flash-lite-preview" style="background: var(--bg-color)">gemini-3.1-flash-lite-preview</option>
+                                <option value="custom" style="background: var(--bg-color)">Custom...</option>
                             </select>
                         </div>
                     </div>
@@ -87,26 +95,116 @@
                     </div>
                 </div>
             </section>
+                </div>
+                <div class="tab-pane" id="sect-audio">
+                    <!-- Audio & Voice -->
+            <section class="setting-section">
+                <h2 class="section-title">🔊 Audio & Voice</h2>
+                <div class="setting-row" style="display: flex; align-items: center; justify-content: space-between;">
+                    <label for="enable-voice-reply" style="margin-bottom: 0;">Enable Voice Reply</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="enable-voice-reply">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <p class="hint" style="margin-top: 8px;">If enabled, Mint will speak the responses out loud.</p>
 
-            <hr class="divider">
+                <div class="setting-row" style="margin-top: 16px;">
+                    <label for="tts-provider-select">Voice Engine</label>
+                    <div class="input-group">
+                        <select id="tts-provider-select" style="flex: 1; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s;">
+                            <option value="google" style="background: var(--bg-color)">Google Cloud (Natural, Auto Lang)</option>
+                            <option value="native" style="background: var(--bg-color)">OS Native (Supports Pitch)</option>
+                        </select>
+                    </div>
+                </div>
 
-            <!-- Automation Browser -->
+                <div class="setting-row" style="margin-top: 12px;">
+                    <label for="tts-volume">Volume</label>
+                    <div class="slider-group">
+                        <input type="range" id="tts-volume" class="range-slider" min="0" max="1" step="0.1" value="1">
+                        <span class="range-value" id="tts-volume-val">100%</span>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <label for="tts-speed">Speed (Rate)</label>
+                    <div class="slider-group">
+                        <input type="range" id="tts-speed" class="range-slider" min="0.5" max="2" step="0.1" value="1">
+                        <span class="range-value" id="tts-speed-val">1.0x</span>
+                    </div>
+                </div>
+
+                <div class="setting-row">
+                    <label for="tts-pitch">Pitch (OS Native Only)</label>
+                    <div class="slider-group">
+                        <input type="range" id="tts-pitch" class="range-slider" min="0" max="2" step="0.1" value="1">
+                        <span class="range-value" id="tts-pitch-val">1.0</span>
+                    </div>
+                </div>
+            </section>
+                </div>
+                <div class="tab-pane" id="sect-automation">
+                    <!-- Automation Browser -->
             <section class="setting-section">
                 <h2 class="section-title">🌐 Automation Browser</h2>
                 <div class="setting-row">
                     <label for="automation-browser-select">Browser Engine</label>
                     <div class="input-group">
-                        <select id="automation-browser-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--border); outline: none;">
-                            <option value="chromium">Chromium (Bundled)</option>
-                            <option value="/usr/bin/firefox">Firefox (System - Linux)</option>
+                        <select id="automation-browser-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
+                            <option value="chromium" style="background: var(--bg-color)">Chromium (Bundled)</option>
+                            <option value="/usr/bin/firefox" style="background: var(--bg-color)">Firefox (System - Linux)</option>
                         </select>
                     </div>
                 </div>
             </section>
+                    <!-- Proactive Assistant -->
+            <section class="setting-section">
+                <h2 class="section-title">✨ Proactive Assistant</h2>
 
-            <hr class="divider">
+                <div class="setting-row">
+                    <label for="proactive-interval">Screen Capture Frequency</label>
+                    <div class="slider-group">
+                        <input type="range" id="proactive-interval"
+                            min="30" max="300" step="30" value="60"
+                            class="range-slider">
+                        <span class="range-value" id="proactive-interval-display">60 sec</span>
+                    </div>
+                    <p class="hint">Interval for AI screen analysis (lower = faster response, but higher API usage)</p>
+                </div>
 
-            <!-- Theme -->
+                <div class="setting-row" style="margin-top: 14px;">
+                    <label for="proactive-cooldown">Suggestion Cooldown</label>
+                    <div class="slider-group">
+                        <input type="range" id="proactive-cooldown"
+                            min="60" max="600" step="60" value="120"
+                            class="range-slider">
+                        <span class="range-value" id="proactive-cooldown-display">2 min</span>
+                    </div>
+                    <p class="hint">Min time between repeat suggestions (higher = less intrusive)</p>
+                </div>
+            </section>
+                    <!-- Custom Workflows -->
+            <section class="setting-section">
+                <h2 class="section-title">⚙️ Custom Workflows</h2>
+                <div class="setting-row" style="display: flex; align-items: center; justify-content: space-between;">
+                    <label for="enable-custom-workflows" style="margin-bottom: 0;">Enable Custom Workflows</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="enable-custom-workflows">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="setting-row" style="margin-top: 10px;">
+                    <p class="hint">Edit "If This Then Mint" rules (e.g. "If I open Zoom, check mic") directly via the JSON configuration file.</p>
+                </div>
+                <div class="setting-row" style="margin-top: 10px; display: flex; gap: 10px;">
+                    <button class="btn-secondary" id="open-workflows-btn">Open workflows.json</button>
+                    <button class="btn-primary" id="reload-workflows-btn">Reload Rules</button>
+                </div>
+            </section>
+                </div>
+                <div class="tab-pane" id="sect-theme">
+                    <!-- Theme -->
             <section class="setting-section">
                 <h2 class="section-title">🎨 Theme</h2>
                 <div class="theme-grid">
@@ -143,10 +241,7 @@
                     </div>
                 </div>
             </section>
-
-            <hr class="divider">
-
-            <!-- Accent Color -->
+                    <!-- Accent Color -->
             <section class="setting-section">
                 <h2 class="section-title">🖌️ Accent Color</h2>
                 <div class="setting-row accent-row">
@@ -167,40 +262,41 @@
                     </div>
                 </div>
             </section>
-
-            <hr class="divider">
-
-            <!-- UI Customizations (Glassmorphism & Font) -->
+                    <!-- UI Customizations (Glassmorphism & Font) -->
             <section class="setting-section">
                 <h2 class="section-title">✨ UI Customization</h2>
+                <div class="setting-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                    <label for="show-desktop-widget" style="margin-bottom: 0;">Show Desktop AI Widget</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="show-desktop-widget">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
                 <div class="setting-row" style="margin-bottom: 12px;">
                     <label for="glass-blur-select">Glassmorphism (Blur)</label>
                     <div class="input-group">
-                        <select id="glass-blur-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--border); outline: none;">
-                            <option value="blur(4px)">Low (4px)</option>
-                            <option value="blur(16px)">Medium (16px) - Default</option>
-                            <option value="blur(32px)">High (32px)</option>
-                            <option value="none">Off (Solid)</option>
+                        <select id="glass-blur-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
+                            <option value="blur(4px)" style="background: var(--bg-color)">Low (4px)</option>
+                            <option value="blur(16px)" style="background: var(--bg-color)">Medium (16px) - Default</option>
+                            <option value="blur(32px)" style="background: var(--bg-color)">High (32px)</option>
+                            <option value="none" style="background: var(--bg-color)">Off (Solid)</option>
                         </select>
                     </div>
                 </div>
                 <div class="setting-row">
                     <label for="font-family-select">Font Family</label>
                     <div class="input-group">
-                        <select id="font-family-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2); color: var(--text-main); border: 1px solid var(--border); outline: none;">
-                            <option value="'Outfit', sans-serif">Outfit (Default)</option>
-                            <option value="'Mali', cursive">Mali (Cute Thai Font)</option>
-                            <option value="'Prompt', sans-serif">Prompt (Modern Thai)</option>
-                            <option value="'Sarabun', sans-serif">Sarabun (Formal Thai)</option>
+                        <select id="font-family-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
+                            <option value="'Outfit', sans-serif" style="background: var(--bg-color)">Outfit (Default)</option>
+                            <option value="'Mali', cursive" style="background: var(--bg-color)">Mali (Cute Thai Font)</option>
+                            <option value="'Prompt', sans-serif" style="background: var(--bg-color)">Prompt (Modern Thai)</option>
+                            <option value="'Sarabun', sans-serif" style="background: var(--bg-color)">Sarabun (Formal Thai)</option>
                         </select>
                     </div>
                     <p class="hint" style="margin-top: 8px;">Mint supports beautiful Google Fonts!</p>
                 </div>
             </section>
-
-            <hr class="divider">
-
-            <!-- System Text Color -->
+                    <!-- System Text Color -->
             <section class="setting-section">
                 <h2 class="section-title">✍️ System Text Color</h2>
                 <div class="setting-row">
@@ -211,53 +307,52 @@
                     <p class="hint" style="margin-top: 8px;">Adjust system text color (menu, headers) excluding chat messages.</p>
                 </div>
             </section>
-
-            <hr class="divider">
-
-            <!-- Proactive Assistant -->
-            <section class="setting-section">
-                <h2 class="section-title">✨ Proactive Assistant</h2>
-
-                <div class="setting-row">
-                    <label for="proactive-interval">Screen Capture Frequency</label>
-                    <div class="slider-group">
-                        <input type="range" id="proactive-interval"
-                            min="30" max="300" step="30" value="60"
-                            class="range-slider">
-                        <span class="range-value" id="proactive-interval-display">60 sec</span>
-                    </div>
-                    <p class="hint">Interval for AI screen analysis (lower = faster response, but higher API usage)</p>
                 </div>
-
-                <div class="setting-row" style="margin-top: 14px;">
-                    <label for="proactive-cooldown">Suggestion Cooldown</label>
-                    <div class="slider-group">
-                        <input type="range" id="proactive-cooldown"
-                            min="60" max="600" step="60" value="120"
-                            class="range-slider">
-                        <span class="range-value" id="proactive-cooldown-display">2 min</span>
+                <div class="tab-pane" id="sect-plugins">
+                    <!-- Plugins & Integrations -->
+            <section class="setting-section">
+                <h2 class="section-title">🧩 Plugins & Integrations</h2>
+                <div class="plugin-list">
+                    <!-- Spotify -->
+                    <div class="plugin-card">
+                        <div class="plugin-icon">🎵</div>
+                        <div class="plugin-info">
+                            <div class="plugin-name">Spotify</div>
+                            <div class="plugin-desc">Control playback with AI (req: playerctl)</div>
+                        </div>
+                        <div class="plugin-actions">
+                            <button class="btn-connect" id="btn-plugin-spotify" data-plugin="spotify">Connect</button>
+                        </div>
                     </div>
-                    <p class="hint">Min time between repeat suggestions (higher = less intrusive)</p>
+                    
+                    <!-- Google Calendar -->
+                    <div class="plugin-card">
+                        <div class="plugin-icon">📅</div>
+                        <div class="plugin-info">
+                            <div class="plugin-name">Google Calendar</div>
+                            <div class="plugin-desc">Read and schedule your events via Gemini</div>
+                        </div>
+                        <div class="plugin-actions">
+                            <button class="btn-connect" id="btn-plugin-calendar" data-plugin="calendar">Connect</button>
+                        </div>
+                    </div>
+
+                    <!-- Discord -->
+                    <div class="plugin-card">
+                        <div class="plugin-icon">💬</div>
+                        <div class="plugin-info">
+                            <div class="plugin-name">Discord RPC</div>
+                            <div class="plugin-desc">Show "Using Mint Assistant" on your Discord status</div>
+                        </div>
+                        <div class="plugin-actions">
+                            <button class="btn-connect" id="btn-plugin-discord" data-plugin="discord">Connect</button>
+                        </div>
+                    </div>
                 </div>
             </section>
-
-            <hr class="divider">
-
-            <!-- Custom Workflows -->
-            <section class="setting-section">
-                <h2 class="section-title">⚙️ Custom Workflows</h2>
-                <div class="setting-row">
-                    <p class="hint">Edit "If This Then Mint" rules (e.g. "If I open Zoom, check mic") directly via the JSON configuration file.</p>
                 </div>
-                <div class="setting-row" style="margin-top: 10px; display: flex; gap: 10px;">
-                    <button class="btn-secondary" id="open-workflows-btn">Open workflows.json</button>
-                    <button class="btn-primary" id="reload-workflows-btn">Reload Rules</button>
-                </div>
-            </section>
-
-            <hr class="divider">
-
-            <!-- Keyboard Shortcuts -->
+                <div class="tab-pane" id="sect-shortcuts">
+                    <!-- Keyboard Shortcuts -->
             <section class="setting-section">
                 <h2 class="section-title">⌨️ Keyboard Shortcuts</h2>
                 <div class="shortcut-list">
@@ -281,6 +376,8 @@
                     </div>
                 </div>
             </section>
+                </div>
+            </div> <!-- end settings-content -->
 
         </main>
 

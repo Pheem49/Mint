@@ -18,6 +18,11 @@ const proactiveChips = document.getElementById('proactive-chips');
 const proactiveDismissBtn = document.getElementById('proactive-dismiss-btn');
 
 let currentBase64Image = null;
+let enableVoiceReply = true;
+let ttsProvider = 'google';
+let ttsVolume = 1.0;
+let ttsSpeed = 1.0;
+let ttsPitch = 1.0;
 
 // --- Theme Loading ---
 function applyTheme(theme, accentColor, systemTextColor, config = {}) {
@@ -60,6 +65,11 @@ async function loadTheme() {
     try {
         const config = await window.api.getSettings();
         applyTheme(config.theme, config.accentColor, config.systemTextColor, config);
+        enableVoiceReply = config.enableVoiceReply !== false;
+        ttsProvider = config.ttsProvider || 'google';
+        ttsVolume = config.ttsVolume !== undefined ? config.ttsVolume : 1.0;
+        ttsSpeed = config.ttsSpeed !== undefined ? config.ttsSpeed : 1.0;
+        ttsPitch = config.ttsPitch !== undefined ? config.ttsPitch : 1.0;
     } catch (e) {
         applyTheme('dark', '#8b5cf6', '#f8fafc');
     }
@@ -78,6 +88,11 @@ function lightenColor(hex, amount) {
 // 🔔 Real-time theme sync from Settings window
 window.api.onSettingsChanged((config) => {
     applyTheme(config.theme, config.accentColor, config.systemTextColor, config);
+    enableVoiceReply = config.enableVoiceReply !== false;
+    ttsProvider = config.ttsProvider || 'google';
+    ttsVolume = config.ttsVolume !== undefined ? config.ttsVolume : 1.0;
+    ttsSpeed = config.ttsSpeed !== undefined ? config.ttsSpeed : 1.0;
+    ttsPitch = config.ttsPitch !== undefined ? config.ttsPitch : 1.0;
 });
 
 // --- Voice Input Setup ---
@@ -326,8 +341,10 @@ micBtn.addEventListener('click', (e) => {
         if (mediaRecorder.state === 'inactive') {
             audioChunks = [];
             mediaRecorder.start();
+            if (window.api && window.api.setAiState) window.api.setAiState('listening');
         } else {
             mediaRecorder.stop();
+            if (window.api && window.api.setAiState) window.api.setAiState('thinking');
             voiceMode = null;
         }
         return;
@@ -359,8 +376,10 @@ micBtn.addEventListener('click', (e) => {
     if (mediaRecorder.state === 'inactive') {
         audioChunks = [];
         mediaRecorder.start();
+        if (window.api && window.api.setAiState) window.api.setAiState('listening');
     } else {
         mediaRecorder.stop();
+        if (window.api && window.api.setAiState) window.api.setAiState('thinking');
     }
 });
 
@@ -368,8 +387,15 @@ micBtn.addEventListener('click', (e) => {
 let currentAudioPlayer = null;
 
 function speakText(text, options = {}) {
+    if (window.api && window.api.setAiState) window.api.setAiState('speaking');
     const onEnd = typeof options.onEnd === 'function' ? options.onEnd : null;
     return new Promise(async (resolve) => {
+        if (!enableVoiceReply) {
+            if (window.api && window.api.setAiState) window.api.setAiState('idle');
+            if (onEnd) onEnd();
+            return resolve();
+        }
+
         // Stop any currently playing audio
         if (currentAudioPlayer) {
             currentAudioPlayer.pause();
@@ -381,37 +407,44 @@ function speakText(text, options = {}) {
         }
 
         if (!text || !text.trim()) {
+            if (window.api && window.api.setAiState) window.api.setAiState('idle');
             if (onEnd) onEnd();
             return resolve();
         }
 
         try {
-            const urls = await window.api.getTtsUrls(text);
-            if (urls && urls.length > 0) {
-                let i = 0;
-                const playNext = () => {
-                    if (i >= urls.length) {
-                        if (onEnd) onEnd();
-                        return resolve();
-                    }
-                    const audio = new Audio(urls[i].url);
-                    currentAudioPlayer = audio;
-                    audio.onended = () => {
-                        i++;
-                        playNext();
+            if (ttsProvider !== 'native') {
+                const urls = await window.api.getTtsUrls(text);
+                if (urls && urls.length > 0) {
+                    let i = 0;
+                    const playNext = () => {
+                        if (i >= urls.length) {
+                            if (window.api && window.api.setAiState) window.api.setAiState('idle');
+                            if (onEnd) onEnd();
+                            return resolve();
+                        }
+                        const audio = new Audio(urls[i].url);
+                        audio.volume = ttsVolume;
+                        audio.playbackRate = ttsSpeed;
+
+                        currentAudioPlayer = audio;
+                        audio.onended = () => {
+                            i++;
+                            playNext();
+                        };
+                        audio.onerror = () => {
+                            console.error("TTS Audio error", urls[i]);
+                            i++;
+                            playNext();
+                        };
+                        audio.play().catch(e => {
+                            console.error("Audio playback prevented:", e);
+                            fallbackSpeak(text, onEnd, resolve);
+                        });
                     };
-                    audio.onerror = () => {
-                        console.error("TTS Audio error", urls[i]);
-                        i++;
-                        playNext();
-                    };
-                    audio.play().catch(e => {
-                        console.error("Audio playback prevented:", e);
-                        fallbackSpeak(text, onEnd, resolve);
-                    });
-                };
-                playNext();
-                return;
+                    playNext();
+                    return;
+                }
             }
         } catch (err) {
             console.error("Cloud TTS Error, falling back to local:", err);
@@ -432,11 +465,15 @@ function fallbackSpeak(text, onEnd, resolve) {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'th-TH'; 
+    utterance.volume = ttsVolume;
+    utterance.rate = ttsSpeed;
+    utterance.pitch = ttsPitch;
     
     let finished = false;
     const done = () => {
         if (finished) return;
         finished = true;
+        if (window.api && window.api.setAiState) window.api.setAiState('idle');
         if (onEnd) onEnd();
         resolve();
     };
@@ -771,6 +808,7 @@ async function sendTextMessage(text, options = {}) {
 
 chatForm.addEventListener('submit', throttle(async (e) => {
     e.preventDefault();
+    if (window.api && window.api.setAiState) window.api.setAiState('thinking');
     const text = chatInput.value.trim();
     await sendTextMessage(text);
 }, 500));

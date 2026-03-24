@@ -5,9 +5,13 @@ spotlightInput.focus();
 
 const COMMANDS = [
     { label: 'Open YouTube', desc: 'เปิดเว็บไซต์ YouTube', icon: '📺', action: { type: 'open_url', target: 'https://youtube.com' } },
+    { label: 'Open Facebook', desc: 'เปิดเว็บไซต์ Facebook', icon: '📘', action: { type: 'open_url', target: 'https://facebook.com' } },
+    { label: 'Open Instagram', desc: 'เปิดเว็บไซต์ Instagram', icon: '📸', action: { type: 'open_url', target: 'https://instagram.com' } },
     { label: 'Open GitHub', desc: 'เปิดเว็บไซต์ GitHub', icon: '🐙', action: { type: 'open_url', target: 'https://github.com' } },
     { label: 'System Info', desc: 'ดูข้อมูลระบบ', icon: '💻', action: { type: 'chat', query: 'ขอข้อมูลระบบหน่อย' } },
     { label: 'Weather', desc: 'เช็คสภาพอากาศ', icon: '🌤️', action: { type: 'chat', query: 'อากาศที่กรุงเทพเป็นยังไง' } },
+    { label: 'Open Spotify', desc: 'เปิดโปรแกรม Spotify', icon: '🎵', action: { type: 'open_app', target: 'spotify' } },
+    { label: 'Open VS Code', desc: 'เปิดโปรแกรม VS Code', icon: '💻', action: { type: 'open_app', target: 'code' } },
 ];
 
 let selectedIndex = -1;
@@ -75,6 +79,17 @@ spotlightInput.addEventListener('input', () => {
     renderResults(matches);
 });
 
+// Handle mouse clicks on results
+spotlightResultsArr.addEventListener('click', (e) => {
+    const item = e.target.closest('.result-item');
+    if (item) {
+        const index = parseInt(item.getAttribute('data-index'), 10);
+        if (index >= 0 && filteredCommands[index]) {
+            handleAction(filteredCommands[index].action);
+        }
+    }
+});
+
 spotlightInput.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         window.spotlightAPI.hide();
@@ -108,7 +123,9 @@ function handleAction(action) {
     if (action.type === 'chat') {
         window.spotlightAPI.submit(action.query);
     } else if (action.type === 'open_url') {
-        window.spotlightAPI.submit(`open ${action.target}`); // Re-use submit logic or add open-url IPC
+        window.spotlightAPI.submit(`เปิดเว็บ ${action.target}`);
+    } else if (action.type === 'open_app') {
+        window.spotlightAPI.submit(`เปิดโปรแกรม ${action.target}`);
     } else if (action.type === 'copy') {
         // We need a clipboard API in spotlight preload or just send as chat message that triggers copy
         window.spotlightAPI.submit(`copy ${action.value}`);

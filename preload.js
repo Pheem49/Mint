@@ -30,5 +30,6 @@ contextBridge.exposeInMainWorld('api', {
     onSpotlightToChat: (callback) => ipcRenderer.on('spotlight-to-chat', (_event, query) => callback(query)),
     notifyAiResponse: () => ipcRenderer.send('ai-notify'),
     clearAiNotifications: () => ipcRenderer.send('ai-notify-clear'),
-    getTtsUrls: (text) => ipcRenderer.invoke('get-tts-urls', text)
+    getTtsUrls: (text) => ipcRenderer.invoke('get-tts-urls', text),
+    setAiState: (state) => ipcRenderer.send('set-ai-state', state)
 });

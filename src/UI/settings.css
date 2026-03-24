@@ -115,20 +115,83 @@ h1 {
 /* Body */
 .settings-body {
     flex: 1;
-    padding: 24px 24px 12px;
-    overflow-y: auto;
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    overflow: hidden;
 }
 
-.settings-body::-webkit-scrollbar {
+/* Sidebar */
+.settings-sidebar {
+    width: 160px;
+    min-width: 160px;
+    padding: 16px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border-right: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.15);
+    overflow-y: auto;
+}
+
+.tab-btn {
+    -webkit-app-region: no-drag;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s;
+}
+
+.tab-btn:hover {
+    background: rgba(139, 92, 246, 0.1);
+    color: var(--text-main);
+}
+
+.tab-btn.active {
+    background: rgba(139, 92, 246, 0.18);
+    color: var(--accent);
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* Content area */
+.settings-content {
+    flex: 1;
+    padding: 24px;
+    overflow-y: auto;
+}
+
+.settings-content::-webkit-scrollbar {
     width: 4px;
 }
 
-.settings-body::-webkit-scrollbar-thumb {
+.settings-content::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 10px;
+}
+
+/* Tab panes */
+.tab-pane {
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    animation: fadeTab 0.2s ease;
+}
+
+.tab-pane.active {
+    display: flex;
+}
+
+@keyframes fadeTab {
+    from { opacity: 0; transform: translateX(8px); }
+    to   { opacity: 1; transform: translateX(0); }
 }
 
 .setting-section h2.section-title {
@@ -492,4 +555,136 @@ kbd {
     font-weight: 600;
     color: var(--accent);
     box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Toggle Switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    -webkit-app-region: no-drag;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--input-bg);
+    border: 1px solid var(--border);
+    transition: .3s;
+    border-radius: 24px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--text-muted);
+    transition: .3s;
+    border-radius: 50%;
+}
+
+input:checked + .toggle-slider {
+    background-color: var(--accent);
+    border-color: var(--accent);
+}
+
+input:checked + .toggle-slider:before {
+    transform: translateX(19px);
+    background-color: white;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
+}
+
+/* Plugin Manager */
+.plugin-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.plugin-card {
+    -webkit-app-region: no-drag;
+    display: flex;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    transition: all 0.2s;
+}
+
+.plugin-card:hover {
+    border-color: var(--accent);
+}
+
+.plugin-icon {
+    font-size: 2rem;
+    margin-right: 14px;
+}
+
+.plugin-info {
+    flex: 1;
+}
+
+.plugin-name {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text-main);
+    margin-bottom: 4px;
+}
+
+.plugin-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.plugin-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-connect {
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    background: var(--accent);
+    color: white;
+    border: none;
+    transition: all 0.2s;
+}
+
+.btn-connect:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+}
+
+.btn-disconnect {
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    background: transparent;
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    transition: all 0.2s;
+}
+
+.btn-disconnect:hover {
+    background: rgba(239, 68, 68, 0.1);
 }
