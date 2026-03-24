@@ -27,6 +27,8 @@
 - **Automation First**: Control your system and browser via natural language.
 - **Advanced Customization**: Create **Custom Themes** with your own background gradients, panel colors, and system text colors.
 - **Privacy Conscious**: Local knowledge indexing and customizable data handling.
+- **Desktop Widget**: A floating AI character that reacts to your interactions in real-time.
+- **Plugin Manager UI**: Visually connect and manage integrations like Spotify, Google Calendar, and Discord from Settings.
 
 ---
 
@@ -69,6 +71,21 @@
 ### 🎨 Customization & Privacy
 - **Interactive Themes**: Personalize Mint with dynamic background gradients, custom Google Fonts (like Mali and Outfit), and adjustable Glassmorphism blur levels.
 - **Local LLM Support (Ollama)**: Want 100% privacy? Switch from Google Gemini to a Local LLM via Ollama (`llama3`) directly from the settings panel.
+- **TTS Fine-tuning**: Adjust voice speed, volume, and pitch. Switch between Google Cloud TTS and native OS speech engine.
+
+### 🧩 Plugin Manager UI
+- Visual **Connect / Disconnect** toggles for plugins directly in the Settings panel.
+- Supported integrations: **Spotify**, **Google Calendar**, **Discord RPC**.
+- Plugin status is persisted in the app config.
+
+### 🧚 Desktop AI Widget
+- A transparent, frameless window that floats on top of all applications.
+- Animated character reacts to AI state in real-time:
+  - 💜 **Idle** — gentle floating animation
+  - 💙 **Listening** — glows blue when the mic is active
+  - 🧡 **Thinking** — pulses amber while processing
+  - 💚 **Speaking** — glows green with a speaking mouth animation
+- Toggle visibility from ✨ UI Customization in Settings.
 
 ---
 
@@ -110,7 +127,8 @@ Mint understands natural language commands. Try these:
 - **System**: "Open VS Code" or "Create a folder named Projects"
 - **Clipboard**: "Copy the text 'Hello World' to my clipboard"
 - **Context**: "Remember the file /path/to/notes.md"
-- **Utility**: "What's the weather like in Bangkok?"
+- **Utility**: "What's the weather like in Bangkok?" or "What's today's date?"
+- **Spotlight**: "Open Facebook", "Open Instagram", "Open Spotify" — or type any command in the Spotlight bar
 
 ---
 
