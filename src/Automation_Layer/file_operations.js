@@ -1,4 +1,10 @@
-const { shell } = require('electron');
+const { exec } = require('child_process');
+let shell;
+try {
+    shell = require('electron').shell;
+} catch (e) {
+    shell = null;
+}
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -34,9 +40,13 @@ function createFolder(target) {
  */
 async function openFile(target) {
     if (!target) return;
-    const result = await shell.openPath(target);
-    if (result) {
-        console.error('openFile error:', result);
+    if (shell) {
+        const result = await shell.openPath(target);
+        if (result) console.error('openFile error:', result);
+    } else {
+        exec(`xdg-open "${target}"`, (err) => {
+            if (err) console.error("Failed to open path via xdg-open:", err);
+        });
     }
 }
 
@@ -45,12 +55,25 @@ async function openFile(target) {
  */
 async function deleteFile(target) {
     if (!target) return { success: false, message: 'No path provided.' };
-    try {
-        await shell.trashItem(target);
-        return { success: true };
-    } catch (err) {
-        console.error('deleteFile error:', err);
-        return { success: false, message: err.message };
+    if (shell) {
+        try {
+            await shell.trashItem(target);
+            return { success: true };
+        } catch (err) {
+            console.error('deleteFile error:', err);
+            return { success: false, message: err.message };
+        }
+    } else {
+        return new Promise((resolve) => {
+            exec(`gio trash "${target}"`, (err) => {
+                if (err) {
+                    console.error("Failed to trash item via gio trash:", err);
+                    resolve({ success: false, message: err.message });
+                } else {
+                    resolve({ success: true });
+                }
+            });
+        });
     }
 }
 

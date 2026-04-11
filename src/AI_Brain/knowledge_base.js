@@ -45,7 +45,7 @@ function getAiClient() {
     const prevKey = activeApiKey;
     const nextKey = resolveApiKey();
     if (!ai || nextKey !== prevKey) {
-        ai = new GoogleGenAI({});
+        ai = new GoogleGenAI({ apiKey: nextKey });
     }
     return ai;
 }

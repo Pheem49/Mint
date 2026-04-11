@@ -1,8 +1,17 @@
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
 
-const CONFIG_PATH = path.join(app.getPath('userData'), 'mint-config.json');
+let app;
+try {
+    const electron = require('electron');
+    app = electron.app;
+} catch (e) {
+    app = null;
+}
+
+const CONFIG_PATH = app && app.getPath 
+    ? path.join(app.getPath('userData'), 'mint-config.json')
+    : path.join(process.cwd(), 'mint-config.json');
 
 const DEFAULT_CONFIG = {
     theme: 'dark',

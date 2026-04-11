@@ -6,7 +6,11 @@
   "scripts": {
     "start": "electron .",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build:linux": "electron-builder --linux"
+    "build:linux": "electron-builder --linux",
+    "cli": "node mint-cli.js"
+  },
+  "bin": {
+    "mint": "./mint-cli.js"
   },
   "keywords": [],
   "author": {
@@ -19,8 +23,10 @@
     "@google/genai": "^1.44.0",
     "axios": "^1.13.6",
     "cheerio": "^1.2.0",
+    "commander": "^14.0.3",
     "dotenv": "^17.3.1",
     "google-tts-api": "^2.0.2",
+    "inquirer": "^13.4.1",
     "mammoth": "^1.12.0",
     "pdf-parse": "^2.4.5",
     "puppeteer": "^24.38.0",
