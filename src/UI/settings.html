@@ -54,6 +54,16 @@
                     </div>
                     <p class="hint">Get your API Key at <a href="#" id="ai-studio-link">Google AI Studio</a></p>
                 </div>
+                <div class="setting-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 12px; border: 1px solid rgba(139, 92, 246, 0.2);">
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                        <label for="show-desktop-widget" style="margin-bottom: 0; font-weight: 500;">Show Desktop AI Candidate</label>
+                        <span class="hint" style="font-size: 0.75rem;">Show the mini AI character on your desktop</span>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="show-desktop-widget">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
             </section>
                     <!-- AI Provider & Model -->
             <section class="setting-section">
@@ -75,6 +85,7 @@
                         <div class="input-group">
                             <select id="gemini-model-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
                                 <option value="gemini-2.5-flash" style="background: var(--bg-color)">gemini-2.5-flash</option>
+                                <option value="gemini-3.1-flash-lite" style="background: var(--bg-color)">gemini-3.1-flash-lite</option>
                                 <option value="gemini-3.1-flash-lite-preview" style="background: var(--bg-color)">gemini-3.1-flash-lite-preview</option>
                                 <option value="custom" style="background: var(--bg-color)">Custom...</option>
                             </select>
@@ -263,15 +274,6 @@
                 </div>
             </section>
                     <!-- UI Customizations (Glassmorphism & Font) -->
-            <section class="setting-section">
-                <h2 class="section-title">✨ UI Customization</h2>
-                <div class="setting-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-                    <label for="show-desktop-widget" style="margin-bottom: 0;">Show Desktop AI Widget</label>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="show-desktop-widget">
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
                 <div class="setting-row" style="margin-bottom: 12px;">
                     <label for="glass-blur-select">Glassmorphism (Blur)</label>
                     <div class="input-group">

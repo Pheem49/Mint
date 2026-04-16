@@ -174,9 +174,25 @@
         .close-translate-btn:hover {
             background: #c82333;
         }
+
+        /* Vision Enhancements */
+        .vision-glow {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            box-shadow: inset 0 0 100px rgba(139, 92, 246, 0.15);
+            z-index: 5;
+            animation: vision-pulse 4s ease-in-out infinite alternate;
+        }
+
+        @keyframes vision-pulse {
+            from { box-shadow: inset 0 0 60px rgba(139, 92, 246, 0.1); }
+            to { box-shadow: inset 0 0 120px rgba(139, 92, 246, 0.25); }
+        }
     </style>
 </head>
 <body>
+    <div class="vision-glow"></div>
     <div id="toolbar">
         <span class="hint" id="hint-text">Click and drag to select a region</span>
         <button class="btn btn-translate" id="btn-translate">🌐 Live Translate</button>

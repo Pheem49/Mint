@@ -22,7 +22,8 @@ const DEFAULT_CONFIG = {
     ttsPitch: 1.0,
     pluginSpotifyEnabled: true,
     pluginCalendarEnabled: false,
-    pluginDiscordEnabled: false
+    pluginDiscordEnabled: false,
+    showDesktopWidget: true
 };
 
 let currentConfig = { ...DEFAULT_CONFIG };

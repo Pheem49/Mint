@@ -25,6 +25,7 @@ let screenPickerWindow = null;
 let spotlightWindow = null;
 let floatingWindow = null;
 let widgetWindow = null;
+let proactiveGlowWindow = null;
 let tray = null;
 let floatingUnreadCount = 0;
 
@@ -36,6 +37,9 @@ let proactiveIntervalHandle = null;
 async function runProactiveCycle() {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     try {
+        // Show Glow
+        showProactiveGlow();
+        
         // Silent screen capture
         const primaryDisplay = screen.getPrimaryDisplay();
         // Downscale to 50% for performance
@@ -65,8 +69,50 @@ async function runProactiveCycle() {
                 mainWindow.webContents.send('proactive-suggestion', result);
             }
         }
+        
+        // Hide Glow after analysis
+        hideProactiveGlow();
     } catch (err) {
         console.error('[Proactive] Cycle error:', err.message);
+        hideProactiveGlow();
+    }
+}
+
+function createProactiveGlowWindow() {
+    if (proactiveGlowWindow) return;
+    const { width, height } = screen.getPrimaryDisplay().bounds;
+    
+    proactiveGlowWindow = new BrowserWindow({
+        width, height,
+        x: 0, y: 0,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        focusable: false,
+        show: false,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true
+        }
+    });
+
+    proactiveGlowWindow.setIgnoreMouseEvents(true);
+    proactiveGlowWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    proactiveGlowWindow.setAlwaysOnTop(true, 'screen-saver');
+    proactiveGlowWindow.loadFile('src/UI/proactive-glow.html');
+
+    proactiveGlowWindow.on('closed', () => { proactiveGlowWindow = null; });
+}
+
+function showProactiveGlow() {
+    if (!proactiveGlowWindow) createProactiveGlowWindow();
+    if (proactiveGlowWindow) proactiveGlowWindow.showInactive();
+}
+
+function hideProactiveGlow() {
+    if (proactiveGlowWindow && !proactiveGlowWindow.isDestroyed()) {
+        proactiveGlowWindow.hide();
     }
 }
 
@@ -330,14 +376,18 @@ function clearFloatingUnread() {
 }
 
 app.whenReady().then(() => {
+    const config = readConfig();
     createWindow();
     createTray();
     createFloatingWindow();
-    createWidgetWindow();
+    
+    // Only show AI widget if enabled in settings
+    if (config.showDesktopWidget !== false) {
+        createWidgetWindow();
+    }
     
     // Start monitoring system events (battery, wifi, etc.)
     systemEvents.startMonitoring();
-    const config = readConfig();
     if (config.enableCustomWorkflows !== false) {
         customWorkflows.startMonitoring(mainWindow.webContents);
     }
@@ -419,10 +469,16 @@ ipcMain.handle('chat-message', async (event, message, base64Image = null, base64
 });
 
 ipcMain.on('close-window', (event) => {
-    if (mainWindow) {
-        event.preventDefault();
-        mainWindow.hide();
-    }
+    if (mainWindow) mainWindow.hide();
+});
+
+ipcMain.on('minimize-window', (event) => {
+    if (mainWindow) mainWindow.hide();
+});
+
+ipcMain.on('quit-app', (event) => {
+    app.isQuiting = true;
+    app.quit();
 });
 
 ipcMain.on('maximize-window', (event) => {
@@ -480,7 +536,9 @@ ipcMain.handle('save-settings', (event, config) => {
             widgetWindow = null;
         }
     } else {
-        createWidgetWindow();
+        if (!widgetWindow || widgetWindow.isDestroyed()) {
+            createWidgetWindow();
+        }
     }
 
     return result;

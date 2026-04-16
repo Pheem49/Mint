@@ -3,6 +3,7 @@ const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const closeBtn = document.getElementById('close-btn');
 const maximizeBtn = document.getElementById('maximize-btn');
+const minimizeBtn = document.getElementById('minimize-btn');
 const clearBtn = document.getElementById('clear-btn');
 const settingsBtn = document.getElementById('settings-btn');
 const micBtn = document.getElementById('mic-btn');
@@ -483,9 +484,14 @@ function fallbackSpeak(text, onEnd, resolve) {
     window.speechSynthesis.speak(utterance);
 }
 
-// Close window handler (hides to tray)
+// Minimize window handler (hides to tray)
+minimizeBtn.addEventListener('click', () => {
+    window.api.minimizeWindow();
+});
+
+// Close window handler (quits app)
 closeBtn.addEventListener('click', () => {
-    window.api.closeWindow();
+    window.api.quitApp();
 });
 
 maximizeBtn.addEventListener('click', () => {
