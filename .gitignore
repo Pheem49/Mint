@@ -11,6 +11,8 @@ node_modules/
 .env
 .env.local
 .env.*.local
+mint-config.json
+workflows.json
 
 
 BUILD_AND_RELEASE.md
