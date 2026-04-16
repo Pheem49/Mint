@@ -19,142 +19,147 @@
 
 **Mint** is a powerful AI Assistant built with **Electron**, **Node.js**, and **Google Gemini**. It bridges the gap between your Desktop and Terminal, featuring real-time screen vision, web automation, local knowledge search, and a professional CLI for developers who love the command line.
 
-## Highlights
+## 🌟 Highlights
 
 - **Dual-Mode AI**: Switch between a beautiful **Desktop GUI** and a professional **CLI**.
-- **Persona-Driven**: Features **Mint**, a smart and highly helpful assistant.
-- **Natural Replies**: Longer AI responses are split into multiple chat bubbles/lines with human-like pacing.
-- **Vision-Ready (Desktop)**: Capture and translate any part of your screen in real-time.
+- **Interactive Slash Commands**: Manage models and settings in the terminal with `/models`, `/config`, `/clear`, etc.
+- **Smart Tab-Completion**: Fast and intuitive command suggestions in your terminal.
+- **Dynamic UI Aesthetics**: Animated **Aura Glow** for the AI widget and **Glassmorphism** design.
+- **Minimize-to-Tray**: Keep Mint running in the background via the System Tray.
+- **Vision-Ready (Desktop)**: Capture, analyze, and translate any part of your screen in real-time.
 - **Automation First**: Control your system and browser via natural language from both App and Terminal.
-- **Professional CLI**: Onboarding wizard, subcommands, and background daemon support.
-- **Background Agent**: Install Mint as a `systemd` user service to run tasks in the background.
+- **Background Agent**: Install Mint as a `systemd` user service for proactive monitoring.
 
 ---
 
-## Screenshots
+## 📸 Screenshots
 
 <p align="center">
   <img src="assets/Agent_Mint.png" alt="Agent Mint UI" width="48%">
   <img src="assets/Settings.png" alt="Settings Window" width="48%">
 </p>
 <p align="center">
-  <em>Desktop Interface and Personalized Settings window</em>
+  <em>Desktop Interface and personalized Settings window</em>
 </p>
 
 ---
 
-## Getting Started
+## ⌨️ CLI Usage (Power Users)
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) (LTS recommended)
-- [npm](https://www.npmjs.com/)
-- A **Google Gemini API Key** (Get one at [Google AI Studio](https://aistudio.google.com/))
-
-### 1. Installation
-
-1. **Clone and Install Dependencies**
-   ```bash
-   git clone https://github.com/Pheem49/Mint.git
-   cd Mint
-   npm install
-   ```
-
-2. **Setup CLI Globally (Recommended)**
-   ```bash
-   sudo env "PATH=$PATH" npm link
-   ```
-
-### 2. Configuration
-
-Mint will guide you through the setup automatically when you first run it, or you can manually create a `.env` file:
-```env
-GEMINI_API_KEY=your_google_gemini_api_key
-```
-
----
-
-## Desktop Usage
-
-Launch the full Electron experience with a floating character widget and screen vision:
-```bash
-npm start
-```
-**Pro Tip:** Use `Ctrl+Shift+Space` as the default global shortcut to summon Mint Desktop instantly!
-
----
-
-## CLI Usage
-
-Mint CLI is built for power users. Use the **`mint`** command from anywhere in your terminal.
-
-### First-Time Setup
-Run the onboarding wizard to configure your API key and model:
-```bash
-mint onboard
-```
-
-### Install Background Daemon (Linux Only)
-Keep Mint running in the background to handle proactive features:
-```bash
-mint onboard --install-daemon
-```
+Mint CLI is built for speed and efficiency. Use the **`mint`** command from anywhere.
 
 <p align="center">
   <img src="assets/CLI_Screen.png" alt="Mint CLI Preview" width="100%">
 </p>
 
-### Direct Commands
-Ask Mint something directly without entering interactive mode:
-```bash
-mint "What are my upcoming calendar events?"
-mint "Open YouTube and search for Lo-fi music"
-```
+### 🚀 Professional Commands
+- **`mint`** : Start interactive chat mode (Default).
+- **`mint agent`** : Run Mint as a headless background agent (Monitoring mode).
+- **`mint agent "task"`** : **[NEW]** Start agent and execute an autonomous task immediately.
+- **`mint task "task"`** : Delegate a multi-step task to an already running background agent.
+- **`mint onboard`** : Setup API Key, Model, and install background daemon.
+- **`mint list`** : See full list of automation actions and plugins.
 
-### Interactive Chat & Features
-Start a conversation or see all available abilities:
+---
+
+### 🤖 Autonomous Agent (Task Delegate)
+Mint isn't just a chatbot—it's an autonomous worker. Assign complex tasks that require multiple steps of reasoning.
+
+**Supported Autonomous Tools:**
+- 🌐 **Web Automation**: Full Puppeteer-based browsing, info extraction, and research.
+- 📁 **File System**: Create, Write, Delete, and Manage folders using `~/` path expansion.
+- 🔍 **Knowledge Search**: Query local files and documentation (RAG).
+- 🛡️ **Safety Mode (Bash)**: Mint proposes commands via notifications; you choose whether to run them.
+
+**Usage Examples:**
 ```bash
-mint        # Start chat
-mint list   # Show all features and plugins
+# Research and write a report
+mint agent 'Search for the latest iPhone reviews and write a SUMMARY.md to my desktop.'
+
+# Background Task
+mint task 'Process these 5 files and move them to ~/Documents/Archive'
 ```
 
 ---
 
-## Key Features
+### ⚡ Slash Commands (Interactive Chat)
+While in terminal chat, type **`/`** to access advanced tools. 
+> [!TIP]
+> Press **`[Tab]`** after typing `/` to cycle through available commands instantly!
 
-### Intelligent Core
-- **AI Persona**: A professional and friendly assistant with a distinct helpful personality.
-- **Multi-Bubble Responses**: AI replies appear in multiple lines for better readability.
-- **Extended Local Knowledge (RAG)**: Index and search `.pdf`, `.docx`, `.md`, and live **Website URLs**.
-
-### Screen Vision & Automation
-- **Live Translate (Desktop)**: Drag a box over any window to translate text dynamically.
-- **System Control**: Open apps, create folders, and control system volume/brightness via chat.
-- **Web Automation**: Puppeteer-driven browser control for searching or extracting data.
-
-### Plugin System
-Mint is highly modular. Manage these integrations from the Settings panel or CLI:
-- **Spotify**, **Docker**, **Obsidian**, **Google Calendar**, **DevTools (Git)**, and more.
+- `/help` : View all commands and descriptions.
+- `/models` : List and switch between Gemini/Ollama models.
+- `/config` : Check your active API keys and preferences.
+- `/clear` / `/reset` : Clean terminal or reset AI context.
 
 ---
 
-## Project Structure
+### 🕒 Proactive Monitoring
+When running in `agent` mode, Mint monitors your system in the background:
+- 🔋 **Battery Alerts**: Notifies you when power is low or charging status changes.
+- 🌐 **Network Status**: Alerts you when connection status changes.
+- 📊 **Resource Usage**: Proactive tips if system load is too high (System Metrics).
+
+
+---
+
+## 🎨 Desktop GUI Features
+
+- **Floating Widget**: A persistent AI character on your desktop.
+- **Animated Aura**: The widget breathes and glows when Mint is thinking or proactive.
+- **Minimize to Tray**: Click the dash icon (-) to hide the window to your system tray. Mint stays active!
+- **Widget Toggle**: Enable or disable the desktop widget anytime from **Settings > General**.
+- **Screen Overlay Glow**: Visual feedback when Mint is capturing your screen for analysis.
+
+---
+
+## 🛡️ Security & Privacy
+
+- **Push Protection**: Automated `.gitignore` patterns for `mint-config.json` and `.env` files.
+- **History Scrubbing**: Integrated tools to ensure API keys are never leaked to Git history.
+- **Local First**: Built-in **Ollama** support for 100% private, offline AI processing.
+
+---
+
+## 🛠️ Getting Started
+
+### Prerequisites
+- [Node.js](https://nodejs.org/) (LTS)
+- [npm](https://www.npmjs.com/)
+- A **Google Gemini API Key** (Get one at [Google AI Studio](https://aistudio.google.com/))
+
+### Installation
+1. **Clone & Install**
+   ```bash
+   git clone https://github.com/Pheem49/Mint.git
+   cd Mint
+   npm install
+   ```
+2. **Setup CLI Globally**
+   ```bash
+   sudo npm link
+   ```
+
+---
+
+## 📂 Project Structure
 
 ```text
 Mint/
 ├── src/
-│   ├── AI_Brain/        # Gemini integration & Headless Agent
+│   ├── AI_Brain/        # Gemini/Ollama integration & logic
 │   ├── Automation/      # Puppeteer and browser scripts
-│   ├── CLI/             # CLI Onboarding and Command logic
-│   ├── Plugins/         # Spotify, Docker, etc.
-│   ├── System/          # Config, Daemon Management, and State
-│   └── UI/              # Electron renderer and styles
-├── mint-cli.js          # CLI Entry point
+│   ├── CLI/             # CLI Onboarding and Feature list
+│   ├── Plugins/         # Spotify, Docker, Obsidian, Git, etc.
+│   ├── System/          # Config, Daemon, and Event Monitoring
+│   └── UI/              # Electron renderer (Glassmorphism & Aura)
+├── mint-cli.js          # CLI Main Entry
 ├── main.js              # Electron Main process
-└── package.json         # Project metadata & Binaries
+└── package.json         # Binaries and dependencies
 ```
 
 ---
 
-## License
+## 🏛️ License
 
-Distributed under the **GNU Affero General Public License v3.0**. See `LICENSE` for more information.
+Distributed under the **GNU Affero General Public License v3.0**. See `LICENSE` for details.
