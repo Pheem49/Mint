@@ -1,0 +1,25 @@
+# Exclude Electron builds
+dist/
+release/
+
+# Exclude sensitive files
+.env
+.env.example
+mint-config.json
+mint-chat-history.json
+mint-knowledge.json
+
+# Exclude local project artifacts
+task.md
+walkthrough.md
+implementation_plan.md
+scratch/
+verify_paths.js
+
+# Exclude Git files
+.git/
+.github/
+.gitignore
+
+# Keep assets for README but ignore if too large (optional)
+# assets/
