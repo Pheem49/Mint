@@ -13,6 +13,7 @@ node_modules/
 .env.*.local
 mint-config.json
 workflows.json
+mint-chat-history.json
 
 
 BUILD_AND_RELEASE.md

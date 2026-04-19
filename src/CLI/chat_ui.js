@@ -107,7 +107,7 @@ function createChatUI({ onSubmit, onExit }) {
         height: 1,
         content: '> Type your message or @path/to/file',
         tags: false,
-        style: { fg: '#ffffffff', bg: '#111111' }
+        style: { fg: '#555555', bg: '#111111' }
     });
 
     let placeholderVisible = true;
@@ -132,7 +132,7 @@ function createChatUI({ onSubmit, onExit }) {
     const statusBar = blessed.box({
         bottom: 0, left: 0, width: '100%', height: 3,
         tags: true,
-        style: { bg: '#111111', fg: '#ffffffff' },
+        style: { bg: '#111111', fg: '#888888' },
         border: { type: 'line', fg: '#222222' }
     });
 
@@ -144,7 +144,7 @@ function createChatUI({ onSubmit, onExit }) {
         height: 1,
         tags: true,
         content: `  workspace {bold}(${workspaceName}){/bold}`,
-        style: { bg: '#111111', fg: '#ffffffff' }
+        style: { bg: '#111111', fg: '#888888' }
     });
 
     // Center: sandbox status
@@ -157,7 +157,7 @@ function createChatUI({ onSubmit, onExit }) {
         align: 'center',
         tags: true,
         content: `{#cc4444-fg}no sandbox{/}`,
-        style: { bg: '#111111', fg: '#ffffffff' }
+        style: { bg: '#111111', fg: '#888888' }
     });
 
     // Right: current model
@@ -169,7 +169,7 @@ function createChatUI({ onSubmit, onExit }) {
         align: 'right',
         tags: true,
         content: `{#88e0b0-fg}${modelName}{/}`,
-        style: { bg: '#111111', fg: '#ffffffff' }
+        style: { bg: '#111111', fg: '#888888' }
     });
 
     function updateStatusBar(thinkingText = null) {
@@ -281,7 +281,7 @@ function createChatUI({ onSubmit, onExit }) {
             try {
                 execSync(cmd, { stdio: 'pipe' });
                 return true;
-            } catch (_) { }
+            } catch (_) {}
         }
         return false;
     }
