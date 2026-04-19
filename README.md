@@ -129,14 +129,16 @@ When running in `agent` mode, Mint monitors your system in the background:
 - A **Google Gemini API Key** (Get one at [Google AI Studio](https://aistudio.google.com/))
 
 ### Installation
-1. **Clone & Install**
+1. **Install via NPM (Recommended)**
+   ```bash
+   npm install -g @pheem49/mint
+   ```
+
+2. **Manual Installation (For Developers)**
    ```bash
    git clone https://github.com/Pheem49/Mint.git
    cd Mint
    npm install
-   ```
-2. **Setup CLI Globally**
-   ```bash
    sudo npm link
    ```
 
