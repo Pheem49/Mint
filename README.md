@@ -23,7 +23,7 @@
 
 - **Dual-Mode AI**: Switch between a beautiful **Desktop GUI** and a professional **CLI**.
 - **Interactive Slash Commands**: Manage models and settings in the terminal with `/models`, `/config`, `/clear`, etc.
-- **Smart Tab-Completion**: Fast and intuitive command suggestions in your terminal.
+- **Visual Slash Commands**: Intuitive command suggestions with a scrollable UI and descriptions.
 - **Dynamic UI Aesthetics**: Animated **Aura Glow** for the AI widget and **Glassmorphism** design.
 - **Minimize-to-Tray**: Keep Mint running in the background via the System Tray.
 - **Vision-Ready (Desktop)**: Capture, analyze, and translate any part of your screen in real-time.
@@ -57,7 +57,7 @@ Mint CLI is built for speed and efficiency. Use the **`mint`** command from anyw
 - **`mint agent`** : Run Mint as a headless background agent (Monitoring mode).
 - **`mint agent "task"`** : **[NEW]** Start agent and execute an autonomous task immediately.
 - **`mint task "task"`** : Delegate a multi-step task to an already running background agent.
-- **`mint onboard`** : Setup API Key, Model, and install background daemon.
+- **`mint onboard`** : Setup API Key, Model, and initialize global configuration in `~/.mint/`.
 - **`mint list`** : See full list of automation actions and plugins.
 
 ---
@@ -83,9 +83,9 @@ mint task 'Process these 5 files and move them to ~/Documents/Archive'
 ---
 
 ### ⚡ Slash Commands (Interactive Chat)
-While in terminal chat, type **`/`** to access advanced tools. 
+While in terminal chat, type **`/`** to access advanced tools with the new visual autocomplete system.
 > [!TIP]
-> Press **`[Tab]`** after typing `/` to cycle through available commands instantly!
+> Use **Up/Down arrow keys** to navigate the suggestion list and press **Enter** to select!
 
 - `/help` : View all commands and descriptions.
 - `/models` : List and switch between Gemini/Ollama models.
