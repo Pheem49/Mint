@@ -428,16 +428,22 @@ function createChatUI({ onSubmit, onExit }) {
     /**
      * @param {'user'|'assistant'|'system'|'error'} role
      * @param {string} text
+     * @param {string} timestamp - ISO string or Date object
      */
-    function appendMessage(role, text) {
+    function appendMessage(role, text, timestamp = null) {
         const lines = text.split('\n');
+        const now = timestamp ? new Date(timestamp) : new Date();
+        const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false });
+
         if (role === 'user') {
             chatBox.log(`\n {bold}{#88e0b0-fg}>{/} {#ffffff-fg}${lines[0]}{/}`);
             lines.slice(1).forEach(l => chatBox.log(`   {#ffffff-fg}${l}{/}`));
+            chatBox.log(`   {gray-fg}${timeStr}{/}`);
         } else if (role === 'assistant') {
             lastAssistantResponse = text; // track for Ctrl+Y
             chatBox.log(`\n {bold}{#d4a8ff-fg}Mint:{/} {#ffffff-fg}${lines[0]}{/}`);
             lines.slice(1).forEach(l => chatBox.log(`   {#ffffff-fg}${l}{/}`));
+            chatBox.log(`   {gray-fg}${timeStr}{/}`);
             chatBox.log('');
         } else if (role === 'system') {
             chatBox.log(`\n {gray-fg}${text}{/}`);

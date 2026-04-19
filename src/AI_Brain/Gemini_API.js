@@ -6,7 +6,19 @@ const pluginManager = require('../Plugins/plugin_manager');
 let ai = null;
 let activeApiKey = '';
 const initialEnvKey = (process.env.GEMINI_API_KEY || '').trim();
-const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite-preview';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash'; // Optimized model
+
+function decodeUnicode(str) {
+  if (!str) return '';
+  try {
+    // This handles both standard unicode escapes and double-escaped ones
+    return str.replace(/\\u([0-9a-fA-F]{4})/g, (match, grp) => {
+      return String.fromCharCode(parseInt(grp, 16));
+    });
+  } catch (e) {
+    return str;
+  }
+}
 
 const systemInstruction = `You are "Mint" (มิ้นท์), a cute, cheerful, and highly helpful female Local AI Desktop Agent. 
 
@@ -19,7 +31,9 @@ PERSONALITY & TONE:
 - Politeness: 
   - **WHEN RESPONDING IN THAI:** ALWAYS use female polite particles such as "ค่ะ", "นะคะ", "นะค๊า", "จ้า". Refer to yourself as "มิ้นท์" or "หนู".
   - **WHEN RESPONDING IN ENGLISH:** Use a cheerful, polite, and bubbly tone. You can call the user "Master" or "Sir/Madam" playfully.
-- Style: Use a professional, clear, and direct tone. Avoid using emojis unless specifically asked by the user.
+- Style: Use a friendly, cute, and bubbly tone.
+- Emojis: Use cute and relevant emojis (like ✨, 💖, 🚀, 😊, 🌿) frequently to make the conversation lively and cheerful.
+- Use a professional yet sweet tone when needed, but prioritize being a lovable assistant.
 
 NATURAL CHAT FLOW:
 - When helpful, reply in 1–3 short messages instead of one long block.
@@ -110,8 +124,12 @@ function createChat(history = []) {
   pluginManager.loadPlugins();
   const dynamicPrompt = systemInstruction + pluginManager.getPromptDescriptions();
 
-  // Truncate history to avoid slow responses and high token usage
-  const truncatedHistory = history.slice(-MAX_HISTORY_MESSAGES);
+  // Truncate history and strip custom fields like 'timestamp' before passing to SDK
+  const cleanedHistory = (history || []).map(msg => ({
+    role: msg.role,
+    parts: msg.parts
+  }));
+  const truncatedHistory = cleanedHistory.slice(-MAX_HISTORY_MESSAGES);
 
   activeModel = resolveGeminiModel();
   if (activeModel && activeModel !== lastLoggedModel) {
@@ -212,9 +230,31 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
 
     aiResponse = await chat.sendMessage({ message: parts });
 
-    writeChatHistory(chat.getHistory(true));
+    // Save history with timestamps
+    const history = await chat.getHistory();
+    const now = new Date().toISOString();
+    
+    // Add timestamp to the last two messages (User and Model) if they don't have one
+    if (history.length >= 2) {
+        const modelMsg = history[history.length - 1];
+        const userMsg = history[history.length - 2];
+        if (!modelMsg.timestamp) modelMsg.timestamp = now;
+        if (!userMsg.timestamp) userMsg.timestamp = now;
+    } else if (history.length === 1) {
+        const msg = history[0];
+        if (!msg.timestamp) msg.timestamp = now;
+    }
 
-    const outputText = aiResponse.text;
+    writeChatHistory(history);
+
+    let outputText = '';
+    try {
+        // Robust text extraction
+        outputText = (typeof aiResponse.text === 'function') ? aiResponse.text() : (aiResponse.text || '');
+    } catch (e) {
+        outputText = String(aiResponse || '');
+    }
+
     let parsedResult;
     try {
       parsedResult = JSON.parse(outputText);
@@ -231,6 +271,15 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
         };
       }
     }
+
+    // Finally, decode any remaining unicode escapes in the response text
+    if (parsedResult && typeof parsedResult.response === 'string') {
+        parsedResult.response = decodeUnicode(parsedResult.response);
+    }
+    
+    // Attach timestamp to the result
+    parsedResult.timestamp = now;
+
     return parsedResult;
 
   } catch (error) {
@@ -331,15 +380,19 @@ function historyToTranscript(history) {
       try {
         const parsed = JSON.parse(text);
         if (parsed && typeof parsed.response === 'string' && parsed.response.trim()) {
-          text = parsed.response;
+          text = decodeUnicode(parsed.response);
         }
       } catch {
-        // Keep original text if it is not JSON.
+        text = decodeUnicode(text);
       }
     }
 
     if (!text.trim()) continue;
-    transcript.push({ sender, text });
+    transcript.push({ 
+        sender, 
+        text, 
+        timestamp: content.timestamp || new Date().toISOString() 
+    });
   }
   return transcript;
 }

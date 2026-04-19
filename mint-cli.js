@@ -111,7 +111,7 @@ async function startInteractiveChat(initialMessage = null) {
                 const response = await handleChat(text);
                 clearInterval(timer);
                 setThinking(false);
-                appendMessage('assistant', response.response);
+                appendMessage('assistant', response.response, response.timestamp);
 
                 // Execute Actions
                 const { executeAction } = require('./mint-cli-logic');
@@ -142,7 +142,7 @@ async function startInteractiveChat(initialMessage = null) {
             const response = await handleChat(initialMessage);
             clearInterval(timer);
             setThinking(false);
-            appendMessage('assistant', response.response);
+            appendMessage('assistant', response.response, response.timestamp);
         } catch (err) {
             clearInterval(timer);
             setThinking(false);

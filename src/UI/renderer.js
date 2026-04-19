@@ -295,7 +295,10 @@ async function sendVoiceMessage(base64Audio) {
         removeTyping();
         
         // Show AI response
-        const msgDiv = await appendAiMessages(response.response, { allowDelay: true });
+        const msgDiv = await appendAiMessages(response.response, { 
+            allowDelay: true, 
+            timestamp: new Date().toISOString() 
+        });
         await speakText(normalizeAiText(response.response), { onEnd: resumeSpeechIfNeeded });
         notifyAiIfNeeded();
 
@@ -535,6 +538,16 @@ removeImageBtn.addEventListener('click', () => {
     imagePreviewContainer.style.display = 'none';
 });
 
+function formatTime(isoString) {
+    if (!isoString) return '';
+    try {
+        const date = new Date(isoString);
+        return date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false });
+    } catch (e) {
+        return '';
+    }
+}
+
 // Clear chat history
 clearBtn.addEventListener('click', async () => {
     await window.api.resetChat();
@@ -542,12 +555,15 @@ clearBtn.addEventListener('click', async () => {
     const messages = chatContainer.querySelectorAll('.message:not(.initial)');
     messages.forEach(m => m.remove());
     // Append a clear confirmation
-    appendMessage('Chat history cleared. Starting fresh! 🌿', 'ai');
+    appendMessage('Chat history cleared. Starting fresh! 🌿', 'ai', null, new Date().toISOString());
 });
 
-function appendMessage(text, sender, base64Image = null) {
+function appendMessage(text, sender, base64Image = null, timestamp = null) {
     const messageDiv = document.createElement('div');
     messageDiv.classList.add('message', `${sender}-message`);
+
+    const bubbleWrapper = document.createElement('div');
+    bubbleWrapper.classList.add('bubble-wrapper');
 
     const bubble = document.createElement('div');
     bubble.classList.add('message-bubble');
@@ -568,7 +584,17 @@ function appendMessage(text, sender, base64Image = null) {
         bubble.appendChild(textSpan);
     }
 
-    messageDiv.appendChild(bubble);
+    bubbleWrapper.appendChild(bubble);
+
+    // Add Timestamp
+    if (timestamp) {
+        const timeDiv = document.createElement('div');
+        timeDiv.classList.add('message-time');
+        timeDiv.textContent = formatTime(timestamp);
+        bubbleWrapper.appendChild(timeDiv);
+    }
+
+    messageDiv.appendChild(bubbleWrapper);
     chatContainer.appendChild(messageDiv);
     scrollToBottom();
 
@@ -611,6 +637,7 @@ function estimateMessageDelay(text) {
 
 async function appendAiMessages(text, options = {}) {
     const allowDelay = options.allowDelay !== false;
+    const timestamp = options.timestamp || new Date().toISOString();
     const parts = splitAiMessages(text);
     let lastDiv = null;
 
@@ -620,7 +647,9 @@ async function appendAiMessages(text, options = {}) {
             await sleep(estimateMessageDelay(parts[index]));
             removeTyping();
         }
-        lastDiv = appendMessage(parts[index], 'ai');
+        // Only show timestamp for the last bubble in a group if multiple
+        const partTimestamp = (index === parts.length - 1) ? timestamp : null;
+        lastDiv = appendMessage(parts[index], 'ai', null, partTimestamp);
     }
 
     return lastDiv;
@@ -721,9 +750,9 @@ async function loadChatHistory() {
             if (!item || typeof item.text !== 'string' || !item.text.trim()) continue;
             const sender = item.sender === 'user' ? 'user' : 'ai';
             if (sender === 'ai') {
-                await appendAiMessages(item.text, { allowDelay: false });
+                await appendAiMessages(item.text, { allowDelay: false, timestamp: item.timestamp });
             } else {
-                appendMessage(item.text, sender);
+                appendMessage(item.text, sender, null, item.timestamp);
             }
         }
     } catch (error) {
@@ -747,8 +776,10 @@ async function sendTextMessage(text, options = {}) {
     imagePreviewContainer.style.display = 'none';
     imagePreview.src = '';
 
+    const now = new Date().toISOString();
+
     // Show user message (with explicit image if available)
-    appendMessage(cleanText, 'user', imageToSend);
+    appendMessage(cleanText, 'user', imageToSend, now);
 
     // Show typing early so user knows we are processing
     showTyping();
