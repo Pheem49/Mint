@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 let app;
 try {
@@ -9,9 +10,14 @@ try {
     app = null;
 }
 
-const CONFIG_PATH = app && app.getPath 
+const MINT_DIR = path.join(os.homedir(), '.mint');
+if (!fs.existsSync(MINT_DIR)) {
+    fs.mkdirSync(MINT_DIR, { recursive: true });
+}
+
+const CONFIG_PATH = app && app.getPath
     ? path.join(app.getPath('userData'), 'mint-config.json')
-    : path.join(process.cwd(), 'mint-config.json');
+    : path.join(MINT_DIR, 'mint-config.json');
 
 const DEFAULT_CONFIG = {
     theme: 'dark',
@@ -21,7 +27,7 @@ const DEFAULT_CONFIG = {
     customBgEnd: '#1e1b4b',
     customPanelBg: '#1e293b',
     apiKey: '',
-    geminiModel: 'gemini-3.1-flash-lite-preview',
+    geminiModel: 'gemini-2.5-flash',
     language: 'th-TH',
     automationBrowser: 'chromium',
     proactiveInterval: 60,   // seconds between screen captures

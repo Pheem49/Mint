@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 let app;
 try {
@@ -9,9 +10,14 @@ try {
     app = null;
 }
 
+const MINT_DIR = path.join(os.homedir(), '.mint');
+if (!fs.existsSync(MINT_DIR)) {
+    fs.mkdirSync(MINT_DIR, { recursive: true });
+}
+
 const CHAT_HISTORY_PATH = app && app.getPath 
     ? path.join(app.getPath('userData'), 'mint-chat-history.json')
-    : path.join(process.cwd(), 'mint-chat-history.json');
+    : path.join(MINT_DIR, 'mint-chat-history.json');
 
 function readChatHistory() {
     try {

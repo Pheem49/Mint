@@ -179,8 +179,8 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
                 appendMessage('system', [
                     `Current Model: ${config.geminiModel}`,
                     'Available Presets:',
-                    '  - gemini-3.1-flash-lite-preview (Default)',
-                    '  - gemini-2.5-flash',
+                    '  - gemini-2.5-flash (Default)',
+                    '  - gemini-3.1-flash-lite-preview',
                     '  - gemini-3.1-flash-lite',
                     '  - ollama (local provider)',
                     'Usage: /models <name> to switch'

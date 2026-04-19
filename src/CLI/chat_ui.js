@@ -6,6 +6,17 @@ const blessed = require('blessed');
 const path = require('path');
 const { execSync } = require('child_process');
 const { readConfig } = require('../System/config_manager');
+const fs = require('fs');
+
+const SLASH_COMMANDS = [
+    { name: '/models', desc: 'List or switch Gemini models' },
+    { name: '/config', desc: 'Show current configuration' },
+    { name: '/copy',   desc: 'Copy last response to clipboard' },
+    { name: '/clear',  desc: 'Clear conversation history' },
+    { name: '/reset',  desc: 'Reset conversation history' },
+    { name: '/help',   desc: 'Show help information' },
+    { name: '/exit',   desc: 'Exit Mint' }
+];
 
 /**
  * Creates and returns the Mint chat TUI screen
@@ -198,16 +209,100 @@ function createChatUI({ onSubmit, onExit }) {
     screen.append(statusBar);
     screen.append(placeholderWidget); // sibling on top of inputBox
 
+    // ─── Suggestion List ──────────────────────────────────────────────────────
+    const commandList = blessed.list({
+        parent: screen,
+        bottom: 6, // Above hintBar
+        left: 2,
+        width: '70%',
+        height: 8,
+        tags: true,
+        keys: false, // We will handle keys manually to keep focus on input
+        vi: false,
+        hidden: true,
+        border: { type: 'line', fg: '#88e0b0' },
+        style: {
+            bg: '#111111',
+            fg: '#ffffff',
+            selected: {
+                bg: '#334433',
+                fg: '#88e0b0',
+                bold: true
+            }
+        }
+    });
+
+    let activeSuggestions = [];
+
+    function updateSuggestions(filter = '') {
+        activeSuggestions = SLASH_COMMANDS.filter(cmd => 
+            cmd.name.toLowerCase().startsWith(filter.toLowerCase())
+        );
+
+        if (activeSuggestions.length === 0) {
+            commandList.hide();
+            screen.render();
+            return;
+        }
+
+        const items = activeSuggestions.map(cmd => 
+            ` {bold}${cmd.name}{/} {gray-fg}${cmd.desc}{/}`
+        );
+        commandList.setItems(items);
+        commandList.select(0);
+        commandList.show();
+        commandList.setFront();
+        screen.render();
+    }
+
+
     // ─── Input events ─────────────────────────────────────────────────────────
 
-    // Hide placeholder on first printable keypress
-    inputBox.on('keypress', (ch, key) => {
+    // ─── Input events ─────────────────────────────────────────────────────────
+    let lastListVisible = false;
+
+    // Consolidated key handling
+    inputBox.on('element keypress', (el, ch, key) => {
+        // 1. Handle placeholder visibility
         if (!key.ctrl && !key.meta && key.name !== 'enter' && key.name !== 'tab') {
             if (ch) hidePlaceholder();
         }
-        // Re-check after key is processed to show placeholder if box is empty again
+
+        // 2. Handle suggestion list navigation
+        if (!commandList.hidden) {
+            if (key.name === 'up') {
+                commandList.up();
+                screen.render();
+                return false;
+            }
+            if (key.name === 'down') {
+                commandList.down();
+                screen.render();
+                return false;
+            }
+            if (key.name === 'escape') {
+                commandList.hide();
+                lastListVisible = false;
+                screen.render();
+                return false;
+            }
+        }
+
+        // 3. Logic for suggestions and placeholder after key is processed
         setImmediate(() => {
             const val = (inputBox.getValue ? inputBox.getValue() : inputBox.value) || '';
+            const isCommand = val.startsWith('/') && !val.includes(' ');
+            
+            // Only render if visibility changed or list is updated
+            if (isCommand) {
+                updateSuggestions(val);
+                lastListVisible = true;
+            } else if (lastListVisible) {
+                commandList.hide();
+                lastListVisible = false;
+                screen.render();
+            }
+
             if (!val.trim()) {
                 showPlaceholder();
             } else {
@@ -216,8 +311,21 @@ function createChatUI({ onSubmit, onExit }) {
         });
     });
 
-    // Submit on Enter
+
+    // Submit or Select Suggestion on Enter
     inputBox.key(['enter'], () => {
+        if (!commandList.hidden) {
+            const selected = activeSuggestions[commandList.selected];
+            if (selected) {
+                inputBox.setValue(selected.name + ' ');
+                commandList.hide();
+                hidePlaceholder();
+                inputBox.focus();
+                screen.render();
+                return; // Don't submit yet, let user add args or press enter again
+            }
+        }
+
         const raw = (inputBox.getValue ? inputBox.getValue() : inputBox.value) || '';
         const text = raw.trim();
         if (!text) return;

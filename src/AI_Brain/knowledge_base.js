@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { GoogleGenAI } = require('@google/genai');
 const pdf = require('pdf-parse');
 const mammoth = require('mammoth');
@@ -54,8 +55,12 @@ function getDbPath() {
     if (app && app.getPath) {
         return path.join(app.getPath('userData'), 'mint-knowledge.json');
     }
-    // Fallback for Node.js environment (benchmarking)
-    return path.join(process.cwd(), 'mint-knowledge.json');
+    // Use global .mint directory for CLI/Benchmarking
+    const mintDir = path.join(os.homedir(), '.mint');
+    if (!fs.existsSync(mintDir)) {
+        fs.mkdirSync(mintDir, { recursive: true });
+    }
+    return path.join(mintDir, 'mint-knowledge.json');
 }
 
 function loadDb() {
