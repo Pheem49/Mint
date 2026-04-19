@@ -21,15 +21,20 @@
   "type": "commonjs",
   "dependencies": {
     "@google/genai": "^1.44.0",
+    "@inkjs/ui": "^2.0.0",
     "axios": "^1.13.6",
+    "blessed": "^0.1.81",
     "cheerio": "^1.2.0",
     "commander": "^14.0.3",
     "dotenv": "^17.3.1",
     "google-tts-api": "^2.0.2",
+    "ink": "^7.0.1",
+    "ink-text-input": "^6.0.0",
     "inquirer": "^13.4.1",
     "mammoth": "^1.12.0",
     "pdf-parse": "^2.4.5",
     "puppeteer": "^24.38.0",
+    "react": "^19.2.5",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

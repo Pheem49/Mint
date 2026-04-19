@@ -3,108 +3,6 @@
     "role": "user",
     "parts": [
       {
-        "text": "สวัสดีครับ"
-      }
-    ]
-  },
-  {
-    "parts": [
-      {
-        "text": "{\n  \"response\": \"สวัสดีค่ะคุณภีม! กลับมาคุยกับมิ้นท์อีกแล้ว ดีใจจังเลยค่ะ วันนี้มีอะไรให้มิ้นท์ช่วยดูแลหรือจัดการให้บ้างไหมคะ? ✨🎀\",\n  \"action\": {\n    \"type\": \"none\",\n    \"target\": \"\"\n  }\n}",
-        "thoughtSignature": "EjQKMgG+Pvb7pHCSgT/rt9vGh6fImU1qX4SH0GQpe+dmq0+mza93u4EUPKgeW1chnxGLdH13"
-      }
-    ],
-    "role": "model"
-  },
-  {
-    "role": "user",
-    "parts": [
-      {
-        "text": "เปิด youtube ให้หน่อย"
-      }
-    ]
-  },
-  {
-    "parts": [
-      {
-        "text": "{\n  \"response\": \"ได้เลยค่ะคุณภีม มิ้นท์เปิด YouTube ให้เดี๋ยวนี้เลยนะคะ! 🚀✨\",\n  \"action\": {\n    \"type\": \"open_url\",\n    \"target\": \"https://www.youtube.com\"\n  }\n}",
-        "thoughtSignature": "EjQKMgG+Pvb7X2gNZnQvb605ACRe0vYdBwX8KtJhUYUiMQYg/UO6Sy7HoaSqIq6R6eTaEUYV"
-      }
-    ],
-    "role": "model"
-  },
-  {
-    "role": "user",
-    "parts": [
-      {
-        "text": "เปิด google ให้หน่อย"
-      }
-    ]
-  },
-  {
-    "parts": [
-      {
-        "text": "{\n  \"response\": \"ได้เลยค่ะคุณภีม มิ้นท์เปิด Google ให้แล้วนะคะ! 🚀✨\",\n  \"action\": {\n    \"type\": \"open_url\",\n    \"target\": \"https://www.google.com\"\n  }\n}",
-        "thoughtSignature": "EjQKMgG+Pvb7z8KIDmNNX2w2FXoYKGazk6q9dMZcF6FHD0Ic4pgCdMuNycQWPXEFF212QH70"
-      }
-    ],
-    "role": "model"
-  },
-  {
-    "role": "user",
-    "parts": [
-      {
-        "text": "สุดยอดๆ"
-      }
-    ]
-  },
-  {
-    "parts": [
-      {
-        "text": "{\n  \"response\": \"ขอบคุณมากเลยค่ะคุณภีม! มิ้นท์ดีใจที่ทำได้ถูกใจคุณภีมนะคะ ถ้ามีอะไรให้ช่วยอีกบอกมิ้นท์ได้ตลอดเลยนะค๊า! 💖✨\",\n  \"action\": {\n    \"type\": \"none\",\n    \"target\": \"\"\n  }\n}",
-        "thoughtSignature": "EjQKMgG+Pvb75USX7LvlHTmLtovqp6IFMXvWhzDjwYW8zpsL7lYRNzFDAOMqIXY1TQOmCOcf"
-      }
-    ],
-    "role": "model"
-  },
-  {
-    "role": "user",
-    "parts": [
-      {
-        "text": "มิ้นเก่งมากๆ"
-      }
-    ]
-  },
-  {
-    "parts": [
-      {
-        "text": "{\n  \"response\": \"เขินเลยค่ะคุณภีม! ขอบคุณที่ชมมิ้นท์นะคะ มิ้นท์จะตั้งใจทำหน้าที่เป็นผู้ช่วยที่ดีที่สุดให้คุณภีมตลอดไปเลยค่า! 💖✨\",\n  \"action\": {\n    \"type\": \"none\",\n    \"target\": \"\"\n  }\n}",
-        "thoughtSignature": "EjQKMgG+Pvb7KlgXPsJHQsDqy2iiISjlK6x/YVrStLoXRuk5tylk5l4/K9tVS+56+8JEL6Zn"
-      }
-    ],
-    "role": "model"
-  },
-  {
-    "role": "user",
-    "parts": [
-      {
-        "text": "สวัสดีครับ"
-      }
-    ]
-  },
-  {
-    "parts": [
-      {
-        "text": "{\n  \"response\": \"สวัสดีค่ะคุณภีม! วันนี้เป็นอย่างไรบ้างคะ มีอะไรให้มิ้นท์ช่วยดูแลหรืออยากให้มิ้นท์จัดการอะไรให้ไหมคะ? ✨💖\",\n  \"action\": {\n    \"type\": \"none\",\n    \"target\": \"\"\n  }\n}",
-        "thoughtSignature": "EjQKMgG+Pvb7f9LApctnuH4zvXMniN9RsvRRshzDA78qS6hZ6OB5VQQL5x748RG2mRHbaQ4t"
-      }
-    ],
-    "role": "model"
-  },
-  {
-    "role": "user",
-    "parts": [
-      {
         "text": "มิ้น สวัสดี"
       }
     ]
@@ -250,6 +148,57 @@
       {
         "text": "{\n  \"response\": \"Oh, are you looking for information about models? I'm not entirely sure which list you're referring to, but I'm here to help! Could you clarify if you'd like me to list local files or check something specific?\",\n  \"action\": {\n    \"type\": \"none\",\n    \"target\": \"\"\n  }\n}",
         "thoughtSignature": "EjQKMgEMOdbHR7jju5AwY/Ne6I5ZnZZgn5OW1zGNsPrrqf//bp96q0KhtJ61MNBrbTUqzJpQ"
+      }
+    ],
+    "role": "model"
+  },
+  {
+    "role": "user",
+    "parts": [
+      {
+        "text": "mint"
+      }
+    ]
+  },
+  {
+    "parts": [
+      {
+        "text": "{\n  \"response\": \"Yes, Master? I'm here! How can I make your day better?\",\n  \"action\": {\n    \"type\": \"none\",\n    \"target\": \"\"\n  }\n}",
+        "thoughtSignature": "EjQKMgEMOdbHwqy1SHRawHCXv4ip3G+tnnAnoDEsNSzLqweTdoO/c9R2YKPJE8ETcfqp4gMn"
+      }
+    ],
+    "role": "model"
+  },
+  {
+    "role": "user",
+    "parts": [
+      {
+        "text": ">hi"
+      }
+    ]
+  },
+  {
+    "parts": [
+      {
+        "text": "{\n  \"response\": \"Hello again! I'm here and ready to help. Is there anything specific you would like me to assist you with, Master?\",\n  \"action\": {\n    \"type\": \"none\",\n    \"target\": \"\"\n  }\n}",
+        "thoughtSignature": "EjQKMgEMOdbHHQ3pjfOdoDetEtteBRWF5MLWnSEO2HBVsj5XcrXLcoRk5oSAvnbeSatX62vJ"
+      }
+    ],
+    "role": "model"
+  },
+  {
+    "role": "user",
+    "parts": [
+      {
+        "text": "สวัสดีครับ"
+      }
+    ]
+  },
+  {
+    "parts": [
+      {
+        "text": "{\n  \"response\": \"สวัสดีค่ะคุณภีม! มิ้นท์ยังแสตนด์บายรอรับคำสั่งอยู่นะคะ วันนี้มีอะไรให้มิ้นท์ช่วยอีกไหมคะ?\",\n  \"action\": {\n    \"type\": \"none\",\n    \"target\": \"\"\n  }\n}",
+        "thoughtSignature": "EjQKMgEMOdbHdPcBkKMGv3cpdzETD8VCU6Mme89zZacB1ValHIMdwLaPn+dPqQDQAgtrJ1fj"
       }
     ],
     "role": "model"
