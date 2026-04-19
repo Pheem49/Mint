@@ -42,19 +42,26 @@
     "electron-builder": "^26.8.1"
   },
   "build": {
-    "appId": "com.yourname.mint",
+    "appId": "com.pheem49.mint",
     "productName": "Mint",
+    "executableName": "mint-ai",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "files": [
       "**/*",
       "!node_modules/.cache/**"
     ],
     "linux": {
       "icon": "assets/icon.png",
+      "executableName": "mint-ai",
       "target": [
         "AppImage",
         "deb"
       ],
       "category": "Utility"
+    },
+    "deb": {
+      "packageName": "mint-ai",
+      "artifactName": "mint-ai_${version}_${arch}.${ext}"
     }
   }
 }
