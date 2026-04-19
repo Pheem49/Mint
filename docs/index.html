@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mint | Experience the Future of Desktop Assistance</title>
+    <meta name="description" content="A powerful Electron-based AI desktop assistant powered by Google Gemini, featuring screen vision, web automation, and proactive suggestions.">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <link rel="icon" type="image/png" href="assets/logo.png">
+</head>
+<body>
+    <div class="bg-glow"></div>
+
+    <nav>
+        <div class="logo-container">
+            <img src="assets/logo.png" alt="Mint Logo">
+            <span>Agent Mint</span>
+        </div>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="https://www.npmjs.com/package/@pheem49/mint">Resources</a>
+            <a href="https://github.com/Pheem49/Mint" class="github-link">GitHub</a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <h1>Experience the Future <br>of Desktop Assistance</h1>
+        <p>Mint combines screen vision, web automation, and proactive AI to supercharge your workflow. Built with Google Gemini 2.5 Flash.</p>
+        
+        <div class="install-container" id="install-cmd">
+            <span>$</span>
+            <code>npm install -g @pheem49/mint</code>
+            <button class="copy-btn" title="Copy to clipboard" onclick="copyCommand()">
+                <i class="ph ph-copy"></i>
+            </button>
+        </div>
+
+        <div class="hero-preview">
+            <img src="assets/CLI_Screen.png" alt="Mint CLI Preview">
+        </div>
+    </header>
+
+    <section class="features" id="features">
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="ph ph-eye"></i>
+            </div>
+            <h3>Screen Vision</h3>
+            <p>Mint can see what you see. It understands your active applications and provides context-aware assistance.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="ph ph-browser"></i>
+            </div>
+            <h3>Web Automation</h3>
+            <p>Automate repetitive web tasks effortlessly. Mint can browse, interact, and extract data for you.</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">
+                <i class="ph ph-lightning"></i>
+            </div>
+            <h3>Proactive Suggests</h3>
+            <p>Mint doesn't just wait for you. It suggests optimizations and help before you even ask.</p>
+        </div>
+    </section>
+
+    <footer>
+        <p>&copy; 2026 Mint Project. Powered by Google Gemini. Created by Pheem49.</p>
+    </footer>
+
+    <script>
+        function copyCommand() {
+            const cmd = "npm install -g @pheem49/mint";
+            navigator.clipboard.writeText(cmd);
+            const icon = document.querySelector('.copy-btn i');
+            icon.classList.replace('ph-copy', 'ph-check');
+            setTimeout(() => {
+                icon.classList.replace('ph-check', 'ph-copy');
+            }, 2000);
+        }
+    </script>
+</body>
+</html>
