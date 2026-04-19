@@ -10,7 +10,7 @@
     "cli": "node mint-cli.js"
   },
   "bin": {
-    "mint": "./mint-cli.js"
+    "mint": "mint-cli.js"
   },
   "keywords": [],
   "author": {
