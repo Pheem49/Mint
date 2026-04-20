@@ -15,6 +15,7 @@ walkthrough.md
 implementation_plan.md
 BUILD_AND_RELEASE.md
 NPM_PUBLISH_GUIDE.md
+RELEASE_NOTES.md
 scratch/
 verify_paths.js
 

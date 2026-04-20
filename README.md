@@ -22,8 +22,9 @@
 ## 🌟 Highlights
 
 - **Dual-Mode AI**: Switch between a beautiful **Desktop GUI** and a professional **CLI**.
-- **Interactive Slash Commands**: Manage models and settings in the terminal with `/models`, `/config`, `/clear`, etc.
-- **Visual Slash Commands**: Intuitive command suggestions with a scrollable UI and descriptions.
+- **Interactive Slash Commands**: Manage models and settings in the terminal with `/model`, `/config`, `/clear`, etc.
+- **Smart TUI Experience**: Professional message framing, character-wrapped Thai text support, and mouse scroll wheel navigation.
+- **System Information Action**: Retrieve OS, Kernel, and Architecture details via natural language.
 - **Dynamic UI Aesthetics**: Animated **Aura Glow** for the AI widget and **Glassmorphism** design.
 - **Minimize-to-Tray**: Keep Mint running in the background via the System Tray.
 - **Vision-Ready (Desktop)**: Capture, analyze, and translate any part of your screen in real-time.
@@ -131,7 +132,7 @@ When running in `agent` mode, Mint monitors your system in the background:
 ### Installation
 1. **Install via NPM (Recommended)**
    ```bash
-   npm install -g @pheem49/mint
+   npm install -g @pheem49/mint@latest
    ```
 
 2. **Manual Installation (For Developers)**
