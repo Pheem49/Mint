@@ -7,14 +7,18 @@
     <meta name="description" content="A powerful Electron-based AI desktop assistant powered by Google Gemini, featuring screen vision, web automation, and proactive suggestions.">
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
-    <link rel="icon" type="image/png" href="assets/logo.png">
+    <link rel="icon" type="image/png" href="assets/icon.png">
 </head>
 <body>
     <div class="bg-glow"></div>
-
+    <div class="floating-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
     <nav>
         <div class="logo-container">
-            <img src="assets/logo.png" alt="Mint Logo">
+            <img src="assets/icon.png" alt="Mint Logo">
             <span>Agent Mint</span>
         </div>
         <div class="nav-links">
@@ -30,15 +34,59 @@
         
         <div class="install-container" id="install-cmd">
             <span>$</span>
-            <code>npm install -g @pheem49/mint</code>
+            <code>npm install -g @pheem49/mint@latest</code>
             <button class="copy-btn" title="Copy to clipboard" onclick="copyCommand()">
                 <i class="ph ph-copy"></i>
             </button>
         </div>
 
         <div class="hero-preview">
+            <div class="preview-badge">Terminal Interface</div>
             <img src="assets/CLI_Screen.png" alt="Mint CLI Preview">
         </div>
+
+        <section class="desktop-showcase">
+            <div class="showcase-header">
+                <img src="assets/icon.png" alt="Mint Icon" class="section-icon">
+                <h2>Modern Desktop Interface</h2>
+                <p>Enjoy a premium, glassmorphism-inspired GUI designed for the modern desktop environment. Manage your AI companion and customize your experience with ease.</p>
+            </div>
+
+            <div class="showcase-group">
+                <div class="showcase-images">
+                    <div class="image-wrapper main-ui">
+                        <img src="assets/Agent_Mint.png" alt="Agent Mint Main UI">
+                        <span>Main Interface</span>
+                    </div>
+                    <div class="image-wrapper settings-ui">
+                        <img src="assets/Settings.png" alt="Mint Settings UI">
+                        <span>Settings & Controls</span>
+                    </div>
+                </div>
+                
+                <div class="showcase-text-combined">
+                    <div class="text-block">
+                        <h3><i class="ph ph-sparkle"></i> Intelligent Companion</h3>
+                        <p>A sleek, floating chat interface that provides powerful AI capabilities without cluttering your workspace.</p>
+                    </div>
+                    <div class="text-block">
+                        <h3><i class="ph ph-sliders"></i> Granular Controls</h3>
+                        <p>Fully customize your experience. Manage API keys, switch models, and toggle proactive features with ease.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="downloads">
+            <div class="download-container">
+                <h2>Get the Latest Release</h2>
+                <p>Download the latest stable binaries for Linux including <b>.deb</b> and <b>.AppImage</b> formats directly from our GitHub releases page.</p>
+                <a href="https://github.com/Pheem49/Mint/releases" class="download-btn" target="_blank">
+                    <i class="ph ph-download-simple"></i>
+                    Download Latest Binaries
+                </a>
+            </div>
+        </section>
     </header>
 
     <section class="features" id="features">
@@ -71,7 +119,7 @@
 
     <script>
         function copyCommand() {
-            const cmd = "npm install -g @pheem49/mint";
+            const cmd = "npm install -g @pheem49/mint@latest";
             navigator.clipboard.writeText(cmd);
             const icon = document.querySelector('.copy-btn i');
             icon.classList.replace('ph-copy', 'ph-check');
