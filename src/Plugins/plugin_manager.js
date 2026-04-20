@@ -28,7 +28,7 @@ class PluginManager {
                     const plugin = require(pluginPath);
                     if (this.validatePlugin(plugin)) {
                         this.plugins.set(plugin.name, plugin);
-                        console.log(`[PluginManager] Loaded: ${plugin.name}`);
+                        // console.log(`[PluginManager] Loaded: ${plugin.name}`);
                     } else {
                         console.warn(`[PluginManager] Invalid plugin format: ${file}`);
                     }
@@ -67,7 +67,7 @@ class PluginManager {
         }
 
         try {
-            console.log(`[PluginManager] Executing ${name} with instruction: "${instruction}"`);
+            // console.log(`[PluginManager] Executing ${name} with instruction: "${instruction}"`);
             return await plugin.execute(instruction);
         } catch (err) {
             console.error(`[PluginManager] Error executing plugin ${name}:`, err);

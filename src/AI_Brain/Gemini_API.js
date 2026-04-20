@@ -6,7 +6,7 @@ const pluginManager = require('../Plugins/plugin_manager');
 let ai = null;
 let activeApiKey = '';
 const initialEnvKey = (process.env.GEMINI_API_KEY || '').trim();
-const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash'; // Optimized model
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'; // Optimized model
 
 function decodeUnicode(str) {
   if (!str) return '';
@@ -133,7 +133,7 @@ function createChat(history = []) {
 
   activeModel = resolveGeminiModel();
   if (activeModel && activeModel !== lastLoggedModel) {
-    console.log(`[Gemini] Using model: ${activeModel}`);
+    // console.log(`[Gemini] Using model: ${activeModel}`);
     lastLoggedModel = activeModel;
   }
   chat = ai.chats.create({

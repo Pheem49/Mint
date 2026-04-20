@@ -6,7 +6,7 @@ const DEFAULT_CONFIG = {
     customBgEnd: '#1e1b4b',
     customPanelBg: '#1e293b',
     apiKey: '',
-    geminiModel: 'gemini-3.1-flash-lite-preview',
+    geminiModel: 'gemini-2.5-flash',
     language: 'th-TH',
     proactiveInterval: 60,
     proactiveCooldown: 120,

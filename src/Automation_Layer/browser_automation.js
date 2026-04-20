@@ -3,7 +3,7 @@ const { GoogleGenAI } = require('@google/genai');
 const { readConfig } = require('../System/config_manager');
 
 const ai = new GoogleGenAI({});
-const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite-preview';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 let lastLoggedModel = '';
 
 const BROWSER_SYSTEM_PROMPT = `You are an Autonomous Browser Agent. Your goal is to fulfill the user's web instruction by driving a headless browser.

@@ -8,7 +8,7 @@ const path = require('path');
 
 const os = require('os');
 
-const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite-preview';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
 function expandHome(filePath) {
     if (filePath.startsWith('~/')) {

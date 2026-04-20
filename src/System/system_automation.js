@@ -82,6 +82,34 @@ const SystemAutomation = {
         } catch (e) {
             throw new Error("xdotool not found. Cannot perform window management.");
         }
+    },
+
+    // System Information
+    async getSystemInfo(target = "") {
+        // If target is empty, return OS info
+        if (!target) {
+            try {
+                // Try lsb_release first
+                const osInfo = await execPromise('lsb_release -ds');
+                const kernel = await execPromise('uname -r');
+                const arch = await execPromise('uname -m');
+                return `Operating System: ${osInfo}\nKernel: ${kernel}\nArchitecture: ${arch}`;
+            } catch (e) {
+                try {
+                    // Fallback to /etc/os-release
+                    const osInfo = await execPromise('grep PRETTY_NAME /etc/os-release | cut -d\'"\' -f2');
+                    const kernel = await execPromise('uname -r');
+                    const arch = await execPromise('uname -m');
+                    return `Operating System: ${osInfo}\nKernel: ${kernel}\nArchitecture: ${arch}`;
+                } catch (err) {
+                    return "Could not retrieve OS information.";
+                }
+            }
+        }
+        
+        // Handle weather or other info if target is provided
+        // For now, let's just return a placeholder or handle it if needed
+        return `System info for ${target} is not yet implemented.`;
     }
 };
 

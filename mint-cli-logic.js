@@ -35,6 +35,8 @@ async function executeAction(action) {
                 return await pluginManager.executePlugin(action.pluginName, action.target);
             case 'system_automation':
                 return await handleSystemAutomation(action.target);
+            case 'system_info':
+                return await SystemAutomation.getSystemInfo(action.target);
             default:
                 return `Action ${action.type} is not yet fully supported in CLI.`;
         }

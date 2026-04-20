@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const { Command } = require('commander');
 const { handleChat, resetChat } = require('./src/AI_Brain/Gemini_API');
 const { runOnboarding } = require('./src/CLI/onboarding');
@@ -8,6 +8,16 @@ const { displayFeatures } = require('./src/CLI/list_features');
 const { readConfig, writeConfig } = require('./src/System/config_manager');
 const readline = require('readline');
 const { createChatUI } = require('./src/CLI/chat_ui');
+
+// Startup Info
+const startupConfig = readConfig();
+const startupModel = startupConfig.geminiModel || 'gemini-2.5-flash';
+const startupNow = new Date();
+const startupTime = startupNow.toLocaleString('th-TH', { 
+    day: '2-digit', month: '2-digit', year: 'numeric', 
+    hour: '2-digit', minute: '2-digit', hour12: false 
+}).replace(',', '');
+console.log(`\x1b[38;5;121m[Mint] ${startupTime} | Active Model: ${startupModel}\x1b[0m`);
 
 // ANSI Colors
 const colors = {
@@ -23,64 +33,64 @@ const colors = {
 const program = new Command();
 
 program
-  .name('mint-ai')
-  .description('Mint - Your Personal AI Assistant CLI')
-  .version('1.0.0');
+    .name('mint-ai')
+    .description('Mint - Your Personal AI Assistant CLI')
+    .version('1.0.0');
 
 // Chat Command (Interactive Mode)
 program
-  .command('chat', { isDefault: true })
-  .description('Start interactive chat session with Mint')
-  .argument('[message]', 'Initial message to send to Mint')
-  .action(async (message) => {
-    await startInteractiveChat(message);
-  });
+    .command('chat', { isDefault: true })
+    .description('Start interactive chat session with Mint')
+    .argument('[message]', 'Initial message to send to Mint')
+    .action(async (message) => {
+        await startInteractiveChat(message);
+    });
 
 // Onboard Command
 program
-  .command('onboard')
-  .description('Setup Mint for the first time')
-  .option('--install-daemon', 'Automatically install systemd background agent')
-  .action(async (options) => {
-    await runOnboarding(options);
-  });
+    .command('onboard')
+    .description('Setup Mint for the first time')
+    .option('--install-daemon', 'Automatically install systemd background agent')
+    .action(async (options) => {
+        await runOnboarding(options);
+    });
 
 // Agent Command (Headless Daemon Mode)
 program
-  .command('agent')
-  .description('Run Mint as a background agent (headless)')
-  .argument('[initialTask]', 'Optional first task to perform immediately on startup')
-  .action(async (initialTask) => {
-    if (initialTask) {
-        const taskManager = require('./src/System/task_manager');
-        taskManager.addTask(initialTask);
-        console.log(`\n${colors.mint}${colors.bright}[Mint-Agent] Starting with initial task:${colors.reset} "${initialTask}"`);
-    }
-    await startAgent();
-  });
+    .command('agent')
+    .description('Run Mint as a background agent (headless)')
+    .argument('[initialTask]', 'Optional first task to perform immediately on startup')
+    .action(async (initialTask) => {
+        if (initialTask) {
+            const taskManager = require('./src/System/task_manager');
+            taskManager.addTask(initialTask);
+            console.log(`\n${colors.mint}${colors.bright}[Mint-Agent] Starting with initial task:${colors.reset} "${initialTask}"`);
+        }
+        await startAgent();
+    });
 
 // List Command
 program
-  .command('list')
-  .description('Show list of Mint features and commands')
-  .action(() => {
-    displayFeatures();
-  });
+    .command('list')
+    .description('Show list of Mint features and commands')
+    .action(() => {
+        displayFeatures();
+    });
 
 // Task Command (Autonomous Background Task)
 program
-  .command('task')
-  .description('Delegate a complex task to the background agent')
-  .argument('<description>', 'Description of the task for Mint to perform autonomously')
-  .action(async (description) => {
-    const taskManager = require('./src/System/task_manager');
-    const task = taskManager.addTask(description);
-    console.log(`\n${colors.mint}${colors.bright}Task Received!${colors.reset}`);
-    console.log(`${colors.gray}Task ID: ${task.id}${colors.reset}`);
-    console.log(`"${description}"`);
-    console.log(`\n${colors.cyan}Mint Agent is starting to work on this in the background.${colors.reset}`);
-    console.log(`${colors.gray}You will receive a notification when it's done.${colors.reset}\n`);
-  });
+    .command('task')
+    .description('Delegate a complex task to the background agent')
+    .argument('<description>', 'Description of the task for Mint to perform autonomously')
+    .action(async (description) => {
+        const taskManager = require('./src/System/task_manager');
+        const task = taskManager.addTask(description);
+        console.log(`\n${colors.mint}${colors.bright}Task Received!${colors.reset}`);
+        console.log(`${colors.gray}Task ID: ${task.id}${colors.reset}`);
+        console.log(`"${description}"`);
+        console.log(`\n${colors.cyan}Mint Agent is starting to work on this in the background.${colors.reset}`);
+        console.log(`${colors.gray}You will receive a notification when it's done.${colors.reset}\n`);
+    });
 
 program.parse(process.argv);
 
@@ -92,7 +102,7 @@ async function startInteractiveChat(initialMessage = null) {
         onSubmit: async (text) => {
             if (text.startsWith('/')) {
                 // Slash commands via fake rl-compatible object
-                const fakeRl = { close: () => {} };
+                const fakeRl = { close: () => { } };
                 appendMessage('user', text);
                 await handleSlashCommandUI(text, appendMessage, updateStatusModel, copyLastResponse);
                 return;
@@ -127,6 +137,9 @@ async function startInteractiveChat(initialMessage = null) {
         },
         onExit: () => {
             screen.destroy();
+            // Explicitly restore terminal state and disable ALL mouse tracking modes
+            process.stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l'); 
+            process.stdout.write('\x1b[?25h');   // Show cursor
             console.log(`\n${colors.pink}Goodbye! See you again soon!${colors.reset}\n`);
             process.exit(0);
         }
@@ -173,6 +186,7 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
             ].join('\n'));
             break;
 
+        case '/model':
         case '/models':
             const config = readConfig();
             if (args.length === 0) {

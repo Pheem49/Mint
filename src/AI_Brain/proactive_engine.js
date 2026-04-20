@@ -9,7 +9,7 @@ const { readConfig } = require('../System/config_manager');
 // ============================================================
 
 const ai = new GoogleGenAI({});
-const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite-preview';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 let lastLoggedModel = '';
 
 const PROACTIVE_SYSTEM_PROMPT = `You are a Smart Suggestion Engine built into a Desktop AI Agent called "Mint".

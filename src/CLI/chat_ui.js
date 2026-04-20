@@ -35,12 +35,7 @@ function createChatUI({ onSubmit, onExit }) {
         smartCSR: true,
         fullUnicode: true,
         title: 'Mint CLI',
-        cursor: {
-            artificial: true,
-            shape: 'line',
-            blink: true,
-            color: '#88e0b0'
-        }
+        mouse: true
     });
 
     // ─── Banner ───────────────────────────────────────────────────────────────
@@ -75,7 +70,9 @@ function createChatUI({ onSubmit, onExit }) {
         scrollable: true,
         alwaysScroll: true,
         scrollbar: { ch: '│', style: { fg: '#334433' } },
-        style: { bg: 'default', fg: '#ffffff' }
+        style: { bg: 'default', fg: '#ffffff' },
+        mouse: true,
+        scrollable: true
     });
 
     // ─── Divider above input ──────────────────────────────────────────────────
@@ -89,7 +86,7 @@ function createChatUI({ onSubmit, onExit }) {
     const hintBar = blessed.box({
         bottom: 6, left: 0, width: '100%', height: 1,
         tags: true,
-        content: `{gray-fg}  Shift+Tab to accept edits  ·  /help for slash commands{/}`,
+        content: `{gray-fg}  Shift+Drag to select text  ·  Scroll to view history  ·  /help for commands{/}`,
         style: { bg: 'default' }
     });
 
@@ -355,7 +352,7 @@ function createChatUI({ onSubmit, onExit }) {
     // Ctrl+C — double-press to exit
     let ctrlCPressed = false;
     let ctrlCTimer = null;
-    const HINT_DEFAULT = `{gray-fg}  Ctrl+Y copy last response  ·  /help for commands{/}`;
+    const HINT_DEFAULT = `{gray-fg}  Shift+Drag to select text  ·  Ctrl+Y to copy  ·  /help for commands{/}`;
 
     screen.key(['C-c'], () => {
         if (ctrlCPressed) {
@@ -431,24 +428,58 @@ function createChatUI({ onSubmit, onExit }) {
      * @param {string} timestamp - ISO string or Date object
      */
     function appendMessage(role, text, timestamp = null) {
-        const lines = text.split('\n');
         const now = timestamp ? new Date(timestamp) : new Date();
         const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false });
 
+        // Helper to wrap text manually since blessed.log doesn't support indenting wrapped lines
+        const wrapText = (str, width) => {
+            const lines = [];
+            const originalLines = str.split('\n');
+            
+            for (let line of originalLines) {
+                if (line.length === 0) {
+                    lines.push('');
+                    continue;
+                }
+                
+                let current = '';
+                for (let i = 0; i < line.length; i++) {
+                    current += line[i];
+                    // Simple wrap based on character count. 
+                    // Note: This is an approximation for Thai, but better than terminal auto-wrap.
+                    if (current.length >= width) {
+                        lines.push(current);
+                        current = '';
+                    }
+                }
+                if (current) lines.push(current);
+            }
+            return lines;
+        };
+
+        const maxLineWidth = Math.max(screen.width - 15, 40);
+
         if (role === 'user') {
-            chatBox.log(`\n {bold}{#88e0b0-fg}>{/} {#ffffff-fg}${lines[0]}{/}`);
-            lines.slice(1).forEach(l => chatBox.log(`   {#ffffff-fg}${l}{/}`));
+            chatBox.log(`\n {bold}{#88e0b0-fg}● You{/}`);
+            const lines = wrapText(text, maxLineWidth);
+            lines.forEach(l => chatBox.log(`   {#ffffff-fg}${l}{/}`));
             chatBox.log(`   {gray-fg}${timeStr}{/}`);
         } else if (role === 'assistant') {
-            lastAssistantResponse = text; // track for Ctrl+Y
-            chatBox.log(`\n {bold}{#d4a8ff-fg}Mint:{/} {#ffffff-fg}${lines[0]}{/}`);
-            lines.slice(1).forEach(l => chatBox.log(`   {#ffffff-fg}${l}{/}`));
-            chatBox.log(`   {gray-fg}${timeStr}{/}`);
-            chatBox.log('');
+            lastAssistantResponse = text;
+            chatBox.log(`\n {bold}{#d4a8ff-fg}● Mint{/}`);
+            const lines = wrapText(text, maxLineWidth);
+            lines.forEach(l => chatBox.log(`   {#444444-fg}│{/} {#ffffff-fg}${l}{/}`));
+            chatBox.log(`   {#444444-fg}┕${'─'.repeat(4)}{/} {gray-fg}${timeStr}{/}`);
         } else if (role === 'system') {
-            chatBox.log(`\n {gray-fg}${text}{/}`);
+            const displayTag = text.startsWith('Action:') ? '{#88e0b0-fg}✦ Action:{/}' : '{#888888-fg}ℹ System:{/}';
+            const cleanText = text.replace(/^(Action:|System:)\s*/, '');
+            chatBox.log(`\n   ${displayTag}`);
+            const lines = wrapText(cleanText, maxLineWidth - 2);
+            lines.forEach(l => chatBox.log(`     {#ffffff-fg}${l}{/}`));
         } else if (role === 'error') {
-            chatBox.log(`\n {red-fg}✖ ${text}{/}`);
+            chatBox.log(`\n   {#ff5555-fg}✖ Error:{/}`);
+            const lines = wrapText(text, maxLineWidth - 2);
+            lines.forEach(l => chatBox.log(`     {#ff5555-fg}${l}{/}`));
         }
         screen.render();
     }
