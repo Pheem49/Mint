@@ -1,6 +1,6 @@
 {
   "name": "@pheem49/mint",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "A powerful Electron-based AI desktop assistant powered by Google Gemini, featuring screen vision, web automation, and proactive suggestions.",
   "main": "main.js",
   "scripts": {
