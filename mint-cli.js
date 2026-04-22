@@ -2,6 +2,7 @@
 require('dotenv').config({ quiet: true });
 const { Command } = require('commander');
 const { handleChat, resetChat } = require('./src/AI_Brain/Gemini_API');
+const pkg = require('./package.json');
 const { runOnboarding } = require('./src/CLI/onboarding');
 const { startAgent } = require('./src/AI_Brain/headless_agent');
 const { displayFeatures } = require('./src/CLI/list_features');
@@ -17,7 +18,7 @@ const startupTime = startupNow.toLocaleString('th-TH', {
     day: '2-digit', month: '2-digit', year: 'numeric', 
     hour: '2-digit', minute: '2-digit', hour12: false 
 }).replace(',', '');
-console.log(`\x1b[38;5;121m[Mint] ${startupTime} | Active Model: ${startupModel}\x1b[0m`);
+console.log(`\x1b[38;5;121m[Mint] v${pkg.version} | ${startupTime} | Active Model: ${startupModel}\x1b[0m`);
 
 // ANSI Colors
 const colors = {
@@ -35,7 +36,7 @@ const program = new Command();
 program
     .name('mint-ai')
     .description('Mint - Your Personal AI Assistant CLI')
-    .version('1.0.0');
+    .version(pkg.version);
 
 // Chat Command (Interactive Mode)
 program
@@ -218,6 +219,7 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
             const currentCfg = readConfig();
             appendMessage('system', [
                 'Current Configuration:',
+                `  Version   : v${pkg.version}`,
                 `  Provider  : ${currentCfg.aiProvider}`,
                 `  Model     : ${currentCfg.geminiModel}`,
                 `  Ollama    : ${currentCfg.ollamaModel}`,
