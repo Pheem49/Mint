@@ -7,6 +7,8 @@ const { runOnboarding } = require('./src/CLI/onboarding');
 const { startAgent } = require('./src/AI_Brain/headless_agent');
 const { displayFeatures } = require('./src/CLI/list_features');
 const { readConfig, writeConfig } = require('./src/System/config_manager');
+const { executeCodeTask } = require('./src/CLI/code_agent');
+const { detectCodeIntent, runChatRoutedTask } = require('./src/CLI/chat_router');
 const readline = require('readline');
 const { createChatUI } = require('./src/CLI/chat_ui');
 
@@ -93,22 +95,63 @@ program
         console.log(`${colors.gray}You will receive a notification when it's done.${colors.reset}\n`);
     });
 
+program
+    .command('code')
+    .description('Run Mint in workspace-aware coding mode for the current project')
+    .argument('<task>', 'Coding task to execute in the current working directory')
+    .action(async (task) => {
+        console.log(`\n${colors.mint}${colors.bright}[Mint Code]${colors.reset} Workspace: ${process.cwd()}`);
+        console.log(`${colors.gray}[Mint Code] Task: ${task}${colors.reset}\n`);
+
+        try {
+            const result = await executeCodeTask(task, {
+                cwd: process.cwd(),
+                onProgress: (message) => {
+                    console.log(`${colors.gray}[Mint Code] ${message}${colors.reset}`);
+                },
+                requestApproval: requestCodeApproval
+            });
+
+            console.log(`\n${colors.mint}${colors.bright}Summary${colors.reset}`);
+            console.log(result.summary);
+            console.log(`\n${colors.cyan}Verification:${colors.reset} ${result.verification}`);
+            console.log(`${colors.gray}Completed in ${result.steps} step(s).${colors.reset}\n`);
+        } catch (error) {
+            console.error(`\n${colors.pink}[Mint Code Error]${colors.reset} ${error.message}\n`);
+            process.exitCode = 1;
+        }
+    });
+
 program.parse(process.argv);
 
 /**
  * The Interactive Chat Loop — Gemini-style TUI
  */
 async function startInteractiveChat(initialMessage = null) {
-    const { screen, appendMessage, setThinking, updateStatusModel, copyLastResponse } = createChatUI({
+    const { screen, appendMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode } = createChatUI({
         onSubmit: async (text) => {
             if (text.startsWith('/')) {
                 // Slash commands via fake rl-compatible object
                 const fakeRl = { close: () => { } };
                 appendMessage('user', text);
-                await handleSlashCommandUI(text, appendMessage, updateStatusModel, copyLastResponse);
+                await handleSlashCommandUI(text, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode);
                 return;
             }
             appendMessage('user', text);
+
+            const routeDecision = await detectCodeIntent(text, process.cwd());
+            if (routeDecision.route === 'code') {
+                appendMessage('system', `Router: entering Code Mode. ${routeDecision.reason}`);
+                await runChatRoutedTask(text, {
+                    appendMessage,
+                    setThinking,
+                    requestApproval,
+                    setMode
+                });
+                return;
+            }
+
+            setMode('Chat');
 
             // Start thinking timer
             let seconds = 0;
@@ -149,18 +192,30 @@ async function startInteractiveChat(initialMessage = null) {
     // Handle initial message if passed via CLI arg
     if (initialMessage) {
         appendMessage('user', initialMessage);
-        let seconds = 0;
-        setThinking(true, seconds);
-        const timer = setInterval(() => { seconds++; setThinking(true, seconds); }, 1000);
-        try {
-            const response = await handleChat(initialMessage);
-            clearInterval(timer);
-            setThinking(false);
-            appendMessage('assistant', response.response, response.timestamp);
-        } catch (err) {
-            clearInterval(timer);
-            setThinking(false);
-            appendMessage('error', err.message);
+        const routeDecision = await detectCodeIntent(initialMessage, process.cwd());
+        if (routeDecision.route === 'code') {
+            appendMessage('system', `Router: entering Code Mode. ${routeDecision.reason}`);
+            await runChatRoutedTask(initialMessage, {
+                appendMessage,
+                setThinking,
+                requestApproval,
+                setMode
+            });
+        } else {
+            setMode('Chat');
+            let seconds = 0;
+            setThinking(true, seconds);
+            const timer = setInterval(() => { seconds++; setThinking(true, seconds); }, 1000);
+            try {
+                const response = await handleChat(initialMessage);
+                clearInterval(timer);
+                setThinking(false);
+                appendMessage('assistant', response.response, response.timestamp);
+            } catch (err) {
+                clearInterval(timer);
+                setThinking(false);
+                appendMessage('error', err.message);
+            }
         }
     }
 }
@@ -168,7 +223,7 @@ async function startInteractiveChat(initialMessage = null) {
 /**
  * Handles slash commands within the TUI context
  */
-async function handleSlashCommandUI(input, appendMessage, updateStatusModel, copyLastResponse) {
+async function handleSlashCommandUI(input, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode) {
     const parts = input.split(' ');
     const command = parts[0].toLowerCase();
     const args = parts.slice(1);
@@ -178,6 +233,7 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
         case '/?':
             appendMessage('system', [
                 'Mint Slash Commands:',
+                '  /code <task>     — Force workspace Code Mode',
                 '  /models [name]  — List or switch Gemini models',
                 '  /config         — Show current configuration',
                 '  /copy           — Copy last response to clipboard',
@@ -213,6 +269,19 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
                 appendMessage('system', `✅ Switched to: ${newModel}`);
                 if (updateStatusModel) updateStatusModel(newModel);
             }
+            break;
+
+        case '/code':
+            if (args.length === 0) {
+                appendMessage('system', 'Usage: /code <task>');
+                break;
+            }
+            await runChatRoutedTask(`/code ${args.join(' ')}`, {
+                appendMessage,
+                setThinking,
+                requestApproval,
+                setMode
+            });
             break;
 
         case '/config':
@@ -253,3 +322,36 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
     }
 }
 
+async function requestCodeApproval(request) {
+    const typeLabel = request.type === 'shell'
+        ? 'Shell Command'
+        : request.type === 'patch'
+            ? 'Patch Edit'
+            : 'File Write';
+
+    console.log(`\n${colors.yellow}${colors.bright}[Approval Required]${colors.reset} ${typeLabel}`);
+    if (request.label) {
+        console.log(`${colors.gray}${request.label}${colors.reset}`);
+    }
+    if (request.preview) {
+        console.log(`${colors.gray}${request.preview}${colors.reset}\n`);
+    }
+
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+
+    const answer = await new Promise((resolve) => {
+        rl.question('Approve this action? [y/N]: ', (value) => {
+            rl.close();
+            resolve((value || '').trim().toLowerCase());
+        });
+    });
+
+    const approved = answer === 'y' || answer === 'yes';
+    console.log(approved
+        ? `${colors.mint}[Mint Code] Approved.${colors.reset}\n`
+        : `${colors.pink}[Mint Code] Denied.${colors.reset}\n`);
+    return approved;
+}

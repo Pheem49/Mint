@@ -21,6 +21,7 @@ function displayFeatures() {
     console.log(`\n${colors.bright}CLI Commands:${colors.reset}`);
     const commands = [
         { cmd: 'mint', desc: 'Start interactive chat session (Default)' },
+        { cmd: 'mint code "<task>"', desc: 'Run workspace-aware coding agent in current directory' },
         { cmd: 'mint onboard', desc: 'Run setup wizard (API Key, Model, Daemon)' },
         { cmd: 'mint agent', desc: 'Run Mint as a background agent (Headless)' },
         { cmd: 'mint list', desc: 'Show this features & commands list' }

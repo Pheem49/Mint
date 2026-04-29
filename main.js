@@ -13,21 +13,22 @@ const { parseCommand } = require('./src/Command_Parser/parser');
 const pluginManager = require('./src/Plugins/plugin_manager');
 const { analyzeAndSuggest } = require('./src/AI_Brain/proactive_engine');
 const { recordBehavior, getBehaviorSummary } = require('./src/AI_Brain/behavior_memory');
-const { indexFile } = require('./src/AI_Brain/knowledge_base');
+const { indexFile, indexFolder } = require('./src/AI_Brain/knowledge_base');
+
 const SystemAutomation = require('./src/System/system_automation');
 const systemEvents = require('./src/System/system_events');
 const customWorkflows = require('./src/System/custom_workflows');
+const mcpManager = require('./src/Plugins/mcp_manager');
+const granularAutomation = require('./src/System/granular_automation');
 const googleTTS = require('google-tts-api');
 
 let mainWindow;
 let settingsWindow = null;
 let screenPickerWindow = null;
 let spotlightWindow = null;
-let floatingWindow = null;
 let widgetWindow = null;
 let proactiveGlowWindow = null;
 let tray = null;
-let floatingUnreadCount = 0;
 
 // =====================
 // Proactive Loop
@@ -192,7 +193,7 @@ function createWindow() {
     });
 
     mainWindow.on('focus', () => {
-        clearFloatingUnread();
+        // clearFloatingUnread(); // Disabled
     });
 }
 
@@ -291,41 +292,7 @@ function createSpotlightWindow() {
     });
 }
 
-function createFloatingWindow() {
-    if (floatingWindow) return;
-    const display = screen.getPrimaryDisplay();
-    const { x, y, width, height } = display.workArea;
-    const size = 72;
-    const margin = 20;
-    const posX = x + width - size - margin;
-    const posY = y + height - size - margin - 40;
-
-    floatingWindow = new BrowserWindow({
-        width: size,
-        height: size,
-        x: posX,
-        y: posY,
-        frame: false,
-        transparent: true,
-        resizable: false,
-        alwaysOnTop: true,
-        skipTaskbar: true,
-        show: true,
-        webPreferences: {
-            preload: path.join(__dirname, 'src/UI/preload-floating.js'),
-            nodeIntegration: false,
-            contextIsolation: true
-        }
-    });
-
-    floatingWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    floatingWindow.setAlwaysOnTop(true, 'floating');
-    floatingWindow.loadFile('src/UI/floating.html');
-
-    floatingWindow.on('closed', () => {
-        floatingWindow = null;
-    });
-}
+// Floating window logic removed
 
 function createWidgetWindow() {
     if (widgetWindow) return;
@@ -363,28 +330,21 @@ function createWidgetWindow() {
     });
 }
 
-function updateFloatingUnread() {
-    if (floatingWindow && !floatingWindow.isDestroyed()) {
-        floatingWindow.webContents.send('floating-notify', floatingUnreadCount);
-    }
-}
-
-function clearFloatingUnread() {
-    if (floatingUnreadCount === 0) return;
-    floatingUnreadCount = 0;
-    updateFloatingUnread();
-}
+// Floating unread logic removed
 
 app.whenReady().then(() => {
     const config = readConfig();
     createWindow();
     createTray();
-    createFloatingWindow();
+    // createFloatingWindow(); // Removed
     
     // Only show AI widget if enabled in settings
     if (config.showDesktopWidget !== false) {
         createWidgetWindow();
     }
+
+    // Initialize MCP Servers
+    mcpManager.init().catch(err => console.error('[MCP] Init Error:', err));
     
     // Start monitoring system events (battery, wifi, etc.)
     systemEvents.startMonitoring();
@@ -395,7 +355,7 @@ app.whenReady().then(() => {
     systemEvents.on('low-battery', (level) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('proactive-notification', {
-                message: `⚠️ แบตเตอรี่เหลือน้อยแล้วนะคะ (${level}%) อย่าลืมเสียบสายชาร์จนะค๊า ✨`,
+                message: `⚠️ Battery is low (${level}%). Please plug in your charger. ✨`,
                 type: 'warning'
             });
         }
@@ -403,7 +363,7 @@ app.whenReady().then(() => {
 
     systemEvents.on('connection-change', (isOnline) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
-            const msg = isOnline ? '✅ เชื่อมต่ออินเทอร์เน็ตได้แล้วค่ะ ✨' : '❌ การเชื่อมต่ออินเทอร์เน็ตขาดหายไปนะคะ';
+            const msg = isOnline ? '✅ Internet connection restored. ✨' : '❌ Internet connection lost.';
             mainWindow.webContents.send('proactive-notification', { message: msg, type: 'info' });
         }
     });
@@ -438,6 +398,7 @@ app.on('window-all-closed', (e) => {
 
 app.on('will-quit', () => {
     globalShortcut.unregisterAll();
+    mcpManager.shutdown();
 });
 
 // =====================
@@ -473,7 +434,7 @@ ipcMain.on('close-window', (event) => {
 });
 
 ipcMain.on('minimize-window', (event) => {
-    if (mainWindow) mainWindow.hide();
+    if (mainWindow) mainWindow.minimize();
 });
 
 ipcMain.on('quit-app', (event) => {
@@ -512,6 +473,7 @@ ipcMain.handle('get-settings', () => {
 });
 
 ipcMain.handle('save-settings', (event, config) => {
+    console.log('[Settings] Saving new config. MCP Servers count:', Object.keys(config.mcpServers || {}).length);
     const result = writeConfig(config);
     // Refresh API key if user updated it in settings
     refreshApiKeyFromConfig();
@@ -597,33 +559,7 @@ ipcMain.on('spotlight-resize', (event, width, height) => {
     }
 });
 
-// =====================
-// IPC — Floating Icon
-// =====================
-ipcMain.on('floating-click', () => {
-    if (mainWindow) {
-        mainWindow.show();
-        mainWindow.focus();
-    }
-    clearFloatingUnread();
-});
-
-ipcMain.on('ai-notify', () => {
-    floatingUnreadCount += 1;
-    updateFloatingUnread();
-});
-
-ipcMain.on('ai-notify-clear', () => {
-    clearFloatingUnread();
-});
-
-ipcMain.on('floating-drag-move', (_event, x, y) => {
-    if (!floatingWindow || floatingWindow.isDestroyed()) return;
-    const [width, height] = floatingWindow.getSize();
-    const posX = Math.round(x - width / 2);
-    const posY = Math.round(y - height / 2);
-    floatingWindow.setBounds({ x: posX, y: posY, width, height });
-});
+// Floating IPC removed
 
 ipcMain.handle('open-external', (event, url) => {
     shell.openExternal(url);
@@ -924,8 +860,11 @@ async function executeAction(action) {
             createFolder(action.target);
             break;
         case 'open_file':
-            await openFile(action.target);
-            break;
+            const fileRes = await openFile(action.target);
+            return fileRes || `Successfully opened file: ${action.target} ✅`;
+        case 'open_folder':
+            const folderRes = await openFile(action.target);
+            return folderRes || `Successfully opened folder: ${action.target} ✅`;
         case 'delete_file':
             await deleteFile(action.target);
             break;
@@ -934,6 +873,20 @@ async function executeAction(action) {
             break;
         case 'learn_file':
             return await indexFile(action.target);
+        case 'learn_folder':
+            const { indexFolder } = require('./src/AI_Brain/knowledge_base');
+            return await indexFolder(action.target);
+        case 'mcp_tool':
+            const mcpResult = await mcpManager.callTool(action.server, action.target, action.args);
+            return JSON.stringify(mcpResult.content);
+        case 'mouse_move':
+            return await granularAutomation.mouseMove(action.x, action.y);
+        case 'mouse_click':
+            return await granularAutomation.mouseClick(action.x, action.y, action.button || 1);
+        case 'type_text':
+            return await granularAutomation.typeText(action.target);
+        case 'key_tap':
+            return await granularAutomation.keyTap(action.target);
         case 'plugin':
             return await pluginManager.executePlugin(action.pluginName, action.target);
         case 'system_automation':

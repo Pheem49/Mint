@@ -16,8 +16,8 @@ class PluginManager {
 
             const files = fs.readdirSync(this.pluginsDir);
             for (const file of files) {
-                // Ignore self and non-JS files
-                if (file === 'plugin_manager.js' || !file.endsWith('.js')) continue;
+                // Ignore self and core system managers
+                if (file === 'plugin_manager.js' || file === 'mcp_manager.js' || !file.endsWith('.js')) continue;
 
                 const pluginPath = path.join(this.pluginsDir, file);
                 

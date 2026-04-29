@@ -10,14 +10,27 @@ try {
     app = null;
 }
 
-const MINT_DIR = path.join(os.homedir(), '.mint');
-if (!fs.existsSync(MINT_DIR)) {
-    fs.mkdirSync(MINT_DIR, { recursive: true });
+const CONFIG_DIR = path.join(os.homedir(), '.config', 'mint');
+const LEGACY_DIR = path.join(os.homedir(), '.mint');
+
+if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
 }
 
-const CONFIG_PATH = app && app.getPath
-    ? path.join(app.getPath('userData'), 'mint-config.json')
-    : path.join(MINT_DIR, 'mint-config.json');
+// Migration: If old .mint exists but new .config/mint is empty, move files
+if (fs.existsSync(LEGACY_DIR) && fs.readdirSync(CONFIG_DIR).length === 0) {
+    try {
+        const files = fs.readdirSync(LEGACY_DIR);
+        for (const file of files) {
+            fs.copyFileSync(path.join(LEGACY_DIR, file), path.join(CONFIG_DIR, file));
+        }
+        console.log('[Config] Migrated settings from ~/.mint to ~/.config/mint');
+    } catch (e) {
+        console.error('[Config] Migration failed:', e);
+    }
+}
+
+const CONFIG_PATH = path.join(CONFIG_DIR, 'mint-config.json');
 
 const DEFAULT_CONFIG = {
     theme: 'dark',
@@ -43,8 +56,15 @@ const DEFAULT_CONFIG = {
     pluginSpotifyEnabled: true,
     pluginCalendarEnabled: false,
     pluginDiscordEnabled: false,
-    showDesktopWidget: true
+    showDesktopWidget: true,
+    mcpServers: {},
+    anthropicApiKey: '',
+    openaiApiKey: '',
+    anthropicModel: 'claude-3-5-sonnet-latest',
+    openaiModel: 'gpt-4o'
 };
+
+
 
 function readConfig() {
     try {

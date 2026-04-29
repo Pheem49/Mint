@@ -6,9 +6,9 @@ const blessed = require('blessed');
 const path = require('path');
 const { execSync } = require('child_process');
 const { readConfig } = require('../System/config_manager');
-const fs = require('fs');
 
 const SLASH_COMMANDS = [
+    { name: '/code',   desc: 'Force workspace code mode for a task' },
     { name: '/models', desc: 'List or switch Gemini models' },
     { name: '/config', desc: 'Show current configuration' },
     { name: '/copy',   desc: 'Copy last response to clipboard' },
@@ -29,6 +29,9 @@ function createChatUI({ onSubmit, onExit }) {
     const config = readConfig();
     const modelName = config.geminiModel || 'gemini';
     const workspaceName = path.basename(process.cwd());
+    const HINT_DEFAULT = `{gray-fg}  Enter send  ·  Ctrl+Y copy  ·  /help commands{/}`;
+    const INPUT_FG = '#f8fafc';
+    const INPUT_BG = '#10141c';
 
     // ─── Screen ───────────────────────────────────────────────────────────────
     const screen = blessed.screen({
@@ -40,82 +43,80 @@ function createChatUI({ onSubmit, onExit }) {
 
     // ─── Banner ───────────────────────────────────────────────────────────────
     const banner = blessed.box({
-        top: 0, left: 0, width: '100%', height: 9,
+        top: 0, left: 1, width: '100%-2', height: 4,
         tags: true,
-        style: { bg: 'default' }
+        padding: { left: 1, right: 1 },
+        style: { bg: 'default', fg: '#d7dde8' }
     });
     banner.setContent([
-        `{bold}{#88e0b0-fg}  __  __ _       _      _____ _      _____ {/}`,
-        `{bold}{#88e0b0-fg} |  \\/  (_)     | |    / ____| |    |_   _|{/}`,
-        `{bold}{#88e0b0-fg} | \\  / |_ _ __ | |_  | |    | |      | |  {/}`,
-        `{bold}{#88e0b0-fg} | |\\/| | | '_ \\| __| | |    | |      | |  {/}`,
-        `{bold}{#88e0b0-fg} | |  | | | | | | |_  | |____| |____ _| |_ {/}`,
-        `{bold}{#88e0b0-fg} |_|  |_|_|_| |_|\\__|  \\_____|______|_____|{/}`,
-        ``,
-        `{bold}  Welcome to Mint Interactive AI!{/}  {gray-fg}Type '/help' for commands · 'exit' or Esc to quit{/}`
+        `{#88e0b0-fg} __  __ _       _    ___ _    ___ {/}`,
+        `{#88e0b0-fg}|  \\/  (_)_ __ | |_ / __| |  |_ _|{/}`,
+        `{#88e0b0-fg}| |\\/| | | '_ \\|  _| (__| |__ | | {/}`,
+        `{#88e0b0-fg}|_|  |_|_|_| |_|\\__|\\___|____|___|{/}`
     ].join('\n'));
 
-    // ─── Divider under banner ─────────────────────────────────────────────────
-    const divider1 = blessed.line({
-        top: 9, left: 0, width: '100%',
-        orientation: 'horizontal',
-        style: { fg: '#333333' }
+    const subBanner = blessed.box({
+        top: 4, left: 2, width: '100%-4', height: 2,
+        tags: true,
+        content: `{gray-fg}Type naturally to chat. Coding requests can auto-enter {/}{#ffd166-fg}Code Mode{/}{gray-fg}. Use {/}{#88e0b0-fg}/help{/}{gray-fg}, {/}{#88e0b0-fg}/code{/}{gray-fg}, or {/}{#88e0b0-fg}Esc{/}{gray-fg}.{/}`,
+        style: { bg: 'default', fg: '#9aa6bf' }
     });
 
     // ─── Chat log (scrollable) ────────────────────────────────────────────────
     const chatBox = blessed.log({
-        top: 10, left: 0, width: '100%',
-        bottom: 8,  // statusbar(3) + hint(1) + inputBox(3) + divider(1)
+        top: 6, left: 1, width: '100%-2',
+        bottom: 8,
         tags: true,
         scrollable: true,
         alwaysScroll: true,
-        scrollbar: { ch: '│', style: { fg: '#334433' } },
-        style: { bg: 'default', fg: '#ffffff' },
+        scrollbar: { ch: '┃', style: { fg: '#335d52' } },
+        style: { bg: '#171b24', fg: '#ffffff', border: { fg: '#2f3747' } },
         mouse: true,
-        scrollable: true
-    });
-
-    // ─── Divider above input ──────────────────────────────────────────────────
-    const divider2 = blessed.line({
-        bottom: 7, left: 0, width: '100%',
-        orientation: 'horizontal',
-        style: { fg: '#333333' }
+        scrollable: true,
+        border: { type: 'line' },
+        padding: { left: 1, right: 1, top: 0, bottom: 0 },
+        label: ' Conversation '
     });
 
     // ─── Hint bar ─────────────────────────────────────────────────────────────
     const hintBar = blessed.box({
-        bottom: 6, left: 0, width: '100%', height: 1,
+        bottom: 6, left: 1, width: '100%-2', height: 1,
         tags: true,
-        content: `{gray-fg}  Shift+Drag to select text  ·  Scroll to view history  ·  /help for commands{/}`,
+        content: HINT_DEFAULT,
         style: { bg: 'default' }
     });
 
     // ─── Input area ───────────────────────────────────────────────────────────
-    const inputBox = blessed.textarea({
-        bottom: 3, left: 0, width: '100%', height: 3,
+    const inputBox = blessed.textbox({
+        bottom: 3, left: 1, width: '100%-2', height: 3,
         tags: false,
         inputOnFocus: true,
         keys: true,
         style: {
-            bg: '#111111',
-            fg: '#ffffff',
-            border: { fg: '#334433' },
-            focus: { border: { fg: '#88e0b0' } }
+            bg: INPUT_BG,
+            fg: INPUT_FG,
+            border: { fg: '#335d52' },
+            focus: {
+                fg: INPUT_FG,
+                bg: INPUT_BG,
+                border: { fg: '#88e0b0' }
+            }
         },
         border: { type: 'line' },
-        padding: { left: 1 }
+        padding: { left: 1 },
+        label: ' Message '
     });
 
     // ─── Placeholder (SIBLING widget floating over input content area) ─────────
     // inputBox: bottom=3, height=3, border=1 → content row at bottom=4, left=2
     const placeholderWidget = blessed.text({
         bottom: 4,        // inside input content area (border offset)
-        left: 2,          // border(1) + padding(1)
-        width: '100%-4',  // minus borders and padding
+        left: 3,
+        width: '100%-6',
         height: 1,
-        content: '> Type your message or @path/to/file',
+        content: '> Ask anything, or describe a coding task for this workspace',
         tags: false,
-        style: { fg: '#555555', bg: '#111111' }
+        style: { fg: '#5d6678', bg: '#10141c' }
     });
 
     let placeholderVisible = true;
@@ -136,12 +137,40 @@ function createChatUI({ onSubmit, onExit }) {
         }
     }
 
+    function refreshInputStyles() {
+        inputBox.style.fg = INPUT_FG;
+        inputBox.style.bg = INPUT_BG;
+        if (inputBox.style.focus) {
+            inputBox.style.focus.fg = INPUT_FG;
+            inputBox.style.focus.bg = INPUT_BG;
+        }
+        if (Array.isArray(inputBox.children)) {
+            inputBox.children.forEach((child) => {
+                if (child.style) {
+                    child.style.fg = INPUT_FG;
+                    child.style.bg = INPUT_BG;
+                }
+            });
+        }
+        applyTerminalInputAttrs();
+    }
+
+    function applyTerminalInputAttrs() {
+        try {
+            if (!screen || !screen.program || typeof inputBox.sattr !== 'function' || typeof screen.codeAttr !== 'function') {
+                return;
+            }
+            const attr = inputBox.sattr(inputBox.style);
+            screen.program.write(screen.codeAttr(attr));
+        } catch (_) {}
+    }
+
     // ─── Status bar (3 columns: left / center / right) ──────────────────────
     const statusBar = blessed.box({
-        bottom: 0, left: 0, width: '100%', height: 3,
+        bottom: 0, left: 1, width: '100%-2', height: 3,
         tags: true,
-        style: { bg: '#111111', fg: '#888888' },
-        border: { type: 'line', fg: '#222222' }
+        style: { bg: '#10141c', fg: '#888888' },
+        border: { type: 'line', fg: '#222c38' }
     });
 
     // Left: workspace info
@@ -152,20 +181,20 @@ function createChatUI({ onSubmit, onExit }) {
         height: 1,
         tags: true,
         content: `  workspace {bold}(${workspaceName}){/bold}`,
-        style: { bg: '#111111', fg: '#888888' }
+        style: { bg: '#10141c', fg: '#93a0b7' }
     });
 
-    // Center: sandbox status
+    // Center: mode + status
     const statusCenter = blessed.text({
         parent: statusBar,
         top: 0,
         left: 'center',
-        width: '34%',
+        width: '44%',
         height: 1,
         align: 'center',
         tags: true,
-        content: `{#cc4444-fg}no sandbox{/}`,
-        style: { bg: '#111111', fg: '#888888' }
+        content: `{#88aaff-fg}[Chat]{/} {#cc4444-fg}no sandbox{/}`,
+        style: { bg: '#10141c', fg: '#888888' }
     });
 
     // Right: current model
@@ -177,16 +206,28 @@ function createChatUI({ onSubmit, onExit }) {
         align: 'right',
         tags: true,
         content: `{#88e0b0-fg}${modelName}{/}`,
-        style: { bg: '#111111', fg: '#888888' }
+        style: { bg: '#10141c', fg: '#88e0b0' }
     });
+
+    let activeMode = 'Chat';
+
+    function formatModeTag(mode) {
+        if (mode === 'Code') return `{#ffd166-fg}[Code]{/}`;
+        return `{#88aaff-fg}[Chat]{/}`;
+    }
 
     function updateStatusBar(thinkingText = null) {
         if (thinkingText) {
-            statusCenter.setContent(`{#88e0b0-fg}${thinkingText}{/}`);
+            statusCenter.setContent(`${formatModeTag(activeMode)} {#88e0b0-fg}${thinkingText}{/}`);
         } else {
-            statusCenter.setContent(`{#cc4444-fg}no sandbox{/}`);
+            statusCenter.setContent(`${formatModeTag(activeMode)} {#cc4444-fg}no sandbox{/}`);
         }
         screen.render();
+    }
+
+    function setMode(mode) {
+        activeMode = mode === 'Code' ? 'Code' : 'Chat';
+        updateStatusBar(null);
     }
 
     /** Update model name in status bar (called after /models switch) */
@@ -198,9 +239,8 @@ function createChatUI({ onSubmit, onExit }) {
 
     // ─── Append widgets to screen ─────────────────────────────────────────────
     screen.append(banner);
-    screen.append(divider1);
+    screen.append(subBanner);
     screen.append(chatBox);
-    screen.append(divider2);
     screen.append(hintBar);
     screen.append(inputBox);
     screen.append(statusBar);
@@ -209,9 +249,9 @@ function createChatUI({ onSubmit, onExit }) {
     // ─── Suggestion List ──────────────────────────────────────────────────────
     const commandList = blessed.list({
         parent: screen,
-        bottom: 6, // Above hintBar
-        left: 2,
-        width: '70%',
+        bottom: 6,
+        left: 3,
+        width: '64%',
         height: 8,
         tags: true,
         keys: false, // We will handle keys manually to keep focus on input
@@ -219,10 +259,10 @@ function createChatUI({ onSubmit, onExit }) {
         hidden: true,
         border: { type: 'line', fg: '#88e0b0' },
         style: {
-            bg: '#111111',
+            bg: '#10141c',
             fg: '#ffffff',
             selected: {
-                bg: '#334433',
+                bg: '#22352f',
                 fg: '#88e0b0',
                 bold: true
             }
@@ -230,6 +270,22 @@ function createChatUI({ onSubmit, onExit }) {
     });
 
     let activeSuggestions = [];
+    const approvalDialog = blessed.question({
+        parent: screen,
+        tags: true,
+        border: { type: 'line', fg: '#88e0b0' },
+        style: {
+            bg: '#10141c',
+            fg: '#ffffff',
+            border: { fg: '#88e0b0' }
+        },
+        width: '80%',
+        height: 'shrink',
+        top: 'center',
+        left: 'center',
+        label: ' Approval ',
+        hidden: true
+    });
 
     function updateSuggestions(filter = '') {
         activeSuggestions = SLASH_COMMANDS.filter(cmd => 
@@ -260,6 +316,7 @@ function createChatUI({ onSubmit, onExit }) {
 
     // Consolidated key handling
     inputBox.on('element keypress', (el, ch, key) => {
+        refreshInputStyles();
         // 1. Handle placeholder visibility
         if (!key.ctrl && !key.meta && key.name !== 'enter' && key.name !== 'tab') {
             if (ch) hidePlaceholder();
@@ -287,6 +344,7 @@ function createChatUI({ onSubmit, onExit }) {
 
         // 3. Logic for suggestions and placeholder after key is processed
         setImmediate(() => {
+            refreshInputStyles();
             const val = (inputBox.getValue ? inputBox.getValue() : inputBox.value) || '';
             const isCommand = val.startsWith('/') && !val.includes(' ');
             
@@ -308,6 +366,15 @@ function createChatUI({ onSubmit, onExit }) {
         });
     });
 
+    inputBox.on('focus', () => {
+        refreshInputStyles();
+        screen.render();
+    });
+
+    inputBox.on('keypress', () => {
+        applyTerminalInputAttrs();
+    });
+
 
     // Submit or Select Suggestion on Enter
     inputBox.key(['enter'], () => {
@@ -318,6 +385,7 @@ function createChatUI({ onSubmit, onExit }) {
                 commandList.hide();
                 hidePlaceholder();
                 inputBox.focus();
+                refreshInputStyles();
                 screen.render();
                 return; // Don't submit yet, let user add args or press enter again
             }
@@ -325,12 +393,20 @@ function createChatUI({ onSubmit, onExit }) {
 
         const raw = (inputBox.getValue ? inputBox.getValue() : inputBox.value) || '';
         const text = raw.trim();
-        if (!text) return;
+        if (!text) {
+            inputBox.clearValue();
+            showPlaceholder();
+            inputBox.focus();
+            refreshInputStyles();
+            screen.render();
+            return;
+        }
 
         // Clear input and restore placeholder
         inputBox.clearValue();
         showPlaceholder();
         inputBox.focus();
+        refreshInputStyles();
         screen.render();
 
         if (text.toLowerCase() === 'exit' || text.toLowerCase() === 'quit') {
@@ -342,18 +418,9 @@ function createChatUI({ onSubmit, onExit }) {
     });
 
     // Shift+Enter = newline in input
-    inputBox.key(['S-enter'], () => {
-        hidePlaceholder();
-        const val = (inputBox.getValue ? inputBox.getValue() : inputBox.value) || '';
-        inputBox.setValue(val + '\n');
-        screen.render();
-    });
-
     // Ctrl+C — double-press to exit
     let ctrlCPressed = false;
     let ctrlCTimer = null;
-    const HINT_DEFAULT = `{gray-fg}  Shift+Drag to select text  ·  Ctrl+Y to copy  ·  /help for commands{/}`;
-
     screen.key(['C-c'], () => {
         if (ctrlCPressed) {
             clearTimeout(ctrlCTimer);
@@ -415,6 +482,7 @@ function createChatUI({ onSubmit, onExit }) {
 
     // ─── Initial render ───────────────────────────────────────────────────────
     inputBox.focus();
+    refreshInputStyles();
     screen.render();
 
     // ─── Public API ───────────────────────────────────────────────────────────
@@ -427,59 +495,95 @@ function createChatUI({ onSubmit, onExit }) {
      * @param {string} text
      * @param {string} timestamp - ISO string or Date object
      */
+    function wrapLineSmart(line, width) {
+        if (line.length <= width) return [line];
+        if (!line.includes(' ')) {
+            const pieces = [];
+            for (let index = 0; index < line.length; index += width) {
+                pieces.push(line.slice(index, index + width));
+            }
+            return pieces;
+        }
+
+        const words = line.split(/\s+/);
+        const lines = [];
+        let current = '';
+        for (const word of words) {
+            if (word.length > width) {
+                if (current) {
+                    lines.push(current);
+                    current = '';
+                }
+                for (let index = 0; index < word.length; index += width) {
+                    const slice = word.slice(index, index + width);
+                    if (slice.length === width) {
+                        lines.push(slice);
+                    } else {
+                        current = slice;
+                    }
+                }
+                continue;
+            }
+
+            if (!current) {
+                current = word;
+                continue;
+            }
+
+            if (`${current} ${word}`.length <= width) {
+                current += ` ${word}`;
+            } else {
+                lines.push(current);
+                current = word;
+            }
+        }
+        if (current) lines.push(current);
+        return lines;
+    }
+
+    function wrapText(str, width) {
+        const lines = [];
+        const originalLines = String(str).split('\n');
+        for (const line of originalLines) {
+            if (line.length === 0) {
+                lines.push('');
+                continue;
+            }
+            lines.push(...wrapLineSmart(line, width));
+        }
+        return lines;
+    }
+
     function appendMessage(role, text, timestamp = null) {
         const now = timestamp ? new Date(timestamp) : new Date();
         const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false });
-
-        // Helper to wrap text manually since blessed.log doesn't support indenting wrapped lines
-        const wrapText = (str, width) => {
-            const lines = [];
-            const originalLines = str.split('\n');
-            
-            for (let line of originalLines) {
-                if (line.length === 0) {
-                    lines.push('');
-                    continue;
-                }
-                
-                let current = '';
-                for (let i = 0; i < line.length; i++) {
-                    current += line[i];
-                    // Simple wrap based on character count. 
-                    // Note: This is an approximation for Thai, but better than terminal auto-wrap.
-                    if (current.length >= width) {
-                        lines.push(current);
-                        current = '';
-                    }
-                }
-                if (current) lines.push(current);
-            }
-            return lines;
-        };
-
-        const maxLineWidth = Math.max(screen.width - 15, 40);
+        const maxLineWidth = Math.max(screen.width - 20, 36);
+        const lines = wrapText(text, maxLineWidth);
 
         if (role === 'user') {
-            chatBox.log(`\n {bold}{#88e0b0-fg}● You{/}`);
-            const lines = wrapText(text, maxLineWidth);
-            lines.forEach(l => chatBox.log(`   {#ffffff-fg}${l}{/}`));
-            chatBox.log(`   {gray-fg}${timeStr}{/}`);
+            chatBox.log(``);
+            chatBox.log(` {bold}{#88e0b0-fg}You{/} {gray-fg}${timeStr}{/}`);
+            lines.forEach(l => chatBox.log(` {#88e0b0-fg}▏{/} {#ffffff-fg}${l}{/}`));
         } else if (role === 'assistant') {
             lastAssistantResponse = text;
-            chatBox.log(`\n {bold}{#d4a8ff-fg}● Mint{/}`);
-            const lines = wrapText(text, maxLineWidth);
-            lines.forEach(l => chatBox.log(`   {#444444-fg}│{/} {#ffffff-fg}${l}{/}`));
-            chatBox.log(`   {#444444-fg}┕${'─'.repeat(4)}{/} {gray-fg}${timeStr}{/}`);
+            chatBox.log(``);
+            chatBox.log(` {bold}{#d4a8ff-fg}Mint{/} {gray-fg}${timeStr}{/}`);
+            lines.forEach(l => chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${l}{/}`));
         } else if (role === 'system') {
-            const displayTag = text.startsWith('Action:') ? '{#88e0b0-fg}✦ Action:{/}' : '{#888888-fg}ℹ System:{/}';
+            const displayTag = text.startsWith('Action:')
+                ? '{#88e0b0-fg}Action{/}'
+                : text.startsWith('[Code]')
+                    ? '{#ffd166-fg}Code{/}'
+                    : '{#8ba0ff-fg}System{/}';
             const cleanText = text.replace(/^(Action:|System:)\s*/, '');
-            chatBox.log(`\n   ${displayTag}`);
-            const lines = wrapText(cleanText, maxLineWidth - 2);
-            lines.forEach(l => chatBox.log(`     {#ffffff-fg}${l}{/}`));
+            const systemLines = wrapText(cleanText, maxLineWidth - 4);
+            chatBox.log(``);
+            chatBox.log(` {bold}${displayTag}{/}`);
+            systemLines.forEach(l => chatBox.log(`   {#95a2b8-fg}${l}{/}`));
         } else if (role === 'error') {
-            chatBox.log(`\n   {#ff5555-fg}✖ Error:{/}`);
-            const lines = wrapText(text, maxLineWidth - 2);
-            lines.forEach(l => chatBox.log(`     {#ff5555-fg}${l}{/}`));
+            chatBox.log(``);
+            chatBox.log(` {bold}{#ff6b6b-fg}Error{/} {gray-fg}${timeStr}{/}`);
+            lines.forEach(l => chatBox.log(` {#7a2e2e-fg}▏{/} {#ff7d7d-fg}${l}{/}`));
         }
         screen.render();
     }
@@ -499,7 +603,32 @@ function createChatUI({ onSubmit, onExit }) {
         return copyToClipboard(lastAssistantResponse);
     }
 
-    return { screen, appendMessage, setThinking, updateStatusModel, copyLastResponse };
+    function requestApproval(request) {
+        return new Promise((resolve) => {
+            const typeLabel = request.type === 'shell'
+                ? 'Shell Command'
+                : request.type === 'patch'
+                    ? 'Patch Edit'
+                    : 'File Write';
+            const preview = request.preview || request.label || '';
+            const message = [
+                `{bold}${typeLabel}{/bold}`,
+                '',
+                preview,
+                '',
+                'Approve this action?'
+            ].join('\n');
+
+            approvalDialog.ask(message, (approved) => {
+                inputBox.focus();
+                refreshInputStyles();
+                screen.render();
+                resolve(Boolean(approved));
+            });
+        });
+    }
+
+    return { screen, appendMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode };
 }
 
 module.exports = { createChatUI };

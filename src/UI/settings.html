@@ -352,6 +352,30 @@
                     </div>
                 </div>
             </section>
+
+            <!-- MCP Servers Management -->
+            <section class="setting-section" style="margin-top: 30px;">
+                <h2 class="section-title">🌐 MCP Servers (Model Context Protocol)</h2>
+                <p class="hint" style="margin-bottom: 16px;">Connect Mint to external tools like Google Search, GitHub, or Filesystem.</p>
+                
+                <div class="mcp-list" id="mcp-server-list" style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+                    <!-- MCP items will be injected here -->
+                </div>
+
+                <div class="add-mcp-box" style="padding: 16px; background: rgba(255,255,255,0.05); border-radius: 12px; border: 1px dashed var(--border);">
+                    <h3 style="font-size: 1rem; margin-bottom: 12px; color: var(--accent);">+ Add New MCP Server</h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                        <input type="text" id="mcp-new-name" placeholder="Server Name (e.g. google-search)">
+                        <input type="text" id="mcp-new-command" placeholder="Command (e.g. npx)">
+                    </div>
+                    <input type="text" id="mcp-new-args" placeholder="Arguments (e.g. -y @modelcontextprotocol/server-brave-search)" style="width: 100%; margin-bottom: 10px;">
+                    <textarea id="mcp-new-env" placeholder='Env (JSON format, e.g. {"BRAVE_API_KEY": "..."})' style="width: 100%; min-height: 60px; background: var(--input-bg); color: var(--text-main); border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.8rem;"></textarea>
+                    
+                    <button class="btn-primary" id="btn-add-mcp" style="margin-top: 10px; width: 100%;">Add MCP Server</button>
+                </div>
+                
+                <p class="hint" style="margin-top: 12px;">Browse more servers at <a href="https://github.com/modelcontextprotocol/servers" target="_blank">MCP Servers Registry</a></p>
+            </section>
                 </div>
                 <div class="tab-pane" id="sect-shortcuts">
                     <!-- Keyboard Shortcuts -->

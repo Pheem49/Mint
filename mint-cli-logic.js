@@ -26,11 +26,30 @@ async function executeAction(action) {
             case 'open_file':
                 await openFile(action.target);
                 return `Opening: ${action.target}`;
+            case 'open_folder':
+                await openFile(action.target);
+                return `Opening folder: ${action.target}`;
             case 'delete_file':
                 await deleteFile(action.target);
                 return `Deleted: ${action.target}`;
             case 'learn_file':
                 return await indexFile(action.target);
+            case 'mcp_tool':
+                const mcpManager = require('./src/Plugins/mcp_manager');
+                const mcpResult = await mcpManager.callTool(action.server, action.target, action.args);
+                return JSON.stringify(mcpResult.content);
+            case 'mouse_move':
+                const granularAutomation = require('./src/System/granular_automation');
+                return await granularAutomation.mouseMove(action.x, action.y);
+            case 'mouse_click':
+                const granularAutomationClick = require('./src/System/granular_automation');
+                return await granularAutomationClick.mouseClick(action.x, action.y, action.button || 1);
+            case 'type_text':
+                const granularAutomationType = require('./src/System/granular_automation');
+                return await granularAutomationType.typeText(action.target);
+            case 'key_tap':
+                const granularAutomationKey = require('./src/System/granular_automation');
+                return await granularAutomationKey.keyTap(action.target);
             case 'plugin':
                 return await pluginManager.executePlugin(action.pluginName, action.target);
             case 'system_automation':

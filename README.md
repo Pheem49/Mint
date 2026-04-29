@@ -22,6 +22,9 @@
 ## 🌟 Highlights
 
 - **Dual-Mode AI**: Switch between a beautiful **Desktop GUI** and a professional **CLI**.
+- **Code Agent Mode**: Use `mint code "<task>"` to inspect, edit, and verify a project directly from the current terminal workspace.
+- **Chat-First Workflow**: Regular Mint chat can now auto-route coding requests into workspace Code Mode, so the main chat acts as the control surface.
+- **Visible Mode State**: The CLI status bar now shows whether Mint is currently in `Chat` or `Code` mode.
 - **Interactive Slash Commands**: Manage models and settings in the terminal with `/model`, `/config`, `/clear`, etc.
 - **Smart TUI Experience**: Professional message framing, character-wrapped Thai text support, and mouse scroll wheel navigation.
 - **System Information Action**: Retrieve OS, Kernel, and Architecture details via natural language.
@@ -55,6 +58,7 @@ Mint CLI is built for speed and efficiency. Use the **`mint`** command from anyw
 
 ### 🚀 Professional Commands
 - **`mint`** : Start interactive chat mode (Default).
+- **`mint code "task"`** : Run Mint as a workspace-aware coding agent in the current project folder.
 - **`mint agent`** : Run Mint as a headless background agent (Monitoring mode).
 - **`mint agent "task"`** : **[NEW]** Start agent and execute an autonomous task immediately.
 - **`mint task "task"`** : Delegate a multi-step task to an already running background agent.
@@ -65,6 +69,30 @@ Mint CLI is built for speed and efficiency. Use the **`mint`** command from anyw
 
 ### 🤖 Autonomous Agent (Task Delegate)
 Mint isn't just a chatbot—it's an autonomous worker. Assign complex tasks that require multiple steps of reasoning.
+
+### 👨‍💻 Code Agent Mode
+Mint now includes a dedicated coding workflow as the first step toward a Claude-Code-like experience in the terminal.
+
+**What it can do now:**
+- Inspect the current workspace before editing
+- Search code across the repo
+- Read targeted file ranges
+- Run non-destructive shell commands in the project with interactive approval
+- Apply patch-based file edits with approval before changes are written
+- Reuse lightweight session memory and git/test context per project
+
+**Usage Example:**
+```bash
+mint code "fix the failing CLI command and verify it"
+```
+
+**Chat-first Example:**
+```bash
+mint
+> สำรวจโปรเจคนี้ให้หน่อย
+```
+
+Mint will classify the request, switch the status bar to `Code`, and return to `Chat` mode after the coding flow finishes.
 
 **Supported Autonomous Tools:**
 - 🌐 **Web Automation**: Full Puppeteer-based browsing, info extraction, and research.

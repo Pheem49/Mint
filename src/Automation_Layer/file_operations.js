@@ -17,36 +17,42 @@ const os = require('os');
 function resolveSmartPath(target) {
     if (!target) return target;
 
-    // 1. If it exists as is (absolute or relative to CWD), use it
-    if (fs.existsSync(target)) return target;
-
+    const home = os.homedir();
     const commonFolders = ['Downloads', 'Desktop', 'Documents', 'Videos', 'Pictures', 'Music', 'vscode', 'Games'];
 
-    // 2. If it starts with / and doesn't exist at root, try home directory
-    if (target.startsWith('/')) {
-        const homeRelative = path.join(os.homedir(), target.substring(1));
-        if (fs.existsSync(homeRelative)) return homeRelative;
-        
-        const cwdRelative = path.join(process.cwd(), target.substring(1));
-        if (fs.existsSync(cwdRelative)) return cwdRelative;
+    // 1. If it's already an absolute path and exists, use it
+    if (path.isAbsolute(target) && fs.existsSync(target)) return target;
 
-        const firstPart = target.split('/')[1];
-        if (commonFolders.includes(firstPart)) return homeRelative;
-    }
-
-    // 3. Handle ~ manually
+    // 2. If it starts with ~/ expand it
     if (target.startsWith('~/')) {
-        return path.join(os.homedir(), target.substring(2));
+        const expanded = path.join(home, target.substring(2));
+        if (fs.existsSync(expanded)) return expanded;
     }
 
-    // 4. If it's just a name, search in common folders
-    for (const folder of commonFolders) {
-        const potentialPath = path.join(os.homedir(), folder, target);
+    // 3. If it starts with / but doesn't exist at root, try home directory
+    if (target.startsWith('/')) {
+        const homeRelative = path.join(home, target.substring(1));
+        if (fs.existsSync(homeRelative)) return homeRelative;
+    }
+
+    // 4. Check if the target itself starts with a common folder (e.g., "Downloads/resume.pdf")
+    const parts = target.split(/[/\\]/);
+    const firstPart = parts[0];
+    if (commonFolders.includes(firstPart)) {
+        const potentialPath = path.join(home, target);
         if (fs.existsSync(potentialPath)) return potentialPath;
     }
 
+    // 5. Try searching the filename in all common folders
+    for (const folder of commonFolders) {
+        const potentialPath = path.join(home, folder, target);
+        if (fs.existsSync(potentialPath)) return potentialPath;
+    }
+
+    // 6. Final fallback: just return as is (might be relative to CWD)
     return target;
 }
+
 /**
  * สร้างโฟลเดอร์ใหม่
  * target: ชื่อโฟลเดอร์ หรือ absolute path
@@ -80,15 +86,31 @@ async function openFile(target) {
     if (!target) return;
     const resolvedPath = resolveSmartPath(target);
     
+    if (!fs.existsSync(resolvedPath)) {
+        console.error(`[OpenFile] File not found: ${resolvedPath}`);
+        return `ไม่พบไฟล์หรือโฟลเดอร์: ${target} ค่ะ`;
+    }
+
     if (shell) {
         const result = await shell.openPath(resolvedPath);
-        if (result) console.error('openFile error:', result);
+        if (result) {
+            console.error('openFile error:', result);
+            return `เกิดข้อผิดพลาดในการเปิดไฟล์: ${result}`;
+        }
     } else {
-        exec(`xdg-open "${resolvedPath}"`, (err) => {
-            if (err) console.error("Failed to open path via xdg-open:", err);
+        return new Promise((resolve) => {
+            exec(`xdg-open "${resolvedPath}"`, (err) => {
+                if (err) {
+                    console.error("Failed to open path via xdg-open:", err);
+                    resolve(`ไม่สามารถเปิดไฟล์ได้ค่ะ: ${err.message}`);
+                } else {
+                    resolve(true);
+                }
+            });
         });
     }
 }
+
 
 /**
  * ลบไฟล์หรือโฟลเดอร์ (ย้ายไป Trash)

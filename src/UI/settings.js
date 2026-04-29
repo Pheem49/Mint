@@ -23,7 +23,8 @@ const DEFAULT_CONFIG = {
     pluginSpotifyEnabled: true,
     pluginCalendarEnabled: false,
     pluginDiscordEnabled: false,
-    showDesktopWidget: true
+    showDesktopWidget: true,
+    mcpServers: {}
 };
 
 let currentConfig = { ...DEFAULT_CONFIG };
@@ -153,6 +154,9 @@ function applyConfig(config) {
     document.getElementById('proactive-cooldown').value = cooldown;
     updateIntervalDisplay(interval);
     updateCooldownDisplay(cooldown);
+
+    // MCP Servers
+    renderMcpServers();
 }
 
 function lightenColor(hex, amount) {
@@ -433,10 +437,98 @@ document.getElementById('save-btn').addEventListener('click', async () => {
     currentConfig.customBgEnd = document.getElementById('custom-bg-end').value;
     currentConfig.customPanelBg = document.getElementById('custom-panel-bg').value;
 
+    // Ensure mcpServers is part of the saved config
+    if (!currentConfig.mcpServers) currentConfig.mcpServers = {};
+
+    console.log('[Settings] Saving config with MCP servers:', Object.keys(currentConfig.mcpServers).length);
     await window.settingsApi.saveSettings(currentConfig);
     const btn = document.getElementById('save-btn');
     btn.textContent = '✅ Saved!';
     setTimeout(() => { btn.textContent = 'Save Settings'; }, 1500);
+});
+
+// --- MCP Management Functions ---
+function renderMcpServers() {
+    console.log('[Settings] Rendering MCP Servers UI...');
+    const list = document.getElementById('mcp-server-list');
+    if (!list) {
+        console.warn('[Settings] MCP list element not found in DOM.');
+        return;
+    }
+    list.innerHTML = '';
+
+    const servers = currentConfig.mcpServers || {};
+    const entries = Object.entries(servers);
+    console.log(`[Settings] Found ${entries.length} servers in currentConfig.`);
+
+    if (entries.length === 0) {
+        list.innerHTML = '<p class="hint" style="text-align: center; padding: 10px;">No MCP servers connected.</p>';
+        return;
+    }
+
+    for (const [name, cfg] of entries) {
+        const item = document.createElement('div');
+        item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 10px; border: 1px solid var(--border);';
+        
+        item.innerHTML = `
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+                <div style="font-weight: 600; color: var(--accent); display: flex; align-items: center; gap: 6px;">
+                    <span>🌐 ${name}</span>
+                </div>
+                <div style="font-size: 0.75rem; opacity: 0.7; font-family: monospace;">${cfg.command} ${cfg.args.join(' ')}</div>
+            </div>
+            <button class="btn-danger" style="padding: 6px 12px; font-size: 0.8rem;" onclick="removeMcpServer('${name}')">Remove</button>
+        `;
+        list.appendChild(item);
+    }
+}
+
+window.removeMcpServer = function(name) {
+    if (confirm(`Remove MCP server "${name}"?`)) {
+        delete currentConfig.mcpServers[name];
+        renderMcpServers();
+    }
+};
+
+document.getElementById('btn-add-mcp').addEventListener('click', () => {
+    const nameInput = document.getElementById('mcp-new-name');
+    const cmdInput = document.getElementById('mcp-new-command');
+    const argsInput = document.getElementById('mcp-new-args');
+    const envInput = document.getElementById('mcp-new-env');
+
+    const name = nameInput.value.trim();
+    const command = cmdInput.value.trim();
+    const argsStr = argsInput.value.trim();
+    const envStr = envInput.value.trim();
+
+    if (!name || !command) {
+        alert('Name and Command are required!');
+        return;
+    }
+
+    // Basic args split (by space, but respecting some quotes if possible - simple for now)
+    const args = argsStr ? argsStr.split(/\s+/) : [];
+    
+    let env = {};
+    if (envStr) {
+        try {
+            env = JSON.parse(envStr);
+        } catch (e) {
+            alert('Invalid JSON in Environment Variables field!');
+            return;
+        }
+    }
+
+    if (!currentConfig.mcpServers) currentConfig.mcpServers = {};
+    currentConfig.mcpServers[name] = { command, args, env };
+
+    // Clear inputs
+    nameInput.value = '';
+    cmdInput.value = '';
+    argsInput.value = '';
+    envInput.value = '';
+
+    renderMcpServers();
 });
 
 // Custom Workflows functionality
@@ -508,6 +600,11 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.add('active');
         const pane = document.getElementById(target);
         if (pane) pane.classList.add('active');
+
+        // Re-render MCP list if switching to plugins tab
+        if (target === 'sect-plugins') {
+            renderMcpServers();
+        }
     });
 });
 

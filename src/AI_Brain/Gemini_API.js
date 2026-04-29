@@ -2,11 +2,13 @@ const { GoogleGenAI } = require('@google/genai');
 const { readChatHistory, writeChatHistory, clearChatHistory } = require('../System/chat_history_manager');
 const { readConfig } = require('../System/config_manager');
 const pluginManager = require('../Plugins/plugin_manager');
+const mcpManager = require('../Plugins/mcp_manager');
 
 let ai = null;
 let activeApiKey = '';
 const initialEnvKey = (process.env.GEMINI_API_KEY || '').trim();
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'; // Optimized model
+const axios = require('axios');
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
 function decodeUnicode(str) {
   if (!str) return '';
@@ -53,11 +55,23 @@ Always respond exactly with valid JSON containing NO MARKDOWN FORMATTING (do not
 {
   "response": "Your conversational reply here (Matches user language).",
   "action": {
-    "type": "none" | "open_url" | "open_app" | "search" | "web_automation" | "create_folder" | "open_file" | "delete_file" | "clipboard_write" | "system_info" | "plugin" | "learn_file" | "system_automation",
+    "type": "none" | "open_url" | "open_app" | "search" | "web_automation" | "create_folder" | "open_file" | "open_folder" | "delete_file" | "clipboard_write" | "system_info" | "plugin" | "learn_file" | "learn_folder" | "system_automation" | "mcp_tool" | "mouse_click" | "mouse_move" | "type_text" | "key_tap",
+
     "pluginName": "only if type is plugin",
-    "target": "target string based on type or plugin instruction"
+    "server": "only if type is mcp_tool (server name)",
+    "target": "target string based on type (tool name if mcp_tool, text to type if type_text, key name if key_tap)",
+    "x": 0-1000, // required for mouse_click and mouse_move
+    "y": 0-1000, // required for mouse_click and mouse_move
+    "button": 1 | 2 | 3, // optional for mouse_click, 1=left, 2=middle, 3=right
+    "args": { "param": "value" } // only if type is mcp_tool
   }
 }
+
+COORDINATE SYSTEM:
+- When analyzing an image, use a coordinate system from 0 to 1000.
+- (0, 0) is the Top-Left corner.
+- (1000, 1000) is the Bottom-Right corner.
+- To click an element, estimate its center point and provide x and y.
 
 Examples:
 Input: "Hi, what is your name?"
@@ -122,7 +136,19 @@ const MAX_HISTORY_MESSAGES = 20; // Keep only the last 20 messages (approx 10 tu
 function createChat(history = []) {
   // Load plugins and get dynamic description for the prompt
   pluginManager.loadPlugins();
-  const dynamicPrompt = systemInstruction + pluginManager.getPromptDescriptions();
+  // Inject MCP Tools
+  const mcpTools = mcpManager.getAllTools();
+  let mcpPrompt = "\n\nAVAILABLE MCP TOOLS (Model Context Protocol):\n";
+  if (mcpTools.length > 0) {
+      mcpTools.forEach(tool => {
+          mcpPrompt += `- Server: ${tool.serverName}, Tool: ${tool.name}\n  Desc: ${tool.description}\n  Args: ${JSON.stringify(tool.inputSchema.properties)}\n`;
+      });
+      mcpPrompt += "\nTo use these tools, use action type 'mcp_tool', specify the 'server' name, set 'target' to the tool name, and provide 'args'.\n";
+  } else {
+      mcpPrompt += "No MCP tools currently connected.\n";
+  }
+
+  const dynamicPrompt = systemInstruction + pluginManager.getPromptDescriptions() + mcpPrompt;
 
   // Truncate history and strip custom fields like 'timestamp' before passing to SDK
   const cleanedHistory = (history || []).map(msg => ({
@@ -151,7 +177,18 @@ resolveApiKey();
 initAiClient();
 createChat(readChatHistory());
 
-const { searchKnowledge } = require('./knowledge_base');
+function shouldUseKnowledgeSearch(message) {
+  const text = (message || '').trim().toLowerCase();
+  if (!text) return false;
+
+  const knowledgeHints = [
+    'readme', 'docs', 'documentation', 'manual', 'guide', 'knowledge', 'rag',
+    'search local', 'search files', 'learn file', 'project files', 'source code',
+    'ไฟล์', 'เอกสาร', 'คู่มือ', 'ค้นหาในเครื่อง', 'ค้นหาไฟล์', 'ข้อมูลในเครื่อง', 'โค้ดโปรเจค'
+  ];
+
+  return knowledgeHints.some(hint => text.includes(hint));
+}
 
 async function handleChat(message, base64Image = null, base64Audio = null) {
   try {
@@ -175,7 +212,8 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
     let finalMessage = message;
     
     // Inject Local RAG Context
-    if (message && message.trim().length > 0) {
+    if (message && message.trim().length > 0 && shouldUseKnowledgeSearch(message)) {
+        const { searchKnowledge } = require('./knowledge_base');
         const retrievedDocs = await searchKnowledge(message);
         if (retrievedDocs && retrievedDocs.length > 0) {
             let contextString = `\n\n[LOCAL KNOWLEDGE BASE - USE THIS CONTEXT TO ANSWER]\n`;
@@ -187,9 +225,17 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
     }
 
     if (provider === 'ollama') {
-        const axios = require('axios');
-        return await handleOllamaChat(finalMessage, base64Image, base64Audio, config, axios);
+        return await handleOllamaChat(finalMessage, base64Image, base64Audio, config);
     }
+    
+    if (provider === 'anthropic') {
+        return await handleAnthropicChat(finalMessage, base64Image, config);
+    }
+    
+    if (provider === 'openai') {
+        return await handleOpenAIChat(finalMessage, base64Image, config);
+    }
+
 
     const desiredModel = resolveGeminiModel();
     if (!chat || activeModel !== desiredModel) {
@@ -288,7 +334,127 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
   }
 }
 
-async function handleOllamaChat(finalMessage, base64Image, base64Audio, config, axios) {
+async function handleAnthropicChat(finalMessage, base64Image, config) {
+    const history = readChatHistory() || [];
+    const apiKey = config.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return { response: "กรุณาใส่ Anthropic API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
+
+    const mcpTools = mcpManager.getAllTools();
+    let mcpPrompt = "\n\nAVAILABLE MCP TOOLS:\n";
+    mcpTools.forEach(tool => {
+        mcpPrompt += `- Server: ${tool.serverName}, Tool: ${tool.name}\n  Desc: ${tool.description}\n  Args: ${JSON.stringify(tool.inputSchema.properties)}\n`;
+    });
+
+    const systemPrompt = systemInstruction + pluginManager.getPromptDescriptions() + mcpPrompt;
+    
+    const messages = [];
+    for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
+        const role = msg.role === 'model' ? 'assistant' : 'user';
+        let text = Array.isArray(msg.parts) ? msg.parts.map(p => p.text || '').join('\n') : '';
+        if (text) messages.push({ role, content: text });
+    }
+
+    const content = [];
+    if (base64Image) {
+        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
+        const mimeType = base64Image.match(/^data:(image\/\w+);base64,/)[1];
+        content.push({
+            type: "image",
+            source: { type: "base64", media_type: mimeType, data: base64Data }
+        });
+    }
+    content.push({ type: "text", text: finalMessage || "Analyze this." });
+    messages.push({ role: "user", content });
+
+    const response = await axios.post('https://api.anthropic.com/v1/messages', {
+        model: config.anthropicModel || 'claude-3-5-sonnet-latest',
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: messages
+    }, {
+        headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json'
+        }
+    });
+
+    const outputText = response.data.content[0].text;
+    history.push({ role: 'user', parts: [{ text: finalMessage }] });
+    history.push({ role: 'model', parts: [{ text: outputText }] });
+    writeChatHistory(history.slice(-MAX_HISTORY_MESSAGES));
+
+    return parseAiResponse(outputText);
+}
+
+async function handleOpenAIChat(finalMessage, base64Image, config) {
+    const history = readChatHistory() || [];
+    const apiKey = config.openaiApiKey || process.env.OPENAI_API_KEY;
+    if (!apiKey) return { response: "กรุณาใส่ OpenAI API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
+
+    const mcpTools = mcpManager.getAllTools();
+    let mcpPrompt = "\n\nAVAILABLE MCP TOOLS:\n";
+    mcpTools.forEach(tool => {
+        mcpPrompt += `- Server: ${tool.serverName}, Tool: ${tool.name}\n  Desc: ${tool.description}\n  Args: ${JSON.stringify(tool.inputSchema.properties)}\n`;
+    });
+
+    const systemPrompt = systemInstruction + pluginManager.getPromptDescriptions() + mcpPrompt;
+    
+    const messages = [{ role: "system", content: systemPrompt }];
+    for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
+        const role = msg.role === 'model' ? 'assistant' : 'user';
+        let text = Array.isArray(msg.parts) ? msg.parts.map(p => p.text || '').join('\n') : '';
+        if (text) messages.push({ role, content: text });
+    }
+
+    const content = [{ type: "text", text: finalMessage || "Analyze this." }];
+    if (base64Image) {
+        content.push({
+            type: "image_url",
+            image_url: { url: base64Image }
+        });
+    }
+    messages.push({ role: "user", content });
+
+    const response = await axios.post('https://api.openai.com/v1/chat/completions', {
+        model: config.openaiModel || 'gpt-4o',
+        messages: messages,
+        response_format: { type: "json_object" }
+    }, {
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+        }
+    });
+
+    const outputText = response.data.choices[0].message.content;
+    history.push({ role: 'user', parts: [{ text: finalMessage }] });
+    history.push({ role: 'model', parts: [{ text: outputText }] });
+    writeChatHistory(history.slice(-MAX_HISTORY_MESSAGES));
+
+    return parseAiResponse(outputText);
+}
+
+function parseAiResponse(outputText) {
+    let parsedResult;
+    try {
+        parsedResult = JSON.parse(outputText);
+    } catch (e) {
+        const jsonMatch = outputText.match(/```json\n([\s\S]*?)\n```/) || outputText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            parsedResult = JSON.parse(jsonMatch[jsonMatch.length > 1 ? 1 : 0]);
+        } else {
+            parsedResult = { response: outputText, action: { type: "none", target: "" } };
+        }
+    }
+    if (parsedResult && typeof parsedResult.response === 'string') {
+        parsedResult.response = decodeUnicode(parsedResult.response);
+    }
+    parsedResult.timestamp = new Date().toISOString();
+    return parsedResult;
+}
+
+async function handleOllamaChat(finalMessage, base64Image, base64Audio, config) {
     const history = readChatHistory() || [];
     pluginManager.loadPlugins();
     
