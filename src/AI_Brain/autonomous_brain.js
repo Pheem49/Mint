@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 
 const os = require('os');
+const { sendNotification } = require('../System/notifications');
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -119,6 +120,7 @@ async function executeAutonomousTask(taskDescription, notifyCallback) {
                     break;
                 case 'propose_bash':
                     if (notifyCallback) notifyCallback(`💡 มิ้นท์เสนอให้รันคำสั่ง: ${actionObj.target}`);
+                    sendNotification('Mint Bash Proposal', `Mint wants to run: ${actionObj.target}`);
                     observation = `USER NOTIFIED of bash command: ${actionObj.target}. Note: You must wait for user to run it manually. If you can continue without it, do so. Otherwise, indicate you are waiting or done with this phase.`;
                     break;
                 default:

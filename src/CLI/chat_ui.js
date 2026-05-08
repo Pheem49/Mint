@@ -14,6 +14,10 @@ const SLASH_COMMANDS = [
     { name: '/copy',   desc: 'Copy last response to clipboard' },
     { name: '/clear',  desc: 'Clear conversation history' },
     { name: '/reset',  desc: 'Reset conversation history' },
+    { name: '/agent',  desc: 'Switch AI personas (coder, researcher, etc)' },
+    { name: '/workspace', desc: 'Manage project-specific contexts' },
+    { name: '/review', desc: 'Request a second-pass review of the last response' },
+    { name: '/stats',  desc: 'Show system health stats (CPU/RAM/Disk)' },
     { name: '/help',   desc: 'Show help information' },
     { name: '/exit',   desc: 'Exit Mint' }
 ];

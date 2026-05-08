@@ -3,6 +3,9 @@ require('dotenv').config({ quiet: true });
 const { Command } = require('commander');
 const { handleChat, handleGeminiChatStream, resetChat, refreshApiKeyFromConfig } = require('./src/AI_Brain/Gemini_API');
 const agentOrchestrator = require('./src/AI_Brain/agent_orchestrator');
+const workspaceManager = require('./src/CLI/workspace_manager');
+const systemMonitor = require('./src/Plugins/system_monitor');
+const { sendNotification } = require('./src/System/notifications');
 const pkg = require('./package.json');
 const { runOnboarding } = require('./src/CLI/onboarding');
 const { startAgent } = require('./src/AI_Brain/headless_agent');
@@ -129,6 +132,7 @@ program.parse(process.argv);
  * The Interactive Chat Loop — Gemini-style TUI
  */
 async function startInteractiveChat(initialMessage = null) {
+    let lastResponseText = "";
     const { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode } = createChatUI({
         onSubmit: async (text) => {
             if (text.startsWith('/')) {
@@ -152,12 +156,62 @@ async function startInteractiveChat(initialMessage = null) {
                     }
                     return;
                 }
-                
-                // Slash commands via fake rl-compatible object
-                const fakeRl = { close: () => { } };
-                appendMessage('user', text);
-                await handleSlashCommandUI(text, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode);
-                return;
+
+                if (text.startsWith('/stats')) {
+                    appendMessage('system', '📊 Fetching system statistics...');
+                    const stats = await systemMonitor.execute('stats');
+                    appendMessage('system', stats);
+                    return;
+                }
+
+                if (text.startsWith('/workspace')) {
+                    const args = text.split(' ');
+                    const subCmd = args[1];
+
+                    if (subCmd === 'add') {
+                        const name = args[2];
+                        const wsPath = args[3] || '.';
+                        const instructions = args.slice(4).join(' ');
+                        if (!name) {
+                            appendMessage('error', 'Usage: /workspace add <name> [path] [instructions]');
+                        } else {
+                            workspaceManager.addWorkspace(name, wsPath, instructions);
+                            appendMessage('system', `Workspace "${name}" registered at ${path.resolve(wsPath)}`);
+                            resetChat();
+                        }
+                    } else if (subCmd === 'list') {
+                        const all = workspaceManager.listWorkspaces();
+                        let listMsg = "Registered Workspaces:\n";
+                        for (const n in all) listMsg += `- ${n}: ${all[n].path}\n`;
+                        appendMessage('system', Object.keys(all).length ? listMsg : "No workspaces registered.");
+                    } else if (subCmd === 'remove') {
+                        const name = args[2];
+                        if (workspaceManager.removeWorkspace(name)) {
+                            appendMessage('system', `Removed workspace "${name}"`);
+                            resetChat();
+                        } else {
+                            appendMessage('error', `Workspace "${name}" not found.`);
+                        }
+                    } else {
+                        const ws = workspaceManager.getWorkspaceByPath(process.cwd());
+                        appendMessage('system', ws ? `Current Workspace: ${ws.name}\nPath: ${ws.path}` : "Not currently in a registered workspace.\nUsage: /workspace <add|list|remove>");
+                    }
+                    return;
+                if (text.startsWith('/review')) {
+                    if (!lastResponseText) {
+                        appendMessage('error', 'Nothing to review yet. Get a response first.');
+                        return;
+                    }
+                    agentOrchestrator.setAgent('reviewer');
+                    appendMessage('system', '⚖️ Requesting second-pass review from Mint Reviewer...');
+                    text = `Please review this previous response and provide a critique:\n\n${lastResponseText}`;
+                } else {
+                    // Other slash commands
+                    const fakeRl = { close: () => { } };
+                    appendMessage('user', text);
+                    await handleSlashCommandUI(text, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode);
+                    return;
+                }
             }
             appendMessage('user', text);
 
@@ -262,6 +316,7 @@ async function startInteractiveChat(initialMessage = null) {
                     const response = await handleChat(text);
                     clearInterval(timer);
                     setThinking(false);
+                    lastResponseText = response.response;
                     appendMessage('assistant', response.response, response.timestamp);
 
                     const { executeAction } = require('./mint-cli-logic');

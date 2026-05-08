@@ -5,6 +5,7 @@ const pluginManager = require('../Plugins/plugin_manager');
 const mcpManager = require('../Plugins/mcp_manager');
 const memoryStore = require('./memory_store');
 const agentOrchestrator = require('./agent_orchestrator');
+const workspaceManager = require('../CLI/workspace_manager');
 
 let ai = null;
 let activeApiKey = '';
@@ -119,7 +120,14 @@ function buildSystemPrompt() {
     const agent = agentOrchestrator.getCurrentAgent();
     const personaInstruction = `\n\n[CURRENT PERSONA: ${agent.name}]\n${agent.instruction}\n`;
 
-    return systemInstruction + personaInstruction + pluginManager.getPromptDescriptions() + mcpSection + userContext;
+    // Inject Workspace Context if available
+    let workspaceSection = "";
+    const ws = workspaceManager.getWorkspaceByPath(process.cwd());
+    if (ws) {
+        workspaceSection = `\n\n[WORKSPACE DETECTED: ${ws.name}]\nPath: ${ws.path}\nProject Instructions: ${ws.instructions}\n`;
+    }
+
+    return systemInstruction + personaInstruction + workspaceSection + pluginManager.getPromptDescriptions() + mcpSection + userContext;
 }
 
 function resolveApiKey() {
