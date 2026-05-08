@@ -4,6 +4,7 @@ const { readConfig, getAvailableProviders } = require('../System/config_manager'
 const pluginManager = require('../Plugins/plugin_manager');
 const mcpManager = require('../Plugins/mcp_manager');
 const memoryStore = require('./memory_store');
+const agentOrchestrator = require('./agent_orchestrator');
 
 let ai = null;
 let activeApiKey = '';
@@ -114,7 +115,11 @@ function buildSystemPrompt() {
     // Inject long-term user context (non-blocking read from SQLite)
     const userContext = memoryStore.getUserContext();
 
-    return systemInstruction + pluginManager.getPromptDescriptions() + mcpSection + userContext;
+    // Get current specialized persona instruction
+    const agent = agentOrchestrator.getCurrentAgent();
+    const personaInstruction = `\n\n[CURRENT PERSONA: ${agent.name}]\n${agent.instruction}\n`;
+
+    return systemInstruction + personaInstruction + pluginManager.getPromptDescriptions() + mcpSection + userContext;
 }
 
 function resolveApiKey() {
@@ -278,7 +283,11 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
 
 async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
   try {
-
+    // 1. Check cache first for text-only messages
+    if (finalMessage && !base64Image && !base64Audio) {
+        const cached = memoryStore.getCachedResponse(finalMessage);
+        if (cached) return cached;
+    }
 
     const desiredModel = resolveGeminiModel();
     if (!chat || activeModel !== desiredModel) {
@@ -371,7 +380,13 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
 
     // Record interaction for long-term memory (non-blocking)
     if (finalMessage && parsedResult.response) {
-        setImmediate(() => memoryStore.recordInteraction(finalMessage, parsedResult.response));
+        setImmediate(() => {
+            memoryStore.recordInteraction(finalMessage, parsedResult.response);
+            // Cache text-only responses
+            if (!base64Image && !base64Audio) {
+                memoryStore.cacheResponse(finalMessage, parsedResult);
+            }
+        });
     }
 
     return parsedResult;
@@ -389,6 +404,16 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
   try {
+    // 1. Check cache first
+    if (finalMessage && !base64Image && !base64Audio) {
+        const cached = memoryStore.getCachedResponse(finalMessage);
+        if (cached) {
+            yield { chunk: `{"response":"${cached.response.replace(/"/g, '\\"')}", "action": {"type":"none"}}` };
+            yield { done: true, parsed: cached, timestamp: cached.timestamp || new Date().toISOString() };
+            return;
+        }
+    }
+
     const desiredModel = resolveGeminiModel();
     if (!chat || activeModel !== desiredModel) {
         createChat(readChatHistory());
@@ -458,7 +483,13 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
 
     // Record for long-term memory
     if (finalMessage && parsedResult.response) {
-        setImmediate(() => memoryStore.recordInteraction(finalMessage, parsedResult.response));
+        setImmediate(() => {
+            memoryStore.recordInteraction(finalMessage, parsedResult.response);
+            // Cache text-only responses
+            if (!base64Image && !base64Audio) {
+                memoryStore.cacheResponse(finalMessage, parsedResult);
+            }
+        });
     }
 
     yield { done: true, parsed: parsedResult, timestamp: now };

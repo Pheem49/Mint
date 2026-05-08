@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 const { readConfig } = require('../System/config_manager');
 
 // ── Electron-safe app path ──────────────────────────────────────────────────
@@ -66,6 +67,13 @@ function getDb() {
             pattern   TEXT PRIMARY KEY,
             count     INTEGER DEFAULT 1,
             last_used DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
+        -- Response Cache: For repetitive exact queries
+        CREATE TABLE IF NOT EXISTS response_cache (
+            query_hash TEXT PRIMARY KEY,
+            response   TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
     `);
 
@@ -270,6 +278,33 @@ function getUserContext() {
     }
 }
 
+// ── Response Cache helpers ────────────────────────────────────────────────
+function getCachedResponse(query) {
+    try {
+        const hash = crypto.createHash('md5').update(query.trim().toLowerCase()).digest('hex');
+        const row = getDb().prepare('SELECT response, created_at FROM response_cache WHERE query_hash = ?').get(hash);
+        if (row) {
+            // Optional: check TTL (e.g., 24 hours)
+            const age = Date.now() - new Date(row.created_at).getTime();
+            if (age < 24 * 60 * 60 * 1000) {
+                return JSON.parse(row.response);
+            }
+        }
+    } catch (_) {}
+    return null;
+}
+
+function cacheResponse(query, responseObj) {
+    try {
+        const hash = crypto.createHash('md5').update(query.trim().toLowerCase()).digest('hex');
+        getDb().prepare(`
+            INSERT INTO response_cache (query_hash, response, created_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(query_hash) DO UPDATE SET response = excluded.response, created_at = CURRENT_TIMESTAMP
+        `).run(hash, JSON.stringify(responseObj));
+    } catch (_) {}
+}
+
 module.exports = {
     recordInteraction,
     saveSessionSummary,
@@ -278,4 +313,6 @@ module.exports = {
     getProfile,
     getTopPatterns,
     getRecentMemories,
+    getCachedResponse,
+    cacheResponse
 };

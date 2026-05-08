@@ -134,6 +134,32 @@ describe('memory_store — getUserContext', () => {
     });
 });
 
+// ── Response Cache tests ──────────────────────────────────────────────────
+
+describe('memory_store — response cache', () => {
+    test('stores and retrieves a response', () => {
+        const query = 'What is 2+2?';
+        const response = { response: '4', action: { type: 'none' } };
+        memStore.cacheResponse(query, response);
+        
+        const cached = memStore.getCachedResponse(query);
+        expect(cached.response).toBe('4');
+    });
+
+    test('returns null for missing query', () => {
+        expect(memStore.getCachedResponse('where is my cat?')).toBe(null);
+    });
+
+    test('is case-insensitive and ignores whitespace', () => {
+        const query = '  Hello World  ';
+        const response = { response: 'Hi!', action: { type: 'none' } };
+        memStore.cacheResponse(query, response);
+        
+        const cached = memStore.getCachedResponse('hello world');
+        expect(cached.response).toBe('Hi!');
+    });
+});
+
 // ── saveSessionSummary / getRecentMemories tests ───────────────────────────
 
 describe('memory_store — session summaries', () => {

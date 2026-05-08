@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 require('dotenv').config({ quiet: true });
 const { Command } = require('commander');
-const { handleChat, handleGeminiChatStream, resetChat } = require('./src/AI_Brain/Gemini_API');
+const { handleChat, handleGeminiChatStream, resetChat, refreshApiKeyFromConfig } = require('./src/AI_Brain/Gemini_API');
+const agentOrchestrator = require('./src/AI_Brain/agent_orchestrator');
 const pkg = require('./package.json');
 const { runOnboarding } = require('./src/CLI/onboarding');
 const { startAgent } = require('./src/AI_Brain/headless_agent');
@@ -131,6 +132,27 @@ async function startInteractiveChat(initialMessage = null) {
     const { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode } = createChatUI({
         onSubmit: async (text) => {
             if (text.startsWith('/')) {
+                if (text.startsWith('/agent')) {
+                    const args = text.split(' ');
+                    if (args[1] === 'list') {
+                        appendMessage('system', `Available Agents: ${agentOrchestrator.listAgents().join(', ')}`);
+                    } else if (args[1]) {
+                        const success = agentOrchestrator.setAgent(args[1]);
+                        if (success) {
+                            const agent = agentOrchestrator.getCurrentAgent();
+                            appendMessage('system', `Switched to Agent: ${agent.icon} ${agent.name}`);
+                            updateStatusModel(null, agent.name); // Pass name to status bar
+                            resetChat(); // Reset to apply new system prompt
+                        } else {
+                            appendMessage('error', `Agent "${args[1]}" not found. Try /agent list`);
+                        }
+                    } else {
+                        const agent = agentOrchestrator.getCurrentAgent();
+                        appendMessage('system', `Current Agent: ${agent.icon} ${agent.name}\nUsage: /agent <type> or /agent list`);
+                    }
+                    return;
+                }
+                
                 // Slash commands via fake rl-compatible object
                 const fakeRl = { close: () => { } };
                 appendMessage('user', text);
@@ -164,6 +186,8 @@ async function startInteractiveChat(initialMessage = null) {
             try {
                 const config = require('./src/System/config_manager').readConfig();
                 const provider = config.aiProvider || 'gemini';
+                const currentAgent = agentOrchestrator.getCurrentAgent();
+                updateStatusModel(null, currentAgent.name);
                 if (provider === 'gemini') {
                     // ── Streaming path (Gemini only) ──────────────────────────────────
                     // Gemini returns JSON so we buffer all chunks and progressively
