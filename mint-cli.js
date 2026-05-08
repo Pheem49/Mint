@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 require('dotenv').config({ quiet: true });
 const { Command } = require('commander');
-const { handleChat, resetChat } = require('./src/AI_Brain/Gemini_API');
+const { handleChat, handleGeminiChatStream, resetChat } = require('./src/AI_Brain/Gemini_API');
 const pkg = require('./package.json');
 const { runOnboarding } = require('./src/CLI/onboarding');
 const { startAgent } = require('./src/AI_Brain/headless_agent');
@@ -128,7 +128,7 @@ program.parse(process.argv);
  * The Interactive Chat Loop — Gemini-style TUI
  */
 async function startInteractiveChat(initialMessage = null) {
-    const { screen, appendMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode } = createChatUI({
+    const { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode } = createChatUI({
         onSubmit: async (text) => {
             if (text.startsWith('/')) {
                 // Slash commands via fake rl-compatible object
@@ -162,16 +162,89 @@ async function startInteractiveChat(initialMessage = null) {
             }, 1000);
 
             try {
-                const response = await handleChat(text);
-                clearInterval(timer);
-                setThinking(false);
-                appendMessage('assistant', response.response, response.timestamp);
+                const config = require('./src/System/config_manager').readConfig();
+                const provider = config.aiProvider || 'gemini';
+                if (provider === 'gemini') {
+                    // ── Streaming path (Gemini only) ──────────────────────────────────
+                    // Gemini returns JSON so we buffer all chunks and progressively
+                    // extract the "response" field as more of the JSON arrives.
+                    clearInterval(timer);
 
-                // Execute Actions
-                const { executeAction } = require('./mint-cli-logic');
-                if (response.action && response.action.type !== 'none') {
-                    const result = await executeAction(response.action);
-                    if (result) appendMessage('system', `Action: ${result}`);
+                    let jsonBuffer = '';
+                    let finalParsed = null;
+                    let streamer = null;
+                    let displayedChars = 0; // chars of response text already sent to TUI
+
+                    try {
+                        for await (const event of handleGeminiChatStream(text)) {
+                            if (event.chunk) {
+                                jsonBuffer += event.chunk;
+
+                                // Progressively extract readable text from the growing JSON buffer
+                                const match = jsonBuffer.match(/"response"\s*:\s*"((?:[^"\\]|\\.)*)"/s);
+                                if (match) {
+                                    const fullText = match[1]
+                                        .replace(/\\n/g, '\n')
+                                        .replace(/\\"/g, '"')
+                                        .replace(/\\\\/g, '\\');
+                                    const newChars = fullText.slice(displayedChars);
+                                    if (newChars.length > 0) {
+                                        if (!streamer) {
+                                            setThinking(false);
+                                            streamer = streamMessage('assistant');
+                                        }
+                                        streamer.appendChunk(newChars);
+                                        displayedChars = fullText.length;
+                                    }
+                                }
+                            } else if (event.done) {
+                                finalParsed = event.parsed;
+                                // Flush any remaining response text not yet displayed
+                                if (finalParsed && finalParsed.response) {
+                                    const remaining = finalParsed.response.slice(displayedChars);
+                                    if (!streamer) {
+                                        setThinking(false);
+                                        streamer = streamMessage('assistant');
+                                    }
+                                    if (remaining) streamer.appendChunk(remaining);
+                                }
+                                if (streamer) {
+                                    streamer.finalize(event.timestamp);
+                                } else {
+                                    setThinking(false);
+                                    appendMessage('assistant',
+                                        finalParsed ? finalParsed.response : '',
+                                        event.timestamp);
+                                }
+                            }
+                        }
+                    } catch (streamErr) {
+                        setThinking(false);
+                        appendMessage('error', streamErr.message);
+                        return;
+                    }
+
+                    // Execute Actions from the final parsed response
+                    if (finalParsed) {
+                        const { executeAction } = require('./mint-cli-logic');
+                        if (finalParsed.action && finalParsed.action.type !== 'none') {
+                            const result = await executeAction(finalParsed.action);
+                            if (result) appendMessage('system', `Action: ${result}`);
+                        }
+                    }
+
+                } else {
+                    // ── Non-streaming fallback (Ollama, Anthropic, OpenAI, etc.) ──
+                    const response = await handleChat(text);
+                    clearInterval(timer);
+                    setThinking(false);
+                    appendMessage('assistant', response.response, response.timestamp);
+
+                    const { executeAction } = require('./mint-cli-logic');
+                    if (response.action && response.action.type !== 'none') {
+                        const result = await executeAction(response.action);
+                        if (result) appendMessage('system', `Action: ${result}`);
+                    }
                 }
             } catch (err) {
                 clearInterval(timer);
@@ -248,26 +321,47 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
             const config = readConfig();
             if (args.length === 0) {
                 appendMessage('system', [
-                    `Current Model: ${config.geminiModel}`,
-                    'Available Presets:',
-                    '  - gemini-2.5-flash (Default)',
-                    '  - gemini-3.1-flash-lite-preview',
-                    '  - gemini-3.1-flash-lite',
-                    '  - ollama (local provider)',
+                    `Current Provider: ${config.aiProvider}`,
+                    `Current Gemini Model: ${config.geminiModel}`,
+                    'Available Providers/Presets:',
+                    '  - gemini-2.5-flash (Default Gemini)',
+                    '  - ollama (Local provider)',
+                    '  - anthropic (Claude)',
+                    '  - openai (GPT)',
+                    '  - huggingface (Inference API)',
+                    '  - local (LM Studio / OpenAI Compatible)',
                     'Usage: /models <name> to switch'
                 ].join('\n'));
             } else {
                 const { writeConfig } = require('./src/System/config_manager');
                 const newModel = args[0];
+                let newProvider = 'gemini';
+                
                 if (newModel === 'ollama') {
-                    config.aiProvider = 'ollama';
+                    newProvider = 'ollama';
+                } else if (newModel === 'anthropic') {
+                    newProvider = 'anthropic';
+                } else if (newModel === 'openai') {
+                    newProvider = 'openai';
+                } else if (newModel === 'huggingface') {
+                    newProvider = 'huggingface';
+                } else if (newModel === 'local' || newModel === 'local_openai') {
+                    newProvider = 'local_openai';
+                } else if (newModel.startsWith('gpt-')) {
+                    newProvider = 'openai';
+                    config.openaiModel = newModel;
+                } else if (newModel.startsWith('claude-')) {
+                    newProvider = 'anthropic';
+                    config.anthropicModel = newModel;
                 } else {
-                    config.aiProvider = 'gemini';
+                    newProvider = 'gemini';
                     config.geminiModel = newModel;
                 }
+                
+                config.aiProvider = newProvider;
                 writeConfig(config);
-                appendMessage('system', `✅ Switched to: ${newModel}`);
-                if (updateStatusModel) updateStatusModel(newModel);
+                appendMessage('system', `✅ Switched to: ${newProvider} ${newProvider === 'gemini' ? `(${newModel})` : ''}`);
+                if (updateStatusModel) updateStatusModel(newProvider === 'gemini' ? newModel : newProvider);
             }
             break;
 

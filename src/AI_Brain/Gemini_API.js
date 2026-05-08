@@ -1,8 +1,9 @@
 const { GoogleGenAI } = require('@google/genai');
 const { readChatHistory, writeChatHistory, clearChatHistory } = require('../System/chat_history_manager');
-const { readConfig } = require('../System/config_manager');
+const { readConfig, getAvailableProviders } = require('../System/config_manager');
 const pluginManager = require('../Plugins/plugin_manager');
 const mcpManager = require('../Plugins/mcp_manager');
+const memoryStore = require('./memory_store');
 
 let ai = null;
 let activeApiKey = '';
@@ -92,6 +93,30 @@ Input: "อากาศวันนี้เป็นยังไง" or "What's
 Output: { "response": "มิ้นท์ไปดูอากาศให้เลยนะคะ", "action": { "type": "system_info", "target": "Bangkok" } }
 `;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// buildSystemPrompt() — single source of truth for all provider system prompts
+// Replaces 5 previously duplicated mcpPrompt blocks.
+// ─────────────────────────────────────────────────────────────────────────────
+function buildSystemPrompt() {
+    pluginManager.loadPlugins();
+    const mcpTools = mcpManager.getAllTools();
+
+    let mcpSection = '\n\nAVAILABLE MCP TOOLS (Model Context Protocol):\n';
+    if (mcpTools.length > 0) {
+        mcpTools.forEach(tool => {
+            mcpSection += `- Server: ${tool.serverName}, Tool: ${tool.name}\n  Desc: ${tool.description}\n  Args: ${JSON.stringify(tool.inputSchema.properties)}\n`;
+        });
+        mcpSection += "\nTo use these tools, use action type 'mcp_tool', specify the 'server' name, set 'target' to the tool name, and provide 'args'.\n";
+    } else {
+        mcpSection += 'No MCP tools currently connected.\n';
+    }
+
+    // Inject long-term user context (non-blocking read from SQLite)
+    const userContext = memoryStore.getUserContext();
+
+    return systemInstruction + pluginManager.getPromptDescriptions() + mcpSection + userContext;
+}
+
 function resolveApiKey() {
   let settingsKey = '';
   try {
@@ -134,22 +159,6 @@ let lastLoggedModel = '';
 const MAX_HISTORY_MESSAGES = 20; // Keep only the last 20 messages (approx 10 turns)
 
 function createChat(history = []) {
-  // Load plugins and get dynamic description for the prompt
-  pluginManager.loadPlugins();
-  // Inject MCP Tools
-  const mcpTools = mcpManager.getAllTools();
-  let mcpPrompt = "\n\nAVAILABLE MCP TOOLS (Model Context Protocol):\n";
-  if (mcpTools.length > 0) {
-      mcpTools.forEach(tool => {
-          mcpPrompt += `- Server: ${tool.serverName}, Tool: ${tool.name}\n  Desc: ${tool.description}\n  Args: ${JSON.stringify(tool.inputSchema.properties)}\n`;
-      });
-      mcpPrompt += "\nTo use these tools, use action type 'mcp_tool', specify the 'server' name, set 'target' to the tool name, and provide 'args'.\n";
-  } else {
-      mcpPrompt += "No MCP tools currently connected.\n";
-  }
-
-  const dynamicPrompt = systemInstruction + pluginManager.getPromptDescriptions() + mcpPrompt;
-
   // Truncate history and strip custom fields like 'timestamp' before passing to SDK
   const cleanedHistory = (history || []).map(msg => ({
     role: msg.role,
@@ -159,13 +168,12 @@ function createChat(history = []) {
 
   activeModel = resolveGeminiModel();
   if (activeModel && activeModel !== lastLoggedModel) {
-    // console.log(`[Gemini] Using model: ${activeModel}`);
     lastLoggedModel = activeModel;
   }
   chat = ai.chats.create({
     model: activeModel,
     config: {
-      systemInstruction: dynamicPrompt,
+      systemInstruction: buildSystemPrompt(),
       responseMimeType: "application/json"
     },
     history: truncatedHistory
@@ -224,17 +232,52 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
         }
     }
 
-    if (provider === 'ollama') {
-        return await handleOllamaChat(finalMessage, base64Image, base64Audio, config);
-    }
+    const { getAvailableProviders } = require('../System/config_manager');
+    const availableProviders = getAvailableProviders(config);
     
-    if (provider === 'anthropic') {
-        return await handleAnthropicChat(finalMessage, base64Image, config);
+    // Ensure the requested provider is prioritized. If not available, fallback to the first available.
+    let providersToTry = [provider];
+    const alternates = availableProviders.filter(p => p !== provider);
+    providersToTry = providersToTry.concat(alternates);
+
+    for (let i = 0; i < providersToTry.length; i++) {
+        const currentProv = providersToTry[i];
+        try {
+            if (currentProv === 'ollama') {
+                return await handleOllamaChat(finalMessage, base64Image, base64Audio, config);
+            }
+            if (currentProv === 'anthropic') {
+                return await handleAnthropicChat(finalMessage, base64Image, config);
+            }
+            if (currentProv === 'openai') {
+                return await handleOpenAIChat(finalMessage, base64Image, config);
+            }
+            if (currentProv === 'local_openai') {
+                return await handleLocalOpenAIChat(finalMessage, base64Image, config);
+            }
+            if (currentProv === 'huggingface') {
+                return await handleHuggingFaceChat(finalMessage, base64Image, config);
+            }
+
+            return await handleGeminiChat(finalMessage, base64Image, base64Audio);
+        } catch (error) {
+            console.error(`[Fallback System] Provider '${currentProv}' failed:`, error.message);
+            if (i === providersToTry.length - 1) {
+                console.error("[Fallback System] All available providers failed.");
+                throw error; // No more providers to fallback to
+            }
+            console.log(`[Fallback System] Switching to next available provider: '${providersToTry[i+1]}'`);
+            // Continue the loop to try the next provider
+        }
     }
-    
-    if (provider === 'openai') {
-        return await handleOpenAIChat(finalMessage, base64Image, config);
-    }
+  } catch (globalError) {
+    console.error("handleChat error:", globalError);
+    throw globalError;
+  }
+}
+
+async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
+  try {
 
 
     const desiredModel = resolveGeminiModel();
@@ -318,13 +361,18 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
       }
     }
 
-    // Finally, decode any remaining unicode escapes in the response text
+    // Decode any remaining unicode escapes in the response text
     if (parsedResult && typeof parsedResult.response === 'string') {
         parsedResult.response = decodeUnicode(parsedResult.response);
     }
     
     // Attach timestamp to the result
     parsedResult.timestamp = now;
+
+    // Record interaction for long-term memory (non-blocking)
+    if (finalMessage && parsedResult.response) {
+        setImmediate(() => memoryStore.recordInteraction(finalMessage, parsedResult.response));
+    }
 
     return parsedResult;
 
@@ -334,18 +382,99 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// handleGeminiChatStream() — Streaming async generator (CLI only)
+// Yields: { chunk: string }  during streaming
+//         { done: true, parsed: object, timestamp: string }  when complete
+// ─────────────────────────────────────────────────────────────────────────────
+async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
+  try {
+    const desiredModel = resolveGeminiModel();
+    if (!chat || activeModel !== desiredModel) {
+        createChat(readChatHistory());
+    }
+
+    const parts = [];
+    if (finalMessage) {
+        parts.push({ text: finalMessage });
+    } else if (base64Audio && !base64Image) {
+        parts.push({ text: "Please listen to this voice command and respond in Thai with the appropriate JSON action if needed." });
+    } else if (!base64Image && !base64Audio) {
+        parts.push({ text: "Analyze this input." });
+    }
+    if (base64Image) {
+        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
+        parts.push({ inlineData: { mimeType: "image/png", data: base64Data } });
+    }
+    if (base64Audio) {
+        let mimeType = "audio/webm";
+        const mimeMatch = base64Audio.match(/^data:(audio\/\w+);base64,/);
+        if (mimeMatch) mimeType = mimeMatch[1];
+        const base64Data = base64Audio.replace(/^data:audio\/\w+;base64,/, '');
+        parts.push({ inlineData: { mimeType, data: base64Data } });
+    }
+
+    const stream = await chat.sendMessageStream({ message: parts });
+    let fullText = '';
+
+    for await (const chunk of stream) {
+        let chunkText = '';
+        try {
+            chunkText = (typeof chunk.text === 'function') ? chunk.text() : (chunk.text || '');
+        } catch (_) {}
+        if (chunkText) {
+            fullText += chunkText;
+            yield { chunk: chunkText };
+        }
+    }
+
+    // Save history
+    const history = await chat.getHistory();
+    const now = new Date().toISOString();
+    if (history.length >= 2) {
+        const modelMsg = history[history.length - 1];
+        const userMsg  = history[history.length - 2];
+        if (!modelMsg.timestamp) modelMsg.timestamp = now;
+        if (!userMsg.timestamp)  userMsg.timestamp  = now;
+    }
+    writeChatHistory(history);
+
+    // Parse complete JSON response
+    let parsedResult;
+    try {
+        parsedResult = JSON.parse(fullText);
+    } catch (_) {
+        const jsonMatch = fullText.match(/```json\n([\s\S]*?)\n```/) || fullText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            parsedResult = JSON.parse(jsonMatch[jsonMatch.length > 1 ? 1 : 0]);
+        } else {
+            parsedResult = { response: fullText, action: { type: 'none', target: '' } };
+        }
+    }
+    if (parsedResult && typeof parsedResult.response === 'string') {
+        parsedResult.response = decodeUnicode(parsedResult.response);
+    }
+    parsedResult.timestamp = now;
+
+    // Record for long-term memory
+    if (finalMessage && parsedResult.response) {
+        setImmediate(() => memoryStore.recordInteraction(finalMessage, parsedResult.response));
+    }
+
+    yield { done: true, parsed: parsedResult, timestamp: now };
+
+  } catch (error) {
+    console.error('[Stream] Gemini stream error:', error);
+    throw error;
+  }
+}
+
 async function handleAnthropicChat(finalMessage, base64Image, config) {
     const history = readChatHistory() || [];
     const apiKey = config.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return { response: "กรุณาใส่ Anthropic API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
 
-    const mcpTools = mcpManager.getAllTools();
-    let mcpPrompt = "\n\nAVAILABLE MCP TOOLS:\n";
-    mcpTools.forEach(tool => {
-        mcpPrompt += `- Server: ${tool.serverName}, Tool: ${tool.name}\n  Desc: ${tool.description}\n  Args: ${JSON.stringify(tool.inputSchema.properties)}\n`;
-    });
-
-    const systemPrompt = systemInstruction + pluginManager.getPromptDescriptions() + mcpPrompt;
+    const systemPrompt = buildSystemPrompt();
     
     const messages = [];
     for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
@@ -392,13 +521,7 @@ async function handleOpenAIChat(finalMessage, base64Image, config) {
     const apiKey = config.openaiApiKey || process.env.OPENAI_API_KEY;
     if (!apiKey) return { response: "กรุณาใส่ OpenAI API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
 
-    const mcpTools = mcpManager.getAllTools();
-    let mcpPrompt = "\n\nAVAILABLE MCP TOOLS:\n";
-    mcpTools.forEach(tool => {
-        mcpPrompt += `- Server: ${tool.serverName}, Tool: ${tool.name}\n  Desc: ${tool.description}\n  Args: ${JSON.stringify(tool.inputSchema.properties)}\n`;
-    });
-
-    const systemPrompt = systemInstruction + pluginManager.getPromptDescriptions() + mcpPrompt;
+    const systemPrompt = buildSystemPrompt();
     
     const messages = [{ role: "system", content: systemPrompt }];
     for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
@@ -435,6 +558,96 @@ async function handleOpenAIChat(finalMessage, base64Image, config) {
     return parseAiResponse(outputText);
 }
 
+async function handleLocalOpenAIChat(finalMessage, base64Image, config) {
+    const history = readChatHistory() || [];
+    const apiKey = 'lm-studio';
+    const baseUrl = config.localApiBaseUrl || 'http://localhost:1234/v1';
+
+    const systemPrompt = buildSystemPrompt();
+    
+    const messages = [{ role: "system", content: systemPrompt }];
+    for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
+        const role = msg.role === 'model' ? 'assistant' : 'user';
+        let text = Array.isArray(msg.parts) ? msg.parts.map(p => p.text || '').join('\n') : '';
+        if (text) messages.push({ role, content: text });
+    }
+
+    const content = [{ type: "text", text: finalMessage || "Analyze this." }];
+    if (base64Image) {
+        content.push({
+            type: "image_url",
+            image_url: { url: base64Image }
+        });
+    }
+    messages.push({ role: "user", content });
+
+    const response = await axios.post(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+        model: config.localModelName || 'local-model',
+        messages: messages,
+        // response_format json_object is sometimes problematic on weak local models, but required by our prompt.
+        // We'll keep it as some local servers like LM Studio support it for specific models.
+        // If not supported, the system prompt usually coerces it anyway.
+        response_format: { type: "json_object" }
+    }, {
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+        }
+    });
+
+    const outputText = response.data.choices[0].message.content;
+    history.push({ role: 'user', parts: [{ text: finalMessage }] });
+    history.push({ role: 'model', parts: [{ text: outputText }] });
+    writeChatHistory(history.slice(-MAX_HISTORY_MESSAGES));
+
+    return parseAiResponse(outputText);
+}
+
+async function handleHuggingFaceChat(finalMessage, base64Image, config) {
+    const history = readChatHistory() || [];
+    const apiKey = config.hfApiKey || process.env.HF_API_KEY;
+    if (!apiKey) return { response: "กรุณาใส่ Hugging Face API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
+
+    const modelId = config.hfModel || 'meta-llama/Meta-Llama-3-8B-Instruct';
+    const baseUrl = `https://api-inference.huggingface.co/models/${modelId}/v1/chat/completions`;
+
+    const systemPrompt = buildSystemPrompt();
+    
+    const messages = [{ role: "system", content: systemPrompt }];
+    for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
+        const role = msg.role === 'model' ? 'assistant' : 'user';
+        let text = Array.isArray(msg.parts) ? msg.parts.map(p => p.text || '').join('\n') : '';
+        if (text) messages.push({ role, content: text });
+    }
+
+    const content = [{ type: "text", text: finalMessage || "Analyze this." }];
+    if (base64Image) {
+        content.push({
+            type: "image_url",
+            image_url: { url: base64Image }
+        });
+    }
+    messages.push({ role: "user", content });
+
+    const response = await axios.post(baseUrl, {
+        model: modelId,
+        messages: messages,
+        max_tokens: 4096
+    }, {
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+        }
+    });
+
+    const outputText = response.data.choices[0].message.content;
+    history.push({ role: 'user', parts: [{ text: finalMessage }] });
+    history.push({ role: 'model', parts: [{ text: outputText }] });
+    writeChatHistory(history.slice(-MAX_HISTORY_MESSAGES));
+
+    return parseAiResponse(outputText);
+}
+
 function parseAiResponse(outputText) {
     let parsedResult;
     try {
@@ -456,10 +669,9 @@ function parseAiResponse(outputText) {
 
 async function handleOllamaChat(finalMessage, base64Image, base64Audio, config) {
     const history = readChatHistory() || [];
-    pluginManager.loadPlugins();
     
     const ollamaMessages = [
-        { role: 'system', content: systemInstruction + pluginManager.getPromptDescriptions() }
+        { role: 'system', content: buildSystemPrompt() }
     ];
     
     for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
@@ -486,7 +698,8 @@ async function handleOllamaChat(finalMessage, base64Image, base64Audio, config) 
     
     ollamaMessages.push(userMessage);
     
-    const response = await axios.post('http://localhost:11434/api/chat', {
+    const ollamaBaseUrl = (config.ollamaHost || 'http://localhost:11434').replace(/\/$/, '');
+    const response = await axios.post(`${ollamaBaseUrl}/api/chat`, {
         model: config.ollamaModel || 'llama3:latest',
         messages: ollamaMessages,
         format: 'json',
@@ -631,6 +844,7 @@ async function translateImageContent(base64Image) {
 
 module.exports = {
     handleChat,
+    handleGeminiChatStream,
     resetChat,
     getChatTranscript,
     translateImageContent,

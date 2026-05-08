@@ -588,6 +588,84 @@ function createChatUI({ onSubmit, onExit }) {
         screen.render();
     }
 
+    /**
+     * Opens a streaming message bubble for the assistant.
+     * Returns { appendChunk(text), finalize(timestamp) } for typewriter rendering.
+     * Usage:
+     *   const stream = streamMessage('assistant');
+     *   stream.appendChunk('Hello'); stream.appendChunk(' World');
+     *   stream.finalize(timestamp);
+     */
+    function streamMessage(role = 'assistant') {
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const maxLineWidth = Math.max(screen.width - 20, 36);
+
+        // Print the header bubble once
+        chatBox.log('');
+        if (role === 'assistant') {
+            chatBox.log(` {bold}{#d4a8ff-fg}Mint{/} {gray-fg}${timeStr}{/}`);
+        }
+
+        let buffer = '';           // accumulates the full response text
+        let lineBuffer = '';       // current partial line being built
+        let lineRendered = false;  // whether we already pushed the first line prefix
+
+        function flushLine(force = false) {
+            // Flush content that fits on one line-width or when forced
+            if (!lineBuffer && !force) return;
+            if (!lineRendered) {
+                chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${lineBuffer}{/}`);
+                lineRendered = true;
+            } else {
+                // Overwrite the last line by popping + re-pushing (blessed.log limitation)
+                // We can't truly overwrite, so we just keep appending new lines for each chunk.
+                // For large chunks, split on newline and emit per-line.
+                chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${lineBuffer}{/}`);
+            }
+            screen.render();
+        }
+
+        function appendChunk(text) {
+            if (!text) return;
+            buffer += text;
+            const segments = text.split('\n');
+            for (let i = 0; i < segments.length; i++) {
+                lineBuffer += segments[i];
+                if (i < segments.length - 1) {
+                    // Newline boundary — emit current line
+                    const lines = wrapLineSmart(lineBuffer, maxLineWidth);
+                    lines.forEach(l => chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${l}{/}`));
+                    lineBuffer = '';
+                    lineRendered = true;
+                    screen.render();
+                } else if (lineBuffer.length >= maxLineWidth) {
+                    // Line overflow — auto-wrap
+                    const lines = wrapLineSmart(lineBuffer, maxLineWidth);
+                    lines.slice(0, -1).forEach(l => chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${l}{/}`));
+                    lineBuffer = lines[lines.length - 1] || '';
+                    lineRendered = true;
+                    screen.render();
+                }
+                // Otherwise keep buffering the partial line
+            }
+        }
+
+        function finalize(timestamp = null) {
+            // Flush remaining buffer
+            if (lineBuffer) {
+                const lines = wrapLineSmart(lineBuffer, maxLineWidth);
+                lines.forEach(l => chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${l}{/}`));
+                lineBuffer = '';
+            }
+            // Track last response for clipboard
+            lastAssistantResponse = buffer;
+            screen.render();
+        }
+
+        return { appendChunk, finalize };
+    }
+
     /** Show/hide thinking indicator in status bar */
     function setThinking(active, secondsElapsed = 0) {
         if (active) {
@@ -628,7 +706,7 @@ function createChatUI({ onSubmit, onExit }) {
         });
     }
 
-    return { screen, appendMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode };
+    return { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode };
 }
 
 module.exports = { createChatUI };
