@@ -100,11 +100,21 @@ function getAvailableProviders(config) {
     const providers = [];
     const cfg = config || readConfig();
     
+    const isPlaceholder = (val) => !val || val.startsWith('your_') || val.includes('key_here') || val.trim() === '';
+
     // Check which providers have API keys or URLs configured
-    if ((cfg.anthropicApiKey || process.env.ANTHROPIC_API_KEY)) providers.push('anthropic');
-    if ((cfg.openaiApiKey || process.env.OPENAI_API_KEY)) providers.push('openai');
-    if ((cfg.apiKey || process.env.GEMINI_API_KEY)) providers.push('gemini');
-    if ((cfg.hfApiKey || process.env.HF_API_KEY)) providers.push('huggingface');
+    const anthropicKey = cfg.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
+    if (!isPlaceholder(anthropicKey)) providers.push('anthropic');
+
+    const openaiKey = cfg.openaiApiKey || process.env.OPENAI_API_KEY;
+    if (!isPlaceholder(openaiKey)) providers.push('openai');
+
+    const geminiKey = cfg.apiKey || process.env.GEMINI_API_KEY;
+    if (!isPlaceholder(geminiKey)) providers.push('gemini');
+
+    const hfKey = cfg.hfApiKey || process.env.HF_API_KEY;
+    if (!isPlaceholder(hfKey)) providers.push('huggingface');
+
     if (cfg.localApiBaseUrl && cfg.localApiBaseUrl.trim() !== '') providers.push('local_openai');
     
     // Always push ollama at the end since it's local

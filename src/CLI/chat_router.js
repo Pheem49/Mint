@@ -130,18 +130,16 @@ async function runChatRoutedTask(input, context) {
 
     const config = readConfig();
     const availableProviders = getAvailableProviders(config);
+    
     // Smart Routing Priority for Code Tasks
-    let preferredProvider = 'gemini'; // default
-    if (availableProviders.includes('anthropic')) {
-        preferredProvider = 'anthropic';
-    } else if (availableProviders.includes('openai')) {
-        preferredProvider = 'openai';
-    } else if (availableProviders.includes('gemini')) {
-        preferredProvider = 'gemini';
-    } else if (availableProviders.includes('local_openai')) {
-        preferredProvider = 'local_openai';
-    } else {
-        preferredProvider = availableProviders[0] || 'gemini';
+    let preferredProvider = config.aiProvider || 'gemini'; 
+    
+    // If preferred isn't actually available, try best available
+    if (!availableProviders.includes(preferredProvider)) {
+        if (availableProviders.includes('anthropic')) preferredProvider = 'anthropic';
+        else if (availableProviders.includes('openai')) preferredProvider = 'openai';
+        else if (availableProviders.includes('gemini')) preferredProvider = 'gemini';
+        else preferredProvider = availableProviders[0] || 'gemini';
     }
 
     appendMessage('system', `Routing this request to Code Mode for workspace: ${process.cwd()} using [${preferredProvider}]`);

@@ -197,6 +197,8 @@ async function startInteractiveChat(initialMessage = null) {
                         appendMessage('system', ws ? `Current Workspace: ${ws.name}\nPath: ${ws.path}` : "Not currently in a registered workspace.\nUsage: /workspace <add|list|remove>");
                     }
                     return;
+                }
+
                 if (text.startsWith('/review')) {
                     if (!lastResponseText) {
                         appendMessage('error', 'Nothing to review yet. Get a response first.');
