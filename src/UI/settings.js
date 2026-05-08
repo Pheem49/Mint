@@ -16,6 +16,7 @@ const DEFAULT_CONFIG = {
     ollamaModel: 'llama3:latest',
     enableVoiceReply: true,
     enableCustomWorkflows: true,
+    enableAgentCollaboration: true,
     ttsProvider: 'google',
     ttsVolume: 1.0,
     ttsSpeed: 1.0,
@@ -57,6 +58,18 @@ function applyConfig(config) {
     // Apply API key
     document.getElementById('api-key-input').value = config.apiKey || '';
 
+    const anthropicInput = document.getElementById('anthropic-api-key-input');
+    if (anthropicInput) anthropicInput.value = config.anthropicApiKey || '';
+
+    const openaiInput = document.getElementById('openai-api-key-input');
+    if (openaiInput) openaiInput.value = config.openaiApiKey || '';
+
+    const hfInput = document.getElementById('hf-api-key');
+    if (hfInput) hfInput.value = config.hfApiKey || '';
+
+    const ollamaHostInput = document.getElementById('ollama-host-input');
+    if (ollamaHostInput) ollamaHostInput.value = config.ollamaHost || 'http://localhost:11434';
+
     // Apply Gemini model
     applyModelSelection(config.geminiModel);
     
@@ -70,6 +83,24 @@ function applyConfig(config) {
     const ollamaInput = document.getElementById('ollama-model-input');
     if (ollamaInput) {
         ollamaInput.value = config.ollamaModel || 'llama3:latest';
+    }
+
+    applyModelSelectionGeneric('openai-model-select', 'openai-model-custom-row', 'openai-model-custom', config.openaiModel || 'gpt-4o');
+    applyModelSelectionGeneric('anthropic-model-select', 'anthropic-model-custom-row', 'anthropic-model-custom', config.anthropicModel || 'claude-3-5-sonnet-latest');
+
+    const hfModelInput = document.getElementById('hf-model-name');
+    if (hfModelInput) {
+        hfModelInput.value = config.hfModel || 'meta-llama/Meta-Llama-3-8B-Instruct';
+    }
+
+    const localApiBaseUrlInput = document.getElementById('local-api-base-url');
+    if (localApiBaseUrlInput) {
+        localApiBaseUrlInput.value = config.localApiBaseUrl || 'http://localhost:1234/v1';
+    }
+
+    const localModelNameInput = document.getElementById('local-model-name');
+    if (localModelNameInput) {
+        localModelNameInput.value = config.localModelName || 'local-model';
     }
 
     const voiceReplyToggle = document.getElementById('enable-voice-reply');
@@ -101,6 +132,11 @@ function applyConfig(config) {
     const enableWorkflowsToggle = document.getElementById('enable-custom-workflows');
     if (enableWorkflowsToggle) {
         enableWorkflowsToggle.checked = config.enableCustomWorkflows !== false;
+    }
+
+    const enableAgentCollaborationToggle = document.getElementById('enable-agent-collaboration');
+    if (enableAgentCollaborationToggle) {
+        enableAgentCollaborationToggle.checked = config.enableAgentCollaboration !== false;
     }
 
     // Plugins logic
@@ -168,9 +204,15 @@ function lightenColor(hex, amount) {
 }
 
 function applyModelSelection(model) {
-    const select = document.getElementById('gemini-model-select');
-    const customRow = document.getElementById('gemini-model-custom-row');
-    const customInput = document.getElementById('gemini-model-custom');
+    applyModelSelectionGeneric('gemini-model-select', 'gemini-model-custom-row', 'gemini-model-custom', model);
+}
+
+function applyModelSelectionGeneric(selectId, customRowId, customInputId, model) {
+    const select = document.getElementById(selectId);
+    const customRow = document.getElementById(customRowId);
+    const customInput = document.getElementById(customInputId);
+    if (!select || !customRow || !customInput) return;
+
     const normalized = (model || '').trim();
     const optionValues = Array.from(select.options).map(opt => opt.value);
 
@@ -186,11 +228,16 @@ function applyModelSelection(model) {
 }
 
 function getSelectedModel() {
-    const select = document.getElementById('gemini-model-select');
-    const customInput = document.getElementById('gemini-model-custom');
+    return getSelectedModelGeneric('gemini-model-select', 'gemini-model-custom', DEFAULT_CONFIG.geminiModel);
+}
+
+function getSelectedModelGeneric(selectId, customInputId, defaultModel) {
+    const select = document.getElementById(selectId);
+    const customInput = document.getElementById(customInputId);
+    if (!select || !customInput) return defaultModel;
     if (select.value === 'custom') {
         const custom = (customInput.value || '').trim();
-        return custom || DEFAULT_CONFIG.geminiModel;
+        return custom || defaultModel;
     }
     return select.value;
 }
@@ -198,21 +245,28 @@ function getSelectedModel() {
 // --- Event Listeners ---
 
 // Close button
-document.getElementById('close-btn').addEventListener('click', () => {
-    window.settingsApi.closeSettings();
-});
+// Close button
+const closeBtn = document.getElementById('close-btn');
+if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+        window.settingsApi.closeSettings();
+    });
+}
 
 // Toggle API key visibility
-document.getElementById('toggle-key').addEventListener('click', () => {
-    const input = document.getElementById('api-key-input');
-    input.type = input.type === 'password' ? 'text' : 'password';
-});
+const toggleKey = document.getElementById('toggle-key');
+if (toggleKey) {
+    toggleKey.addEventListener('click', () => {
+        const input = document.getElementById('api-key-input');
+        input.type = input.type === 'password' ? 'text' : 'password';
+    });
+}
 
 async function saveApiKeyOnly() {
     const input = document.getElementById('api-key-input');
     const status = document.getElementById('api-save-status');
     const btn = document.getElementById('save-api-key');
-    const apiKey = input.value.trim();
+    const apiKey = input ? input.value.trim() : '';
 
     try {
         const baseConfig = await window.settingsApi.getSettings();
@@ -220,26 +274,31 @@ async function saveApiKeyOnly() {
         await window.settingsApi.saveSettings(nextConfig);
         currentConfig.apiKey = apiKey;
 
-        btn.textContent = 'Saved!';
-        status.textContent = 'API key saved';
+        if (btn) btn.textContent = 'Saved!';
+        if (status) status.textContent = 'API key saved';
         setTimeout(() => {
-            btn.textContent = 'Save API Key';
-            status.textContent = '';
+            if (btn) btn.textContent = 'Save API Key';
+            if (status) status.textContent = '';
         }, 1500);
     } catch (err) {
         console.error('Failed to save API key:', err);
-        status.textContent = 'Save failed';
-        setTimeout(() => { status.textContent = ''; }, 1500);
+        if (status) status.textContent = 'Save failed';
+        setTimeout(() => { if (status) status.textContent = ''; }, 1500);
     }
 }
 
-document.getElementById('save-api-key').addEventListener('click', saveApiKeyOnly);
-document.getElementById('api-key-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        saveApiKeyOnly();
-    }
-});
+const saveApiKey = document.getElementById('save-api-key');
+if (saveApiKey) saveApiKey.addEventListener('click', saveApiKeyOnly);
+
+const apiKeyInput = document.getElementById('api-key-input');
+if (apiKeyInput) {
+    apiKeyInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            saveApiKeyOnly();
+        }
+    });
+}
 
 // Gemini model select
 document.getElementById('gemini-model-select').addEventListener('change', (e) => {
@@ -257,23 +316,45 @@ document.getElementById('gemini-model-custom').addEventListener('input', (e) => 
     currentConfig.geminiModel = e.target.value.trim();
 });
 
-// AI Provider toggle
-function toggleProviderOptions(provider) {
-    const geminiOptions = document.getElementById('gemini-options');
-    const ollamaOptions = document.getElementById('ollama-options');
-    
-    if (provider === 'ollama') {
-        geminiOptions.style.display = 'none';
-        ollamaOptions.style.display = 'block';
+// OpenAI model select
+document.getElementById('openai-model-select').addEventListener('change', (e) => {
+    const customRow = document.getElementById('openai-model-custom-row');
+    if (e.target.value === 'custom') {
+        customRow.style.display = 'block';
+        currentConfig.openaiModel = (document.getElementById('openai-model-custom').value || '').trim();
     } else {
-        geminiOptions.style.display = 'block';
-        ollamaOptions.style.display = 'none';
+        customRow.style.display = 'none';
+        currentConfig.openaiModel = e.target.value;
     }
+});
+
+document.getElementById('openai-model-custom').addEventListener('input', (e) => {
+    currentConfig.openaiModel = e.target.value.trim();
+});
+
+// Anthropic model select
+document.getElementById('anthropic-model-select').addEventListener('change', (e) => {
+    const customRow = document.getElementById('anthropic-model-custom-row');
+    if (e.target.value === 'custom') {
+        customRow.style.display = 'block';
+        currentConfig.anthropicModel = (document.getElementById('anthropic-model-custom').value || '').trim();
+    } else {
+        customRow.style.display = 'none';
+        currentConfig.anthropicModel = e.target.value;
+    }
+});
+
+document.getElementById('anthropic-model-custom').addEventListener('input', (e) => {
+    currentConfig.anthropicModel = e.target.value.trim();
+});
+
+// AI Provider toggle (No-op since all sections stay visible)
+function toggleProviderOptions(provider) {
+    // No-op
 }
 
 document.getElementById('ai-provider-select').addEventListener('change', (e) => {
     currentConfig.aiProvider = e.target.value;
-    toggleProviderOptions(e.target.value);
 });
 
 document.getElementById('ollama-model-input').addEventListener('input', (e) => {
@@ -281,9 +362,12 @@ document.getElementById('ollama-model-input').addEventListener('input', (e) => {
 });
 
 // AI Studio link
-document.getElementById('ai-studio-link').addEventListener('click', () => {
-    window.settingsApi.openExternal('https://aistudio.google.com/');
-});
+const aiStudioLink = document.getElementById('ai-studio-link');
+if (aiStudioLink) {
+    aiStudioLink.addEventListener('click', () => {
+        window.settingsApi.openExternal('https://aistudio.google.com/');
+    });
+}
 
 // Theme cards
 document.querySelectorAll('.theme-card').forEach(card => {
@@ -400,9 +484,34 @@ if (document.getElementById('tts-pitch')) {
 // Save
 document.getElementById('save-btn').addEventListener('click', async () => {
     currentConfig.apiKey = document.getElementById('api-key-input').value.trim();
+    
+    const anthropicInput = document.getElementById('anthropic-api-key-input');
+    if (anthropicInput) currentConfig.anthropicApiKey = anthropicInput.value.trim();
+
+    const openaiInput = document.getElementById('openai-api-key-input');
+    if (openaiInput) currentConfig.openaiApiKey = openaiInput.value.trim();
+
+    const hfInput = document.getElementById('hf-api-key');
+    if (hfInput) currentConfig.hfApiKey = hfInput.value.trim();
+
+    const ollamaHostInput = document.getElementById('ollama-host-input');
+    if (ollamaHostInput) currentConfig.ollamaHost = ollamaHostInput.value.trim();
+
     currentConfig.geminiModel = getSelectedModel();
     currentConfig.aiProvider = document.getElementById('ai-provider-select').value;
     currentConfig.ollamaModel = document.getElementById('ollama-model-input').value.trim();
+
+    currentConfig.openaiModel = getSelectedModelGeneric('openai-model-select', 'openai-model-custom', DEFAULT_CONFIG.openaiModel || 'gpt-4o');
+    currentConfig.anthropicModel = getSelectedModelGeneric('anthropic-model-select', 'anthropic-model-custom', DEFAULT_CONFIG.anthropicModel || 'claude-3-5-sonnet-latest');
+
+    const hfModelInput = document.getElementById('hf-model-name');
+    if (hfModelInput) currentConfig.hfModel = hfModelInput.value.trim();
+
+    const localApiBaseUrlInput = document.getElementById('local-api-base-url');
+    if (localApiBaseUrlInput) currentConfig.localApiBaseUrl = localApiBaseUrlInput.value.trim();
+
+    const localModelNameInput = document.getElementById('local-model-name');
+    if (localModelNameInput) currentConfig.localModelName = localModelNameInput.value.trim();
     
     const voiceReplyToggle = document.getElementById('enable-voice-reply');
     if (voiceReplyToggle) {
@@ -419,6 +528,11 @@ document.getElementById('save-btn').addEventListener('click', async () => {
     const enableWorkflowsToggle = document.getElementById('enable-custom-workflows');
     if (enableWorkflowsToggle) {
         currentConfig.enableCustomWorkflows = enableWorkflowsToggle.checked;
+    }
+
+    const enableAgentCollaborationToggle = document.getElementById('enable-agent-collaboration');
+    if (enableAgentCollaborationToggle) {
+        currentConfig.enableAgentCollaboration = enableAgentCollaborationToggle.checked;
     }
 
     const showWidgetToggle = document.getElementById('show-desktop-widget');

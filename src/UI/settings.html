@@ -38,74 +38,138 @@
             <div class="settings-content" id="settings-content">
 
                 <div class="tab-pane active" id="sect-general">
-                    <!-- API Key -->
-            <section class="setting-section">
-                <h2 class="section-title">🔑 Gemini API Key</h2>
-                <div class="setting-row">
-                    <label for="api-key-input">API Key</label>
-                    <div class="input-group">
-                        <input type="password" id="api-key-input" placeholder="Enter your Gemini API Key..."
-                            autocomplete="off">
-                        <button class="toggle-visibility" id="toggle-key" title="Show/Hide">👁</button>
-                    </div>
-                    <div class="api-actions">
-                        <button class="api-save-btn" id="save-api-key">Save API Key</button>
-                        <span class="api-save-status" id="api-save-status" aria-live="polite"></span>
-                    </div>
-                    <p class="hint">Get your API Key at <a href="#" id="ai-studio-link">Google AI Studio</a></p>
-                </div>
-                <div class="setting-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 12px; border: 1px solid rgba(139, 92, 246, 0.2);">
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <label for="show-desktop-widget" style="margin-bottom: 0; font-weight: 500;">Show Desktop AI Candidate</label>
-                        <span class="hint" style="font-size: 0.75rem;">Show the mini AI character on your desktop</span>
-                    </div>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="show-desktop-widget">
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-            </section>
-                    <!-- AI Provider & Model -->
-            <section class="setting-section">
-                <h2 class="section-title">🧠 AI Engine</h2>
-                <div class="setting-row">
-                    <label for="ai-provider-select">Provider</label>
-                    <div class="input-group">
-                        <select id="ai-provider-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
-                            <option value="gemini" style="background: var(--bg-color)">Google Gemini (Cloud)</option>
-                            <option value="ollama" style="background: var(--bg-color)">Ollama (Local / Private)</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Gemini Options -->
-                <div id="gemini-options" style="margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.1);">
-                    <div class="setting-row">
-                        <label for="gemini-model-select">Gemini Model</label>
-                        <div class="input-group">
-                            <select id="gemini-model-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
-                                <option value="gemini-2.5-flash" style="background: var(--bg-color)">gemini-2.5-flash</option>
-                                <option value="gemini-3.1-flash-lite" style="background: var(--bg-color)">gemini-3.1-flash-lite</option>
-                                <option value="gemini-3.1-flash-lite-preview" style="background: var(--bg-color)">gemini-3.1-flash-lite-preview</option>
-                                <option value="custom" style="background: var(--bg-color)">Custom...</option>
-                            </select>
+                    <!-- API Keys & Hosts -->
+                    <section class="setting-section">
+                        <h2 class="section-title">🔑 API Keys & Hosts</h2>
+                        <div class="setting-row">
+                            <label for="api-key-input">Gemini API Key</label>
+                            <div class="input-group">
+                                <input type="password" id="api-key-input" placeholder="Enter Gemini API Key..." autocomplete="off">
+                                <button class="toggle-visibility" onclick="const i = document.getElementById('api-key-input'); i.type = i.type === 'password' ? 'text' : 'password';" title="Show/Hide">👁</button>
+                            </div>
                         </div>
-                    </div>
-                    <div class="setting-row" id="gemini-model-custom-row" style="display: none; margin-top: 10px;">
-                        <label for="gemini-model-custom">Custom Model</label>
-                        <input type="text" id="gemini-model-custom" placeholder="e.g. gemini-3.1-flash-lite-preview">
-                    </div>
-                </div>
+                        <div class="setting-row" style="margin-top: 10px;">
+                            <label for="openai-api-key-input">OpenAI API Key</label>
+                            <div class="input-group">
+                                <input type="password" id="openai-api-key-input" placeholder="Enter OpenAI API Key..." autocomplete="off">
+                                <button class="toggle-visibility" onclick="const i = document.getElementById('openai-api-key-input'); i.type = i.type === 'password' ? 'text' : 'password';" title="Show/Hide">👁</button>
+                            </div>
+                        </div>
+                        <div class="setting-row" style="margin-top: 10px;">
+                            <label for="anthropic-api-key-input">Anthropic API Key</label>
+                            <div class="input-group">
+                                <input type="password" id="anthropic-api-key-input" placeholder="Enter Anthropic API Key..." autocomplete="off">
+                                <button class="toggle-visibility" onclick="const i = document.getElementById('anthropic-api-key-input'); i.type = i.type === 'password' ? 'text' : 'password';" title="Show/Hide">👁</button>
+                            </div>
+                        </div>
+                        <div class="setting-row" style="margin-top: 10px;">
+                            <label for="hf-api-key">Hugging Face API Key</label>
+                            <div class="input-group">
+                                <input type="password" id="hf-api-key" placeholder="Enter Hugging Face API Key..." autocomplete="off">
+                                <button class="toggle-visibility" onclick="const i = document.getElementById('hf-api-key'); i.type = i.type === 'password' ? 'text' : 'password';" title="Show/Hide">👁</button>
+                            </div>
+                        </div>
+                        <div class="setting-row" style="margin-top: 10px;">
+                            <label for="local-api-base-url">LM Studio Base URL</label>
+                            <input type="text" id="local-api-base-url" placeholder="e.g. http://localhost:1234/v1">
+                        </div>
+                        <div class="setting-row" style="margin-top: 10px;">
+                            <label for="ollama-host-input">Ollama Host</label>
+                            <input type="text" id="ollama-host-input" placeholder="e.g. http://localhost:11434">
+                        </div>
+                        <div class="setting-row" style="display: flex; align-items: center; justify-content: space-between; margin-top: 20px; padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 12px; border: 1px solid rgba(139, 92, 246, 0.2);">
+                            <div style="display: flex; flex-direction: column; gap: 4px;">
+                                <label for="show-desktop-widget" style="margin-bottom: 0; font-weight: 500;">Show Desktop AI Candidate</label>
+                                <span class="hint" style="font-size: 0.75rem;">Show the mini AI character on your desktop</span>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="show-desktop-widget">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </section>
 
-                <!-- Ollama Options -->
-                <div id="ollama-options" style="display: none; margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.1);">
-                    <div class="setting-row">
-                        <label for="ollama-model-input">Ollama Model</label>
-                        <input type="text" id="ollama-model-input" placeholder="e.g. llama3:latest">
-                        <p class="hint" style="margin-top: 8px; color: #fbbf24;">Make sure Ollama is running at http://localhost:11434</p>
-                    </div>
-                </div>
-            </section>
+                    <!-- Models Configuration -->
+                    <section class="setting-section">
+                        <h2 class="section-title">🧠 AI Engine & Default Models</h2>
+                        <div class="setting-row">
+                            <label for="ai-provider-select">Active Provider</label>
+                            <div class="input-group">
+                                <select id="ai-provider-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
+                                    <option value="gemini" style="background: var(--bg-color)">Google Gemini (Cloud)</option>
+                                    <option value="anthropic" style="background: var(--bg-color)">Anthropic Claude</option>
+                                    <option value="openai" style="background: var(--bg-color)">OpenAI</option>
+                                    <option value="ollama" style="background: var(--bg-color)">Ollama (Local / Private)</option>
+                                    <option value="huggingface" style="background: var(--bg-color)">Hugging Face (Inference API)</option>
+                                    <option value="local_openai" style="background: var(--bg-color)">Local (LM Studio / OpenAI Compatible)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="setting-row" style="margin-top: 14px;">
+                            <label for="gemini-model-select">Gemini Model</label>
+                            <div class="input-group">
+                                <select id="gemini-model-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
+                                    <option value="gemini-2.5-flash" style="background: var(--bg-color)">gemini-2.5-flash</option>
+                                    <option value="gemini-3.1-flash-lite" style="background: var(--bg-color)">gemini-3.1-flash-lite</option>
+                                    <option value="gemini-3.1-flash-lite-preview" style="background: var(--bg-color)">gemini-3.1-flash-lite-preview</option>
+                                    <option value="custom" style="background: var(--bg-color)">Custom...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="setting-row" id="gemini-model-custom-row" style="display: none; margin-top: 10px;">
+                            <label for="gemini-model-custom">Custom Gemini Model</label>
+                            <input type="text" id="gemini-model-custom" placeholder="e.g. gemini-3.1-flash-lite-preview">
+                        </div>
+
+                        <div class="setting-row" style="margin-top: 14px;">
+                            <label for="openai-model-select">OpenAI Model</label>
+                            <div class="input-group">
+                                <select id="openai-model-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
+                                    <option value="gpt-4o" style="background: var(--bg-color)">gpt-4o</option>
+                                    <option value="gpt-4o-mini" style="background: var(--bg-color)">gpt-4o-mini</option>
+                                    <option value="o1-preview" style="background: var(--bg-color)">o1-preview</option>
+                                    <option value="o1-mini" style="background: var(--bg-color)">o1-mini</option>
+                                    <option value="custom" style="background: var(--bg-color)">Custom...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="setting-row" id="openai-model-custom-row" style="display: none; margin-top: 10px;">
+                            <label for="openai-model-custom">Custom OpenAI Model</label>
+                            <input type="text" id="openai-model-custom" placeholder="e.g. gpt-4o">
+                        </div>
+
+                        <div class="setting-row" style="margin-top: 14px;">
+                            <label for="anthropic-model-select">Anthropic Model</label>
+                            <div class="input-group">
+                                <select id="anthropic-model-select" style="width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; color: var(--text-main); font-family: inherit; font-size: 0.9rem; outline: none; transition: border-color 0.2s; cursor: pointer;">
+                                    <option value="claude-3-5-sonnet-latest" style="background: var(--bg-color)">claude-3-5-sonnet-latest</option>
+                                    <option value="claude-3-opus-latest" style="background: var(--bg-color)">claude-3-opus-latest</option>
+                                    <option value="claude-3-5-haiku-latest" style="background: var(--bg-color)">claude-3-5-haiku-latest</option>
+                                    <option value="custom" style="background: var(--bg-color)">Custom...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="setting-row" id="anthropic-model-custom-row" style="display: none; margin-top: 10px;">
+                            <label for="anthropic-model-custom">Custom Anthropic Model</label>
+                            <input type="text" id="anthropic-model-custom" placeholder="e.g. claude-3-5-sonnet-latest">
+                        </div>
+
+                        <div class="setting-row" style="margin-top: 14px;">
+                            <label for="hf-model-name">Hugging Face Model</label>
+                            <input type="text" id="hf-model-name" placeholder="e.g. meta-llama/Meta-Llama-3-8B-Instruct">
+                        </div>
+
+                        <div class="setting-row" style="margin-top: 14px;">
+                            <label for="local-model-name">Local (LM Studio) Model</label>
+                            <input type="text" id="local-model-name" placeholder="e.g. local-model">
+                        </div>
+
+                        <div class="setting-row" style="margin-top: 14px;">
+                            <label for="ollama-model-input">Ollama Model</label>
+                            <input type="text" id="ollama-model-input" placeholder="e.g. llama3:latest">
+                        </div>
+                    </section>
                 </div>
                 <div class="tab-pane" id="sect-audio">
                     <!-- Audio & Voice -->
@@ -211,6 +275,20 @@
                 <div class="setting-row" style="margin-top: 10px; display: flex; gap: 10px;">
                     <button class="btn-secondary" id="open-workflows-btn">Open workflows.json</button>
                     <button class="btn-primary" id="reload-workflows-btn">Reload Rules</button>
+                </div>
+            </section>
+                    <!-- Agent Collaboration -->
+            <section class="setting-section">
+                <h2 class="section-title">🤝 Agent Collaboration</h2>
+                <div class="setting-row" style="display: flex; align-items: center; justify-content: space-between;">
+                    <label for="enable-agent-collaboration" style="margin-bottom: 0;">Enable Multi-Agent Review</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="enable-agent-collaboration">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="setting-row" style="margin-top: 10px;">
+                    <p class="hint">When in Code Mode, allow a secondary AI model to automatically review the code written by the primary model. (Requires multiple API keys. Costs API credits for both models.)</p>
                 </div>
             </section>
                 </div>

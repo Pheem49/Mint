@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { GoogleGenAI } = require('@google/genai');
 const { executeCodeTask } = require('./code_agent');
-const { readConfig } = require('../System/config_manager');
+const { readConfig, getAvailableProviders } = require('../System/config_manager');
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -128,7 +128,23 @@ async function runChatRoutedTask(input, context) {
     const text = input.startsWith('/code ') ? input.slice('/code '.length).trim() : input;
     const { appendMessage, setThinking, requestApproval, setMode } = context;
 
-    appendMessage('system', `Routing this request to Code Mode for workspace: ${process.cwd()}`);
+    const config = readConfig();
+    const availableProviders = getAvailableProviders(config);
+    // Smart Routing Priority for Code Tasks
+    let preferredProvider = 'gemini'; // default
+    if (availableProviders.includes('anthropic')) {
+        preferredProvider = 'anthropic';
+    } else if (availableProviders.includes('openai')) {
+        preferredProvider = 'openai';
+    } else if (availableProviders.includes('gemini')) {
+        preferredProvider = 'gemini';
+    } else if (availableProviders.includes('local_openai')) {
+        preferredProvider = 'local_openai';
+    } else {
+        preferredProvider = availableProviders[0] || 'gemini';
+    }
+
+    appendMessage('system', `Routing this request to Code Mode for workspace: ${process.cwd()} using [${preferredProvider}]`);
     if (setMode) setMode('Code');
 
     let seconds = 0;
@@ -142,6 +158,7 @@ async function runChatRoutedTask(input, context) {
         const result = await executeCodeTask(text, {
             cwd: process.cwd(),
             requestApproval,
+            provider: preferredProvider,
             onProgress: (message) => appendMessage('system', `[Code] ${message}`)
         });
         clearInterval(timer);

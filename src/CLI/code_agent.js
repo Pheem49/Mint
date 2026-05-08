@@ -3,7 +3,8 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { GoogleGenAI } = require('@google/genai');
-const { readConfig } = require('../System/config_manager');
+const axios = require('axios');
+const { readConfig, getAvailableProviders } = require('../System/config_manager');
 const { readWorkspaceSession, writeWorkspaceSession } = require('./code_session_memory');
 
 const execFileAsync = promisify(execFile);
@@ -244,16 +245,101 @@ function writeFile(workspaceRoot, targetPath, content) {
     return `Wrote ${targetPath}`;
 }
 
-function getAiClientAndModel() {
-    const config = readConfig();
-    const apiKey = (config.apiKey || process.env.GEMINI_API_KEY || '').trim();
-    if (!apiKey) {
-        throw new Error("Missing Gemini API key. Run 'mint onboard' first.");
+class UnifiedAgentClient {
+    constructor(provider, config) {
+        this.provider = provider;
+        this.config = config;
+        this.history = [];
+        this.systemInstruction = CODE_AGENT_PROMPT;
     }
-    return {
-        ai: new GoogleGenAI({ apiKey }),
-        model: (config.geminiModel || DEFAULT_GEMINI_MODEL).trim() || DEFAULT_GEMINI_MODEL
-    };
+
+    async sendMessage(observation) {
+        this.history.push({ role: 'user', content: observation });
+
+        let responseText = '';
+        if (this.provider === 'anthropic') {
+            responseText = await this._callAnthropic();
+        } else if (this.provider === 'openai' || this.provider === 'local_openai') {
+            responseText = await this._callOpenAI();
+        } else {
+            responseText = await this._callGemini();
+        }
+
+        this.history.push({ role: 'assistant', content: responseText });
+        return responseText;
+    }
+
+    async _callAnthropic() {
+        const apiKey = this.config.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
+        const messages = this.history.map(m => ({
+            role: m.role,
+            content: m.content
+        }));
+
+        const response = await axios.post('https://api.anthropic.com/v1/messages', {
+            model: this.config.anthropicModel || 'claude-3-5-sonnet-latest',
+            max_tokens: 8192,
+            system: this.systemInstruction,
+            messages: messages
+        }, {
+            headers: {
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json'
+            }
+        });
+        return response.data.content[0].text;
+    }
+
+    async _callOpenAI() {
+        const isLocal = this.provider === 'local_openai';
+        const apiKey = isLocal ? 'not-needed' : (this.config.openaiApiKey || process.env.OPENAI_API_KEY);
+        const baseUrl = isLocal ? (this.config.localApiBaseUrl || 'http://localhost:1234/v1') : 'https://api.openai.com/v1';
+        const model = isLocal ? (this.config.localModelName || 'local-model') : (this.config.openaiModel || 'gpt-4o');
+
+        const messages = [
+            { role: 'system', content: this.systemInstruction },
+            ...this.history
+        ];
+
+        const response = await axios.post(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+            model: model,
+            messages: messages,
+            response_format: isLocal ? undefined : { type: "json_object" }
+        }, {
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        return response.data.choices[0].message.content;
+    }
+
+    async _callGemini() {
+        const apiKey = this.config.apiKey || process.env.GEMINI_API_KEY;
+        const model = this.config.geminiModel || DEFAULT_GEMINI_MODEL;
+        const ai = new GoogleGenAI({ apiKey });
+        
+        // Convert history for Gemini
+        const geminiHistory = this.history.slice(0, -1).map(m => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }]
+        }));
+        
+        const lastMessage = this.history[this.history.length - 1].content;
+
+        const chat = ai.chats.create({
+            model,
+            config: {
+                systemInstruction: this.systemInstruction,
+                responseMimeType: 'application/json'
+            },
+            history: geminiHistory
+        });
+
+        const response = await chat.sendMessage({ message: [{ text: lastMessage }] });
+        return typeof response.text === 'function' ? response.text() : response.text;
+    }
 }
 
 function detectPackageManager(workspaceRoot) {
@@ -327,23 +413,19 @@ async function executeCodeTask(task, options = {}) {
     const requestApproval = typeof options.requestApproval === 'function'
         ? options.requestApproval
         : async () => true;
-    const { ai, model } = getAiClientAndModel();
-
-    const chat = ai.chats.create({
-        model,
-        config: {
-            systemInstruction: CODE_AGENT_PROMPT,
-            responseMimeType: 'application/json'
-        },
-        history: []
-    });
+    const config = readConfig();
+    const provider = options.provider || 'gemini';
+    const client = new UnifiedAgentClient(provider, config);
 
     let observation = await buildInitialObservation(task, workspaceRoot);
 
+    let finalSummary = '';
+    let finalVerification = '';
+    let finalSessionSummary = '';
+
     for (let step = 1; step <= MAX_AGENT_STEPS; step++) {
         onProgress(`Step ${step}: thinking`);
-        const response = await chat.sendMessage({ message: [{ text: observation }] });
-        const text = typeof response.text === 'function' ? response.text() : response.text;
+        const text = await client.sendMessage(observation);
         const decision = extractJson(text);
         const action = decision.action;
         const input = decision.input || {};
@@ -351,17 +433,15 @@ async function executeCodeTask(task, options = {}) {
         onProgress(`Step ${step}: ${action}${input.path ? ` ${input.path}` : input.command ? ` ${input.command}` : ''}`);
 
         if (action === 'finish') {
-            const sessionSummary = input.sessionSummary || input.summary || task;
+            finalSessionSummary = input.sessionSummary || input.summary || task;
+            finalSummary = input.summary || 'Task complete.';
+            finalVerification = input.verification || 'Not specified.';
             writeWorkspaceSession(workspaceRoot, {
-                summary: sessionSummary,
+                summary: finalSessionSummary,
                 lastTask: task,
-                lastVerification: input.verification || 'Not specified.'
+                lastVerification: finalVerification
             });
-            return {
-                summary: input.summary || 'Task complete.',
-                verification: input.verification || 'Not specified.',
-                steps: step
-            };
+            break;
         }
 
         let toolResult = '';
@@ -425,6 +505,39 @@ async function executeCodeTask(task, options = {}) {
             'Observation:',
             toolResult
         ].join('\n');
+    }
+
+    // Check for Agent Collaboration (Review)
+    if (config.enableAgentCollaboration !== false) {
+        const availableProviders = getAvailableProviders(config);
+        const altProviders = availableProviders.filter(p => p !== provider && p !== 'ollama' && p !== 'huggingface');
+        if (altProviders.length > 0 && finalSummary) {
+            const reviewerProvider = altProviders[0];
+            onProgress(`Invoking Reviewer Agent (${reviewerProvider})...`);
+            
+            const reviewerClient = new UnifiedAgentClient(reviewerProvider, config);
+            reviewerClient.systemInstruction = CODE_AGENT_PROMPT + "\n\nYou are the Reviewer Agent. Review the primary agent's changes, test output, and verification. If you spot a critical bug, point it out. Otherwise, confirm it looks good. Return JSON with action: 'finish' and your review in the 'summary' field.";
+            
+            const reviewPrompt = `The primary agent (${provider}) just completed the task: "${task}".\nSummary: ${finalSummary}\nVerification: ${finalVerification}\nGit Status: ${(await getGitContext(workspaceRoot)).status}\n\nPlease review this. Return JSON with action: 'finish'.`;
+            
+            try {
+                const reviewResponse = await reviewerClient.sendMessage(reviewPrompt);
+                const reviewDecision = extractJson(reviewResponse);
+                const reviewInput = reviewDecision.input || {};
+                
+                finalSummary += `\n\n[Review by ${reviewerProvider}]\n${reviewInput.summary || reviewDecision.thought || 'Looks good.'}`;
+            } catch (e) {
+                onProgress(`Reviewer Agent failed: ${e.message}`);
+            }
+        }
+    }
+
+    if (finalSummary) {
+        return {
+            summary: finalSummary,
+            verification: finalVerification,
+            steps: MAX_AGENT_STEPS
+        };
     }
 
     writeWorkspaceSession(workspaceRoot, {

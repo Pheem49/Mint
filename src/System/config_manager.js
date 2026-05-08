@@ -60,8 +60,14 @@ const DEFAULT_CONFIG = {
     mcpServers: {},
     anthropicApiKey: '',
     openaiApiKey: '',
+    hfApiKey: '',
     anthropicModel: 'claude-3-5-sonnet-latest',
-    openaiModel: 'gpt-4o'
+    openaiModel: 'gpt-4o',
+    hfModel: 'meta-llama/Meta-Llama-3-8B-Instruct',
+    localApiBaseUrl: 'http://localhost:1234/v1',
+    localModelName: 'local-model',
+    ollamaHost: 'http://localhost:11434',
+    enableAgentCollaboration: true
 };
 
 
@@ -90,4 +96,21 @@ function writeConfig(config) {
     }
 }
 
-module.exports = { readConfig, writeConfig, CONFIG_PATH };
+function getAvailableProviders(config) {
+    const providers = [];
+    const cfg = config || readConfig();
+    
+    // Check which providers have API keys or URLs configured
+    if ((cfg.anthropicApiKey || process.env.ANTHROPIC_API_KEY)) providers.push('anthropic');
+    if ((cfg.openaiApiKey || process.env.OPENAI_API_KEY)) providers.push('openai');
+    if ((cfg.apiKey || process.env.GEMINI_API_KEY)) providers.push('gemini');
+    if ((cfg.hfApiKey || process.env.HF_API_KEY)) providers.push('huggingface');
+    if (cfg.localApiBaseUrl && cfg.localApiBaseUrl.trim() !== '') providers.push('local_openai');
+    
+    // Always push ollama at the end since it's local
+    providers.push('ollama');
+
+    return providers;
+}
+
+module.exports = { readConfig, writeConfig, getAvailableProviders, CONFIG_PATH };
