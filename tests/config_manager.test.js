@@ -1,45 +1,43 @@
 /**
  * Tests: config_manager.js
  * Tests readConfig, writeConfig, and getAvailableProviders.
- * Uses a temp directory so tests never touch the real ~/.config/mint.
+ *
+ * Isolation strategy: spy on os.homedir() BEFORE requiring config_manager
+ * so CONFIG_DIR and CONFIG_PATH point to a temp directory, never touching
+ * the real ~/.config/mint/mint-config.json.
  */
 
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
-const os = require('os');
+const os   = require('os');
 
-// ── Setup: point config to a temp directory before requiring the module ───
 let tempDir;
-let CONFIG_PATH;
 
 beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-test-'));
-    CONFIG_PATH = path.join(tempDir, 'mint-config.json');
-
-    // Reset module cache so config_manager re-initializes with our temp path
+    // 1. Reset module registry so config_manager re-initialises fresh each test
     jest.resetModules();
 
-    // Mock the CONFIG_DIR used inside config_manager
-    jest.mock('../src/System/config_manager', () => {
-        const actual = jest.requireActual('../src/System/config_manager');
-        return actual;
-    }, { virtual: false });
+    // 2. Create an isolated temp dir for this test
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-cfg-test-'));
+
+    // 3. Mock os.homedir() BEFORE requiring config_manager.
+    //    config_manager computes CONFIG_DIR = os.homedir() + '/.config/mint'
+    //    at load time, so the spy must be active when the module first loads.
+    jest.spyOn(os, 'homedir').mockReturnValue(tempDir);
 });
 
 afterEach(() => {
-    // Cleanup temp dir
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    jest.restoreAllMocks();
     jest.resetModules();
+    fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// ── Helper: get a fresh config_manager pointed at our temp file ─────────────
+// Helper — always gets a fresh, isolated instance of config_manager
 function getModule() {
-    // Patch the exported CONFIG_PATH constant after require
-    const mod = require('../src/System/config_manager');
-    return mod;
+    return require('../src/System/config_manager');
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────────
+// ── readConfig ─────────────────────────────────────────────────────────────
 
 describe('config_manager — readConfig', () => {
     test('returns DEFAULT_CONFIG when no config file exists', () => {
@@ -50,60 +48,85 @@ describe('config_manager — readConfig', () => {
         expect(config).toHaveProperty('language', 'th-TH');
     });
 
-    test('merges saved values with defaults', () => {
-        const { readConfig, writeConfig, CONFIG_PATH } = getModule();
-        writeConfig({ geminiModel: 'gemini-2.0-pro', customField: 'yes' });
+    test('merges saved values with defaults (saved value wins)', () => {
+        const { readConfig, writeConfig } = getModule();
+        writeConfig({ geminiModel: 'gemini-2.0-pro' });
         const config = readConfig();
-        // saved value wins
         expect(config.geminiModel).toBe('gemini-2.0-pro');
-        // default still present
+        // Default fields still present
         expect(config.aiProvider).toBe('gemini');
+        expect(config.language).toBe('th-TH');
+    });
+
+    test('missing keys in saved file are filled by defaults', () => {
+        const { readConfig, writeConfig } = getModule();
+        // Write a partial config (no 'ollamaModel' key)
+        writeConfig({ geminiModel: 'my-model' });
+        const config = readConfig();
+        expect(config.ollamaModel).toBe('llama3:latest'); // default
     });
 });
 
+// ── writeConfig ────────────────────────────────────────────────────────────
+
 describe('config_manager — writeConfig', () => {
-    test('returns success: true on valid write', () => {
+    test('returns { success: true } on valid write', () => {
         const { writeConfig } = getModule();
         const result = writeConfig({ testKey: 'testValue' });
         expect(result).toEqual({ success: true });
     });
 
-    test('written JSON is readable back', () => {
-        const { writeConfig, readConfig } = getModule();
+    test('written JSON is readable back correctly', () => {
+        const { readConfig, writeConfig } = getModule();
         writeConfig({ geminiModel: 'custom-model-test' });
         const config = readConfig();
         expect(config.geminiModel).toBe('custom-model-test');
     });
+
+    test('config file is actually created on disk', () => {
+        const { writeConfig, CONFIG_PATH } = getModule();
+        writeConfig({ geminiModel: 'test' });
+        expect(fs.existsSync(CONFIG_PATH)).toBe(true);
+    });
 });
 
+// ── getAvailableProviders ──────────────────────────────────────────────────
+
 describe('config_manager — getAvailableProviders', () => {
-    test('always includes ollama', () => {
+    test('always includes ollama (local, no key needed)', () => {
         const { getAvailableProviders } = getModule();
-        const providers = getAvailableProviders({});
-        expect(providers).toContain('ollama');
+        expect(getAvailableProviders({})).toContain('ollama');
     });
 
-    test('includes gemini when apiKey present', () => {
+    test('includes gemini when apiKey is set', () => {
         const { getAvailableProviders } = getModule();
-        const providers = getAvailableProviders({ apiKey: 'test-key' });
-        expect(providers).toContain('gemini');
+        expect(getAvailableProviders({ apiKey: 'test-key' })).toContain('gemini');
     });
 
-    test('includes anthropic when anthropicApiKey present', () => {
+    test('includes anthropic when anthropicApiKey is set', () => {
         const { getAvailableProviders } = getModule();
-        const providers = getAvailableProviders({ anthropicApiKey: 'ant-key' });
-        expect(providers).toContain('anthropic');
+        expect(getAvailableProviders({ anthropicApiKey: 'ant-key' })).toContain('anthropic');
     });
 
-    test('includes openai when openaiApiKey present', () => {
+    test('includes openai when openaiApiKey is set', () => {
         const { getAvailableProviders } = getModule();
-        const providers = getAvailableProviders({ openaiApiKey: 'oai-key' });
-        expect(providers).toContain('openai');
+        expect(getAvailableProviders({ openaiApiKey: 'oai-key' })).toContain('openai');
     });
 
-    test('does not include gemini when no key', () => {
+    test('includes huggingface when hfApiKey is set', () => {
         const { getAvailableProviders } = getModule();
-        // clear any env var
+        expect(getAvailableProviders({ hfApiKey: 'hf-key' })).toContain('huggingface');
+    });
+
+    test('includes local_openai when localApiBaseUrl is set', () => {
+        const { getAvailableProviders } = getModule();
+        expect(
+            getAvailableProviders({ localApiBaseUrl: 'http://localhost:1234/v1' })
+        ).toContain('local_openai');
+    });
+
+    test('does NOT include gemini when no key', () => {
+        const { getAvailableProviders } = getModule();
         const savedEnv = process.env.GEMINI_API_KEY;
         delete process.env.GEMINI_API_KEY;
         const providers = getAvailableProviders({ apiKey: '' });
@@ -111,9 +134,8 @@ describe('config_manager — getAvailableProviders', () => {
         if (savedEnv) process.env.GEMINI_API_KEY = savedEnv;
     });
 
-    test('includes local_openai when localApiBaseUrl is set', () => {
+    test('returns array type', () => {
         const { getAvailableProviders } = getModule();
-        const providers = getAvailableProviders({ localApiBaseUrl: 'http://localhost:1234/v1' });
-        expect(providers).toContain('local_openai');
+        expect(Array.isArray(getAvailableProviders({}))).toBe(true);
     });
 });
