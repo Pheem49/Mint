@@ -1,4 +1,4 @@
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 
 module.exports = {
     name: 'docker',
@@ -8,28 +8,30 @@ module.exports = {
         return new Promise((resolve) => {
             console.log(`[Docker Plugin] Executing command: ${target}`);
             
-            const [action, ...args] = target.toLowerCase().split(' ');
+            const rawTarget = (target || '').trim();
+            const [rawAction, ...args] = rawTarget.split(/\s+/);
+            const action = (rawAction || '').toLowerCase();
             const containerName = args.join(' ');
-
-            let cmd = '';
+            let commandArgs = [];
             
             if (action === 'list') {
-                cmd = 'docker ps --format "{{.Names}} ({{.Status}})"';
+                commandArgs = ['ps', '--format', '{{.Names}} ({{.Status}})'];
             } else if (['start', 'stop', 'restart'].includes(action) && containerName) {
-                cmd = `docker ${action} ${containerName}`;
+                commandArgs = [action, containerName];
             } else {
                 return resolve(`Invalid docker command or missing container name: ${target}`);
             }
 
-            exec(cmd, (error, stdout, stderr) => {
+            execFile('docker', commandArgs, (error, stdout, stderr) => {
                 if (error) {
-                    if (error.code === 127 || stderr.includes('not found')) {
+                    const stderrText = stderr || '';
+                    if (error.code === 127 || stderrText.includes('not found') || error.code === 'ENOENT') {
                         return resolve('Error: Docker is not installed or not in PATH.');
                     }
-                    if (stderr.includes('permission denied')) {
+                    if (stderrText.toLowerCase().includes('permission denied')) {
                         return resolve('Error: Permission denied. You might need to add your user to the "docker" group.');
                     }
-                    return resolve(`Docker Error: ${stderr || error.message}`);
+                    return resolve(`Docker Error: ${stderrText || error.message}`);
                 }
 
                 if (action === 'list') {

@@ -11,6 +11,8 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const MAX_TOOL_OUTPUT = 12000;
 const MAX_AGENT_STEPS = 16;
+const MAX_JSON_REPAIR_ATTEMPTS = 2;
+const SUPPORTED_CODE_PROVIDERS = ['gemini', 'anthropic', 'openai', 'local_openai'];
 
 const CODE_AGENT_PROMPT = `You are Mint Code Mode, a careful coding agent for a local workspace.
 
@@ -31,10 +33,11 @@ Rules:
 Response format:
 {
   "thought": "short reasoning",
-  "action": "list_files" | "read_file" | "search_code" | "run_shell" | "apply_patch" | "write_file" | "finish",
+  "action": "list_files" | "read_file" | "search_code" | "find_path" | "run_shell" | "apply_patch" | "write_file" | "finish",
   "input": {
     "path": "relative/path",
     "query": "search text",
+    "type": "file" | "dir" | "any",
     "command": "shell command",
     "startLine": 1,
     "endLine": 120,
@@ -58,6 +61,7 @@ Tool notes:
 - "list_files": inspect the workspace or a subdirectory.
 - "read_file": read a file, optionally with startLine/endLine.
 - "search_code": search by text or regex-like pattern.
+- "find_path": find files or directories by path/name when the user is looking for a folder, filename, or location.
 - "run_shell": run a non-destructive command in the workspace.
 - "apply_patch": update an existing file using one or more exact replacement hunks.
 - "write_file": create a new file or fully rewrite a file when replacement is not practical.
@@ -79,6 +83,22 @@ function extractJson(text) {
         }
         return JSON.parse(match[0]);
     }
+}
+
+function selectSupportedCodeProvider(config, availableProviders = getAvailableProviders(config || {})) {
+    const requestedProvider = (config && config.aiProvider) || 'gemini';
+    if (SUPPORTED_CODE_PROVIDERS.includes(requestedProvider) && availableProviders.includes(requestedProvider)) {
+        return requestedProvider;
+    }
+
+    const priority = ['anthropic', 'openai', 'gemini', 'local_openai'];
+    for (const provider of priority) {
+        if (availableProviders.includes(provider)) {
+            return provider;
+        }
+    }
+
+    return 'gemini';
 }
 
 function resolveWorkspacePath(workspaceRoot, targetPath = '.') {
@@ -158,6 +178,40 @@ async function searchCode(workspaceRoot, query) {
         }
         throw error;
     }
+}
+
+async function findPaths(workspaceRoot, query, type = 'any') {
+    if (!query || !query.trim()) {
+        throw new Error('Path search query is required.');
+    }
+
+    const normalizedType = ['file', 'dir', 'any'].includes(type) ? type : 'any';
+    const loweredQuery = query.trim().toLowerCase();
+    const results = [];
+
+    function visit(currentPath) {
+        const entries = fs.readdirSync(currentPath, { withFileTypes: true });
+        for (const entry of entries) {
+            const absoluteEntryPath = path.join(currentPath, entry.name);
+            const relativeEntryPath = path.relative(workspaceRoot, absoluteEntryPath) || '.';
+            const entryType = entry.isDirectory() ? 'dir' : 'file';
+            const matchesType = normalizedType === 'any' || normalizedType === entryType;
+            const matchesQuery = entry.name.toLowerCase().includes(loweredQuery) || relativeEntryPath.toLowerCase().includes(loweredQuery);
+
+            if (matchesType && matchesQuery) {
+                results.push(`${entryType === 'dir' ? '[dir]' : '[file]'} ${relativeEntryPath}`);
+                if (results.length >= 200) return;
+            }
+
+            if (entry.isDirectory() && results.length < 200) {
+                visit(absoluteEntryPath);
+                if (results.length >= 200) return;
+            }
+        }
+    }
+
+    visit(workspaceRoot);
+    return results.length > 0 ? results.join('\n') : '(no matching paths)';
 }
 
 function assertSafeShell(command) {
@@ -247,7 +301,7 @@ function writeFile(workspaceRoot, targetPath, content) {
 
 class UnifiedAgentClient {
     constructor(provider, config) {
-        this.provider = provider;
+        this.provider = SUPPORTED_CODE_PROVIDERS.includes(provider) ? provider : 'gemini';
         this.config = config;
         this.history = [];
         this.systemInstruction = CODE_AGENT_PROMPT;
@@ -342,6 +396,29 @@ class UnifiedAgentClient {
     }
 }
 
+async function getAgentDecision(client, observation, options = {}) {
+    const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
+    const step = options.step || 0;
+
+    let rawText = await client.sendMessage(observation);
+    for (let attempt = 0; attempt <= MAX_JSON_REPAIR_ATTEMPTS; attempt++) {
+        try {
+            return extractJson(rawText);
+        } catch (error) {
+            if (attempt === MAX_JSON_REPAIR_ATTEMPTS) {
+                throw new Error(`Agent returned invalid JSON after ${MAX_JSON_REPAIR_ATTEMPTS + 1} attempts: ${error.message}`);
+            }
+
+            onProgress(`Step ${step}: invalid JSON response, requesting repair (${attempt + 1}/${MAX_JSON_REPAIR_ATTEMPTS})`);
+            rawText = await client.sendMessage([
+                'Your previous response was not valid JSON for Code Mode.',
+                'Reply again with valid JSON only, following the required schema exactly.',
+                `Previous response:\n${truncate(rawText, 4000)}`
+            ].join('\n'));
+        }
+    }
+}
+
 function detectPackageManager(workspaceRoot) {
     if (fs.existsSync(path.join(workspaceRoot, 'package-lock.json'))) return 'npm';
     if (fs.existsSync(path.join(workspaceRoot, 'pnpm-lock.yaml'))) return 'pnpm';
@@ -420,7 +497,7 @@ async function executeCodeTask(task, options = {}) {
         ? options.requestApproval
         : async () => true;
     const config = readConfig();
-    const provider = options.provider || 'gemini';
+    const provider = options.provider || selectSupportedCodeProvider(config);
     const client = new UnifiedAgentClient(provider, config);
 
     let observation = await buildInitialObservation(task, workspaceRoot, history);
@@ -428,11 +505,12 @@ async function executeCodeTask(task, options = {}) {
     let finalSummary = '';
     let finalVerification = '';
     let finalSessionSummary = '';
+    let executedSteps = 0;
 
     for (let step = 1; step <= MAX_AGENT_STEPS; step++) {
+        executedSteps = step;
         onProgress(`Step ${step}: thinking`);
-        const text = await client.sendMessage(observation);
-        const decision = extractJson(text);
+        const decision = await getAgentDecision(client, observation, { onProgress, step });
         const action = decision.action;
         const input = decision.input || {};
 
@@ -460,6 +538,9 @@ async function executeCodeTask(task, options = {}) {
                 break;
             case 'search_code':
                 toolResult = await searchCode(workspaceRoot, input.query);
+                break;
+            case 'find_path':
+                toolResult = await findPaths(workspaceRoot, input.query, input.type);
                 break;
             case 'run_shell': {
                 const approved = await requestApproval({
@@ -548,7 +629,7 @@ async function executeCodeTask(task, options = {}) {
         return {
             summary: finalSummary,
             verification: finalVerification,
-            steps: MAX_AGENT_STEPS
+            steps: executedSteps
         };
     }
 
@@ -561,8 +642,15 @@ async function executeCodeTask(task, options = {}) {
     return {
         summary: 'Stopped after reaching the maximum number of agent steps.',
         verification: 'Agent limit reached before explicit completion.',
-        steps: MAX_AGENT_STEPS
+        steps: executedSteps || MAX_AGENT_STEPS
     };
 }
 
-module.exports = { executeCodeTask };
+module.exports = {
+    executeCodeTask,
+    _helpers: {
+        extractJson,
+        selectSupportedCodeProvider,
+        findPaths
+    }
+};

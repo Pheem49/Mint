@@ -228,15 +228,29 @@ async function startInteractiveChat(initialMessage = null) {
             const transcript = await getChatTranscript();
             const routeDecision = await detectCodeIntent(text, process.cwd(), transcript);
             if (routeDecision.route === 'code') {
-                appendMessage('system', `Router: entering Code Mode. ${routeDecision.reason}`);
-                await runChatRoutedTask(text, {
-                    appendMessage,
-                    setThinking,
-                    requestApproval,
-                    setMode,
-                    history: transcript
+                const approved = await requestApproval({
+                    type: 'code_mode',
+                    label: 'Mint wants to switch this request into Code Mode.',
+                    preview: [
+                        `Request: ${text}`,
+                        `Reason: ${routeDecision.reason}`,
+                        '',
+                        'Code Mode is better for larger coding tasks that may inspect the workspace, run checks, or edit files.'
+                    ].join('\n')
                 });
-                return;
+                if (!approved) {
+                    appendMessage('system', `Router stayed in Chat Mode. ${routeDecision.reason}`);
+                } else {
+                    appendMessage('system', `Router: entering Code Mode. ${routeDecision.reason}`);
+                    await runChatRoutedTask(text, {
+                        appendMessage,
+                        setThinking,
+                        requestApproval,
+                        setMode,
+                        history: transcript
+                    });
+                    return;
+                }
             }
 
             setMode('Chat');
@@ -359,14 +373,48 @@ async function startInteractiveChat(initialMessage = null) {
             const transcript = await getChatTranscript();
             const routeDecision = await detectCodeIntent(initialMessage, process.cwd(), transcript);
             if (routeDecision.route === 'code') {
-                appendMessage('system', `Router: entering Code Mode. ${routeDecision.reason}`);
-                await runChatRoutedTask(initialMessage, {
-                    appendMessage,
-                    setThinking,
-                    requestApproval,
-                    setMode,
-                    history: transcript
+                const approved = await requestApproval({
+                    type: 'code_mode',
+                    label: 'Mint wants to switch this request into Code Mode.',
+                    preview: [
+                        `Request: ${initialMessage}`,
+                        `Reason: ${routeDecision.reason}`,
+                        '',
+                        'Code Mode is better for larger coding tasks that may inspect the workspace, run checks, or edit files.'
+                    ].join('\n')
                 });
+                if (approved) {
+                    appendMessage('system', `Router: entering Code Mode. ${routeDecision.reason}`);
+                    await runChatRoutedTask(initialMessage, {
+                        appendMessage,
+                        setThinking,
+                        requestApproval,
+                        setMode,
+                        history: transcript
+                    });
+                } else {
+                    appendMessage('system', `Router stayed in Chat Mode. ${routeDecision.reason}`);
+                    setMode('Chat');
+                    let seconds = 0;
+                    setThinking(true, seconds);
+                    const timer = setInterval(() => { seconds++; setThinking(true, seconds); }, 1000);
+                    try {
+                        const response = await handleChat(initialMessage);
+                        clearInterval(timer);
+                        setThinking(false);
+                        appendMessage('assistant', response.response, response.timestamp);
+                        lastResponseText = response.response;
+                        const { executeAction } = require('./mint-cli-logic');
+                        if (response.action && response.action.type !== 'none') {
+                            const result = await executeAction(response.action);
+                            if (result) appendMessage('system', `Action: ${result}`);
+                        }
+                    } catch (err) {
+                        clearInterval(timer);
+                        setThinking(false);
+                        appendMessage('error', err.message);
+                    }
+                }
             } else {
             setMode('Chat');
             let seconds = 0;
@@ -377,6 +425,12 @@ async function startInteractiveChat(initialMessage = null) {
                 clearInterval(timer);
                 setThinking(false);
                 appendMessage('assistant', response.response, response.timestamp);
+                lastResponseText = response.response;
+                const { executeAction } = require('./mint-cli-logic');
+                if (response.action && response.action.type !== 'none') {
+                    const result = await executeAction(response.action);
+                    if (result) appendMessage('system', `Action: ${result}`);
+                }
             } catch (err) {
                 clearInterval(timer);
                 setThinking(false);

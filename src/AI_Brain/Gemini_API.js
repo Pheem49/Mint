@@ -58,11 +58,13 @@ Always respond exactly with valid JSON containing NO MARKDOWN FORMATTING (do not
 {
   "response": "Your conversational reply here (Matches user language).",
   "action": {
-    "type": "none" | "open_url" | "open_app" | "search" | "web_automation" | "create_folder" | "open_file" | "open_folder" | "delete_file" | "clipboard_write" | "system_info" | "plugin" | "learn_file" | "learn_folder" | "system_automation" | "mcp_tool" | "mouse_click" | "mouse_move" | "type_text" | "key_tap",
+    "type": "none" | "open_url" | "open_app" | "search" | "web_automation" | "create_folder" | "open_file" | "open_folder" | "find_path" | "delete_file" | "clipboard_write" | "system_info" | "plugin" | "learn_file" | "learn_folder" | "system_automation" | "mcp_tool" | "mouse_click" | "mouse_move" | "type_text" | "key_tap",
 
     "pluginName": "only if type is plugin",
     "server": "only if type is mcp_tool (server name)",
     "target": "target string based on type (tool name if mcp_tool, text to type if type_text, key name if key_tap)",
+    "pathType": "optional for find_path: 'file' | 'dir' | 'any'",
+    "openAfter": true,
     "x": 0-1000, // required for mouse_click and mouse_move
     "y": 0-1000, // required for mouse_click and mouse_move
     "button": 1 | 2 | 3, // optional for mouse_click, 1=left, 2=middle, 3=right
@@ -85,6 +87,12 @@ Output: { "response": "สวัสดีค่ะ! หนูชื่อมิ�
 
 Input: "Create a folder named Projects"
 Output: { "response": "Sure thing! I'm creating a folder named 'Projects' for you right now.", "action": { "type": "create_folder", "target": "Projects" } }
+
+Input: "หาโฟลเดอร์ xidaidai ให้หน่อย" or "find the xidaidai folder"
+Output: { "response": "ได้เลยค่ะ มิ้นท์จะค้นหาโฟลเดอร์ xidaidai ให้", "action": { "type": "find_path", "target": "xidaidai", "pathType": "dir", "openAfter": false } }
+
+Input: "เปิดโฟลเดอร์ xidaidai ให้หน่อย" or "open the xidaidai folder"
+Output: { "response": "ได้เลยค่ะ มิ้นท์จะหาแล้วเปิดโฟลเดอร์ xidaidai ให้", "action": { "type": "find_path", "target": "xidaidai", "pathType": "dir", "openAfter": true } }
 
 Input: "วันนี้วันที่เท่าไร" or "What date is today?" or "today's date" or "วันเวลา"
 Output: { "response": "แป๊บนึงนะคะ มิ้นท์จะดูให้ค่า", "action": { "type": "system_info", "target": "" } }
@@ -165,6 +173,13 @@ function resolveGeminiModel() {
   }
 }
 
+function getProviderAttemptOrder(config) {
+  const provider = config.aiProvider || 'gemini';
+  const availableProviders = getAvailableProviders(config);
+  const alternates = availableProviders.filter(p => p !== provider);
+  return [provider, ...alternates];
+}
+
 // Chat session — maintains conversation history within the session
 let chat = null;
 let activeModel = resolveGeminiModel();
@@ -214,21 +229,6 @@ function shouldUseKnowledgeSearch(message) {
 async function handleChat(message, base64Image = null, base64Audio = null) {
   try {
     const config = readConfig();
-    const provider = config.aiProvider || 'gemini';
-
-    // Ensure API Key is loaded and Client is initialized before every chat
-    const currentKey = resolveApiKey();
-    if (!currentKey) {
-       return { 
-           response: "I couldn't find your Gemini API Key. Please run 'mint onboard' to set it up!", 
-           action: { type: "none", target: "" } 
-       };
-    }
-
-    if (!ai || activeApiKey !== currentKey) {
-        initAiClient();
-        createChat(readChatHistory());
-    }
 
     let finalMessage = message;
     
@@ -245,13 +245,7 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
         }
     }
 
-    const { getAvailableProviders } = require('../System/config_manager');
-    const availableProviders = getAvailableProviders(config);
-    
-    // Ensure the requested provider is prioritized. If not available, fallback to the first available.
-    let providersToTry = [provider];
-    const alternates = availableProviders.filter(p => p !== provider);
-    providersToTry = providersToTry.concat(alternates);
+    const providersToTry = getProviderAttemptOrder(config);
 
     for (let i = 0; i < providersToTry.length; i++) {
         const currentProv = providersToTry[i];
@@ -270,6 +264,23 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
             }
             if (currentProv === 'huggingface') {
                 return await handleHuggingFaceChat(finalMessage, base64Image, config);
+            }
+
+            const currentKey = resolveApiKey();
+            if (!currentKey) {
+                if (i === providersToTry.length - 1) {
+                    return {
+                        response: "I couldn't find your Gemini API Key. Please run 'mint onboard' to set it up!",
+                        action: { type: "none", target: "" }
+                    };
+                }
+                console.warn("[Fallback System] Gemini API key missing. Skipping Gemini provider.");
+                continue;
+            }
+
+            if (!ai || activeApiKey !== currentKey) {
+                initAiClient();
+                createChat(readChatHistory());
             }
 
             return await handleGeminiChat(finalMessage, base64Image, base64Audio);
@@ -887,5 +898,8 @@ module.exports = {
     resetChat,
     getChatTranscript,
     translateImageContent,
-    refreshApiKeyFromConfig
+    refreshApiKeyFromConfig,
+    _helpers: {
+        getProviderAttemptOrder
+    }
 };

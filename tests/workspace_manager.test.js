@@ -9,13 +9,17 @@ const os = require('os');
 
 describe('Workspace Manager', () => {
     let tempDir;
+    let workspaceFile;
 
     beforeEach(() => {
         // Create a temp workspace directory
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-ws-test-'));
+        workspaceFile = path.join(tempDir, 'workspaces.json');
+        process.env.MINT_WORKSPACE_FILE = workspaceFile;
     });
 
     afterEach(() => {
+        delete process.env.MINT_WORKSPACE_FILE;
         fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
@@ -30,6 +34,17 @@ describe('Workspace Manager', () => {
         wsManager.addWorkspace('test-ws', tempDir);
         const ws = wsManager.getWorkspaceByPath(tempDir);
         expect(ws.name).toBe('test-ws');
+    });
+
+    test('does not match sibling paths with same prefix', () => {
+        const workspaceRoot = path.join(tempDir, 'project');
+        const siblingPath = path.join(tempDir, 'project-two');
+        fs.mkdirSync(workspaceRoot, { recursive: true });
+        fs.mkdirSync(siblingPath, { recursive: true });
+
+        wsManager.addWorkspace('test-ws', workspaceRoot);
+        const ws = wsManager.getWorkspaceByPath(siblingPath);
+        expect(ws).toBeNull();
     });
 
     test('removes workspaces', () => {

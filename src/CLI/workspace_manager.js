@@ -9,26 +9,35 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const WORKSPACE_FILE = path.join(os.homedir(), '.config', 'mint', 'workspaces.json');
+function getWorkspaceFile() {
+    return process.env.MINT_WORKSPACE_FILE || path.join(os.homedir(), '.config', 'mint', 'workspaces.json');
+}
 
 function ensureDir() {
-    const dir = path.dirname(WORKSPACE_FILE);
+    const dir = path.dirname(getWorkspaceFile());
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
 function loadWorkspaces() {
+    const workspaceFile = getWorkspaceFile();
     ensureDir();
-    if (!fs.existsSync(WORKSPACE_FILE)) return {};
+    if (!fs.existsSync(workspaceFile)) return {};
     try {
-        return JSON.parse(fs.readFileSync(WORKSPACE_FILE, 'utf8'));
+        return JSON.parse(fs.readFileSync(workspaceFile, 'utf8'));
     } catch (e) {
         return {};
     }
 }
 
 function saveWorkspaces(data) {
+    const workspaceFile = getWorkspaceFile();
     ensureDir();
-    fs.writeFileSync(WORKSPACE_FILE, JSON.stringify(data, null, 2));
+    fs.writeFileSync(workspaceFile, JSON.stringify(data, null, 2));
+}
+
+function isPathInsideWorkspace(currentPath, workspacePath) {
+    const relative = path.relative(workspacePath, currentPath);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function addWorkspace(name, rootPath, instructions = '') {
@@ -62,7 +71,7 @@ function getWorkspaceByPath(currentPath) {
     // Find workspace where current path is inside or equal to workspace path
     for (const name in workspaces) {
         const ws = workspaces[name];
-        if (absoluteCurrent.startsWith(ws.path)) {
+        if (isPathInsideWorkspace(absoluteCurrent, ws.path)) {
             return ws;
         }
     }

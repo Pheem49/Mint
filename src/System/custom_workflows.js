@@ -3,6 +3,10 @@ const path = require('path');
 const { app, shell } = require('electron');
 const { exec } = require('child_process');
 
+function escapeRegExp(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 class CustomWorkflows {
     constructor() {
         this.configPath = path.join(app.getPath('userData'), 'workflows.json');
@@ -86,7 +90,7 @@ class CustomWorkflows {
                     if (wf.trigger && wf.trigger.type === 'process_running' && wf.trigger.processName) {
                         const targetName = wf.trigger.processName.toLowerCase();
                         // simplistic exact-word match to avoid partial matches
-                        const regex = new RegExp(`^${targetName}$`, 'm');
+                        const regex = new RegExp(`^${escapeRegExp(targetName)}$`, 'm');
                         const isRunning = regex.test(runningProcesses);
                         
                         if (isRunning) {
@@ -124,4 +128,7 @@ class CustomWorkflows {
     }
 }
 
-module.exports = new CustomWorkflows();
+const instance = new CustomWorkflows();
+instance._helpers = { escapeRegExp };
+
+module.exports = instance;

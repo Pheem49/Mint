@@ -1,56 +1,85 @@
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 
-function openApp(target) {
-    if (!target) return;
+function execFilePromise(command, args) {
+    return new Promise((resolve, reject) => {
+        execFile(command, args, (error) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+            resolve();
+        });
+    });
+}
 
-    let cmd = '';
-    if (process.platform === 'win32') {
-        cmd = `start "" "${target}"`;
-    } else if (process.platform === 'darwin') {
-        if (!target.includes('/')) {
-            cmd = `open -X -a "${target}" || open -a "${target}"`;
-        } else {
-            cmd = `open "${target}"`;
-        }
-    } else {
-        const tLower = target.toLowerCase();
-        const tCapitalized = target.charAt(0).toUpperCase() + target.slice(1).toLowerCase();
-        
-        // Try common linux patterns: gtk-launch, exact name, lowercase, flatpak
-        if (!target.includes('/')) {
-            const patterns = [
-                `gtk-launch ${target}`,
-                `gtk-launch ${tLower}`,
-                `gtk-launch ${tCapitalized}`,
-                `gtk-launch com.${tLower}app.${tCapitalized}`,
-                `gtk-launch com.${tLower}.${tCapitalized}`,
-                target,
-                tLower,
-                `flatpak run ${target}`, // In case target is already ID
-                `flatpak run com.${tLower}app.${tCapitalized}`,
-                `flatpak run com.${tLower}.${tCapitalized}`,
-                `flatpak run com.${tLower}.Browser`,
-                `flatpak run com.${tLower}.${target}`,
-                `flatpak run com.valvesoftware.Steam`,
-                `flatpak run net.lutris.Lutris`,
-                `snap run ${tLower}`
-            ];
-            cmd = patterns.join(' || ');
-        } else {
-            cmd = `xdg-open "${target}"`;
+async function tryCommands(commands) {
+    let lastError = null;
+    for (const { command, args } of commands) {
+        try {
+            await execFilePromise(command, args);
+            return true;
+        } catch (error) {
+            lastError = error;
         }
     }
 
-    exec(cmd, (error) => {
-        if (error) {
+    if (lastError) {
+        console.error(`exec error: ${lastError}`);
+    }
+    return false;
+}
+
+async function openApp(target) {
+    if (!target) return;
+
+    if (process.platform === 'win32') {
+        await execFilePromise('cmd.exe', ['/c', 'start', '', target]).catch((error) => {
             console.error(`exec error: ${error}`);
-            if (process.platform !== 'win32') {
-                exec(target.toLowerCase(), (err2) => {
-                    if (err2) console.error("Fallback lowercase exec failed:", err2);
-                });
-            }
+        });
+        return;
+    }
+
+    if (process.platform === 'darwin') {
+        if (!target.includes('/')) {
+            await tryCommands([
+                { command: 'open', args: ['-X', '-a', target] },
+                { command: 'open', args: ['-a', target] }
+            ]);
+        } else {
+            await execFilePromise('open', [target]).catch((error) => {
+                console.error(`exec error: ${error}`);
+            });
         }
-    });
+        return;
+    }
+
+    const tLower = target.toLowerCase();
+    const tCapitalized = target.charAt(0).toUpperCase() + target.slice(1).toLowerCase();
+
+    if (target.includes('/')) {
+        await execFilePromise('xdg-open', [target]).catch((error) => {
+            console.error(`exec error: ${error}`);
+        });
+        return;
+    }
+
+    await tryCommands([
+        { command: 'gtk-launch', args: [target] },
+        { command: 'gtk-launch', args: [tLower] },
+        { command: 'gtk-launch', args: [tCapitalized] },
+        { command: 'gtk-launch', args: [`com.${tLower}app.${tCapitalized}`] },
+        { command: 'gtk-launch', args: [`com.${tLower}.${tCapitalized}`] },
+        { command: target, args: [] },
+        { command: tLower, args: [] },
+        { command: 'flatpak', args: ['run', target] },
+        { command: 'flatpak', args: ['run', `com.${tLower}app.${tCapitalized}`] },
+        { command: 'flatpak', args: ['run', `com.${tLower}.${tCapitalized}`] },
+        { command: 'flatpak', args: ['run', `com.${tLower}.Browser`] },
+        { command: 'flatpak', args: ['run', `com.${tLower}.${target}`] },
+        { command: 'flatpak', args: ['run', 'com.valvesoftware.Steam'] },
+        { command: 'flatpak', args: ['run', 'net.lutris.Lutris'] },
+        { command: 'snap', args: ['run', tLower] }
+    ]);
 }
 
 module.exports = { openApp };

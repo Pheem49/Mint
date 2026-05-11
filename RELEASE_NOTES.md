@@ -1,88 +1,83 @@
-
 # Mint Release Notes
 
-## v1.4.0 - The "Intelligence & Collaboration" Update
+## v1.4.1 - CLI Agent Hardening & Stability
 
-Mint 1.4.0 is the most significant release to date — Mint is now **project-aware**, **persona-driven**, and **context-sensitive**. With persistent memory, real-time streaming, and a full suite of system tools, Mint has evolved from a simple chat interface into a true autonomous assistant.
+Mint 1.4.1 focuses on making the CLI and coding agent behave more like a real agent, while tightening several unsafe execution paths and improving reliability across provider selection, workspace handling, and action execution.
 
-### ✨ New Features
+### Highlights
 
-* **⚡ Streaming Responses (Gemini):**
-    * Real-time interaction! Messages now appear word-by-word as they are generated, rather than waiting for the full response.
-    * Uses Gemini SDK's `sendMessageStream()` with progressive JSON buffer extraction.
+- CLI one-shot chat now executes returned actions, not just text responses
+- Code Mode now uses only supported coding providers instead of silently falling through
+- Agent loop is more resilient when a model returns malformed JSON
+- Workspace detection is safer and no longer matches sibling paths by prefix
+- Multiple shell execution paths were hardened to reduce command injection risk
 
-* **🧠 Long-Term Memory & Caching:**
-    * Mint now remembers you across sessions via a local SQLite store.
-    * **Personalization:** Tracks your language preferences, active projects, and common interaction patterns to inject relevant context into every prompt.
-    * **Response Caching:** Instant answers for repeated queries! Saves API quota and reduces latency by caching common AI responses.
+### CLI & Agent Improvements
 
-* **🤖 Multi-Agent Orchestrator:**
-    * **Persona Switching:** Switch between specialized agents like **Coder**, **Researcher**, **Creative**, **Manager**, and **Reviewer** using the `/agent <type>` command.
-    * **Review Mode:** Use `/review` to trigger a second-pass critique of any AI response by the specialized Reviewer agent.
+- **One-shot CLI action execution**
+  - `mint chat <message>` and equivalent one-shot paths now execute structured actions the same way as interactive chat.
+  - This fixes cases where Mint would say it was opening or searching for something but would not actually perform the action.
 
-* **📂 Workspace Management:**
-    * Register your project directories with `/workspace add <name> [path] [instructions]`.
-    * Mint automatically detects when you are working inside a registered workspace and applies project-specific instructions to the AI context.
+- **Better Code Mode provider routing**
+  - Code Mode now selects from providers that are actually supported by the coding workflow:
+    - `gemini`
+    - `anthropic`
+    - `openai`
+    - `local_openai`
+  - Unsupported coding providers such as `ollama` or `huggingface` no longer appear to be active while silently falling back elsewhere.
 
-* **📊 System Monitor & Notifications:**
-    * **Stats:** Use `/stats` to view real-time CPU load, Memory usage, and Disk space.
-    * **OS Notifications:** Receive system alerts when autonomous tasks finish or when Mint proposes a bash command, keeping you informed even when the terminal is in the background.
+- **More robust agent loop**
+  - Code Mode now attempts JSON repair when a provider returns malformed structured output.
+  - Instead of failing immediately on the first invalid JSON response, Mint asks the model to reformat the reply into valid JSON and retries.
 
-* **🎵 Spotify Plugin (Complete Edition):**
-    * Full control via `playerctl` (no OAuth required):
-    * **Playback:** `play`, `pause`, `stop`, `next`, `previous`.
-    * **Now Playing:** View current track, artist, and album status.
-    * **Volume & Shuffle:** Fine-grained control over audio levels and playback modes.
-    * **Search:** Quick browser-based search integration.
+- **Accurate step reporting**
+  - Code Mode now reports the actual number of executed steps instead of always showing the maximum configured step count.
 
-### 🛠️ Improvements & Refactoring
+### Security & Safety Fixes
 
-* **Smarter API Key Detection:** Automatically detects and skips placeholder API keys (e.g., "your_key_here") to prevent unauthorized errors.
-* **Unified System Prompt:** Refactored `buildSystemPrompt()` to centralize MCP tools, plugin descriptions, and workspace context across all AI providers.
-* **Smart Routing Priority:** Code tasks now prioritize your configured `aiProvider` while gracefully falling back to the best available model.
+- **Hardened URL and file opening paths**
+  - Replaced shell-string execution with argument-based process execution in browser and file action handlers.
 
-### 🧪 Testing & Stability
+- **Hardened app launching**
+  - `open_app` no longer builds launcher commands through shell interpolation for common launch paths.
 
-* **Robust Test Suite (69 tests passed):**
-    * Full coverage for `config_manager`, `memory_store`, `workspace_manager`, `agent_orchestrator`, `system_monitor`, and `spotify` plugins.
-    * Implemented strict test isolation with temporary databases and configurations to protect production data.
+- **Hardened Docker plugin**
+  - Docker actions now use argument-based execution instead of shell-string concatenation.
 
----
+- **Safer workflow process matching**
+  - Custom workflow process-name matching now escapes regex characters before building a matcher.
 
-## v1.3.0 - The "Agent & Plugin Power-Up" Update
+### Workspace & Config Fixes
 
-Mint 1.3.0 introduced the foundation for multi-agent capabilities and a more flexible plugin architecture.
+- **Workspace path matching fixed**
+  - Workspace detection no longer treats sibling folders with the same prefix as the same project.
+  - Example: `/project` no longer incorrectly matches `/project-two`
 
-### ✨ New Features
-* **Agent Framework:** Initial support for switching between different AI specializations.
-* **Plugin System 2.0:** Dynamic loading/unloading of plugins without restarting the CLI.
-* **Contextual Help:** Introduced `/help` command with situation-aware suggestions.
+- **Workspace test isolation**
+  - Workspace storage can now be redirected for tests through an override path, making tests more reliable in restricted environments.
 
-### 🛠️ Improvements & Bug Fixes
-* **Performance Boost:** Optimized CLI responsiveness and reduced memory footprint.
-* **Better Error Handling:** Improved user-facing error messages with actionable fixes.
+- **Proactive cooldown config consistency**
+  - Proactive suggestion cooldown now reads from the same config source as the rest of the app.
 
----
+- **Provider fallback logic improved**
+  - Non-Gemini providers are no longer blocked by a missing Gemini API key before routing even begins.
 
-## v1.2.4 - The "Smart Path & Dynamic Version" Update
+### Documentation
 
-Focused on path resolution intelligence and consistent versioning.
+- Rewrote the README to better reflect Mint’s current state as a desktop assistant plus CLI coding agent
+- Clarified current agent capabilities, supported workflows, and provider behavior
 
-### ✨ New Features
-* **Smart Path Resolution:** Automatic Home-directory correction and common folder searching.
-* **Dynamic Versioning:** CLI versioning is now synchronized directly with `package.json`.
+### Testing
 
----
+- Expanded regression coverage for:
+  - Docker plugin execution
+  - Provider routing helpers
+  - Code agent helper behavior
+  - Workspace path boundary handling
 
-## v1.2.3 - The "Smart TUI" Update
+- Current test status:
+  - **77 tests passed**
 
-Focused on the terminal user interface (TUI) polish and system awareness.
+### Notes
 
-### ✨ New Features
-* **System Awareness:** Added reporting for OS, Kernel, and Architecture.
-* **Enhanced TUI Layout:** Bubble-Lite message style and smart text wrapping for Thai/English.
-* **Mouse Support:** Added scroll wheel support for chat history.
-
-### 🛠️ Improvements & Bug Fixes
-* **Terminal Cleanup:** Fixed "garbage" character artifacts on exit.
-* **Slash Command Aliases:** Added `/model` as an alias for `/models`.
+Mint 1.4.1 is not a major feature release. It is a stabilization release aimed at making existing agentic workflows safer, more honest about what provider is actually being used, and more reliable in day-to-day CLI usage.

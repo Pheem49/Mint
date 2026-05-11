@@ -1,200 +1,244 @@
 # Mint
 
 <p align="center">
-  <img src="assets/icon.png" alt="Luna Mint Icon" width="160">
+  <img src="assets/icon.png" alt="Mint Icon" width="160">
 </p>
 
 <p align="center">
-  <strong>An advanced AI Assistant built for the modern workflow — now on Desktop & Terminal.</strong>
+  <strong>Desktop assistant + CLI coding agent built with Electron, Node.js, and modern LLM providers.</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge" alt="License">
   <img src="https://img.shields.io/badge/Node.js-LTS-green?style=for-the-badge&logo=node.js" alt="Node.js">
-  <img src="https://img.shields.io/badge/Electron-Latest-47848F?style=for-the-badge&logo=electron" alt="Electron">
-  <img src="https://img.shields.io/badge/Powered%20By-Gemini-orange?style=for-the-badge&logo=google-gemini" alt="Gemini">
+  <img src="https://img.shields.io/badge/Electron-40.x-47848F?style=for-the-badge&logo=electron" alt="Electron">
+  <img src="https://img.shields.io/badge/CLI-Agentic-orange?style=for-the-badge" alt="CLI Agentic">
 </p>
 
----
+Mint is an AI assistant that runs in two main surfaces:
 
-**Mint** is a powerful AI Assistant built with **Electron**, **Node.js**, and **Google Gemini** (with extended support for Hugging Face, Anthropic, OpenAI, and Local Models). It bridges the gap between your Desktop and Terminal, featuring real-time screen vision, web automation, local knowledge search, and a professional CLI for developers who love the command line.
+- A desktop Electron app for chat, screen-aware help, and system actions
+- A terminal-first CLI with a workspace-aware coding agent
 
-## Highlights
+The project is built around practical local workflows: inspect code, edit files, run safe commands with approval, use project context, and fall back across multiple AI providers when needed.
 
-- **Dual-Mode AI**: Switch between a beautiful **Desktop GUI** and a professional **CLI**.
-- **Code Agent Mode**: Use `mint code "<task>"` to inspect, edit, and verify a project directly from the current terminal workspace.
-- **Chat-First Workflow**: Regular Mint chat can now auto-route coding requests into workspace Code Mode, so the main chat acts as the control surface.
-- **Advanced Multi-Agent Hub**: 
-  - **Smart Routing**: Intelligently routes coding/general tasks to the most capable configured provider (e.g., Claude, OpenAI, Gemini).
-  - **Agent Collaboration**: Enable Multi-Agent Review so that a primary AI writes the code while a secondary AI automatically reviews it in the same loop.
-  - **Resilient Fallback**: Automatically fallbacks to alternative AI providers (Gemini, Anthropic, OpenAI, Hugging Face, LM Studio, Ollama) if your active provider fails.
-- **Visible Mode State**: The CLI status bar now shows whether Mint is currently in `Chat` or `Code` mode.
-- **Interactive Slash Commands**: Manage models and settings in the terminal with `/model`, `/config`, `/clear`, etc.
-- **Smart TUI Experience**: Professional message framing, character-wrapped Thai text support, and mouse scroll wheel navigation.
-- **System Information Action**: Retrieve OS, Kernel, and Architecture details via natural language.
-- **Dynamic UI Aesthetics**: Animated **Aura Glow** for the AI widget and **Glassmorphism** design.
-- **Minimize-to-Tray**: Keep Mint running in the background via the System Tray.
-- **Vision-Ready (Desktop)**: Capture, analyze, and translate any part of your screen in real-time.
-- **Automation First**: Control your system and browser via natural language from both App and Terminal.
-- **Background Agent**: Install Mint as a `systemd` user service for proactive monitoring.
+## What Mint Can Do
 
----
+- Chat in Desktop or CLI mode
+- Route coding requests into Code Mode automatically from the CLI chat UI
+- Inspect a workspace before editing
+- Search code, read file ranges, and patch files
+- Run non-destructive shell commands with user approval
+- Keep lightweight per-workspace session memory
+- Perform a second-pass reviewer step in Code Mode
+- Execute structured actions such as opening apps, URLs, folders, and system tasks
+- Support multiple providers: Gemini, Anthropic, OpenAI, local OpenAI-compatible endpoints, Ollama, and Hugging Face
+
+## Current Agent Capabilities
+
+Mint CLI is an agentic coding workflow, not just a chat wrapper.
+
+In Code Mode it can:
+
+- Decide on the next step from the current observation
+- Use tools in a loop: `list_files`, `read_file`, `search_code`, `run_shell`, `apply_patch`, `write_file`
+- Observe tool output and continue iterating
+- Stop with a summary and verification result
+- Ask for approval before shell commands and file changes
+
+That makes Mint a practical CLI coding agent, while still keeping the user in control of risky actions.
 
 ## Screenshots
 
 <p align="center">
-  <img src="assets/Agent_Mint.png" alt="Agent Mint UI" width="48%">
-  <img src="assets/Settings.png" alt="Settings Window" width="48%">
+  <img src="assets/Agent_Mint.png" alt="Mint Desktop UI" width="48%">
+  <img src="assets/Settings.png" alt="Mint Settings" width="48%">
 </p>
-<p align="center">
-  <em>Desktop Interface and personalized Settings window</em>
-</p>
-
----
-
-## CLI Usage (Power Users)
-
-Mint CLI is built for speed and efficiency. Use the **`mint`** command from anywhere.
 
 <p align="center">
-  <img src="assets/CLI_Screen.png" alt="Mint CLI Preview" width="100%">
+  <img src="assets/CLI_Screen.png" alt="Mint CLI" width="100%">
 </p>
 
-### Professional Commands
-- **`mint`** : Start interactive chat mode (Default).
-- **`mint code "task"`** : Run Mint as a workspace-aware coding agent in the current project folder.
-- **`mint agent`** : Run Mint as a headless background agent (Monitoring mode).
-- **`mint agent "task"`** : Start agent and execute an autonomous task immediately.
-- **`mint task "task"`** : Delegate a multi-step task to an already running background agent.
-- **`mint onboard`** : Setup API Key, Model, and initialize global configuration in `~/.mint/`.
-- **`mint list`** : See full list of automation actions and plugins.
+## Installation
 
----
+### Global install
 
-### Autonomous Agent (Task Delegate)
-Mint isn't just a chatbot—it's an autonomous worker. Assign complex tasks that require multiple steps of reasoning.
-
-### Code Agent Mode
-Mint now includes a dedicated coding workflow as the first step toward a Claude-Code-like experience in the terminal.
-
-**What it can do now:**
-- Inspect the current workspace before editing
-- Search code across the repo
-- Read targeted file ranges
-- Run non-destructive shell commands in the project with interactive approval
-- Apply patch-based file edits with approval before changes are written
-- Reuse lightweight session memory and git/test context per project
-
-**Usage Example:**
 ```bash
-mint code "fix the failing CLI command and verify it"
+npm install -g @pheem49/mint@latest
 ```
 
-**Chat-first Example:**
+### Local development
+
+```bash
+git clone https://github.com/Pheem49/Mint.git
+cd Mint
+npm install
+```
+
+## Quick Start
+
+### Run the desktop app
+
+```bash
+npm start
+```
+
+### Run the CLI
+
 ```bash
 mint
-> สำรวจโปรเจคนี้ให้หน่อย
 ```
 
-Mint will classify the request, switch the status bar to `Code`, and return to `Chat` mode after the coding flow finishes.
+### First-time setup
 
-**Supported Autonomous Tools:**
-- **Web Automation**: Full Puppeteer-based browsing, info extraction, and research.
-- **File System**: Create, Write, Delete, and Manage folders using `~/` path expansion.
-- **Knowledge Search**: Query local files and documentation (RAG).
-- **Safety Mode (Bash)**: Mint proposes commands via notifications; you choose whether to run them.
-
-**Usage Examples:**
 ```bash
-# Research and write a report
-mint agent 'Search for the latest iPhone reviews and write a SUMMARY.md to my desktop.'
-
-# Background Task
-mint task 'Process these 5 files and move them to ~/Documents/Archive'
+mint onboard
 ```
 
----
+## CLI Commands
 
-### Slash Commands (Interactive Chat)
-While in terminal chat, type **`/`** to access advanced tools with the new visual autocomplete system.
-> [!TIP]
-> Use **Up/Down arrow keys** to navigate the suggestion list and press **Enter** to select!
+- `mint` or `mint chat`
+Start the interactive chat UI.
 
-- `/help` : View all commands and descriptions.
-- `/models` : List and switch between Gemini, Ollama, Hugging Face, Anthropic, OpenAI, and Local models.
-- `/config` : Check your active API keys and preferences.
-- `/clear` / `/reset` : Clean terminal or reset AI context.
+- `mint code "<task>"`
+Run the workspace-aware coding agent in the current directory.
 
----
+- `mint task "<task>"`
+Queue a background task for the headless agent.
 
-### Proactive Monitoring
-When running in `agent` mode, Mint monitors your system in the background:
-- **Battery Alerts**: Notifies you when power is low or charging status changes.
-- **Network Status**: Alerts you when connection status changes.
-- **Resource Usage**: Proactive tips if system load is too high (System Metrics).
+- `mint agent`
+Run the background headless agent.
 
+- `mint list`
+Show major features and commands.
 
----
+- `mint onboard`
+Configure API keys and local settings.
 
-## Desktop GUI Features
+## CLI Examples
 
-- **Floating Widget**: A persistent AI character on your desktop.
-- **Animated Aura**: The widget breathes and glows when Mint is thinking or proactive.
-- **Minimize to Tray**: Click the dash icon (-) to hide the window to your system tray. Mint stays active!
-- **Widget Toggle**: Enable or disable the desktop widget anytime from **Settings > General**.
-- **Screen Overlay Glow**: Visual feedback when Mint is capturing your screen for analysis.
+### Interactive chat
 
----
+```bash
+mint
+```
 
-## Security & Privacy
+Then ask naturally:
 
-- **Push Protection**: Automated `.gitignore` patterns for `mint-config.json` and `.env` files.
-- **History Scrubbing**: Integrated tools to ensure API keys are never leaked to Git history.
-- **Local First**: Built-in **Ollama** and **LM Studio (OpenAI Compatible)** support for 100% private, offline AI processing.
+```text
+สำรวจโปรเจคนี้ให้หน่อย
+แก้บัคใน CLI ตัวนี้และรันเทสต์
+open github
+```
 
----
+### One-shot coding task
 
-## Getting Started
+```bash
+mint code "fix the failing tests and verify the result"
+```
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) (LTS)
-- [npm](https://www.npmjs.com/)
-- A **Google Gemini API Key** (Get one at [Google AI Studio](https://aistudio.google.com/))
+### Background task
 
-### Installation
-1. **Install via NPM (Recommended)**
-   ```bash
-   npm install -g @pheem49/mint@latest
-   ```
+```bash
+mint task "inspect the repo and summarize the top 3 risks"
+```
 
-2. **Manual Installation (For Developers)**
-   ```bash
-   git clone https://github.com/Pheem49/Mint.git
-   cd Mint
-   npm install
-   sudo npm link
-   ```
+## Code Mode Workflow
 
----
+Mint Code Mode is designed around an inspect -> act -> verify loop.
+
+What it does well right now:
+
+- Understand the current workspace path
+- Read git status and diff summary
+- Suggest verification commands from `package.json`
+- Apply focused patches instead of blind rewrites
+- Keep a workspace session summary for future tasks
+
+What it deliberately does not do:
+
+- Run destructive commands like `rm -rf` or `git reset --hard`
+- Edit files outside the current workspace
+- Execute shell edits without approval
+
+## Desktop Features
+
+- Chat window with custom UI
+- Settings window for provider and behavior configuration
+- System tray support
+- Proactive suggestion loop
+- Silent screen capture for analysis
+- Screen translation support
+- Floating widget / overlay UI elements
+
+## AI Providers
+
+Mint supports multiple providers and local backends.
+
+- `gemini`
+- `anthropic`
+- `openai`
+- `local_openai`
+- `ollama`
+- `huggingface`
+
+For CLI Code Mode, Mint currently behaves best with:
+
+- `gemini`
+- `anthropic`
+- `openai`
+- `local_openai`
 
 ## Project Structure
 
 ```text
 Mint/
 ├── src/
-│   ├── AI_Brain/        # Gemini/Ollama integration & logic
-│   ├── Automation/      # Puppeteer and browser scripts
-│   ├── CLI/             # CLI Onboarding and Feature list
-│   ├── Plugins/         # Spotify, Docker, Obsidian, Git, etc.
-│   ├── System/          # Config, Daemon, and Event Monitoring
-│   └── UI/              # Electron renderer (Glassmorphism & Aura)
-├── mint-cli.js          # CLI Main Entry
-├── main.js              # Electron Main process
-└── package.json         # Binaries and dependencies
+│   ├── AI_Brain/          # Provider integration, prompts, memory, orchestration
+│   ├── Automation_Layer/  # App/file/browser actions
+│   ├── CLI/               # Chat router, code agent, TUI support, onboarding
+│   ├── Plugins/           # Docker, Spotify, calendar, system monitor, MCP
+│   ├── System/            # Config, notifications, daemon, automation, task queue
+│   └── UI/                # Electron renderer files
+├── tests/                 # Jest tests
+├── mint-cli.js            # Main CLI entry
+├── mint-cli-logic.js      # CLI action executor
+├── main.js                # Electron main process
+└── package.json
 ```
 
----
+## Development
+
+### Run tests
+
+```bash
+npm test -- --runInBand
+```
+
+### Watch tests
+
+```bash
+npm run test:watch
+```
+
+### Build Linux packages
+
+```bash
+npm run build:linux
+```
+
+See [BUILD_AND_RELEASE.md](/home/pheem49/vscode/Project/Mint/BUILD_AND_RELEASE.md) for Linux packaging and release notes workflow.
+
+## Security Notes
+
+- API keys are stored in local config, not in source files
+- Code Mode asks for approval before shell commands and file edits
+- Workspace path resolution blocks writes outside the active workspace
+- Several shell-based execution paths have been hardened to use argument-based process execution
+
+This is still an actively evolving project. Review permissions and local configuration before using Mint against sensitive files or production systems.
 
 ## License
 
-Distributed under the **GNU Affero General Public License v3.0**. See `LICENSE` for details.
+Mint is licensed under the GNU Affero General Public License v3.0.
+See [LICENSE](/home/pheem49/vscode/Project/Mint/LICENSE).

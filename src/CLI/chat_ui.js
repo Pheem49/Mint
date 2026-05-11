@@ -705,7 +705,9 @@ function createChatUI({ onSubmit, onExit }) {
                 ? 'Shell Command'
                 : request.type === 'patch'
                     ? 'Patch Edit'
-                    : 'File Write';
+                    : request.type === 'code_mode'
+                        ? 'Enter Code Mode'
+                        : 'File Write';
             const preview = request.preview || request.label || '';
             const message = [
                 `{bold}${typeLabel}{/bold}`,

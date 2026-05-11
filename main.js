@@ -6,7 +6,7 @@ const { handleChat, resetChat, getChatTranscript, translateImageContent, refresh
 const { openApp } = require('./src/Automation_Layer/open_app');
 const { openWebsite, openSearch } = require('./src/Automation_Layer/open_website');
 const { performWebAutomation } = require('./src/Automation_Layer/browser_automation');
-const { createFolder, openFile, deleteFile } = require('./src/Automation_Layer/file_operations');
+const { createFolder, openFile, deleteFile, findPath } = require('./src/Automation_Layer/file_operations');
 const { getSystemInfo, getWeather } = require('./src/System/system_info');
 const { readConfig, writeConfig } = require('./src/System/config_manager');
 const { parseCommand } = require('./src/Command_Parser/parser');
@@ -868,6 +868,26 @@ async function executeAction(action) {
         case 'delete_file':
             await deleteFile(action.target);
             break;
+        case 'find_path': {
+            const result = findPath(action.target, {
+                type: action.pathType,
+                maxResults: 10
+            });
+            if (!result.success) {
+                return result.message;
+            }
+
+            if (action.openAfter === true) {
+                if (result.matches.length === 1) {
+                    const match = result.matches[0];
+                    const openResult = await openFile(match.path);
+                    return openResult || `Successfully found and opened ${match.type === 'dir' ? 'folder' : 'file'}: ${match.path} ✅`;
+                }
+                return `Found multiple matches for "${action.target}". Please be more specific:\n${result.matches.map(m => `- [${m.type}] ${m.path}`).join('\n')}`;
+            }
+
+            return `Found matches for "${action.target}":\n${result.matches.map(m => `- [${m.type}] ${m.path}`).join('\n')}`;
+        }
         case 'clipboard_write':
             clipboard.writeText(action.target);
             break;

@@ -1,4 +1,4 @@
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 let shell;
 try {
     shell = require('electron').shell;
@@ -8,6 +8,22 @@ try {
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+
+const IGNORED_DIRECTORY_NAMES = new Set([
+    '.git',
+    'node_modules',
+    '.cache',
+    'dist',
+    'build',
+    'coverage'
+]);
+
+function getSearchRoots() {
+    return Array.from(new Set([
+        process.cwd(),
+        os.homedir()
+    ]));
+}
 
 /**
  * Smartly resolves a path.
@@ -51,6 +67,109 @@ function resolveSmartPath(target) {
 
     // 6. Final fallback: just return as is (might be relative to CWD)
     return target;
+}
+
+function findPath(target, options = {}) {
+    if (!target || !target.trim()) {
+        return { success: false, message: 'No search query provided.', matches: [] };
+    }
+
+    const normalizedType = ['file', 'dir', 'any'].includes(options.type) ? options.type : 'any';
+    const loweredQuery = target.trim().toLowerCase();
+    const exactMatches = [];
+    const partialMatches = [];
+    const visited = new Set();
+    const maxResults = options.maxResults || 20;
+    const searchRoots = Array.isArray(options.roots) && options.roots.length > 0
+        ? options.roots
+        : getSearchRoots();
+
+    function buildMatch(entryPath, entryType, rootPath, exactNameMatch) {
+        const relativeToCwd = path.relative(process.cwd(), entryPath);
+        const pathDepth = entryPath.split(path.sep).length;
+        return {
+            path: entryPath,
+            type: entryType,
+            exactNameMatch,
+            inCurrentWorkspace: !relativeToCwd.startsWith('..') && !path.isAbsolute(relativeToCwd),
+            pathDepth,
+            rootPath
+        };
+    }
+
+    function sortMatches(matches) {
+        return matches.sort((a, b) => {
+            if (a.exactNameMatch !== b.exactNameMatch) return a.exactNameMatch ? -1 : 1;
+            if (a.inCurrentWorkspace !== b.inCurrentWorkspace) return a.inCurrentWorkspace ? -1 : 1;
+            if (a.pathDepth !== b.pathDepth) return a.pathDepth - b.pathDepth;
+            return a.path.localeCompare(b.path);
+        });
+    }
+
+    function visit(currentPath, rootPath) {
+        let entries = [];
+        try {
+            entries = fs.readdirSync(currentPath, { withFileTypes: true });
+        } catch (_) {
+            return;
+        }
+
+        for (const entry of entries) {
+            const absoluteEntryPath = path.join(currentPath, entry.name);
+            if (visited.has(absoluteEntryPath)) continue;
+            visited.add(absoluteEntryPath);
+
+            const entryType = entry.isDirectory() ? 'dir' : 'file';
+            if (entry.isDirectory() && IGNORED_DIRECTORY_NAMES.has(entry.name)) {
+                continue;
+            }
+            const relativePath = path.relative(rootPath, absoluteEntryPath);
+            const searchablePath = relativePath || entry.name;
+            const matchesType = normalizedType === 'any' || normalizedType === entryType;
+            const lowerEntryName = entry.name.toLowerCase();
+            const exactNameMatch = lowerEntryName === loweredQuery;
+            const partialMatch = lowerEntryName.includes(loweredQuery) || searchablePath.toLowerCase().includes(loweredQuery);
+
+            if (matchesType && partialMatch) {
+                const match = buildMatch(absoluteEntryPath, entryType, rootPath, exactNameMatch);
+                if (exactNameMatch) {
+                    exactMatches.push(match);
+                    if (exactMatches.length >= maxResults) return;
+                } else if (exactMatches.length === 0) {
+                    partialMatches.push(match);
+                    if (partialMatches.length >= maxResults) return;
+                }
+            }
+
+            if (entry.isDirectory() && exactMatches.length < maxResults && partialMatches.length < maxResults) {
+                visit(absoluteEntryPath, rootPath);
+                if (exactMatches.length >= maxResults || partialMatches.length >= maxResults) return;
+            }
+        }
+    }
+
+    for (const rootPath of searchRoots) {
+        if (!fs.existsSync(rootPath)) continue;
+        visit(rootPath, rootPath);
+        if (exactMatches.length >= maxResults || partialMatches.length >= maxResults) break;
+    }
+
+    const matches = exactMatches.length > 0
+        ? sortMatches(exactMatches).slice(0, maxResults)
+        : sortMatches(partialMatches).slice(0, maxResults);
+
+    if (matches.length === 0) {
+        return {
+            success: false,
+            message: `ไม่พบ${normalizedType === 'dir' ? 'โฟลเดอร์' : normalizedType === 'file' ? 'ไฟล์' : 'ไฟล์หรือโฟลเดอร์'}ที่ตรงกับ "${target}" ค่ะ`,
+            matches: []
+        };
+    }
+
+    return {
+        success: true,
+        matches: matches.map(({ path: matchPath, type }) => ({ path: matchPath, type }))
+    };
 }
 
 /**
@@ -99,7 +218,7 @@ async function openFile(target) {
         }
     } else {
         return new Promise((resolve) => {
-            exec(`xdg-open "${resolvedPath}"`, (err) => {
+            execFile('xdg-open', [resolvedPath], (err) => {
                 if (err) {
                     console.error("Failed to open path via xdg-open:", err);
                     resolve(`ไม่สามารถเปิดไฟล์ได้ค่ะ: ${err.message}`);
@@ -129,7 +248,7 @@ async function deleteFile(target) {
         }
     } else {
         return new Promise((resolve) => {
-            exec(`gio trash "${resolvedPath}"`, (err) => {
+            execFile('gio', ['trash', resolvedPath], (err) => {
                 if (err) {
                     console.error("Failed to trash item via gio trash:", err);
                     resolve({ success: false, message: err.message });
@@ -141,4 +260,4 @@ async function deleteFile(target) {
     }
 }
 
-module.exports = { createFolder, openFile, deleteFile };
+module.exports = { createFolder, openFile, deleteFile, findPath };

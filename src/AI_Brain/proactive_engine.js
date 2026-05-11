@@ -1,7 +1,4 @@
 const { GoogleGenAI } = require('@google/genai');
-const path = require('path');
-const fs = require('fs');
-const { app } = require('electron');
 const { readConfig } = require('../System/config_manager');
 
 // ============================================================
@@ -76,11 +73,8 @@ function resolveGeminiModel() {
 
 function getMinSuggestionIntervalMs() {
     try {
-        const CONFIG_PATH = path.join(app.getPath('userData'), 'mint-config.json');
-        if (fs.existsSync(CONFIG_PATH)) {
-            const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-            return (cfg.proactiveCooldown || 120) * 1000;
-        }
+        const cfg = readConfig();
+        return (cfg.proactiveCooldown || 120) * 1000;
     } catch {
         // ignore
     }

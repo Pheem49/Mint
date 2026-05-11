@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { GoogleGenAI } = require('@google/genai');
-const { executeCodeTask } = require('./code_agent');
+const { executeCodeTask, _helpers: codeAgentHelpers } = require('./code_agent');
 const { readConfig, getAvailableProviders } = require('../System/config_manager');
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
@@ -26,7 +26,19 @@ Return JSON only:
 }
 
 Choose "code" when the user is asking to inspect, edit, review, debug, explain, refactor, verify, or otherwise operate on the current project/workspace/codebase/files.
-Choose "chat" for general conversation, factual Q&A, or non-code assistant tasks.`;
+Choose "chat" for general conversation, factual Q&A, small/simple requests, non-code assistant tasks, or direct file-system actions like finding/opening a folder or file by name.
+Only choose "code" for substantial coding work that likely needs multiple steps, workspace inspection, edits, verification, or project-wide reasoning.`;
+
+function isDirectFilesystemActionRequest(text) {
+    const input = (text || '').trim().toLowerCase();
+    if (!input) return false;
+
+    const filesystemActionPattern = /(open|find|locate|search for|look for|หา|ค้นหา|เปิด)/;
+    const filesystemTargetPattern = /(folder|directory|dir|file|โฟลเดอร์|ไฟล์|ไดเรกทอรี)/;
+    const codeOperationPattern = /(inspect|review|refactor|debug|implement|edit|change|fix|explain|analyze|สำรวจ|รีวิว|รีแฟกเตอร์|แก้|อธิบาย|วิเคราะห์)/;
+
+    return filesystemActionPattern.test(input) && filesystemTargetPattern.test(input) && !codeOperationPattern.test(input);
+}
 
 function workspaceLooksLikeCodebase(workspaceRoot) {
     const markers = [
@@ -45,13 +57,27 @@ function detectCodeIntentHeuristic(text, workspaceRoot = process.cwd()) {
     const input = (text || '').trim().toLowerCase();
     if (!input) return false;
     if (input.startsWith('/code ')) return true;
+    if (isDirectFilesystemActionRequest(input)) return false;
+
+    return isLargeCodeTaskRequest(input, workspaceRoot);
+}
+
+function isLargeCodeTaskRequest(text, workspaceRoot = process.cwd()) {
+    const input = (text || '').trim().toLowerCase();
+    if (!input) return false;
+    if (!workspaceLooksLikeCodebase(workspaceRoot)) return false;
 
     const hasCodeKeyword = CODE_KEYWORDS.some(keyword => input.includes(keyword));
     const hasThaiCodeKeyword = THAI_CODE_KEYWORDS.some(keyword => input.includes(keyword));
     const referencesProject = /โปรเจคนี้|โปรเจ็กต์นี้|this project|this repo|this repository|codebase|workspace/.test(input);
     const asksForAction = /สำรวจ|ดู|แก้|เพิ่ม|ลบ|ปรับ|ตรวจ|วิเคราะห์|implement|inspect|explore|fix|update|change|refactor|review|explain|debug/.test(input);
+    const strongTaskSignal = /failing tests?|run tests?|verify|verification|bug|issue|error|refactor|implement|feature|patch|edit|modify|analyze the project|แก้บั๊ก|รันเทสต์|ทดสอบ|ตรวจสอบ|ยืนยันผล|รีแฟกเตอร์|เพิ่มฟีเจอร์|แก้โค้ด|วิเคราะห์โปรเจค/.test(input);
+    const multiStepSignal = /and|then|พร้อม|แล้ว|จากนั้น|ทั้ง|ทั่วทั้ง|ทั้งโปรเจค|project-wide|entire project|whole project/.test(input);
 
-    return workspaceLooksLikeCodebase(workspaceRoot) && (referencesProject || ((hasCodeKeyword || hasThaiCodeKeyword) && asksForAction));
+    if (referencesProject && strongTaskSignal) return true;
+    if ((hasCodeKeyword || hasThaiCodeKeyword) && asksForAction && strongTaskSignal) return true;
+    if ((hasCodeKeyword || hasThaiCodeKeyword) && multiStepSignal && asksForAction) return true;
+    return false;
 }
 
 function getRouterClient() {
@@ -79,6 +105,10 @@ async function detectCodeIntent(text, workspaceRoot = process.cwd(), history = [
 
     if (input.startsWith('/code ')) {
         return { route: 'code', reason: 'Explicit /code command.' };
+    }
+
+    if (isDirectFilesystemActionRequest(input)) {
+        return { route: 'chat', reason: 'Direct file-system action request.' };
     }
 
     const heuristicRoute = detectCodeIntentHeuristic(input, workspaceRoot);
@@ -113,6 +143,12 @@ async function detectCodeIntent(text, workspaceRoot = process.cwd(), history = [
         const textOutput = typeof response.text === 'function' ? response.text() : response.text;
         const parsed = JSON.parse(textOutput);
         const route = parsed.route === 'code' ? 'code' : 'chat';
+        if (route === 'code' && !isLargeCodeTaskRequest(input, workspaceRoot)) {
+            return {
+                route: 'chat',
+                reason: 'Request looks small enough for normal chat.'
+            };
+        }
         return {
             route,
             reason: parsed.reason || (route === 'code' ? 'Model classified as code.' : 'Model classified as chat.')
@@ -131,17 +167,7 @@ async function runChatRoutedTask(input, context) {
 
     const config = readConfig();
     const availableProviders = getAvailableProviders(config);
-    
-    // Smart Routing Priority for Code Tasks
-    let preferredProvider = config.aiProvider || 'gemini'; 
-    
-    // If preferred isn't actually available, try best available
-    if (!availableProviders.includes(preferredProvider)) {
-        if (availableProviders.includes('anthropic')) preferredProvider = 'anthropic';
-        else if (availableProviders.includes('openai')) preferredProvider = 'openai';
-        else if (availableProviders.includes('gemini')) preferredProvider = 'gemini';
-        else preferredProvider = availableProviders[0] || 'gemini';
-    }
+    const preferredProvider = codeAgentHelpers.selectSupportedCodeProvider(config, availableProviders);
 
     appendMessage('system', `Routing this request to Code Mode for workspace: ${process.cwd()} using [${preferredProvider}]`);
     if (setMode) setMode('Code');
@@ -179,5 +205,10 @@ async function runChatRoutedTask(input, context) {
 
 module.exports = {
     detectCodeIntent,
-    runChatRoutedTask
+    runChatRoutedTask,
+    _helpers: {
+        detectCodeIntentHeuristic,
+        isDirectFilesystemActionRequest,
+        isLargeCodeTaskRequest
+    }
 };

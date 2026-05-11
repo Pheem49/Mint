@@ -1,4 +1,4 @@
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 
 let shell;
 try {
@@ -17,7 +17,7 @@ function openWebsite(targetUrl) {
         shell.openExternal(url);
     } else {
         // Fallback for Node.js (Linux focus)
-        exec(`xdg-open "${url}"`, (err) => {
+        execFile('xdg-open', [url], (err) => {
             if (err) console.error("Failed to open URL via xdg_open:", err);
         });
     }
@@ -29,7 +29,7 @@ function openSearch(query) {
     if (shell) {
         shell.openExternal(url);
     } else {
-        exec(`xdg-open "${url}"`, (err) => {
+        execFile('xdg-open', [url], (err) => {
             if (err) console.error("Failed to open search via xdg-open:", err);
         });
     }

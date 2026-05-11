@@ -1,7 +1,7 @@
 // Mint CLI Action Logic
 const { openApp } = require('./src/Automation_Layer/open_app');
 const { openWebsite, openSearch } = require('./src/Automation_Layer/open_website');
-const { createFolder, openFile, deleteFile } = require('./src/Automation_Layer/file_operations');
+const { createFolder, openFile, deleteFile, findPath } = require('./src/Automation_Layer/file_operations');
 const { indexFile } = require('./src/AI_Brain/knowledge_base');
 const SystemAutomation = require('./src/System/system_automation');
 const pluginManager = require('./src/Plugins/plugin_manager');
@@ -32,6 +32,26 @@ async function executeAction(action) {
             case 'delete_file':
                 await deleteFile(action.target);
                 return `Deleted: ${action.target}`;
+            case 'find_path': {
+                const result = findPath(action.target, {
+                    type: action.pathType,
+                    maxResults: 10
+                });
+                if (!result.success) {
+                    return result.message;
+                }
+
+                if (action.openAfter === true) {
+                    if (result.matches.length === 1) {
+                        const match = result.matches[0];
+                        await openFile(match.path);
+                        return `Found and opened ${match.type === 'dir' ? 'folder' : 'file'}: ${match.path}`;
+                    }
+                    return `Found multiple matches for "${action.target}". Please be more specific:\n${result.matches.map(m => `- [${m.type}] ${m.path}`).join('\n')}`;
+                }
+
+                return `Found matches for "${action.target}":\n${result.matches.map(m => `- [${m.type}] ${m.path}`).join('\n')}`;
+            }
             case 'learn_file':
                 return await indexFile(action.target);
             case 'mcp_tool':
