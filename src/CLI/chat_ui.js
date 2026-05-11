@@ -90,11 +90,10 @@ function createChatUI({ onSubmit, onExit }) {
         style: { bg: 'default' }
     });
 
-    // ─── Input area ───────────────────────────────────────────────────────────
     const inputBox = blessed.textbox({
         bottom: 3, left: 1, width: '100%-2', height: 3,
         tags: false,
-        inputOnFocus: true,
+        inputOnFocus: false, // We'll manage this manually for stability
         keys: true,
         style: {
             bg: INPUT_BG,
@@ -110,6 +109,16 @@ function createChatUI({ onSubmit, onExit }) {
         padding: { left: 1 },
         label: ' Message '
     });
+
+    // --- SAFETY PATCH ---
+    // Prevent "TypeError: done is not a function" if a listener survives a blur/focus cycle.
+    const originalListener = inputBox._listener;
+    inputBox._listener = function(ch, key) {
+        if (typeof this._done !== 'function') return;
+        return originalListener.call(this, ch, key);
+    };
+
+
 
     // ─── Placeholder (SIBLING widget floating over input content area) ─────────
     // inputBox: bottom=3, height=3, border=1 → content row at bottom=4, left=2
@@ -236,6 +245,7 @@ function createChatUI({ onSubmit, onExit }) {
 
     /** Update model name in status bar (called after /models switch) */
     function updateStatusModel(newModel) {
+        if (!newModel) return;
         statusRight.setContent(`{#88e0b0-fg}${newModel}{/}`);
         screen.render();
     }
@@ -284,7 +294,7 @@ function createChatUI({ onSubmit, onExit }) {
             border: { fg: '#88e0b0' }
         },
         width: '80%',
-        height: 'shrink',
+        height: 12, // Fixed height to avoid 'shrink' miscalculation with buttons
         top: 'center',
         left: 'center',
         label: ' Approval ',
@@ -381,26 +391,28 @@ function createChatUI({ onSubmit, onExit }) {
 
 
     // Submit or Select Suggestion on Enter
-    inputBox.key(['enter'], () => {
+    inputBox.on('submit', (value) => {
         if (!commandList.hidden) {
             const selected = activeSuggestions[commandList.selected];
             if (selected) {
                 inputBox.setValue(selected.name + ' ');
                 commandList.hide();
                 hidePlaceholder();
-                inputBox.focus();
+                inputBox.focus(); 
+                inputBox.readInput(); // Re-focus to continue typing
                 refreshInputStyles();
                 screen.render();
                 return; // Don't submit yet, let user add args or press enter again
             }
         }
 
-        const raw = (inputBox.getValue ? inputBox.getValue() : inputBox.value) || '';
+        const raw = value || '';
         const text = raw.trim();
         if (!text) {
             inputBox.clearValue();
             showPlaceholder();
-            inputBox.focus();
+            inputBox.focus(); 
+            inputBox.readInput(); // Re-focus to continue typing
             refreshInputStyles();
             screen.render();
             return;
@@ -409,7 +421,8 @@ function createChatUI({ onSubmit, onExit }) {
         // Clear input and restore placeholder
         inputBox.clearValue();
         showPlaceholder();
-        inputBox.focus();
+        inputBox.focus(); 
+        inputBox.readInput(); // Explicitly restart reading
         refreshInputStyles();
         screen.render();
 
@@ -486,6 +499,7 @@ function createChatUI({ onSubmit, onExit }) {
 
     // ─── Initial render ───────────────────────────────────────────────────────
     inputBox.focus();
+    inputBox.readInput(); // Initial start
     refreshInputStyles();
     screen.render();
 
@@ -698,11 +712,19 @@ function createChatUI({ onSubmit, onExit }) {
                 '',
                 preview,
                 '',
-                'Approve this action?'
+                'Approve this action?',
+                '', // Extra lines to push buttons down and avoid overlapping
+                ''
             ].join('\n');
+
+            // Temporarily stop reading input so the dialog can receive keys
+            if (inputBox._reading) {
+                inputBox.cancel();
+            }
 
             approvalDialog.ask(message, (approved) => {
                 inputBox.focus();
+                inputBox.readInput(); // Ensure we resume reading after dialog
                 refreshInputStyles();
                 screen.render();
                 resolve(Boolean(approved));

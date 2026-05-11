@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 require('dotenv').config({ quiet: true });
+// Suppress experimental SQLite warning
+const originalEmit = process.emit;
+process.emit = function (name, data, ...args) {
+    if (name === 'warning' && typeof data === 'object' && data.name === 'ExperimentalWarning' && data.message.includes('SQLite')) {
+        return false;
+    }
+    return originalEmit.apply(process, [name, data, ...args]);
+};
 const { Command } = require('commander');
-const { handleChat, handleGeminiChatStream, resetChat, refreshApiKeyFromConfig } = require('./src/AI_Brain/Gemini_API');
+const { handleChat, handleGeminiChatStream, resetChat, refreshApiKeyFromConfig, getChatTranscript } = require('./src/AI_Brain/Gemini_API');
 const agentOrchestrator = require('./src/AI_Brain/agent_orchestrator');
 const workspaceManager = require('./src/CLI/workspace_manager');
 const systemMonitor = require('./src/Plugins/system_monitor');
@@ -145,7 +153,7 @@ async function startInteractiveChat(initialMessage = null) {
                         if (success) {
                             const agent = agentOrchestrator.getCurrentAgent();
                             appendMessage('system', `Switched to Agent: ${agent.icon} ${agent.name}`);
-                            updateStatusModel(null, agent.name); // Pass name to status bar
+                            updateStatusModel(agent.name); // Pass name to status bar
                             resetChat(); // Reset to apply new system prompt
                         } else {
                             appendMessage('error', `Agent "${args[1]}" not found. Try /agent list`);
@@ -217,14 +225,16 @@ async function startInteractiveChat(initialMessage = null) {
             }
             appendMessage('user', text);
 
-            const routeDecision = await detectCodeIntent(text, process.cwd());
+            const transcript = await getChatTranscript();
+            const routeDecision = await detectCodeIntent(text, process.cwd(), transcript);
             if (routeDecision.route === 'code') {
                 appendMessage('system', `Router: entering Code Mode. ${routeDecision.reason}`);
                 await runChatRoutedTask(text, {
                     appendMessage,
                     setThinking,
                     requestApproval,
-                    setMode
+                    setMode,
+                    history: transcript
                 });
                 return;
             }
@@ -243,7 +253,7 @@ async function startInteractiveChat(initialMessage = null) {
                 const config = require('./src/System/config_manager').readConfig();
                 const provider = config.aiProvider || 'gemini';
                 const currentAgent = agentOrchestrator.getCurrentAgent();
-                updateStatusModel(null, currentAgent.name);
+                updateStatusModel(currentAgent.name);
                 if (provider === 'gemini') {
                     // ── Streaming path (Gemini only) ──────────────────────────────────
                     // Gemini returns JSON so we buffer all chunks and progressively
@@ -346,16 +356,18 @@ async function startInteractiveChat(initialMessage = null) {
     // Handle initial message if passed via CLI arg
     if (initialMessage) {
         appendMessage('user', initialMessage);
-        const routeDecision = await detectCodeIntent(initialMessage, process.cwd());
-        if (routeDecision.route === 'code') {
-            appendMessage('system', `Router: entering Code Mode. ${routeDecision.reason}`);
-            await runChatRoutedTask(initialMessage, {
-                appendMessage,
-                setThinking,
-                requestApproval,
-                setMode
-            });
-        } else {
+            const transcript = await getChatTranscript();
+            const routeDecision = await detectCodeIntent(initialMessage, process.cwd(), transcript);
+            if (routeDecision.route === 'code') {
+                appendMessage('system', `Router: entering Code Mode. ${routeDecision.reason}`);
+                await runChatRoutedTask(initialMessage, {
+                    appendMessage,
+                    setThinking,
+                    requestApproval,
+                    setMode,
+                    history: transcript
+                });
+            } else {
             setMode('Chat');
             let seconds = 0;
             setThinking(true, seconds);
@@ -455,7 +467,8 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
                 appendMessage,
                 setThinking,
                 requestApproval,
-                setMode
+                setMode,
+                history: await getChatTranscript()
             });
             break;
 

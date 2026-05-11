@@ -384,12 +384,17 @@ async function getGitContext(workspaceRoot) {
     return { isRepo: true, branch, status, diffSummary };
 }
 
-async function buildInitialObservation(task, workspaceRoot) {
+async function buildInitialObservation(task, workspaceRoot, history = []) {
     const session = readWorkspaceSession(workspaceRoot);
     const gitContext = await getGitContext(workspaceRoot);
     const testCommands = detectTestCommands(workspaceRoot);
 
+    const contextStr = history.length > 0 
+        ? `Recent Context:\n${history.slice(-10).map(m => `${m.sender}: ${m.text}`).join('\n')}\n`
+        : '';
+
     return [
+        contextStr,
         `Task: ${task}`,
         `Workspace: ${workspaceRoot}`,
         `Git branch: ${gitContext.branch}`,
@@ -409,6 +414,7 @@ async function buildInitialObservation(task, workspaceRoot) {
 
 async function executeCodeTask(task, options = {}) {
     const workspaceRoot = path.resolve(options.cwd || process.cwd());
+    const history = options.history || [];
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
     const requestApproval = typeof options.requestApproval === 'function'
         ? options.requestApproval
@@ -417,7 +423,7 @@ async function executeCodeTask(task, options = {}) {
     const provider = options.provider || 'gemini';
     const client = new UnifiedAgentClient(provider, config);
 
-    let observation = await buildInitialObservation(task, workspaceRoot);
+    let observation = await buildInitialObservation(task, workspaceRoot, history);
 
     let finalSummary = '';
     let finalVerification = '';
@@ -510,9 +516,15 @@ async function executeCodeTask(task, options = {}) {
     // Check for Agent Collaboration (Review)
     if (config.enableAgentCollaboration !== false) {
         const availableProviders = getAvailableProviders(config);
-        const altProviders = availableProviders.filter(p => p !== provider && p !== 'ollama' && p !== 'huggingface');
-        if (altProviders.length > 0 && finalSummary) {
-            const reviewerProvider = altProviders[0];
+        // Exclude providers that often need special local setup or are slow/unreliable for tiny reviews
+        const altProviders = availableProviders.filter(p => p !== provider && p !== 'ollama' && p !== 'huggingface' && p !== 'local_openai');
+        
+        // Fallback to provider itself if no other good ones exist, or pick the best available
+        const reviewerProvider = altProviders.length > 0 
+            ? altProviders[0] 
+            : (availableProviders.includes('gemini') ? 'gemini' : availableProviders[0]);
+
+        if (reviewerProvider && finalSummary) {
             onProgress(`Invoking Reviewer Agent (${reviewerProvider})...`);
             
             const reviewerClient = new UnifiedAgentClient(reviewerProvider, config);

@@ -71,7 +71,7 @@ function summarizeWorkspace(workspaceRoot) {
         .join(', ') || '(no obvious code markers)';
 }
 
-async function detectCodeIntent(text, workspaceRoot = process.cwd()) {
+async function detectCodeIntent(text, workspaceRoot = process.cwd(), history = []) {
     const input = (text || '').trim();
     if (!input) {
         return { route: 'chat', reason: 'Empty input.' };
@@ -103,7 +103,8 @@ async function detectCodeIntent(text, workspaceRoot = process.cwd()) {
                     text: [
                         `Workspace: ${workspaceRoot}`,
                         `Workspace markers: ${summarizeWorkspace(workspaceRoot)}`,
-                        `Message: ${input}`
+                        `Context (Last 5 turns): ${history.slice(-10).map(m => `${m.sender}: ${m.text}`).join('\n')}`,
+                        `Current Message: ${input}`
                     ].join('\n')
                 }]
             }]
@@ -126,7 +127,7 @@ async function detectCodeIntent(text, workspaceRoot = process.cwd()) {
 
 async function runChatRoutedTask(input, context) {
     const text = input.startsWith('/code ') ? input.slice('/code '.length).trim() : input;
-    const { appendMessage, setThinking, requestApproval, setMode } = context;
+    const { appendMessage, setThinking, requestApproval, setMode, history } = context;
 
     const config = readConfig();
     const availableProviders = getAvailableProviders(config);
@@ -157,6 +158,7 @@ async function runChatRoutedTask(input, context) {
             cwd: process.cwd(),
             requestApproval,
             provider: preferredProvider,
+            history: history,
             onProgress: (message) => appendMessage('system', `[Code] ${message}`)
         });
         clearInterval(timer);
