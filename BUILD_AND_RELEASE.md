@@ -51,11 +51,11 @@ gh auth login
 
 ```bash
 # แบบระบุข้อความอธิบายเอง
-gh release create v1.3.0 dist/*.deb dist/*.AppImage --title "Mint v1.4.0" --notes-file RELEASE_NOTES.md
+gh release create v1.4.1 dist/*.deb dist/*.AppImage --title "Mint v1.4.1" --notes-file RELEASE_NOTES.md
 
 
 # หรือแบบให้ GitHub สรุปสิ่งที่แก้ไขให้โดยอัตโนมัติ (แนะนำ)
-gh release create v1.1.0 dist/*.deb dist/*.AppImage --generate-notes
+gh release create v1.4.1 dist/*.deb dist/*.AppImage --generate-notes
 ```
 
 **หากต้องการอัปโหลดไฟล์เพิ่มเข้าไปใน Release เดิม:**
@@ -70,6 +70,6 @@ gh release upload v1.2.2 dist/*.deb dist/*.AppImage --clobber
 ปกติไฟล์ Source code (.zip) จะถูกสร้างจาก **Tag** หากคุณ push โค้ดใหม่แต่ลืมย้าย Tag ให้รันคำสั่งนี้:
 
 ```bash
-git tag -f v1.4.0
-git push -f origin v1.4.0
+git tag -f v1.4.1
+git push -f origin v1.4.1
 ```

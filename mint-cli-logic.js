@@ -2,9 +2,6 @@
 const { openApp } = require('./src/Automation_Layer/open_app');
 const { openWebsite, openSearch } = require('./src/Automation_Layer/open_website');
 const { createFolder, openFile, deleteFile, findPath } = require('./src/Automation_Layer/file_operations');
-const { indexFile } = require('./src/AI_Brain/knowledge_base');
-const SystemAutomation = require('./src/System/system_automation');
-const pluginManager = require('./src/Plugins/plugin_manager');
 
 async function executeAction(action) {
     if (!action || action.type === 'none') return null;
@@ -24,11 +21,9 @@ async function executeAction(action) {
                 createFolder(action.target);
                 return `Created folder: ${action.target}`;
             case 'open_file':
-                await openFile(action.target);
-                return `Opening: ${action.target}`;
             case 'open_folder':
-                await openFile(action.target);
-                return `Opening folder: ${action.target}`;
+                const res = await openFile(action.target);
+                return res === true ? `Opening: ${action.target}` : res;
             case 'delete_file':
                 await deleteFile(action.target);
                 return `Deleted: ${action.target}`;

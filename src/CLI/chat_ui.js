@@ -32,7 +32,7 @@ const SLASH_COMMANDS = [
 function createChatUI({ onSubmit, onExit }) {
     const config = readConfig();
     const modelName = config.geminiModel || 'gemini';
-    const workspaceName = path.basename(process.cwd());
+    const workspacePath = process.cwd();
     const HINT_DEFAULT = `{gray-fg}  Enter send  ·  Ctrl+Y copy  ·  /help commands{/}`;
     const INPUT_FG = '#f8fafc';
     const INPUT_BG = '#10141c';
@@ -178,7 +178,7 @@ function createChatUI({ onSubmit, onExit }) {
         } catch (_) {}
     }
 
-    // ─── Status bar (3 columns: left / center / right) ──────────────────────
+    // ─── Status bar (2 lines as per screenshot) ──────────────────────
     const statusBar = blessed.box({
         bottom: 0, left: 1, width: '100%-2', height: 3,
         tags: true,
@@ -186,54 +186,62 @@ function createChatUI({ onSubmit, onExit }) {
         border: { type: 'line', fg: '#222c38' }
     });
 
-    // Left: workspace info
-    const statusLeft = blessed.text({
+    // Line 1: Thinking / Status (Left) and Shortcut (Right)
+    const statusLine1 = blessed.text({
         parent: statusBar,
-        top: 0, left: 1,
-        width: '33%',
+        top: 0, left: 1, right: 1,
         height: 1,
-        tags: true,
-        content: `  workspace {bold}(${workspaceName}){/bold}`,
-        style: { bg: '#10141c', fg: '#93a0b7' }
-    });
-
-    // Center: mode + status
-    const statusCenter = blessed.text({
-        parent: statusBar,
-        top: 0,
-        left: 'center',
-        width: '44%',
-        height: 1,
-        align: 'center',
         tags: true,
         content: `{#88aaff-fg}[Chat]{/} {#cc4444-fg}no sandbox{/}`,
-        style: { bg: '#10141c', fg: '#888888' }
+        style: { bg: '#10141c' }
     });
 
-    // Right: current model
-    const statusRight = blessed.text({
+    const shortcutHint = blessed.text({
         parent: statusBar,
         top: 0, right: 1,
-        width: '33%',
         height: 1,
-        align: 'right',
         tags: true,
-        content: `{#88e0b0-fg}${modelName}{/}`,
-        style: { bg: '#10141c', fg: '#88e0b0' }
+        content: `{gray-fg}? for shortcuts{/}`,
+        style: { bg: '#10141c' }
+    });
+
+    // Line 2: Action Hint (Left) and File Info (Right)
+    const statusLine2 = blessed.text({
+        parent: statusBar,
+        top: 1, left: 1, right: 1,
+        height: 1,
+        tags: true,
+        content: `{gray-fg}Shift+Tab to accept edits{/}`,
+        style: { bg: '#10141c' }
+    });
+
+    const fileInfo = blessed.text({
+        parent: statusBar,
+        top: 1, right: 1,
+        height: 1,
+        tags: true,
+        content: `{gray-fg}path: ${workspacePath}{/}`,
+        style: { bg: '#10141c' }
     });
 
     let activeMode = 'Chat';
+    let spinnerIdx = 0;
+    const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-    function formatModeTag(mode) {
-        if (mode === 'Code') return `{#ffd166-fg}[Code]{/}`;
-        return `{#88aaff-fg}[Chat]{/}`;
+    function formatTime(seconds) {
+        if (seconds < 60) return `${seconds}s`;
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${mins}m ${secs}s`;
     }
 
-    function updateStatusBar(thinkingText = null) {
+    function updateStatusBar(thinkingText = null, secondsElapsed = 0) {
         if (thinkingText) {
-            statusCenter.setContent(`${formatModeTag(activeMode)} {#88e0b0-fg}${thinkingText}{/}`);
+            const char = spinnerChars[spinnerIdx % spinnerChars.length];
+            spinnerIdx++;
+            statusLine1.setContent(`{#88e0b0-fg}${char}{/} Thinking... {gray-fg}(esc to cancel, ${formatTime(secondsElapsed)}){/}`);
         } else {
-            statusCenter.setContent(`${formatModeTag(activeMode)} {#cc4444-fg}no sandbox{/}`);
+            statusLine1.setContent(`${activeMode === 'Code' ? '{#ffd166-fg}[Code]{/}' : '{#88aaff-fg}[Chat]{/}'} {#cc4444-fg}no sandbox{/}`);
         }
         screen.render();
     }
@@ -243,10 +251,16 @@ function createChatUI({ onSubmit, onExit }) {
         updateStatusBar(null);
     }
 
-    /** Update model name in status bar (called after /models switch) */
     function updateStatusModel(newModel) {
         if (!newModel) return;
-        statusRight.setContent(`{#88e0b0-fg}${newModel}{/}`);
+        shortcutHint.setContent(`{gray-fg}${newModel} · ? for shortcuts{/}`);
+        screen.render();
+    }
+
+    /** Update workspace name in status bar */
+    function updateWorkspace(newPath) {
+        if (!newPath) return;
+        fileInfo.setContent(`{gray-fg}path: ${newPath}{/}`);
         screen.render();
     }
     updateStatusBar();
@@ -259,6 +273,8 @@ function createChatUI({ onSubmit, onExit }) {
     screen.append(inputBox);
     screen.append(statusBar);
     screen.append(placeholderWidget); // sibling on top of inputBox
+
+    // Suggestion List and Approval Dialog remain same ...
 
     // ─── Suggestion List ──────────────────────────────────────────────────────
     const commandList = blessed.list({
@@ -387,6 +403,19 @@ function createChatUI({ onSubmit, onExit }) {
 
     inputBox.on('keypress', () => {
         applyTerminalInputAttrs();
+    });
+
+    // Restore focus to inputBox when clicked or when screen is clicked
+    screen.on('click', () => {
+        if (!approvalDialog.visible) {
+            inputBox.focus();
+            screen.render();
+        }
+    });
+
+    inputBox.on('click', () => {
+        inputBox.focus();
+        screen.render();
     });
 
 
@@ -684,10 +713,72 @@ function createChatUI({ onSubmit, onExit }) {
         return { appendChunk, finalize };
     }
 
+    function appendCodeStep(info) {
+        if (typeof info === 'string') {
+            appendMessage('system', `[Code] ${info}`);
+            return;
+        }
+
+        const { step, phase, action, target, message, thought } = info;
+        const maxLineWidth = Math.max(screen.width - 20, 36);
+
+        // Special handling for ask_user which needs a box style
+        if (action === 'ask_user') {
+            chatBox.log('');
+            chatBox.log(` {#88e0b0-fg}✓{/} {bold}Ask User{/}`);
+            const questionLines = wrapText(target || message || '', maxLineWidth - 6);
+            questionLines.forEach(l => chatBox.log(`   {#95a2b8-fg}${l}{/}`));
+            screen.render();
+            return;
+        }
+
+        let icon = '{#88e0b0-fg}✓{/}';
+        let label = action || phase;
+        let color = '{#ffffff-fg}';
+
+        // Map internal action names to display names seen in the screenshot
+        switch (action) {
+            case 'thinking': 
+                if (phase === 'thinking' && !thought) {
+                    // Initial "Thinking..." without a bubble
+                    chatBox.log('');
+                    chatBox.log(` {#ffd166-fg}* {bold}Thinking{/}`);
+                } else if (thought) {
+                    // Show reasoning bubble
+                    const thoughtLines = wrapText(thought, maxLineWidth - 6);
+                    thoughtLines.forEach(l => chatBox.log(`   {gray-fg}> ${l}{/}`));
+                }
+                screen.render();
+                return;
+            case 'ask_user': label = 'AskUser'; break;
+            case 'open_url': label = 'OpenURL'; break;
+            case 'open_app': label = 'OpenApp'; break;
+            case 'open_file': label = 'OpenFile'; break;
+            case 'open_folder': label = 'OpenFolder'; break;
+            case 'create_folder': label = 'CreateFolder'; break;
+            case 'system_info': label = 'SystemInfo'; break;
+            case 'system_automation': label = 'SystemAction'; break;
+            case 'web_search': label = 'WebSearch'; break;
+            case 'list_files':
+            case 'find_path': label = 'Explored'; break;
+            case 'read_file': label = 'ReadFile'; break;
+            case 'search_code': label = 'SearchText'; break;
+            case 'apply_patch':
+            case 'write_file': label = 'Edited'; break;
+            case 'run_shell': label = 'Ran command'; break;
+            case 'json_repair': icon = '*'; label = 'Repairing JSON'; color = '{#ffd166-fg}'; break;
+            case 'reviewer_start': label = 'Reviewing'; break;
+        }
+
+        const content = target || message || '';
+        chatBox.log(` ${icon} {bold}${label}{/} ${color}${content}{/}`);
+        screen.render();
+    }
+
     /** Show/hide thinking indicator in status bar */
     function setThinking(active, secondsElapsed = 0) {
         if (active) {
-            updateStatusBar(`Thinking... {gray-fg}(esc to cancel, ${secondsElapsed}s){/}`);
+            updateStatusBar('Thinking...', secondsElapsed);
         } else {
             updateStatusBar(null);
         }
@@ -734,7 +825,45 @@ function createChatUI({ onSubmit, onExit }) {
         });
     }
 
-    return { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode };
+    function askUser(question) {
+        return new Promise((resolve) => {
+            // Temporarily stop reading input so we can capture the answer
+            if (inputBox._reading) {
+                inputBox.cancel();
+            }
+
+            // We use a simple textbox floating over the chat or reuse the main input?
+            // Reusing the main input is cleaner for CLI.
+            // But we need to change the label to ' Answer '
+            const oldLabel = inputBox._label.content;
+            inputBox._label.setContent(' Answer ');
+            
+            // Clear input for the answer
+            inputBox.clearValue();
+            hidePlaceholder();
+            inputBox.focus();
+            inputBox.readInput();
+            screen.render();
+
+            const submitHandler = (value) => {
+                inputBox.removeListener('submit', submitHandler);
+                inputBox._label.setContent(oldLabel);
+                
+                const answer = value || '';
+                chatBox.log('');
+                chatBox.log(` {bold}User answered:{/}`);
+                const lines = wrapText(answer, screen.width - 20);
+                lines.forEach(l => chatBox.log(`   {#95a2b8-fg}${l}{/}`));
+                screen.render();
+
+                resolve(answer);
+            };
+
+            inputBox.on('submit', submitHandler);
+        });
+    }
+
+    return { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser };
 }
 
 module.exports = { createChatUI };

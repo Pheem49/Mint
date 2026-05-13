@@ -67,7 +67,7 @@ const DEFAULT_CONFIG = {
     localApiBaseUrl: 'http://localhost:1234/v1',
     localModelName: 'local-model',
     ollamaHost: 'http://localhost:11434',
-    enableAgentCollaboration: true
+    enableAgentCollaboration: false
 };
 
 

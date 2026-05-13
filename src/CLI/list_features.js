@@ -22,11 +22,13 @@ function displayFeatures() {
     const commands = [
         { cmd: 'mint', desc: 'Start interactive chat session (Default)' },
         { cmd: 'mint code "<task>"', desc: 'Run workspace-aware coding agent in current directory' },
+        { cmd: 'mint mcp', desc: 'Manage Model Context Protocol (MCP) servers' },
+        { cmd: 'mint task "<task>"', desc: 'Queue an autonomous task for the background agent' },
         { cmd: 'mint onboard', desc: 'Run setup wizard (API Key, Model, Daemon)' },
         { cmd: 'mint agent', desc: 'Run Mint as a background agent (Headless)' },
         { cmd: 'mint list', desc: 'Show this features & commands list' }
     ];
-    commands.forEach(c => console.log(`  - ${colors.cyan}${c.cmd.padEnd(15)}${colors.reset} : ${c.desc}`));
+    commands.forEach(c => console.log(`  - ${colors.cyan}${c.cmd.padEnd(18)}${colors.reset} : ${c.desc}`));
 
     console.log(`\n${colors.bright}AI Core Actions (Automation):${colors.reset}`);
     const actions = [

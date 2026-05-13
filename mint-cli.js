@@ -45,10 +45,42 @@ const colors = {
     yellow: "\x1b[33m"
 };
 
+function formatProgress(info) {
+    if (typeof info === 'string') return `${colors.gray}[Mint Code] ${info}${colors.reset}`;
+
+    const { step, phase, action, target, message } = info;
+    
+    if (action === 'ask_user') {
+        return `\n${colors.mint}✓${colors.reset} ${colors.bright}Ask User${colors.reset}\n${colors.gray}   ${target || message || ''}${colors.reset}`;
+    }
+
+    let icon = `${colors.mint}✓${colors.reset}`;
+    let label = action || phase;
+    let color = colors.reset;
+
+    switch (action) {
+        case 'thinking': 
+            return `\n${colors.yellow}* ${colors.bright}Thinking${colors.reset}`;
+        case 'web_search': label = 'WebSearch'; break;
+        case 'list_files':
+        case 'find_path': label = 'Explored'; break;
+        case 'read_file': label = 'ReadFile'; break;
+        case 'search_code': label = 'SearchText'; break;
+        case 'apply_patch':
+        case 'write_file': label = 'Edited'; break;
+        case 'run_shell': label = 'Ran command'; break;
+        case 'json_repair': icon = '*'; label = 'Repairing JSON'; break;
+        case 'reviewer_start': label = 'Reviewing'; break;
+    }
+
+    const content = target || message || '';
+    return ` ${icon} ${colors.bright}${label}${colors.reset} ${color}${content}${colors.reset}`;
+}
+
 const program = new Command();
 
 program
-    .name('mint-ai')
+    .name('mint')
     .description('Mint - Your Personal AI Assistant CLI')
     .version(pkg.version);
 
@@ -108,6 +140,79 @@ program
     });
 
 program
+    .command('mcp')
+    .description('Manage MCP (Model Context Protocol) servers')
+    .addCommand(new Command('add')
+        .description('Add a new MCP server')
+        .argument('<name>', 'Server name')
+        .argument('<command>', 'Command to run (e.g. npx)')
+        .option('-a, --args <args...>', 'Command arguments')
+        .option('-e, --env <env...>', 'Environment variables (KEY=VALUE)')
+        .action((name, command, options) => {
+            const config = readConfig();
+            const mcpServers = config.mcpServers || {};
+            
+            const env = {};
+            if (options.env) {
+                options.env.forEach(kv => {
+                    const [k, v] = kv.split('=');
+                    if (k && v) env[k] = v;
+                });
+            }
+
+            mcpServers[name] = {
+                command,
+                args: options.args || [],
+                env
+            };
+
+            config.mcpServers = mcpServers;
+            writeConfig(config);
+            console.log(`\n${colors.mint}✓${colors.reset} MCP server "${name}" added successfully.`);
+        })
+    )
+    .addCommand(new Command('remove')
+        .description('Remove an MCP server')
+        .argument('<name>', 'Server name')
+        .action((name) => {
+            const config = readConfig();
+            if (config.mcpServers && config.mcpServers[name]) {
+                delete config.mcpServers[name];
+                writeConfig(config);
+                console.log(`\n${colors.mint}✓${colors.reset} MCP server "${name}" removed.`);
+            } else {
+                console.log(`\n${colors.pink}✗${colors.reset} MCP server "${name}" not found.`);
+            }
+        })
+    )
+    .addCommand(new Command('list')
+        .description('List configured MCP servers')
+        .action(() => {
+            const config = readConfig();
+            const servers = Object.keys(config.mcpServers || {});
+            if (servers.length === 0) {
+                console.log(`\n${colors.gray}No MCP servers configured.${colors.reset}`);
+            } else {
+                console.log(`\n${colors.bright}Configured MCP Servers:${colors.reset}`);
+                servers.forEach(name => {
+                    const s = config.mcpServers[name];
+                    console.log(`${colors.mint}• ${colors.bright}${name}${colors.reset}`);
+                    console.log(`  ${colors.gray}Command:${colors.reset} ${s.command} ${(s.args || []).join(' ')}`);
+                });
+            }
+        })
+    )
+    .addCommand(new Command('clear')
+        .description('Remove all MCP servers')
+        .action(() => {
+            const config = readConfig();
+            config.mcpServers = {};
+            writeConfig(config);
+            console.log(`\n${colors.mint}✓${colors.reset} All MCP servers cleared.`);
+        })
+    );
+
+program
     .command('code')
     .description('Run Mint in workspace-aware coding mode for the current project')
     .argument('<task>', 'Coding task to execute in the current working directory')
@@ -118,8 +223,8 @@ program
         try {
             const result = await executeCodeTask(task, {
                 cwd: process.cwd(),
-                onProgress: (message) => {
-                    console.log(`${colors.gray}[Mint Code] ${message}${colors.reset}`);
+                onProgress: (info) => {
+                    console.log(formatProgress(info));
                 },
                 requestApproval: requestCodeApproval
             });
@@ -141,7 +246,7 @@ program.parse(process.argv);
  */
 async function startInteractiveChat(initialMessage = null) {
     let lastResponseText = "";
-    const { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode } = createChatUI({
+    const { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser } = createChatUI({
         onSubmit: async (text) => {
             if (text.startsWith('/')) {
                 if (text.startsWith('/agent')) {
@@ -200,9 +305,25 @@ async function startInteractiveChat(initialMessage = null) {
                         } else {
                             appendMessage('error', `Workspace "${name}" not found.`);
                         }
+                    } else if (subCmd === 'use' || subCmd === 'switch') {
+                        const name = args[2];
+                        const all = workspaceManager.listWorkspaces();
+                        if (all[name]) {
+                            const newPath = all[name].path;
+                            try {
+                                process.chdir(newPath);
+                                updateWorkspace(newPath);
+                                appendMessage('system', `✓ Switched to workspace "${name}" at ${newPath}`);
+                                resetChat();
+                            } catch (e) {
+                                appendMessage('error', `Failed to change directory: ${e.message}`);
+                            }
+                        } else {
+                            appendMessage('error', `Workspace "${name}" not found. Try /workspace list`);
+                        }
                     } else {
                         const ws = workspaceManager.getWorkspaceByPath(process.cwd());
-                        appendMessage('system', ws ? `Current Workspace: ${ws.name}\nPath: ${ws.path}` : "Not currently in a registered workspace.\nUsage: /workspace <add|list|remove>");
+                        appendMessage('system', ws ? `Current Workspace: ${ws.name}\nPath: ${ws.path}` : `Not currently in a registered workspace.\nActive Path: ${process.cwd()}\nUsage: /workspace <add|use|list|remove>`);
                     }
                     return;
                 }
@@ -219,43 +340,15 @@ async function startInteractiveChat(initialMessage = null) {
                     // Other slash commands
                     const fakeRl = { close: () => { } };
                     appendMessage('user', text);
-                    await handleSlashCommandUI(text, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode);
+                    await handleSlashCommandUI(text, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode, appendCodeStep, updateWorkspace);
                     return;
                 }
             }
             appendMessage('user', text);
 
             const transcript = await getChatTranscript();
-            const routeDecision = await detectCodeIntent(text, process.cwd(), transcript);
-            if (routeDecision.route === 'code') {
-                const approved = await requestApproval({
-                    type: 'code_mode',
-                    label: 'Mint wants to switch this request into Code Mode.',
-                    preview: [
-                        `Request: ${text}`,
-                        `Reason: ${routeDecision.reason}`,
-                        '',
-                        'Code Mode is better for larger coding tasks that may inspect the workspace, run checks, or edit files.'
-                    ].join('\n')
-                });
-                if (!approved) {
-                    appendMessage('system', `Router stayed in Chat Mode. ${routeDecision.reason}`);
-                } else {
-                    appendMessage('system', `Router: entering Code Mode. ${routeDecision.reason}`);
-                    await runChatRoutedTask(text, {
-                        appendMessage,
-                        setThinking,
-                        requestApproval,
-                        setMode,
-                        history: transcript
-                    });
-                    return;
-                }
-            }
+            if (setMode) setMode('Agent');
 
-            setMode('Chat');
-
-            // Start thinking timer
             let seconds = 0;
             setThinking(true, seconds);
             const timer = setInterval(() => {
@@ -265,96 +358,31 @@ async function startInteractiveChat(initialMessage = null) {
 
             try {
                 const config = require('./src/System/config_manager').readConfig();
-                const provider = config.aiProvider || 'gemini';
-                const currentAgent = agentOrchestrator.getCurrentAgent();
-                updateStatusModel(currentAgent.name);
-                if (provider === 'gemini') {
-                    // ── Streaming path (Gemini only) ──────────────────────────────────
-                    // Gemini returns JSON so we buffer all chunks and progressively
-                    // extract the "response" field as more of the JSON arrives.
-                    clearInterval(timer);
+                const availableProviders = require('./src/System/config_manager').getAvailableProviders(config);
+                const preferredProvider = require('./src/CLI/code_agent')._helpers.selectSupportedCodeProvider(config, availableProviders);
 
-                    let jsonBuffer = '';
-                    let finalParsed = null;
-                    let streamer = null;
-                    let displayedChars = 0; // chars of response text already sent to TUI
-
-                    try {
-                        for await (const event of handleGeminiChatStream(text)) {
-                            if (event.chunk) {
-                                jsonBuffer += event.chunk;
-
-                                // Progressively extract readable text from the growing JSON buffer
-                                const match = jsonBuffer.match(/"response"\s*:\s*"((?:[^"\\]|\\.)*)"/s);
-                                if (match) {
-                                    const fullText = match[1]
-                                        .replace(/\\n/g, '\n')
-                                        .replace(/\\"/g, '"')
-                                        .replace(/\\\\/g, '\\');
-                                    const newChars = fullText.slice(displayedChars);
-                                    if (newChars.length > 0) {
-                                        if (!streamer) {
-                                            setThinking(false);
-                                            streamer = streamMessage('assistant');
-                                        }
-                                        streamer.appendChunk(newChars);
-                                        displayedChars = fullText.length;
-                                    }
-                                }
-                            } else if (event.done) {
-                                finalParsed = event.parsed;
-                                // Flush any remaining response text not yet displayed
-                                if (finalParsed && finalParsed.response) {
-                                    const remaining = finalParsed.response.slice(displayedChars);
-                                    if (!streamer) {
-                                        setThinking(false);
-                                        streamer = streamMessage('assistant');
-                                    }
-                                    if (remaining) streamer.appendChunk(remaining);
-                                }
-                                if (streamer) {
-                                    streamer.finalize(event.timestamp);
-                                } else {
-                                    setThinking(false);
-                                    appendMessage('assistant',
-                                        finalParsed ? finalParsed.response : '',
-                                        event.timestamp);
-                                }
-                            }
-                        }
-                    } catch (streamErr) {
-                        setThinking(false);
-                        appendMessage('error', streamErr.message);
-                        return;
+                const result = await executeCodeTask(text, {
+                    cwd: process.cwd(),
+                    requestApproval,
+                    askUser,
+                    provider: preferredProvider,
+                    history: transcript,
+                    onProgress: (info) => {
+                        if (appendCodeStep) appendCodeStep(info);
                     }
+                });
 
-                    // Execute Actions from the final parsed response
-                    if (finalParsed) {
-                        const { executeAction } = require('./mint-cli-logic');
-                        if (finalParsed.action && finalParsed.action.type !== 'none') {
-                            const result = await executeAction(finalParsed.action);
-                            if (result) appendMessage('system', `Action: ${result}`);
-                        }
-                    }
+                clearInterval(timer);
+                setThinking(false);
+                lastResponseText = result.summary;
+                appendMessage('assistant', result.summary);
 
-                } else {
-                    // ── Non-streaming fallback (Ollama, Anthropic, OpenAI, etc.) ──
-                    const response = await handleChat(text);
-                    clearInterval(timer);
-                    setThinking(false);
-                    lastResponseText = response.response;
-                    appendMessage('assistant', response.response, response.timestamp);
-
-                    const { executeAction } = require('./mint-cli-logic');
-                    if (response.action && response.action.type !== 'none') {
-                        const result = await executeAction(response.action);
-                        if (result) appendMessage('system', `Action: ${result}`);
-                    }
-                }
             } catch (err) {
                 clearInterval(timer);
                 setThinking(false);
                 appendMessage('error', err.message);
+            } finally {
+                if (setMode) setMode('Chat');
             }
         },
         onExit: () => {
@@ -370,72 +398,43 @@ async function startInteractiveChat(initialMessage = null) {
     // Handle initial message if passed via CLI arg
     if (initialMessage) {
         appendMessage('user', initialMessage);
-            const transcript = await getChatTranscript();
-            const routeDecision = await detectCodeIntent(initialMessage, process.cwd(), transcript);
-            if (routeDecision.route === 'code') {
-                const approved = await requestApproval({
-                    type: 'code_mode',
-                    label: 'Mint wants to switch this request into Code Mode.',
-                    preview: [
-                        `Request: ${initialMessage}`,
-                        `Reason: ${routeDecision.reason}`,
-                        '',
-                        'Code Mode is better for larger coding tasks that may inspect the workspace, run checks, or edit files.'
-                    ].join('\n')
-                });
-                if (approved) {
-                    appendMessage('system', `Router: entering Code Mode. ${routeDecision.reason}`);
-                    await runChatRoutedTask(initialMessage, {
-                        appendMessage,
-                        setThinking,
-                        requestApproval,
-                        setMode,
-                        history: transcript
-                    });
-                } else {
-                    appendMessage('system', `Router stayed in Chat Mode. ${routeDecision.reason}`);
-                    setMode('Chat');
-                    let seconds = 0;
-                    setThinking(true, seconds);
-                    const timer = setInterval(() => { seconds++; setThinking(true, seconds); }, 1000);
-                    try {
-                        const response = await handleChat(initialMessage);
-                        clearInterval(timer);
-                        setThinking(false);
-                        appendMessage('assistant', response.response, response.timestamp);
-                        lastResponseText = response.response;
-                        const { executeAction } = require('./mint-cli-logic');
-                        if (response.action && response.action.type !== 'none') {
-                            const result = await executeAction(response.action);
-                            if (result) appendMessage('system', `Action: ${result}`);
-                        }
-                    } catch (err) {
-                        clearInterval(timer);
-                        setThinking(false);
-                        appendMessage('error', err.message);
-                    }
-                }
-            } else {
-            setMode('Chat');
-            let seconds = 0;
+        const transcript = await getChatTranscript();
+        if (setMode) setMode('Agent');
+
+        let seconds = 0;
+        setThinking(true, seconds);
+        const timer = setInterval(() => {
+            seconds++;
             setThinking(true, seconds);
-            const timer = setInterval(() => { seconds++; setThinking(true, seconds); }, 1000);
-            try {
-                const response = await handleChat(initialMessage);
-                clearInterval(timer);
-                setThinking(false);
-                appendMessage('assistant', response.response, response.timestamp);
-                lastResponseText = response.response;
-                const { executeAction } = require('./mint-cli-logic');
-                if (response.action && response.action.type !== 'none') {
-                    const result = await executeAction(response.action);
-                    if (result) appendMessage('system', `Action: ${result}`);
+        }, 1000);
+
+        try {
+            const config = require('./src/System/config_manager').readConfig();
+            const availableProviders = require('./src/System/config_manager').getAvailableProviders(config);
+            const preferredProvider = require('./src/CLI/code_agent')._helpers.selectSupportedCodeProvider(config, availableProviders);
+
+            const result = await executeCodeTask(initialMessage, {
+                cwd: process.cwd(),
+                requestApproval,
+                askUser,
+                provider: preferredProvider,
+                history: transcript,
+                onProgress: (info) => {
+                    if (appendCodeStep) appendCodeStep(info);
                 }
-            } catch (err) {
-                clearInterval(timer);
-                setThinking(false);
-                appendMessage('error', err.message);
-            }
+            });
+
+            clearInterval(timer);
+            setThinking(false);
+            lastResponseText = result.summary;
+            appendMessage('assistant', result.summary);
+
+        } catch (err) {
+            clearInterval(timer);
+            setThinking(false);
+            appendMessage('error', err.message);
+        } finally {
+            if (setMode) setMode('Chat');
         }
     }
 }
@@ -443,7 +442,7 @@ async function startInteractiveChat(initialMessage = null) {
 /**
  * Handles slash commands within the TUI context
  */
-async function handleSlashCommandUI(input, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode) {
+async function handleSlashCommandUI(input, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode, appendCodeStep, updateWorkspace) {
     const parts = input.split(' ');
     const command = parts[0].toLowerCase();
     const args = parts.slice(1);
@@ -453,14 +452,34 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
         case '/?':
             appendMessage('system', [
                 'Mint Slash Commands:',
-                '  /code <task>     — Force workspace Code Mode',
-                '  /models [name]  — List or switch Gemini models',
-                '  /config         — Show current configuration',
-                '  /copy           — Copy last response to clipboard',
-                '  /clear          — Clear conversation history',
-                '  /reset          — Reset conversation history',
-                '  /exit           — Exit Mint'
+                '  /code <task>      — Force workspace Code Mode',
+                '  /cd <path>        — Change current working directory',
+                '  /models [name]   — List or switch Gemini models',
+                '  /config          — Show current configuration',
+                '  /copy            — Copy last response to clipboard',
+                '  /clear           — Clear conversation history',
+                '  /reset           — Reset conversation history',
+                '  /exit            — Exit Mint'
             ].join('\n'));
+            break;
+
+        case '/cd':
+            if (args.length === 0) {
+                appendMessage('system', `Current Directory: ${process.cwd()}`);
+                break;
+            }
+            try {
+                const newPath = path.resolve(process.cwd(), args[0]);
+                if (fs.existsSync(newPath) && fs.lstatSync(newPath).isDirectory()) {
+                    process.chdir(newPath);
+                    if (updateWorkspace) updateWorkspace(newPath);
+                    appendMessage('system', `✓ Directory changed to: ${newPath}`);
+                } else {
+                    appendMessage('error', `Directory not found: ${newPath}`);
+                }
+            } catch (err) {
+                appendMessage('error', `Error: ${err.message}`);
+            }
             break;
 
         case '/model':
@@ -520,7 +539,7 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
             await runChatRoutedTask(`/code ${args.join(' ')}`, {
                 appendMessage,
                 setThinking,
-                requestApproval,
+                appendCodeStep,
                 setMode,
                 history: await getChatTranscript()
             });

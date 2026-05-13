@@ -9,12 +9,15 @@ const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const CODE_KEYWORDS = [
     'code', 'repo', 'repository', 'project', 'workspace', 'file', 'files', 'readme',
     'package.json', 'bug', 'fix', 'refactor', 'test', 'tests', 'build', 'lint',
-    'implement', 'feature', 'cli', 'function', 'module', 'component', 'diff'
+    'implement', 'feature', 'cli', 'function', 'module', 'component', 'diff',
+    'list', 'show', 'ls', 'dir', 'directory', 'folders' // เพิ่มคำเหล่านี้ค่ะ
 ];
+
 
 const THAI_CODE_KEYWORDS = [
     'โค้ด', 'โปรเจค', 'โปรเจ็กต์', 'ไฟล์', 'รีโป', 'บั๊ก', 'แก้', 'ทดสอบ', 'เทสต์',
-    'รีแฟกเตอร์', 'ฟีเจอร์', 'คอมโพเนนต์', 'ฟังก์ชัน', 'อ่าน', 'สำรวจ', 'โครงสร้าง'
+    'รีแฟกเตอร์', 'ฟีเจอร์', 'คอมโพเนนต์', 'ฟังก์ชัน', 'อ่าน', 'สำรวจ', 'โครงสร้าง',
+    'ไดเรกทอรี', 'โฟลเดอร์'
 ];
 
 const ROUTER_PROMPT = `You classify whether a chat message should be routed to a coding agent for the current local workspace.
@@ -69,11 +72,15 @@ function isLargeCodeTaskRequest(text, workspaceRoot = process.cwd()) {
 
     const hasCodeKeyword = CODE_KEYWORDS.some(keyword => input.includes(keyword));
     const hasThaiCodeKeyword = THAI_CODE_KEYWORDS.some(keyword => input.includes(keyword));
-    const referencesProject = /โปรเจคนี้|โปรเจ็กต์นี้|this project|this repo|this repository|codebase|workspace/.test(input);
-    const asksForAction = /สำรวจ|ดู|แก้|เพิ่ม|ลบ|ปรับ|ตรวจ|วิเคราะห์|implement|inspect|explore|fix|update|change|refactor|review|explain|debug/.test(input);
+    const referencesProject = /โปรเจคนี้|โปรเจ็กต์นี้|this project|this repo|this repository|codebase|workspace|โฟลเดอร์นี้|ในนี้/.test(input);
+    const asksForAction = /สำรวจ|ดู|แก้|เพิ่ม|ลบ|ปรับ|ตรวจ|วิเคราะห์|ลิสต์|โชว์|แสดง|มี|implement|inspect|explore|fix|update|change|refactor|review|explain|debug|list|show/.test(input);
     const strongTaskSignal = /failing tests?|run tests?|verify|verification|bug|issue|error|refactor|implement|feature|patch|edit|modify|analyze the project|แก้บั๊ก|รันเทสต์|ทดสอบ|ตรวจสอบ|ยืนยันผล|รีแฟกเตอร์|เพิ่มฟีเจอร์|แก้โค้ด|วิเคราะห์โปรเจค/.test(input);
     const multiStepSignal = /and|then|พร้อม|แล้ว|จากนั้น|ทั้ง|ทั่วทั้ง|ทั้งโปรเจค|project-wide|entire project|whole project/.test(input);
 
+    // If they ask for files/folder content specifically, it's a code task because Chat can't do it accurately
+    const isListFilesRequest = (hasCodeKeyword || hasThaiCodeKeyword) && /มี|โชว์|แสดง|ลิสต์|list|show|what|anything|อะไรบ้าง/.test(input) && /ไฟล์|file|folder|dir|โฟลเดอร์/.test(input);
+
+    if (isListFilesRequest) return true;
     if (referencesProject && strongTaskSignal) return true;
     if ((hasCodeKeyword || hasThaiCodeKeyword) && asksForAction && strongTaskSignal) return true;
     if ((hasCodeKeyword || hasThaiCodeKeyword) && multiStepSignal && asksForAction) return true;
@@ -185,7 +192,13 @@ async function runChatRoutedTask(input, context) {
             requestApproval,
             provider: preferredProvider,
             history: history,
-            onProgress: (message) => appendMessage('system', `[Code] ${message}`)
+            onProgress: (info) => {
+                if (context.appendCodeStep) {
+                    context.appendCodeStep(info);
+                } else {
+                    appendMessage('system', `[Code] ${typeof info === 'string' ? info : (info.action || info.phase)}`);
+                }
+            }
         });
         clearInterval(timer);
         setThinking(false);

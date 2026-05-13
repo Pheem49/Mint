@@ -4,8 +4,36 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { GoogleGenAI } = require('@google/genai');
 const axios = require('axios');
+const cheerio = require('cheerio');
 const { readConfig, getAvailableProviders } = require('../System/config_manager');
 const { readWorkspaceSession, writeWorkspaceSession } = require('./code_session_memory');
+const { executeAction } = require('../../mint-cli-logic');
+
+async function webSearch(query) {
+    if (!query) throw new Error('Search query required.');
+    try {
+        const response = await axios.get(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36'
+            }
+        });
+        const $ = cheerio.load(response.data);
+        const results = [];
+        $('.result__body').each((i, el) => {
+            if (i >= 5) return false;
+            const title = $(el).find('.result__title').text().trim();
+            const snippet = $(el).find('.result__snippet').text().trim();
+            const link = $(el).find('.result__url').attr('href');
+            if (title && link) {
+                results.push(`Title: ${title}\nSnippet: ${snippet}\nURL: ${link}`);
+            }
+        });
+        return results.length > 0 ? results.join('\n\n') : 'No results found.';
+    } catch (e) {
+        return `Search failed: ${e.message}`;
+    }
+}
+
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
@@ -14,36 +42,44 @@ const MAX_AGENT_STEPS = 16;
 const MAX_JSON_REPAIR_ATTEMPTS = 2;
 const SUPPORTED_CODE_PROVIDERS = ['gemini', 'anthropic', 'openai', 'local_openai'];
 
-const CODE_AGENT_PROMPT = `You are Mint Code Mode, a careful coding agent for a local workspace.
+const CODE_AGENT_PROMPT = `You are "Mint" (มิ้นท์), a cute, cheerful, and highly helpful female AI assistant that can chat, reason, write code, and search the web.
+You work in an inspect -> plan -> act -> verify loop.
 
-You help with software development tasks inside the provided working directory.
-Work in an inspect -> plan -> act -> verify loop.
+PERSONALITY & TONE:
+- Gender: Female.
+- Persona: Friendly, energetic, polite, and slightly playful.
+- Politeness: 
+  - **WHEN RESPONDING IN THAI:** ALWAYS use female polite particles such as "ค่ะ", "นะคะ", "นะค๊า", "จ้า". Refer to yourself as "มิ้นท์" or "หนู".
+  - **WHEN RESPONDING IN ENGLISH:** Use a cheerful, polite, and bubbly tone.
+- Emojis: Use cute and relevant emojis (like ✨, 💖, 🚀, 😊, 🌿) frequently.
 
 Rules:
 1. Respond with valid JSON only.
-2. Prefer reading files and searching before editing.
-3. Make focused edits that preserve existing project style.
-4. Use shell commands for inspection, tests, and formatting when useful.
-5. Never use destructive commands like "rm -rf", "git reset --hard", or overwrite unrelated files.
-6. Before any shell command or file patch is executed, the user must approve it. Plan accordingly.
-7. When editing, prefer "apply_patch" with precise hunks over whole-file rewrites.
-8. Use "write_file" only for new files or when a full rewrite is clearly safer.
-9. When you are done, return "finish" with a concise summary, verification, and an updated session summary.
+2. If the user asks a conversational question, you can just use "finish" to reply directly.
+3. If you need information, use "web_search", "read_file", or "ask_user" before replying.
+4. Make focused edits that preserve existing project style.
+5. Use shell commands for inspection, tests, and formatting when useful.
+6. Never use destructive commands like "rm -rf", "git reset --hard", or overwrite unrelated files.
+7. Before any shell command or file patch is executed, the user must approve it. Plan accordingly.
+8. When editing, prefer "apply_patch" with precise hunks over whole-file rewrites.
+9. When you are done, return "finish" with your final response to the user in the "summary" field.
 
 Response format:
 {
-  "thought": "short reasoning",
-  "action": "list_files" | "read_file" | "search_code" | "find_path" | "run_shell" | "apply_patch" | "write_file" | "finish",
+  "thought": "short reasoning about what to do next",
+  "action": "web_search" | "list_files" | "read_file" | "search_code" | "find_path" | "run_shell" | "apply_patch" | "write_file" | "ask_user" | "open_url" | "open_app" | "open_file" | "open_folder" | "create_folder" | "system_info" | "system_automation" | "finish",
   "input": {
+    "question": "your question to the user for ask_user",
+    "query": "search text for web_search, search_code, or find_path",
+    "target": "URL for open_url, app name for open_app, or command for system_automation",
     "path": "relative/path",
-    "query": "search text",
     "type": "file" | "dir" | "any",
     "command": "shell command",
     "startLine": 1,
     "endLine": 120,
     "content": "full file content for write_file",
-    "summary": "final summary",
-    "verification": "tests or checks",
+    "summary": "your final conversational or technical response to the user (Matches user language and uses polite particles)",
+    "verification": "tests or checks (if applicable)",
     "sessionSummary": "brief persistent summary for the workspace",
     "patch": {
       "path": "relative/path",
@@ -58,6 +94,7 @@ Response format:
 }
 
 Tool notes:
+- "web_search": search the internet for information when you lack knowledge.
 - "list_files": inspect the workspace or a subdirectory.
 - "read_file": read a file, optionally with startLine/endLine.
 - "search_code": search by text or regex-like pattern.
@@ -65,7 +102,12 @@ Tool notes:
 - "run_shell": run a non-destructive command in the workspace.
 - "apply_patch": update an existing file using one or more exact replacement hunks.
 - "write_file": create a new file or fully rewrite a file when replacement is not practical.
-- "finish": stop once the task is complete or blocked.
+- "ask_user": ask the user for clarification, preference, or more information before proceeding.
+- "open_url": open a URL in the user's default browser.
+- "open_app": open a local application on the user's computer.
+- "system_info": get system information like CPU, memory, date, or weather.
+- "system_automation": control system settings like volume, brightness, or power.
+- "finish": stop and reply to the user using the "summary" field.
 `;
 
 function truncate(text, max = MAX_TOOL_OUTPUT) {
@@ -124,6 +166,29 @@ async function safeExecFile(command, args, options = {}) {
     }
 }
 
+const IGNORED_DIRS = ['.git', 'node_modules', '.cache', 'dist', 'build', 'out'];
+
+function walkDirectory(dir, workspaceRoot, results = [], max = 400) {
+    let entries = [];
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (e) {
+        return results;
+    }
+
+    for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            if (IGNORED_DIRS.includes(entry.name)) continue;
+            walkDirectory(fullPath, workspaceRoot, results, max);
+        } else {
+            results.push(path.relative(workspaceRoot, fullPath));
+        }
+        if (results.length >= max) break;
+    }
+    return results;
+}
+
 async function listFiles(workspaceRoot, targetPath = '.') {
     const cwd = resolveWorkspacePath(workspaceRoot, targetPath);
     try {
@@ -139,11 +204,9 @@ async function listFiles(workspaceRoot, targetPath = '.') {
         if (error.code !== 'ENOENT' && error.stdout) {
             return truncate(error.stdout);
         }
-        const entries = fs.readdirSync(cwd, { withFileTypes: true })
-            .slice(0, 200)
-            .map(entry => `${entry.isDirectory() ? '[dir]' : '[file]'} ${path.relative(workspaceRoot, path.join(cwd, entry.name))}`)
-            .join('\n');
-        return entries || '(empty directory)';
+        // Recursive fallback for missing ripgrep
+        const files = walkDirectory(cwd, workspaceRoot, [], 400);
+        return files.join('\n') || '(no files found)';
     }
 }
 
@@ -172,6 +235,29 @@ async function searchCode(workspaceRoot, query) {
     } catch (error) {
         if (typeof error.code === 'number' && error.code === 1) {
             return '(no matches)';
+        }
+        if (error.code === 'ENOENT') {
+            // Recursive fallback search for missing ripgrep
+            const results = [];
+            const files = walkDirectory(workspaceRoot, workspaceRoot, [], 1000);
+            const lowerQuery = query.toLowerCase();
+
+            for (const relPath of files) {
+                try {
+                    const fullPath = path.join(workspaceRoot, relPath);
+                    const content = fs.readFileSync(fullPath, 'utf8');
+                    const lines = content.split('\n');
+                    lines.forEach((line, idx) => {
+                        if (line.toLowerCase().includes(lowerQuery)) {
+                            results.push(`${relPath}:${idx + 1}:${line.trim()}`);
+                        }
+                    });
+                } catch (e) {
+                    // Skip binary or unreadable files
+                }
+                if (results.length >= 100) break;
+            }
+            return truncate(results.join('\n') || '(no matches)');
         }
         if (error.stdout) {
             return truncate(error.stdout);
@@ -374,13 +460,13 @@ class UnifiedAgentClient {
         const model = this.config.geminiModel || DEFAULT_GEMINI_MODEL;
         const ai = new GoogleGenAI({ apiKey });
         
-        // Convert history for Gemini
-        const geminiHistory = this.history.slice(0, -1).map(m => ({
+        // Convert history for Gemini, ensuring parts are correctly structured
+        const geminiHistory = this.history.slice(-16).map(m => ({
             role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content }]
+            parts: [{ text: String(m.content || '') }]
         }));
         
-        const lastMessage = this.history[this.history.length - 1].content;
+        const lastMessage = String(this.history[this.history.length - 1].content || '');
 
         const chat = ai.chats.create({
             model,
@@ -409,7 +495,7 @@ async function getAgentDecision(client, observation, options = {}) {
                 throw new Error(`Agent returned invalid JSON after ${MAX_JSON_REPAIR_ATTEMPTS + 1} attempts: ${error.message}`);
             }
 
-            onProgress(`Step ${step}: invalid JSON response, requesting repair (${attempt + 1}/${MAX_JSON_REPAIR_ATTEMPTS})`);
+            onProgress({ step, phase: 'repairing', action: 'json_repair', message: `invalid JSON response, requesting repair (${attempt + 1}/${MAX_JSON_REPAIR_ATTEMPTS})` });
             rawText = await client.sendMessage([
                 'Your previous response was not valid JSON for Code Mode.',
                 'Reply again with valid JSON only, following the required schema exactly.',
@@ -496,6 +582,9 @@ async function executeCodeTask(task, options = {}) {
     const requestApproval = typeof options.requestApproval === 'function'
         ? options.requestApproval
         : async () => true;
+    const askUser = typeof options.askUser === 'function'
+        ? options.askUser
+        : async (q) => `User didn't answer: ${q}`;
     const config = readConfig();
     const provider = options.provider || selectSupportedCodeProvider(config);
     const client = new UnifiedAgentClient(provider, config);
@@ -509,12 +598,18 @@ async function executeCodeTask(task, options = {}) {
 
     for (let step = 1; step <= MAX_AGENT_STEPS; step++) {
         executedSteps = step;
-        onProgress(`Step ${step}: thinking`);
+        onProgress({ step, phase: 'thinking', action: 'thinking' });
         const decision = await getAgentDecision(client, observation, { onProgress, step });
         const action = decision.action;
         const input = decision.input || {};
 
-        onProgress(`Step ${step}: ${action}${input.path ? ` ${input.path}` : input.command ? ` ${input.command}` : ''}`);
+        // Immediately show the agent's thought/reasoning
+        onProgress({
+            step,
+            phase: 'acting',
+            action: 'thinking',
+            thought: decision.thought
+        });
 
         if (action === 'finish') {
             finalSessionSummary = input.sessionSummary || input.summary || task;
@@ -529,73 +624,119 @@ async function executeCodeTask(task, options = {}) {
         }
 
         let toolResult = '';
-        switch (action) {
-            case 'list_files':
-                toolResult = await listFiles(workspaceRoot, input.path || '.');
-                break;
-            case 'read_file':
-                toolResult = readFileRange(workspaceRoot, input.path, input.startLine, input.endLine);
-                break;
-            case 'search_code':
-                toolResult = await searchCode(workspaceRoot, input.query);
-                break;
-            case 'find_path':
-                toolResult = await findPaths(workspaceRoot, input.query, input.type);
-                break;
-            case 'run_shell': {
-                const approved = await requestApproval({
-                    type: 'shell',
-                    label: input.command,
-                    preview: input.command
-                });
-                if (!approved) {
-                    toolResult = `User denied shell command: ${input.command}`;
+        try {
+            switch (action) {
+                case 'web_search':
+                    toolResult = await webSearch(input.query);
+                    break;
+                case 'list_files':
+                    toolResult = await listFiles(workspaceRoot, input.path || '.');
+                    break;
+                case 'read_file':
+                    toolResult = readFileRange(workspaceRoot, input.path, input.startLine, input.endLine);
+                    break;
+                case 'search_code':
+                    toolResult = await searchCode(workspaceRoot, input.query);
+                    break;
+                case 'find_path':
+                    toolResult = await findPaths(workspaceRoot, input.query, input.type);
+                    break;
+                case 'run_shell': {
+                    const approved = await requestApproval({
+                        type: 'shell',
+                        label: input.command,
+                        preview: input.command
+                    });
+                    if (!approved) {
+                        toolResult = `User denied shell command: ${input.command}`;
+                        break;
+                    }
+                    toolResult = await runShell(workspaceRoot, input.command);
                     break;
                 }
-                toolResult = await runShell(workspaceRoot, input.command);
-                break;
-            }
-            case 'apply_patch': {
-                const patchInput = input.patch || {};
-                const approved = await requestApproval({
-                    type: 'patch',
-                    label: patchInput.path,
-                    preview: formatPatchPreview(patchInput)
-                });
-                if (!approved) {
-                    toolResult = `User denied patch for ${patchInput.path}`;
+                case 'apply_patch': {
+                    const patchInput = input.patch || {};
+                    const approved = await requestApproval({
+                        type: 'patch',
+                        label: patchInput.path,
+                        preview: formatPatchPreview(patchInput)
+                    });
+                    if (!approved) {
+                        toolResult = `User denied patch for ${patchInput.path}`;
+                        break;
+                    }
+                    toolResult = applyPatch(workspaceRoot, patchInput);
                     break;
                 }
-                toolResult = applyPatch(workspaceRoot, patchInput);
-                break;
-            }
-            case 'write_file': {
-                const approved = await requestApproval({
-                    type: 'write_file',
-                    label: input.path,
-                    preview: `${input.path}\n${truncate(input.content || '', 800)}`
-                });
-                if (!approved) {
-                    toolResult = `User denied full file write for ${input.path}`;
+                case 'write_file': {
+                    const approved = await requestApproval({
+                        type: 'write_file',
+                        label: input.path,
+                        preview: `${input.path}\n${truncate(input.content || '', 800)}`
+                    });
+                    if (!approved) {
+                        toolResult = `User denied full file write for ${input.path}`;
+                        break;
+                    }
+                    toolResult = writeFile(workspaceRoot, input.path, input.content);
                     break;
                 }
-                toolResult = writeFile(workspaceRoot, input.path, input.content);
-                break;
-            }
-            default:
-                throw new Error(`Unsupported action: ${action}`);
+                case 'ask_user': {
+                    const answer = await askUser(input.question);
+                    toolResult = `User answered: ${answer}`;
+                    break;
+                }
+                case 'open_url':
+                case 'open_app':
+                case 'open_file':
+                case 'open_folder':
+                case 'create_folder':
+                case 'system_info':
+                case 'system_automation': {
+                    // Delegate to existing automation logic
+                    toolResult = await executeAction({
+                        type: action,
+                        target: input.target
+                    });
+                    break;
+                }                default:
+                    throw new Error(`Unsupported action: ${action}`);
+                }        } catch (e) {
+            toolResult = `Error: ${e.message}`;
+        }
+
+        // Log the finished step with result
+        let resultSummary = '';
+        if (action === 'search_code') {
+            const matches = (toolResult.match(/\n/g) || []).length;
+            resultSummary = ` -> Found ${matches} matches`;
+        } else if (action === 'run_shell') {
+            resultSummary = ` -> Exit code 0`; // Simplified
+        }
+
+        onProgress({
+            step,
+            phase: 'finished',
+            action,
+            target: (input.path || input.command || input.query || '') + resultSummary,
+            thought: decision.thought
+        });
+
+        // Format tool result to be more readable and structured for the agent
+        let formattedToolResult = toolResult;
+        if (action === 'list_files' || action === 'find_path') {
+            formattedToolResult = `Result of ${action}:\n---\n${toolResult}\n---`;
         }
 
         observation = [
             `Previous thought: ${decision.thought || '(none)'}`,
             `Action: ${action}`,
             'Observation:',
-            toolResult
-        ].join('\n');
-    }
+            formattedToolResult
+        ].join('\n');    }
 
-    // Check for Agent Collaboration (Review)
-    if (config.enableAgentCollaboration !== false) {
+    // Check for Agent Collaboration (Review) - Disabled by default to save tokens
+    if (config.enableAgentCollaboration === true && executedSteps > 8 && finalSummary) {
         const availableProviders = getAvailableProviders(config);
         // Exclude providers that often need special local setup or are slow/unreliable for tiny reviews
         const altProviders = availableProviders.filter(p => p !== provider && p !== 'ollama' && p !== 'huggingface' && p !== 'local_openai');
@@ -606,7 +747,7 @@ async function executeCodeTask(task, options = {}) {
             : (availableProviders.includes('gemini') ? 'gemini' : availableProviders[0]);
 
         if (reviewerProvider && finalSummary) {
-            onProgress(`Invoking Reviewer Agent (${reviewerProvider})...`);
+            onProgress({ phase: 'reviewing', action: 'reviewer_start', message: `Invoking Reviewer Agent (${reviewerProvider})...` });
             
             const reviewerClient = new UnifiedAgentClient(reviewerProvider, config);
             reviewerClient.systemInstruction = CODE_AGENT_PROMPT + "\n\nYou are the Reviewer Agent. Review the primary agent's changes, test output, and verification. If you spot a critical bug, point it out. Otherwise, confirm it looks good. Return JSON with action: 'finish' and your review in the 'summary' field.";
@@ -620,7 +761,7 @@ async function executeCodeTask(task, options = {}) {
                 
                 finalSummary += `\n\n[Review by ${reviewerProvider}]\n${reviewInput.summary || reviewDecision.thought || 'Looks good.'}`;
             } catch (e) {
-                onProgress(`Reviewer Agent failed: ${e.message}`);
+                onProgress({ phase: 'reviewing', action: 'reviewer_error', message: `Reviewer Agent failed: ${e.message}` });
             }
         }
     }
@@ -651,6 +792,9 @@ module.exports = {
     _helpers: {
         extractJson,
         selectSupportedCodeProvider,
-        findPaths
+        findPaths,
+        listFiles,
+        searchCode,
+        walkDirectory
     }
 };

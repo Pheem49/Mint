@@ -216,12 +216,23 @@ async function openFile(target) {
             console.error('openFile error:', result);
             return `เกิดข้อผิดพลาดในการเปิดไฟล์: ${result}`;
         }
+        return true;
     } else {
         return new Promise((resolve) => {
-            execFile('xdg-open', [resolvedPath], (err) => {
+            // บน Linux ลอง xdg-open แล้วค่อย gio open ถ้าอันแรกไม่ทำงาน
+            const { exec } = require('child_process');
+            const platformCmd = process.platform === 'darwin' ? 'open' : (process.platform === 'win32' ? 'start' : 'xdg-open');
+            
+            // ใช้ exec เพื่อให้รันผ่าน shell และรองรับการทำ fallback
+            let cmd = `${platformCmd} "${resolvedPath}"`;
+            if (process.platform === 'linux') {
+                cmd = `xdg-open "${resolvedPath}" || gio open "${resolvedPath}" || nautilus "${resolvedPath}"`;
+            }
+
+            exec(cmd, (err) => {
                 if (err) {
-                    console.error("Failed to open path via xdg-open:", err);
-                    resolve(`ไม่สามารถเปิดไฟล์ได้ค่ะ: ${err.message}`);
+                    console.error("Failed to open path:", err);
+                    resolve(`ไม่สามารถเปิดได้ค่ะ: ${err.message}`);
                 } else {
                     resolve(true);
                 }
