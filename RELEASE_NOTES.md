@@ -1,5 +1,67 @@
 # Mint Release Notes
 
+## v1.4.2 - Web Search & Specialized Personas
+
+Mint 1.4.2 introduces powerful information retrieval capabilities with integrated Web Search, smarter file discovery, and a suite of specialized agent personas with consistent "Mint" personality traits.
+
+### Highlights
+
+- **Integrated Web Search:** The agent can now search the internet to provide up-to-date information.
+- **Specialized Personas:** Six distinct agent personas (Default, Coder, Researcher, Creative, Manager, Reviewer) with a consistent "Mint" personality.
+- **Smart Path Discovery:** New `find_path` tool for finding files and folders by name or partial path.
+- **Enhanced Thai Support:** Refined personality and polite particles ("ค่ะ", "นะคะ") when communicating in Thai.
+- **Deep Context Integration:** Better chat history management for seamless multi-turn conversations.
+
+### New Features
+
+- **Web Search Integration**
+  - Added `web_search` tool to `code_agent`.
+  - Enables the agent to fetch real-time data from the web when it lacks local knowledge.
+
+- **Persona-Driven Experts**
+  - Introduced the `Agent Orchestrator` with six specialized roles:
+    - **Mint Default:** Friendly and versatile assistant.
+    - **Mint Coder:** Technical expert focusing on best practices.
+    - **Mint Researcher:** Analytical role focused on data and facts.
+    - **Mint Creative:** Expressive partner for brainstorming.
+    - **Mint Manager:** Efficiency-focused role for task planning.
+    - **Mint Reviewer:** Senior critic for code and content quality.
+
+- **Improved File Operations**
+  - New `find_path` utility to locate files and directories within the workspace.
+  - Smarter path resolution for all file system actions.
+
+- **Refined Agent Personality**
+  - Standardized "Mint" personality across all modules.
+  - Added specific Thai language support to ensure polite and consistent responses in Thai.
+
+### Improvements & Fixes
+
+- **CLI Stability**
+  - Improved CLI input handling and streaming performance.
+  - Better reporting of tool execution in the terminal UI.
+
+- **Router Improvements**
+  - Enhanced intent detection in `chat_router` to better distinguish between general chat and complex coding tasks.
+  - Added more Thai keyword support for better localization.
+
+- **Tool Execution**
+  - Hardened tool execution paths and improved error reporting when tools fail.
+  - Better handling of large tool outputs with truncation logic.
+
+### Documentation & Maintenance
+
+- Major overhaul of `README.md` to reflect new capabilities and architecture.
+- Updated `BUILD_AND_RELEASE.md` with refined release procedures.
+- Cleaned up dependency list in `package.json`.
+
+### Testing
+
+- Added tests for `findPath` and `webSearch` helpers.
+- Verified persona switching and personality consistency.
+- Current test status:
+  - **85 tests passed**
+
 ## v1.4.1 - CLI Agent Hardening & Stability
 
 Mint 1.4.1 focuses on making the CLI and coding agent behave more like a real agent, while tightening several unsafe execution paths and improving reliability across provider selection, workspace handling, and action execution.

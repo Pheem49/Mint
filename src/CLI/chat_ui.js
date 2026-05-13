@@ -93,8 +93,9 @@ function createChatUI({ onSubmit, onExit }) {
     const inputBox = blessed.textbox({
         bottom: 3, left: 1, width: '100%-2', height: 3,
         tags: false,
-        inputOnFocus: false, // We'll manage this manually for stability
-        keys: true,
+        inputOnFocus: true, 
+        keys: false,
+        editor: false, 
         style: {
             bg: INPUT_BG,
             fg: INPUT_FG,
@@ -111,10 +112,16 @@ function createChatUI({ onSubmit, onExit }) {
     });
 
     // --- SAFETY PATCH ---
-    // Prevent "TypeError: done is not a function" if a listener survives a blur/focus cycle.
+    // Prevent "TypeError: done is not a function"
     const originalListener = inputBox._listener;
     inputBox._listener = function(ch, key) {
-        if (typeof this._done !== 'function') return;
+        if (typeof this._done !== 'function') {
+            // If not in readInput mode, but we have focus, we might still want to handle some keys
+            // if inputOnFocus is true. But blessed usually handles this.
+            // To be safe, if _done is missing, we only allow navigation keys.
+            const isNav = key && (key.name === 'left' || key.name === 'right' || key.name === 'home' || key.name === 'end' || key.name === 'backspace' || key.name === 'delete');
+            if (!isNav) return;
+        }
         return originalListener.call(this, ch, key);
     };
 
@@ -274,8 +281,6 @@ function createChatUI({ onSubmit, onExit }) {
     screen.append(statusBar);
     screen.append(placeholderWidget); // sibling on top of inputBox
 
-    // Suggestion List and Approval Dialog remain same ...
-
     // ─── Suggestion List ──────────────────────────────────────────────────────
     const commandList = blessed.list({
         parent: screen,
@@ -347,6 +352,7 @@ function createChatUI({ onSubmit, onExit }) {
     // Consolidated key handling
     inputBox.on('element keypress', (el, ch, key) => {
         refreshInputStyles();
+        
         // 1. Handle placeholder visibility
         if (!key.ctrl && !key.meta && key.name !== 'enter' && key.name !== 'tab') {
             if (ch) hidePlaceholder();
@@ -397,6 +403,9 @@ function createChatUI({ onSubmit, onExit }) {
     });
 
     inputBox.on('focus', () => {
+        if (typeof inputBox._done !== 'function') {
+            inputBox.readInput();
+        }
         refreshInputStyles();
         screen.render();
     });
@@ -413,9 +422,9 @@ function createChatUI({ onSubmit, onExit }) {
         }
     });
 
-    inputBox.on('click', () => {
-        inputBox.focus();
-        screen.render();
+    // Restoration logic: Keep Ctrl+V/O/X but BLOCK Ctrl+E specifically
+    inputBox.key(['C-e'], () => {
+        // Do nothing! This prevents opening the text editor (Vim)
     });
 
 
@@ -735,6 +744,15 @@ function createChatUI({ onSubmit, onExit }) {
         let icon = '{#88e0b0-fg}✓{/}';
         let label = action || phase;
         let color = '{#ffffff-fg}';
+
+        if (phase === 'error') {
+            chatBox.log('');
+            chatBox.log(` {#ff6b6b-fg}✗{/} {bold}{#ff6b6b-fg}Error in ${action || 'task'}:{/}`);
+            const errorLines = wrapText(message || '', maxLineWidth - 6);
+            errorLines.forEach(l => chatBox.log(`   {#ff7d7d-fg}${l}{/}`));
+            screen.render();
+            return;
+        }
 
         // Map internal action names to display names seen in the screenshot
         switch (action) {

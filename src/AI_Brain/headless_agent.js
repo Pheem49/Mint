@@ -27,6 +27,10 @@ async function startAgent() {
     // Initialize System Monitoring
     systemEvents.startMonitoring();
 
+    // Initialize Messaging Bridges
+    const bridgeManager = require('../System/bridge_manager');
+    bridgeManager.init().catch(err => console.error('[BridgeManager] Init Error:', err));
+
     // Listen for Battery Events
     systemEvents.on('low-battery', (level) => {
         sendNotification(

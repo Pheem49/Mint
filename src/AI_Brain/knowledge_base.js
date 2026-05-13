@@ -44,12 +44,32 @@ function getAiClient() {
 
 function getDbPath() {
     const fileName = 'mint-knowledge.sqlite';
-    if (app && app.getPath) {
-        return path.join(app.getPath('userData'), fileName);
+    const configDir = path.join(os.homedir(), '.config', 'mint');
+    const dbPath = path.join(configDir, fileName);
+
+    if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
     }
-    const mintDir = path.join(os.homedir(), '.mint');
-    if (!fs.existsSync(mintDir)) fs.mkdirSync(mintDir, { recursive: true });
-    return path.join(mintDir, fileName);
+
+    // Migration Logic
+    if (!fs.existsSync(dbPath)) {
+        const electronDb = app && app.getPath ? path.join(app.getPath('userData'), fileName) : null;
+        const legacyDb = path.join(os.homedir(), '.mint', fileName);
+
+        if (electronDb && fs.existsSync(electronDb)) {
+            try {
+                fs.copyFileSync(electronDb, dbPath);
+                console.log('[RAG] Migrated database from Electron userData');
+            } catch (e) { console.error('[RAG] Migration from Electron failed:', e); }
+        } else if (fs.existsSync(legacyDb)) {
+            try {
+                fs.copyFileSync(legacyDb, dbPath);
+                console.log('[RAG] Migrated database from ~/.mint');
+            } catch (e) { console.error('[RAG] Migration from ~/.mint failed:', e); }
+        }
+    }
+
+    return dbPath;
 }
 
 function getDatabaseSync() {
@@ -67,8 +87,13 @@ function getDb() {
     const Database = getDatabaseSync();
     dbInstance = new Database(dbPath);
 
+    // Enable WAL mode for better concurrency
+    dbInstance.exec('PRAGMA journal_mode = WAL;');
+    dbInstance.exec('PRAGMA synchronous = NORMAL;');
+
     // Create Tables
     dbInstance.exec(`
+        -- Shared knowledge tables
         CREATE TABLE IF NOT EXISTS sources (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             path TEXT UNIQUE,
@@ -84,6 +109,29 @@ function getDb() {
             FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source_id);
+
+        -- Shared memory tables (ensuring consistency)
+        CREATE TABLE IF NOT EXISTS user_profile (
+            key        TEXT PRIMARY KEY,
+            value      TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS session_memories (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            summary    TEXT NOT NULL,
+            tags       TEXT DEFAULT '',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS usage_patterns (
+            pattern   TEXT PRIMARY KEY,
+            count     INTEGER DEFAULT 1,
+            last_used DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS response_cache (
+            query_hash TEXT PRIMARY KEY,
+            response   TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
     `);
     return dbInstance;
 }

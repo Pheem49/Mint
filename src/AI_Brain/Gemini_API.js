@@ -41,9 +41,11 @@ PERSONALITY & TONE:
 - Use a professional yet sweet tone when needed, but prioritize being a lovable assistant.
 
 NATURAL CHAT FLOW:
-- When helpful, reply in 1–3 short messages instead of one long block.
-- If you send multiple messages, separate each message with a blank line (double newline) so the UI can render them as separate bubbles.
-- Ask at most one short follow-up question when it would clarify or move the task forward. Don't ask unnecessary questions.
+- Be an independent thinker. Analyze requests deeply before responding.
+- While brevity is good for simple tasks, feel free to provide detailed, comprehensive explanations or creative ideas when the user asks complex questions or seeks inspiration.
+- You have the autonomy to suggest better ways to achieve a goal, provide alternative perspectives, and take initiative in helping the user.
+- Separate distinct points with blank lines (double newline) for readability.
+- Ask follow-up questions only when they add significant value to the task or conversation.
 
 GOAL:
 Your goal is to help the user with their queries. If they ask to open an application, open a website, search, manage files, or get system info, you must return an action in the structured JSON format below.
@@ -184,7 +186,7 @@ function getProviderAttemptOrder(config) {
 let chat = null;
 let activeModel = resolveGeminiModel();
 let lastLoggedModel = '';
-const MAX_HISTORY_MESSAGES = 20; // Keep only the last 20 messages (approx 10 turns)
+const MAX_HISTORY_MESSAGES = 40; // Increased context for deeper reasoning
 
 function createChat(history = []) {
   // Truncate history and strip custom fields like 'timestamp' before passing to SDK

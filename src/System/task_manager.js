@@ -2,13 +2,23 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-// Standard location for Mint tasks
-const MINT_DIR = path.join(os.homedir(), '.mint');
-const TASKS_FILE = path.join(MINT_DIR, 'tasks.json');
+const CONFIG_DIR = path.join(os.homedir(), '.config', 'mint');
+const TASKS_FILE = path.join(CONFIG_DIR, 'tasks.json');
 
 // Ensure directory exists
-if (!fs.existsSync(MINT_DIR)) {
-    fs.mkdirSync(MINT_DIR, { recursive: true });
+if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+}
+
+// Migration Logic: Move tasks.json from ~/.mint to ~/.config/mint
+if (!fs.existsSync(TASKS_FILE)) {
+    const legacyPath = path.join(os.homedir(), '.mint', 'tasks.json');
+    if (fs.existsSync(legacyPath)) {
+        try {
+            fs.copyFileSync(legacyPath, TASKS_FILE);
+            console.log('[TaskManager] Migrated tasks from ~/.mint');
+        } catch (e) { console.error('[TaskManager] Migration failed:', e); }
+    }
 }
 
 /**

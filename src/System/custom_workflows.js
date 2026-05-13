@@ -1,7 +1,18 @@
 const fs = require('fs');
 const path = require('path');
-const { app, shell } = require('electron');
+const os = require('os');
 const { exec } = require('child_process');
+
+// Handle electron dependency safely
+let app, shell;
+try {
+    const electron = require('electron');
+    app = electron.app;
+    shell = electron.shell;
+} catch (e) {
+    app = null;
+    shell = null;
+}
 
 function escapeRegExp(text) {
     return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -9,7 +20,8 @@ function escapeRegExp(text) {
 
 class CustomWorkflows {
     constructor() {
-        this.configPath = path.join(app.getPath('userData'), 'workflows.json');
+        const configDir = path.join(os.homedir(), '.config', 'mint');
+        this.configPath = path.join(configDir, 'workflows.json');
         this.workflows = [];
         this.lastTriggered = {};
         this.cooldownMs = 60 * 60 * 1000; // 1 hour cooldown per rule
@@ -17,8 +29,25 @@ class CustomWorkflows {
         this.timer = null;
         this.webContents = null;
         
+        if (!fs.existsSync(configDir)) {
+            fs.mkdirSync(configDir, { recursive: true });
+        }
+
+        this.migrateConfig();
         this.ensureConfigExists();
         this.loadWorkflows();
+    }
+    
+    migrateConfig() {
+        if (!fs.existsSync(this.configPath) && app && app.getPath) {
+            const electronPath = path.join(app.getPath('userData'), 'workflows.json');
+            if (fs.existsSync(electronPath)) {
+                try {
+                    fs.copyFileSync(electronPath, this.configPath);
+                    console.log('[CustomWorkflows] Migrated workflows from Electron userData');
+                } catch (e) { console.error('[CustomWorkflows] Migration failed:', e); }
+            }
+        }
     }
     
     ensureConfigExists() {

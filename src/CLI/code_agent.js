@@ -9,8 +9,39 @@ const { readConfig, getAvailableProviders } = require('../System/config_manager'
 const { readWorkspaceSession, writeWorkspaceSession } = require('./code_session_memory');
 const { executeAction } = require('../../mint-cli-logic');
 
-async function webSearch(query) {
+async function webSearch(query, onProgress = () => {}) {
     if (!query) throw new Error('Search query required.');
+    const config = readConfig();
+
+    // 1. Try Google Search API if configured
+    if (config.googleSearchApiKey && config.googleSearchCx) {
+        try {
+            const GoogleSearch = require('../Channels/google_search_bridge');
+            const google = new GoogleSearch({ apiKey: config.googleSearchApiKey, cx: config.googleSearchCx });
+            const results = await google.search(query);
+            if (results.length > 0) {
+                return results.map(r => `Title: ${r.title}\nSnippet: ${r.snippet}\nURL: ${r.link}`).join('\n\n');
+            }
+        } catch (e) { 
+            onProgress({ phase: 'error', action: 'web_search', message: e.message });
+        }
+    }
+
+    // 2. Try Brave Search API if configured
+    if (config.braveSearchApiKey) {
+        try {
+            const BraveSearch = require('../Channels/brave_search_bridge');
+            const brave = new BraveSearch({ apiKey: config.braveSearchApiKey });
+            const results = await brave.search(query);
+            if (results.length > 0) {
+                return results.map(r => `Title: ${r.title}\nSnippet: ${r.snippet}\nURL: ${r.link}`).join('\n\n');
+            }
+        } catch (e) { 
+            onProgress({ phase: 'error', action: 'web_search', message: e.message });
+        }
+    }
+
+    // 3. Fallback to DuckDuckGo Scraping
     try {
         const response = await axios.get(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
             headers: {
@@ -28,8 +59,14 @@ async function webSearch(query) {
                 results.push(`Title: ${title}\nSnippet: ${snippet}\nURL: ${link}`);
             }
         });
+
+        if (results.length === 0) {
+             onProgress({ phase: 'error', action: 'web_search', message: 'DuckDuckGo scraping returned no results. It might be blocking us.' });
+        }
+
         return results.length > 0 ? results.join('\n\n') : 'No results found.';
     } catch (e) {
+        onProgress({ phase: 'error', action: 'web_search', message: `DuckDuckGo fallback failed: ${e.message}` });
         return `Search failed: ${e.message}`;
     }
 }
@@ -627,7 +664,7 @@ async function executeCodeTask(task, options = {}) {
         try {
             switch (action) {
                 case 'web_search':
-                    toolResult = await webSearch(input.query);
+                    toolResult = await webSearch(input.query, onProgress);
                     break;
                 case 'list_files':
                     toolResult = await listFiles(workspaceRoot, input.path || '.');

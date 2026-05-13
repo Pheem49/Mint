@@ -1,12 +1,33 @@
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
+const os = require('os');
 
-// ============================================================
-// Behavior Memory — Tracks user behavior patterns over time
-// ============================================================
+// Handle electron dependency safely
+let app;
+try {
+    const electron = require('electron');
+    app = electron.app;
+} catch (e) {
+    app = null;
+}
 
-const MEMORY_FILE = path.join(app.getPath('userData'), 'behavior_memory.json');
+const CONFIG_DIR = path.join(os.homedir(), '.config', 'mint');
+if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+}
+
+const MEMORY_FILE = path.join(CONFIG_DIR, 'behavior_memory.json');
+
+// Migration Logic: Move from Electron userData to ~/.config/mint
+if (!fs.existsSync(MEMORY_FILE) && app && app.getPath) {
+    const electronPath = path.join(app.getPath('userData'), 'behavior_memory.json');
+    if (fs.existsSync(electronPath)) {
+        try {
+            fs.copyFileSync(electronPath, MEMORY_FILE);
+            console.log('[BehaviorMemory] Migrated memory from Electron userData');
+        } catch (e) { console.error('[BehaviorMemory] Migration failed:', e); }
+    }
+}
 const MAX_CONTEXT_HISTORY = 20; // Keep last 20 context snapshots
 
 /**

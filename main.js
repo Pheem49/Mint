@@ -346,6 +346,10 @@ app.whenReady().then(() => {
     // Initialize MCP Servers
     mcpManager.init().catch(err => console.error('[MCP] Init Error:', err));
     
+    // Initialize Messaging Bridges
+    const bridgeManager = require('./src/System/bridge_manager');
+    bridgeManager.init().catch(err => console.error('[BridgeManager] Init Error:', err));
+    
     // Start monitoring system events (battery, wifi, etc.)
     systemEvents.startMonitoring();
     if (config.enableCustomWorkflows !== false) {

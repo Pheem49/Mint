@@ -17,7 +17,9 @@ mint-chat-history.json
 
 # Documentation
 # (Moved out of ignore)
-
+RELEASE_NOTES.md
+BUILD_AND_RELEASE.md
+NPM_PUBLISH_GUIDE.md
 # ==========================
 # Electron Build Output
 # ==========================

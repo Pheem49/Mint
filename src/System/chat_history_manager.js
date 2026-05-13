@@ -10,14 +10,32 @@ try {
     app = null;
 }
 
+const CONFIG_DIR = path.join(os.homedir(), '.config', 'mint');
 const MINT_DIR = path.join(os.homedir(), '.mint');
-if (!fs.existsSync(MINT_DIR)) {
-    fs.mkdirSync(MINT_DIR, { recursive: true });
+
+if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
 }
 
-const CHAT_HISTORY_PATH = app && app.getPath 
-    ? path.join(app.getPath('userData'), 'mint-chat-history.json')
-    : path.join(MINT_DIR, 'mint-chat-history.json');
+const CHAT_HISTORY_PATH = path.join(CONFIG_DIR, 'mint-chat-history.json');
+
+// Migration Logic: Consolidate from Electron userData or old ~/.mint to ~/.config/mint
+if (!fs.existsSync(CHAT_HISTORY_PATH)) {
+    const electronUserData = app && app.getPath ? path.join(app.getPath('userData'), 'mint-chat-history.json') : null;
+    const legacyPath = path.join(MINT_DIR, 'mint-chat-history.json');
+
+    if (electronUserData && fs.existsSync(electronUserData)) {
+        try {
+            fs.copyFileSync(electronUserData, CHAT_HISTORY_PATH);
+            console.log('[History] Migrated chat history from Electron userData');
+        } catch (e) { console.error('[History] Migration from Electron failed:', e); }
+    } else if (fs.existsSync(legacyPath)) {
+        try {
+            fs.copyFileSync(legacyPath, CHAT_HISTORY_PATH);
+            console.log('[History] Migrated chat history from ~/.mint');
+        } catch (e) { console.error('[History] Migration from ~/.mint failed:', e); }
+    }
+}
 
 function readChatHistory() {
     try {

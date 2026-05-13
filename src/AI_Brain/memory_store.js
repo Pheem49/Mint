@@ -25,12 +25,32 @@ try {
 
 function getDbPath() {
     const fileName = 'mint-knowledge.sqlite'; // shared DB with knowledge_base
-    if (app && app.getPath) {
-        return path.join(app.getPath('userData'), fileName);
+    const configDir = path.join(os.homedir(), '.config', 'mint');
+    const dbPath = path.join(configDir, fileName);
+
+    if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
     }
-    const mintDir = path.join(os.homedir(), '.mint');
-    if (!fs.existsSync(mintDir)) fs.mkdirSync(mintDir, { recursive: true });
-    return path.join(mintDir, fileName);
+
+    // Migration Logic
+    if (!fs.existsSync(dbPath)) {
+        const electronDb = app && app.getPath ? path.join(app.getPath('userData'), fileName) : null;
+        const legacyDb = path.join(os.homedir(), '.mint', fileName);
+
+        if (electronDb && fs.existsSync(electronDb)) {
+            try {
+                fs.copyFileSync(electronDb, dbPath);
+                console.log('[Memory] Migrated database from Electron userData');
+            } catch (e) { console.error('[Memory] Migration from Electron failed:', e); }
+        } else if (fs.existsSync(legacyDb)) {
+            try {
+                fs.copyFileSync(legacyDb, dbPath);
+                console.log('[Memory] Migrated database from ~/.mint');
+            } catch (e) { console.error('[Memory] Migration from ~/.mint failed:', e); }
+        }
+    }
+
+    return dbPath;
 }
 
 // ── Lazy DatabaseSync init ─────────────────────────────────────────────────
@@ -45,6 +65,10 @@ function getDb() {
     if (dbInstance) return dbInstance;
     const Database = getDatabaseSync();
     dbInstance = new Database(getDbPath());
+    
+    // Enable WAL mode for better concurrency
+    dbInstance.exec('PRAGMA journal_mode = WAL;');
+    dbInstance.exec('PRAGMA synchronous = NORMAL;');
 
     dbInstance.exec(`
         -- User profile: arbitrary key-value pairs
