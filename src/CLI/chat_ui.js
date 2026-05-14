@@ -1,887 +1,202 @@
 /**
- * Mint CLI - Gemini-style TUI using blessed
- * Provides a rich terminal UI with chat history, input box, and status bar
+ * Mint CLI - Ink-based UI (ESM-compatible Version)
+ * A modern, React-based terminal UI for a better chat experience.
+ * Uses dynamic imports to handle ESM dependencies (Ink).
  */
-const blessed = require('blessed');
+const React = require('react');
 const path = require('path');
-const { execSync } = require('child_process');
 const { readConfig } = require('../System/config_manager');
 
-const SLASH_COMMANDS = [
-    { name: '/code',   desc: 'Force workspace code mode for a task' },
-    { name: '/models', desc: 'List or switch Gemini models' },
-    { name: '/config', desc: 'Show current configuration' },
-    { name: '/copy',   desc: 'Copy last response to clipboard' },
-    { name: '/clear',  desc: 'Clear conversation history' },
-    { name: '/reset',  desc: 'Reset conversation history' },
-    { name: '/agent',  desc: 'Switch AI personas (coder, researcher, etc)' },
-    { name: '/workspace', desc: 'Manage project-specific contexts' },
-    { name: '/review', desc: 'Request a second-pass review of the last response' },
-    { name: '/stats',  desc: 'Show system health stats (CPU/RAM/Disk)' },
-    { name: '/help',   desc: 'Show help information' },
-    { name: '/exit',   desc: 'Exit Mint' }
-];
+// Helper to make element creation less verbose
+const h = React.createElement;
 
 /**
- * Creates and returns the Mint chat TUI screen
- * @param {Object} options
- * @param {Function} options.onSubmit - Called with (userInput: string) when user sends a message
- * @param {Function} options.onExit  - Called when user exits
- * @returns {{ screen, appendMessage, setThinking }}
+ * We wrap everything in an async function to load ESM modules
  */
-function createChatUI({ onSubmit, onExit }) {
-    const config = readConfig();
-    const modelName = config.geminiModel || 'gemini';
-    const workspacePath = process.cwd();
-    const HINT_DEFAULT = `{gray-fg}  Enter send  ·  Ctrl+Y copy  ·  /help commands{/}`;
-    const INPUT_FG = '#f8fafc';
-    const INPUT_BG = '#10141c';
+async function createChatUI(options) {
+    // Dynamic imports for ESM modules
+    const { render, Box, Text, useInput, useApp, Static } = await import('ink');
+    const TextInput = (await import('ink-text-input')).default;
+    const { useState, useImperativeHandle, forwardRef, createRef, useEffect } = React;
 
-    // ─── Screen ───────────────────────────────────────────────────────────────
-    const screen = blessed.screen({
-        smartCSR: true,
-        fullUnicode: true,
-        title: 'Mint CLI',
-        mouse: true
-    });
+    const App = forwardRef(({ onSubmit, onExit, initialHistory = [] }, ref) => {
+        const config = readConfig();
+        const { exit } = useApp();
+        const [input, setInput] = useState('');
+        const [history, setHistory] = useState(initialHistory);
+        const [thinking, setThinking] = useState(false);
+        const [mode, setMode] = useState('Chat');
+        const [model, setModel] = useState('');
+        const [workspace, setWorkspace] = useState(process.cwd());
 
-    // ─── Banner ───────────────────────────────────────────────────────────────
-    const banner = blessed.box({
-        top: 0, left: 1, width: '100%-2', height: 4,
-        tags: true,
-        padding: { left: 1, right: 1 },
-        style: { bg: 'default', fg: '#d7dde8' }
-    });
-    banner.setContent([
-        `{#88e0b0-fg} __  __ _       _    ___ _    ___ {/}`,
-        `{#88e0b0-fg}|  \\/  (_)_ __ | |_ / __| |  |_ _|{/}`,
-        `{#88e0b0-fg}| |\\/| | | '_ \\|  _| (__| |__ | | {/}`,
-        `{#88e0b0-fg}|_|  |_|_|_| |_|\\__|\\___|____|___|{/}`
-    ].join('\n'));
+        const lastSystemMessage = React.useRef('');
 
-    const subBanner = blessed.box({
-        top: 4, left: 2, width: '100%-4', height: 2,
-        tags: true,
-        content: `{gray-fg}Type naturally to chat. Coding requests can auto-enter {/}{#ffd166-fg}Code Mode{/}{gray-fg}. Use {/}{#88e0b0-fg}/help{/}{gray-fg}, {/}{#88e0b0-fg}/code{/}{gray-fg}, or {/}{#88e0b0-fg}Esc{/}{gray-fg}.{/}`,
-        style: { bg: 'default', fg: '#9aa6bf' }
-    });
+        // Export methods to the outside world via ref
+        useImperativeHandle(ref, () => ({
+            appendMessage: (role, text) => {
+                setHistory(prev => [...prev, { role, text, time: new Date() }]);
+            },
+            setThinking: (val) => setThinking(val),
+            setMode: (val) => setMode(val),
+            updateStatusModel: (val) => setModel(val),
+            updateWorkspace: (val) => setWorkspace(val),
+            appendCodeStep: (info) => {
+                let text = '';
+                let label = 'System';
+                let labelColor = 'blueBright';
+                let isThought = false;
 
-    // ─── Chat log (scrollable) ────────────────────────────────────────────────
-    const chatBox = blessed.log({
-        top: 6, left: 1, width: '100%-2',
-        bottom: 8,
-        tags: true,
-        scrollable: true,
-        alwaysScroll: true,
-        scrollbar: { ch: '┃', style: { fg: '#335d52' } },
-        style: { bg: '#171b24', fg: '#ffffff', border: { fg: '#2f3747' } },
-        mouse: true,
-        scrollable: true,
-        border: { type: 'line' },
-        padding: { left: 1, right: 1, top: 0, bottom: 0 },
-        label: ' Conversation '
-    });
-
-    // ─── Hint bar ─────────────────────────────────────────────────────────────
-    const hintBar = blessed.box({
-        bottom: 6, left: 1, width: '100%-2', height: 1,
-        tags: true,
-        content: HINT_DEFAULT,
-        style: { bg: 'default' }
-    });
-
-    const inputBox = blessed.textbox({
-        bottom: 3, left: 1, width: '100%-2', height: 3,
-        tags: false,
-        inputOnFocus: true, 
-        keys: false,
-        editor: false, 
-        style: {
-            bg: INPUT_BG,
-            fg: INPUT_FG,
-            border: { fg: '#335d52' },
-            focus: {
-                fg: INPUT_FG,
-                bg: INPUT_BG,
-                border: { fg: '#88e0b0' }
-            }
-        },
-        border: { type: 'line' },
-        padding: { left: 1 },
-        label: ' Message '
-    });
-
-    // --- SAFETY PATCH ---
-    // Prevent "TypeError: done is not a function"
-    const originalListener = inputBox._listener;
-    inputBox._listener = function(ch, key) {
-        if (typeof this._done !== 'function') {
-            // If not in readInput mode, but we have focus, we might still want to handle some keys
-            // if inputOnFocus is true. But blessed usually handles this.
-            // To be safe, if _done is missing, we only allow navigation keys.
-            const isNav = key && (key.name === 'left' || key.name === 'right' || key.name === 'home' || key.name === 'end' || key.name === 'backspace' || key.name === 'delete');
-            if (!isNav) return;
-        }
-        return originalListener.call(this, ch, key);
-    };
-
-
-
-    // ─── Placeholder (SIBLING widget floating over input content area) ─────────
-    // inputBox: bottom=3, height=3, border=1 → content row at bottom=4, left=2
-    const placeholderWidget = blessed.text({
-        bottom: 4,        // inside input content area (border offset)
-        left: 3,
-        width: '100%-6',
-        height: 1,
-        content: '> Ask anything, or describe a coding task for this workspace',
-        tags: false,
-        style: { fg: '#5d6678', bg: '#10141c' }
-    });
-
-    let placeholderVisible = true;
-
-    function hidePlaceholder() {
-        if (placeholderVisible) {
-            placeholderVisible = false;
-            placeholderWidget.hide();
-            screen.render();
-        }
-    }
-
-    function showPlaceholder() {
-        if (!placeholderVisible) {
-            placeholderVisible = true;
-            placeholderWidget.show();
-            screen.render();
-        }
-    }
-
-    function refreshInputStyles() {
-        inputBox.style.fg = INPUT_FG;
-        inputBox.style.bg = INPUT_BG;
-        if (inputBox.style.focus) {
-            inputBox.style.focus.fg = INPUT_FG;
-            inputBox.style.focus.bg = INPUT_BG;
-        }
-        if (Array.isArray(inputBox.children)) {
-            inputBox.children.forEach((child) => {
-                if (child.style) {
-                    child.style.fg = INPUT_FG;
-                    child.style.bg = INPUT_BG;
-                }
-            });
-        }
-        applyTerminalInputAttrs();
-    }
-
-    function applyTerminalInputAttrs() {
-        try {
-            if (!screen || !screen.program || typeof inputBox.sattr !== 'function' || typeof screen.codeAttr !== 'function') {
-                return;
-            }
-            const attr = inputBox.sattr(inputBox.style);
-            screen.program.write(screen.codeAttr(attr));
-        } catch (_) {}
-    }
-
-    // ─── Status bar (2 lines as per screenshot) ──────────────────────
-    const statusBar = blessed.box({
-        bottom: 0, left: 1, width: '100%-2', height: 3,
-        tags: true,
-        style: { bg: '#10141c', fg: '#888888' },
-        border: { type: 'line', fg: '#222c38' }
-    });
-
-    // Line 1: Thinking / Status (Left) and Shortcut (Right)
-    const statusLine1 = blessed.text({
-        parent: statusBar,
-        top: 0, left: 1, right: 1,
-        height: 1,
-        tags: true,
-        content: `{#88aaff-fg}[Chat]{/} {#cc4444-fg}no sandbox{/}`,
-        style: { bg: '#10141c' }
-    });
-
-    const shortcutHint = blessed.text({
-        parent: statusBar,
-        top: 0, right: 1,
-        height: 1,
-        tags: true,
-        content: `{gray-fg}? for shortcuts{/}`,
-        style: { bg: '#10141c' }
-    });
-
-    // Line 2: Action Hint (Left) and File Info (Right)
-    const statusLine2 = blessed.text({
-        parent: statusBar,
-        top: 1, left: 1, right: 1,
-        height: 1,
-        tags: true,
-        content: `{gray-fg}Shift+Tab to accept edits{/}`,
-        style: { bg: '#10141c' }
-    });
-
-    const fileInfo = blessed.text({
-        parent: statusBar,
-        top: 1, right: 1,
-        height: 1,
-        tags: true,
-        content: `{gray-fg}path: ${workspacePath}{/}`,
-        style: { bg: '#10141c' }
-    });
-
-    let activeMode = 'Chat';
-    let spinnerIdx = 0;
-    const spinnerChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-    function formatTime(seconds) {
-        if (seconds < 60) return `${seconds}s`;
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins}m ${secs}s`;
-    }
-
-    function updateStatusBar(thinkingText = null, secondsElapsed = 0) {
-        if (thinkingText) {
-            const char = spinnerChars[spinnerIdx % spinnerChars.length];
-            spinnerIdx++;
-            statusLine1.setContent(`{#88e0b0-fg}${char}{/} Thinking... {gray-fg}(esc to cancel, ${formatTime(secondsElapsed)}){/}`);
-        } else {
-            statusLine1.setContent(`${activeMode === 'Code' ? '{#ffd166-fg}[Code]{/}' : '{#88aaff-fg}[Chat]{/}'} {#cc4444-fg}no sandbox{/}`);
-        }
-        screen.render();
-    }
-
-    function setMode(mode) {
-        activeMode = mode === 'Code' ? 'Code' : 'Chat';
-        updateStatusBar(null);
-    }
-
-    function updateStatusModel(newModel) {
-        if (!newModel) return;
-        shortcutHint.setContent(`{gray-fg}${newModel} · ? for shortcuts{/}`);
-        screen.render();
-    }
-
-    /** Update workspace name in status bar */
-    function updateWorkspace(newPath) {
-        if (!newPath) return;
-        fileInfo.setContent(`{gray-fg}path: ${newPath}{/}`);
-        screen.render();
-    }
-    updateStatusBar();
-
-    // ─── Append widgets to screen ─────────────────────────────────────────────
-    screen.append(banner);
-    screen.append(subBanner);
-    screen.append(chatBox);
-    screen.append(hintBar);
-    screen.append(inputBox);
-    screen.append(statusBar);
-    screen.append(placeholderWidget); // sibling on top of inputBox
-
-    // ─── Suggestion List ──────────────────────────────────────────────────────
-    const commandList = blessed.list({
-        parent: screen,
-        bottom: 6,
-        left: 3,
-        width: '64%',
-        height: 8,
-        tags: true,
-        keys: false, // We will handle keys manually to keep focus on input
-        vi: false,
-        hidden: true,
-        border: { type: 'line', fg: '#88e0b0' },
-        style: {
-            bg: '#10141c',
-            fg: '#ffffff',
-            selected: {
-                bg: '#22352f',
-                fg: '#88e0b0',
-                bold: true
-            }
-        }
-    });
-
-    let activeSuggestions = [];
-    const approvalDialog = blessed.question({
-        parent: screen,
-        tags: true,
-        border: { type: 'line', fg: '#88e0b0' },
-        style: {
-            bg: '#10141c',
-            fg: '#ffffff',
-            border: { fg: '#88e0b0' }
-        },
-        width: '80%',
-        height: 12, // Fixed height to avoid 'shrink' miscalculation with buttons
-        top: 'center',
-        left: 'center',
-        label: ' Approval ',
-        hidden: true
-    });
-
-    function updateSuggestions(filter = '') {
-        activeSuggestions = SLASH_COMMANDS.filter(cmd => 
-            cmd.name.toLowerCase().startsWith(filter.toLowerCase())
-        );
-
-        if (activeSuggestions.length === 0) {
-            commandList.hide();
-            screen.render();
-            return;
-        }
-
-        const items = activeSuggestions.map(cmd => 
-            ` {bold}${cmd.name}{/} {gray-fg}${cmd.desc}{/}`
-        );
-        commandList.setItems(items);
-        commandList.select(0);
-        commandList.show();
-        commandList.setFront();
-        screen.render();
-    }
-
-
-    // ─── Input events ─────────────────────────────────────────────────────────
-
-    // ─── Input events ─────────────────────────────────────────────────────────
-    let lastListVisible = false;
-
-    // Consolidated key handling
-    inputBox.on('element keypress', (el, ch, key) => {
-        refreshInputStyles();
-        
-        // 1. Handle placeholder visibility
-        if (!key.ctrl && !key.meta && key.name !== 'enter' && key.name !== 'tab') {
-            if (ch) hidePlaceholder();
-        }
-
-        // 2. Handle suggestion list navigation
-        if (!commandList.hidden) {
-            if (key.name === 'up') {
-                commandList.up();
-                screen.render();
-                return false;
-            }
-            if (key.name === 'down') {
-                commandList.down();
-                screen.render();
-                return false;
-            }
-            if (key.name === 'escape') {
-                commandList.hide();
-                lastListVisible = false;
-                screen.render();
-                return false;
-            }
-        }
-
-        // 3. Logic for suggestions and placeholder after key is processed
-        setImmediate(() => {
-            refreshInputStyles();
-            const val = (inputBox.getValue ? inputBox.getValue() : inputBox.value) || '';
-            const isCommand = val.startsWith('/') && !val.includes(' ');
-            
-            // Only render if visibility changed or list is updated
-            if (isCommand) {
-                updateSuggestions(val);
-                lastListVisible = true;
-            } else if (lastListVisible) {
-                commandList.hide();
-                lastListVisible = false;
-                screen.render();
-            }
-
-            if (!val.trim()) {
-                showPlaceholder();
-            } else {
-                hidePlaceholder();
-            }
-        });
-    });
-
-    inputBox.on('focus', () => {
-        if (typeof inputBox._done !== 'function') {
-            inputBox.readInput();
-        }
-        refreshInputStyles();
-        screen.render();
-    });
-
-    inputBox.on('keypress', () => {
-        applyTerminalInputAttrs();
-    });
-
-    // Restore focus to inputBox when clicked or when screen is clicked
-    screen.on('click', () => {
-        if (!approvalDialog.visible) {
-            inputBox.focus();
-            screen.render();
-        }
-    });
-
-    // Restoration logic: Keep Ctrl+V/O/X but BLOCK Ctrl+E specifically
-    inputBox.key(['C-e'], () => {
-        // Do nothing! This prevents opening the text editor (Vim)
-    });
-
-
-    // Submit or Select Suggestion on Enter
-    inputBox.on('submit', (value) => {
-        if (!commandList.hidden) {
-            const selected = activeSuggestions[commandList.selected];
-            if (selected) {
-                inputBox.setValue(selected.name + ' ');
-                commandList.hide();
-                hidePlaceholder();
-                inputBox.focus(); 
-                inputBox.readInput(); // Re-focus to continue typing
-                refreshInputStyles();
-                screen.render();
-                return; // Don't submit yet, let user add args or press enter again
-            }
-        }
-
-        const raw = value || '';
-        const text = raw.trim();
-        if (!text) {
-            inputBox.clearValue();
-            showPlaceholder();
-            inputBox.focus(); 
-            inputBox.readInput(); // Re-focus to continue typing
-            refreshInputStyles();
-            screen.render();
-            return;
-        }
-
-        // Clear input and restore placeholder
-        inputBox.clearValue();
-        showPlaceholder();
-        inputBox.focus(); 
-        inputBox.readInput(); // Explicitly restart reading
-        refreshInputStyles();
-        screen.render();
-
-        if (text.toLowerCase() === 'exit' || text.toLowerCase() === 'quit') {
-            onExit();
-            return;
-        }
-
-        onSubmit(text);
-    });
-
-    // Shift+Enter = newline in input
-    // Ctrl+C — double-press to exit
-    let ctrlCPressed = false;
-    let ctrlCTimer = null;
-    screen.key(['C-c'], () => {
-        if (ctrlCPressed) {
-            clearTimeout(ctrlCTimer);
-            onExit();
-        } else {
-            ctrlCPressed = true;
-            hintBar.setContent(`{bold}{yellow-fg}  Press Ctrl+C again to exit.{/}  {gray-fg}(or type 'exit'){/}`);
-            screen.render();
-            ctrlCTimer = setTimeout(() => {
-                ctrlCPressed = false;
-                hintBar.setContent(HINT_DEFAULT);
-                screen.render();
-            }, 2000);
-        }
-    });
-
-    // ESC — exit immediately
-    screen.key(['escape'], () => {
-        onExit();
-    });
-
-    // ─── Clipboard copy (Ctrl+Y) ──────────────────────────────────────────────
-    function copyToClipboard(text) {
-        // Try xclip first, then xsel as fallback
-        const tools = [
-            `echo ${JSON.stringify(text)} | xclip -selection clipboard`,
-            `echo ${JSON.stringify(text)} | xsel --clipboard --input`
-        ];
-        for (const cmd of tools) {
-            try {
-                execSync(cmd, { stdio: 'pipe' });
-                return true;
-            } catch (_) {}
-        }
-        return false;
-    }
-
-    function flashHint(msg, durationMs = 2000) {
-        hintBar.setContent(msg);
-        screen.render();
-        setTimeout(() => {
-            hintBar.setContent(HINT_DEFAULT);
-            screen.render();
-        }, durationMs);
-    }
-
-    screen.key(['C-y'], () => {
-        if (!lastAssistantResponse) {
-            flashHint(`{yellow-fg}  No response to copy yet.{/}`);
-            return;
-        }
-        const ok = copyToClipboard(lastAssistantResponse);
-        if (ok) {
-            flashHint(`{#88e0b0-fg}  ✓ Copied to clipboard!{/}`);
-        } else {
-            flashHint(`{red-fg}  ✖ Copy failed. Install xclip: sudo apt install xclip{/}`, 3000);
-        }
-    });
-
-    // ─── Initial render ───────────────────────────────────────────────────────
-    inputBox.focus();
-    inputBox.readInput(); // Initial start
-    refreshInputStyles();
-    screen.render();
-
-    // ─── Public API ───────────────────────────────────────────────────────────
-
-    // Track last assistant response for clipboard copy
-    let lastAssistantResponse = '';
-
-    /**
-     * @param {'user'|'assistant'|'system'|'error'} role
-     * @param {string} text
-     * @param {string} timestamp - ISO string or Date object
-     */
-    function wrapLineSmart(line, width) {
-        if (line.length <= width) return [line];
-        if (!line.includes(' ')) {
-            const pieces = [];
-            for (let index = 0; index < line.length; index += width) {
-                pieces.push(line.slice(index, index + width));
-            }
-            return pieces;
-        }
-
-        const words = line.split(/\s+/);
-        const lines = [];
-        let current = '';
-        for (const word of words) {
-            if (word.length > width) {
-                if (current) {
-                    lines.push(current);
-                    current = '';
-                }
-                for (let index = 0; index < word.length; index += width) {
-                    const slice = word.slice(index, index + width);
-                    if (slice.length === width) {
-                        lines.push(slice);
+                if (typeof info === 'string') {
+                    text = info;
+                } else {
+                    const { action, phase, target, message, thought } = info;
+                    if (thought) {
+                        text = thought;
+                        label = 'Thinking';
+                        labelColor = 'gray';
+                        isThought = true;
+                    } else if (action === 'thinking' || phase === 'thinking') {
+                        return;
                     } else {
-                        current = slice;
+                        label = action || phase || 'Action';
+                        text = target || message || '';
+                        if (!text) return;
+
+                        // Color coding for specific actions
+                        if (label.includes('search')) labelColor = 'yellowBright';
+                        else if (label.includes('file') || label.includes('path')) labelColor = 'cyanBright';
+                        else if (label.includes('write') || label.includes('edit') || label.includes('patch')) labelColor = 'greenBright';
+                        else if (label.includes('shell') || label.includes('run')) labelColor = 'magentaBright';
                     }
                 }
-                continue;
+
+                const fullText = `[${label}] ${text}`;
+                if (fullText === lastSystemMessage.current) return;
+                lastSystemMessage.current = fullText;
+
+                setHistory(prev => [...prev, { 
+                    role: 'system', 
+                    label,
+                    labelColor,
+                    text, 
+                    isThought,
+                    time: new Date() 
+                }]);
             }
+        }));
 
-            if (!current) {
-                current = word;
-                continue;
+        // Handle exiting
+        useInput((input, key) => {
+            if (key.escape || (key.ctrl && input === 'c')) {
+                onExit();
+                exit();
             }
+        });
 
-            if (`${current} ${word}`.length <= width) {
-                current += ` ${word}`;
-            } else {
-                lines.push(current);
-                current = word;
-            }
-        }
-        if (current) lines.push(current);
-        return lines;
-    }
-
-    function wrapText(str, width) {
-        const lines = [];
-        const originalLines = String(str).split('\n');
-        for (const line of originalLines) {
-            if (line.length === 0) {
-                lines.push('');
-                continue;
-            }
-            lines.push(...wrapLineSmart(line, width));
-        }
-        return lines;
-    }
-
-    function appendMessage(role, text, timestamp = null) {
-        const now = timestamp ? new Date(timestamp) : new Date();
-        const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false });
-        const maxLineWidth = Math.max(screen.width - 20, 36);
-        const lines = wrapText(text, maxLineWidth);
-
-        if (role === 'user') {
-            chatBox.log(``);
-            chatBox.log(` {bold}{#88e0b0-fg}You{/} {gray-fg}${timeStr}{/}`);
-            lines.forEach(l => chatBox.log(` {#88e0b0-fg}▏{/} {#ffffff-fg}${l}{/}`));
-        } else if (role === 'assistant') {
-            lastAssistantResponse = text;
-            chatBox.log(``);
-            chatBox.log(` {bold}{#d4a8ff-fg}Mint{/} {gray-fg}${timeStr}{/}`);
-            lines.forEach(l => chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${l}{/}`));
-        } else if (role === 'system') {
-            const displayTag = text.startsWith('Action:')
-                ? '{#88e0b0-fg}Action{/}'
-                : text.startsWith('[Code]')
-                    ? '{#ffd166-fg}Code{/}'
-                    : '{#8ba0ff-fg}System{/}';
-            const cleanText = text.replace(/^(Action:|System:)\s*/, '');
-            const systemLines = wrapText(cleanText, maxLineWidth - 4);
-            chatBox.log(``);
-            chatBox.log(` {bold}${displayTag}{/}`);
-            systemLines.forEach(l => chatBox.log(`   {#95a2b8-fg}${l}{/}`));
-        } else if (role === 'error') {
-            chatBox.log(``);
-            chatBox.log(` {bold}{#ff6b6b-fg}Error{/} {gray-fg}${timeStr}{/}`);
-            lines.forEach(l => chatBox.log(` {#7a2e2e-fg}▏{/} {#ff7d7d-fg}${l}{/}`));
-        }
-        screen.render();
-    }
-
-    /**
-     * Opens a streaming message bubble for the assistant.
-     * Returns { appendChunk(text), finalize(timestamp) } for typewriter rendering.
-     * Usage:
-     *   const stream = streamMessage('assistant');
-     *   stream.appendChunk('Hello'); stream.appendChunk(' World');
-     *   stream.finalize(timestamp);
-     */
-    function streamMessage(role = 'assistant') {
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false });
-        const maxLineWidth = Math.max(screen.width - 20, 36);
-
-        // Print the header bubble once
-        chatBox.log('');
-        if (role === 'assistant') {
-            chatBox.log(` {bold}{#d4a8ff-fg}Mint{/} {gray-fg}${timeStr}{/}`);
-        }
-
-        let buffer = '';           // accumulates the full response text
-        let lineBuffer = '';       // current partial line being built
-        let lineRendered = false;  // whether we already pushed the first line prefix
-
-        function flushLine(force = false) {
-            // Flush content that fits on one line-width or when forced
-            if (!lineBuffer && !force) return;
-            if (!lineRendered) {
-                chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${lineBuffer}{/}`);
-                lineRendered = true;
-            } else {
-                // Overwrite the last line by popping + re-pushing (blessed.log limitation)
-                // We can't truly overwrite, so we just keep appending new lines for each chunk.
-                // For large chunks, split on newline and emit per-line.
-                chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${lineBuffer}{/}`);
-            }
-            screen.render();
-        }
-
-        function appendChunk(text) {
+        const handleSubmit = (value) => {
+            const text = value.trim();
             if (!text) return;
-            buffer += text;
-            const segments = text.split('\n');
-            for (let i = 0; i < segments.length; i++) {
-                lineBuffer += segments[i];
-                if (i < segments.length - 1) {
-                    // Newline boundary — emit current line
-                    const lines = wrapLineSmart(lineBuffer, maxLineWidth);
-                    lines.forEach(l => chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${l}{/}`));
-                    lineBuffer = '';
-                    lineRendered = true;
-                    screen.render();
-                } else if (lineBuffer.length >= maxLineWidth) {
-                    // Line overflow — auto-wrap
-                    const lines = wrapLineSmart(lineBuffer, maxLineWidth);
-                    lines.slice(0, -1).forEach(l => chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${l}{/}`));
-                    lineBuffer = lines[lines.length - 1] || '';
-                    lineRendered = true;
-                    screen.render();
+            setInput('');
+            onSubmit(text);
+        };
+
+        return h(Box, { flexDirection: 'column', paddingX: 1, width: '100%' },
+            // Static History: Messages
+            h(Static, { items: history }, (msg, index) => {
+                if (msg.isThought) {
+                    return h(Box, { key: index, flexDirection: 'row', marginBottom: 0, paddingLeft: 2 },
+                        h(Text, { color: 'gray', dimColor: true }, `Thinking: ${msg.text}`)
+                    );
                 }
-                // Otherwise keep buffering the partial line
-            }
-        }
 
-        function finalize(timestamp = null) {
-            // Flush remaining buffer
-            if (lineBuffer) {
-                const lines = wrapLineSmart(lineBuffer, maxLineWidth);
-                lines.forEach(l => chatBox.log(` {#5a456d-fg}▏{/} {#ffffff-fg}${l}{/}`));
-                lineBuffer = '';
-            }
-            // Track last response for clipboard
-            lastAssistantResponse = buffer;
-            screen.render();
-        }
-
-        return { appendChunk, finalize };
-    }
-
-    function appendCodeStep(info) {
-        if (typeof info === 'string') {
-            appendMessage('system', `[Code] ${info}`);
-            return;
-        }
-
-        const { step, phase, action, target, message, thought } = info;
-        const maxLineWidth = Math.max(screen.width - 20, 36);
-
-        // Special handling for ask_user which needs a box style
-        if (action === 'ask_user') {
-            chatBox.log('');
-            chatBox.log(` {#88e0b0-fg}✓{/} {bold}Ask User{/}`);
-            const questionLines = wrapText(target || message || '', maxLineWidth - 6);
-            questionLines.forEach(l => chatBox.log(`   {#95a2b8-fg}${l}{/}`));
-            screen.render();
-            return;
-        }
-
-        let icon = '{#88e0b0-fg}✓{/}';
-        let label = action || phase;
-        let color = '{#ffffff-fg}';
-
-        if (phase === 'error') {
-            chatBox.log('');
-            chatBox.log(` {#ff6b6b-fg}✗{/} {bold}{#ff6b6b-fg}Error in ${action || 'task'}:{/}`);
-            const errorLines = wrapText(message || '', maxLineWidth - 6);
-            errorLines.forEach(l => chatBox.log(`   {#ff7d7d-fg}${l}{/}`));
-            screen.render();
-            return;
-        }
-
-        // Map internal action names to display names seen in the screenshot
-        switch (action) {
-            case 'thinking': 
-                if (phase === 'thinking' && !thought) {
-                    // Initial "Thinking..." without a bubble
-                    chatBox.log('');
-                    chatBox.log(` {#ffd166-fg}* {bold}Thinking{/}`);
-                } else if (thought) {
-                    // Show reasoning bubble
-                    const thoughtLines = wrapText(thought, maxLineWidth - 6);
-                    thoughtLines.forEach(l => chatBox.log(`   {gray-fg}> ${l}{/}`));
-                }
-                screen.render();
-                return;
-            case 'ask_user': label = 'AskUser'; break;
-            case 'open_url': label = 'OpenURL'; break;
-            case 'open_app': label = 'OpenApp'; break;
-            case 'open_file': label = 'OpenFile'; break;
-            case 'open_folder': label = 'OpenFolder'; break;
-            case 'create_folder': label = 'CreateFolder'; break;
-            case 'system_info': label = 'SystemInfo'; break;
-            case 'system_automation': label = 'SystemAction'; break;
-            case 'web_search': label = 'WebSearch'; break;
-            case 'list_files':
-            case 'find_path': label = 'Explored'; break;
-            case 'read_file': label = 'ReadFile'; break;
-            case 'search_code': label = 'SearchText'; break;
-            case 'apply_patch':
-            case 'write_file': label = 'Edited'; break;
-            case 'run_shell': label = 'Ran command'; break;
-            case 'json_repair': icon = '*'; label = 'Repairing JSON'; color = '{#ffd166-fg}'; break;
-            case 'reviewer_start': label = 'Reviewing'; break;
-        }
-
-        const content = target || message || '';
-        chatBox.log(` ${icon} {bold}${label}{/} ${color}${content}{/}`);
-        screen.render();
-    }
-
-    /** Show/hide thinking indicator in status bar */
-    function setThinking(active, secondsElapsed = 0) {
-        if (active) {
-            updateStatusBar('Thinking...', secondsElapsed);
-        } else {
-            updateStatusBar(null);
-        }
-    }
-
-    /** Copy last assistant response to clipboard */
-    function copyLastResponse() {
-        if (!lastAssistantResponse) return false;
-        return copyToClipboard(lastAssistantResponse);
-    }
-
-    function requestApproval(request) {
-        return new Promise((resolve) => {
-            const typeLabel = request.type === 'shell'
-                ? 'Shell Command'
-                : request.type === 'patch'
-                    ? 'Patch Edit'
-                    : request.type === 'code_mode'
-                        ? 'Enter Code Mode'
-                        : 'File Write';
-            const preview = request.preview || request.label || '';
-            const message = [
-                `{bold}${typeLabel}{/bold}`,
-                '',
-                preview,
-                '',
-                'Approve this action?',
-                '', // Extra lines to push buttons down and avoid overlapping
-                ''
-            ].join('\n');
-
-            // Temporarily stop reading input so the dialog can receive keys
-            if (inputBox._reading) {
-                inputBox.cancel();
-            }
-
-            approvalDialog.ask(message, (approved) => {
-                inputBox.focus();
-                inputBox.readInput(); // Ensure we resume reading after dialog
-                refreshInputStyles();
-                screen.render();
-                resolve(Boolean(approved));
-            });
-        });
-    }
-
-    function askUser(question) {
-        return new Promise((resolve) => {
-            // Temporarily stop reading input so we can capture the answer
-            if (inputBox._reading) {
-                inputBox.cancel();
-            }
-
-            // We use a simple textbox floating over the chat or reuse the main input?
-            // Reusing the main input is cleaner for CLI.
-            // But we need to change the label to ' Answer '
-            const oldLabel = inputBox._label.content;
-            inputBox._label.setContent(' Answer ');
-            
-            // Clear input for the answer
-            inputBox.clearValue();
-            hidePlaceholder();
-            inputBox.focus();
-            inputBox.readInput();
-            screen.render();
-
-            const submitHandler = (value) => {
-                inputBox.removeListener('submit', submitHandler);
-                inputBox._label.setContent(oldLabel);
+                let name = 'Mint';
+                let nameColor = 'greenBright';
                 
-                const answer = value || '';
-                chatBox.log('');
-                chatBox.log(` {bold}User answered:{/}`);
-                const lines = wrapText(answer, screen.width - 20);
-                lines.forEach(l => chatBox.log(`   {#95a2b8-fg}${l}{/}`));
-                screen.render();
+                if (msg.role === 'user') {
+                    name = 'You';
+                    nameColor = 'cyanBright';
+                } else if (msg.role === 'error') {
+                    name = 'Error';
+                    nameColor = 'redBright';
+                } else if (msg.role === 'system') {
+                    name = msg.label || 'System';
+                    nameColor = msg.labelColor || 'blueBright';
+                }
 
-                resolve(answer);
+                return h(Box, { key: index, flexDirection: 'column', marginBottom: 0 },
+                    h(Box, null,
+                        h(Text, { bold: true, color: nameColor }, name),
+                        h(Text, { color: 'gray' }, ` ${msg.time instanceof Date ? msg.time.toLocaleTimeString() : ''}`)
+                    ),
+                    h(Box, { paddingLeft: 2, marginBottom: 1 },
+                        h(Text, null, msg.text)
+                    )
+                );
+            }),
+
+            // Floating (Persistent) UI part
+            h(Box, { flexDirection: 'column' },
+                thinking && h(Box, { marginBottom: 1 },
+                    h(Text, { color: 'yellow' }, '● Mint is thinking...')
+                ),
+
+                // Compact Input Area
+                h(Box, { borderStyle: 'round', borderColor: 'greenBright', paddingX: 1, flexDirection: 'row' },
+                    h(Text, { bold: true, color: 'greenBright' }, '› '),
+                    h(TextInput, { 
+                        value: input, 
+                        onChange: setInput, 
+                        onSubmit: handleSubmit,
+                        placeholder: 'Ask anything...'
+                    })
+                ),
+
+                // Status Bar
+                h(Box, { justifyContent: 'space-between' },
+                    h(Box, null,
+                        h(Text, { color: 'cyan' }, `[${mode}] `),
+                        h(Text, { color: 'magentaBright' }, (model || config.geminiModel || 'gemini').slice(0, 30))
+                    ),
+                    h(Box, null,
+                        h(Text, { color: 'gray' }, `path: ...${workspace.slice(-20)}`)
+                    )
+                )
+            )
+        );
+    });
+
+    // Print banner once before rendering the main app-
+    console.log(`\x1b[38;5;121m\x1b[1m __  __ _       _    ___ _    ___ \x1b[0m`);
+    console.log(`\x1b[38;5;121m\x1b[1m|  \\/  (_)_ __ | |_ / __| |  |_ _|\x1b[0m`);
+    console.log(`\x1b[38;5;121m\x1b[1m| |\\/| | | '_ \\|  _| (__| |__ | | \x1b[0m`);
+    console.log(`\x1b[38;5;121m\x1b[1m|_|  |_|_|_| |_|\\__|\\___|____|___|\x1b[0m`);
+    console.log(`\x1b[90mType naturally to chat. Esc to exit.\x1b[0m\n`);
+
+    const ref = createRef();
+    render(h(App, { ref, ...options }));
+
+    return {
+        appendMessage: (role, text) => ref.current?.appendMessage(role, text),
+        setThinking: (val) => ref.current?.setThinking(val),
+        setMode: (val) => ref.current?.setMode(val),
+        updateStatusModel: (val) => ref.current?.updateStatusModel(val),
+        updateWorkspace: (val) => ref.current?.updateWorkspace(val),
+        appendCodeStep: (info) => ref.current?.appendCodeStep(info),
+        streamMessage: () => {
+            let fullText = '';
+            return {
+                appendChunk: (chunk) => {
+                    fullText += chunk;
+                },
+                finalize: () => {
+                    ref.current?.appendMessage('assistant', fullText);
+                }
             };
-
-            inputBox.on('submit', submitHandler);
-        });
-    }
-
-    return { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser };
+        },
+        copyLastResponse: () => false,
+        requestApproval: () => Promise.resolve(true),
+        askUser: () => Promise.resolve('')
+    };
 }
 
 module.exports = { createChatUI };

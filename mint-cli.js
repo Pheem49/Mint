@@ -246,8 +246,10 @@ program.parse(process.argv);
  */
 async function startInteractiveChat(initialMessage = null) {
     let lastResponseText = "";
-    const { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser } = createChatUI({
+    
+    const ui = await createChatUI({
         onSubmit: async (text) => {
+            const { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser } = ui;
             if (text.startsWith('/')) {
                 if (text.startsWith('/agent')) {
                     const args = text.split(' ');
@@ -386,7 +388,6 @@ async function startInteractiveChat(initialMessage = null) {
             }
         },
         onExit: () => {
-            screen.destroy();
             // Explicitly restore terminal state and disable ALL mouse tracking modes
             process.stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l'); 
             process.stdout.write('\x1b[?25h');   // Show cursor
@@ -397,6 +398,7 @@ async function startInteractiveChat(initialMessage = null) {
 
     // Handle initial message if passed via CLI arg
     if (initialMessage) {
+        const { appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser } = ui;
         appendMessage('user', initialMessage);
         const transcript = await getChatTranscript();
         if (setMode) setMode('Agent');
