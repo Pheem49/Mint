@@ -6,6 +6,7 @@ const { GoogleGenAI } = require('@google/genai');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { readConfig, getAvailableProviders } = require('../System/config_manager');
+const safetyManager = require('../System/safety_manager');
 const { readWorkspaceSession, writeWorkspaceSession } = require('./code_session_memory');
 const { executeAction } = require('../../mint-cli-logic');
 
@@ -85,6 +86,10 @@ You work in an inspect -> plan -> act -> verify loop.
 PERSONALITY & TONE:
 - Gender: Female.
 - Persona: Friendly, energetic, polite, and slightly playful.
+- Language routing is mandatory and based on the user's latest message:
+  - If the latest user message contains Thai characters, respond in Thai.
+  - If the latest user message is English, ASCII-only, or a short English greeting such as "hi", "hello", "ok", or "thanks", respond in English.
+  - Do not use Thai just because your persona mentions Mint/มิ้นท์, previous history was Thai, or app settings use th-TH.
 - Politeness: 
   - **WHEN RESPONDING IN THAI:** ALWAYS use female polite particles such as "ค่ะ", "นะคะ", "นะค๊า", "จ้า". Refer to yourself as "มิ้นท์" or "หนู".
   - **WHEN RESPONDING IN ENGLISH:** Use a cheerful, polite, and bubbly tone.
@@ -164,20 +169,40 @@ function extractJson(text) {
     }
 }
 
-function selectSupportedCodeProvider(config, availableProviders = getAvailableProviders(config || {})) {
-    const requestedProvider = (config && config.aiProvider) || 'gemini';
+function getSupportedCodeProviderOrder(config, availableProviders = getAvailableProviders(config || {}), requestedOverride = null) {
+    const requestedProvider = requestedOverride || (config && config.aiProvider) || 'gemini';
+    const priority = ['anthropic', 'openai', 'gemini', 'local_openai'];
+    const ordered = [];
+
     if (SUPPORTED_CODE_PROVIDERS.includes(requestedProvider) && availableProviders.includes(requestedProvider)) {
-        return requestedProvider;
+        ordered.push(requestedProvider);
     }
 
-    const priority = ['anthropic', 'openai', 'gemini', 'local_openai'];
     for (const provider of priority) {
-        if (availableProviders.includes(provider)) {
-            return provider;
+        if (availableProviders.includes(provider) && !ordered.includes(provider)) {
+            ordered.push(provider);
         }
     }
 
-    return 'gemini';
+    return ordered.length > 0 ? ordered : ['gemini'];
+}
+
+function selectSupportedCodeProvider(config, availableProviders = getAvailableProviders(config || {})) {
+    return getSupportedCodeProviderOrder(config, availableProviders)[0];
+}
+
+function getCodeProviderModel(provider, config = {}) {
+    switch (provider) {
+        case 'anthropic':
+            return config.anthropicModel || 'claude-3-5-sonnet-latest';
+        case 'openai':
+            return config.openaiModel || 'gpt-4o';
+        case 'local_openai':
+            return config.localModelName || 'local-model';
+        case 'gemini':
+        default:
+            return config.geminiModel || DEFAULT_GEMINI_MODEL;
+    }
 }
 
 function resolveWorkspacePath(workspaceRoot, targetPath = '.') {
@@ -338,21 +363,7 @@ async function findPaths(workspaceRoot, query, type = 'any') {
 }
 
 function assertSafeShell(command) {
-    const blockedPatterns = [
-        /\brm\s+-rf\b/,
-        /\bgit\s+reset\s+--hard\b/,
-        /\bgit\s+checkout\s+--\b/,
-        /\bmkfs\b/,
-        /\bshutdown\b/,
-        /\breboot\b/,
-        />\s*\/dev\//,
-        /\bcurl\b.*\|\s*(sh|bash)\b/,
-        /\bwget\b.*\|\s*(sh|bash)\b/
-    ];
-
-    if (blockedPatterns.some(pattern => pattern.test(command))) {
-        throw new Error(`Blocked unsafe command: ${command}`);
-    }
+    return safetyManager.assertShellCommandAllowed(command);
 }
 
 async function runShell(workspaceRoot, command) {
@@ -423,27 +434,44 @@ function writeFile(workspaceRoot, targetPath, content) {
 }
 
 class UnifiedAgentClient {
-    constructor(provider, config) {
+    constructor(provider, config, providerOrder = [provider]) {
         this.provider = SUPPORTED_CODE_PROVIDERS.includes(provider) ? provider : 'gemini';
+        this.providerOrder = providerOrder.length > 0 ? providerOrder : [this.provider];
         this.config = config;
         this.history = [];
         this.systemInstruction = CODE_AGENT_PROMPT;
+        this.lastSuccessfulProvider = null;
     }
 
     async sendMessage(observation) {
         this.history.push({ role: 'user', content: observation });
 
-        let responseText = '';
-        if (this.provider === 'anthropic') {
-            responseText = await this._callAnthropic();
-        } else if (this.provider === 'openai' || this.provider === 'local_openai') {
-            responseText = await this._callOpenAI();
-        } else {
-            responseText = await this._callGemini();
+        const failures = [];
+        for (const provider of this.providerOrder) {
+            this.provider = SUPPORTED_CODE_PROVIDERS.includes(provider) ? provider : 'gemini';
+            try {
+                let responseText = '';
+                if (this.provider === 'anthropic') {
+                    responseText = await this._callAnthropic();
+                } else if (this.provider === 'openai' || this.provider === 'local_openai') {
+                    responseText = await this._callOpenAI();
+                } else {
+                    responseText = await this._callGemini();
+                }
+
+                this.history.push({ role: 'assistant', content: responseText });
+                this.lastSuccessfulProvider = this.provider;
+                return responseText;
+            } catch (error) {
+                const message = error.message || error.code || 'unknown error';
+                failures.push(`${this.provider}: ${message}`);
+                if (process.env.MINT_DEBUG === '1') {
+                    console.error(`[Code Agent Fallback] Provider '${this.provider}' failed: ${message}`);
+                }
+            }
         }
 
-        this.history.push({ role: 'assistant', content: responseText });
-        return responseText;
+        throw new Error(`All code agent providers failed. ${failures.join(' | ')}`);
     }
 
     async _callAnthropic() {
@@ -608,7 +636,7 @@ async function buildInitialObservation(task, workspaceRoot, history = []) {
         session.summary || '(none)',
         `Previous task: ${session.lastTask || '(none)'}`,
         `Previous verification: ${session.lastVerification || '(none)'}`,
-        'Start by inspecting the workspace before making edits unless the task is trivial.'
+        'If the task is conversational or trivial, finish directly without inspecting the workspace. For code/workspace tasks, inspect before making edits.'
     ].join('\n');
 }
 
@@ -623,8 +651,10 @@ async function executeCodeTask(task, options = {}) {
         ? options.askUser
         : async (q) => `User didn't answer: ${q}`;
     const config = readConfig();
-    const provider = options.provider || selectSupportedCodeProvider(config);
-    const client = new UnifiedAgentClient(provider, config);
+    const availableProviders = getAvailableProviders(config);
+    const providerOrder = getSupportedCodeProviderOrder(config, availableProviders, options.provider);
+    const provider = providerOrder[0];
+    const client = new UnifiedAgentClient(provider, config, providerOrder);
 
     let observation = await buildInitialObservation(task, workspaceRoot, history);
 
@@ -677,6 +707,13 @@ async function executeCodeTask(task, options = {}) {
                     break;
                 case 'find_path':
                     toolResult = await findPaths(workspaceRoot, input.query, input.type);
+                    if (input.openAfter === true) {
+                        const result = JSON.parse(toolResult);
+                        if (result.success && result.matches.length === 1) {
+                            await executeAction({ type: 'open_folder', target: result.matches[0].path });
+                            toolResult = `Found and opened: ${result.matches[0].path}`;
+                        }
+                    }
                     break;
                 case 'run_shell': {
                     const approved = await requestApproval({
@@ -688,6 +725,12 @@ async function executeCodeTask(task, options = {}) {
                         toolResult = `User denied shell command: ${input.command}`;
                         break;
                     }
+                    safetyManager.appendActionLog({
+                        source: 'code_agent',
+                        action: 'run_shell',
+                        command: input.command,
+                        approved
+                    });
                     toolResult = await runShell(workspaceRoot, input.command);
                     break;
                 }
@@ -702,6 +745,12 @@ async function executeCodeTask(task, options = {}) {
                         toolResult = `User denied patch for ${patchInput.path}`;
                         break;
                     }
+                    safetyManager.appendActionLog({
+                        source: 'code_agent',
+                        action: 'apply_patch',
+                        path: patchInput.path,
+                        approved
+                    });
                     toolResult = applyPatch(workspaceRoot, patchInput);
                     break;
                 }
@@ -715,6 +764,12 @@ async function executeCodeTask(task, options = {}) {
                         toolResult = `User denied full file write for ${input.path}`;
                         break;
                     }
+                    safetyManager.appendActionLog({
+                        source: 'code_agent',
+                        action: 'write_file',
+                        path: input.path,
+                        approved
+                    });
                     toolResult = writeFile(workspaceRoot, input.path, input.content);
                     break;
                 }
@@ -733,7 +788,7 @@ async function executeCodeTask(task, options = {}) {
                     // Delegate to existing automation logic
                     toolResult = await executeAction({
                         type: action,
-                        target: input.target
+                        target: input.target || input.path || input.query // Handle all possible input fields
                     });
                     break;
                 }                default:
@@ -755,8 +810,7 @@ async function executeCodeTask(task, options = {}) {
             step,
             phase: 'finished',
             action,
-            target: (input.path || input.command || input.query || '') + resultSummary,
-            thought: decision.thought
+            target: (input.path || input.command || input.query || '') + resultSummary
         });
 
         // Format tool result to be more readable and structured for the agent
@@ -804,10 +858,15 @@ async function executeCodeTask(task, options = {}) {
     }
 
     if (finalSummary) {
+        const answeredProvider = client.lastSuccessfulProvider || client.provider || provider;
         return {
             summary: finalSummary,
             verification: finalVerification,
-            steps: executedSteps
+            steps: executedSteps,
+            providerInfo: {
+                provider: answeredProvider,
+                model: getCodeProviderModel(answeredProvider, config)
+            }
         };
     }
 
@@ -817,10 +876,15 @@ async function executeCodeTask(task, options = {}) {
         lastVerification: 'Agent limit reached before explicit completion.'
     });
 
+    const answeredProvider = client.lastSuccessfulProvider || client.provider || provider;
     return {
         summary: 'Stopped after reaching the maximum number of agent steps.',
         verification: 'Agent limit reached before explicit completion.',
-        steps: executedSteps || MAX_AGENT_STEPS
+        steps: executedSteps || MAX_AGENT_STEPS,
+        providerInfo: {
+            provider: answeredProvider,
+            model: getCodeProviderModel(answeredProvider, config)
+        }
     };
 }
 
@@ -829,6 +893,7 @@ module.exports = {
     _helpers: {
         extractJson,
         selectSupportedCodeProvider,
+        getSupportedCodeProviderOrder,
         findPaths,
         listFiles,
         searchCode,

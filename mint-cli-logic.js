@@ -2,11 +2,23 @@
 const { openApp } = require('./src/Automation_Layer/open_app');
 const { openWebsite, openSearch } = require('./src/Automation_Layer/open_website');
 const { createFolder, openFile, deleteFile, findPath } = require('./src/Automation_Layer/file_operations');
+const safetyManager = require('./src/System/safety_manager');
 
-async function executeAction(action) {
+async function executeAction(action, options = {}) {
     if (!action || action.type === 'none') return null;
 
     try {
+        const safety = safetyManager.assertActionAllowed(action, {
+            allowDangerous: options.allowDangerous === true
+        });
+        safetyManager.appendActionLog({
+            source: options.source || 'mint_cli_logic',
+            action: action.type,
+            target: action.target || action.path || '',
+            tier: safety.tier,
+            approved: options.allowDangerous === true || safety.tier !== safetyManager.TIERS.DANGEROUS
+        });
+
         switch (action.type) {
             case 'open_url':
                 openWebsite(action.target);

@@ -170,7 +170,7 @@ async function detectCodeIntent(text, workspaceRoot = process.cwd(), history = [
 
 async function runChatRoutedTask(input, context) {
     const text = input.startsWith('/code ') ? input.slice('/code '.length).trim() : input;
-    const { appendMessage, setThinking, requestApproval, setMode, history } = context;
+    const { appendMessage, setThinking, requestApproval, askUser, setMode, history } = context;
 
     const config = readConfig();
     const availableProviders = getAvailableProviders(config);
@@ -190,6 +190,7 @@ async function runChatRoutedTask(input, context) {
         const result = await executeCodeTask(text, {
             cwd: process.cwd(),
             requestApproval,
+            askUser,
             provider: preferredProvider,
             history: history,
             onProgress: (info) => {
@@ -206,7 +207,7 @@ async function runChatRoutedTask(input, context) {
             `Code Mode finished.`,
             result.summary,
             `Verification: ${result.verification}`
-        ].join('\n'));
+        ].join('\n'), { providerInfo: result.providerInfo });
     } catch (error) {
         clearInterval(timer);
         setThinking(false);

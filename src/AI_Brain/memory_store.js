@@ -118,6 +118,19 @@ function setProfile(key, value) {
     }
 }
 
+function deleteProfile(key) {
+    try {
+        getDb().prepare('DELETE FROM user_profile WHERE key = ?').run(key);
+    } catch (err) {
+        console.error('[Memory] deleteProfile error:', err.message);
+    }
+}
+
+function clearConversationScopedProfile() {
+    deleteProfile('preferred_language');
+    clearResponseCache();
+}
+
 function getProfile(key, defaultValue = null) {
     try {
         const row = getDb().prepare('SELECT value FROM user_profile WHERE key = ?').get(key);
@@ -270,7 +283,7 @@ function getUserContext() {
         // Profile info
         if (Object.keys(profile).length > 0) {
             if (profile.preferred_language)
-                lines.push(`• Preferred language: ${profile.preferred_language}`);
+                lines.push(`• Previously inferred language: ${profile.preferred_language} (do not override the current user message language)`);
             if (profile.last_active_project)
                 lines.push(`• Last active project: ${profile.last_active_project} (${profile.last_active_project_path || ''})`);
             if (profile.total_interactions)
@@ -329,14 +342,25 @@ function cacheResponse(query, responseObj) {
     } catch (_) {}
 }
 
+function clearResponseCache() {
+    try {
+        getDb().prepare('DELETE FROM response_cache').run();
+    } catch (err) {
+        console.error('[Memory] clearResponseCache error:', err.message);
+    }
+}
+
 module.exports = {
     recordInteraction,
     saveSessionSummary,
     getUserContext,
     setProfile,
+    deleteProfile,
+    clearConversationScopedProfile,
     getProfile,
     getTopPatterns,
     getRecentMemories,
     getCachedResponse,
-    cacheResponse
+    cacheResponse,
+    clearResponseCache
 };

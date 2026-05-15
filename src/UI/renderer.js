@@ -558,7 +558,15 @@ clearBtn.addEventListener('click', async () => {
     appendMessage('Chat history cleared. Starting fresh! 🌿', 'ai', null, new Date().toISOString());
 });
 
-function appendMessage(text, sender, base64Image = null, timestamp = null) {
+function formatProviderInfo(providerInfo) {
+    if (!providerInfo || typeof providerInfo !== 'object') return '';
+    const provider = String(providerInfo.provider || '').trim();
+    const model = String(providerInfo.model || '').trim();
+    if (!provider && !model) return '';
+    return model ? `${provider || 'AI'} • ${model}` : provider;
+}
+
+function appendMessage(text, sender, base64Image = null, timestamp = null, options = {}) {
     const messageDiv = document.createElement('div');
     messageDiv.classList.add('message', `${sender}-message`);
 
@@ -586,11 +594,23 @@ function appendMessage(text, sender, base64Image = null, timestamp = null) {
 
     bubbleWrapper.appendChild(bubble);
 
-    // Add Timestamp
-    if (timestamp) {
+    const providerLabel = sender === 'ai' ? formatProviderInfo(options.providerInfo) : '';
+
+    // Add metadata
+    if (timestamp || providerLabel) {
         const timeDiv = document.createElement('div');
         timeDiv.classList.add('message-time');
-        timeDiv.textContent = formatTime(timestamp);
+        if (providerLabel) {
+            const providerSpan = document.createElement('span');
+            providerSpan.classList.add('provider-badge');
+            providerSpan.textContent = providerLabel;
+            timeDiv.appendChild(providerSpan);
+        }
+        if (timestamp) {
+            const timeSpan = document.createElement('span');
+            timeSpan.textContent = formatTime(timestamp);
+            timeDiv.appendChild(timeSpan);
+        }
         bubbleWrapper.appendChild(timeDiv);
     }
 
@@ -638,6 +658,7 @@ function estimateMessageDelay(text) {
 async function appendAiMessages(text, options = {}) {
     const allowDelay = options.allowDelay !== false;
     const timestamp = options.timestamp || new Date().toISOString();
+    const providerInfo = options.providerInfo || null;
     const parts = splitAiMessages(text);
     let lastDiv = null;
 
@@ -649,7 +670,8 @@ async function appendAiMessages(text, options = {}) {
         }
         // Only show timestamp for the last bubble in a group if multiple
         const partTimestamp = (index === parts.length - 1) ? timestamp : null;
-        lastDiv = appendMessage(parts[index], 'ai', null, partTimestamp);
+        const partProviderInfo = (index === parts.length - 1) ? providerInfo : null;
+        lastDiv = appendMessage(parts[index], 'ai', null, partTimestamp, { providerInfo: partProviderInfo });
     }
 
     return lastDiv;
@@ -750,7 +772,7 @@ async function loadChatHistory() {
             if (!item || typeof item.text !== 'string' || !item.text.trim()) continue;
             const sender = item.sender === 'user' ? 'user' : 'ai';
             if (sender === 'ai') {
-                await appendAiMessages(item.text, { allowDelay: false, timestamp: item.timestamp });
+                await appendAiMessages(item.text, { allowDelay: false, timestamp: item.timestamp, providerInfo: item.providerInfo });
             } else {
                 appendMessage(item.text, sender, null, item.timestamp);
             }
@@ -829,7 +851,11 @@ async function sendTextMessage(text, options = {}) {
         }
 
         // Show AI response
-        const msgDiv = await appendAiMessages(response.response, { allowDelay: true });
+        const msgDiv = await appendAiMessages(response.response, {
+            allowDelay: true,
+            timestamp: response.timestamp,
+            providerInfo: response.providerInfo
+        });
 
         // Speak AI response
         await speakText(normalizeAiText(response.response), { onEnd: resumeSpeechIfNeeded });

@@ -10,6 +10,22 @@ const { readConfig } = require('../System/config_manager');
 // Helper to make element creation less verbose
 const h = React.createElement;
 
+const SLASH_COMMANDS = [
+    { cmd: '/help', desc: 'Show available commands' },
+    { cmd: '/code', desc: 'Force workspace Code Mode' },
+    { cmd: '/cd', desc: 'Change current working directory' },
+    { cmd: '/models', desc: 'List or switch Gemini models' },
+    { cmd: '/config', desc: 'Show current configuration' },
+    { cmd: '/copy', desc: 'Copy last response to clipboard' },
+    { cmd: '/clear', desc: 'Clear conversation history' },
+    { cmd: '/reset', desc: 'Reset conversation history' },
+    { cmd: '/agent', desc: 'Switch AI agents (e.g. /agent code)' },
+    { cmd: '/workspace', desc: 'Manage registered workspaces' },
+    { cmd: '/stats', desc: 'Show system statistics' },
+    { cmd: '/review', desc: 'Request second-pass review' },
+    { cmd: '/exit', desc: 'Exit Mint' }
+];
+
 /**
  * We wrap everything in an async function to load ESM modules
  */
@@ -17,7 +33,7 @@ async function createChatUI(options) {
     // Dynamic imports for ESM modules
     const { render, Box, Text, useInput, useApp, Static } = await import('ink');
     const TextInput = (await import('ink-text-input')).default;
-    const { useState, useImperativeHandle, forwardRef, createRef, useEffect } = React;
+    const { useState, useImperativeHandle, forwardRef, createRef, useEffect, useMemo } = React;
 
     const App = forwardRef(({ onSubmit, onExit, initialHistory = [] }, ref) => {
         const config = readConfig();
@@ -29,12 +45,41 @@ async function createChatUI(options) {
         const [model, setModel] = useState('');
         const [workspace, setWorkspace] = useState(process.cwd());
 
+        // Suggestions State
+        const [selectedIndex, setSelectedIndex] = useState(0);
+        const inputRef = React.useRef(input);
+        const selectedIndexRef = React.useRef(selectedIndex);
+        
+        useEffect(() => {
+            inputRef.current = input;
+        }, [input]);
+
+        useEffect(() => {
+            selectedIndexRef.current = selectedIndex;
+        }, [selectedIndex]);
+
+        const showSuggestions = input.startsWith('/') && !input.includes(' ');
+        const suggestions = useMemo(() => {
+            if (!showSuggestions) return [];
+            const query = input.toLowerCase();
+            return SLASH_COMMANDS.filter(s => s.cmd.startsWith(query));
+        }, [input, showSuggestions]);
+
+        // Reset index when suggestions change
+        useEffect(() => {
+            setSelectedIndex(0);
+        }, [suggestions.length]);
+
         const lastSystemMessage = React.useRef('');
 
         // Export methods to the outside world via ref
         useImperativeHandle(ref, () => ({
-            appendMessage: (role, text) => {
-                setHistory(prev => [...prev, { role, text, time: new Date() }]);
+            appendMessage: (role, text, metadata = {}) => {
+                setHistory(prev => [...prev, { role, text, time: new Date(), ...metadata }]);
+                if (metadata.providerInfo) {
+                    const { provider, model } = metadata.providerInfo;
+                    setModel(model ? `${provider} • ${model}` : provider);
+                }
             },
             setThinking: (val) => setThinking(val),
             setMode: (val) => setMode(val),
@@ -85,17 +130,47 @@ async function createChatUI(options) {
             }
         }));
 
-        // Handle exiting
-        useInput((input, key) => {
-            if (key.escape || (key.ctrl && input === 'c')) {
+        // Handle exiting and keyboard navigation
+        useInput((inputStr, key) => {
+            if (key.escape || (key.ctrl && inputStr === 'c')) {
                 onExit();
                 exit();
+            }
+
+            const currentInput = inputRef.current;
+            const currentShowSuggestions = currentInput.startsWith('/') && !currentInput.includes(' ');
+
+            if (currentShowSuggestions) {
+                const query = currentInput.toLowerCase();
+                const currentSuggestions = SLASH_COMMANDS.filter(s => s.cmd.startsWith(query));
+
+                if (currentSuggestions.length > 0) {
+                    if (key.upArrow) {
+                        setSelectedIndex(prev => (prev > 0 ? prev - 1 : currentSuggestions.length - 1));
+                    } else if (key.downArrow) {
+                        setSelectedIndex(prev => (prev < currentSuggestions.length - 1 ? prev + 1 : 0));
+                    } else if (key.tab || (key.return && currentInput.startsWith('/'))) {
+                        const picked = currentSuggestions[selectedIndexRef.current];
+                        if (picked) {
+                            setInput(picked.cmd + ' ');
+                        }
+                    }
+                }
             }
         });
 
         const handleSubmit = (value) => {
             const text = value.trim();
             if (!text) return;
+
+            if (showSuggestions && suggestions.length > 0) {
+                const picked = suggestions[selectedIndex];
+                if (picked && text !== picked.cmd) {
+                    setInput(picked.cmd + ' ');
+                    return;
+                }
+            }
+
             setInput('');
             onSubmit(text);
         };
@@ -140,6 +215,23 @@ async function createChatUI(options) {
                     h(Text, { color: 'yellow' }, '● Mint is thinking...')
                 ),
 
+                // Suggestions Menu
+                showSuggestions && suggestions.length > 0 && h(Box, { 
+                    flexDirection: 'column', 
+                    borderStyle: 'single', 
+                    borderColor: 'gray',
+                    paddingX: 1,
+                    marginBottom: 0
+                },
+                    suggestions.map((s, i) => h(Box, { key: s.cmd, flexDirection: 'row' },
+                        h(Text, { 
+                            backgroundColor: i === selectedIndex ? 'green' : undefined,
+                            color: i === selectedIndex ? 'white' : 'greenBright' 
+                        }, s.cmd.padEnd(12)),
+                        h(Text, { color: 'gray' }, ` ${s.desc}`)
+                    ))
+                ),
+
                 // Compact Input Area
                 h(Box, { borderStyle: 'round', borderColor: 'greenBright', paddingX: 1, flexDirection: 'row' },
                     h(Text, { bold: true, color: 'greenBright' }, '› '),
@@ -155,7 +247,7 @@ async function createChatUI(options) {
                 h(Box, { justifyContent: 'space-between' },
                     h(Box, null,
                         h(Text, { color: 'cyan' }, `[${mode}] `),
-                        h(Text, { color: 'magentaBright' }, (model || config.geminiModel || 'gemini').slice(0, 30))
+                        h(Text, { color: 'magentaBright' }, (model || config.geminiModel || 'gemini').slice(0, 46))
                     ),
                     h(Box, null,
                         h(Text, { color: 'gray' }, `path: ...${workspace.slice(-20)}`)
@@ -176,7 +268,7 @@ async function createChatUI(options) {
     render(h(App, { ref, ...options }));
 
     return {
-        appendMessage: (role, text) => ref.current?.appendMessage(role, text),
+        appendMessage: (role, text, metadata) => ref.current?.appendMessage(role, text, metadata),
         setThinking: (val) => ref.current?.setThinking(val),
         setMode: (val) => ref.current?.setMode(val),
         updateStatusModel: (val) => ref.current?.updateStatusModel(val),

@@ -22,8 +22,10 @@ function displayFeatures() {
     const commands = [
         { cmd: 'mint', desc: 'Start interactive chat session (Default)' },
         { cmd: 'mint code "<task>"', desc: 'Run workspace-aware coding agent in current directory' },
+        { cmd: 'mint gmail auth', desc: 'Connect Gmail OAuth and save refresh token' },
         { cmd: 'mint mcp', desc: 'Manage Model Context Protocol (MCP) servers' },
         { cmd: 'mint task "<task>"', desc: 'Queue an autonomous task for the background agent' },
+        { cmd: 'mint update', desc: 'Check for and install the latest Mint CLI version' },
         { cmd: 'mint onboard', desc: 'Run setup wizard (API Key, Model, Daemon)' },
         { cmd: 'mint agent', desc: 'Run Mint as a background agent (Headless)' },
         { cmd: 'mint list', desc: 'Show this features & commands list' }

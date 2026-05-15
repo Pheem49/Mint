@@ -226,7 +226,7 @@ async function openFile(target) {
             // ใช้ exec เพื่อให้รันผ่าน shell และรองรับการทำ fallback
             let cmd = `${platformCmd} "${resolvedPath}"`;
             if (process.platform === 'linux') {
-                cmd = `xdg-open "${resolvedPath}" || gio open "${resolvedPath}" || nautilus "${resolvedPath}"`;
+                cmd = `xdg-open "${resolvedPath}" || gio open "${resolvedPath}" || nautilus "${resolvedPath}" || nemo "${resolvedPath}" || thunar "${resolvedPath}" || dolphin "${resolvedPath}"`;
             }
 
             exec(cmd, (err) => {

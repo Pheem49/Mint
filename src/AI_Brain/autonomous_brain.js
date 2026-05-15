@@ -3,6 +3,7 @@ const { readConfig } = require('../System/config_manager');
 const { performWebAutomation } = require('../Automation_Layer/browser_automation');
 const { createFolder, deleteFile } = require('../Automation_Layer/file_operations');
 const { searchKnowledge } = require('./knowledge_base');
+const safetyManager = require('../System/safety_manager');
 const fs = require('fs');
 const path = require('path');
 
@@ -99,8 +100,16 @@ async function executeAutonomousTask(taskDescription, notifyCallback) {
                     break;
                 case 'write_file':
                     const filePath = expandHome(actionObj.target);
+                    safetyManager.resolveWithinRoot(os.homedir(), filePath);
                     if (notifyCallback) notifyCallback(`✍️ กำลังบันทึกไฟล์: ${actionObj.target}`);
                     try {
+                        safetyManager.appendActionLog({
+                            source: 'autonomous_brain',
+                            action: 'write_file',
+                            target: filePath,
+                            tier: safetyManager.TIERS.APPROVAL,
+                            approved: true
+                        });
                         fs.writeFileSync(filePath, actionObj.data || '');
                         observation = `File written successfully to ${actionObj.target}`;
                     } catch (e) {
@@ -109,6 +118,7 @@ async function executeAutonomousTask(taskDescription, notifyCallback) {
                     break;
                 case 'delete_file':
                     const delPath = expandHome(actionObj.target);
+                    safetyManager.assertActionAllowed({ type: 'delete_file', target: delPath });
                     if (notifyCallback) notifyCallback(`🗑️ มิ้นท์ขอย้ายไฟล์ไปที่ถังขยะ: ${actionObj.target}`);
                     const resDel = await deleteFile(delPath);
                     observation = resDel.success ? "File moved to trash." : `Failed: ${resDel.message}`;

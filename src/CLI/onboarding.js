@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { readConfig, writeConfig } = require('../System/config_manager');
 const { installDaemon } = require('../System/daemon_manager');
+const { runGmailAuth } = require('./gmail_auth');
 
 /**
  * Onboarding Wizard for Mint CLI
@@ -51,15 +52,17 @@ async function runOnboarding(options = {}) {
                 { name: 'Discord (Bot API)', value: 'discord', checked: config.enableDiscordBridge },
                 { name: 'Slack (Socket Mode)', value: 'slack', checked: config.enableSlackBridge },
                 { name: 'LINE (Messaging API)', value: 'line', checked: config.enableLineBridge },
-                { name: 'Google Chat', value: 'gchat', disabled: 'Coming Soon' },
+                { name: 'Google Calendar API', value: 'google_calendar', checked: config.pluginCalendarEnabled },
+                { name: 'Gmail API', value: 'gmail', checked: config.pluginGmailEnabled },
+                { name: 'Notion API', value: 'notion', checked: config.pluginNotionEnabled },
                 new inquirer.Separator(),
-                { name: 'Anthropic (Claude)', value: 'anthropic' },
-                { name: 'OpenAI (GPT-4o)', value: 'openai' },
-                { name: 'Hugging Face', value: 'hf' },
-                { name: 'Local AI (LM Studio/Ollama)', value: 'local' },
+                { name: 'Anthropic (Claude)', value: 'anthropic', checked: config.aiProvider === 'anthropic' || !!config.anthropicApiKey },
+                { name: 'OpenAI (GPT-4o)', value: 'openai', checked: config.aiProvider === 'openai' || !!config.openaiApiKey },
+                { name: 'Hugging Face', value: 'hf', checked: config.aiProvider === 'huggingface' || !!config.hfApiKey },
+                { name: 'Local AI (LM Studio/Ollama)', value: 'local', checked: config.aiProvider === 'local_openai' || (!!config.localApiBaseUrl && config.localApiBaseUrl.length > 0) },
                 new inquirer.Separator(),
-                { name: 'Google Search API', value: 'google_search' },
-                { name: 'Brave Search API', value: 'brave_search' },
+                { name: 'Google Search API', value: 'google_search', checked: !!config.googleSearchApiKey },
+                { name: 'Brave Search API', value: 'brave_search', checked: !!config.braveSearchApiKey },
                 new inquirer.Separator(),
                 { name: 'Skip for now', value: 'skip' }
             ]
@@ -69,8 +72,17 @@ async function runOnboarding(options = {}) {
     // 3. Configure selected items
     const dynamicQuestions = [];
     
+    // Reset enabled flags if we are not skipping
+    if (!selections.includes('skip')) {
+        config.enableTelegramBridge = selections.includes('telegram');
+        config.enableWhatsappBridge = selections.includes('whatsapp');
+        config.enableDiscordBridge = selections.includes('discord');
+        config.enableSlackBridge = selections.includes('slack');
+        config.enableLineBridge = selections.includes('line');
+    }
+
     // If "Skip for now" is selected or nothing is selected, we move to save
-    if (selections.length === 0 || selections.includes('skip')) {
+    if (selections.includes('skip')) {
         console.log('\n⏩ Skipping optional configuration...');
     } else {
         if (selections.includes('google_search')) {
@@ -103,7 +115,6 @@ async function runOnboarding(options = {}) {
                 message: 'Enter Discord Bot Token:',
                 default: config.discordBotToken
             });
-            config.enableDiscordBridge = true;
         }
 
         if (selections.includes('telegram')) {
@@ -113,12 +124,7 @@ async function runOnboarding(options = {}) {
                 message: 'Enter Telegram Bot Token:',
                 default: config.telegramBotToken
             });
-            config.enableTelegramBridge = true;
-        } else { config.enableTelegramBridge = false; }
-
-        if (selections.includes('whatsapp')) {
-            config.enableWhatsappBridge = true;
-        } else { config.enableWhatsappBridge = false; }
+        }
 
         if (selections.includes('slack')) {
             dynamicQuestions.push({
@@ -133,8 +139,7 @@ async function runOnboarding(options = {}) {
                 message: 'Enter Slack App Token (xapp-...):',
                 default: config.slackAppToken
             });
-            config.enableSlackBridge = true;
-        } else { config.enableSlackBridge = false; }
+        }
 
         if (selections.includes('line')) {
             dynamicQuestions.push({
@@ -155,8 +160,97 @@ async function runOnboarding(options = {}) {
                 message: 'Enter LINE Webhook Port (Local):',
                 default: config.lineWebhookPort || 3000
             });
-            config.enableLineBridge = true;
-        } else { config.enableLineBridge = false; }
+        }
+
+        if (selections.includes('google_calendar')) {
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'googleCalendarClientId',
+                message: 'Enter Google Calendar OAuth Client ID:',
+                default: config.googleCalendarClientId
+            });
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'googleCalendarClientSecret',
+                message: 'Enter Google Calendar OAuth Client Secret:',
+                default: config.googleCalendarClientSecret
+            });
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'googleCalendarRefreshToken',
+                message: 'Enter Google Calendar Refresh Token:',
+                default: config.googleCalendarRefreshToken
+            });
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'googleCalendarId',
+                message: 'Enter Google Calendar ID:',
+                default: config.googleCalendarId || 'primary'
+            });
+            config.pluginCalendarEnabled = true;
+        } else {
+            config.pluginCalendarEnabled = false;
+        }
+
+        if (selections.includes('gmail')) {
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'gmailClientId',
+                message: 'Enter Gmail OAuth Client ID:',
+                default: config.gmailClientId
+            });
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'gmailClientSecret',
+                message: 'Enter Gmail OAuth Client Secret:',
+                default: config.gmailClientSecret
+            });
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'gmailRefreshToken',
+                message: 'Enter Gmail Refresh Token:',
+                default: config.gmailRefreshToken
+            });
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'gmailUserId',
+                message: 'Enter Gmail User ID:',
+                default: config.gmailUserId || 'me'
+            });
+            config.pluginGmailEnabled = true;
+        } else {
+            config.pluginGmailEnabled = false;
+        }
+
+        if (selections.includes('notion')) {
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'notionApiKey',
+                message: 'Enter Notion Internal Integration Secret:',
+                default: config.notionApiKey
+            });
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'notionDatabaseId',
+                message: 'Enter default Notion Database ID (optional):',
+                default: config.notionDatabaseId
+            });
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'notionPageId',
+                message: 'Enter default Notion Page ID (optional):',
+                default: config.notionPageId
+            });
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'notionTitleProperty',
+                message: 'Enter database title property name:',
+                default: config.notionTitleProperty || 'Name'
+            });
+            config.pluginNotionEnabled = true;
+        } else {
+            config.pluginNotionEnabled = false;
+        }
 
         if (selections.includes('anthropic')) {
             dynamicQuestions.push({
@@ -204,11 +298,49 @@ async function runOnboarding(options = {}) {
     if (dynamicQuestions.length > 0) {
         const extraAnswers = await inquirer.prompt(dynamicQuestions);
         config = { ...config, ...extraAnswers };
+        
+    }
+
+    // Ensure aiProvider reflects the selected primary AI. If no optional AI
+    // provider is selected, keep Gemini as the safe default from basic setup.
+    if (!selections.includes('skip')) {
+        if (selections.includes('anthropic')) config.aiProvider = 'anthropic';
+        else if (selections.includes('openai')) config.aiProvider = 'openai';
+        else if (selections.includes('hf')) config.aiProvider = 'huggingface';
+        else if (selections.includes('local')) config.aiProvider = 'local_openai';
+        else config.aiProvider = 'gemini';
     }
 
     // Save configuration
     writeConfig(config);
     console.log('\n✅ Configuration saved successfully!');
+
+    if (!selections.includes('skip') && selections.includes('gmail') && !config.gmailRefreshToken) {
+        const { runGmailAuthNow } = await inquirer.prompt([
+            {
+                type: 'confirm',
+                name: 'runGmailAuthNow',
+                message: 'Gmail Refresh Token is empty. Start Gmail OAuth now?',
+                default: true
+            }
+        ]);
+
+        if (runGmailAuthNow) {
+            console.log('\n🔐 Starting Gmail OAuth. Open the link below, sign in, and approve access.');
+            try {
+                const result = await runGmailAuth({
+                    logger: console,
+                    openBrowser: false
+                });
+                console.log(`✅ Gmail connected for ${result.userId}. Refresh token saved.`);
+            } catch (err) {
+                console.error(`❌ Gmail OAuth failed: ${err.message}`);
+                console.log('You can retry later with: mint gmail auth');
+            }
+        } else {
+            console.log('You can connect Gmail later with: mint gmail auth');
+        }
+    }
 
     // Install Daemon if requested
     if (options.installDaemon) {

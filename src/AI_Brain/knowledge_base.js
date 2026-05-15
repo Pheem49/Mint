@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { GoogleGenAI } = require('@google/genai');
 const pdf = require('pdf-parse');
 const mammoth = require('mammoth');
-const xlsx = require('xlsx');
+const readXlsxFile = require('read-excel-file/node');
 const { readConfig } = require('../System/config_manager');
 
 // Handle electron dependency safely
@@ -202,8 +202,13 @@ async function indexFile(filePath) {
             const res = await mammoth.extractRawText({ path: filePath });
             content = res.value;
         } else if (ext === '.xlsx') {
-            const wb = xlsx.readFile(filePath);
-            content = wb.SheetNames.map(n => xlsx.utils.sheet_to_csv(wb.Sheets[n])).join('\n');
+            const sheets = await readXlsxFile(filePath);
+            content = sheets
+                .map(({ sheet, data }) => [
+                    `Sheet: ${sheet}`,
+                    ...data.map(row => row.map(value => value == null ? '' : String(value)).join(','))
+                ].join('\n'))
+                .join('\n');
         } else {
             content = fs.readFileSync(filePath, 'utf8');
         }

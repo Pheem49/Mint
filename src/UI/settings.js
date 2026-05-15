@@ -23,9 +23,17 @@ const DEFAULT_CONFIG = {
     ttsPitch: 1.0,
     pluginSpotifyEnabled: true,
     pluginCalendarEnabled: false,
+    pluginGmailEnabled: false,
+    pluginNotionEnabled: false,
     pluginDiscordEnabled: false,
     showDesktopWidget: true,
-    mcpServers: {}
+    mcpServers: {},
+    openaiModel: 'gpt-4o',
+    anthropicModel: 'claude-3-5-sonnet-latest',
+    hfModel: 'meta-llama/Meta-Llama-3-8B-Instruct',
+    localApiBaseUrl: '',
+    localModelName: 'local-model',
+    ollamaHost: ''
 };
 
 let currentConfig = { ...DEFAULT_CONFIG };
@@ -68,7 +76,7 @@ function applyConfig(config) {
     if (hfInput) hfInput.value = config.hfApiKey || '';
 
     const ollamaHostInput = document.getElementById('ollama-host-input');
-    if (ollamaHostInput) ollamaHostInput.value = config.ollamaHost || 'http://localhost:11434';
+    if (ollamaHostInput) ollamaHostInput.value = config.ollamaHost || '';
 
     // Apply Gemini model
     applyModelSelection(config.geminiModel);
@@ -95,7 +103,7 @@ function applyConfig(config) {
 
     const localApiBaseUrlInput = document.getElementById('local-api-base-url');
     if (localApiBaseUrlInput) {
-        localApiBaseUrlInput.value = config.localApiBaseUrl || 'http://localhost:1234/v1';
+        localApiBaseUrlInput.value = config.localApiBaseUrl || '';
     }
 
     const localModelNameInput = document.getElementById('local-model-name');
@@ -142,6 +150,8 @@ function applyConfig(config) {
     // Plugins logic
     updatePluginButton('spotify', config.pluginSpotifyEnabled);
     updatePluginButton('calendar', config.pluginCalendarEnabled);
+    updatePluginButton('gmail', config.pluginGmailEnabled);
+    updatePluginButton('notion', config.pluginNotionEnabled);
     updatePluginButton('discord', config.pluginDiscordEnabled);
 
     // Apply Automation Browser
@@ -691,7 +701,7 @@ function updatePluginButton(pluginName, isEnabled) {
 }
 
 // Bind plugin buttons
-['spotify', 'calendar', 'discord'].forEach(plugin => {
+['spotify', 'calendar', 'gmail', 'notion', 'discord'].forEach(plugin => {
     const btn = document.getElementById(`btn-plugin-${plugin}`);
     if (btn) {
         btn.addEventListener('click', () => {

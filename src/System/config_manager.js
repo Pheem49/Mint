@@ -53,6 +53,9 @@ const DEFAULT_CONFIG = {
     ttsVolume: 1.0,
     ttsSpeed: 1.0,
     ttsPitch: 1.0,
+    pluginCalendarEnabled: false,
+    pluginGmailEnabled: false,
+    pluginNotionEnabled: false,
     pluginDiscordEnabled: false,
     showDesktopWidget: true,
     mcpServers: {},
@@ -70,6 +73,18 @@ const DEFAULT_CONFIG = {
     enableWhatsappBridge: false,
     googleSearchApiKey: '',
     googleSearchCx: '',
+    googleCalendarClientId: '',
+    googleCalendarClientSecret: '',
+    googleCalendarRefreshToken: '',
+    googleCalendarId: 'primary',
+    gmailClientId: '',
+    gmailClientSecret: '',
+    gmailRefreshToken: '',
+    gmailUserId: 'me',
+    notionApiKey: '',
+    notionDatabaseId: '',
+    notionPageId: '',
+    notionTitleProperty: 'Name',
     braveSearchApiKey: '',
     anthropicApiKey: '',
 
@@ -78,10 +93,13 @@ const DEFAULT_CONFIG = {
     anthropicModel: 'claude-3-5-sonnet-latest',
     openaiModel: 'gpt-4o',
     hfModel: 'meta-llama/Meta-Llama-3-8B-Instruct',
-    localApiBaseUrl: 'http://localhost:1234/v1',
+    localApiBaseUrl: '',
     localModelName: 'local-model',
-    ollamaHost: 'http://localhost:11434',
-    enableAgentCollaboration: false
+    ollamaHost: '',
+    enableAgentCollaboration: false,
+    enableAutoUpdate: true,
+    autoUpdateCheckIntervalHours: 24,
+    lastUpdateCheckAt: ''
 };
 
 
@@ -114,8 +132,6 @@ function getAvailableProviders(config) {
     const providers = [];
     const cfg = config || readConfig();
     
-    const isPlaceholder = (val) => !val || val.startsWith('your_') || val.includes('key_here') || val.trim() === '';
-
     // Check which providers have API keys or URLs configured
     const anthropicKey = cfg.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
     if (!isPlaceholder(anthropicKey)) providers.push('anthropic');
@@ -137,4 +153,8 @@ function getAvailableProviders(config) {
     return providers;
 }
 
-module.exports = { readConfig, writeConfig, getAvailableProviders, CONFIG_PATH };
+function isPlaceholder(val) {
+    return !val || val.startsWith('your_') || val.includes('key_here') || val.trim() === '';
+}
+
+module.exports = { readConfig, writeConfig, getAvailableProviders, isPlaceholder, CONFIG_PATH };

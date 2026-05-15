@@ -25,7 +25,12 @@ jest.mock('../src/System/chat_history_manager', () => ({
 
 jest.mock('../src/System/config_manager', () => ({
     readConfig: jest.fn(() => ({})),
-    getAvailableProviders: jest.fn(() => ['ollama', 'gemini'])
+    getAvailableProviders: jest.fn((config = {}) => {
+        const providers = ['ollama', 'gemini'];
+        if (config.openaiApiKey) providers.unshift('openai');
+        return providers;
+    }),
+    isPlaceholder: jest.fn((val) => !val || val.startsWith('your_') || val.includes('key_here') || val.trim() === '')
 }));
 
 jest.mock('../src/Plugins/plugin_manager', () => ({
@@ -63,5 +68,16 @@ describe('Gemini_API provider routing helpers', () => {
 
         expect(order[0]).toBe('openai');
         expect(order).toContain('ollama');
+    });
+
+    test('skips configured provider when it is not available', () => {
+        const geminiApi = require('../src/AI_Brain/Gemini_API');
+        const order = geminiApi._helpers.getProviderAttemptOrder({
+            aiProvider: 'openai',
+            openaiApiKey: ''
+        });
+
+        expect(order).not.toContain('openai');
+        expect(order[0]).toBe('ollama');
     });
 });

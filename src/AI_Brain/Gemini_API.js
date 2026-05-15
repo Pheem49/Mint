@@ -1,6 +1,6 @@
 const { GoogleGenAI } = require('@google/genai');
 const { readChatHistory, writeChatHistory, clearChatHistory } = require('../System/chat_history_manager');
-const { readConfig, getAvailableProviders } = require('../System/config_manager');
+const { readConfig, getAvailableProviders, isPlaceholder } = require('../System/config_manager');
 const pluginManager = require('../Plugins/plugin_manager');
 const mcpManager = require('../Plugins/mcp_manager');
 const memoryStore = require('./memory_store');
@@ -48,7 +48,7 @@ NATURAL CHAT FLOW:
 - Ask follow-up questions only when they add significant value to the task or conversation.
 
 GOAL:
-Your goal is to help the user with their queries. If they ask to open an application, open a website, search, manage files, or get system info, you must return an action in the structured JSON format below.
+Your goal is to help the user with their queries. If they ask to open an application, open a website, search, manage files, or get system info, you must trigger an action in the structured JSON format below. **NEVER provide a conversational response about performing an action without including the actual "action" object in your JSON.**
 
 CREATOR INFO:
 - The creator is Pheem49.
@@ -178,8 +178,61 @@ function resolveGeminiModel() {
 function getProviderAttemptOrder(config) {
   const provider = config.aiProvider || 'gemini';
   const availableProviders = getAvailableProviders(config);
-  const alternates = availableProviders.filter(p => p !== provider);
-  return [provider, ...alternates];
+  const ordered = availableProviders.includes(provider)
+    ? [provider, ...availableProviders.filter(p => p !== provider)]
+    : availableProviders;
+  return ordered.length > 0 ? ordered : ['gemini'];
+}
+
+function getProviderModel(provider, config = {}) {
+  switch (provider) {
+    case 'gemini':
+      return (config.geminiModel || DEFAULT_GEMINI_MODEL).trim() || DEFAULT_GEMINI_MODEL;
+    case 'anthropic':
+      return config.anthropicModel || 'claude-3-5-sonnet-latest';
+    case 'openai':
+      return config.openaiModel || 'gpt-4o';
+    case 'local_openai':
+      return config.localModelName || 'local-model';
+    case 'huggingface':
+      return config.hfModel || 'meta-llama/Meta-Llama-3-8B-Instruct';
+    case 'ollama':
+      return config.ollamaModel || 'llama3:latest';
+    default:
+      return '';
+  }
+}
+
+function withProviderInfo(result, provider, config = {}) {
+  const normalized = (result && typeof result === 'object')
+    ? result
+    : { response: String(result || ''), action: { type: 'none', target: '' } };
+  const providerInfo = {
+    provider,
+    model: getProviderModel(provider, config)
+  };
+
+  attachProviderInfoToLatestHistory(providerInfo);
+
+  return {
+    ...normalized,
+    providerInfo
+  };
+}
+
+function attachProviderInfoToLatestHistory(providerInfo) {
+  try {
+    const history = readChatHistory();
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      if (history[i] && history[i].role === 'model') {
+        history[i].providerInfo = providerInfo;
+        writeChatHistory(history);
+        return;
+      }
+    }
+  } catch (error) {
+    console.warn('[Provider Info] Failed to persist provider metadata:', error.message);
+  }
 }
 
 // Chat session — maintains conversation history within the session
@@ -253,28 +306,28 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
         const currentProv = providersToTry[i];
         try {
             if (currentProv === 'ollama') {
-                return await handleOllamaChat(finalMessage, base64Image, base64Audio, config);
+                return withProviderInfo(await handleOllamaChat(finalMessage, base64Image, base64Audio, config), currentProv, config);
             }
             if (currentProv === 'anthropic') {
-                return await handleAnthropicChat(finalMessage, base64Image, config);
+                return withProviderInfo(await handleAnthropicChat(finalMessage, base64Image, config), currentProv, config);
             }
             if (currentProv === 'openai') {
-                return await handleOpenAIChat(finalMessage, base64Image, config);
+                return withProviderInfo(await handleOpenAIChat(finalMessage, base64Image, config), currentProv, config);
             }
             if (currentProv === 'local_openai') {
-                return await handleLocalOpenAIChat(finalMessage, base64Image, config);
+                return withProviderInfo(await handleLocalOpenAIChat(finalMessage, base64Image, config), currentProv, config);
             }
             if (currentProv === 'huggingface') {
-                return await handleHuggingFaceChat(finalMessage, base64Image, config);
+                return withProviderInfo(await handleHuggingFaceChat(finalMessage, base64Image, config), currentProv, config);
             }
 
             const currentKey = resolveApiKey();
             if (!currentKey) {
                 if (i === providersToTry.length - 1) {
-                    return {
+                    return withProviderInfo({
                         response: "I couldn't find your Gemini API Key. Please run 'mint onboard' to set it up!",
                         action: { type: "none", target: "" }
-                    };
+                    }, currentProv, config);
                 }
                 console.warn("[Fallback System] Gemini API key missing. Skipping Gemini provider.");
                 continue;
@@ -285,7 +338,7 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
                 createChat(readChatHistory());
             }
 
-            return await handleGeminiChat(finalMessage, base64Image, base64Audio);
+            return withProviderInfo(await handleGeminiChat(finalMessage, base64Image, base64Audio), currentProv, config);
         } catch (error) {
             console.error(`[Fallback System] Provider '${currentProv}' failed:`, error.message);
             if (i === providersToTry.length - 1) {
@@ -524,7 +577,7 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
 async function handleAnthropicChat(finalMessage, base64Image, config) {
     const history = readChatHistory() || [];
     const apiKey = config.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return { response: "กรุณาใส่ Anthropic API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
+    if (isPlaceholder(apiKey)) return { response: "กรุณาใส่ Anthropic API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
 
     const systemPrompt = buildSystemPrompt();
     
@@ -571,7 +624,7 @@ async function handleAnthropicChat(finalMessage, base64Image, config) {
 async function handleOpenAIChat(finalMessage, base64Image, config) {
     const history = readChatHistory() || [];
     const apiKey = config.openaiApiKey || process.env.OPENAI_API_KEY;
-    if (!apiKey) return { response: "กรุณาใส่ OpenAI API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
+    if (isPlaceholder(apiKey)) return { response: "กรุณาใส่ OpenAI API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
 
     const systemPrompt = buildSystemPrompt();
     
@@ -658,7 +711,7 @@ async function handleLocalOpenAIChat(finalMessage, base64Image, config) {
 async function handleHuggingFaceChat(finalMessage, base64Image, config) {
     const history = readChatHistory() || [];
     const apiKey = config.hfApiKey || process.env.HF_API_KEY;
-    if (!apiKey) return { response: "กรุณาใส่ Hugging Face API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
+    if (isPlaceholder(apiKey)) return { response: "กรุณาใส่ Hugging Face API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
 
     const modelId = config.hfModel || 'meta-llama/Meta-Llama-3-8B-Instruct';
     const baseUrl = `https://api-inference.huggingface.co/models/${modelId}/v1/chat/completions`;
@@ -780,6 +833,7 @@ async function handleOllamaChat(finalMessage, base64Image, base64Audio, config) 
 
 function resetChat() {
   clearChatHistory();
+  memoryStore.clearConversationScopedProfile();
   createChat([]);
   console.log("Chat history cleared.");
 }
@@ -822,7 +876,8 @@ function historyToTranscript(history) {
     transcript.push({ 
         sender, 
         text, 
-        timestamp: content.timestamp || new Date().toISOString() 
+        timestamp: content.timestamp || new Date().toISOString(),
+        providerInfo: content.providerInfo || null
     });
   }
   return transcript;

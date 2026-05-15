@@ -23,16 +23,27 @@ const { executeCodeTask } = require('./src/CLI/code_agent');
 const { detectCodeIntent, runChatRoutedTask } = require('./src/CLI/chat_router');
 const readline = require('readline');
 const { createChatUI } = require('./src/CLI/chat_ui');
+const { runUpdate, runStartupAutoUpdate, shouldRunAutoUpdate } = require('./src/CLI/updater');
+const { runGmailAuth } = require('./src/CLI/gmail_auth');
 
 // Startup Info
 const startupConfig = readConfig();
-const startupModel = startupConfig.geminiModel || 'gemini-2.5-flash';
+const startupProvider = startupConfig.aiProvider || 'gemini';
+const startupModel = startupProvider === 'openai'
+    ? (startupConfig.openaiModel || 'gpt-4o')
+    : startupProvider === 'anthropic'
+        ? (startupConfig.anthropicModel || 'claude-3-5-sonnet-latest')
+        : startupProvider === 'local_openai'
+            ? (startupConfig.localModelName || 'local-model')
+            : startupProvider === 'ollama'
+                ? (startupConfig.ollamaModel || 'llama3:latest')
+                : (startupConfig.geminiModel || 'gemini-2.5-flash');
 const startupNow = new Date();
 const startupTime = startupNow.toLocaleString('th-TH', { 
     day: '2-digit', month: '2-digit', year: 'numeric', 
     hour: '2-digit', minute: '2-digit', hour12: false 
 }).replace(',', '');
-console.log(`\x1b[38;5;121m[Mint] v${pkg.version} | ${startupTime} | Active Model: ${startupModel}\x1b[0m`);
+console.log(`\x1b[38;5;121m[Mint] v${pkg.version} | ${startupTime} | Active AI: ${startupProvider} • ${startupModel}\x1b[0m`);
 
 // ANSI Colors
 const colors = {
@@ -83,6 +94,29 @@ program
     .name('mint')
     .description('Mint - Your Personal AI Assistant CLI')
     .version(pkg.version);
+
+program.hook('preAction', async (thisCommand, actionCommand) => {
+    if (actionCommand.name() === 'update' || process.env.MINT_SKIP_AUTO_UPDATE === '1') {
+        return;
+    }
+
+    const config = readConfig();
+    if (config.enableAutoUpdate === false) {
+        return;
+    }
+
+    if (!shouldRunAutoUpdate(config)) {
+        return;
+    }
+
+    console.log(`${colors.gray}[Mint Update] Checking for updates...${colors.reset}`);
+    const result = await runStartupAutoUpdate(config, writeConfig);
+    if (result.status === 'updated') {
+        console.log(`${colors.mint}[Mint Update] ${result.message}${colors.reset}`);
+    } else if (result.status === 'error') {
+        console.log(`${colors.gray}[Mint Update] ${result.message}${colors.reset}`);
+    }
+});
 
 // Chat Command (Interactive Mode)
 program
@@ -137,6 +171,32 @@ program
         console.log(`"${description}"`);
         console.log(`\n${colors.cyan}Mint Agent is starting to work on this in the background.${colors.reset}`);
         console.log(`${colors.gray}You will receive a notification when it's done.${colors.reset}\n`);
+    });
+
+program
+    .command('update')
+    .description('Check for and install the latest Mint CLI version from npm')
+    .option('--check', 'Only check whether an update is available')
+    .option('--dry-run', 'Show the npm update operation without installing')
+    .action(async (options) => {
+        console.log(`\n${colors.mint}${colors.bright}[Mint Update]${colors.reset} Checking npm for updates...`);
+
+        try {
+            const result = await runUpdate({
+                checkOnly: options.check === true,
+                dryRun: options.dryRun === true
+            });
+
+            const color = result.status === 'error' ? colors.pink : colors.mint;
+            console.log(`${color}${result.message}${colors.reset}\n`);
+
+            if (result.status === 'error') {
+                process.exitCode = 1;
+            }
+        } catch (error) {
+            console.error(`${colors.pink}Update failed: ${error.message}${colors.reset}\n`);
+            process.exitCode = 1;
+        }
     });
 
 program
@@ -213,6 +273,29 @@ program
     );
 
 program
+    .command('gmail')
+    .description('Manage Gmail integration')
+    .addCommand(new Command('auth')
+        .description('Open Google OAuth login and save a Gmail refresh token')
+        .option('--port <port>', 'Local callback port, defaults to a random available port')
+        .option('--no-open', 'Print the auth link without opening a browser')
+        .action(async (options) => {
+            try {
+                const result = await runGmailAuth({
+                    port: options.port ? Number(options.port) : 0,
+                    openBrowser: options.open,
+                    logger: console
+                });
+                console.log(`\n${colors.mint}✓${colors.reset} Gmail connected for ${result.userId}. Refresh token saved.`);
+                console.log(`${colors.gray}Scopes: ${result.scopes.join(', ')}${colors.reset}\n`);
+            } catch (error) {
+                console.error(`\n${colors.pink}Gmail auth failed:${colors.reset} ${error.message}\n`);
+                process.exitCode = 1;
+            }
+        })
+    );
+
+program
     .command('code')
     .description('Run Mint in workspace-aware coding mode for the current project')
     .argument('<task>', 'Coding task to execute in the current working directory')
@@ -239,13 +322,17 @@ program
         }
     });
 
-program.parse(process.argv);
+program.parseAsync(process.argv).catch((error) => {
+    console.error(`${colors.pink}${error.message}${colors.reset}`);
+    process.exitCode = 1;
+});
 
 /**
  * The Interactive Chat Loop — Gemini-style TUI
  */
 async function startInteractiveChat(initialMessage = null) {
     let lastResponseText = "";
+    const formatErrorMessage = (err) => err && err.message ? err.message : String(err || 'Unknown error');
     
     const ui = await createChatUI({
         onSubmit: async (text) => {
@@ -377,12 +464,12 @@ async function startInteractiveChat(initialMessage = null) {
                 clearInterval(timer);
                 setThinking(false);
                 lastResponseText = result.summary;
-                appendMessage('assistant', result.summary);
+                appendMessage('assistant', result.summary, { providerInfo: result.providerInfo });
 
             } catch (err) {
                 clearInterval(timer);
                 setThinking(false);
-                appendMessage('error', err.message);
+                appendMessage('error', formatErrorMessage(err));
             } finally {
                 if (setMode) setMode('Chat');
             }
@@ -429,12 +516,12 @@ async function startInteractiveChat(initialMessage = null) {
             clearInterval(timer);
             setThinking(false);
             lastResponseText = result.summary;
-            appendMessage('assistant', result.summary);
+            appendMessage('assistant', result.summary, { providerInfo: result.providerInfo });
 
         } catch (err) {
             clearInterval(timer);
             setThinking(false);
-            appendMessage('error', err.message);
+            appendMessage('error', formatErrorMessage(err));
         } finally {
             if (setMode) setMode('Chat');
         }
@@ -541,8 +628,10 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
             await runChatRoutedTask(`/code ${args.join(' ')}`, {
                 appendMessage,
                 setThinking,
+                requestApproval,
                 appendCodeStep,
                 setMode,
+                askUser: () => Promise.resolve(''),
                 history: await getChatTranscript()
             });
             break;
