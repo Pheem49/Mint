@@ -1,19 +1,31 @@
-const { clipboard: electronClipboard } = require('electron');
+let electronClipboard = null;
+try {
+    ({ clipboard: electronClipboard } = require('electron'));
+} catch (_) {
+    electronClipboard = {
+        writeText: () => {}
+    };
+}
 const { openApp } = require('../Automation_Layer/open_app');
 const { openWebsite, openSearch } = require('../Automation_Layer/open_website');
 const { performWebAutomation } = require('../Automation_Layer/browser_automation');
 const { createFolder, openFile, deleteFile, findPath } = require('../Automation_Layer/file_operations');
 const { indexFile, indexFolder } = require('../AI_Brain/knowledge_base');
+const { getSystemInfo, getWeather } = require('./system_info');
 const pluginManager = require('../Plugins/plugin_manager');
 const mcpManager = require('../Plugins/mcp_manager');
-const granularAutomation = require('./granular_automation');
 const SystemAutomation = require('./system_automation');
 const safetyManager = require('./safety_manager');
+const toolRegistry = require('./tool_registry');
 
 async function executeAction(action, options = {}) {
-    console.log("Executing action:", action);
+    if (process.env.MINT_DEBUG === '1') {
+        console.log("Executing action:", action);
+    }
+    toolRegistry.validateToolInput(action.type, action);
     const clipboard = options.clipboard || electronClipboard;
     const safety = safetyManager.assertActionAllowed(action, {
+        allowApproval: options.allowApproval === true,
         allowDangerous: options.allowDangerous === true
     });
     safetyManager.appendActionLog({
@@ -21,7 +33,7 @@ async function executeAction(action, options = {}) {
         action: action.type,
         target: action.target || action.path || '',
         tier: safety.tier,
-        approved: options.allowDangerous === true || safety.tier !== safetyManager.TIERS.DANGEROUS
+        approved: options.allowApproval === true || options.allowDangerous === true || safety.tier === safetyManager.TIERS.SAFE
     });
 
     switch (action.type) {
@@ -59,18 +71,28 @@ async function executeAction(action, options = {}) {
             return await indexFile(action.target);
         case 'learn_folder':
             return await indexFolder(action.target);
+        case 'system_info':
+            return await handleSystemInfo(action.target);
         case 'mcp_tool': {
             const mcpResult = await mcpManager.callTool(action.server, action.target, action.args);
             return JSON.stringify(mcpResult.content);
         }
-        case 'mouse_move':
+        case 'mouse_move': {
+            const granularAutomation = require('./granular_automation');
             return await granularAutomation.mouseMove(action.x, action.y);
-        case 'mouse_click':
+        }
+        case 'mouse_click': {
+            const granularAutomation = require('./granular_automation');
             return await granularAutomation.mouseClick(action.x, action.y, action.button || 1);
-        case 'type_text':
+        }
+        case 'type_text': {
+            const granularAutomation = require('./granular_automation');
             return await granularAutomation.typeText(action.target);
-        case 'key_tap':
+        }
+        case 'key_tap': {
+            const granularAutomation = require('./granular_automation');
             return await granularAutomation.keyTap(action.target);
+        }
         case 'plugin':
             return await pluginManager.executePlugin(action.pluginName, action.target);
         case 'system_automation':
@@ -78,6 +100,22 @@ async function executeAction(action, options = {}) {
         default:
             return undefined;
     }
+}
+
+async function handleSystemInfo(target = '') {
+    const query = String(target || '').trim();
+    if (query) {
+        const weather = await getWeather(query);
+        return JSON.stringify({
+            type: 'weather',
+            target: query,
+            ...weather
+        });
+    }
+    return JSON.stringify({
+        type: 'system_info',
+        data: getSystemInfo()
+    });
 }
 
 async function executeFindPath(action) {
@@ -126,4 +164,4 @@ async function handleSystemAutomation(target) {
     }
 }
 
-module.exports = { executeAction, handleSystemAutomation };
+module.exports = { executeAction, handleSystemAutomation, handleSystemInfo };

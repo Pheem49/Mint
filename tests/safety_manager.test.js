@@ -28,6 +28,13 @@ describe('safety_manager', () => {
         expect(() => safety.assertActionAllowed({ type: 'delete_file', target: 'notes.txt' }, { allowDangerous: true })).not.toThrow();
     });
 
+    test('requires approval flag for approval-tier actions', () => {
+        const action = { type: 'system_automation', target: 'volume:50' };
+        expect(safety.classifyAction(action).tier).toBe(safety.TIERS.APPROVAL);
+        expect(() => safety.assertActionAllowed(action)).toThrow(/requires approval/);
+        expect(() => safety.assertActionAllowed(action, { allowApproval: true })).not.toThrow();
+    });
+
     test('resolveWithinRoot prevents path traversal', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-safe-'));
         try {

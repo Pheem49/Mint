@@ -21,12 +21,15 @@ Mint is an AI assistant built to live in your desktop and terminal. It combines 
 ## What's New
 
 - **Unified CLI Agent:** `mint` now routes every normal message through the same agent loop. It can think, answer conversationally, inspect projects, edit files, run tools, and finish directly for simple chat.
+- **Fast Mode:** `/fast` switches the interactive CLI into a quieter `[Fast]` status that keeps the working indicator visible but hides internal `Thinking:` and tool-progress trace messages.
+- **Live CLI Replies:** Mint responses now appear in one live-updating `Mint` message instead of waiting for the whole final answer to render at once.
+- **Learned Skills:** `mint learn <path>` and `/learn <path>` import local `.md` or `.txt` files as persistent skill/instruction memory. Learned skills can be listed and deleted.
 - **Provider Fallback:** The agent can fall back across supported providers, for example from local OpenAI-compatible backends to Gemini.
 - **Provider Visibility:** Desktop and CLI responses show the provider/model that actually answered, including fallback results.
 - **Google Workspace + Notion Integrations:** Gmail, Google Calendar, and Notion plugins can be configured from onboarding.
 - **Safety Manager:** Central safety policy for shell commands and actions, including deterministic command blocking, permission tiers, path guards, and action logs.
 - **Refactored Main Process:** Electron startup is split into focused modules for windows, IPC, proactive loop, screen capture, and action execution.
-- **CI & Audit Baseline:** GitHub Actions runs install, tests, and security audit. Current local test baseline is `120` passing tests and `0` high vulnerabilities.
+- **CI & Audit Baseline:** GitHub Actions runs install, tests, and security audit. Current local test baseline is `137` passing tests and `0` high vulnerabilities.
 - **Dependency Hardening:** Removed vulnerable `google-tts-api` and `xlsx`; replaced with internal Google TTS URL generation and `read-excel-file`.
 
 ## Key Features
@@ -36,6 +39,8 @@ Mint is an AI assistant built to live in your desktop and terminal. It combines 
 Mint CLI is not just a chat wrapper. It is a workspace-aware agent loop.
 
 - **Think Before Acting:** Every request goes through an agent decision step.
+- **Fast Mode:** Toggle `/fast` to hide internal thought/progress messages while keeping the final answer, approvals, tools, and working indicator unchanged.
+- **Live Answer Rendering:** Final answers are streamed into a single Mint message block as they arrive.
 - **Conversational + Coding in One Flow:** Casual messages can finish directly; coding tasks can inspect, plan, edit, and verify.
 - **Workspace Context:** Reads current path, git status, diff summary, package scripts, and previous workspace session memory.
 - **Tool Use:** Supports web search, file listing, file reading, code search, path finding, shell commands, patch edits, file writes, opening folders, and asking the user.
@@ -69,6 +74,7 @@ Mint CLI is not just a chat wrapper. It is a workspace-aware agent loop.
 - **Chat History:** Persistent local chat transcript.
 - **Behavior Memory:** Stores recurring user context for proactive suggestions.
 - **Long-Term Memory Store:** SQLite-backed user context, session memories, usage patterns, and response cache.
+- **Learned Skill Files:** Import `.md` or `.txt` instruction files with `mint learn <path>` or `/learn <path>`. Mint remembers them as persistent skill/instruction context.
 - **Knowledge Base / RAG:** Index and search local `.txt`, `.md`, `.pdf`, `.docx`, and `.xlsx` files.
 - **Workspace Session Memory:** Remembers previous task summary and verification for each workspace.
 
@@ -167,7 +173,14 @@ npm start
 
 - `mint` / `mint chat` - Start the unified interactive agent UI.
 - `mint chat "<message>"` - Start with an initial message.
+- `mint chat --image ./screenshot.png "What is on this screen?"` - Attach an image to the initial chat message.
+- `/image ./screenshot.png What is on this screen?` - Attach an image while inside the interactive CLI, then press Enter to send.
+- `Ctrl+V` or `/paste What is on this screen?` - Attach clipboard images inside the interactive CLI, then press Enter to send.
+- `mint learn ./skill.md` - Read a local `.md` or `.txt` file and remember it as a persistent Mint skill/instruction.
+- `mint learn --list` - List learned skill files.
+- `mint learn --delete <id|path|name>` - Delete a learned skill by ID, path, or file name.
 - `mint code "<task>"` - Run a specific coding task in the current workspace.
+- `mint code --image ./mockup.png "Build this UI"` - Attach an image as visual context for a coding task.
 - `mint gmail auth` - Open Google OAuth and save a Gmail refresh token.
 - `mint gmail auth --no-open` - Print the Gmail OAuth link without opening a browser.
 - `mint task "<task>"` - Queue a background task for the headless agent.
@@ -246,9 +259,16 @@ The plugin can create pages, query database pages, and append text blocks.
 Inside `mint`:
 
 - `/help` - Show commands.
+- `/fast [on|off|status]` - Toggle Fast Mode. Fast Mode shows `[Fast]`, keeps `Mint is thinking...`, and hides `Thinking:`/progress trace messages.
+- `/learn <path>` - Read a local `.md` or `.txt` file and remember it as a persistent Mint skill/instruction.
+- `/memory skills` - Show learned skill files.
+- `/memory skills delete <id|path|name>` - Delete a learned skill.
+- `/image <path> [prompt]` - Attach an image from disk.
+- `/paste [prompt]` - Attach an image from the clipboard.
 - `/code <task>` - Force Code Mode.
 - `/cd <path>` - Change active workspace directory.
 - `/models [name]` - Show or switch model/provider.
+- `/memory [cmd]` - Manage long-term memory.
 - `/config` - Show current configuration.
 - `/copy` - Copy last response.
 - `/clear` / `/reset` - Clear conversation history.

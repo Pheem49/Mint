@@ -93,15 +93,47 @@ function getDb() {
             last_used DATETIME DEFAULT CURRENT_TIMESTAMP
         );
 
+        -- Raw episodic memories of user/assistant turns.
+        CREATE TABLE IF NOT EXISTS interaction_memories (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_text   TEXT NOT NULL,
+            ai_text     TEXT NOT NULL,
+            keywords    TEXT DEFAULT '',
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
         -- Response Cache: For repetitive exact queries
         CREATE TABLE IF NOT EXISTS response_cache (
             query_hash TEXT PRIMARY KEY,
             response   TEXT NOT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
+
+        -- Learned skill/instruction documents imported from local files.
+        CREATE TABLE IF NOT EXISTS learned_skills (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            source_path TEXT NOT NULL UNIQUE,
+            content    TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
     `);
 
     return dbInstance;
+}
+
+function ensureLearnedSkillsTable() {
+    getDb().exec(`
+        CREATE TABLE IF NOT EXISTS learned_skills (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            source_path TEXT NOT NULL UNIQUE,
+            content     TEXT NOT NULL,
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
 }
 
 // ── Profile helpers ────────────────────────────────────────────────────────
@@ -203,6 +235,108 @@ function getTopPatterns(limit = 8) {
     }
 }
 
+const MAX_INTERACTION_MEMORIES = 1000;
+
+function addInteractionMemory(userMessage, aiResponseText, keywords = []) {
+    try {
+        const db = getDb();
+        db.prepare(`
+            INSERT INTO interaction_memories (user_text, ai_text, keywords)
+            VALUES (?, ?, ?)
+        `).run(
+            String(userMessage || '').slice(0, 1200),
+            String(aiResponseText || '').slice(0, 1200),
+            keywords.join(',')
+        );
+        db.exec(`
+            DELETE FROM interaction_memories WHERE id NOT IN (
+                SELECT id FROM interaction_memories ORDER BY id DESC LIMIT ${MAX_INTERACTION_MEMORIES}
+            )
+        `);
+    } catch (err) {
+        console.error('[Memory] addInteractionMemory error:', err.message);
+    }
+}
+
+function getRecentInteractions(limit = 5) {
+    try {
+        return getDb()
+            .prepare('SELECT id, user_text, ai_text, keywords, created_at FROM interaction_memories ORDER BY id DESC LIMIT ?')
+            .all(limit);
+    } catch (_) {
+        return [];
+    }
+}
+
+function deleteInteractionMemory(id) {
+    try {
+        const result = getDb().prepare('DELETE FROM interaction_memories WHERE id = ?').run(id);
+        return result.changes > 0;
+    } catch (err) {
+        console.error('[Memory] deleteInteractionMemory error:', err.message);
+        return false;
+    }
+}
+
+function searchInteractions(query, limit = 8) {
+    try {
+        const keywords = extractKeywords(query);
+        const terms = keywords.length > 0 ? keywords : [String(query || '').trim()].filter(Boolean);
+        if (terms.length === 0) return [];
+
+        const rows = [];
+        const seen = new Set();
+        const stmt = getDb().prepare(`
+            SELECT id, user_text, ai_text, keywords, created_at
+            FROM interaction_memories
+            WHERE user_text LIKE ? OR ai_text LIKE ? OR keywords LIKE ?
+            ORDER BY id DESC
+            LIMIT ?
+        `);
+
+        for (const term of terms.slice(0, 5)) {
+            const like = `%${term}%`;
+            for (const row of stmt.all(like, like, like, limit)) {
+                if (!seen.has(row.id)) {
+                    seen.add(row.id);
+                    rows.push(row);
+                    if (rows.length >= limit) return rows;
+                }
+            }
+        }
+        return rows;
+    } catch (_) {
+        return [];
+    }
+}
+
+function clearInteractionMemories() {
+    try {
+        getDb().prepare('DELETE FROM interaction_memories').run();
+    } catch (err) {
+        console.error('[Memory] clearInteractionMemories error:', err.message);
+    }
+}
+
+function exportMemorySnapshot() {
+    try {
+        return {
+            profile: getAllProfile(),
+            session_memories: getRecentMemories(MAX_SESSION_MEMORIES),
+            usage_patterns: getTopPatterns(50),
+            interaction_memories: getRecentInteractions(MAX_INTERACTION_MEMORIES)
+        };
+    } catch (err) {
+        console.error('[Memory] exportMemorySnapshot error:', err.message);
+        return {
+            profile: {},
+            session_memories: [],
+            usage_patterns: [],
+            interaction_memories: []
+        };
+    }
+}
+
 // ── Simple keyword extractor (no external deps) ────────────────────────────
 const STOP_WORDS = new Set([
     'ที่', 'ให้', 'และ', 'ของ', 'กับ', 'ใน', 'บน', 'เป็น', 'อยู่', 'มี', 'ได้', 'the', 'a', 'an',
@@ -220,6 +354,37 @@ function extractKeywords(text) {
         .slice(0, 6);
 }
 
+function cleanProfileValue(value) {
+    return String(value || '')
+        .replace(/[.,!?;:()[\]{}"'`“”‘’]+$/g, '')
+        .replace(/(นะ|น่ะ|ครับ|ค่ะ|คะ|จ้า|จ๊ะ|ฮะ|ค้าบ|ค่า)+$/u, '')
+        .trim();
+}
+
+function extractUserName(text) {
+    const input = String(text || '').trim();
+    const patterns = [
+        /(?:ผม|ฉัน|ชั้น|หนู|เรา|ข้า|ดิฉัน)?\s*ชื่อ(?:เล่น)?\s*(?:คือ|ว่า|เป็น)?\s*([A-Za-z\u0E00-\u0E7F][A-Za-z\u0E00-\u0E7F\s]{0,40})/iu,
+        /(?:เรียก(?:ผม|ฉัน|ชั้น|หนู|เรา)?ว่า)\s*([A-Za-z\u0E00-\u0E7F][A-Za-z\u0E00-\u0E7F\s]{0,40})/iu,
+        /\bmy name is\s+([A-Za-z][A-Za-z\s'-]{0,40})/iu,
+        /\bcall me\s+([A-Za-z][A-Za-z\s'-]{0,40})/iu,
+        /\bi am\s+([A-Za-z][A-Za-z\s'-]{0,40})/iu,
+        /\bi'm\s+([A-Za-z][A-Za-z\s'-]{0,40})/iu
+    ];
+
+    for (const pattern of patterns) {
+        const match = input.match(pattern);
+        if (match && match[1]) {
+            const name = cleanProfileValue(match[1])
+                .split(/\s+(?:and|แล้ว|นะ|ครับ|ค่ะ|คะ)\s+/i)[0]
+                .trim();
+            if (name && name.length <= 40) return name;
+        }
+    }
+
+    return '';
+}
+
 // ── Main public API ────────────────────────────────────────────────────────
 
 /**
@@ -233,11 +398,17 @@ function recordInteraction(userMessage, aiResponseText) {
         // Extract keywords as usage patterns
         const keywords = extractKeywords(userMessage);
         keywords.forEach(kw => recordPattern(kw));
+        addInteractionMemory(userMessage, aiResponseText, keywords);
 
         // Detect preferred language
         const thaiRatio = (userMessage.match(/[\u0E00-\u0E7F]/g) || []).length / userMessage.length;
         if (thaiRatio > 0.3) setProfile('preferred_language', 'thai');
         else setProfile('preferred_language', 'english');
+
+        const userName = extractUserName(userMessage);
+        if (userName) {
+            setProfile('user_name', userName);
+        }
 
         // Detect coding intent (update project activity)
         const codingKeywords = ['code', 'fix', 'debug', 'function', 'class', 'import', 'script',
@@ -268,20 +439,86 @@ function saveSessionSummary(summary, tags = []) {
     addSessionMemory(summary.trim(), tags);
 }
 
+function addLearnedSkill(name, sourcePath, content) {
+    const cleanName = String(name || '').trim() || path.basename(sourcePath || 'skill.md');
+    const cleanPath = path.resolve(String(sourcePath || ''));
+    const cleanContent = String(content || '').trim();
+    if (!cleanContent) {
+        throw new Error('Skill file is empty.');
+    }
+
+    const storedContent = cleanContent.slice(0, 12000);
+    ensureLearnedSkillsTable();
+    const db = getDb();
+    db.prepare(`
+        INSERT INTO learned_skills (name, source_path, content, created_at, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT(source_path) DO UPDATE SET
+            name = excluded.name,
+            content = excluded.content,
+            updated_at = CURRENT_TIMESTAMP
+    `).run(cleanName, cleanPath, storedContent);
+
+    return {
+        name: cleanName,
+        source_path: cleanPath,
+        content_length: cleanContent.length,
+        stored_length: storedContent.length
+    };
+}
+
+function getLearnedSkills(limit = 10) {
+    try {
+        ensureLearnedSkillsTable();
+        return getDb().prepare(`
+            SELECT id, name, source_path, content, created_at, updated_at
+            FROM learned_skills
+            ORDER BY updated_at DESC, id DESC
+            LIMIT ?
+        `).all(limit);
+    } catch (err) {
+        console.error('[Memory] getLearnedSkills error:', err.message);
+        return [];
+    }
+}
+
+function deleteLearnedSkill(identifier) {
+    try {
+        ensureLearnedSkillsTable();
+        const input = String(identifier || '').trim();
+        if (!input) return 0;
+
+        const db = getDb();
+        if (/^\d+$/.test(input)) {
+            return db.prepare('DELETE FROM learned_skills WHERE id = ?').run(Number(input)).changes;
+        }
+
+        const resolved = path.resolve(input);
+        return db.prepare('DELETE FROM learned_skills WHERE source_path = ? OR name = ?').run(resolved, input).changes;
+    } catch (err) {
+        console.error('[Memory] deleteLearnedSkill error:', err.message);
+        return 0;
+    }
+}
+
 /**
  * Returns a formatted context string to inject into the AI system prompt.
  * Lightweight — no async calls.
  */
-function getUserContext() {
+function getUserContext(query = '') {
     try {
         const profile = getAllProfile();
         const patterns = getTopPatterns(6);
         const memories = getRecentMemories(3);
+        const interactions = getRecentInteractions(6);
+        const relevantInteractions = query ? searchInteractions(query, 5) : [];
 
         const lines = ['\n\n[LONG-TERM USER CONTEXT — use this to personalize responses]'];
 
         // Profile info
         if (Object.keys(profile).length > 0) {
+            if (profile.user_name)
+                lines.push(`• User name: ${profile.user_name}`);
             if (profile.preferred_language)
                 lines.push(`• Previously inferred language: ${profile.preferred_language} (do not override the current user message language)`);
             if (profile.last_active_project)
@@ -304,6 +541,36 @@ function getUserContext() {
         if (memories.length > 0) {
             lines.push('\nRecent session summaries:');
             memories.forEach((m, i) => lines.push(`  ${i + 1}. ${m.summary}`));
+        }
+
+        if (interactions.length > 0) {
+            lines.push('\nRecent remembered interactions:');
+            interactions.forEach((m, i) => {
+                lines.push(`  ${i + 1}. User: ${m.user_text}`);
+                lines.push(`     Mint: ${m.ai_text}`);
+            });
+        }
+
+        if (relevantInteractions.length > 0) {
+            lines.push('\nRelevant remembered interactions for the current request:');
+            relevantInteractions.forEach((m, i) => {
+                lines.push(`  ${i + 1}. User: ${m.user_text}`);
+                lines.push(`     Mint: ${m.ai_text}`);
+            });
+        }
+
+        const learnedSkills = getLearnedSkills(8);
+        if (learnedSkills.length > 0) {
+            lines.push('\nLearned skill/instruction files:');
+            learnedSkills.forEach((skill, i) => {
+                lines.push(`\n  ${i + 1}. ${skill.name}`);
+                lines.push(`     Source: ${skill.source_path}`);
+                lines.push('     Content:');
+                lines.push(skill.content
+                    .split('\n')
+                    .map(line => `       ${line}`)
+                    .join('\n'));
+            });
         }
 
         if (lines.length === 1) return ''; // nothing to add
@@ -358,7 +625,16 @@ module.exports = {
     deleteProfile,
     clearConversationScopedProfile,
     getProfile,
+    getAllProfile,
+    addLearnedSkill,
+    getLearnedSkills,
+    deleteLearnedSkill,
     getTopPatterns,
+    getRecentInteractions,
+    searchInteractions,
+    deleteInteractionMemory,
+    clearInteractionMemories,
+    exportMemorySnapshot,
     getRecentMemories,
     getCachedResponse,
     cacheResponse,

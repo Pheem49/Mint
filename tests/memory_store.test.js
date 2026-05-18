@@ -68,10 +68,27 @@ describe('memory_store — recordInteraction', () => {
         expect(memStore.getProfile('preferred_language')).toBe('english');
     });
 
+    test('records thai user name when explicitly introduced', () => {
+        memStore.recordInteraction('ผมชื่อภีมนะ', 'ยินดีที่ได้รู้จักค่ะ');
+        expect(memStore.getProfile('user_name')).toBe('ภีม');
+    });
+
+    test('records english user name when explicitly introduced', () => {
+        memStore.recordInteraction('my name is Pheem', 'nice to meet you');
+        expect(memStore.getProfile('user_name')).toBe('Pheem');
+    });
+
     test('increments total_interactions counter', () => {
         memStore.recordInteraction('msg 1', 'reply 1');
         memStore.recordInteraction('msg 2', 'reply 2');
         expect(memStore.getProfile('total_interactions')).toBe('2');
+    });
+
+    test('stores every interaction as episodic memory', () => {
+        memStore.recordInteraction('ผมชอบใช้ Pop!_OS', 'จำไว้แล้วค่ะ');
+        const interactions = memStore.getRecentInteractions(5);
+        expect(interactions.length).toBe(1);
+        expect(interactions[0].user_text).toContain('Pop!_OS');
     });
 
     test('records coding keywords as patterns', () => {
@@ -102,6 +119,48 @@ describe('memory_store — getTopPatterns', () => {
     });
 });
 
+// ── Interaction memory tests ───────────────────────────────────────────────
+
+describe('memory_store — interaction memories', () => {
+    test('searches stored interactions by keyword', () => {
+        memStore.recordInteraction('ผมกำลังทำโปรเจกต์ Mint agent', 'รับทราบค่ะ');
+        memStore.recordInteraction('วันนี้อากาศร้อน', 'ใช่ค่ะ');
+
+        const results = memStore.searchInteractions('Mint agent', 5);
+        expect(results.length).toBeGreaterThan(0);
+        expect(results[0].user_text).toContain('Mint agent');
+    });
+
+    test('returns recent interactions newest first', () => {
+        memStore.recordInteraction('first memory', 'one');
+        memStore.recordInteraction('second memory', 'two');
+
+        const interactions = memStore.getRecentInteractions(2);
+        expect(interactions[0].user_text).toBe('second memory');
+        expect(interactions[1].user_text).toBe('first memory');
+    });
+
+    test('clears interaction memories', () => {
+        memStore.recordInteraction('remember this', 'ok');
+        memStore.clearInteractionMemories();
+        expect(memStore.getRecentInteractions(5)).toEqual([]);
+    });
+
+    test('deletes one interaction memory by id', () => {
+        memStore.recordInteraction('delete this one', 'ok');
+        const [memory] = memStore.getRecentInteractions(1);
+        expect(memStore.deleteInteractionMemory(memory.id)).toBe(true);
+        expect(memStore.getRecentInteractions(5)).toEqual([]);
+    });
+
+    test('exports memory snapshot', () => {
+        memStore.recordInteraction('export this memory', 'ok');
+        const snapshot = memStore.exportMemorySnapshot();
+        expect(snapshot.profile.total_interactions).toBe('1');
+        expect(snapshot.interaction_memories[0].user_text).toBe('export this memory');
+    });
+});
+
 // ── getUserContext tests ───────────────────────────────────────────────────
 
 describe('memory_store — getUserContext', () => {
@@ -115,10 +174,32 @@ describe('memory_store — getUserContext', () => {
         expect(ctx).toContain('thai');
     });
 
+    test('includes user name in context output', () => {
+        memStore.recordInteraction('ผมชื่อภีมนะ', 'จำชื่อไว้แล้วค่ะ');
+        const ctx = memStore.getUserContext();
+        expect(ctx).toContain('User name: ภีม');
+    });
+
     test('includes total_interactions in context', () => {
         memStore.recordInteraction('hello', 'hi');
         const ctx = memStore.getUserContext();
         expect(ctx).toContain('1');
+    });
+
+    test('includes recent remembered interactions in context', () => {
+        memStore.recordInteraction('ผมชอบธีมสีเขียว', 'จำไว้แล้วค่ะ');
+        const ctx = memStore.getUserContext();
+        expect(ctx).toContain('Recent remembered interactions');
+        expect(ctx).toContain('ผมชอบธีมสีเขียว');
+    });
+
+    test('includes relevant remembered interactions for a query', () => {
+        memStore.recordInteraction('ผมใช้ editor ชื่อ Cursor', 'จำไว้แล้วค่ะ');
+        memStore.recordInteraction('ผมชอบกาแฟเย็น', 'จำไว้แล้วค่ะ');
+
+        const ctx = memStore.getUserContext('ผมใช้ editor อะไร');
+        expect(ctx).toContain('Relevant remembered interactions');
+        expect(ctx).toContain('Cursor');
     });
 
     test('context starts with the user context header', () => {

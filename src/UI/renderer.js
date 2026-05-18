@@ -846,7 +846,9 @@ async function sendTextMessage(text, options = {}) {
             } else {
                 // General system info (date, time, RAM, CPU)
                 const info = await window.api.getSystemInfo();
-                response.response += `\n\n📅 วันนี้: ${info.date}\n⏰ เวลา: ${info.time}\n💻 RAM: ${info.ram.used} / ${info.ram.total} (${info.ram.percent})`;
+                const machine = info.machine && info.machine.display ? `\n🖥️ รุ่นเครื่อง: ${info.machine.display}` : '';
+                const distro = info.distro ? `\nระบบ: ${info.distro}` : '';
+                response.response += `\n\n📅 วันนี้: ${info.date}\n⏰ เวลา: ${info.time}${machine}${distro}\n💻 CPU: ${info.cpu.model} (${info.cpu.cores} คอร์)\n💻 RAM: ${info.ram.used} / ${info.ram.total} (${info.ram.percent})`;
             }
         }
 

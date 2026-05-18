@@ -40,6 +40,7 @@ const SAFE_ACTIONS = new Set([
     'clipboard_write',
     'learn_file',
     'learn_folder',
+    'system_info',
     'mcp_tool',
     'mouse_move',
     'mouse_click',
@@ -105,6 +106,7 @@ function classifyAction(action = {}) {
 function assertActionAllowed(action, options = {}) {
     const classification = classifyAction(action);
     const allowDangerous = options.allowDangerous === true;
+    const allowApproval = options.allowApproval === true;
 
     if (classification.tier === TIERS.BLOCKED) {
         throw new Error(`Blocked action (${classification.reason}): ${action.type}`);
@@ -112,6 +114,10 @@ function assertActionAllowed(action, options = {}) {
 
     if (classification.tier === TIERS.DANGEROUS && !allowDangerous) {
         throw new Error(`Dangerous action requires explicit permission (${classification.reason}): ${action.type}`);
+    }
+
+    if (classification.tier === TIERS.APPROVAL && !allowApproval) {
+        throw new Error(`Action requires approval (${classification.reason}): ${action.type}`);
     }
 
     return classification;

@@ -7,8 +7,10 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { readConfig, getAvailableProviders } = require('../System/config_manager');
 const safetyManager = require('../System/safety_manager');
+const memoryStore = require('../AI_Brain/memory_store');
 const { readWorkspaceSession, writeWorkspaceSession } = require('./code_session_memory');
-const { executeAction } = require('../../mint-cli-logic');
+const { executeAction } = require('../System/action_executor');
+const toolRegistry = require('../System/tool_registry');
 
 async function webSearch(query, onProgress = () => {}) {
     if (!query) throw new Error('Search query required.');
@@ -167,6 +169,109 @@ function extractJson(text) {
         }
         return JSON.parse(match[0]);
     }
+}
+
+function normalizeExecutorAction(action, input = {}) {
+    return {
+        type: action,
+        target: input.target || input.path || input.query || '',
+        path: input.path,
+        pathType: input.type,
+        openAfter: input.openAfter,
+        pluginName: input.pluginName,
+        server: input.server,
+        args: input.args,
+        x: input.x,
+        y: input.y,
+        button: input.button
+    };
+}
+
+function formatActionPreview(action, input = {}) {
+    if (input.command) return input.command;
+    if (input.path) return input.path;
+    if (input.target) return input.target;
+    if (input.query) return input.query;
+    return action;
+}
+
+function evaluateActionResult(action, toolResult = '') {
+    if (!toolRegistry.isImportantAction(action)) {
+        return null;
+    }
+
+    const text = String(toolResult || '');
+    if (/^Error:|blocked|denied|failed|exception|not found/i.test(text)) {
+        return {
+            status: 'failed',
+            message: `Evaluator: ${action} may have failed. Review the observation before continuing.`
+        };
+    }
+
+    if (action === 'run_shell' && /(ERR!|Error:|FAIL|failed|not found|permission denied)/i.test(text)) {
+        return {
+            status: 'warning',
+            message: 'Evaluator: shell output contains error-like text; verify before claiming success.'
+        };
+    }
+
+    return {
+        status: 'passed',
+        message: `Evaluator: ${action} completed without obvious errors.`
+    };
+}
+
+function splitDataUri(dataUri = '') {
+    const match = String(dataUri).match(/^data:([^;]+);base64,([\s\S]+)$/);
+    if (!match) return null;
+    return {
+        mimeType: match[1],
+        data: match[2]
+    };
+}
+
+function contentToText(content) {
+    if (content && typeof content === 'object' && !Array.isArray(content)) {
+        return String(content.text || '');
+    }
+    return String(content || '');
+}
+
+function contentToGeminiParts(content) {
+    const text = contentToText(content);
+    const parts = text ? [{ text }] : [];
+    if (content && typeof content === 'object' && content.imageDataUri) {
+        const image = splitDataUri(content.imageDataUri);
+        if (image) {
+            parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
+        }
+    }
+    return parts.length > 0 ? parts : [{ text: '' }];
+}
+
+function contentToOpenAIContent(content) {
+    const text = contentToText(content) || 'Analyze this input.';
+    if (content && typeof content === 'object' && content.imageDataUri) {
+        return [
+            { type: 'text', text },
+            { type: 'image_url', image_url: { url: content.imageDataUri } }
+        ];
+    }
+    return text;
+}
+
+function contentToAnthropicContent(content) {
+    const text = contentToText(content) || 'Analyze this input.';
+    if (content && typeof content === 'object' && content.imageDataUri) {
+        const image = splitDataUri(content.imageDataUri);
+        if (image) {
+            return [
+                { type: 'image', source: { type: 'base64', media_type: image.mimeType, data: image.data } },
+                { type: 'text', text }
+            ];
+        }
+    }
+    return text;
 }
 
 function getSupportedCodeProviderOrder(config, availableProviders = getAvailableProviders(config || {}), requestedOverride = null) {
@@ -478,7 +583,7 @@ class UnifiedAgentClient {
         const apiKey = this.config.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
         const messages = this.history.map(m => ({
             role: m.role,
-            content: m.content
+            content: contentToAnthropicContent(m.content)
         }));
 
         const response = await axios.post('https://api.anthropic.com/v1/messages', {
@@ -504,7 +609,10 @@ class UnifiedAgentClient {
 
         const messages = [
             { role: 'system', content: this.systemInstruction },
-            ...this.history
+            ...this.history.map(m => ({
+                role: m.role,
+                content: contentToOpenAIContent(m.content)
+            }))
         ];
 
         const response = await axios.post(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
@@ -525,13 +633,15 @@ class UnifiedAgentClient {
         const model = this.config.geminiModel || DEFAULT_GEMINI_MODEL;
         const ai = new GoogleGenAI({ apiKey });
         
+        const recentHistory = this.history.slice(-16);
+        const priorHistory = recentHistory.slice(0, -1);
+        const lastEntry = recentHistory[recentHistory.length - 1] || { content: '' };
+
         // Convert history for Gemini, ensuring parts are correctly structured
-        const geminiHistory = this.history.slice(-16).map(m => ({
+        const geminiHistory = priorHistory.map(m => ({
             role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: String(m.content || '') }]
+            parts: contentToGeminiParts(m.content)
         }));
-        
-        const lastMessage = String(this.history[this.history.length - 1].content || '');
 
         const chat = ai.chats.create({
             model,
@@ -542,7 +652,7 @@ class UnifiedAgentClient {
             history: geminiHistory
         });
 
-        const response = await chat.sendMessage({ message: [{ text: lastMessage }] });
+        const response = await chat.sendMessage({ message: contentToGeminiParts(lastEntry.content) });
         return typeof response.text === 'function' ? response.text() : response.text;
     }
 }
@@ -616,6 +726,7 @@ async function buildInitialObservation(task, workspaceRoot, history = []) {
     const session = readWorkspaceSession(workspaceRoot);
     const gitContext = await getGitContext(workspaceRoot);
     const testCommands = detectTestCommands(workspaceRoot);
+    const userContext = memoryStore.getUserContext(task);
 
     const contextStr = history.length > 0 
         ? `Recent Context:\n${history.slice(-10).map(m => `${m.sender}: ${m.text}`).join('\n')}\n`
@@ -636,6 +747,8 @@ async function buildInitialObservation(task, workspaceRoot, history = []) {
         session.summary || '(none)',
         `Previous task: ${session.lastTask || '(none)'}`,
         `Previous verification: ${session.lastVerification || '(none)'}`,
+        'Long-term user context:',
+        userContext || '(none)',
         'If the task is conversational or trivial, finish directly without inspecting the workspace. For code/workspace tasks, inspect before making edits.'
     ].join('\n');
 }
@@ -644,6 +757,7 @@ async function executeCodeTask(task, options = {}) {
     const workspaceRoot = path.resolve(options.cwd || process.cwd());
     const history = options.history || [];
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
+    const onFinalSummary = typeof options.onFinalSummary === 'function' ? options.onFinalSummary : null;
     const requestApproval = typeof options.requestApproval === 'function'
         ? options.requestApproval
         : async () => true;
@@ -656,7 +770,24 @@ async function executeCodeTask(task, options = {}) {
     const provider = providerOrder[0];
     const client = new UnifiedAgentClient(provider, config, providerOrder);
 
-    let observation = await buildInitialObservation(task, workspaceRoot, history);
+    const initialObservationText = await buildInitialObservation(task, workspaceRoot, history);
+    const relevantMemoryCount = memoryStore.searchInteractions(task, 5).length;
+    onProgress({
+        phase: 'memory',
+        action: 'memory_context',
+        message: `Loaded memory: profile + recent history, ${relevantMemoryCount} direct match${relevantMemoryCount === 1 ? '' : 'es'}`
+    });
+    let observation = options.imageDataUri
+        ? {
+            text: [
+                initialObservationText,
+                '',
+                `[Attached image: ${options.imagePath || 'command-line image'}]`,
+                'Use the attached image as visual context when planning and answering.'
+            ].join('\n'),
+            imageDataUri: options.imageDataUri
+        }
+        : initialObservationText;
 
     let finalSummary = '';
     let finalVerification = '';
@@ -669,6 +800,17 @@ async function executeCodeTask(task, options = {}) {
         const decision = await getAgentDecision(client, observation, { onProgress, step });
         const action = decision.action;
         const input = decision.input || {};
+        try {
+            toolRegistry.validateToolInput(action, input);
+        } catch (e) {
+            observation = [
+                `Previous thought: ${decision.thought || '(none)'}`,
+                `Action: ${action || '(none)'}`,
+                'Observation:',
+                `Error: ${e.message}`
+            ].join('\n');
+            continue;
+        }
 
         // Immediately show the agent's thought/reasoning
         onProgress({
@@ -682,6 +824,16 @@ async function executeCodeTask(task, options = {}) {
             finalSessionSummary = input.sessionSummary || input.summary || task;
             finalSummary = input.summary || 'Task complete.';
             finalVerification = input.verification || 'Not specified.';
+            if (onFinalSummary) {
+                await onFinalSummary({
+                    summary: finalSummary,
+                    verification: finalVerification,
+                    providerInfo: {
+                        provider: client.lastSuccessfulProvider || client.provider || provider,
+                        model: getCodeProviderModel(client.lastSuccessfulProvider || client.provider || provider, config)
+                    }
+                });
+            }
             writeWorkspaceSession(workspaceRoot, {
                 summary: finalSessionSummary,
                 lastTask: task,
@@ -785,16 +937,50 @@ async function executeCodeTask(task, options = {}) {
                 case 'create_folder':
                 case 'system_info':
                 case 'system_automation': {
-                    // Delegate to existing automation logic
-                    toolResult = await executeAction({
-                        type: action,
-                        target: input.target || input.path || input.query // Handle all possible input fields
+                    const executorAction = normalizeExecutorAction(action, input);
+                    const safety = safetyManager.classifyAction(executorAction);
+                    let allowDangerous = false;
+                    let allowApproval = false;
+                    if (safety.tier === safetyManager.TIERS.APPROVAL || safety.tier === safetyManager.TIERS.DANGEROUS) {
+                        const approved = await requestApproval({
+                            type: action,
+                            label: formatActionPreview(action, input),
+                            preview: `${action}: ${formatActionPreview(action, input)}\nSafety: ${safety.tier} (${safety.reason})`
+                        });
+                        if (!approved) {
+                            toolResult = `User denied ${action}: ${formatActionPreview(action, input)}`;
+                            break;
+                        }
+                        allowApproval = safety.tier === safetyManager.TIERS.APPROVAL;
+                        allowDangerous = safety.tier === safetyManager.TIERS.DANGEROUS;
+                    }
+
+                    toolResult = await executeAction(executorAction, {
+                        source: 'code_agent',
+                        allowApproval,
+                        allowDangerous
                     });
                     break;
                 }                default:
                     throw new Error(`Unsupported action: ${action}`);
                 }        } catch (e) {
             toolResult = `Error: ${e.message}`;
+        }
+
+        const evaluation = evaluateActionResult(action, toolResult);
+        if (evaluation) {
+            onProgress({
+                step,
+                phase: 'evaluating',
+                action: 'evaluator',
+                message: `${evaluation.status}: ${evaluation.message}`
+            });
+            toolResult = [
+                toolResult,
+                '',
+                'Evaluation:',
+                `${evaluation.status}: ${evaluation.message}`
+            ].join('\n');
         }
 
         // Log the finished step with result
@@ -858,6 +1044,7 @@ async function executeCodeTask(task, options = {}) {
     }
 
     if (finalSummary) {
+        memoryStore.recordInteraction(task, finalSummary);
         const answeredProvider = client.lastSuccessfulProvider || client.provider || provider;
         return {
             summary: finalSummary,

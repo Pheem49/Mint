@@ -6,6 +6,7 @@ const mcpManager = require('../Plugins/mcp_manager');
 const memoryStore = require('./memory_store');
 const agentOrchestrator = require('./agent_orchestrator');
 const workspaceManager = require('../CLI/workspace_manager');
+const toolRegistry = require('../System/tool_registry');
 
 let ai = null;
 let activeApiKey = '';
@@ -23,6 +24,31 @@ function decodeUnicode(str) {
   } catch (e) {
     return str;
   }
+}
+
+function imageDataUriToInlineData(base64Image) {
+  const fallbackMimeType = "image/png";
+  const match = String(base64Image || '').match(/^data:(image\/[\w.+-]+);base64,([\s\S]+)$/);
+  if (match) {
+    return {
+      mimeType: match[1],
+      data: match[2]
+    };
+  }
+
+  return {
+    mimeType: fallbackMimeType,
+    data: String(base64Image || '').replace(/^data:image\/\w+;base64,/, '')
+  };
+}
+
+function imageDataUriToBase64(base64Image) {
+  return imageDataUriToInlineData(base64Image).data;
+}
+
+function normalizeImageList(base64Image) {
+  if (!base64Image) return [];
+  return Array.isArray(base64Image) ? base64Image.filter(Boolean) : [base64Image];
 }
 
 const systemInstruction = `You are "Mint" (มิ้นท์), a cute, cheerful, and highly helpful female Local AI Desktop Agent. 
@@ -60,7 +86,7 @@ Always respond exactly with valid JSON containing NO MARKDOWN FORMATTING (do not
 {
   "response": "Your conversational reply here (Matches user language).",
   "action": {
-    "type": "none" | "open_url" | "open_app" | "search" | "web_automation" | "create_folder" | "open_file" | "open_folder" | "find_path" | "delete_file" | "clipboard_write" | "system_info" | "plugin" | "learn_file" | "learn_folder" | "system_automation" | "mcp_tool" | "mouse_click" | "mouse_move" | "type_text" | "key_tap",
+    "type": ${toolRegistry.buildChatActionTypeUnion()},
 
     "pluginName": "only if type is plugin",
     "server": "only if type is mcp_tool (server name)",
@@ -103,6 +129,8 @@ NOTE: For date/time queries, ALWAYS use action type "system_info" with an EMPTY 
 
 Input: "อากาศวันนี้เป็นยังไง" or "What's the weather in Bangkok?"
 Output: { "response": "มิ้นท์ไปดูอากาศให้เลยนะคะ", "action": { "type": "system_info", "target": "Bangkok" } }
+
+${toolRegistry.buildToolPromptSection()}
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +166,37 @@ function buildSystemPrompt() {
     }
 
     return systemInstruction + personaInstruction + workspaceSection + pluginManager.getPromptDescriptions() + mcpSection + userContext;
+}
+
+function buildMessageWithRelevantMemory(finalMessage) {
+    if (!finalMessage) return finalMessage;
+    const relevant = memoryStore.searchInteractions(finalMessage, 5);
+    if (relevant.length === 0) return finalMessage;
+
+    const lines = [
+        '[Relevant long-term memory for this user message]',
+        ...relevant.flatMap((item, index) => [
+            `${index + 1}. User: ${item.user_text}`,
+            `   Mint: ${item.ai_text}`
+        ]),
+        '[End relevant memory]',
+        '',
+        finalMessage
+    ];
+    return lines.join('\n');
+}
+
+function validateParsedAction(parsedResult) {
+    if (!parsedResult || !parsedResult.action) {
+        return parsedResult;
+    }
+    try {
+        toolRegistry.validateToolInput(parsedResult.action.type || 'none', parsedResult.action);
+    } catch (error) {
+        parsedResult.response = `${parsedResult.response || ''}\n\n(Note: Mint skipped an invalid action: ${error.message})`.trim();
+        parsedResult.action = { type: 'none', target: '' };
+    }
+    return parsedResult;
 }
 
 function resolveApiKey() {
@@ -357,8 +416,9 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
 
 async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
   try {
+    const images = normalizeImageList(base64Image);
     // 1. Check cache first for text-only messages
-    if (finalMessage && !base64Image && !base64Audio) {
+    if (finalMessage && images.length === 0 && !base64Audio) {
         const cached = memoryStore.getCachedResponse(finalMessage);
         if (cached) return cached;
     }
@@ -371,18 +431,18 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
     let aiResponse;
     const parts = [];
     if (finalMessage) {
-        parts.push({ text: finalMessage });
-    } else if (base64Audio && !base64Image) {
+        parts.push({ text: buildMessageWithRelevantMemory(finalMessage) });
+    } else if (base64Audio && images.length === 0) {
         // Provide a guiding prompt when only audio is provided to ensure Gemini follows instructions
         parts.push({ text: "Please listen to this voice command and respond in Thai with the appropriate JSON action if needed." });
-    } else if (!base64Image && !base64Audio) {
+    } else if (images.length === 0 && !base64Audio) {
         parts.push({ text: "Analyze this input." });
     }
 
-    if (base64Image) {
-        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
+    for (const item of images) {
+        const image = imageDataUriToInlineData(item);
         parts.push({
-            inlineData: { mimeType: "image/png", data: base64Data }
+            inlineData: image
         });
     }
 
@@ -450,6 +510,7 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
     }
     
     // Attach timestamp to the result
+    validateParsedAction(parsedResult);
     parsedResult.timestamp = now;
 
     // Record interaction for long-term memory (non-blocking)
@@ -457,7 +518,7 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
         setImmediate(() => {
             memoryStore.recordInteraction(finalMessage, parsedResult.response);
             // Cache text-only responses
-            if (!base64Image && !base64Audio) {
+            if (images.length === 0 && !base64Audio) {
                 memoryStore.cacheResponse(finalMessage, parsedResult);
             }
         });
@@ -478,8 +539,9 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
   try {
+    const images = normalizeImageList(base64Image);
     // 1. Check cache first
-    if (finalMessage && !base64Image && !base64Audio) {
+    if (finalMessage && images.length === 0 && !base64Audio) {
         const cached = memoryStore.getCachedResponse(finalMessage);
         if (cached) {
             yield { chunk: `{"response":"${cached.response.replace(/"/g, '\\"')}", "action": {"type":"none"}}` };
@@ -495,15 +557,14 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
 
     const parts = [];
     if (finalMessage) {
-        parts.push({ text: finalMessage });
-    } else if (base64Audio && !base64Image) {
+        parts.push({ text: buildMessageWithRelevantMemory(finalMessage) });
+    } else if (base64Audio && images.length === 0) {
         parts.push({ text: "Please listen to this voice command and respond in Thai with the appropriate JSON action if needed." });
-    } else if (!base64Image && !base64Audio) {
+    } else if (images.length === 0 && !base64Audio) {
         parts.push({ text: "Analyze this input." });
     }
-    if (base64Image) {
-        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
-        parts.push({ inlineData: { mimeType: "image/png", data: base64Data } });
+    for (const item of images) {
+        parts.push({ inlineData: imageDataUriToInlineData(item) });
     }
     if (base64Audio) {
         let mimeType = "audio/webm";
@@ -553,6 +614,7 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
     if (parsedResult && typeof parsedResult.response === 'string') {
         parsedResult.response = decodeUnicode(parsedResult.response);
     }
+    validateParsedAction(parsedResult);
     parsedResult.timestamp = now;
 
     // Record for long-term memory
@@ -560,7 +622,7 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
         setImmediate(() => {
             memoryStore.recordInteraction(finalMessage, parsedResult.response);
             // Cache text-only responses
-            if (!base64Image && !base64Audio) {
+            if (images.length === 0 && !base64Audio) {
                 memoryStore.cacheResponse(finalMessage, parsedResult);
             }
         });
@@ -576,6 +638,7 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
 
 async function handleAnthropicChat(finalMessage, base64Image, config) {
     const history = readChatHistory() || [];
+    const images = normalizeImageList(base64Image);
     const apiKey = config.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
     if (isPlaceholder(apiKey)) return { response: "กรุณาใส่ Anthropic API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
 
@@ -589,12 +652,11 @@ async function handleAnthropicChat(finalMessage, base64Image, config) {
     }
 
     const content = [];
-    if (base64Image) {
-        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
-        const mimeType = base64Image.match(/^data:(image\/\w+);base64,/)[1];
+    for (const item of images) {
+        const image = imageDataUriToInlineData(item);
         content.push({
             type: "image",
-            source: { type: "base64", media_type: mimeType, data: base64Data }
+            source: { type: "base64", media_type: image.mimeType, data: image.data }
         });
     }
     content.push({ type: "text", text: finalMessage || "Analyze this." });
@@ -623,6 +685,7 @@ async function handleAnthropicChat(finalMessage, base64Image, config) {
 
 async function handleOpenAIChat(finalMessage, base64Image, config) {
     const history = readChatHistory() || [];
+    const images = normalizeImageList(base64Image);
     const apiKey = config.openaiApiKey || process.env.OPENAI_API_KEY;
     if (isPlaceholder(apiKey)) return { response: "กรุณาใส่ OpenAI API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
 
@@ -636,10 +699,10 @@ async function handleOpenAIChat(finalMessage, base64Image, config) {
     }
 
     const content = [{ type: "text", text: finalMessage || "Analyze this." }];
-    if (base64Image) {
+    for (const item of images) {
         content.push({
             type: "image_url",
-            image_url: { url: base64Image }
+            image_url: { url: item }
         });
     }
     messages.push({ role: "user", content });
@@ -665,6 +728,7 @@ async function handleOpenAIChat(finalMessage, base64Image, config) {
 
 async function handleLocalOpenAIChat(finalMessage, base64Image, config) {
     const history = readChatHistory() || [];
+    const images = normalizeImageList(base64Image);
     const apiKey = 'lm-studio';
     const baseUrl = config.localApiBaseUrl || 'http://localhost:1234/v1';
 
@@ -678,10 +742,10 @@ async function handleLocalOpenAIChat(finalMessage, base64Image, config) {
     }
 
     const content = [{ type: "text", text: finalMessage || "Analyze this." }];
-    if (base64Image) {
+    for (const item of images) {
         content.push({
             type: "image_url",
-            image_url: { url: base64Image }
+            image_url: { url: item }
         });
     }
     messages.push({ role: "user", content });
@@ -710,6 +774,7 @@ async function handleLocalOpenAIChat(finalMessage, base64Image, config) {
 
 async function handleHuggingFaceChat(finalMessage, base64Image, config) {
     const history = readChatHistory() || [];
+    const images = normalizeImageList(base64Image);
     const apiKey = config.hfApiKey || process.env.HF_API_KEY;
     if (isPlaceholder(apiKey)) return { response: "กรุณาใส่ Hugging Face API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
 
@@ -726,10 +791,10 @@ async function handleHuggingFaceChat(finalMessage, base64Image, config) {
     }
 
     const content = [{ type: "text", text: finalMessage || "Analyze this." }];
-    if (base64Image) {
+    for (const item of images) {
         content.push({
             type: "image_url",
-            image_url: { url: base64Image }
+            image_url: { url: item }
         });
     }
     messages.push({ role: "user", content });
@@ -768,12 +833,14 @@ function parseAiResponse(outputText) {
     if (parsedResult && typeof parsedResult.response === 'string') {
         parsedResult.response = decodeUnicode(parsedResult.response);
     }
+    validateParsedAction(parsedResult);
     parsedResult.timestamp = new Date().toISOString();
     return parsedResult;
 }
 
 async function handleOllamaChat(finalMessage, base64Image, base64Audio, config) {
     const history = readChatHistory() || [];
+    const imageInputs = normalizeImageList(base64Image);
     
     const ollamaMessages = [
         { role: 'system', content: buildSystemPrompt() }
@@ -790,11 +857,11 @@ async function handleOllamaChat(finalMessage, base64Image, base64Audio, config) 
     
     let currentContent = finalMessage || 'Analyze this input.';
     let images = [];
-    if (base64Image) {
-        images.push(base64Image.replace(/^data:image\/\w+;base64,/, ''));
+    for (const item of imageInputs) {
+        images.push(imageDataUriToBase64(item));
     }
     
-    if (base64Audio && !base64Image && !finalMessage) {
+    if (base64Audio && imageInputs.length === 0 && !finalMessage) {
         currentContent = "Please analyze this audio requirement based on text if any was transacted, otherwise reply with appropriate action.";
     }
     
@@ -828,6 +895,7 @@ async function handleOllamaChat(finalMessage, base64Image, base64Audio, config) 
             parsedResult = { response: outputText, action: { type: "none", target: "" } };
         }
     }
+    validateParsedAction(parsedResult);
     return parsedResult;
 }
 
@@ -908,7 +976,7 @@ async function translateImageContent(base64Image) {
     const retryDelayMs = [1000, 2500];
 
     try {
-        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
+        const image = imageDataUriToInlineData(base64Image);
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             try {
                 const response = await ai.models.generateContent({
@@ -918,7 +986,7 @@ async function translateImageContent(base64Image) {
                             role: 'user',
                             parts: [
                                 { text: "Extract any English text you see in this image and translate it to Thai. Return ONLY the Thai translation. If there is no text, return 'ไม่พบข้อความ'." },
-                                { inlineData: { mimeType: "image/png", data: base64Data } }
+                                { inlineData: image }
                             ]
                         }
                     ]

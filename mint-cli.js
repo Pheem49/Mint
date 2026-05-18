@@ -9,6 +9,8 @@ process.emit = function (name, data, ...args) {
     return originalEmit.apply(process, [name, data, ...args]);
 };
 const { Command } = require('commander');
+const fs = require('fs');
+const path = require('path');
 const { handleChat, handleGeminiChatStream, resetChat, refreshApiKeyFromConfig, getChatTranscript } = require('./src/AI_Brain/Gemini_API');
 const agentOrchestrator = require('./src/AI_Brain/agent_orchestrator');
 const workspaceManager = require('./src/CLI/workspace_manager');
@@ -21,10 +23,12 @@ const { displayFeatures } = require('./src/CLI/list_features');
 const { readConfig, writeConfig } = require('./src/System/config_manager');
 const { executeCodeTask } = require('./src/CLI/code_agent');
 const { detectCodeIntent, runChatRoutedTask } = require('./src/CLI/chat_router');
+const memoryStore = require('./src/AI_Brain/memory_store');
 const readline = require('readline');
 const { createChatUI } = require('./src/CLI/chat_ui');
 const { runUpdate, runStartupAutoUpdate, shouldRunAutoUpdate } = require('./src/CLI/updater');
 const { runGmailAuth } = require('./src/CLI/gmail_auth');
+const { loadImageAsDataUri, loadClipboardImageAsDataUri } = require('./src/CLI/image_input');
 
 // Startup Info
 const startupConfig = readConfig();
@@ -88,6 +92,68 @@ function formatProgress(info) {
     return ` ${icon} ${colors.bright}${label}${colors.reset} ${color}${content}${colors.reset}`;
 }
 
+function formatMemoryInteractions(interactions, title = 'Remembered interactions') {
+    if (!Array.isArray(interactions) || interactions.length === 0) {
+        return `${title}:\n(no memories found)`;
+    }
+
+    const lines = [`${title}:`];
+    interactions.forEach((item, index) => {
+        const when = item.created_at ? ` (${item.created_at})` : '';
+        const id = item.id ? `#${item.id} ` : '';
+        lines.push(`${index + 1}. ${id}User${when}: ${item.user_text}`);
+        lines.push(`   Mint: ${item.ai_text}`);
+    });
+    return lines.join('\n');
+}
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+function splitResponseSentences(text) {
+    const normalized = String(text || '').replace(/\r\n/g, '\n').trim();
+    if (!normalized) return [];
+
+    const sentences = [];
+    let buffer = '';
+    for (const char of normalized) {
+        buffer += char;
+        if (/[.!?。！？…\n]/u.test(char)) {
+            const sentence = buffer.trim();
+            if (sentence) sentences.push(sentence);
+            buffer = '';
+        }
+    }
+
+    const rest = buffer.trim();
+    if (rest) sentences.push(rest);
+    return sentences.length > 0 ? sentences : [normalized];
+}
+
+function learnSkillFile(filePath) {
+    const targetPath = path.resolve(process.cwd(), filePath);
+    if (!fs.existsSync(targetPath)) {
+        throw new Error(`File not found: ${targetPath}`);
+    }
+
+    const stat = fs.statSync(targetPath);
+    if (!stat.isFile()) {
+        throw new Error(`Path is not a file: ${targetPath}`);
+    }
+
+    const ext = path.extname(targetPath).toLowerCase();
+    if (ext !== '.md' && ext !== '.txt') {
+        throw new Error('Mint learn currently supports .md and .txt files only.');
+    }
+
+    const maxBytes = 256 * 1024;
+    if (stat.size > maxBytes) {
+        throw new Error(`File is too large (${stat.size} bytes). Limit is ${maxBytes} bytes.`);
+    }
+
+    const content = fs.readFileSync(targetPath, 'utf8');
+    return memoryStore.addLearnedSkill(path.basename(targetPath), targetPath, content);
+}
+
 const program = new Command();
 
 program
@@ -123,8 +189,9 @@ program
     .command('chat', { isDefault: true })
     .description('Start interactive chat session with Mint')
     .argument('[message]', 'Initial message to send to Mint')
-    .action(async (message) => {
-        await startInteractiveChat(message);
+    .option('-i, --image <path>', 'Attach an image file to the initial message')
+    .action(async (message, options) => {
+        await startInteractiveChat(message, { imagePath: options.image });
     });
 
 // Onboard Command
@@ -156,6 +223,57 @@ program
     .description('Show list of Mint features and commands')
     .action(() => {
         displayFeatures();
+    });
+
+program
+    .command('learn')
+    .description('Read a local markdown/text file and remember it as a Mint skill')
+    .argument('[filePath]', 'Path to a .md or .txt skill/instruction file')
+    .option('--delete <idOrPathOrName>', 'Delete a learned skill by id, path, or name')
+    .option('--list', 'List learned skills')
+    .action((filePath, options) => {
+        try {
+            if (options.list) {
+                const skills = memoryStore.getLearnedSkills(50);
+                if (skills.length === 0) {
+                    console.log(`\n${colors.gray}No learned skills stored.${colors.reset}\n`);
+                    return;
+                }
+                console.log(`\n${colors.bright}Learned Skills:${colors.reset}`);
+                skills.forEach(skill => {
+                    console.log(`${colors.mint}#${skill.id}${colors.reset} ${skill.name}`);
+                    console.log(`  ${colors.gray}${skill.source_path}${colors.reset}`);
+                });
+                console.log('');
+                return;
+            }
+
+            if (options.delete) {
+                const deleted = memoryStore.deleteLearnedSkill(options.delete);
+                if (deleted > 0) {
+                    console.log(`\n${colors.mint}✓${colors.reset} Deleted learned skill: ${options.delete}\n`);
+                } else {
+                    console.log(`\n${colors.pink}✗${colors.reset} Learned skill not found: ${options.delete}\n`);
+                    process.exitCode = 1;
+                }
+                return;
+            }
+
+            if (!filePath) {
+                throw new Error('Usage: mint learn <path-to-skill.md>');
+            }
+
+            const learned = learnSkillFile(filePath);
+            console.log(`\n${colors.mint}✓${colors.reset} Learned skill: ${learned.name}`);
+            console.log(`${colors.gray}Path: ${learned.source_path}${colors.reset}`);
+            if (learned.stored_length < learned.content_length) {
+                console.log(`${colors.gray}Stored first ${learned.stored_length} of ${learned.content_length} characters.${colors.reset}`);
+            }
+            console.log('');
+        } catch (error) {
+            console.error(`\n${colors.pink}Learn failed:${colors.reset} ${error.message}\n`);
+            process.exitCode = 1;
+        }
     });
 
 // Task Command (Autonomous Background Task)
@@ -299,13 +417,24 @@ program
     .command('code')
     .description('Run Mint in workspace-aware coding mode for the current project')
     .argument('<task>', 'Coding task to execute in the current working directory')
-    .action(async (task) => {
+    .option('-i, --image <path>', 'Attach an image file as context for the coding task')
+    .action(async (task, options) => {
         console.log(`\n${colors.mint}${colors.bright}[Mint Code]${colors.reset} Workspace: ${process.cwd()}`);
-        console.log(`${colors.gray}[Mint Code] Task: ${task}${colors.reset}\n`);
 
         try {
-            const result = await executeCodeTask(task, {
+            let effectiveTask = task;
+            let image = null;
+            if (options.image) {
+                image = loadImageAsDataUri(options.image);
+                console.log(`${colors.gray}[Mint Code] Image: ${image.path}${colors.reset}`);
+            }
+
+            console.log(`${colors.gray}[Mint Code] Task: ${task}${colors.reset}\n`);
+
+            const result = await executeCodeTask(effectiveTask, {
                 cwd: process.cwd(),
+                imageDataUri: image ? image.dataUri : null,
+                imagePath: image ? image.path : null,
                 onProgress: (info) => {
                     console.log(formatProgress(info));
                 },
@@ -330,13 +459,100 @@ program.parseAsync(process.argv).catch((error) => {
 /**
  * The Interactive Chat Loop — Gemini-style TUI
  */
-async function startInteractiveChat(initialMessage = null) {
+async function startInteractiveChat(initialMessage = null, options = {}) {
     let lastResponseText = "";
+    let recentImageContextText = "";
     const formatErrorMessage = (err) => err && err.message ? err.message : String(err || 'Unknown error');
+    const streamAssistantSentences = async (text, appendMessage, metadata = {}, streamMessage = null) => {
+        const sentences = splitResponseSentences(text);
+        if (typeof streamMessage === 'function') {
+            const stream = streamMessage(metadata);
+            for (let index = 0; index < sentences.length; index++) {
+                const prefix = index === 0 ? '' : ' ';
+                stream.appendChunk(`${prefix}${sentences[index]}`);
+                if (index < sentences.length - 1) {
+                    await sleep(90);
+                }
+            }
+            stream.finalize();
+            return;
+        }
+
+        for (let index = 0; index < sentences.length; index++) {
+            appendMessage('assistant', sentences[index], index === 0 ? metadata : {});
+            if (index < sentences.length - 1) {
+                await sleep(90);
+            }
+        }
+    };
+    const sendImageMessage = async ({ images, image, prompt, appendMessage, streamMessage, setThinking, appendCodeStep }) => {
+        const imageList = images || (image ? [image] : []);
+        const message = prompt || 'Analyze this image.';
+        const labels = imageList.map((_, index) => `[Image #${index + 1}]`).join(' ');
+        const displayMessage = labels && message.includes(labels)
+            ? message
+            : `${message}\n${labels}`;
+        appendMessage('user', displayMessage);
+        if (appendCodeStep) {
+            appendCodeStep({
+                thought: imageList.length > 1
+                    ? `Analyzing ${imageList.length} attached images before answering.`
+                    : 'Analyzing the attached image before answering.'
+            });
+        }
+
+        let seconds = 0;
+        setThinking(true, seconds);
+        const timer = setInterval(() => {
+            seconds++;
+            setThinking(true, seconds);
+        }, 1000);
+
+        try {
+            const result = await handleChat(message, imageList.map(item => item.dataUri), null);
+            clearInterval(timer);
+            setThinking(false);
+            const responseText = result.response || '';
+            lastResponseText = responseText;
+            recentImageContextText = [
+                `Recent image context: the user attached ${imageList.length} image(s) labelled ${labels || '[Image #1]'}.`,
+                'The terminal UI displays image attachments as labels only; it does not render thumbnails inside the chat.',
+                `Assistant response to those image(s): ${responseText}`
+            ].join('\n');
+            await streamAssistantSentences(responseText, appendMessage, { providerInfo: result.providerInfo }, streamMessage);
+            return responseText;
+        } catch (err) {
+            clearInterval(timer);
+            setThinking(false);
+            appendMessage('error', formatErrorMessage(err));
+            return '';
+        }
+    };
     
     const ui = await createChatUI({
-        onSubmit: async (text) => {
-            const { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser } = ui;
+        onPasteImage: async () => {
+            try {
+                const image = loadClipboardImageAsDataUri();
+                return { label: image.path, image };
+            } catch (err) {
+                throw new Error(formatErrorMessage(err));
+            }
+        },
+        onSubmit: async (text, submitOptions = {}) => {
+            const { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser, attachImage, setInputText, setPendingPasteText, setFastMode, toggleFastMode, getFastMode } = ui;
+            if (submitOptions.images && submitOptions.images.length > 0) {
+                const images = submitOptions.images.map(item => item.image || item);
+                await sendImageMessage({
+                    images,
+                    prompt: text.trim() || 'Analyze this image.',
+                    appendMessage,
+                    streamMessage,
+                    setThinking,
+                    appendCodeStep
+                });
+                return;
+            }
+
             if (text.startsWith('/')) {
                 if (text.startsWith('/agent')) {
                     const args = text.split(' ');
@@ -428,14 +644,33 @@ async function startInteractiveChat(initialMessage = null) {
                 } else {
                     // Other slash commands
                     const fakeRl = { close: () => { } };
-                    appendMessage('user', text);
-                    await handleSlashCommandUI(text, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode, appendCodeStep, updateWorkspace);
+                    if (!text.startsWith('/image') && !text.startsWith('/paste')) {
+                        appendMessage('user', text);
+                    }
+                    const slashResult = await handleSlashCommandUI(text, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode, appendCodeStep, updateWorkspace, {
+                        sendImageMessage,
+                        formatErrorMessage,
+                        attachImage,
+                        setInputText,
+                        setPendingPasteText,
+                        setFastMode,
+                        toggleFastMode,
+                        getFastMode,
+                        streamAssistantSentences,
+                        streamMessage
+                    });
+                    if (slashResult && slashResult.lastResponseText) {
+                        lastResponseText = slashResult.lastResponseText;
+                    }
                     return;
                 }
             }
             appendMessage('user', text);
 
             const transcript = await getChatTranscript();
+            const contextualHistory = recentImageContextText
+                ? [...transcript, { sender: 'system', text: recentImageContextText, timestamp: new Date().toISOString() }]
+                : transcript;
             if (setMode) setMode('Agent');
 
             let seconds = 0;
@@ -449,29 +684,38 @@ async function startInteractiveChat(initialMessage = null) {
                 const config = require('./src/System/config_manager').readConfig();
                 const availableProviders = require('./src/System/config_manager').getAvailableProviders(config);
                 const preferredProvider = require('./src/CLI/code_agent')._helpers.selectSupportedCodeProvider(config, availableProviders);
+                let streamedFinalSummary = false;
 
                 const result = await executeCodeTask(text, {
                     cwd: process.cwd(),
                     requestApproval,
                     askUser,
                     provider: preferredProvider,
-                    history: transcript,
+                    history: contextualHistory,
                     onProgress: (info) => {
                         if (appendCodeStep) appendCodeStep(info);
+                    },
+                    onFinalSummary: async (info) => {
+                        clearInterval(timer);
+                        setThinking(false);
+                        streamedFinalSummary = true;
+                        await streamAssistantSentences(info.summary, appendMessage, { providerInfo: info.providerInfo }, streamMessage);
                     }
                 });
 
                 clearInterval(timer);
                 setThinking(false);
                 lastResponseText = result.summary;
-                appendMessage('assistant', result.summary, { providerInfo: result.providerInfo });
+                if (!streamedFinalSummary) {
+                    await streamAssistantSentences(result.summary, appendMessage, { providerInfo: result.providerInfo }, streamMessage);
+                }
 
             } catch (err) {
                 clearInterval(timer);
                 setThinking(false);
                 appendMessage('error', formatErrorMessage(err));
             } finally {
-                if (setMode) setMode('Chat');
+                if (setMode) setMode('Agent');
             }
         },
         onExit: () => {
@@ -483,11 +727,24 @@ async function startInteractiveChat(initialMessage = null) {
         }
     });
 
+    // Handle initial image if passed via CLI option.
+    if (options.imagePath) {
+        const { appendMessage, streamMessage, setThinking, appendCodeStep } = ui;
+        const image = loadImageAsDataUri(options.imagePath);
+        const prompt = initialMessage || 'Analyze this image.';
+        await sendImageMessage({ images: [image], prompt, appendMessage, streamMessage, setThinking, appendCodeStep });
+
+        return;
+    }
+
     // Handle initial message if passed via CLI arg
     if (initialMessage) {
         const { appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser } = ui;
         appendMessage('user', initialMessage);
         const transcript = await getChatTranscript();
+        const contextualHistory = recentImageContextText
+            ? [...transcript, { sender: 'system', text: recentImageContextText, timestamp: new Date().toISOString() }]
+            : transcript;
         if (setMode) setMode('Agent');
 
         let seconds = 0;
@@ -501,29 +758,38 @@ async function startInteractiveChat(initialMessage = null) {
             const config = require('./src/System/config_manager').readConfig();
             const availableProviders = require('./src/System/config_manager').getAvailableProviders(config);
             const preferredProvider = require('./src/CLI/code_agent')._helpers.selectSupportedCodeProvider(config, availableProviders);
+            let streamedFinalSummary = false;
 
             const result = await executeCodeTask(initialMessage, {
                 cwd: process.cwd(),
                 requestApproval,
                 askUser,
                 provider: preferredProvider,
-                history: transcript,
+                history: contextualHistory,
                 onProgress: (info) => {
                     if (appendCodeStep) appendCodeStep(info);
+                },
+                onFinalSummary: async (info) => {
+                    clearInterval(timer);
+                    setThinking(false);
+                    streamedFinalSummary = true;
+                    await streamAssistantSentences(info.summary, appendMessage, { providerInfo: info.providerInfo }, streamMessage);
                 }
             });
 
             clearInterval(timer);
             setThinking(false);
             lastResponseText = result.summary;
-            appendMessage('assistant', result.summary, { providerInfo: result.providerInfo });
+            if (!streamedFinalSummary) {
+                await streamAssistantSentences(result.summary, appendMessage, { providerInfo: result.providerInfo }, streamMessage);
+            }
 
         } catch (err) {
             clearInterval(timer);
             setThinking(false);
             appendMessage('error', formatErrorMessage(err));
         } finally {
-            if (setMode) setMode('Chat');
+            if (setMode) setMode('Agent');
         }
     }
 }
@@ -531,7 +797,7 @@ async function startInteractiveChat(initialMessage = null) {
 /**
  * Handles slash commands within the TUI context
  */
-async function handleSlashCommandUI(input, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode, appendCodeStep, updateWorkspace) {
+async function handleSlashCommandUI(input, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode, appendCodeStep, updateWorkspace, helpers = {}) {
     const parts = input.split(' ');
     const command = parts[0].toLowerCase();
     const args = parts.slice(1);
@@ -541,9 +807,14 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
         case '/?':
             appendMessage('system', [
                 'Mint Slash Commands:',
+                '  /image <path> [prompt] — Attach an image from your computer',
+                '  /paste [prompt]   — Attach an image from your clipboard',
+                '  /fast [on|off]    — Hide or show thinking/progress output',
+                '  /learn <path>     — Remember a .md/.txt file as a Mint skill',
                 '  /code <task>      — Force workspace Code Mode',
                 '  /cd <path>        — Change current working directory',
                 '  /models [name]   — List or switch Gemini models',
+                '  /memory [cmd]    — Manage long-term memory',
                 '  /config          — Show current configuration',
                 '  /copy            — Copy last response to clipboard',
                 '  /clear           — Clear conversation history',
@@ -551,6 +822,195 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
                 '  /exit            — Exit Mint'
             ].join('\n'));
             break;
+
+        case '/fast': {
+            if (!helpers.toggleFastMode || !helpers.setFastMode || !helpers.getFastMode) {
+                appendMessage('error', 'Fast mode is not available in this UI.');
+                break;
+            }
+
+            const option = (args[0] || '').toLowerCase();
+            let enabled;
+            if (option === 'on' || option === 'true' || option === '1') {
+                enabled = helpers.setFastMode(true);
+            } else if (option === 'off' || option === 'false' || option === '0') {
+                enabled = helpers.setFastMode(false);
+            } else if (option === 'status') {
+                enabled = helpers.getFastMode();
+            } else {
+                enabled = helpers.toggleFastMode();
+            }
+
+            appendMessage('system', `Fast mode: ${enabled ? 'ON' : 'OFF'}`);
+            break;
+        }
+
+        case '/learn': {
+            const filePath = input.slice(command.length).trim();
+            if (!filePath) {
+                appendMessage('system', 'Usage: /learn <path-to-skill.md>');
+                break;
+            }
+
+            try {
+                const learned = learnSkillFile(filePath);
+                appendMessage('system', [
+                    `✓ Learned skill: ${learned.name}`,
+                    `Path: ${learned.source_path}`,
+                    learned.stored_length < learned.content_length
+                        ? `Stored first ${learned.stored_length} of ${learned.content_length} characters.`
+                        : `Stored ${learned.stored_length} characters.`
+                ].join('\n'));
+            } catch (err) {
+                appendMessage('error', err && err.message ? err.message : String(err || 'Unknown error'));
+            }
+            break;
+        }
+
+        case '/image': {
+            if (args.length === 0) {
+                appendMessage('system', 'Usage: /image <path> [prompt]');
+                break;
+            }
+
+            const imagePath = args[0];
+            const prompt = args.slice(1).join(' ').trim();
+
+            try {
+                const image = loadImageAsDataUri(imagePath);
+                if (helpers.attachImage) {
+                    helpers.attachImage({ label: image.path, image });
+                    if (prompt && helpers.setInputText) {
+                        helpers.setInputText(prompt);
+                    }
+                    appendMessage('system', 'Attached image. Press Enter to send.');
+                } else {
+                    appendMessage('error', 'Image attachment is not available in this UI.');
+                }
+            } catch (err) {
+                appendMessage('error', err && err.message ? err.message : String(err || 'Unknown error'));
+            }
+            break;
+        }
+
+        case '/paste': {
+            try {
+                const image = loadClipboardImageAsDataUri();
+                if (helpers.attachImage) {
+                    helpers.attachImage({ label: image.path, image });
+                    const prompt = args.join(' ').trim();
+                    if (prompt && helpers.setInputText) {
+                        helpers.setInputText(prompt);
+                    }
+                    appendMessage('system', 'Attached clipboard image. Press Enter to send.');
+                } else {
+                    appendMessage('error', 'Image attachment is not available in this UI.');
+                }
+            } catch (err) {
+                appendMessage('error', helpers.formatErrorMessage ? helpers.formatErrorMessage(err) : (err && err.message ? err.message : String(err || 'Unknown error')));
+            }
+            break;
+        }
+
+        case '/memory': {
+            const subCommand = (args[0] || 'list').toLowerCase();
+            const query = args.slice(1).join(' ').trim();
+
+            if (subCommand === 'help') {
+                appendMessage('system', [
+                    'Memory Commands:',
+                    '  /memory list [n]       — Show recent remembered interactions',
+                    '  /memory search <query> — Search remembered interactions',
+                    '  /memory skills        — Show learned skill files',
+                    '  /memory skills delete <id|path|name> — Delete a learned skill',
+                    '  /memory profile        — Show remembered profile fields',
+                    '  /memory context [q]    — Show context Mint injects into prompts',
+                    '  /memory delete <id>    — Delete one remembered interaction',
+                    '  /memory export [path]  — Export memory snapshot as JSON',
+                    '  /memory clear          — Clear episodic interaction memories'
+                ].join('\n'));
+                break;
+            }
+
+            if (subCommand === 'profile') {
+                const profile = memoryStore.getAllProfile();
+                appendMessage('system', Object.keys(profile).length
+                    ? JSON.stringify(profile, null, 2)
+                    : 'No profile memory stored yet.');
+                break;
+            }
+
+            if (subCommand === 'skills') {
+                if ((args[1] || '').toLowerCase() === 'delete') {
+                    const identifier = args.slice(2).join(' ').trim();
+                    if (!identifier) {
+                        appendMessage('system', 'Usage: /memory skills delete <id|path|name>');
+                        break;
+                    }
+                    const deleted = memoryStore.deleteLearnedSkill(identifier);
+                    appendMessage('system', deleted > 0
+                        ? `Deleted learned skill: ${identifier}`
+                        : `Learned skill not found: ${identifier}`);
+                    break;
+                }
+
+                const skills = memoryStore.getLearnedSkills(20);
+                appendMessage('system', skills.length
+                    ? [
+                        'Learned skills:',
+                        ...skills.map((skill) => `#${skill.id} ${skill.name}\n   ${skill.source_path}`)
+                    ].join('\n')
+                    : 'No learned skills stored yet.');
+                break;
+            }
+
+            if (subCommand === 'context') {
+                const ctx = memoryStore.getUserContext(query);
+                appendMessage('system', ctx || 'No memory context stored yet.');
+                break;
+            }
+
+            if (subCommand === 'search') {
+                if (!query) {
+                    appendMessage('system', 'Usage: /memory search <query>');
+                    break;
+                }
+                const results = memoryStore.searchInteractions(query, 10);
+                appendMessage('system', formatMemoryInteractions(results, `Search results for "${query}"`));
+                break;
+            }
+
+            if (subCommand === 'export') {
+                const exportPath = query
+                    ? path.resolve(process.cwd(), query)
+                    : path.join(process.cwd(), `mint-memory-export-${Date.now()}.json`);
+                fs.writeFileSync(exportPath, JSON.stringify(memoryStore.exportMemorySnapshot(), null, 2), 'utf8');
+                appendMessage('system', `Memory exported to: ${exportPath}`);
+                break;
+            }
+
+            if (subCommand === 'delete') {
+                const id = Number.parseInt(args[1] || '', 10);
+                if (!Number.isFinite(id)) {
+                    appendMessage('system', 'Usage: /memory delete <id>');
+                    break;
+                }
+                const deleted = memoryStore.deleteInteractionMemory(id);
+                appendMessage('system', deleted ? `Deleted memory #${id}.` : `Memory #${id} was not found.`);
+                break;
+            }
+
+            if (subCommand === 'clear') {
+                memoryStore.clearInteractionMemories();
+                appendMessage('system', 'Cleared episodic interaction memories. Profile memory is unchanged.');
+                break;
+            }
+
+            const limit = Number.parseInt(args[0] || '10', 10);
+            const interactions = memoryStore.getRecentInteractions(Number.isFinite(limit) ? limit : 10);
+            appendMessage('system', formatMemoryInteractions(interactions, 'Recent remembered interactions'));
+            break;
+        }
 
         case '/cd':
             if (args.length === 0) {
@@ -631,6 +1091,8 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
                 requestApproval,
                 appendCodeStep,
                 setMode,
+                streamAssistantSentences: helpers.streamAssistantSentences,
+                streamMessage: helpers.streamMessage,
                 askUser: () => Promise.resolve(''),
                 history: await getChatTranscript()
             });

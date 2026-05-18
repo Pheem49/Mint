@@ -187,6 +187,7 @@ async function runChatRoutedTask(input, context) {
     }, 1000);
 
     try {
+        let streamedFinalSummary = false;
         const result = await executeCodeTask(text, {
             cwd: process.cwd(),
             requestApproval,
@@ -199,21 +200,32 @@ async function runChatRoutedTask(input, context) {
                 } else {
                     appendMessage('system', `[Code] ${typeof info === 'string' ? info : (info.action || info.phase)}`);
                 }
+            },
+            onFinalSummary: async (info) => {
+                if (typeof context.streamAssistantSentences !== 'function') {
+                    return;
+                }
+                clearInterval(timer);
+                setThinking(false);
+                streamedFinalSummary = true;
+                await context.streamAssistantSentences(info.summary, appendMessage, { providerInfo: info.providerInfo }, context.streamMessage);
             }
         });
         clearInterval(timer);
         setThinking(false);
-        appendMessage('assistant', [
-            `Code Mode finished.`,
-            result.summary,
-            `Verification: ${result.verification}`
-        ].join('\n'), { providerInfo: result.providerInfo });
+        if (!streamedFinalSummary) {
+            appendMessage('assistant', [
+                `Code Mode finished.`,
+                result.summary,
+                `Verification: ${result.verification}`
+            ].join('\n'), { providerInfo: result.providerInfo });
+        }
     } catch (error) {
         clearInterval(timer);
         setThinking(false);
         appendMessage('error', error.message);
     } finally {
-        if (setMode) setMode('Chat');
+        if (setMode) setMode('Agent');
     }
 }
 

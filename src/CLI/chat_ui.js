@@ -12,9 +12,15 @@ const h = React.createElement;
 
 const SLASH_COMMANDS = [
     { cmd: '/help', desc: 'Show available commands' },
+    { cmd: '/image', desc: 'Attach an image from a file path' },
+    { cmd: '/paste', desc: 'Attach an image from the clipboard' },
+    { cmd: '/fast', desc: 'Toggle fast mode (hide thinking)' },
+    { cmd: '/learn', desc: 'Remember a markdown skill file' },
     { cmd: '/code', desc: 'Force workspace Code Mode' },
     { cmd: '/cd', desc: 'Change current working directory' },
     { cmd: '/models', desc: 'List or switch Gemini models' },
+    { cmd: '/memory', desc: 'List, search, clear, or export long-term memory' },
+    { cmd: '/memory skills', desc: 'Show learned skill files' },
     { cmd: '/config', desc: 'Show current configuration' },
     { cmd: '/copy', desc: 'Copy last response to clipboard' },
     { cmd: '/clear', desc: 'Clear conversation history' },
@@ -35,24 +41,75 @@ async function createChatUI(options) {
     const TextInput = (await import('ink-text-input')).default;
     const { useState, useImperativeHandle, forwardRef, createRef, useEffect, useMemo } = React;
 
-    const App = forwardRef(({ onSubmit, onExit, initialHistory = [] }, ref) => {
+    const App = forwardRef(({ onSubmit, onExit, onPasteImage, initialHistory = [] }, ref) => {
         const config = readConfig();
         const { exit } = useApp();
         const [input, setInput] = useState('');
         const [history, setHistory] = useState(initialHistory);
+        const [liveAssistant, setLiveAssistant] = useState(null);
         const [thinking, setThinking] = useState(false);
-        const [mode, setMode] = useState('Chat');
+        const [fastMode, setFastMode] = useState(false);
+        const [mode, setMode] = useState('Agent');
         const [model, setModel] = useState('');
         const [workspace, setWorkspace] = useState(process.cwd());
+        const [pendingImages, setPendingImages] = useState([]);
+        const [pendingImagePrefix, setPendingImagePrefix] = useState('');
+        const [pendingPaste, setPendingPaste] = useState(null);
+        const [pendingPastePrefix, setPendingPastePrefix] = useState('');
 
         // Suggestions State
         const [selectedIndex, setSelectedIndex] = useState(0);
         const inputRef = React.useRef(input);
+        const pendingImagesRef = React.useRef(pendingImages);
+        const pendingImagePrefixRef = React.useRef(pendingImagePrefix);
+        const pendingPasteRef = React.useRef(pendingPaste);
+        const pendingPastePrefixRef = React.useRef(pendingPastePrefix);
+        const liveAssistantRef = React.useRef(liveAssistant);
+        const fastModeRef = React.useRef(fastMode);
+        const suppressPasteCharRef = React.useRef(false);
         const selectedIndexRef = React.useRef(selectedIndex);
+
+        const removePasteArtifact = (value) => {
+            const text = String(value || '');
+            return text.replace(/[vV]$/, '');
+        };
+
+        const normalizeInputText = (value) => {
+            return String(value || '').replace(/\s*[\r\n]+\s*/g, ' ');
+        };
+
+        const shouldStoreAsPastedContent = (value) => {
+            const text = String(value || '');
+            return text.length > 500 || /[\r\n]/.test(text);
+        };
         
         useEffect(() => {
             inputRef.current = input;
         }, [input]);
+
+        useEffect(() => {
+            pendingImagesRef.current = pendingImages;
+        }, [pendingImages]);
+
+        useEffect(() => {
+            pendingImagePrefixRef.current = pendingImagePrefix;
+        }, [pendingImagePrefix]);
+
+        useEffect(() => {
+            pendingPasteRef.current = pendingPaste;
+        }, [pendingPaste]);
+
+        useEffect(() => {
+            pendingPastePrefixRef.current = pendingPastePrefix;
+        }, [pendingPastePrefix]);
+
+        useEffect(() => {
+            liveAssistantRef.current = liveAssistant;
+        }, [liveAssistant]);
+
+        useEffect(() => {
+            fastModeRef.current = fastMode;
+        }, [fastMode]);
 
         useEffect(() => {
             selectedIndexRef.current = selectedIndex;
@@ -81,11 +138,69 @@ async function createChatUI(options) {
                     setModel(model ? `${provider} • ${model}` : provider);
                 }
             },
+            beginAssistantStream: (metadata = {}) => {
+                const msg = { role: 'assistant', text: '', time: new Date(), ...metadata };
+                liveAssistantRef.current = msg;
+                setLiveAssistant(msg);
+                if (metadata.providerInfo) {
+                    const { provider, model } = metadata.providerInfo;
+                    setModel(model ? `${provider} • ${model}` : provider);
+                }
+            },
+            appendAssistantStreamChunk: (chunk) => {
+                const current = liveAssistantRef.current || { role: 'assistant', text: '', time: new Date() };
+                const next = { ...current, text: `${current.text || ''}${chunk}` };
+                liveAssistantRef.current = next;
+                setLiveAssistant(next);
+            },
+            finalizeAssistantStream: () => {
+                const current = liveAssistantRef.current;
+                liveAssistantRef.current = null;
+                setLiveAssistant(null);
+                if (current && String(current.text || '').trim()) {
+                    setHistory(prev => [...prev, current]);
+                }
+            },
             setThinking: (val) => setThinking(val),
             setMode: (val) => setMode(val),
+            setFastMode: (val) => {
+                const next = Boolean(val);
+                fastModeRef.current = next;
+                setFastMode(next);
+                return next;
+            },
+            toggleFastMode: () => {
+                const next = !fastModeRef.current;
+                fastModeRef.current = next;
+                setFastMode(next);
+                return next;
+            },
+            getFastMode: () => fastModeRef.current,
+            setInputText: (val) => setInput(val || ''),
+            setPendingPasteText: (text) => {
+                const normalized = normalizeInputText(text);
+                setPendingPaste({ text: normalized, label: `[Pasted Content ${normalized.length} chars]` });
+                setPendingPastePrefix('');
+                setInput('');
+            },
             updateStatusModel: (val) => setModel(val),
             updateWorkspace: (val) => setWorkspace(val),
+            attachImage: (image) => {
+                setPendingImages(prev => {
+                    if (prev.length === 0) {
+                        const prefix = normalizeInputText(inputRef.current).trim();
+                        setPendingImagePrefix(prefix);
+                        pendingImagePrefixRef.current = prefix;
+                        setInput('');
+                    }
+                    return [...prev, image];
+                });
+            },
             appendCodeStep: (info) => {
+                if (fastModeRef.current) {
+                    return;
+                }
+
                 let text = '';
                 let label = 'System';
                 let labelColor = 'blueBright';
@@ -95,6 +210,9 @@ async function createChatUI(options) {
                     text = info;
                 } else {
                     const { action, phase, target, message, thought } = info;
+                    if (action === 'memory_context' && process.env.MINT_SHOW_MEMORY_TRACE !== '1') {
+                        return;
+                    }
                     if (thought) {
                         text = thought;
                         label = 'Thinking';
@@ -132,12 +250,75 @@ async function createChatUI(options) {
 
         // Handle exiting and keyboard navigation
         useInput((inputStr, key) => {
+            if (key.escape && pendingImagesRef.current.length > 0) {
+                setPendingImages([]);
+                pendingImagesRef.current = [];
+                setPendingImagePrefix('');
+                pendingImagePrefixRef.current = '';
+                return;
+            }
+
+            if (key.escape && pendingPasteRef.current) {
+                setPendingPaste(null);
+                pendingPasteRef.current = null;
+                setPendingPastePrefix('');
+                pendingPastePrefixRef.current = '';
+                return;
+            }
+
+            if (key.ctrl && key.backspace && pendingImagesRef.current.length > 0) {
+                setPendingImages(prev => prev.slice(0, -1));
+                pendingImagesRef.current = pendingImagesRef.current.slice(0, -1);
+                if (pendingImagesRef.current.length === 0) {
+                    setPendingImagePrefix('');
+                    pendingImagePrefixRef.current = '';
+                }
+                return;
+            }
+
             if (key.escape || (key.ctrl && inputStr === 'c')) {
                 onExit();
                 exit();
             }
 
             const currentInput = inputRef.current;
+            if (key.ctrl && inputStr === 'v') {
+                suppressPasteCharRef.current = true;
+                const inputBeforePaste = currentInput;
+                setInput(prev => removePasteArtifact(prev));
+                if (typeof onPasteImage === 'function') {
+                    Promise.resolve(onPasteImage())
+                        .then((image) => {
+                            if (image) {
+                                setPendingImages(prev => {
+                                    if (prev.length === 0) {
+                                        const prefix = normalizeInputText(inputBeforePaste).trim();
+                                        setPendingImagePrefix(prefix);
+                                        pendingImagePrefixRef.current = prefix;
+                                    }
+                                    return [...prev, image];
+                                });
+                            }
+                        })
+                        .catch((err) => {
+                            setHistory(prev => [...prev, {
+                                role: 'error',
+                                text: err && err.message ? err.message : String(err || 'Unknown error'),
+                                time: new Date()
+                            }]);
+                        })
+                        .finally(() => {
+                            setInput(prev => {
+                                if (prev === `${inputBeforePaste}v` || prev === `${inputBeforePaste}V`) {
+                                    return inputBeforePaste;
+                                }
+                                return removePasteArtifact(prev);
+                            });
+                        });
+                }
+                return;
+            }
+
             const currentShowSuggestions = currentInput.startsWith('/') && !currentInput.includes(' ');
 
             if (currentShowSuggestions) {
@@ -160,10 +341,20 @@ async function createChatUI(options) {
         });
 
         const handleSubmit = (value) => {
-            const text = value.trim();
-            if (!text) return;
+            const text = normalizeInputText(value).trim();
+            const images = pendingImagesRef.current;
+            const imagePrefix = normalizeInputText(pendingImagePrefixRef.current).trim();
+            const imageLabels = images.map((_, index) => `[Image #${index + 1}]`).join(' ');
+            const pasted = pendingPasteRef.current;
+            const pastePrefix = normalizeInputText(pendingPastePrefixRef.current).trim();
+            const submittedText = pasted
+                ? [pastePrefix, pasted.text, text].filter(Boolean).join('\n\n')
+                : images.length > 0
+                    ? [imagePrefix, imageLabels, text].filter(Boolean).join('\n\n')
+                    : text;
+            if (!submittedText && images.length === 0) return;
 
-            if (showSuggestions && suggestions.length > 0) {
+            if (!pasted && images.length === 0 && showSuggestions && suggestions.length > 0) {
                 const picked = suggestions[selectedIndex];
                 if (picked && text !== picked.cmd) {
                     setInput(picked.cmd + ' ');
@@ -172,42 +363,79 @@ async function createChatUI(options) {
             }
 
             setInput('');
-            onSubmit(text);
+            setPendingImages([]);
+            setPendingImagePrefix('');
+            setPendingPaste(null);
+            setPendingPastePrefix('');
+            pendingImagesRef.current = [];
+            pendingImagePrefixRef.current = '';
+            pendingPasteRef.current = null;
+            pendingPastePrefixRef.current = '';
+            onSubmit(submittedText, { images, pasted });
+        };
+
+        const handleInputChange = (value) => {
+            if (shouldStoreAsPastedContent(value)) {
+                const normalized = normalizeInputText(value);
+                const previous = normalizeInputText(inputRef.current).trim();
+                setPendingPaste({ text: normalized, label: `[Pasted Content ${normalized.length} chars]` });
+                setPendingPastePrefix(previous);
+                setInput('');
+                return;
+            }
+
+            const normalizedValue = normalizeInputText(value);
+            if (suppressPasteCharRef.current) {
+                suppressPasteCharRef.current = false;
+                const previous = inputRef.current;
+                if (normalizedValue === `${previous}v` || normalizedValue === `${previous}V`) {
+                    setInput(previous);
+                    return;
+                }
+                if (normalizedValue.length > previous.length && /^[vV]$/.test(normalizedValue.slice(previous.length))) {
+                    setInput(previous);
+                    return;
+                }
+            }
+            setInput(normalizedValue);
+        };
+
+        const renderMessage = (msg, index, keyPrefix = 'msg') => {
+            if (msg.isThought) {
+                return h(Box, { key: `${keyPrefix}-${index}`, flexDirection: 'row', marginBottom: 0, paddingLeft: 2 },
+                    h(Text, { color: 'gray', dimColor: true }, `Thinking: ${msg.text}`)
+                );
+            }
+
+            let name = 'Mint';
+            let nameColor = 'greenBright';
+
+            if (msg.role === 'user') {
+                name = 'You';
+                nameColor = 'cyanBright';
+            } else if (msg.role === 'error') {
+                name = 'Error';
+                nameColor = 'redBright';
+            } else if (msg.role === 'system') {
+                name = msg.label || 'System';
+                nameColor = msg.labelColor || 'blueBright';
+            }
+
+            return h(Box, { key: `${keyPrefix}-${index}`, flexDirection: 'column', marginBottom: 0 },
+                h(Box, null,
+                    h(Text, { bold: true, color: nameColor }, name),
+                    h(Text, { color: 'gray' }, ` ${msg.time instanceof Date ? msg.time.toLocaleTimeString() : ''}`)
+                ),
+                h(Box, { paddingLeft: 2, marginBottom: 1 },
+                    h(Text, null, msg.text)
+                )
+            );
         };
 
         return h(Box, { flexDirection: 'column', paddingX: 1, width: '100%' },
             // Static History: Messages
-            h(Static, { items: history }, (msg, index) => {
-                if (msg.isThought) {
-                    return h(Box, { key: index, flexDirection: 'row', marginBottom: 0, paddingLeft: 2 },
-                        h(Text, { color: 'gray', dimColor: true }, `Thinking: ${msg.text}`)
-                    );
-                }
-
-                let name = 'Mint';
-                let nameColor = 'greenBright';
-                
-                if (msg.role === 'user') {
-                    name = 'You';
-                    nameColor = 'cyanBright';
-                } else if (msg.role === 'error') {
-                    name = 'Error';
-                    nameColor = 'redBright';
-                } else if (msg.role === 'system') {
-                    name = msg.label || 'System';
-                    nameColor = msg.labelColor || 'blueBright';
-                }
-
-                return h(Box, { key: index, flexDirection: 'column', marginBottom: 0 },
-                    h(Box, null,
-                        h(Text, { bold: true, color: nameColor }, name),
-                        h(Text, { color: 'gray' }, ` ${msg.time instanceof Date ? msg.time.toLocaleTimeString() : ''}`)
-                    ),
-                    h(Box, { paddingLeft: 2, marginBottom: 1 },
-                        h(Text, null, msg.text)
-                    )
-                );
-            }),
+            h(Static, { items: history }, (msg, index) => renderMessage(msg, index, 'history')),
+            liveAssistant && renderMessage(liveAssistant, 'live', 'live'),
 
             // Floating (Persistent) UI part
             h(Box, { flexDirection: 'column' },
@@ -233,20 +461,32 @@ async function createChatUI(options) {
                 ),
 
                 // Compact Input Area
-                h(Box, { borderStyle: 'round', borderColor: 'greenBright', paddingX: 1, flexDirection: 'row' },
-                    h(Text, { bold: true, color: 'greenBright' }, '› '),
-                    h(TextInput, { 
-                        value: input, 
-                        onChange: setInput, 
-                        onSubmit: handleSubmit,
-                        placeholder: 'Ask anything...'
-                    })
+                h(Box, { borderStyle: 'round', borderColor: 'greenBright', paddingX: 1, flexDirection: 'column' },
+                    pendingImages.length > 0 && h(Box, null,
+                        pendingImagePrefix && h(Text, { color: 'cyanBright' }, '[Text before] '),
+                        h(Text, { color: 'greenBright' }, pendingImages.map((_, index) => `[Image #${index + 1}]`).join(' ') + ' '),
+                        h(Text, { color: 'gray' }, 'Enter to send, Ctrl+Backspace remove, Esc clear')
+                    ),
+                    pendingPaste && h(Box, null,
+                        pendingPastePrefix && h(Text, { color: 'cyanBright' }, '[Text before] '),
+                        h(Text, { color: 'yellowBright' }, pendingPaste.label),
+                        h(Text, { color: 'gray' }, ' Enter to send, Esc clear')
+                    ),
+                    h(Box, { flexDirection: 'row' },
+                        h(Text, { bold: true, color: 'greenBright' }, '› '),
+                        h(TextInput, {
+                            value: input,
+                            onChange: handleInputChange,
+                            onSubmit: handleSubmit,
+                            placeholder: 'Ask anything...'
+                        })
+                    )
                 ),
 
                 // Status Bar
                 h(Box, { justifyContent: 'space-between' },
                     h(Box, null,
-                        h(Text, { color: 'cyan' }, `[${mode}] `),
+                        h(Text, { color: 'cyan' }, `[${fastMode ? 'Fast' : mode}] `),
                         h(Text, { color: 'magentaBright' }, (model || config.geminiModel || 'gemini').slice(0, 46))
                     ),
                     h(Box, null,
@@ -271,17 +511,25 @@ async function createChatUI(options) {
         appendMessage: (role, text, metadata) => ref.current?.appendMessage(role, text, metadata),
         setThinking: (val) => ref.current?.setThinking(val),
         setMode: (val) => ref.current?.setMode(val),
+        setFastMode: (val) => ref.current?.setFastMode(val),
+        toggleFastMode: () => ref.current?.toggleFastMode(),
+        getFastMode: () => ref.current?.getFastMode(),
+        setInputText: (val) => ref.current?.setInputText(val),
+        setPendingPasteText: (text) => ref.current?.setPendingPasteText(text),
         updateStatusModel: (val) => ref.current?.updateStatusModel(val),
         updateWorkspace: (val) => ref.current?.updateWorkspace(val),
+        attachImage: (image) => ref.current?.attachImage(image),
         appendCodeStep: (info) => ref.current?.appendCodeStep(info),
-        streamMessage: () => {
+        streamMessage: (metadata = {}) => {
             let fullText = '';
+            ref.current?.beginAssistantStream(metadata);
             return {
                 appendChunk: (chunk) => {
                     fullText += chunk;
+                    ref.current?.appendAssistantStreamChunk(chunk);
                 },
                 finalize: () => {
-                    ref.current?.appendMessage('assistant', fullText);
+                    ref.current?.finalizeAssistantStream();
                 }
             };
         },
