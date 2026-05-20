@@ -100,7 +100,7 @@ async function executeAutonomousTask(taskDescription, notifyCallback) {
                     break;
                 case 'write_file':
                     const filePath = expandHome(actionObj.target);
-                    safetyManager.resolveWithinRoot(os.homedir(), filePath);
+                    safetyManager.assertPathCapability(filePath, 'write');
                     if (notifyCallback) notifyCallback(`✍️ กำลังบันทึกไฟล์: ${actionObj.target}`);
                     try {
                         safetyManager.appendActionLog({
@@ -119,6 +119,7 @@ async function executeAutonomousTask(taskDescription, notifyCallback) {
                 case 'delete_file':
                     const delPath = expandHome(actionObj.target);
                     safetyManager.assertActionAllowed({ type: 'delete_file', target: delPath });
+                    safetyManager.assertPathCapability(delPath, 'write');
                     if (notifyCallback) notifyCallback(`🗑️ มิ้นท์ขอย้ายไฟล์ไปที่ถังขยะ: ${actionObj.target}`);
                     const resDel = await deleteFile(delPath);
                     observation = resDel.success ? "File moved to trash." : `Failed: ${resDel.message}`;

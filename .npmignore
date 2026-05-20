@@ -17,7 +17,17 @@ BUILD_AND_RELEASE.md
 NPM_PUBLISH_GUIDE.md
 RELEASE_NOTES.md
 scratch/
-verify_paths.js
+tech_news.txt
+test_knowledge.txt
+index.html
+.codex
+
+# Exclude tests and documentation site artifacts from the npm runtime package
+tests/
+docs/
+
+# Exclude compressed model source archives; keep extracted runtime model files
+models/**/*.zip
 
 # Exclude Git files
 .git/

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { readConfig } = require('./config_manager');
 
 const TIERS = Object.freeze({
     SAFE: 'safe',
@@ -55,6 +56,103 @@ const DANGEROUS_SYSTEM_COMMANDS = new Set(['shutdown', 'restart', 'reboot', 'pow
 
 function normalizeCommand(command) {
     return String(command || '').replace(/\s+/g, ' ').trim();
+}
+
+function expandHome(targetPath) {
+    const value = String(targetPath || '');
+    if (value === '~') return os.homedir();
+    if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2));
+    return value;
+}
+
+function normalizeRootList(paths) {
+    return (Array.isArray(paths) ? paths : [])
+        .filter(Boolean)
+        .map((entry) => path.resolve(expandHome(entry)));
+}
+
+function getPolicy(config = readConfig()) {
+    const enabled = config.safetyEnabled !== false;
+    const fallbackRead = [
+        os.homedir(),
+        process.cwd(),
+        path.join(os.homedir(), 'Desktop'),
+        path.join(os.homedir(), 'Documents'),
+        path.join(os.homedir(), 'Downloads'),
+        path.join(os.homedir(), 'Pictures'),
+        path.join(os.homedir(), 'Music'),
+        path.join(os.homedir(), 'Videos')
+    ];
+    const fallbackWrite = [
+        os.homedir(),
+        process.cwd(),
+        path.join(os.homedir(), 'Desktop'),
+        path.join(os.homedir(), 'Documents'),
+        path.join(os.homedir(), 'Downloads'),
+        path.join(os.homedir(), 'Pictures'),
+        path.join(os.homedir(), 'Music'),
+        path.join(os.homedir(), 'Videos')
+    ];
+
+    return {
+        enabled,
+        sandboxMode: ['off', 'prefer', 'enforce'].includes(config.sandboxMode) ? config.sandboxMode : 'prefer',
+        sandboxCommand: config.sandboxCommand || (process.platform === 'darwin' ? 'sandbox-exec' : process.platform === 'linux' ? 'bwrap' : ''),
+        allowedReadPaths: normalizeRootList(config.allowedReadPaths && config.allowedReadPaths.length ? config.allowedReadPaths : fallbackRead),
+        allowedWritePaths: normalizeRootList(config.allowedWritePaths && config.allowedWritePaths.length ? config.allowedWritePaths : fallbackWrite),
+        blockedPaths: normalizeRootList(config.blockedPaths || []),
+        blockedFileNames: new Set(Array.isArray(config.blockedFileNames) ? config.blockedFileNames : ['.env', 'id_rsa', 'id_ed25519'])
+    };
+}
+
+function isPathWithin(root, targetPath) {
+    const relative = path.relative(root, targetPath);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function resolveCapabilityPath(targetPath, options = {}) {
+    if (!targetPath) throw new Error('Target path is required.');
+
+    const expanded = expandHome(targetPath);
+    if (path.isAbsolute(expanded)) return path.resolve(expanded);
+
+    const firstPart = String(expanded).split(/[/\\]/)[0];
+    const commonHomeFolders = new Set(['Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos']);
+    if (commonHomeFolders.has(firstPart)) {
+        return path.resolve(os.homedir(), expanded);
+    }
+
+    const base = options.defaultBase || process.cwd();
+    return path.resolve(base, expanded);
+}
+
+function assertPathCapability(targetPath, capability = 'read', options = {}) {
+    const policy = getPolicy(options.config);
+    const resolved = resolveCapabilityPath(targetPath, options);
+
+    if (!policy.enabled) return resolved;
+
+    if (policy.blockedFileNames.has(path.basename(resolved))) {
+        throw new Error(`Blocked ${capability} access to sensitive file name: ${path.basename(resolved)}`);
+    }
+
+    const blockedRoot = policy.blockedPaths.find((root) => isPathWithin(root, resolved));
+    if (blockedRoot) {
+        throw new Error(`Blocked ${capability} access to protected path: ${resolved}`);
+    }
+
+    const allowedRoots = capability === 'write' ? policy.allowedWritePaths : policy.allowedReadPaths;
+    const allowed = allowedRoots.some((root) => isPathWithin(root, resolved));
+    if (!allowed) {
+        throw new Error(`Path ${capability} denied by capability policy: ${resolved}`);
+    }
+
+    return resolved;
+}
+
+function getAllowedRoots(capability = 'read', options = {}) {
+    const policy = getPolicy(options.config);
+    return capability === 'write' ? policy.allowedWritePaths : policy.allowedReadPaths;
 }
 
 function classifyShellCommand(command) {
@@ -162,10 +260,14 @@ function appendActionLog(entry, options = {}) {
 
 module.exports = {
     TIERS,
+    getPolicy,
+    getAllowedRoots,
     classifyShellCommand,
     assertShellCommandAllowed,
     classifyAction,
     assertActionAllowed,
+    assertPathCapability,
+    resolveCapabilityPath,
     resolveWithinRoot,
     appendActionLog
 };

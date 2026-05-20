@@ -323,6 +323,7 @@ let chat = null;
 let activeModel = resolveGeminiModel();
 let lastLoggedModel = '';
 const MAX_HISTORY_MESSAGES = 40; // Increased context for deeper reasoning
+const MAX_STORED_HISTORY_MESSAGES = 200;
 
 function createChat(history = []) {
   // Truncate history and strip custom fields like 'timestamp' before passing to SDK
@@ -713,7 +714,7 @@ async function handleAnthropicChat(finalMessage, base64Image, config) {
     const outputText = response.data.content[0].text;
     history.push({ role: 'user', parts: [{ text: finalMessage }] });
     history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_HISTORY_MESSAGES)));
+    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_STORED_HISTORY_MESSAGES)));
 
     return parseAiResponse(outputText);
 }
@@ -756,7 +757,7 @@ async function handleOpenAIChat(finalMessage, base64Image, config) {
     const outputText = response.data.choices[0].message.content;
     history.push({ role: 'user', parts: [{ text: finalMessage }] });
     history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_HISTORY_MESSAGES)));
+    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_STORED_HISTORY_MESSAGES)));
 
     return parseAiResponse(outputText);
 }
@@ -802,7 +803,7 @@ async function handleLocalOpenAIChat(finalMessage, base64Image, config) {
     const outputText = response.data.choices[0].message.content;
     history.push({ role: 'user', parts: [{ text: finalMessage }] });
     history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_HISTORY_MESSAGES)));
+    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_STORED_HISTORY_MESSAGES)));
 
     return parseAiResponse(outputText);
 }
@@ -848,7 +849,7 @@ async function handleHuggingFaceChat(finalMessage, base64Image, config) {
     const outputText = response.data.choices[0].message.content;
     history.push({ role: 'user', parts: [{ text: finalMessage }] });
     history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_HISTORY_MESSAGES)));
+    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_STORED_HISTORY_MESSAGES)));
 
     return parseAiResponse(outputText);
 }
@@ -917,7 +918,7 @@ async function handleOllamaChat(finalMessage, base64Image, base64Audio, config) 
     
     history.push({ role: 'user', parts: [{ text: currentContent }] });
     history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_HISTORY_MESSAGES)));
+    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_STORED_HISTORY_MESSAGES)));
     
     let parsedResult;
     try {
@@ -987,9 +988,6 @@ function historyToTranscript(history) {
 }
 
 async function getChatTranscript() {
-    if (chat) {
-        return historyToTranscript(await chat.getHistory(true));
-    }
     return historyToTranscript(readChatHistory());
 }
 

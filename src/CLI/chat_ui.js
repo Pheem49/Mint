@@ -56,6 +56,8 @@ async function createChatUI(options) {
         const [pendingImagePrefix, setPendingImagePrefix] = useState('');
         const [pendingPaste, setPendingPaste] = useState(null);
         const [pendingPastePrefix, setPendingPastePrefix] = useState('');
+        const [pendingApproval, setPendingApproval] = useState(null);
+        const [approvalChoice, setApprovalChoice] = useState('approve');
 
         // Suggestions State
         const [selectedIndex, setSelectedIndex] = useState(0);
@@ -68,6 +70,8 @@ async function createChatUI(options) {
         const fastModeRef = React.useRef(fastMode);
         const suppressPasteCharRef = React.useRef(false);
         const selectedIndexRef = React.useRef(selectedIndex);
+        const pendingApprovalRef = React.useRef(null);
+        const approvalChoiceRef = React.useRef('approve');
 
         const removePasteArtifact = (value) => {
             const text = String(value || '');
@@ -114,6 +118,18 @@ async function createChatUI(options) {
         useEffect(() => {
             selectedIndexRef.current = selectedIndex;
         }, [selectedIndex]);
+
+        useEffect(() => {
+            pendingApprovalRef.current = pendingApproval;
+            if (pendingApproval) {
+                approvalChoiceRef.current = 'approve';
+                setApprovalChoice('approve');
+            }
+        }, [pendingApproval]);
+
+        useEffect(() => {
+            approvalChoiceRef.current = approvalChoice;
+        }, [approvalChoice]);
 
         const showSuggestions = input.startsWith('/') && !input.includes(' ');
         const suggestions = useMemo(() => {
@@ -245,11 +261,61 @@ async function createChatUI(options) {
                     isThought,
                     time: new Date() 
                 }]);
+            },
+            requestApproval: (request = {}) => {
+                return new Promise((resolve) => {
+                    const approval = {
+                        type: request.type || 'action',
+                        label: request.label || 'Requested action',
+                        preview: request.preview || '',
+                        resolve
+                    };
+                    pendingApprovalRef.current = approval;
+                    setPendingApproval(approval);
+                });
             }
         }));
 
         // Handle exiting and keyboard navigation
         useInput((inputStr, key) => {
+            const approval = pendingApprovalRef.current;
+            if (approval) {
+                const resolveApproval = (approved) => {
+                    pendingApprovalRef.current = null;
+                    setPendingApproval(null);
+                    setHistory(prev => [...prev, {
+                        role: 'system',
+                        label: 'Approval',
+                        labelColor: approved ? 'greenBright' : 'redBright',
+                        text: `${approved ? 'Approved' : 'Denied'}: ${approval.label}`,
+                        time: new Date()
+                    }]);
+                    approval.resolve(approved);
+                };
+
+                if (key.leftArrow || key.rightArrow || key.tab) {
+                    const next = approvalChoiceRef.current === 'approve' ? 'deny' : 'approve';
+                    approvalChoiceRef.current = next;
+                    setApprovalChoice(next);
+                    return;
+                }
+
+                const answer = String(inputStr || '').toLowerCase();
+                if (key.return) {
+                    resolveApproval(approvalChoiceRef.current === 'approve');
+                    return;
+                }
+                if (answer === 'y') {
+                    resolveApproval(true);
+                    return;
+                }
+                if (answer === 'n' || key.escape || (key.ctrl && inputStr === 'c')) {
+                    resolveApproval(false);
+                    return;
+                }
+                return;
+            }
+
             if (key.escape && pendingImagesRef.current.length > 0) {
                 setPendingImages([]);
                 pendingImagesRef.current = [];
@@ -461,8 +527,39 @@ async function createChatUI(options) {
                     ))
                 ),
 
+                pendingApproval && h(Box, {
+                    flexDirection: 'column',
+                    borderStyle: 'single',
+                    borderColor: 'yellow',
+                    paddingX: 1,
+                    marginBottom: 1
+                },
+                    h(Box, null,
+                        h(Text, { bold: true, color: 'yellow' }, 'Approval '),
+                        h(Text, { color: 'gray' }, `[${pendingApproval.type}] `),
+                        h(Text, { color: 'white' }, pendingApproval.label)
+                    ),
+                    pendingApproval.preview && pendingApproval.preview !== pendingApproval.label && h(Box, null,
+                        h(Text, { color: 'gray' }, pendingApproval.preview)
+                    ),
+                    h(Box, null,
+                        h(Text, {
+                            color: approvalChoice === 'approve' ? 'black' : 'greenBright',
+                            backgroundColor: approvalChoice === 'approve' ? 'greenBright' : undefined,
+                            bold: true
+                        }, ' Approve '),
+                        h(Text, { color: 'gray' }, ' '),
+                        h(Text, {
+                            color: approvalChoice === 'deny' ? 'white' : 'redBright',
+                            backgroundColor: approvalChoice === 'deny' ? 'redBright' : undefined,
+                            bold: true
+                        }, ' Deny '),
+                        h(Text, { color: 'gray' }, '  Tab/←/→ Enter')
+                    )
+                ),
+
                 // Compact Input Area
-                h(Box, { borderStyle: 'round', borderColor: 'greenBright', paddingX: 1, flexDirection: 'column' },
+                h(Box, { borderStyle: 'round', borderColor: pendingApproval ? 'gray' : 'greenBright', paddingX: 1, flexDirection: 'column' },
                     pendingImages.length > 0 && h(Box, null,
                         pendingImagePrefix && h(Text, { color: 'cyanBright' }, '[Text before] '),
                         h(Text, { color: 'greenBright' }, pendingImages.map((_, index) => `[Image #${index + 1}]`).join(' ') + ' '),
@@ -477,9 +574,9 @@ async function createChatUI(options) {
                         h(Text, { bold: true, color: 'greenBright' }, '› '),
                         h(TextInput, {
                             value: input,
-                            onChange: handleInputChange,
-                            onSubmit: handleSubmit,
-                            placeholder: 'Ask anything...'
+                            onChange: pendingApproval ? () => {} : handleInputChange,
+                            onSubmit: pendingApproval ? () => {} : handleSubmit,
+                            placeholder: pendingApproval ? 'Approval pending...' : 'Ask anything...'
                         })
                     )
                 ),
@@ -535,7 +632,7 @@ async function createChatUI(options) {
             };
         },
         copyLastResponse: () => false,
-        requestApproval: () => Promise.resolve(true),
+        requestApproval: (request) => ref.current?.requestApproval(request) || Promise.resolve(false),
         askUser: () => Promise.resolve('')
     };
 }

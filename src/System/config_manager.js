@@ -99,7 +99,37 @@ const DEFAULT_CONFIG = {
     enableAgentCollaboration: false,
     enableAutoUpdate: true,
     autoUpdateCheckIntervalHours: 24,
-    lastUpdateCheckAt: ''
+    lastUpdateCheckAt: '',
+    safetyEnabled: true,
+    sandboxMode: 'prefer', // off | prefer | enforce
+    sandboxCommand: process.platform === 'darwin' ? 'sandbox-exec' : process.platform === 'linux' ? 'bwrap' : '',
+    allowedReadPaths: [
+        os.homedir(),
+        process.cwd(),
+        path.join(os.homedir(), 'Desktop'),
+        path.join(os.homedir(), 'Documents'),
+        path.join(os.homedir(), 'Downloads'),
+        path.join(os.homedir(), 'Pictures'),
+        path.join(os.homedir(), 'Music'),
+        path.join(os.homedir(), 'Videos')
+    ],
+    allowedWritePaths: [
+        os.homedir(),
+        process.cwd(),
+        path.join(os.homedir(), 'Desktop'),
+        path.join(os.homedir(), 'Documents'),
+        path.join(os.homedir(), 'Downloads'),
+        path.join(os.homedir(), 'Pictures'),
+        path.join(os.homedir(), 'Music'),
+        path.join(os.homedir(), 'Videos')
+    ],
+    blockedPaths: [
+        path.join(os.homedir(), '.ssh'),
+        path.join(os.homedir(), '.gnupg'),
+        path.join(os.homedir(), '.config', 'mint', 'mint-config.json'),
+        path.join(os.homedir(), '.mint', 'mint-config.json')
+    ],
+    blockedFileNames: ['.env', 'id_rsa', 'id_ed25519']
 };
 
 

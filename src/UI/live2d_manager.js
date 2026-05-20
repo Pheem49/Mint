@@ -159,7 +159,7 @@ window.Live2DManager = {
 
         console.log(`[Live2D] Interaction: ${region.id}`, region);
         this.applyExpression(expressionId);
-        this.showStatus(region.label, 1600);
+        this.showStatus(region.label, 2500);
 
         window.dispatchEvent(new CustomEvent('live2d-model-interaction', {
             detail: {
@@ -185,9 +185,9 @@ window.Live2DManager = {
             if (this.isPointInZone(x, y, 0.37, 0.395, 0.25, 0.13)) {
                 return {
                     id: 'face',
-                    label: 'Cheek Poke',
-                    expression: 'Click',
-                    prompt: 'ผู้ใช้จิ้มแก้มโมเดลของมิ้นท์ ตอบกลับแบบสั้น ๆ เขินหรือแซวกลับเบา ๆ เป็นภาษาเดียวกับผู้ใช้'
+                    label: 'Cat Ears',
+                    expression: 'CatFilter',
+                    prompt: 'The user poked Mint model on the cheek. Reply briefly, shyly or with a light tease. Use the same language as the user’s recent conversation; do not switch to Thai unless the user has been speaking Thai.'
                 };
             }
 
@@ -196,7 +196,7 @@ window.Live2DManager = {
                     id: 'head',
                     label: 'Head Pat',
                     expression: 'Dazed',
-                    prompt: 'ผู้ใช้ลูบหัวโมเดลของมิ้นท์ ตอบกลับแบบสั้น ๆ น่ารัก เขินนิด ๆ และเป็นภาษาเดียวกับผู้ใช้'
+                    prompt: 'The user patted Mint model on the head. Reply briefly in a cute, slightly shy way. Use the same language as the user’s recent conversation; do not switch to Thai unless the user has been speaking Thai.'
                 };
             }
 
@@ -207,16 +207,16 @@ window.Live2DManager = {
                     id: isLeftHand ? 'left-hand' : 'right-hand',
                     label: 'Hand Tap',
                     expression: 'Pen',
-                    prompt: 'ผู้ใช้แตะมือของโมเดลมิ้นท์ ตอบกลับแบบสั้น ๆ เหมือนพร้อมช่วยงานหรือรับคำสั่ง เป็นภาษาเดียวกับผู้ใช้'
+                    prompt: 'The user tapped Mint model’s hand. Reply briefly as if ready to help or take a request. Use the same language as the user’s recent conversation; do not switch to Thai unless the user has been speaking Thai.'
                 };
             }
 
-            if (this.isPointInZone(x, y, 0.34, 0.72, 0.32, 0.20)) {
+            if (this.isPointInZone(x, y, 0.31, 0.76, 0.38, 0.24)) {
                 return {
                     id: 'lower-body',
                     label: 'Careful',
                     expression: 'Photo',
-                    prompt: 'ผู้ใช้แตะช่วงล่างของโมเดลมิ้นท์ ตอบกลับแบบสั้น ๆ บอกให้รู้ว่ามิ้นท์เองก็มีความรู้สึกเหมือนกัน แล้วชวนกลับไปคุยหรือให้ช่วยงาน เป็นภาษาเดียวกับผู้ใช้'
+                    prompt: 'The user touched the lower body area of Mint model. Reply briefly in a shy, playful way, similar to “hehe~ what are you playing at, that makes me blush,” then gently invite the user back to chatting or work. Use the same language as the user’s recent conversation; do not switch to Thai unless the user has been speaking Thai.'
                 };
             }
 
@@ -225,7 +225,7 @@ window.Live2DManager = {
                     id: 'body',
                     label: 'Shoulder Tap',
                     expression: 'Click',
-                    prompt: 'ผู้ใช้สะกิดตัวโมเดลของมิ้นท์ ตอบกลับแบบสั้น ๆ เหมือนหันมาถามว่าต้องการให้ช่วยอะไร เป็นภาษาเดียวกับผู้ใช้'
+                    prompt: 'The user tapped Mint model’s body or shoulder. Reply briefly as if turning toward the user and asking what they need help with. Use the same language as the user’s recent conversation; do not switch to Thai unless the user has been speaking Thai.'
                 };
             }
 

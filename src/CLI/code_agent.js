@@ -11,6 +11,7 @@ const memoryStore = require('../AI_Brain/memory_store');
 const { readWorkspaceSession, writeWorkspaceSession } = require('./code_session_memory');
 const { executeAction } = require('../System/action_executor');
 const toolRegistry = require('../System/tool_registry');
+const sandboxRunner = require('../System/sandbox_runner');
 
 async function webSearch(query, onProgress = () => {}) {
     if (!query) throw new Error('Search query required.');
@@ -476,7 +477,8 @@ async function runShell(workspaceRoot, command) {
         throw new Error('Shell command is required.');
     }
     assertSafeShell(command);
-    const { stdout, stderr } = await execFileAsync('bash', ['-lc', command], {
+    const { stdout, stderr } = await sandboxRunner.runShell(command, {
+        source: 'code_agent',
         cwd: workspaceRoot,
         maxBuffer: 1024 * 1024 * 4
     });

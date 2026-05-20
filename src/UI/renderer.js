@@ -27,6 +27,31 @@ let ttsProvider = 'google';
 let ttsVolume = 1.0;
 let ttsSpeed = 1.0;
 let ttsPitch = 1.0;
+let lastConversationLanguage = 'auto';
+
+function detectConversationLanguage(text) {
+    const value = String(text || '');
+    if (/[\u0E00-\u0E7F]/.test(value)) return 'thai';
+    if (/[A-Za-z]/.test(value)) return 'english';
+    return 'auto';
+}
+
+function rememberConversationLanguage(text) {
+    const detected = detectConversationLanguage(text);
+    if (detected !== 'auto') {
+        lastConversationLanguage = detected;
+    }
+}
+
+function buildInteractionLanguageInstruction() {
+    if (lastConversationLanguage === 'thai') {
+        return 'Current conversation language: Thai. Reply in Thai. Do not reply in English just because this interaction instruction is written in English.';
+    }
+    if (lastConversationLanguage === 'english') {
+        return 'Current conversation language: English. Reply in English. Do not switch to Thai.';
+    }
+    return 'Infer the reply language from the recent conversation before this interaction instruction, not from the language of this instruction.';
+}
 
 // --- Theme Loading ---
 function applyTheme(theme, accentColor, systemTextColor, config = {}) {
@@ -822,11 +847,12 @@ async function loadChatHistory() {
         for (const item of history) {
             if (!item || typeof item.text !== 'string' || !item.text.trim()) continue;
             const sender = item.sender === 'user' ? 'user' : 'ai';
-            if (sender === 'ai') {
-                await appendAiMessages(item.text, { allowDelay: false, timestamp: item.timestamp, providerInfo: item.providerInfo });
-            } else {
-                appendMessage(item.text, sender, null, item.timestamp);
+            if (sender === 'user' && !String(item.text).startsWith('Model interaction:')) {
+                rememberConversationLanguage(item.text);
             }
+            appendMessage(item.text, sender, null, item.timestamp, {
+                providerInfo: sender === 'ai' ? item.providerInfo : null
+            });
         }
     } catch (error) {
         console.error('Failed to load chat history:', error);
@@ -838,6 +864,7 @@ async function sendTextMessage(text, options = {}) {
     const allowSmartContext = options.allowSmartContext !== false;
     const includePendingImage = options.includePendingImage !== false;
     const displayText = options.displayText !== undefined ? options.displayText : cleanText;
+    const trackLanguage = options.trackLanguage !== false;
 
     // We can send either a text message, an image, or both.
     if (!cleanText && (!includePendingImage || !currentBase64Image)) return;
@@ -857,6 +884,9 @@ async function sendTextMessage(text, options = {}) {
 
     // Show user message (with explicit image if available)
     appendMessage(displayText, 'user', imageToSend, now);
+    if (trackLanguage) {
+        rememberConversationLanguage(displayText || cleanText);
+    }
 
     // Show typing early so user knows we are processing
     showTyping();
@@ -941,10 +971,13 @@ window.addEventListener('live2d-model-interaction', async (event) => {
     const prompt = event?.detail?.prompt;
     if (!prompt) return;
     if (window.api && window.api.setAiState) window.api.setAiState('thinking');
-    await sendTextMessage(prompt, {
+    const interactionPrompt = `${prompt}\n\n${buildInteractionLanguageInstruction()}`;
+    const displayPrefix = lastConversationLanguage === 'thai' ? 'แตะโมเดล' : 'Model interaction';
+    await sendTextMessage(interactionPrompt, {
         allowSmartContext: false,
         includePendingImage: false,
-        displayText: `แตะโมเดล: ${event.detail.label || event.detail.region || 'Interaction'}`
+        trackLanguage: false,
+        displayText: `${displayPrefix}: ${event.detail.label || event.detail.region || 'Interaction'}`
     });
 });
 

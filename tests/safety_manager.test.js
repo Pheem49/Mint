@@ -44,4 +44,26 @@ describe('safety_manager', () => {
             fs.rmSync(root, { recursive: true, force: true });
         }
     });
+
+    test('path capability policy allows only configured roots', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-cap-'));
+        const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-outside-'));
+        const config = {
+            safetyEnabled: true,
+            allowedReadPaths: [root],
+            allowedWritePaths: [path.join(root, 'writable')],
+            blockedPaths: [path.join(root, 'secret')],
+            blockedFileNames: ['.env']
+        };
+        try {
+            expect(safety.assertPathCapability(path.join(root, 'note.txt'), 'read', { config })).toBe(path.join(root, 'note.txt'));
+            expect(safety.assertPathCapability(path.join(root, 'writable', 'note.txt'), 'write', { config })).toBe(path.join(root, 'writable', 'note.txt'));
+            expect(() => safety.assertPathCapability(path.join(outside, 'note.txt'), 'read', { config })).toThrow(/denied by capability policy/);
+            expect(() => safety.assertPathCapability(path.join(root, 'secret', 'note.txt'), 'read', { config })).toThrow(/protected path/);
+            expect(() => safety.assertPathCapability(path.join(root, '.env'), 'read', { config })).toThrow(/sensitive file name/);
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+            fs.rmSync(outside, { recursive: true, force: true });
+        }
+    });
 });

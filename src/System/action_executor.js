@@ -17,6 +17,8 @@ const mcpManager = require('../Plugins/mcp_manager');
 const SystemAutomation = require('./system_automation');
 const safetyManager = require('./safety_manager');
 const toolRegistry = require('./tool_registry');
+const os = require('os');
+const path = require('path');
 
 async function executeAction(action, options = {}) {
     if (process.env.MINT_DEBUG === '1') {
@@ -49,17 +51,23 @@ async function executeAction(action, options = {}) {
         case 'web_automation':
             return await performWebAutomation(action.target);
         case 'create_folder':
+            safetyManager.assertPathCapability(action.target, 'write', {
+                defaultBase: path.join(os.homedir(), 'Desktop')
+            });
             createFolder(action.target);
             break;
         case 'open_file': {
+            safetyManager.assertPathCapability(action.target, 'read');
             const fileRes = await openFile(action.target);
             return fileRes || `Successfully opened file: ${action.target} ✅`;
         }
         case 'open_folder': {
+            safetyManager.assertPathCapability(action.target, 'read');
             const folderRes = await openFile(action.target);
             return folderRes || `Successfully opened folder: ${action.target} ✅`;
         }
         case 'delete_file':
+            safetyManager.assertPathCapability(action.target, 'write');
             await deleteFile(action.target);
             break;
         case 'find_path':
@@ -68,8 +76,10 @@ async function executeAction(action, options = {}) {
             clipboard.writeText(action.target);
             break;
         case 'learn_file':
+            safetyManager.assertPathCapability(action.target, 'read');
             return await indexFile(action.target);
         case 'learn_folder':
+            safetyManager.assertPathCapability(action.target, 'read');
             return await indexFolder(action.target);
         case 'system_info':
             return await handleSystemInfo(action.target);
@@ -121,7 +131,8 @@ async function handleSystemInfo(target = '') {
 async function executeFindPath(action) {
     const result = findPath(action.target, {
         type: action.pathType,
-        maxResults: 10
+        maxResults: 10,
+        roots: safetyManager.getAllowedRoots('read')
     });
     if (!result.success) {
         return result.message;

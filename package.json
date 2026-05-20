@@ -8,6 +8,9 @@
     "test": "jest --testPathPatterns=tests/",
     "test:watch": "jest --testPathPatterns=tests/ --watch",
     "build:linux": "electron-builder --linux",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:all": "electron-builder --linux --mac --win",
     "cli": "node mint-cli.js"
   },
   "jest": {
@@ -86,6 +89,25 @@
         "deb"
       ],
       "category": "Utility"
+    },
+    "mac": {
+      "icon": "assets/icon.png",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "icon": "assets/icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     },
     "deb": {
       "packageName": "mint-ai",
