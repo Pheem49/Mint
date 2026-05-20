@@ -186,6 +186,30 @@ function buildMessageWithRelevantMemory(finalMessage) {
     return lines.join('\n');
 }
 
+function stripRelevantMemoryBlock(text) {
+    const input = String(text || '');
+    return input
+        .replace(/\n?\[Relevant long-term memory for this user message\][\s\S]*?\[End relevant memory\]\n?/g, '\n')
+        .replace(/^\s*\[Relevant long-term memory for this user message\][\s\S]*?\[End relevant memory\]\s*/g, '')
+        .replace(/\n?\[LOCAL KNOWLEDGE BASE - USE THIS CONTEXT TO ANSWER\][\s\S]*/g, '')
+        .trim();
+}
+
+function cleanHistoryForStorage(history) {
+    if (!Array.isArray(history)) return [];
+    return history.map(msg => ({
+        ...msg,
+        parts: Array.isArray(msg.parts) 
+            ? msg.parts.map(part => {
+                if (part.text) {
+                    return { ...part, text: stripRelevantMemoryBlock(part.text) };
+                }
+                return part;
+            })
+            : msg.parts
+    }));
+}
+
 function validateParsedAction(parsedResult) {
     if (!parsedResult || !parsedResult.action) {
         return parsedResult;
@@ -285,7 +309,7 @@ function attachProviderInfoToLatestHistory(providerInfo) {
     for (let i = history.length - 1; i >= 0; i -= 1) {
       if (history[i] && history[i].role === 'model') {
         history[i].providerInfo = providerInfo;
-        writeChatHistory(history);
+        writeChatHistory(cleanHistoryForStorage(history));
         return;
       }
     }
@@ -304,7 +328,12 @@ function createChat(history = []) {
   // Truncate history and strip custom fields like 'timestamp' before passing to SDK
   const cleanedHistory = (history || []).map(msg => ({
     role: msg.role,
-    parts: msg.parts
+    parts: msg.parts.map(part => {
+        if (part.text) {
+            return { ...part, text: stripRelevantMemoryBlock(part.text) };
+        }
+        return part;
+    })
   }));
   const truncatedHistory = cleanedHistory.slice(-MAX_HISTORY_MESSAGES);
 
@@ -477,7 +506,7 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
         if (!msg.timestamp) msg.timestamp = now;
     }
 
-    writeChatHistory(history);
+    writeChatHistory(cleanHistoryForStorage(history));
 
     let outputText = '';
     try {
@@ -486,6 +515,8 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
     } catch (e) {
         outputText = String(aiResponse || '');
     }
+
+    outputText = stripRelevantMemoryBlock(outputText);
 
     let parsedResult;
     try {
@@ -507,6 +538,7 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
     // Decode any remaining unicode escapes in the response text
     if (parsedResult && typeof parsedResult.response === 'string') {
         parsedResult.response = decodeUnicode(parsedResult.response);
+        parsedResult.response = stripRelevantMemoryBlock(parsedResult.response);
     }
     
     // Attach timestamp to the result
@@ -584,9 +616,11 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
         } catch (_) {}
         if (chunkText) {
             fullText += chunkText;
-            yield { chunk: chunkText };
+            yield { chunk: stripRelevantMemoryBlock(chunkText) };
         }
     }
+
+    fullText = stripRelevantMemoryBlock(fullText);
 
     // Save history
     const history = await chat.getHistory();
@@ -597,7 +631,7 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
         if (!modelMsg.timestamp) modelMsg.timestamp = now;
         if (!userMsg.timestamp)  userMsg.timestamp  = now;
     }
-    writeChatHistory(history);
+    writeChatHistory(cleanHistoryForStorage(history));
 
     // Parse complete JSON response
     let parsedResult;
@@ -613,6 +647,7 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
     }
     if (parsedResult && typeof parsedResult.response === 'string') {
         parsedResult.response = decodeUnicode(parsedResult.response);
+        parsedResult.response = stripRelevantMemoryBlock(parsedResult.response);
     }
     validateParsedAction(parsedResult);
     parsedResult.timestamp = now;
@@ -678,7 +713,7 @@ async function handleAnthropicChat(finalMessage, base64Image, config) {
     const outputText = response.data.content[0].text;
     history.push({ role: 'user', parts: [{ text: finalMessage }] });
     history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(history.slice(-MAX_HISTORY_MESSAGES));
+    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_HISTORY_MESSAGES)));
 
     return parseAiResponse(outputText);
 }
@@ -721,7 +756,7 @@ async function handleOpenAIChat(finalMessage, base64Image, config) {
     const outputText = response.data.choices[0].message.content;
     history.push({ role: 'user', parts: [{ text: finalMessage }] });
     history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(history.slice(-MAX_HISTORY_MESSAGES));
+    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_HISTORY_MESSAGES)));
 
     return parseAiResponse(outputText);
 }
@@ -767,7 +802,7 @@ async function handleLocalOpenAIChat(finalMessage, base64Image, config) {
     const outputText = response.data.choices[0].message.content;
     history.push({ role: 'user', parts: [{ text: finalMessage }] });
     history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(history.slice(-MAX_HISTORY_MESSAGES));
+    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_HISTORY_MESSAGES)));
 
     return parseAiResponse(outputText);
 }
@@ -813,7 +848,7 @@ async function handleHuggingFaceChat(finalMessage, base64Image, config) {
     const outputText = response.data.choices[0].message.content;
     history.push({ role: 'user', parts: [{ text: finalMessage }] });
     history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(history.slice(-MAX_HISTORY_MESSAGES));
+    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_HISTORY_MESSAGES)));
 
     return parseAiResponse(outputText);
 }
@@ -882,7 +917,7 @@ async function handleOllamaChat(finalMessage, base64Image, base64Audio, config) 
     
     history.push({ role: 'user', parts: [{ text: currentContent }] });
     history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(history.slice(-MAX_HISTORY_MESSAGES));
+    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_HISTORY_MESSAGES)));
     
     let parsedResult;
     try {
@@ -924,7 +959,7 @@ function historyToTranscript(history) {
     const sender = content.role === 'user' ? 'user' : 'ai';
     let text = Array.isArray(content.parts)
       ? content.parts
-        .map((part) => typeof part.text === 'string' ? part.text : '')
+        .map((part) => typeof part.text === 'string' ? stripRelevantMemoryBlock(part.text) : '')
         .filter(Boolean)
         .join('\n')
       : '';

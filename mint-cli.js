@@ -60,6 +60,22 @@ const colors = {
     yellow: "\x1b[33m"
 };
 
+let isExiting = false;
+
+function exitWithGoodbye(code = 0) {
+    if (isExiting) return;
+    isExiting = true;
+
+    process.stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');
+    process.stdout.write('\x1b[?25h');
+    console.log(`\n${colors.pink}Goodbye! See you again soon!${colors.reset}\n`);
+    process.exit(code);
+}
+
+process.once('SIGINT', () => {
+    exitWithGoodbye(0);
+});
+
 function formatProgress(info) {
     if (typeof info === 'string') return `${colors.gray}[Mint Code] ${info}${colors.reset}`;
 
@@ -719,11 +735,7 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
             }
         },
         onExit: () => {
-            // Explicitly restore terminal state and disable ALL mouse tracking modes
-            process.stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l'); 
-            process.stdout.write('\x1b[?25h');   // Show cursor
-            console.log(`\n${colors.pink}Goodbye! See you again soon!${colors.reset}\n`);
-            process.exit(0);
+            exitWithGoodbye(0);
         }
     });
 
@@ -1128,7 +1140,7 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
 
         case '/exit':
         case '/quit':
-            process.exit(0);
+            exitWithGoodbye(0);
             break;
 
         default:

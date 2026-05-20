@@ -277,8 +277,9 @@ async function createChatUI(options) {
             }
 
             if (key.escape || (key.ctrl && inputStr === 'c')) {
-                onExit();
                 exit();
+                onExit();
+                return;
             }
 
             const currentInput = inputRef.current;
@@ -505,7 +506,7 @@ async function createChatUI(options) {
     console.log(`\x1b[90mType naturally to chat. Esc to exit.\x1b[0m\n`);
 
     const ref = createRef();
-    render(h(App, { ref, ...options }));
+    render(h(App, { ref, ...options }), { exitOnCtrlC: false });
 
     return {
         appendMessage: (role, text, metadata) => ref.current?.appendMessage(role, text, metadata),

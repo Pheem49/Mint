@@ -1,11 +1,9 @@
 const { app, BrowserWindow, ipcMain, shell, globalShortcut, clipboard } = require('electron');
 require('dotenv').config();
 
-const { handleChat, resetChat, getChatTranscript, translateImageContent, refreshApiKeyFromConfig } = require('./src/AI_Brain/Gemini_API');
 const { getSystemInfo, getWeather } = require('./src/System/system_info');
 const { readConfig, writeConfig } = require('./src/System/config_manager');
 const { parseCommand } = require('./src/Command_Parser/parser');
-const { executeAction } = require('./src/System/action_executor');
 const { getGoogleTtsUrls } = require('./src/System/google_tts_urls');
 const { createWindowManager } = require('./src/System/window_manager');
 const { createProactiveLoop } = require('./src/System/proactive_loop');
@@ -15,6 +13,18 @@ const { registerIpcHandlers } = require('./src/System/ipc_handlers');
 const systemEvents = require('./src/System/system_events');
 const customWorkflows = require('./src/System/custom_workflows');
 const mcpManager = require('./src/Plugins/mcp_manager');
+
+let geminiServices = null;
+function getGeminiServices() {
+    if (!geminiServices) {
+        geminiServices = require('./src/AI_Brain/Gemini_API');
+    }
+    return geminiServices;
+}
+
+function getActionExecutor() {
+    return require('./src/System/action_executor');
+}
 
 const projectRoot = __dirname;
 const windowManager = createWindowManager(projectRoot);
@@ -26,7 +36,7 @@ const proactiveLoop = createProactiveLoop({
 });
 const screenCapture = createScreenCaptureController({
     projectRoot,
-    translateImageContent,
+    translateImageContent: (...args) => getGeminiServices().translateImageContent(...args),
     getMainWindow: windowManager.getMainWindow
 });
 
@@ -39,16 +49,16 @@ registerIpcHandlers({
     proactiveLoop,
     screenCapture,
     services: {
-        handleChat,
-        resetChat,
-        getChatTranscript,
-        refreshApiKeyFromConfig,
+        handleChat: (...args) => getGeminiServices().handleChat(...args),
+        resetChat: (...args) => getGeminiServices().resetChat(...args),
+        getChatTranscript: (...args) => getGeminiServices().getChatTranscript(...args),
+        refreshApiKeyFromConfig: (...args) => getGeminiServices().refreshApiKeyFromConfig(...args),
         getSystemInfo,
         getWeather,
         readConfig,
         writeConfig,
         parseCommand,
-        executeAction,
+        executeAction: (...args) => getActionExecutor().executeAction(...args),
         getGoogleTtsUrls,
         customWorkflows
     }
@@ -59,14 +69,18 @@ app.whenReady().then(() => {
     const mainWindow = windowManager.createMainWindow();
     windowManager.createTray();
 
-    if (config.showDesktopWidget !== false) {
-        windowManager.createWidgetWindow();
-    }
+    mainWindow.once('ready-to-show', () => {
+        if (config.showDesktopWidget !== false) {
+            setTimeout(() => windowManager.createWidgetWindow(), 300);
+        }
 
-    mcpManager.init().catch(err => console.error('[MCP] Init Error:', err));
+        setTimeout(() => {
+            mcpManager.init().catch(err => console.error('[MCP] Init Error:', err));
 
-    const bridgeManager = require('./src/System/bridge_manager');
-    bridgeManager.init().catch(err => console.error('[BridgeManager] Init Error:', err));
+            const bridgeManager = require('./src/System/bridge_manager');
+            bridgeManager.init().catch(err => console.error('[BridgeManager] Init Error:', err));
+        }, 1000);
+    });
 
     systemEvents.startMonitoring();
     if (config.enableCustomWorkflows !== false) {

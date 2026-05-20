@@ -4,6 +4,35 @@ const { readConfig, writeConfig } = require('../System/config_manager');
 const { installDaemon } = require('../System/daemon_manager');
 const { runGmailAuth } = require('./gmail_auth');
 
+const CUSTOM_MODEL_VALUE = '__custom_model__';
+const ANTHROPIC_MODEL_CHOICES = [
+    'claude-3-5-sonnet-latest',
+    'claude-3-opus-latest',
+    'claude-3-5-haiku-latest'
+];
+const OPENAI_MODEL_CHOICES = [
+    'gpt-4o',
+    'gpt-4o-mini',
+    'o1-preview',
+    'o1-mini'
+];
+
+function buildModelChoices(models, currentModel) {
+    const choices = models.map(model => ({ name: model, value: model }));
+    if (currentModel && !models.includes(currentModel)) {
+        choices.push({ name: `${currentModel} (current)`, value: currentModel });
+    }
+    choices.push({ name: 'Custom...', value: CUSTOM_MODEL_VALUE });
+    return choices;
+}
+
+function resolveCustomModelSelection(answers, modelKey, customKey, fallbackModel) {
+    if (answers[modelKey] !== CUSTOM_MODEL_VALUE) return;
+    const customModel = typeof answers[customKey] === 'string' ? answers[customKey].trim() : '';
+    answers[modelKey] = customModel || fallbackModel;
+    delete answers[customKey];
+}
+
 /**
  * Onboarding Wizard for Mint CLI
  */
@@ -56,10 +85,10 @@ async function runOnboarding(options = {}) {
                 { name: 'Gmail API', value: 'gmail', checked: config.pluginGmailEnabled },
                 { name: 'Notion API', value: 'notion', checked: config.pluginNotionEnabled },
                 new inquirer.Separator(),
-                { name: 'Anthropic (Claude)', value: 'anthropic', checked: config.aiProvider === 'anthropic' || !!config.anthropicApiKey },
-                { name: 'OpenAI (GPT-4o)', value: 'openai', checked: config.aiProvider === 'openai' || !!config.openaiApiKey },
-                { name: 'Hugging Face', value: 'hf', checked: config.aiProvider === 'huggingface' || !!config.hfApiKey },
-                { name: 'Local AI (LM Studio/Ollama)', value: 'local', checked: config.aiProvider === 'local_openai' || (!!config.localApiBaseUrl && config.localApiBaseUrl.length > 0) },
+                { name: 'Anthropic (Claude)', value: 'anthropic', checked: !!config.anthropicApiKey },
+                { name: 'OpenAI (GPT-4o)', value: 'openai', checked: !!config.openaiApiKey },
+                { name: 'Hugging Face', value: 'hf', checked: !!config.hfApiKey },
+                { name: 'Local AI (LM Studio/Ollama)', value: 'local', checked: !!(config.localApiBaseUrl && config.localApiBaseUrl.length > 0) },
                 new inquirer.Separator(),
                 { name: 'Google Search API', value: 'google_search', checked: !!config.googleSearchApiKey },
                 { name: 'Brave Search API', value: 'brave_search', checked: !!config.braveSearchApiKey },
@@ -257,7 +286,23 @@ async function runOnboarding(options = {}) {
                 type: 'input',
                 name: 'anthropicApiKey',
                 message: 'Enter Anthropic API Key:',
-                default: config.anthropicApiKey
+                default: config.anthropicApiKey,
+                validate: (input) => input.trim().length > 0 ? true : 'Anthropic API Key is required when Anthropic is selected.'
+            });
+            dynamicQuestions.push({
+                type: 'list',
+                name: 'anthropicModel',
+                message: 'Select Anthropic model:',
+                choices: buildModelChoices(ANTHROPIC_MODEL_CHOICES, config.anthropicModel),
+                default: config.anthropicModel || 'claude-3-5-sonnet-latest'
+            });
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'anthropicModelCustom',
+                message: 'Enter custom Anthropic model:',
+                default: config.anthropicModel || 'claude-3-5-sonnet-latest',
+                when: (answers) => answers.anthropicModel === CUSTOM_MODEL_VALUE,
+                validate: (input) => input.trim().length > 0 ? true : 'Model name is required.'
             });
         }
 
@@ -266,7 +311,23 @@ async function runOnboarding(options = {}) {
                 type: 'input',
                 name: 'openaiApiKey',
                 message: 'Enter OpenAI API Key:',
-                default: config.openaiApiKey
+                default: config.openaiApiKey,
+                validate: (input) => input.trim().length > 0 ? true : 'OpenAI API Key is required when OpenAI is selected.'
+            });
+            dynamicQuestions.push({
+                type: 'list',
+                name: 'openaiModel',
+                message: 'Select OpenAI model:',
+                choices: buildModelChoices(OPENAI_MODEL_CHOICES, config.openaiModel),
+                default: config.openaiModel || 'gpt-4o'
+            });
+            dynamicQuestions.push({
+                type: 'input',
+                name: 'openaiModelCustom',
+                message: 'Enter custom OpenAI model:',
+                default: config.openaiModel || 'gpt-4o',
+                when: (answers) => answers.openaiModel === CUSTOM_MODEL_VALUE,
+                validate: (input) => input.trim().length > 0 ? true : 'Model name is required.'
             });
         }
 
@@ -297,19 +358,15 @@ async function runOnboarding(options = {}) {
 
     if (dynamicQuestions.length > 0) {
         const extraAnswers = await inquirer.prompt(dynamicQuestions);
+        resolveCustomModelSelection(extraAnswers, 'anthropicModel', 'anthropicModelCustom', config.anthropicModel || 'claude-3-5-sonnet-latest');
+        resolveCustomModelSelection(extraAnswers, 'openaiModel', 'openaiModelCustom', config.openaiModel || 'gpt-4o');
         config = { ...config, ...extraAnswers };
         
     }
 
-    // Ensure aiProvider reflects the selected primary AI. If no optional AI
-    // provider is selected, keep Gemini as the safe default from basic setup.
-    if (!selections.includes('skip')) {
-        if (selections.includes('anthropic')) config.aiProvider = 'anthropic';
-        else if (selections.includes('openai')) config.aiProvider = 'openai';
-        else if (selections.includes('hf')) config.aiProvider = 'huggingface';
-        else if (selections.includes('local')) config.aiProvider = 'local_openai';
-        else config.aiProvider = 'gemini';
-    }
+    // Onboarding treats Gemini as the primary AI. Other providers are optional
+    // configured backends that become available only when credentials are set.
+    config.aiProvider = 'gemini';
 
     // Save configuration
     writeConfig(config);

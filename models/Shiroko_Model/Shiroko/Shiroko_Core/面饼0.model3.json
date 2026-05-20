@@ -1,0 +1,47 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "面饼0.moc3",
+		"Textures": [
+			"面饼0.4096/texture_00.png",
+			"面饼0.4096/texture_01.png",
+			"面饼0.4096/texture_02.png",
+			"面饼0.4096/texture_03.png"
+		],
+		"Physics": "面饼0.physics3.json",
+		"DisplayInfo": "面饼0.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": ["ParamEyeLOpen", "ParamEyeROpen"]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": ["ParamMouthOpenY"]
+		}
+	],
+	"FileReferences": {
+		"Moc": "面饼0.moc3",
+		"Textures": [
+			"面饼0.4096/texture_00.png",
+			"面饼0.4096/texture_01.png",
+			"面饼0.4096/texture_02.png",
+			"面饼0.4096/texture_03.png"
+		],
+		"Physics": "面饼0.physics3.json",
+		"DisplayInfo": "面饼0.cdi3.json",
+		"Expressions": [
+			{ "Name": "Apron", "File": "围裙.exp3.json" },
+			{ "Name": "Dazed", "File": "呆猫.exp3.json" },
+			{ "Name": "Photo", "File": "拍照.exp3.json" },
+			{ "Name": "Glasses", "File": "眼镜.exp3.json" },
+			{ "Name": "Pen", "File": "拿笔.exp3.json" },
+			{ "Name": "Click", "File": "点一下.exp3.json" },
+			{ "Name": "CatFilter", "File": "猫咪滤镜.exp3.json" },
+			{ "Name": "DazedEyes", "File": "呆猫眼珠摇晃.exp3.json" }
+		]
+	}
+}

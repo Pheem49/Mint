@@ -237,6 +237,14 @@ function getTopPatterns(limit = 8) {
 
 const MAX_INTERACTION_MEMORIES = 1000;
 
+function stripRelevantMemoryBlock(text) {
+    return String(text || '')
+        .replace(/\n?\[Relevant long-term memory for this user message\][\s\S]*?\[End relevant memory\]\n?/g, '\n')
+        .replace(/^\s*\[Relevant long-term memory for this user message\][\s\S]*?\[End relevant memory\]\s*/g, '')
+        .replace(/\n?\[LOCAL KNOWLEDGE BASE - USE THIS CONTEXT TO ANSWER\][\s\S]*/g, '')
+        .trim();
+}
+
 function addInteractionMemory(userMessage, aiResponseText, keywords = []) {
     try {
         const db = getDb();
@@ -591,7 +599,11 @@ function getCachedResponse(query) {
             // Optional: check TTL (e.g., 24 hours)
             const age = Date.now() - new Date(row.created_at).getTime();
             if (age < 24 * 60 * 60 * 1000) {
-                return JSON.parse(row.response);
+                const parsed = JSON.parse(row.response);
+                if (parsed && typeof parsed.response === 'string') {
+                    parsed.response = stripRelevantMemoryBlock(parsed.response);
+                }
+                return parsed;
             }
         }
     } catch (_) {}
@@ -601,11 +613,19 @@ function getCachedResponse(query) {
 function cacheResponse(query, responseObj) {
     try {
         const hash = crypto.createHash('md5').update(query.trim().toLowerCase()).digest('hex');
+        const sanitized = (responseObj && typeof responseObj === 'object')
+            ? {
+                ...responseObj,
+                response: typeof responseObj.response === 'string'
+                    ? stripRelevantMemoryBlock(responseObj.response)
+                    : responseObj.response
+            }
+            : responseObj;
         getDb().prepare(`
             INSERT INTO response_cache (query_hash, response, created_at)
             VALUES (?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(query_hash) DO UPDATE SET response = excluded.response, created_at = CURRENT_TIMESTAMP
-        `).run(hash, JSON.stringify(responseObj));
+        `).run(hash, JSON.stringify(sanitized));
     } catch (_) {}
 }
 

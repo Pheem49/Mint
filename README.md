@@ -26,6 +26,7 @@ Mint is an AI assistant built to live in your desktop and terminal. It combines 
 - **Learned Skills:** `mint learn <path>` and `/learn <path>` import local `.md` or `.txt` files as persistent skill/instruction memory. Learned skills can be listed and deleted.
 - **Provider Fallback:** The agent can fall back across supported providers, for example from local OpenAI-compatible backends to Gemini.
 - **Provider Visibility:** Desktop and CLI responses show the provider/model that actually answered, including fallback results.
+- **Live2D Assistant Model:** Desktop UI now supports a Live2D Shiroko model with expression cycling, lip sync while speaking, transparent interaction-area overlays, and click-to-chat reactions.
 - **Google Workspace + Notion Integrations:** Gmail, Google Calendar, and Notion plugins can be configured from onboarding.
 - **Safety Manager:** Central safety policy for shell commands and actions, including deterministic command blocking, permission tiers, path guards, and action logs.
 - **Refactored Main Process:** Electron startup is split into focused modules for windows, IPC, proactive loop, screen capture, and action execution.
@@ -51,6 +52,11 @@ Mint CLI is not just a chat wrapper. It is a workspace-aware agent loop.
 ### Desktop Assistant
 
 - **Electron Desktop UI:** Transparent desktop assistant window with tray support.
+- **Live2D Model View:** Optional Live2D assistant panel with model show/hide persistence. New installs start with the model hidden until the user enables it.
+- **Live2D Expressions:** Cycle model expressions from the toolbar and show an on-canvas expression toast for the active expression.
+- **Click Reactions:** Named model interaction zones (`Head Pat`, `Cheek Poke`, `Hand Tap`, `Shoulder Tap`, and `Careful`) can trigger temporary expressions and send short contextual prompts into the normal chat flow.
+- **Interaction Guide Overlay:** Toggle a transparent overlay that labels clickable model areas without blocking pointer input.
+- **Voice Lip Sync:** When Mint speaks, Live2D mouth parameters animate during TTS playback and reset when speech ends.
 - **Floating Widget:** Always-on-top quick access widget.
 - **Spotlight Launcher:** `Alt+Space` quick prompt window.
 - **Screen Vision:** Capture the screen and send selected regions to the AI.

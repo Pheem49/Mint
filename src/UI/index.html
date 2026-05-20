@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agent Mint</title>
   <link rel="stylesheet" href="styles.css">
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Mali:wght@400;500;600&family=Prompt:wght@400;500&family=Sarabun:wght@400;500&display=swap" rel="stylesheet">
 </head>
 
 <body>
@@ -16,44 +15,79 @@
         <div class="status-indicator"></div>
         <h1>Agent Mint</h1>
       </div>
-      <button class="clear-btn" id="clear-btn" aria-label="Clear chat" title="Clear chat history">
-        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
-          <path d="M10 11v6"></path>
-          <path d="M14 11v6"></path>
-          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
-        </svg>
-      </button>
-      <button class="settings-btn" id="settings-btn" aria-label="Settings" title="Settings">
-        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path
-            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z">
-          </path>
-        </svg>
-      </button>
-      <button class="minimize-btn" id="minimize-btn" aria-label="Minimize" title="Minimize to Tray">
-        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="5" y1="12" x2="19" y2="12"></line>
-        </svg>
-      </button>
-      <button class="maximize-btn" id="maximize-btn" aria-label="Maximize">
-        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-        </svg>
-      </button>
-      <button class="close-btn" id="close-btn" aria-label="Close">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
-      </button>
+      <div class="header-actions" aria-label="Model controls">
+        <button class="toggle-model-btn" id="toggle-model-btn" aria-label="Toggle Model" title="Toggle Model Visibility">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+          <span>Model</span>
+        </button>
+        <button class="change-expression-btn" id="change-expression-btn" aria-label="Change Expression" title="Change Shiroko's Expression">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3l1.912 5.886L20 10.8l-4.544 3.414L17.368 21 12 17.186 6.632 21l1.912-6.786L4 10.8l6.088-1.914z"></path>
+          </svg>
+          <span>Expression</span>
+        </button>
+        <button class="interaction-guide-btn" id="interaction-guide-btn" aria-label="Show Interaction Areas" title="Show Interaction Areas">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 2v3"></path>
+            <path d="M12 19v3"></path>
+            <path d="M2 12h3"></path>
+            <path d="M19 12h3"></path>
+          </svg>
+          <span>Areas</span>
+        </button>
+      </div>
+      <div class="header-utility" aria-label="Chat and app controls">
+        <button class="clear-btn" id="clear-btn" aria-label="Clear chat" title="Clear chat history">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+            <path d="M10 11v6"></path>
+            <path d="M14 11v6"></path>
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+          </svg>
+          <span>Clear</span>
+        </button>
+        <button class="settings-btn" id="settings-btn" aria-label="Settings" title="Settings">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z">
+            </path>
+          </svg>
+          <span>Settings</span>
+        </button>
+      </div>
+      <div class="window-controls" aria-label="Window controls">
+        <button class="minimize-btn" id="minimize-btn" aria-label="Minimize" title="Minimize to Tray">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+        <button class="maximize-btn" id="maximize-btn" aria-label="Maximize">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          </svg>
+        </button>
+        <button class="close-btn" id="close-btn" aria-label="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
     </header>
 
     <!-- Proactive Suggestion Bar (Smart Suggestion Engine) -->
@@ -68,56 +102,80 @@
       </div>
     </div>
 
-    <main class="chat-container" id="chat-container">
-      <div class="message ai-message initial">
-        <div class="message-bubble">
-          Hello! I'm Mint, your personal AI assistant ✨ <br>
-          Is there anything I can help you with, Master? You can ask me to "open YouTube", "create a folder", or just chat with me! 💖
+    <div class="assistant-workspace">
+      <section class="model-stage" aria-label="Assistant model">
+        <div class="model-shell" id="model-shell">
+          <div class="model-glow"></div>
+          <div class="model-mount" id="model-mount">
+            <img class="model-placeholder" src="../../assets/Agent_Mint.png" alt="Mint model placeholder" style="display: none; opacity: 0;">
+          </div>
+          <div class="expression-toast" id="expression-toast" aria-live="polite"></div>
+          <div class="interaction-guide" id="interaction-guide" aria-hidden="true">
+            <div class="interaction-zone zone-head"><span>Head Pat</span></div>
+            <div class="interaction-zone zone-face"><span>Cheek Poke</span></div>
+            <div class="interaction-zone zone-left-hand"><span>Hand Tap</span></div>
+            <div class="interaction-zone zone-right-hand"><span>Hand Tap</span></div>
+            <div class="interaction-zone zone-body"><span>Shoulder Tap</span></div>
+            <div class="interaction-zone zone-lower"><span>Careful</span></div>
+          </div>
+          <div class="model-status" id="model-status" aria-live="polite"></div>
+          <div class="model-shadow"></div>
         </div>
-      </div>
-    </main>
+      </section>
 
-    <footer class="input-area">
-      <div id="image-preview-container" style="display: none; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px 8px 0 0; position: relative;">
-        <img id="image-preview" src="" style="max-height: 80px; max-width: 100%; border-radius: 4px;">
-        <button id="remove-image-btn" type="button" style="position: absolute; top: 5px; right: 10px; background: red; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer;">&times;</button>
-      </div>
+      <div class="conversation-panel">
+        <main class="chat-container" id="chat-container">
+          <div class="message ai-message initial" style="display: none; opacity: 0;">
+            <div class="message-bubble">
+              Hello! I'm Mint, your personal AI assistant ✨ <br>
+              Is there anything I can help you with, Master? You can ask me to "open YouTube", "create a folder", or just chat with me! 💖
+            </div>
+          </div>
+        </main>
 
-      <!-- Smart Context Toggle -->
-      <div class="smart-context-bar">
-        <label class="toggle-switch">
-          <input type="checkbox" id="smart-context-toggle">
-          <span class="slider round"></span>
-        </label>
-        <span class="smart-context-label">🧠 Smart Context <span style="font-size: 10px; opacity: 0.7;">(Auto-Screen)</span></span>
-      </div>
+        <footer class="input-area">
+          <div id="image-preview-container" style="display: none; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px 8px 0 0; position: relative;">
+            <img id="image-preview" src="" style="max-height: 80px; max-width: 100%; border-radius: 4px;">
+            <button id="remove-image-btn" type="button" style="position: absolute; top: 5px; right: 10px; background: red; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer;">&times;</button>
+          </div>
 
-      <form id="chat-form">
-        <button type="button" id="vision-btn" aria-label="Screen Vision" title="Screen Vision">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-            <circle cx="12" cy="12" r="3"></circle>
-          </svg>
-        </button>
-        <input type="text" id="chat-input" placeholder="Type or speak a command..." autocomplete="off">
-        <button type="button" id="mic-btn" aria-label="Microphone">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-            <line x1="12" y1="19" x2="12" y2="23"></line>
-            <line x1="8" y1="23" x2="16" y2="23"></line>
-          </svg>
-        </button>
-        <button type="submit" id="send-btn">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13"></line>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-          </svg>
-        </button>
-      </form>
-    </footer>
+          <!-- Smart Context Toggle -->
+          <div class="smart-context-bar">
+            <label class="toggle-switch">
+              <input type="checkbox" id="smart-context-toggle">
+              <span class="slider round"></span>
+            </label>
+            <span class="smart-context-label">🧠 Smart Context <span style="font-size: 10px; opacity: 0.7;">(Auto-Screen)</span></span>
+          </div>
+
+          <form id="chat-form">
+            <button type="button" id="vision-btn" aria-label="Screen Vision" title="Screen Vision">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+            <input type="text" id="chat-input" placeholder="Type or speak a command..." autocomplete="off">
+            <button type="button" id="mic-btn" aria-label="Microphone">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            </button>
+            <button type="submit" id="send-btn">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </form>
+        </footer>
+      </div>
+    </div>
   </div>
 
   <script src="renderer.js"></script>

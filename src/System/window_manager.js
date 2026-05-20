@@ -10,8 +10,10 @@ function createWindowManager(projectRoot) {
 
     function createMainWindow() {
         mainWindow = new BrowserWindow({
-            width: 600,
-            height: 800,
+            width: 1180,
+            height: 860,
+            minWidth: 900,
+            minHeight: 680,
             icon: path.join(projectRoot, 'assets', 'icon.png'),
             webPreferences: {
                 preload: path.join(projectRoot, 'preload.js'),

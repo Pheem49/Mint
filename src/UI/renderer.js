@@ -11,6 +11,9 @@ const visionBtn = document.getElementById('vision-btn');
 const imagePreviewContainer = document.getElementById('image-preview-container');
 const imagePreview = document.getElementById('image-preview');
 const removeImageBtn = document.getElementById('remove-image-btn');
+const modelMount = document.getElementById('model-mount');
+const modelShell = document.getElementById('model-shell');
+const modelStatus = document.getElementById('model-status');
 
 // Proactive Assistant elements
 const proactiveBar = document.getElementById('proactive-bar');
@@ -392,11 +395,17 @@ let currentAudioPlayer = null;
 
 function speakText(text, options = {}) {
     if (window.api && window.api.setAiState) window.api.setAiState('speaking');
-    const onEnd = typeof options.onEnd === 'function' ? options.onEnd : null;
+    const onEnd = typeof options.onEnd === 'function' ? options.onEnd : () => {};
+    
+    const wrappedOnEnd = () => {
+        if (window.Live2DManager) Live2DManager.stopLipSync();
+        onEnd();
+    };
+
     return new Promise(async (resolve) => {
         if (!enableVoiceReply) {
             if (window.api && window.api.setAiState) window.api.setAiState('idle');
-            if (onEnd) onEnd();
+            wrappedOnEnd();
             return resolve();
         }
 
@@ -406,15 +415,19 @@ function speakText(text, options = {}) {
             currentAudioPlayer.currentTime = 0;
             currentAudioPlayer = null;
         }
+        if (window.Live2DManager) Live2DManager.stopLipSync();
+
         if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel();
         }
 
         if (!text || !text.trim()) {
             if (window.api && window.api.setAiState) window.api.setAiState('idle');
-            if (onEnd) onEnd();
+            wrappedOnEnd();
             return resolve();
         }
+
+        if (window.Live2DManager) Live2DManager.startLipSync();
 
         try {
             if (ttsProvider !== 'native') {
@@ -424,7 +437,7 @@ function speakText(text, options = {}) {
                     const playNext = () => {
                         if (i >= urls.length) {
                             if (window.api && window.api.setAiState) window.api.setAiState('idle');
-                            if (onEnd) onEnd();
+                            wrappedOnEnd();
                             return resolve();
                         }
                         const audio = new Audio(urls[i].url);
@@ -443,7 +456,7 @@ function speakText(text, options = {}) {
                         };
                         audio.play().catch(e => {
                             console.error("Audio playback prevented:", e);
-                            fallbackSpeak(text, onEnd, resolve);
+                            fallbackSpeak(text, wrappedOnEnd, resolve);
                         });
                     };
                     playNext();
@@ -455,7 +468,7 @@ function speakText(text, options = {}) {
         }
 
         // Fallback
-        fallbackSpeak(text, onEnd, resolve);
+        fallbackSpeak(text, wrappedOnEnd, resolve);
     });
 }
 
@@ -756,14 +769,52 @@ function scrollToBottom() {
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
+function loadScript(src) {
+    return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) {
+            resolve();
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = resolve;
+        script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+        document.body.appendChild(script);
+    });
+}
+
+async function loadLive2DWhenIdle() {
+    if (!modelMount || window.Live2DManager) return;
+    try {
+        await loadScript('../../node_modules/@hazart-pkg/live2d-core/live2dcubismcore.min.js');
+        await loadScript('../../node_modules/pixi.js/dist/browser/pixi.min.js');
+        await loadScript('../../node_modules/pixi-live2d-display/dist/cubism4.min.js');
+        await loadScript('live2d_manager.js');
+        if (window.Live2DManager) {
+            await Live2DManager.loadModel(modelMount, modelStatus, modelShell);
+        }
+    } catch (err) {
+        console.error('[Live2D] Deferred load failed:', err);
+        if (modelStatus) {
+            modelStatus.classList.add('is-error');
+            modelStatus.textContent = 'Live2D model unavailable.';
+        }
+    }
+}
+
 async function loadChatHistory() {
     try {
         const history = await window.api.getChatHistory();
+        const initial = chatContainer.querySelector('.message.initial');
+        
         if (!Array.isArray(history) || history.length === 0) {
+            if (initial) {
+                initial.style.display = 'flex';
+                initial.style.opacity = '1';
+            }
             return;
         }
 
-        const initial = chatContainer.querySelector('.message.initial');
         if (initial) {
             initial.remove();
         }
@@ -785,23 +836,27 @@ async function loadChatHistory() {
 async function sendTextMessage(text, options = {}) {
     const cleanText = (text || '').trim();
     const allowSmartContext = options.allowSmartContext !== false;
+    const includePendingImage = options.includePendingImage !== false;
+    const displayText = options.displayText !== undefined ? options.displayText : cleanText;
 
     // We can send either a text message, an image, or both.
-    if (!cleanText && !currentBase64Image) return;
+    if (!cleanText && (!includePendingImage || !currentBase64Image)) return;
 
     // Cache the image for sending and UI, then clear
-    let imageToSend = currentBase64Image;
+    let imageToSend = includePendingImage ? currentBase64Image : null;
 
     // Clear input & UI for explicit images
     chatInput.value = '';
-    currentBase64Image = null;
-    imagePreviewContainer.style.display = 'none';
-    imagePreview.src = '';
+    if (includePendingImage) {
+        currentBase64Image = null;
+        imagePreviewContainer.style.display = 'none';
+        imagePreview.src = '';
+    }
 
     const now = new Date().toISOString();
 
     // Show user message (with explicit image if available)
-    appendMessage(cleanText, 'user', imageToSend, now);
+    appendMessage(displayText, 'user', imageToSend, now);
 
     // Show typing early so user knows we are processing
     showTyping();
@@ -882,6 +937,17 @@ chatForm.addEventListener('submit', throttle(async (e) => {
     await sendTextMessage(text);
 }, 500));
 
+window.addEventListener('live2d-model-interaction', async (event) => {
+    const prompt = event?.detail?.prompt;
+    if (!prompt) return;
+    if (window.api && window.api.setAiState) window.api.setAiState('thinking');
+    await sendTextMessage(prompt, {
+        allowSmartContext: false,
+        includePendingImage: false,
+        displayText: `แตะโมเดล: ${event.detail.label || event.detail.region || 'Interaction'}`
+    });
+});
+
 // --- Image Paste and Drag-n-Drop Support ---
 function handleImageFile(file) {
     if (!file || !file.type.startsWith('image/')) return;
@@ -938,6 +1004,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     chatInput.focus();
     await loadTheme();
     await loadChatHistory();
+    const scheduleLive2DLoad = window.requestIdleCallback || ((callback) => setTimeout(callback, 750));
+    scheduleLive2DLoad(() => loadLive2DWhenIdle());
 });
 
 // Proactive OS Notifications (Battery, Network, etc.)
@@ -1027,6 +1095,61 @@ const smartContextToggle = document.getElementById('smart-context-toggle');
 if (smartContextToggle) {
     smartContextToggle.addEventListener('change', () => {
         window.api.toggleProactive(smartContextToggle.checked);
+    });
+}
+
+// Toggle Live2D Model visibility
+const toggleModelBtn = document.getElementById('toggle-model-btn');
+const assistantWorkspace = document.querySelector('.assistant-workspace');
+
+if (toggleModelBtn && assistantWorkspace) {
+    toggleModelBtn.addEventListener('click', () => {
+        const isHidden = assistantWorkspace.classList.toggle('model-hidden');
+        toggleModelBtn.classList.toggle('active', isHidden);
+        
+        // Save preference to local storage
+        localStorage.setItem('mint-model-hidden', String(isHidden));
+        
+        // Refit model if shown
+        if (!isHidden && window.Live2DManager && Live2DManager.model) {
+            // Wait for transition
+            setTimeout(() => {
+                // Trigger a resize event to refit
+                window.dispatchEvent(new Event('resize'));
+            }, 450);
+        }
+    });
+
+    // Restore preference on load
+    const savedModelHidden = localStorage.getItem('mint-model-hidden');
+    const savedHidden = savedModelHidden === null || savedModelHidden === 'true';
+    if (savedHidden) {
+        assistantWorkspace.classList.add('model-hidden');
+        toggleModelBtn.classList.add('active');
+    }
+}
+
+// Cycle Shiroko's Expression
+const changeExpressionBtn = document.getElementById('change-expression-btn');
+if (changeExpressionBtn) {
+    changeExpressionBtn.addEventListener('click', () => {
+        if (window.Live2DManager) {
+            Live2DManager.cycleExpression();
+        }
+    });
+}
+
+// Toggle Live2D interaction area guide
+const interactionGuideBtn = document.getElementById('interaction-guide-btn');
+if (interactionGuideBtn && modelShell) {
+    const savedGuideVisible = localStorage.getItem('mint-interaction-guide-visible') === 'true';
+    modelShell.classList.toggle('show-interaction-guide', savedGuideVisible);
+    interactionGuideBtn.classList.toggle('active', savedGuideVisible);
+
+    interactionGuideBtn.addEventListener('click', () => {
+        const isVisible = modelShell.classList.toggle('show-interaction-guide');
+        interactionGuideBtn.classList.toggle('active', isVisible);
+        localStorage.setItem('mint-interaction-guide-visible', String(isVisible));
     });
 }
 

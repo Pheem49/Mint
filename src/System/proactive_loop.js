@@ -1,9 +1,23 @@
 const { BrowserWindow, desktopCapturer, screen, powerMonitor } = require('electron');
 const path = require('path');
-const { analyzeAndSuggest } = require('../AI_Brain/proactive_engine');
-const { recordBehavior, getBehaviorSummary } = require('../AI_Brain/behavior_memory');
 
 const IDLE_THRESHOLD_SEC = 300;
+
+let proactiveEngine = null;
+function getProactiveEngine() {
+    if (!proactiveEngine) {
+        proactiveEngine = require('../AI_Brain/proactive_engine');
+    }
+    return proactiveEngine;
+}
+
+let behaviorMemory = null;
+function getBehaviorMemory() {
+    if (!behaviorMemory) {
+        behaviorMemory = require('../AI_Brain/behavior_memory');
+    }
+    return behaviorMemory;
+}
 
 function createProactiveLoop({ app, projectRoot, readConfig, getMainWindow }) {
     let proactiveGlowWindow = null;
@@ -29,6 +43,8 @@ function createProactiveLoop({ app, projectRoot, readConfig, getMainWindow }) {
             if (!primarySource || !primarySource.thumbnail) return;
 
             const base64Image = primarySource.thumbnail.toJPEG(60).toString('base64');
+            const { analyzeAndSuggest } = getProactiveEngine();
+            const { recordBehavior, getBehaviorSummary } = getBehaviorMemory();
             const result = await analyzeAndSuggest(base64Image, getBehaviorSummary());
 
             if (result && result.message && Array.isArray(result.suggestions)) {
@@ -130,7 +146,7 @@ function createProactiveLoop({ app, projectRoot, readConfig, getMainWindow }) {
         stop,
         startIdleWatcher,
         isRunning: () => Boolean(proactiveIntervalHandle),
-        recordBehavior
+        recordBehavior: (...args) => getBehaviorMemory().recordBehavior(...args)
     };
 }
 
