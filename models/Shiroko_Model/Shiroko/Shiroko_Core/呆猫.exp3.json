@@ -5,6 +5,36 @@
             "Id": "Param93",
             "Value": 1.0,
             "Blend": "Add"
+        },
+        {
+            "Id": "Param91",
+            "Value": 0.45,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamAngleY",
+            "Value": -8.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamAngleZ",
+            "Value": 8.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamEyeBallY",
+            "Value": -0.35,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthForm",
+            "Value": 0.25,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthOpenY",
+            "Value": 0.25,
+            "Blend": "Add"
         }
     ]
 }

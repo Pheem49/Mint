@@ -1172,6 +1172,76 @@ if (changeExpressionBtn) {
     });
 }
 
+// Cycle Live2D accessories
+const accessoryStorageKey = 'mint-live2d-accessories';
+const accessoryCycleBtn = document.getElementById('accessory-cycle-btn');
+const accessoryCycleLabel = document.getElementById('accessory-cycle-label');
+const accessoryCycleOrder = [null, 'glasses', 'pen', 'cat'];
+const accessoryLabels = {
+    glasses: 'Glasses',
+    pen: 'Pen',
+    cat: 'Cat'
+};
+let savedAccessories = {};
+try {
+    savedAccessories = JSON.parse(localStorage.getItem(accessoryStorageKey) || '{}') || {};
+} catch (_) {
+    savedAccessories = {};
+}
+
+const getSavedAccessoryId = () => accessoryCycleOrder.find(id => id && savedAccessories[id] === true) || null;
+
+function updateAccessoryCycleButton(accessoryId) {
+    if (!accessoryCycleBtn) return;
+    const isActive = Boolean(accessoryId);
+    const label = accessoryId ? accessoryLabels[accessoryId] : 'Accessory';
+    accessoryCycleBtn.classList.toggle('active', isActive);
+    accessoryCycleBtn.setAttribute('aria-pressed', String(isActive));
+    accessoryCycleBtn.title = `Accessory: ${label}`;
+    if (accessoryCycleLabel) accessoryCycleLabel.textContent = label;
+}
+
+let currentAccessoryId = getSavedAccessoryId();
+updateAccessoryCycleButton(currentAccessoryId);
+
+if (accessoryCycleBtn) {
+    accessoryCycleBtn.addEventListener('click', () => {
+        const currentIndex = accessoryCycleOrder.indexOf(currentAccessoryId);
+        currentAccessoryId = accessoryCycleOrder[(currentIndex + 1) % accessoryCycleOrder.length];
+        updateAccessoryCycleButton(currentAccessoryId);
+
+        if (window.Live2DManager) {
+            Live2DManager.setExclusiveAccessory(currentAccessoryId, true);
+        } else {
+            savedAccessories = {};
+            if (currentAccessoryId) savedAccessories[currentAccessoryId] = true;
+            localStorage.setItem(accessoryStorageKey, JSON.stringify(savedAccessories));
+        }
+    });
+}
+
+// Toggle Live2D model interaction
+const toggleInteractionBtn = document.getElementById('toggle-interaction-btn');
+if (toggleInteractionBtn) {
+    const savedInteractionEnabled = localStorage.getItem('mint-model-interaction-enabled') !== 'false';
+    toggleInteractionBtn.classList.toggle('active', savedInteractionEnabled);
+    toggleInteractionBtn.setAttribute('aria-pressed', String(savedInteractionEnabled));
+    if (window.Live2DManager) {
+        Live2DManager.setInteractionEnabled(savedInteractionEnabled);
+    }
+
+    toggleInteractionBtn.addEventListener('click', () => {
+        const isEnabled = !toggleInteractionBtn.classList.contains('active');
+        toggleInteractionBtn.classList.toggle('active', isEnabled);
+        toggleInteractionBtn.setAttribute('aria-pressed', String(isEnabled));
+        if (window.Live2DManager) {
+            Live2DManager.setInteractionEnabled(isEnabled, true);
+        } else {
+            localStorage.setItem('mint-model-interaction-enabled', String(isEnabled));
+        }
+    });
+}
+
 // Toggle Live2D interaction area guide
 const interactionGuideBtn = document.getElementById('interaction-guide-btn');
 if (interactionGuideBtn && modelShell) {

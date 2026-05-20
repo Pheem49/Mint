@@ -159,6 +159,8 @@ h1 {
 
 .toggle-model-btn,
 .change-expression-btn,
+.accessory-cycle-btn,
+.toggle-interaction-btn,
 .interaction-guide-btn,
 .clear-btn,
 .settings-btn {
@@ -184,6 +186,8 @@ h1 {
 
 .toggle-model-btn svg,
 .change-expression-btn svg,
+.accessory-cycle-btn svg,
+.toggle-interaction-btn svg,
 .interaction-guide-btn svg,
 .clear-btn svg,
 .settings-btn svg {
@@ -234,6 +238,38 @@ h1 {
   background: rgba(251, 191, 36, 0.15);
   border-color: rgba(251, 191, 36, 0.2);
   color: #fbbf24;
+}
+
+.accessory-cycle-btn:hover,
+.accessory-cycle-btn.active {
+  background: rgba(168, 85, 247, 0.14);
+  border-color: rgba(168, 85, 247, 0.24);
+  color: #c4b5fd;
+}
+
+.toggle-interaction-btn:hover,
+.toggle-interaction-btn.active {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.24);
+  color: #86efac;
+}
+
+.toggle-interaction-btn:not(.active) {
+  color: #f87171;
+}
+
+.toggle-interaction-btn:not(.active):hover {
+  background: rgba(248, 113, 113, 0.14);
+  border-color: rgba(248, 113, 113, 0.22);
+  color: #f87171;
+}
+
+.toggle-interaction-btn .interaction-off-mark {
+  opacity: 0;
+}
+
+.toggle-interaction-btn:not(.active) .interaction-off-mark {
+  opacity: 1;
 }
 
 .interaction-guide-btn:hover {
@@ -304,8 +340,8 @@ h1 {
 .model-shell {
   width: 100%;
   height: 100%;
-  max-width: 620px;
-  max-height: 720px;
+  max-width: none;
+  max-height: none;
   min-height: 480px;
   display: grid;
   place-items: center;
@@ -406,52 +442,52 @@ h1 {
 }
 
 .zone-head {
-  left: 35%;
-  top: 30%;
-  width: 29%;
-  height: 9%;
+  left: 34%;
+  top: 25.5%;
+  width: 32%;
+  height: 15%;
   border-radius: 48% 48% 42% 42%;
 }
 
 .zone-face {
-  left: 37%;
-  top: 39.5%;
-  width: 25%;
-  height: 13%;
+  left: 38%;
+  top: 40%;
+  width: 24%;
+  height: 11.5%;
   border-radius: 50%;
   background: rgba(244, 114, 182, 0.1);
   border-color: rgba(244, 114, 182, 0.5);
 }
 
 .zone-left-hand {
-  left: 17%;
-  top: 65%;
-  width: 19%;
-  height: 17%;
+  left: 22%;
+  top: 68%;
+  width: 20%;
+  height: 16%;
   border-radius: 48% 42% 56% 44%;
 }
 
 .zone-right-hand {
-  left: 70%;
-  top: 67%;
-  width: 17%;
-  height: 17%;
+  left: 61%;
+  top: 68%;
+  width: 19%;
+  height: 16%;
   border-radius: 42% 54% 44% 56%;
 }
 
 .zone-body {
-  left: 36%;
-  top: 55%;
+  left: 37%;
+  top: 55.5%;
   width: 29%;
-  height: 15%;
+  height: 14%;
   border-radius: 38% 38% 48% 48%;
 }
 
 .zone-lower {
-  left: 31%;
-  top: 76%;
-  width: 38%;
-  height: 24%;
+  left: 38%;
+  top: 77%;
+  width: 30%;
+  height: 23%;
   border-radius: 46% 46% 24% 24%;
   background: rgba(251, 191, 36, 0.08);
   border-color: rgba(251, 191, 36, 0.45);
@@ -1058,6 +1094,8 @@ input:checked + .slider:before {
 
   .toggle-model-btn,
   .change-expression-btn,
+.accessory-cycle-btn,
+  .toggle-interaction-btn,
   .interaction-guide-btn {
     width: 34px;
     padding: 0;
@@ -1065,6 +1103,8 @@ input:checked + .slider:before {
 
   .toggle-model-btn span,
   .change-expression-btn span,
+.accessory-cycle-btn span,
+  .toggle-interaction-btn span,
   .interaction-guide-btn span {
     display: none;
   }

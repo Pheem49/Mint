@@ -5,6 +5,11 @@
             "Id": "Param76",
             "Value": 1.0,
             "Blend": "Add"
+        },
+        {
+            "Id": "Param91",
+            "Value": 0.75,
+            "Blend": "Add"
         }
     ]
 }

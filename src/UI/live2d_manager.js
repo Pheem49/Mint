@@ -7,6 +7,33 @@ window.Live2DManager = {
     resizeObserver: null,
     lipSyncInterval: null,
     expIndex: 0,
+    interactionEnabled: true,
+    interactionStorageKey: 'mint-model-interaction-enabled',
+    accessoryStorageKey: 'mint-live2d-accessories',
+    activeAccessories: {},
+    accessoryOrder: ['glasses', 'pen', 'cat'],
+    accessoryParams: {
+        glasses: { paramId: 'Param96', label: 'Glasses' },
+        pen: { paramId: 'Param68', label: 'Pen' },
+        cat: { paramId: 'Param54', label: 'Cat Filter' }
+    },
+    pointerTrackingEnabled: true,
+    pointerTrackingFrame: null,
+    pointerTracking: {
+        targetX: 0,
+        targetY: 0,
+        currentX: 0,
+        currentY: 0,
+        lastMoveAt: 0
+    },
+    pointerTrackingConfig: {
+        focusX: 0.35,
+        focusY: 0.35,
+        rangeX: 0.35,
+        rangeY: 0.35,
+        smoothing: 0.18
+    },
+    baseModelPosition: null,
     lastInteractionAt: 0,
     expressionToastTimeout: null,
     expressionParamIds: [
@@ -39,6 +66,8 @@ window.Live2DManager = {
 
     async loadModel(mountEl, statusEl, shellEl) {
         this.statusEl = statusEl; // Store for later use
+        this.interactionEnabled = this.getSavedInteractionEnabled();
+        this.activeAccessories = this.getSavedAccessories();
         if (!mountEl) return;
         if (statusEl) {
             statusEl.classList.remove('is-error');
@@ -74,7 +103,7 @@ window.Live2DManager = {
 
             const modelUrl = new URL('../../models/Shiroko_Model/Shiroko/Shiroko_Core/%E9%9D%A2%E9%A5%BC0.model3.json', window.location.href).href;
             this.model = await window.PIXI.live2d.Live2DModel.from(modelUrl, {
-                autoInteract: true
+                autoInteract: false
             });
             this.expressionToastEl = document.getElementById('expression-toast');
 
@@ -82,8 +111,9 @@ window.Live2DManager = {
             this.app.stage.addChild(this.model);
 
             // -- Interaction Setup --
-            this.model.interactive = true;
-            this.model.buttonMode = true;
+            this.setInteractionEnabled(this.interactionEnabled);
+            this.setupPointerTracking(mountEl);
+            this.applyAccessories();
 
             // Tap Interaction. This model does not define Cubism HitAreas, so use
             // normalized model coordinates to provide stable region reactions.
@@ -105,11 +135,15 @@ window.Live2DManager = {
                 const heightScale = mountHeight / Math.max(modelHeight, 1);
                 
                 // Reduced zoom to 2.0 as requested
-                const scale = Math.min(widthScale, heightScale) * 1.8;
+                const scale = Math.min(widthScale, heightScale) * 1.85;
 
                 this.model.scale.set(scale);
                 // Adjusted Y offset to 1.0 as requested
-                this.model.position.set(mountWidth / 2, mountHeight / 2 + mountHeight * 0.6);
+                this.baseModelPosition = {
+                    x: mountWidth / 2,
+                    y: mountHeight / 2 + mountHeight * 0.55
+                };
+                this.applyModelFollowOffset();
             };
 
             requestAnimationFrame(() => {
@@ -147,7 +181,7 @@ window.Live2DManager = {
     },
 
     handleModelTap(event) {
-        if (!this.model) return;
+        if (!this.model || !this.interactionEnabled) return;
 
         const now = Date.now();
         if (now - this.lastInteractionAt < 3000) return;
@@ -182,7 +216,7 @@ window.Live2DManager = {
             if (!point) return null;
             const { x, y } = point;
 
-            if (this.isPointInZone(x, y, 0.37, 0.395, 0.25, 0.13)) {
+            if (this.isPointInZone(x, y, 0.38, 0.40, 0.24, 0.115)) {
                 return {
                     id: 'face',
                     label: 'Cat Ears',
@@ -191,7 +225,7 @@ window.Live2DManager = {
                 };
             }
 
-            if (this.isPointInZone(x, y, 0.35, 0.30, 0.29, 0.09)) {
+            if (this.isPointInZone(x, y, 0.34, 0.255, 0.32, 0.15)) {
                 return {
                     id: 'head',
                     label: 'Head Pat',
@@ -200,8 +234,8 @@ window.Live2DManager = {
                 };
             }
 
-            const isLeftHand = this.isPointInZone(x, y, 0.17, 0.65, 0.19, 0.17);
-            const isRightHand = this.isPointInZone(x, y, 0.70, 0.67, 0.17, 0.17);
+            const isLeftHand = this.isPointInZone(x, y, 0.22, 0.68, 0.20, 0.16);
+            const isRightHand = this.isPointInZone(x, y, 0.61, 0.68, 0.19, 0.16);
             if (isLeftHand || isRightHand) {
                 return {
                     id: isLeftHand ? 'left-hand' : 'right-hand',
@@ -211,7 +245,7 @@ window.Live2DManager = {
                 };
             }
 
-            if (this.isPointInZone(x, y, 0.31, 0.76, 0.38, 0.24)) {
+            if (this.isPointInZone(x, y, 0.38, 0.77, 0.30, 0.23)) {
                 return {
                     id: 'lower-body',
                     label: 'Careful',
@@ -220,7 +254,7 @@ window.Live2DManager = {
                 };
             }
 
-            if (this.isPointInZone(x, y, 0.36, 0.55, 0.29, 0.15)) {
+            if (this.isPointInZone(x, y, 0.37, 0.555, 0.29, 0.14)) {
                 return {
                     id: 'body',
                     label: 'Shoulder Tap',
@@ -271,6 +305,112 @@ window.Live2DManager = {
         this.showExpressionToast(`Expression: ${nextExp.label}`);
     },
 
+    setInteractionEnabled(isEnabled, persist = false) {
+        this.interactionEnabled = Boolean(isEnabled);
+        if (persist) {
+            this.saveInteractionEnabled(this.interactionEnabled);
+        }
+        if (!this.model) return;
+
+        this.model.interactive = this.interactionEnabled;
+        this.model.buttonMode = this.interactionEnabled;
+    },
+
+    getSavedInteractionEnabled() {
+        try {
+            return localStorage.getItem(this.interactionStorageKey) !== 'false';
+        } catch (_) {
+            return true;
+        }
+    },
+
+    saveInteractionEnabled(isEnabled) {
+        try {
+            localStorage.setItem(this.interactionStorageKey, String(Boolean(isEnabled)));
+        } catch (_) {}
+    },
+
+    setupPointerTracking(mountEl) {
+        if (!mountEl) return;
+
+        window.addEventListener('mousemove', (event) => this.updatePointerTrackingTarget(event, mountEl));
+
+        if (!this.pointerTrackingFrame) {
+            this.pointerTrackingFrame = () => this.updatePointerTracking();
+            this.app?.ticker?.add(this.pointerTrackingFrame);
+        }
+    },
+
+    updatePointerTrackingTarget(event, mountEl) {
+        if (!this.pointerTrackingEnabled || !mountEl) return;
+
+        const rect = {
+            left: 0,
+            top: 0,
+            width: window.innerWidth || mountEl.getBoundingClientRect().width,
+            height: window.innerHeight || mountEl.getBoundingClientRect().height
+        };
+        const config = this.pointerTrackingConfig;
+        const centerX = rect.left + rect.width * config.focusX;
+        const centerY = rect.top + rect.height * config.focusY;
+        const rangeX = Math.max(rect.width * config.rangeX, 1);
+        const rangeY = Math.max(rect.height * config.rangeY, 1);
+
+        this.pointerTracking.targetX = this.clamp((event.clientX - centerX) / rangeX, -1, 1);
+        this.pointerTracking.targetY = this.clamp((event.clientY - centerY) / rangeY, -1, 1);
+        this.pointerTracking.lastMoveAt = performance.now();
+    },
+
+    resetPointerTrackingTarget() {
+        this.pointerTracking.targetX = 0;
+        this.pointerTracking.targetY = 0;
+    },
+
+    updatePointerTracking() {
+        if (!this.model || !this.pointerTrackingEnabled) return;
+
+        const tracking = this.pointerTracking;
+        const smoothing = this.pointerTrackingConfig.smoothing;
+        tracking.currentX += (tracking.targetX - tracking.currentX) * smoothing;
+        tracking.currentY += (tracking.targetY - tracking.currentY) * smoothing;
+
+        const x = tracking.currentX;
+        const y = tracking.currentY;
+        const core = this.model?.internalModel?.coreModel;
+        if (!core) return;
+
+        this.setLive2DParam(core, 'ParamAngleX', x * 18);
+        this.setLive2DParam(core, 'ParamAngleY', -y * 14);
+        this.setLive2DParam(core, 'ParamAngleZ', -x * 5);
+        this.setLive2DParam(core, 'ParamEyeBallX', x * 1.45);
+        this.setLive2DParam(core, 'ParamEyeBallY', -y * 1.35);
+        this.setLive2DParam(core, 'Param49', x * 7);
+        this.setLive2DParam(core, 'Param51', -y * 5);
+        this.setLive2DParam(core, 'Param50', -x * 3);
+        this.applyModelFollowOffset();
+    },
+
+    applyModelFollowOffset() {
+        if (!this.model || !this.baseModelPosition) return;
+
+        const x = this.pointerTracking.currentX || 0;
+        const y = this.pointerTracking.currentY || 0;
+        this.model.position.set(
+            this.baseModelPosition.x + x * 22,
+            this.baseModelPosition.y + y * 16
+        );
+    },
+
+    setLive2DParam(core, id, value) {
+        try {
+            core.setParameterValueById(id, value);
+        } catch (_) {}
+    },
+
+    clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+    },
+
     showExpressionToast(text, duration = 1600) {
         const toast = this.expressionToastEl || document.getElementById('expression-toast');
         if (!toast) return;
@@ -296,6 +436,7 @@ window.Live2DManager = {
 
         try {
             this.model.expression(expressionId);
+            requestAnimationFrame(() => this.applyAccessories());
         } catch (error) {
             console.error(`[Live2D] Failed to apply expression: ${expressionId}`, error);
         }
@@ -328,7 +469,64 @@ window.Live2DManager = {
         }
 
         this.resetExpressionParams();
-        requestAnimationFrame(() => this.resetExpressionParams());
+        requestAnimationFrame(() => {
+            this.resetExpressionParams();
+            this.applyAccessories();
+        });
+    },
+
+    setAccessory(accessoryId, isEnabled, persist = false) {
+        if (!this.accessoryParams[accessoryId]) return;
+
+        this.activeAccessories[accessoryId] = Boolean(isEnabled);
+        if (persist) {
+            this.saveAccessories();
+        }
+        this.applyAccessory(accessoryId);
+    },
+
+    setExclusiveAccessory(accessoryId, persist = false) {
+        const nextAccessoryId = this.accessoryParams[accessoryId] ? accessoryId : null;
+        Object.keys(this.accessoryParams).forEach(id => {
+            this.activeAccessories[id] = id === nextAccessoryId;
+        });
+        if (persist) {
+            this.saveAccessories();
+        }
+        this.applyAccessories();
+        return nextAccessoryId;
+    },
+
+    getActiveAccessoryId() {
+        return this.accessoryOrder.find(id => this.activeAccessories[id]) || null;
+    },
+
+    applyAccessories() {
+        Object.keys(this.accessoryParams).forEach(accessoryId => {
+            this.applyAccessory(accessoryId);
+        });
+    },
+
+    applyAccessory(accessoryId) {
+        const accessory = this.accessoryParams[accessoryId];
+        const core = this.model?.internalModel?.coreModel;
+        if (!accessory || !core) return;
+
+        this.setLive2DParam(core, accessory.paramId, this.activeAccessories[accessoryId] ? 1 : 0);
+    },
+
+    getSavedAccessories() {
+        try {
+            return JSON.parse(localStorage.getItem(this.accessoryStorageKey) || '{}') || {};
+        } catch (_) {
+            return {};
+        }
+    },
+
+    saveAccessories() {
+        try {
+            localStorage.setItem(this.accessoryStorageKey, JSON.stringify(this.activeAccessories));
+        } catch (_) {}
     },
 
     startLipSync() {
