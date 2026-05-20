@@ -74,7 +74,8 @@ function shouldRunAutoUpdate(config = {}, now = Date.now()) {
 
 async function getLatestVersion(packageName = pkg.name) {
     const { stdout } = await execFilePromise(NPM_COMMAND, ['view', packageName, 'version', '--json'], {
-        maxBuffer: 1024 * 1024
+        maxBuffer: 1024 * 1024,
+        timeout: 30000
     });
     return normalizeNpmVersionOutput(stdout);
 }
@@ -86,7 +87,8 @@ async function installLatest(packageName = pkg.name, options = {}) {
     }
 
     return await execFilePromise(NPM_COMMAND, args, {
-        maxBuffer: 1024 * 1024 * 8
+        maxBuffer: 1024 * 1024 * 8,
+        timeout: 5 * 60 * 1000
     });
 }
 
@@ -182,14 +184,14 @@ async function runStartupAutoUpdate(config, writeConfig, options = {}) {
         };
     }
 
+    const result = await runUpdate({ checkOnly: false });
     if (typeof writeConfig === 'function') {
         writeConfig({
             ...config,
             lastUpdateCheckAt: new Date(now).toISOString()
         });
     }
-
-    return await runUpdate({ checkOnly: false });
+    return result;
 }
 
 module.exports = {

@@ -51,7 +51,7 @@ gh auth login
 
 ```bash
 # แบบระบุข้อความอธิบายเอง
-gh release create v1.5.0 dist/*.deb dist/*.AppImage --title "Mint v1.5.0" --notes-file RELEASE_NOTES.md
+gh release create v1.5.1 dist/*.deb dist/*.AppImage --title "Mint v1.5.1" --notes-file RELEASE_NOTES.md
 
 
 # หรือแบบให้ GitHub สรุปสิ่งที่แก้ไขให้โดยอัตโนมัติ (แนะนำ)
