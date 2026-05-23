@@ -184,6 +184,10 @@ function applyConfig(config) {
     // Update color picker
     document.getElementById('custom-color').value = config.accentColor;
 
+    const defaultTextColor = config.theme === 'light' ? '#0f172a' : DEFAULT_CONFIG.systemTextColor;
+    const textColor = (!config.systemTextColor || (config.theme === 'light' && config.systemTextColor === DEFAULT_CONFIG.systemTextColor))
+        ? defaultTextColor
+        : config.systemTextColor;
     document.getElementById('system-text-color').value = textColor;
     document.documentElement.style.setProperty('--text-main', textColor);
 
@@ -586,22 +590,20 @@ function renderMcpServers() {
     console.log(`[Settings] Found ${entries.length} servers in currentConfig.`);
 
     if (entries.length === 0) {
-        list.innerHTML = '<p class="hint" style="text-align: center; padding: 10px;">No MCP servers connected.</p>';
+        list.innerHTML = '<p class="mcp-empty">No MCP servers connected.</p>';
         return;
     }
 
     for (const [name, cfg] of entries) {
         const item = document.createElement('div');
-        item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 10px; border: 1px solid var(--border);';
+        item.className = 'mcp-item';
         
         item.innerHTML = `
-            <div style="display: flex; flex-direction: column; gap: 4px;">
-                <div style="font-weight: 600; color: var(--accent); display: flex; align-items: center; gap: 6px;">
-                    <span>🌐 ${name}</span>
-                </div>
-                <div style="font-size: 0.75rem; opacity: 0.7; font-family: monospace;">${cfg.command} ${cfg.args.join(' ')}</div>
+            <div class="mcp-info">
+                <div class="mcp-name">🌐 ${name}</div>
+                <div class="mcp-command">${cfg.command} ${(cfg.args || []).join(' ')}</div>
             </div>
-            <button class="btn-danger" style="padding: 6px 12px; font-size: 0.8rem;" onclick="removeMcpServer('${name}')">Remove</button>
+            <button class="btn-danger btn-small" onclick="removeMcpServer('${name}')">Remove</button>
         `;
         list.appendChild(item);
     }

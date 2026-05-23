@@ -32,6 +32,109 @@ const SLASH_COMMANDS = [
     { cmd: '/exit', desc: 'Exit Mint' }
 ];
 
+const MAX_BLANK_LINES = 1;
+
+function compactPathLabel(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    return path.basename(text) || text;
+}
+
+function formatActivityStep(info = {}) {
+    if (!info || typeof info !== 'object') return null;
+
+    const { action, phase, target, message } = info;
+    const rawText = String(target || message || '').trim();
+    const kind = action || phase || 'activity';
+    if (!rawText) return null;
+
+    switch (kind) {
+        case 'list_files':
+            return { title: 'Explored', detail: `List ${rawText}` };
+        case 'find_path':
+            return { title: 'Explored', detail: `Find ${rawText}` };
+        case 'read_file':
+            return { title: 'Explored', detail: `Read ${compactPathLabel(rawText)}` };
+        case 'search_code':
+            return { title: 'Explored', detail: `Search ${rawText}` };
+        case 'web_search':
+            return { title: 'Searched', detail: rawText };
+        case 'run_shell':
+            return { title: 'Ran', detail: rawText };
+        case 'apply_patch':
+        case 'write_file':
+            return { title: 'Edited', detail: rawText };
+        case 'evaluator':
+            return { title: 'Checked', detail: rawText };
+        case 'reviewer_start':
+            return { title: 'Reviewing', detail: rawText };
+        case 'ask_user':
+            return { title: 'Ask User', detail: rawText };
+        default:
+            return { title: kind, detail: rawText };
+    }
+}
+
+function stripInlineMarkdown(value) {
+    return String(value || '')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*\n]+)\*/g, '$1')
+        .replace(/__([^_]+)__/g, '$1')
+        .replace(/`([^`\n]+)`/g, '$1');
+}
+
+function cleanDisplayText(text, role = 'assistant') {
+    const raw = String(text || '').replace(/\r\n/g, '\n').trim();
+    if (!raw) return '';
+
+    const shouldPolishMarkdown = role === 'assistant' || role === 'system';
+    const lines = raw.split('\n');
+    const cleaned = [];
+    let inCodeBlock = false;
+    let blankCount = 0;
+
+    for (const sourceLine of lines) {
+        let line = sourceLine.replace(/\s+$/g, '');
+        const fence = line.match(/^\s*```(.*)$/);
+
+        if (fence) {
+            inCodeBlock = !inCodeBlock;
+            const label = fence[1] ? `code: ${fence[1].trim()}` : 'code';
+            line = inCodeBlock ? label : '';
+        } else if (inCodeBlock) {
+            line = line ? `  ${line}` : '';
+        } else if (shouldPolishMarkdown) {
+            const heading = line.match(/^\s{0,3}#{1,6}\s+(.+)$/);
+            const bullet = line.match(/^(\s*)[-*]\s+(.+)$/);
+            const numbered = line.match(/^(\s*)\d+[.)]\s+(.+)$/);
+
+            if (heading) {
+                if (cleaned.length > 0 && cleaned[cleaned.length - 1] !== '') cleaned.push('');
+                line = stripInlineMarkdown(heading[1]).trim();
+            } else if (bullet) {
+                line = `${bullet[1]}• ${stripInlineMarkdown(bullet[2]).trim()}`;
+            } else if (numbered) {
+                line = `${numbered[1]}${stripInlineMarkdown(line).trim()}`;
+            } else {
+                line = stripInlineMarkdown(line);
+            }
+        }
+
+        if (!line.trim()) {
+            blankCount++;
+            if (blankCount <= MAX_BLANK_LINES && cleaned.length > 0) cleaned.push('');
+            continue;
+        }
+
+        blankCount = 0;
+        cleaned.push(line);
+    }
+
+    while (cleaned[0] === '') cleaned.shift();
+    while (cleaned[cleaned.length - 1] === '') cleaned.pop();
+    return cleaned.join('\n');
+}
+
 /**
  * We wrap everything in an async function to load ESM modules
  */
@@ -237,6 +340,25 @@ async function createChatUI(options) {
                     } else if (action === 'thinking' || phase === 'thinking') {
                         return;
                     } else {
+                        const activity = formatActivityStep(info);
+                        if (activity) {
+                            const fullText = `[${activity.title}] ${activity.detail}`;
+                            if (fullText === lastSystemMessage.current) return;
+                            lastSystemMessage.current = fullText;
+
+                            setHistory(prev => [...prev, {
+                                role: 'system',
+                                label: activity.title,
+                                labelColor: 'blueBright',
+                                text: activity.detail,
+                                isActivity: true,
+                                activityTitle: activity.title,
+                                activityDetail: activity.detail,
+                                time: new Date()
+                            }]);
+                            return;
+                        }
+
                         label = action || phase || 'Action';
                         text = target || message || '';
                         if (!text) return;
@@ -474,6 +596,19 @@ async function createChatUI(options) {
                 );
             }
 
+            if (msg.isActivity) {
+                return h(Box, { key: `${keyPrefix}-${index}`, flexDirection: 'column', marginBottom: 0 },
+                    h(Box, null,
+                        h(Text, { color: 'greenBright' }, '• '),
+                        h(Text, { bold: true, color: msg.labelColor || 'blueBright' }, msg.activityTitle || msg.label || 'Activity')
+                    ),
+                    h(Box, { paddingLeft: 2, marginBottom: 1 },
+                        h(Text, { color: 'gray' }, '└ '),
+                        h(Text, { color: 'cyanBright', wrap: 'wrap' }, msg.activityDetail || msg.text)
+                    )
+                );
+            }
+
             let name = 'Mint';
             let nameColor = 'greenBright';
 
@@ -494,7 +629,7 @@ async function createChatUI(options) {
                     h(Text, { color: 'gray' }, ` ${msg.time instanceof Date ? msg.time.toLocaleTimeString() : ''}`)
                 ),
                 h(Box, { paddingLeft: 2, marginBottom: 1 },
-                    h(Text, null, msg.text)
+                    h(Text, { wrap: 'wrap' }, cleanDisplayText(msg.text, msg.role))
                 )
             );
         };
@@ -637,4 +772,4 @@ async function createChatUI(options) {
     };
 }
 
-module.exports = { createChatUI };
+module.exports = { createChatUI, _helpers: { cleanDisplayText, stripInlineMarkdown, compactPathLabel, formatActivityStep } };

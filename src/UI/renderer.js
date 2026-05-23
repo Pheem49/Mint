@@ -604,6 +604,95 @@ function formatProviderInfo(providerInfo) {
     return model ? `${provider || 'AI'} • ${model}` : provider;
 }
 
+function splitListOutro(text) {
+    const value = String(text || '').trim();
+    const markers = [
+        ' คุณภีมอยาก',
+        ' อยากให้',
+        ' อยากดู',
+        ' บอกมิ้นท์',
+        ' Would you',
+        ' Do you want',
+        ' Tell me'
+    ];
+
+    for (const marker of markers) {
+        const index = value.indexOf(marker);
+        if (index > 60) {
+            return {
+                main: value.slice(0, index).trim(),
+                outro: value.slice(index).trim()
+            };
+        }
+    }
+
+    return { main: value, outro: '' };
+}
+
+function buildAiTextBlocks(text) {
+    const normalized = normalizeAiText(text).replace(/\r\n/g, '\n').trim();
+    if (!normalized) return [];
+
+    const readable = normalized
+        .replace(/\s+(\d+)[.)]\s+/g, '\n$1. ')
+        .replace(/\n{3,}/g, '\n\n');
+
+    const blocks = [];
+    const lines = readable.split(/\n+/).map(line => line.trim()).filter(Boolean);
+
+    for (const line of lines) {
+        const numbered = line.match(/^\d+[.)]\s+(.+)$/);
+        const bullet = line.match(/^[-*•]\s+(.+)$/);
+
+        if (numbered || bullet) {
+            const content = numbered ? numbered[1] : bullet[1];
+            const { main, outro } = splitListOutro(content);
+            blocks.push({ type: 'bullet', text: main });
+            if (outro) blocks.push({ type: 'paragraph', text: outro });
+        } else {
+            blocks.push({ type: 'paragraph', text: line });
+        }
+    }
+
+    return blocks;
+}
+
+function appendFormattedMessageText(bubble, text, sender) {
+    if (sender !== 'ai') {
+        const textSpan = document.createElement('span');
+        textSpan.textContent = text;
+        bubble.appendChild(textSpan);
+        return;
+    }
+
+    const blocks = buildAiTextBlocks(text);
+    if (blocks.length === 0) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.classList.add('formatted-ai-text');
+
+    for (const block of blocks) {
+        const item = document.createElement(block.type === 'bullet' ? 'div' : 'p');
+        item.classList.add(block.type === 'bullet' ? 'ai-list-item' : 'ai-paragraph');
+
+        if (block.type === 'bullet') {
+            const bullet = document.createElement('span');
+            bullet.classList.add('ai-list-bullet');
+            bullet.textContent = '•';
+            const content = document.createElement('span');
+            content.textContent = block.text;
+            item.appendChild(bullet);
+            item.appendChild(content);
+        } else {
+            item.textContent = block.text;
+        }
+
+        wrapper.appendChild(item);
+    }
+
+    bubble.appendChild(wrapper);
+}
+
 function appendMessage(text, sender, base64Image = null, timestamp = null, options = {}) {
     const messageDiv = document.createElement('div');
     messageDiv.classList.add('message', `${sender}-message`);
@@ -625,9 +714,7 @@ function appendMessage(text, sender, base64Image = null, timestamp = null, optio
     }
 
     if (text) {
-        const textSpan = document.createElement('span');
-        textSpan.textContent = text;
-        bubble.appendChild(textSpan);
+        appendFormattedMessageText(bubble, text, sender);
     }
 
     bubbleWrapper.appendChild(bubble);
@@ -673,6 +760,9 @@ function normalizeAiText(input) {
 function splitAiMessages(text) {
     const normalized = normalizeAiText(text).trim();
     if (!normalized) return [];
+    if (/(^|\s)\d+[.)]\s+/.test(normalized) || /(^|\n)\s*[-*•]\s+/.test(normalized)) {
+        return [normalized];
+    }
     const byBlankLine = normalized
         .split(/\n\s*\n/)
         .map((part) => part.trim())

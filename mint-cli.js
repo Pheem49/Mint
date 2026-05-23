@@ -126,23 +126,22 @@ function formatMemoryInteractions(interactions, title = 'Remembered interactions
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function splitResponseSentences(text) {
-    const normalized = String(text || '').replace(/\r\n/g, '\n').trim();
+    const normalized = String(text || '').replace(/\r\n/g, '\n');
     if (!normalized) return [];
 
-    const sentences = [];
+    const chunks = [];
     let buffer = '';
     for (const char of normalized) {
         buffer += char;
-        if (/[.!?。！？…\n]/u.test(char)) {
-            const sentence = buffer.trim();
-            if (sentence) sentences.push(sentence);
+        if (char === '\n' || /[.!?。！？…]/u.test(char)) {
+            const sentence = buffer;
+            if (sentence.trim()) chunks.push(sentence);
             buffer = '';
         }
     }
 
-    const rest = buffer.trim();
-    if (rest) sentences.push(rest);
-    return sentences.length > 0 ? sentences : [normalized];
+    if (buffer.trim()) chunks.push(buffer);
+    return chunks.length > 0 ? chunks : [normalized];
 }
 
 function learnSkillFile(filePath) {
@@ -484,8 +483,7 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
         if (typeof streamMessage === 'function') {
             const stream = streamMessage(metadata);
             for (let index = 0; index < sentences.length; index++) {
-                const prefix = index === 0 ? '' : ' ';
-                stream.appendChunk(`${prefix}${sentences[index]}`);
+                stream.appendChunk(sentences[index]);
                 if (index < sentences.length - 1) {
                     await sleep(90);
                 }

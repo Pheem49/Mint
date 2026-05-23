@@ -700,6 +700,30 @@ h1 {
   position: relative;
 }
 
+.formatted-ai-text {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  white-space: normal;
+}
+
+.ai-paragraph {
+  margin: 0;
+}
+
+.ai-list-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.ai-list-bullet {
+  color: var(--accent-hover);
+  font-weight: 700;
+  line-height: 1.5;
+}
+
 .user-message {
   transform-origin: bottom right;
 }
