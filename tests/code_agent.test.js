@@ -66,4 +66,34 @@ describe('code_agent helpers', () => {
             fs.rmSync(tempDir, { recursive: true, force: true });
         }
     });
+
+    test('buildUnifiedDiffPreview formats patch approval preview as unified diff', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-diff-'));
+        const targetFile = path.join(tempDir, 'demo.js');
+        fs.writeFileSync(targetFile, [
+            'function demo() {',
+            '  const enabled = false;',
+            '  return enabled;',
+            '}'
+        ].join('\n'));
+
+        try {
+            const preview = _helpers.buildUnifiedDiffPreview(tempDir, {
+                path: 'demo.js',
+                hunks: [{
+                    oldText: '  const enabled = false;',
+                    newText: '  const enabled = true;'
+                }]
+            });
+
+            expect(preview).toContain('--- a/demo.js');
+            expect(preview).toContain('+++ b/demo.js');
+            expect(preview).toContain('@@ -1,4 +1,4 @@');
+            expect(preview).toContain('-  const enabled = false;');
+            expect(preview).toContain('+  const enabled = true;');
+        } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
 });

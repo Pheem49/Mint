@@ -83,20 +83,20 @@ const MAX_AGENT_STEPS = 16;
 const MAX_JSON_REPAIR_ATTEMPTS = 2;
 const SUPPORTED_CODE_PROVIDERS = ['gemini', 'anthropic', 'openai', 'local_openai'];
 
-const CODE_AGENT_PROMPT = `You are "Mint" (มิ้นท์), a cute, cheerful, and highly helpful female AI assistant that can chat, reason, write code, and search the web.
+const CODE_AGENT_PROMPT = `You are "Mint" (มิ้นท์), a pragmatic, polite, and highly helpful AI assistant that can chat, reason, write code, and search the web.
 You work in an inspect -> plan -> act -> verify loop.
 
 PERSONALITY & TONE:
 - Gender: Female.
-- Persona: Friendly, energetic, polite, and slightly playful.
+- Persona: Friendly, calm, concise, and technically direct. Avoid excessive praise, roleplay, or filler.
 - Language routing is mandatory and based on the user's latest message:
   - If the latest user message contains Thai characters, respond in Thai.
   - If the latest user message is English, ASCII-only, or a short English greeting such as "hi", "hello", "ok", or "thanks", respond in English.
   - Do not use Thai just because your persona mentions Mint/มิ้นท์, previous history was Thai, or app settings use th-TH.
 - Politeness: 
-  - **WHEN RESPONDING IN THAI:** ALWAYS use female polite particles such as "ค่ะ", "นะคะ", "นะค๊า", "จ้า". Refer to yourself as "มิ้นท์" or "หนู".
-  - **WHEN RESPONDING IN ENGLISH:** Use a cheerful, polite, and bubbly tone.
-- Emojis: Use cute and relevant emojis (like ✨, 💖, 🚀, 😊, 🌿) frequently.
+  - **WHEN RESPONDING IN THAI:** Use natural female polite particles such as "ค่ะ" or "นะคะ" where appropriate. Refer to yourself as "มิ้นท์" when it sounds natural.
+  - **WHEN RESPONDING IN ENGLISH:** Use a polite, concise, professional tone.
+- Emojis: Avoid emojis in technical, review, debugging, and code-editing responses unless the user explicitly uses or asks for them.
 
 Rules:
 1. Respond with valid JSON only.
@@ -485,23 +485,97 @@ async function runShell(workspaceRoot, command) {
     return truncate([stdout, stderr].filter(Boolean).join('\n') || '(no output)');
 }
 
-function formatPatchPreview(patchInput) {
+function splitDiffLines(text) {
+    const normalized = String(text || '').replace(/\r\n/g, '\n');
+    const lines = normalized.split('\n');
+    if (normalized.endsWith('\n')) {
+        lines.pop();
+    }
+    return lines;
+}
+
+function formatDiffRange(startLine, count) {
+    return count === 1 ? `${startLine}` : `${startLine},${count}`;
+}
+
+function buildUnifiedDiffPreview(workspaceRoot, patchInput, options = {}) {
+    if (!patchInput || !patchInput.path) {
+        throw new Error('Patch path is required.');
+    }
+
+    const resolved = resolveWorkspacePath(workspaceRoot, patchInput.path);
+    if (!fs.existsSync(resolved)) {
+        throw new Error(`Patch target does not exist: ${patchInput.path}`);
+    }
+
     const hunks = Array.isArray(patchInput.hunks) ? patchInput.hunks : [];
-    const preview = hunks
-        .slice(0, 3)
-        .map((hunk, index) => {
-            const oldPreview = truncate(hunk.oldText || '', 240);
-            const newPreview = truncate(hunk.newText || '', 240);
-            return [
-                `Hunk ${index + 1}:`,
-                '--- old',
-                oldPreview,
-                '+++ new',
-                newPreview
-            ].join('\n');
-        })
-        .join('\n\n');
-    return `${patchInput.path}\n${preview}`;
+    if (hunks.length === 0) {
+        throw new Error('Patch hunks are required.');
+    }
+
+    const contextLines = Number.isFinite(options.contextLines) ? options.contextLines : 3;
+    let content = fs.readFileSync(resolved, 'utf8');
+    const output = [
+        `--- a/${patchInput.path}`,
+        `+++ b/${patchInput.path}`
+    ];
+
+    hunks.forEach((hunk, index) => {
+        if (typeof hunk.oldText !== 'string' || typeof hunk.newText !== 'string') {
+            throw new Error(`Patch hunk ${index + 1} is invalid.`);
+        }
+
+        const offset = content.indexOf(hunk.oldText);
+        if (offset === -1) {
+            throw new Error(`Patch hunk ${index + 1} oldText not found in ${patchInput.path}`);
+        }
+
+        const beforeText = content.slice(0, offset);
+        const oldStartLine = beforeText.length === 0 ? 1 : splitDiffLines(beforeText).length + 1;
+        const fileLines = splitDiffLines(content);
+        const oldLines = splitDiffLines(hunk.oldText);
+        const newLines = splitDiffLines(hunk.newText);
+        const oldStartIndex = oldStartLine - 1;
+        const contextStartIndex = Math.max(0, oldStartIndex - contextLines);
+        const contextEndIndex = Math.min(fileLines.length, oldStartIndex + oldLines.length + contextLines);
+        const beforeContext = fileLines.slice(contextStartIndex, oldStartIndex);
+        const afterContext = fileLines.slice(oldStartIndex + oldLines.length, contextEndIndex);
+        const oldRangeStart = contextStartIndex + 1;
+        const oldRangeCount = beforeContext.length + oldLines.length + afterContext.length;
+        const newRangeCount = beforeContext.length + newLines.length + afterContext.length;
+
+        output.push(`@@ -${formatDiffRange(oldRangeStart, oldRangeCount)} +${formatDiffRange(oldRangeStart, newRangeCount)} @@`);
+        beforeContext.forEach(line => output.push(` ${line}`));
+        oldLines.forEach(line => output.push(`-${line}`));
+        newLines.forEach(line => output.push(`+${line}`));
+        afterContext.forEach(line => output.push(` ${line}`));
+
+        content = `${content.slice(0, offset)}${hunk.newText}${content.slice(offset + hunk.oldText.length)}`;
+    });
+
+    return output.join('\n');
+}
+
+function formatPatchPreview(workspaceRoot, patchInput) {
+    try {
+        return buildUnifiedDiffPreview(workspaceRoot, patchInput);
+    } catch (error) {
+        return `Patch preview failed: ${error.message}`;
+    }
+}
+
+function applyHunksToContent(content, hunks, filePath) {
+    let nextContent = content;
+    hunks.forEach((hunk, index) => {
+        if (typeof hunk.oldText !== 'string' || typeof hunk.newText !== 'string') {
+            throw new Error(`Patch hunk ${index + 1} is invalid.`);
+        }
+        if (!nextContent.includes(hunk.oldText)) {
+            throw new Error(`Patch hunk ${index + 1} oldText not found in ${filePath}`);
+        }
+        nextContent = nextContent.replace(hunk.oldText, hunk.newText);
+    });
+    return nextContent;
 }
 
 function applyPatch(workspaceRoot, patchInput) {
@@ -518,16 +592,7 @@ function applyPatch(workspaceRoot, patchInput) {
         throw new Error('Patch hunks are required.');
     }
 
-    let content = fs.readFileSync(resolved, 'utf8');
-    hunks.forEach((hunk, index) => {
-        if (typeof hunk.oldText !== 'string' || typeof hunk.newText !== 'string') {
-            throw new Error(`Patch hunk ${index + 1} is invalid.`);
-        }
-        if (!content.includes(hunk.oldText)) {
-            throw new Error(`Patch hunk ${index + 1} oldText not found in ${patchInput.path}`);
-        }
-        content = content.replace(hunk.oldText, hunk.newText);
-    });
+    const content = applyHunksToContent(fs.readFileSync(resolved, 'utf8'), hunks, patchInput.path);
 
     fs.writeFileSync(resolved, content, 'utf8');
     return `Patched ${patchInput.path} with ${hunks.length} hunk(s).`;
@@ -893,7 +958,7 @@ async function executeCodeTask(task, options = {}) {
                     const approved = await requestApproval({
                         type: 'patch',
                         label: patchInput.path,
-                        preview: formatPatchPreview(patchInput)
+                        preview: formatPatchPreview(workspaceRoot, patchInput)
                     });
                     if (!approved) {
                         toolResult = `User denied patch for ${patchInput.path}`;
@@ -1086,6 +1151,8 @@ module.exports = {
         findPaths,
         listFiles,
         searchCode,
-        walkDirectory
+        walkDirectory,
+        buildUnifiedDiffPreview,
+        formatPatchPreview
     }
 };

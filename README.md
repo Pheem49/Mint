@@ -185,6 +185,10 @@ npm start
 - `mint learn ./skill.md` - Read a local `.md` or `.txt` file and remember it as a persistent Mint skill/instruction.
 - `mint learn --list` - List learned skill files.
 - `mint learn --delete <id|path|name>` - Delete a learned skill by ID, path, or file name.
+- `mint summarize [path]` - Summarize repository structure, package metadata, git state, and key files.
+- `mint symbols [path]` - Build a local source symbol index for supported code files.
+- `mint semantic-code index [path]` - Create embeddings for local source code chunks.
+- `mint semantic-code search "<query>"` - Search the indexed code semantically.
 - `mint code "<task>"` - Run a specific coding task in the current workspace.
 - `mint code --image ./mockup.png "Build this UI"` - Attach an image as visual context for a coding task.
 - `mint gmail auth` - Open Google OAuth and save a Gmail refresh token.
@@ -266,6 +270,10 @@ Inside `mint`:
 
 - `/help` - Show commands.
 - `/fast [on|off|status]` - Toggle Fast Mode. Fast Mode shows `[Fast]`, keeps `Mint is thinking...`, and hides `Thinking:`/progress trace messages.
+- `/summarize [path] [--json]` - Summarize the current repository without using the AI agent.
+- `/symbols [path] [--json] [--limit n]` - Build a local source symbol index without using the AI agent.
+- `/semantic-code index` - Create embeddings for source code chunks in the current workspace.
+- `/semantic-code search <query>` - Search the indexed code semantically.
 - `/learn <path>` - Read a local `.md` or `.txt` file and remember it as a persistent Mint skill/instruction.
 - `/memory skills` - Show learned skill files.
 - `/memory skills delete <id|path|name>` - Delete a learned skill.

@@ -1,5 +1,99 @@
 # Mint Release Notes
 
+## v1.5.2
+
+This release improves desktop readability and adds repository-aware CLI tools for summarizing codebases, indexing symbols, and searching source code semantically.
+
+### Repository Intelligence, Semantic Code Search, and CLI Readability
+
+This patch makes Mint more useful inside a project workspace. The CLI can now inspect a repository directly, build a lightweight source symbol index, and create a semantic code index backed by Gemini embeddings.
+
+#### Highlights
+
+- **Desktop UI Polish:** Updated the app interface layout and control styling for a cleaner, more organized desktop experience.
+- **Clearer Conversation Flow:** Improved chat presentation so user and AI messages are easier to distinguish while reading.
+- **Readable AI Replies:** Adjusted AI response formatting to produce cleaner, more structured replies with better spacing and less clutter.
+- **Thai Reply Handling:** Improved response behavior for Thai conversations so replies remain natural and easier to read.
+- **Reduced Visual Noise:** Tightened UI states and message rendering so important conversation content stays the focus.
+- **Repository Summary:** Added `mint summarize [path]` and `/summarize [path]` to report project structure, package metadata, git state, languages, directories, and important files without requiring a full AI agent turn.
+- **Symbol Index:** Added `mint symbols [path]` and `/symbols [path]` to scan JavaScript, TypeScript, Python, and Rust source files for functions, classes, exports, interfaces, types, structs, enums, traits, and related symbols.
+- **Semantic Code Search:** Added `mint semantic-code index` and `mint semantic-code search <query>` for embedding source chunks and searching code by meaning.
+- **Natural Workspace Requests:** The interactive CLI can detect plain-language requests such as repository summaries, symbol indexes, and semantic code searches, including Thai phrasing, and route them to the local tools.
+- **Working Timer:** The CLI now shows how long Mint has been working while the agent is thinking.
+- **Cleaner Streaming:** Empty assistant/system chunks are filtered so live replies do not create blank messages.
+- **Unified Patch Preview:** Code-agent patch approvals now show a unified-diff style preview with surrounding context before applying edits.
+
+#### New CLI Commands
+
+- `mint summarize [path]`
+- `mint summarize [path] --json`
+- `mint symbols [path]`
+- `mint symbols [path] --json --limit 120`
+- `mint semantic-code index [path]`
+- `mint semantic-code search "<query>" --path <path> --top-k 5`
+
+#### New Interactive Commands
+
+- `/summarize [path] [--json]`
+- `/summary [path] [--json]`
+- `/symbols [path] [--json] [--limit n]`
+- `/symbol-index [path] [--json] [--limit n]`
+- `/semantic-code index [path]`
+- `/semantic-code search <query>`
+- `/semantic index [path]`
+- `/semantic search <query>`
+
+#### Repository Summary
+
+The repository summary tool reports:
+
+- root path
+- scanned file count
+- package name, version, description, scripts, dependencies, and dev dependencies
+- git branch, short status, and diff stat
+- top-level directory counts
+- language counts by extension
+- important files such as README, package metadata, release notes, source files, tests, config files, and CI files
+
+#### Symbol Index
+
+The symbol indexer scans supported source files locally and reports:
+
+- source files scanned
+- files containing symbols
+- total symbol count
+- counts by symbol kind
+- counts by language
+- symbol names with file and line references
+
+Supported source extensions:
+
+- `.js`, `.cjs`, `.mjs`, `.jsx`
+- `.ts`, `.tsx`
+- `.py`
+- `.rs`
+
+#### Semantic Code Search
+
+Semantic code search creates workspace-specific indexes under `~/.config/mint/semantic-code`.
+
+- Uses `gemini-embedding-001` by default.
+- Reads the Gemini API key from Mint config or `GEMINI_API_KEY`.
+- Chunks source files with overlap so search results can point back to file and line ranges.
+- Includes file path, language, and local symbol names in each embedded chunk.
+- Stores file hashes with the index metadata for workspace tracking.
+- Supports formatted output and `--json` output.
+
+#### Code Agent Patch Preview
+
+Patch approvals now use unified diff previews:
+
+- shows `--- a/<path>` and `+++ b/<path>` headers
+- includes `@@` range metadata
+- includes nearby unchanged context
+- displays removed and added lines with `-` and `+`
+- falls back to a clear preview error if a hunk cannot be matched
+
 ## v1.5.1
 
 This release updates the desktop Live2D experience, CLI response loop, learned skills, and image attachment UX.

@@ -22,6 +22,9 @@ function displayFeatures() {
     const commands = [
         { cmd: 'mint', desc: 'Start interactive chat session (Default)' },
         { cmd: 'mint code "<task>"', desc: 'Run workspace-aware coding agent in current directory' },
+        { cmd: 'mint summarize [path]', desc: 'Summarize repository structure, tooling, git state, and key files' },
+        { cmd: 'mint symbols [path]', desc: 'Build a source symbol index for supported languages' },
+        { cmd: 'mint semantic-code', desc: 'Index and search code semantically with embeddings' },
         { cmd: 'mint gmail auth', desc: 'Connect Gmail OAuth and save refresh token' },
         { cmd: 'mint mcp', desc: 'Manage Model Context Protocol (MCP) servers' },
         { cmd: 'mint task "<task>"', desc: 'Queue an autonomous task for the background agent' },

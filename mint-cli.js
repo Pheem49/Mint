@@ -29,6 +29,14 @@ const { createChatUI } = require('./src/CLI/chat_ui');
 const { runUpdate, runStartupAutoUpdate, shouldRunAutoUpdate } = require('./src/CLI/updater');
 const { runGmailAuth } = require('./src/CLI/gmail_auth');
 const { loadImageAsDataUri, loadClipboardImageAsDataUri } = require('./src/CLI/image_input');
+const { summarizeRepository, formatRepoSummary } = require('./src/CLI/repo_summarizer');
+const { buildSymbolIndex, formatSymbolIndex } = require('./src/CLI/symbol_indexer');
+const {
+    indexSemanticCode,
+    searchSemanticCode,
+    formatSemanticCodeIndex,
+    formatSemanticCodeSearch
+} = require('./src/CLI/semantic_code_search');
 
 // Startup Info
 const startupConfig = readConfig();
@@ -121,6 +129,145 @@ function formatMemoryInteractions(interactions, title = 'Remembered interactions
         lines.push(`   Mint: ${item.ai_text}`);
     });
     return lines.join('\n');
+}
+
+function isRepoSummaryRequest(text) {
+    const input = (text || '').trim().toLowerCase();
+    if (!input) return false;
+
+    const hasRepoTarget = /\b(repo|repository|project|workspace|codebase)\b|รีโป|โปรเจค|โปรเจ็กต์|โปรเจกต์|โปรเจ็ค/.test(input);
+    const asksSummary = /\b(summarize|summary|overview)\b|สรุป|ภาพรวม/.test(input);
+    const asksQuestion = /\b(have|has|มีไหม|มีมั้ย|มีหรือเปล่า)\b/.test(input);
+
+    return hasRepoTarget && asksSummary && !asksQuestion;
+}
+
+function parseRepoSummaryArgs(rawArgs) {
+    const args = (rawArgs || '').split(/\s+/).filter(Boolean);
+    const json = args.includes('--json');
+    const pathArgs = args.filter(arg => arg !== '--json');
+    return {
+        targetPath: pathArgs.length > 0 ? pathArgs.join(' ') : process.cwd(),
+        json
+    };
+}
+
+function isSymbolIndexRequest(text) {
+    const input = (text || '').trim().toLowerCase();
+    if (!input) return false;
+
+    const hasSymbolTarget = /\b(symbol|symbols|ast|lsp)\b|ซิมโบล|สัญลักษณ์/.test(input);
+    const asksIndex = /\b(index|list|show|build|scan|overview)\b|ทำ|สร้าง|แสดง|ลิสต์|สแกน/.test(input);
+    const referencesWorkspace = /\b(repo|repository|project|workspace|codebase|source|code)\b|รีโป|โปรเจค|โปรเจ็กต์|โปรเจกต์|โค้ด/.test(input);
+    const asksQuestion = /\b(do i|have|has)\b|มีไหม|มีมั้ย|มีหรือเปล่า/.test(input);
+
+    return hasSymbolTarget && (asksIndex || referencesWorkspace) && !asksQuestion;
+}
+
+function parseSymbolIndexArgs(rawArgs) {
+    const args = (rawArgs || '').split(/\s+/).filter(Boolean);
+    const json = args.includes('--json');
+    let limit = 80;
+    const pathArgs = [];
+
+    for (let index = 0; index < args.length; index++) {
+        const arg = args[index];
+        if (arg === '--json') continue;
+        if (arg === '--limit') {
+            const next = Number(args[index + 1]);
+            if (Number.isFinite(next) && next >= 0) {
+                limit = next;
+                index++;
+            }
+            continue;
+        }
+        if (arg.startsWith('--limit=')) {
+            const next = Number(arg.slice('--limit='.length));
+            if (Number.isFinite(next) && next >= 0) {
+                limit = next;
+            }
+            continue;
+        }
+        pathArgs.push(arg);
+    }
+
+    return {
+        targetPath: pathArgs.length > 0 ? pathArgs.join(' ') : process.cwd(),
+        json,
+        limit
+    };
+}
+
+function isSemanticCodeSearchRequest(text) {
+    const input = (text || '').trim().toLowerCase();
+    if (!input) return false;
+
+    const hasSemanticSearch = /\bsemantic\b/.test(input) && /\b(search|find|look for)\b/.test(input);
+    const referencesCode = /\b(code|repo|repository|project|workspace|codebase|source)\b|โค้ด|รีโป|โปรเจค|โปรเจ็กต์|โปรเจกต์/.test(input);
+    const thaiSemanticSearch = /ค้นหา/.test(input) && /ความหมาย|semantic/.test(input) && /โค้ด|โปรเจค|รีโป/.test(input);
+    const asksQuestion = /\b(do i|have|has)\b|มีไหม|มีมั้ย|มีหรือเปล่า/.test(input);
+
+    return (hasSemanticSearch && referencesCode || thaiSemanticSearch) && !asksQuestion;
+}
+
+function parseSemanticCodeArgs(rawArgs) {
+    const args = (rawArgs || '').split(/\s+/).filter(Boolean);
+    const json = args.includes('--json');
+    let topK = 5;
+    const pathArgs = [];
+    const queryArgs = [];
+    let mode = 'search';
+
+    for (let index = 0; index < args.length; index++) {
+        const arg = args[index];
+        if (arg === 'index' || arg === 'search') {
+            mode = arg;
+            continue;
+        }
+        if (arg === '--json') continue;
+        if (arg === '--top-k' || arg === '--limit') {
+            const next = Number(args[index + 1]);
+            if (Number.isFinite(next) && next > 0) {
+                topK = next;
+                index++;
+            }
+            continue;
+        }
+        if (arg.startsWith('--top-k=') || arg.startsWith('--limit=')) {
+            const next = Number(arg.slice(arg.indexOf('=') + 1));
+            if (Number.isFinite(next) && next > 0) {
+                topK = next;
+            }
+            continue;
+        }
+        if (arg === '--path') {
+            if (args[index + 1]) {
+                pathArgs.push(args[index + 1]);
+                index++;
+            }
+            continue;
+        }
+        queryArgs.push(arg);
+    }
+
+    return {
+        mode,
+        query: queryArgs.join(' ').trim(),
+        targetPath: pathArgs.length > 0 ? pathArgs.join(' ') : process.cwd(),
+        json,
+        topK
+    };
+}
+
+function extractSemanticCodeQuery(text) {
+    return String(text || '')
+        .replace(/semantic\s+code\s+search/ig, '')
+        .replace(/semantic\s+search/ig, '')
+        .replace(/search\s+code/ig, '')
+        .replace(/ค้นหาโค้ดแบบความหมาย/g, '')
+        .replace(/ค้นหาแบบ semantic/g, '')
+        .replace(/ใน repo นี้|ในโปรเจคนี้|ในรีโปนี้/g, '')
+        .trim();
 }
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -238,6 +385,98 @@ program
     .description('Show list of Mint features and commands')
     .action(() => {
         displayFeatures();
+    });
+
+program
+    .command('summarize')
+    .alias('summary')
+    .description('Summarize a repository structure, tooling, git state, and key files')
+    .argument('[path]', 'Repository path to summarize', process.cwd())
+    .option('--json', 'Print raw JSON summary')
+    .action((targetPath, options) => {
+        try {
+            const summary = summarizeRepository(targetPath);
+            if (options.json) {
+                console.log(JSON.stringify(summary, null, 2));
+                return;
+            }
+            console.log(`\n${formatRepoSummary(summary)}\n`);
+        } catch (error) {
+            console.error(`\n${colors.pink}Summarize failed:${colors.reset} ${error.message}\n`);
+            process.exitCode = 1;
+        }
+    });
+
+program
+    .command('symbols')
+    .alias('symbol-index')
+    .description('Build a source symbol index for the current repository')
+    .argument('[path]', 'Repository path to index', process.cwd())
+    .option('--json', 'Print raw JSON symbol index')
+    .option('--limit <count>', 'Limit formatted symbols shown', value => Number(value), 80)
+    .action((targetPath, options) => {
+        try {
+            const index = buildSymbolIndex(targetPath);
+            if (options.json) {
+                console.log(JSON.stringify(index, null, 2));
+                return;
+            }
+            console.log(`\n${formatSymbolIndex(index, { limit: options.limit })}\n`);
+        } catch (error) {
+            console.error(`\n${colors.pink}Symbol index failed:${colors.reset} ${error.message}\n`);
+            process.exitCode = 1;
+        }
+    });
+
+const semanticCodeCommand = program
+    .command('semantic-code')
+    .alias('semantic')
+    .description('Index and search source code semantically with embeddings');
+
+semanticCodeCommand
+    .command('index')
+    .description('Create embeddings for source code chunks in a repository')
+    .argument('[path]', 'Repository path to index', process.cwd())
+    .option('--json', 'Print raw JSON index metadata')
+    .action(async (targetPath, options) => {
+        try {
+            const index = await indexSemanticCode(targetPath, {
+                onProgress: (info) => {
+                    if (info.current === 1 || info.current === info.total || info.current % 25 === 0) {
+                        console.log(`${colors.gray}[Semantic Code] Embedded ${info.current}/${info.total}: ${info.file}${colors.reset}`);
+                    }
+                }
+            });
+            if (options.json) {
+                console.log(JSON.stringify(index, null, 2));
+                return;
+            }
+            console.log(`\n${formatSemanticCodeIndex(index)}\n`);
+        } catch (error) {
+            console.error(`\n${colors.pink}Semantic code index failed:${colors.reset} ${error.message}\n`);
+            process.exitCode = 1;
+        }
+    });
+
+semanticCodeCommand
+    .command('search')
+    .description('Search an existing semantic code index')
+    .argument('<query...>', 'Natural language code search query')
+    .option('--path <path>', 'Repository path to search', process.cwd())
+    .option('--json', 'Print raw JSON search results')
+    .option('--top-k <count>', 'Number of results to return', value => Number(value), 5)
+    .action(async (query, options) => {
+        try {
+            const results = await searchSemanticCode(query.join(' '), options.path, { topK: options.topK });
+            if (options.json) {
+                console.log(JSON.stringify(results, null, 2));
+                return;
+            }
+            console.log(`\n${formatSemanticCodeSearch(results)}\n`);
+        } catch (error) {
+            console.error(`\n${colors.pink}Semantic code search failed:${colors.reset} ${error.message}\n`);
+            process.exitCode = 1;
+        }
     });
 
 program
@@ -480,11 +719,12 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
     const formatErrorMessage = (err) => err && err.message ? err.message : String(err || 'Unknown error');
     const streamAssistantSentences = async (text, appendMessage, metadata = {}, streamMessage = null) => {
         const sentences = splitResponseSentences(text);
+        const chunks = sentences.filter(sentence => String(sentence || '').trim());
         if (typeof streamMessage === 'function') {
             const stream = streamMessage(metadata);
-            for (let index = 0; index < sentences.length; index++) {
-                stream.appendChunk(sentences[index]);
-                if (index < sentences.length - 1) {
+            for (let index = 0; index < chunks.length; index++) {
+                stream.appendChunk(chunks[index]);
+                if (index < chunks.length - 1) {
                     await sleep(90);
                 }
             }
@@ -492,11 +732,83 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
             return;
         }
 
-        for (let index = 0; index < sentences.length; index++) {
-            appendMessage('assistant', sentences[index], index === 0 ? metadata : {});
-            if (index < sentences.length - 1) {
+        for (let index = 0; index < chunks.length; index++) {
+            appendMessage('assistant', chunks[index], index === 0 ? metadata : {});
+            if (index < chunks.length - 1) {
                 await sleep(90);
             }
+        }
+    };
+    const sendRepoSummaryMessage = async ({ rawArgs = '', appendMessage, streamMessage, setThinking }) => {
+        try {
+            if (typeof setThinking === 'function') setThinking(false);
+            const options = parseRepoSummaryArgs(rawArgs);
+            const summary = summarizeRepository(options.targetPath);
+            const responseText = options.json
+                ? JSON.stringify(summary, null, 2)
+                : formatRepoSummary(summary);
+            lastResponseText = responseText;
+            await streamAssistantSentences(responseText, appendMessage, {}, streamMessage);
+            return responseText;
+        } catch (err) {
+            if (typeof setThinking === 'function') setThinking(false);
+            appendMessage('error', formatErrorMessage(err));
+            return '';
+        }
+    };
+    const sendSymbolIndexMessage = async ({ rawArgs = '', appendMessage, streamMessage, setThinking }) => {
+        try {
+            if (typeof setThinking === 'function') setThinking(false);
+            const options = parseSymbolIndexArgs(rawArgs);
+            const index = buildSymbolIndex(options.targetPath);
+            const responseText = options.json
+                ? JSON.stringify(index, null, 2)
+                : formatSymbolIndex(index, { limit: options.limit });
+            lastResponseText = responseText;
+            await streamAssistantSentences(responseText, appendMessage, {}, streamMessage);
+            return responseText;
+        } catch (err) {
+            if (typeof setThinking === 'function') setThinking(false);
+            appendMessage('error', formatErrorMessage(err));
+            return '';
+        }
+    };
+    const sendSemanticCodeMessage = async ({ rawArgs = '', appendMessage, streamMessage, setThinking, appendCodeStep }) => {
+        const options = parseSemanticCodeArgs(rawArgs);
+        try {
+            if (typeof setThinking === 'function') setThinking(true, 0);
+            let responseText;
+            if (options.mode === 'index') {
+                const index = await indexSemanticCode(options.targetPath, {
+                    onProgress: (info) => {
+                        if (typeof appendCodeStep === 'function' && (info.current === 1 || info.current === info.total || info.current % 25 === 0)) {
+                            appendCodeStep({
+                                action: 'semantic_code_index',
+                                target: `${info.current}/${info.total} ${info.file}`
+                            });
+                        }
+                    }
+                });
+                responseText = options.json
+                    ? JSON.stringify(index, null, 2)
+                    : formatSemanticCodeIndex(index);
+            } else {
+                if (!options.query) {
+                    throw new Error('Usage: /semantic-code search <query>');
+                }
+                const results = await searchSemanticCode(options.query, options.targetPath, { topK: options.topK });
+                responseText = options.json
+                    ? JSON.stringify(results, null, 2)
+                    : formatSemanticCodeSearch(results);
+            }
+            if (typeof setThinking === 'function') setThinking(false);
+            lastResponseText = responseText;
+            await streamAssistantSentences(responseText, appendMessage, {}, streamMessage);
+            return responseText;
+        } catch (err) {
+            if (typeof setThinking === 'function') setThinking(false);
+            appendMessage('error', formatErrorMessage(err));
+            return '';
         }
     };
     const sendImageMessage = async ({ images, image, prompt, appendMessage, streamMessage, setThinking, appendCodeStep }) => {
@@ -670,6 +982,9 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
                         setFastMode,
                         toggleFastMode,
                         getFastMode,
+                        sendRepoSummaryMessage,
+                        sendSymbolIndexMessage,
+                        sendSemanticCodeMessage,
                         streamAssistantSentences,
                         streamMessage
                     });
@@ -680,6 +995,28 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
                 }
             }
             appendMessage('user', text);
+
+            if (isRepoSummaryRequest(text)) {
+                await sendRepoSummaryMessage({ appendMessage, streamMessage, setThinking });
+                return;
+            }
+
+            if (isSymbolIndexRequest(text)) {
+                await sendSymbolIndexMessage({ appendMessage, streamMessage, setThinking });
+                return;
+            }
+
+            if (isSemanticCodeSearchRequest(text)) {
+                const query = extractSemanticCodeQuery(text);
+                await sendSemanticCodeMessage({
+                    rawArgs: `search ${query}`,
+                    appendMessage,
+                    streamMessage,
+                    setThinking,
+                    appendCodeStep
+                });
+                return;
+            }
 
             const transcript = await getChatTranscript();
             const contextualHistory = recentImageContextText
@@ -751,6 +1088,25 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
     if (initialMessage) {
         const { appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser } = ui;
         appendMessage('user', initialMessage);
+        if (isRepoSummaryRequest(initialMessage)) {
+            await sendRepoSummaryMessage({ appendMessage, streamMessage, setThinking });
+            return;
+        }
+        if (isSymbolIndexRequest(initialMessage)) {
+            await sendSymbolIndexMessage({ appendMessage, streamMessage, setThinking });
+            return;
+        }
+        if (isSemanticCodeSearchRequest(initialMessage)) {
+            const query = extractSemanticCodeQuery(initialMessage);
+            await sendSemanticCodeMessage({
+                rawArgs: `search ${query}`,
+                appendMessage,
+                streamMessage,
+                setThinking,
+                appendCodeStep
+            });
+            return;
+        }
         const transcript = await getChatTranscript();
         const contextualHistory = recentImageContextText
             ? [...transcript, { sender: 'system', text: recentImageContextText, timestamp: new Date().toISOString() }]
@@ -820,6 +1176,9 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
                 '  /image <path> [prompt] — Attach an image from your computer',
                 '  /paste [prompt]   — Attach an image from your clipboard',
                 '  /fast [on|off]    — Hide or show thinking/progress output',
+                '  /summarize [path] [--json] — Summarize repository structure',
+                '  /symbols [path] [--json] [--limit n] — Build a source symbol index',
+                '  /semantic-code index|search <query> — Embed and search code semantically',
                 '  /learn <path>     — Remember a .md/.txt file as a Mint skill',
                 '  /code <task>      — Force workspace Code Mode',
                 '  /cd <path>        — Change current working directory',
@@ -853,6 +1212,52 @@ async function handleSlashCommandUI(input, appendMessage, updateStatusModel, cop
 
             appendMessage('system', `Fast mode: ${enabled ? 'ON' : 'OFF'}`);
             break;
+        }
+
+        case '/summarize':
+        case '/summary': {
+            if (typeof helpers.sendRepoSummaryMessage !== 'function') {
+                appendMessage('error', 'Repository summary is not available in this UI.');
+                break;
+            }
+            const responseText = await helpers.sendRepoSummaryMessage({
+                rawArgs: input.slice(command.length).trim(),
+                appendMessage,
+                streamMessage: helpers.streamMessage,
+                setThinking
+            });
+            return { lastResponseText: responseText };
+        }
+
+        case '/symbols':
+        case '/symbol-index': {
+            if (typeof helpers.sendSymbolIndexMessage !== 'function') {
+                appendMessage('error', 'Symbol index is not available in this UI.');
+                break;
+            }
+            const responseText = await helpers.sendSymbolIndexMessage({
+                rawArgs: input.slice(command.length).trim(),
+                appendMessage,
+                streamMessage: helpers.streamMessage,
+                setThinking
+            });
+            return { lastResponseText: responseText };
+        }
+
+        case '/semantic-code':
+        case '/semantic': {
+            if (typeof helpers.sendSemanticCodeMessage !== 'function') {
+                appendMessage('error', 'Semantic code search is not available in this UI.');
+                break;
+            }
+            const responseText = await helpers.sendSemanticCodeMessage({
+                rawArgs: input.slice(command.length).trim(),
+                appendMessage,
+                streamMessage: helpers.streamMessage,
+                setThinking,
+                appendCodeStep
+            });
+            return { lastResponseText: responseText };
         }
 
         case '/learn': {

@@ -43,4 +43,16 @@ describe('CLI chat UI formatting', () => {
             detail: 'npm test -- --runInBand'
         });
     });
+
+    test('skips empty assistant and system messages', () => {
+        expect(_helpers.shouldAppendMessage('assistant', '')).toBe(false);
+        expect(_helpers.shouldAppendMessage('assistant', '   \n')).toBe(false);
+        expect(_helpers.shouldAppendMessage('system', '')).toBe(false);
+        expect(_helpers.shouldAppendMessage('user', '')).toBe(true);
+    });
+
+    test('formats working duration', () => {
+        expect(_helpers.formatDuration(5)).toBe('5s');
+        expect(_helpers.formatDuration(118)).toBe('1m 58s');
+    });
 });

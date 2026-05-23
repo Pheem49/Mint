@@ -135,6 +135,22 @@ function cleanDisplayText(text, role = 'assistant') {
     return cleaned.join('\n');
 }
 
+function formatDuration(totalSeconds) {
+    const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+
+    if (minutes <= 0) return `${remainingSeconds}s`;
+    return `${minutes}m ${remainingSeconds}s`;
+}
+
+function shouldAppendMessage(role, text) {
+    if (role === 'assistant' || role === 'system') {
+        return String(text || '').trim().length > 0;
+    }
+    return true;
+}
+
 /**
  * We wrap everything in an async function to load ESM modules
  */
@@ -151,6 +167,7 @@ async function createChatUI(options) {
         const [history, setHistory] = useState(initialHistory);
         const [liveAssistant, setLiveAssistant] = useState(null);
         const [thinking, setThinking] = useState(false);
+        const [workingSeconds, setWorkingSeconds] = useState(0);
         const [fastMode, setFastMode] = useState(false);
         const [mode, setMode] = useState('Agent');
         const [model, setModel] = useState('');
@@ -170,6 +187,7 @@ async function createChatUI(options) {
         const pendingPasteRef = React.useRef(pendingPaste);
         const pendingPastePrefixRef = React.useRef(pendingPastePrefix);
         const liveAssistantRef = React.useRef(liveAssistant);
+        const thinkingStartedAtRef = React.useRef(null);
         const fastModeRef = React.useRef(fastMode);
         const suppressPasteCharRef = React.useRef(false);
         const selectedIndexRef = React.useRef(selectedIndex);
@@ -215,6 +233,17 @@ async function createChatUI(options) {
         }, [liveAssistant]);
 
         useEffect(() => {
+            if (!thinking) return undefined;
+
+            const timer = setInterval(() => {
+                if (!thinkingStartedAtRef.current) return;
+                setWorkingSeconds(Math.floor((Date.now() - thinkingStartedAtRef.current) / 1000));
+            }, 1000);
+
+            return () => clearInterval(timer);
+        }, [thinking]);
+
+        useEffect(() => {
             fastModeRef.current = fastMode;
         }, [fastMode]);
 
@@ -251,6 +280,7 @@ async function createChatUI(options) {
         // Export methods to the outside world via ref
         useImperativeHandle(ref, () => ({
             appendMessage: (role, text, metadata = {}) => {
+                if (!shouldAppendMessage(role, text)) return;
                 setHistory(prev => [...prev, { role, text, time: new Date(), ...metadata }]);
                 if (metadata.providerInfo) {
                     const { provider, model } = metadata.providerInfo;
@@ -267,6 +297,7 @@ async function createChatUI(options) {
                 }
             },
             appendAssistantStreamChunk: (chunk) => {
+                if (!String(chunk || '').trim()) return;
                 const current = liveAssistantRef.current || { role: 'assistant', text: '', time: new Date() };
                 const next = { ...current, text: `${current.text || ''}${chunk}` };
                 liveAssistantRef.current = next;
@@ -280,7 +311,21 @@ async function createChatUI(options) {
                     setHistory(prev => [...prev, current]);
                 }
             },
-            setThinking: (val) => setThinking(val),
+            setThinking: (val, seconds = 0) => {
+                if (val) {
+                    const elapsed = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
+                    if (!thinkingStartedAtRef.current) {
+                        thinkingStartedAtRef.current = Date.now() - (elapsed * 1000);
+                    }
+                    setWorkingSeconds(Math.floor((Date.now() - thinkingStartedAtRef.current) / 1000));
+                    setThinking(true);
+                    return;
+                }
+
+                thinkingStartedAtRef.current = null;
+                setWorkingSeconds(0);
+                setThinking(false);
+            },
             setMode: (val) => setMode(val),
             setFastMode: (val) => {
                 const next = Boolean(val);
@@ -333,6 +378,9 @@ async function createChatUI(options) {
                         return;
                     }
                     if (thought) {
+                        if (process.env.MINT_SHOW_THINKING_TRACE !== '1') {
+                            return;
+                        }
                         text = thought;
                         label = 'Thinking';
                         labelColor = 'gray';
@@ -641,7 +689,8 @@ async function createChatUI(options) {
 
             // Floating (Persistent) UI part
             h(Box, { flexDirection: 'column' },
-                thinking && h(Box, { marginBottom: 1 },
+                thinking && h(Box, { flexDirection: 'column', marginBottom: 1 },
+                    h(Text, { color: 'gray', dimColor: true }, `─ Working for ${formatDuration(workingSeconds)} ─────────────────────────────────────────────────────────`),
                     h(Text, { color: 'yellow' }, '● Mint is thinking...')
                 ),
 
@@ -742,7 +791,7 @@ async function createChatUI(options) {
 
     return {
         appendMessage: (role, text, metadata) => ref.current?.appendMessage(role, text, metadata),
-        setThinking: (val) => ref.current?.setThinking(val),
+        setThinking: (val, seconds) => ref.current?.setThinking(val, seconds),
         setMode: (val) => ref.current?.setMode(val),
         setFastMode: (val) => ref.current?.setFastMode(val),
         toggleFastMode: () => ref.current?.toggleFastMode(),
@@ -754,11 +803,10 @@ async function createChatUI(options) {
         attachImage: (image) => ref.current?.attachImage(image),
         appendCodeStep: (info) => ref.current?.appendCodeStep(info),
         streamMessage: (metadata = {}) => {
-            let fullText = '';
             ref.current?.beginAssistantStream(metadata);
             return {
                 appendChunk: (chunk) => {
-                    fullText += chunk;
+                    if (!String(chunk || '').trim()) return;
                     ref.current?.appendAssistantStreamChunk(chunk);
                 },
                 finalize: () => {
@@ -772,4 +820,4 @@ async function createChatUI(options) {
     };
 }
 
-module.exports = { createChatUI, _helpers: { cleanDisplayText, stripInlineMarkdown, compactPathLabel, formatActivityStep } };
+module.exports = { createChatUI, _helpers: { cleanDisplayText, stripInlineMarkdown, compactPathLabel, formatActivityStep, formatDuration, shouldAppendMessage } };
