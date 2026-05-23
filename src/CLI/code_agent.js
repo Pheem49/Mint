@@ -148,13 +148,14 @@ Rules:
 6. Use shell commands for inspection, tests, and formatting when useful.
 6. Never use destructive commands like "rm -rf", "git reset --hard", or overwrite unrelated files.
 7. Before any shell command or file patch is executed, the user must approve it. Plan accordingly.
-8. When editing, prefer "apply_patch" with precise hunks over whole-file rewrites.
-9. When you are done, return "finish" with your final response to the user in the "summary" field.
+8. Before editing more than one file, you MUST first use the "plan" action and wait for user approval. The plan must start with "Plan:" and include one bullet per file, for example "- แก้ src/CLI/agent.js". After approval, make the edits.
+9. When editing, prefer "apply_patch" with precise hunks over whole-file rewrites.
+10. When you are done, return "finish" with your final response to the user in the "summary" field.
 
 Response format:
 {
   "thought": "short reasoning about what to do next",
-  "action": "web_search" | "list_files" | "read_file" | "search_code" | "find_path" | "run_shell" | "apply_patch" | "write_file" | "ask_user" | "open_url" | "open_app" | "open_file" | "open_folder" | "create_folder" | "system_info" | "system_automation" | "finish",
+  "action": "web_search" | "list_files" | "read_file" | "search_code" | "find_path" | "run_shell" | "plan" | "apply_patch" | "write_file" | "ask_user" | "open_url" | "open_app" | "open_file" | "open_folder" | "create_folder" | "system_info" | "system_automation" | "finish",
   "input": {
     "question": "your question to the user for ask_user",
     "query": "search text for web_search, search_code, or find_path",
@@ -165,6 +166,8 @@ Response format:
     "startLine": 1,
     "endLine": 120,
     "content": "full file content for write_file",
+    "plan": ["- แก้ relative/path.js", "- เพิ่ม test ใน tests/example.test.js"],
+    "files": ["relative/path.js", "tests/example.test.js"],
     "summary": "your final conversational or technical response to the user (Matches user language and uses polite particles)",
     "verification": "tests or checks (if applicable)",
     "sessionSummary": "brief persistent summary for the workspace",
@@ -187,6 +190,7 @@ Tool notes:
 - "search_code": search by text or regex-like pattern.
 - "find_path": find files or directories by path/name when the user is looking for a folder, filename, or location.
 - "run_shell": run a non-destructive command in the workspace.
+- "plan": present a user-visible multi-file edit plan before changing more than one file. Use input.plan as bullet strings and input.files as the expected touched files.
 - "apply_patch": update an existing file using one or more exact replacement hunks.
 - "write_file": create a new file or fully rewrite a file when replacement is not practical.
 - "ask_user": ask the user for clarification, preference, or more information before proceeding.
@@ -606,6 +610,58 @@ function formatPatchPreview(workspaceRoot, patchInput) {
     }
 }
 
+function normalizePlanItems(plan) {
+    if (Array.isArray(plan)) {
+        return plan
+            .map(item => String(item || '').trim())
+            .filter(Boolean);
+    }
+    return String(plan || '')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean);
+}
+
+function formatPlanPreview(input = {}) {
+    const items = normalizePlanItems(input.plan);
+    const files = Array.isArray(input.files)
+        ? input.files.map(file => String(file || '').trim()).filter(Boolean)
+        : [];
+    const lines = ['Plan:'];
+
+    if (items.length > 0) {
+        items.forEach(item => {
+            lines.push(item.startsWith('- ') ? item : `- ${item}`);
+        });
+    } else {
+        files.forEach(file => lines.push(`- แก้ ${file}`));
+    }
+
+    return lines.join('\n');
+}
+
+function getEditTargetPath(action, input = {}) {
+    if (action === 'apply_patch') {
+        return input.patch && input.patch.path ? String(input.patch.path) : '';
+    }
+    if (action === 'write_file') {
+        return input.path ? String(input.path) : '';
+    }
+    return '';
+}
+
+function requiresMultiFilePlan(action, input = {}, editPlanState = {}) {
+    const targetPath = getEditTargetPath(action, input);
+    if (!targetPath || editPlanState.approved) {
+        return false;
+    }
+
+    const touchedFiles = editPlanState.touchedFiles instanceof Set
+        ? editPlanState.touchedFiles
+        : new Set(editPlanState.touchedFiles || []);
+    return touchedFiles.size > 0 && !touchedFiles.has(targetPath);
+}
+
 function applyHunksToContent(content, hunks, filePath) {
     let nextContent = content;
     hunks.forEach((hunk, index) => {
@@ -902,6 +958,10 @@ async function executeCodeTask(task, options = {}) {
     let finalVerification = '';
     let finalSessionSummary = '';
     let executedSteps = 0;
+    const editPlanState = {
+        approved: false,
+        touchedFiles: new Set()
+    };
 
     for (let step = 1; step <= MAX_AGENT_STEPS; step++) {
         executedSteps = step;
@@ -953,6 +1013,22 @@ async function executeCodeTask(task, options = {}) {
 
         let toolResult = '';
         try {
+            if (requiresMultiFilePlan(action, input, editPlanState)) {
+                const nextPath = getEditTargetPath(action, input);
+                observation = [
+                    `Previous thought: ${decision.thought || '(none)'}`,
+                    `Action: ${action}`,
+                    'Observation:',
+                    [
+                        'Error: Multi-file edit plan required before editing another file.',
+                        'Use the "plan" action first with input.plan starting with "Plan:" bullets and input.files listing every file you expect to touch.',
+                        `Already edited: ${Array.from(editPlanState.touchedFiles).join(', ')}`,
+                        `Next requested file: ${nextPath}`
+                    ].join('\n')
+                ].join('\n');
+                continue;
+            }
+
             switch (action) {
                 case 'web_search':
                     toolResult = await webSearch(input.query, onProgress);
@@ -995,6 +1071,27 @@ async function executeCodeTask(task, options = {}) {
                     toolResult = await runShell(workspaceRoot, input.command);
                     break;
                 }
+                case 'plan': {
+                    const preview = formatPlanPreview(input);
+                    const approved = await requestApproval({
+                        type: 'plan',
+                        label: 'Multi-file plan',
+                        preview
+                    });
+                    if (!approved) {
+                        toolResult = 'User denied multi-file plan.';
+                        break;
+                    }
+                    editPlanState.approved = true;
+                    safetyManager.appendActionLog({
+                        source: 'code_agent',
+                        action: 'plan',
+                        preview,
+                        approved
+                    });
+                    toolResult = `User approved multi-file plan:\n${preview}`;
+                    break;
+                }
                 case 'apply_patch': {
                     const patchInput = input.patch || {};
                     const approved = await requestApproval({
@@ -1013,6 +1110,7 @@ async function executeCodeTask(task, options = {}) {
                         approved
                     });
                     toolResult = applyPatch(workspaceRoot, patchInput);
+                    editPlanState.touchedFiles.add(patchInput.path);
                     break;
                 }
                 case 'write_file': {
@@ -1032,6 +1130,7 @@ async function executeCodeTask(task, options = {}) {
                         approved
                     });
                     toolResult = writeFile(workspaceRoot, input.path, input.content);
+                    editPlanState.touchedFiles.add(input.path);
                     break;
                 }
                 case 'ask_user': {
@@ -1105,7 +1204,7 @@ async function executeCodeTask(task, options = {}) {
             step,
             phase: 'finished',
             action,
-            target: (input.path || input.command || input.query || '') + resultSummary
+            target: (action === 'plan' ? formatPlanPreview(input) : (input.path || input.command || input.query || '')) + resultSummary
         });
 
         // Format tool result to be more readable and structured for the agent
@@ -1195,6 +1294,10 @@ module.exports = {
         searchCode,
         walkDirectory,
         buildUnifiedDiffPreview,
-        formatPatchPreview
+        formatPatchPreview,
+        formatPlanPreview,
+        normalizePlanItems,
+        requiresMultiFilePlan,
+        getEditTargetPath
     }
 };

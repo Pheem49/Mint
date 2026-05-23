@@ -28,6 +28,7 @@ function formatProgress(info) {
         case 'find_path':   label = 'Explored';     break;
         case 'read_file':   label = 'ReadFile';     break;
         case 'search_code': label = 'SearchText';   break;
+        case 'plan':        label = 'Plan';         break;
         case 'apply_patch':
         case 'write_file':  label = 'Edited';       break;
         case 'run_shell':   label = 'Ran command';  break;

@@ -96,4 +96,42 @@ describe('code_agent helpers', () => {
             fs.rmSync(tempDir, { recursive: true, force: true });
         }
     });
+
+    test('formatPlanPreview displays a user-visible multi-file plan', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const preview = _helpers.formatPlanPreview({
+            plan: [
+                'แก้ src/CLI/code_agent.js',
+                '- เพิ่ม test ใน tests/code_agent.test.js'
+            ],
+            files: ['src/CLI/code_agent.js', 'tests/code_agent.test.js']
+        });
+
+        expect(preview).toBe([
+            'Plan:',
+            '- แก้ src/CLI/code_agent.js',
+            '- เพิ่ม test ใน tests/code_agent.test.js'
+        ].join('\n'));
+    });
+
+    test('requiresMultiFilePlan blocks a second file edit without approved plan', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const editPlanState = {
+            approved: false,
+            touchedFiles: new Set(['src/CLI/code_agent.js'])
+        };
+
+        expect(_helpers.requiresMultiFilePlan('apply_patch', {
+            patch: { path: 'tests/code_agent.test.js' }
+        }, editPlanState)).toBe(true);
+
+        expect(_helpers.requiresMultiFilePlan('apply_patch', {
+            patch: { path: 'src/CLI/code_agent.js' }
+        }, editPlanState)).toBe(false);
+
+        editPlanState.approved = true;
+        expect(_helpers.requiresMultiFilePlan('write_file', {
+            path: 'tests/code_agent.test.js'
+        }, editPlanState)).toBe(false);
+    });
 });

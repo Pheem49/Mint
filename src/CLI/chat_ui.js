@@ -63,6 +63,8 @@ function formatActivityStep(info = {}) {
             return { title: '⚠ Notice', detail: rawText };
         case 'run_shell':
             return { title: 'Ran', detail: rawText };
+        case 'plan':
+            return { title: 'Plan', detail: rawText };
         case 'apply_patch':
         case 'write_file':
             return { title: 'Edited', detail: rawText };

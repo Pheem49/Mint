@@ -41,6 +41,12 @@ const TOOL_REGISTRY = Object.freeze({
         important: true,
         description: 'Run a non-destructive shell command after user approval.'
     },
+    plan: {
+        permission: 'approval',
+        required: ['plan'],
+        codeAgentOnly: true,
+        description: 'Present a multi-file edit plan before changing files.'
+    },
     apply_patch: {
         permission: 'approval',
         required: ['patch'],
