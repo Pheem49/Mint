@@ -1,9 +1,15 @@
-const { Client, GatewayIntentBits, Partials } = require('discord.js');
+'use strict';
+
+const { requireOptional } = require('../System/optional_require');
 const { handleChat } = require('../AI_Brain/Gemini_API');
 
 class DiscordBridge {
     constructor(token) {
         this.token = token;
+        const { Client, GatewayIntentBits, Partials } = requireOptional(
+            'discord.js',
+            'npm install discord.js'
+        );
         this.client = new Client({
             intents: [
                 GatewayIntentBits.Guilds,
@@ -21,30 +27,22 @@ class DiscordBridge {
         });
 
         this.client.on('messageCreate', async (message) => {
-            // Ignore bot messages
             if (message.author.bot) return;
-
-            // Handle DMs or Mentions
             const isDM = !message.guild;
             const isMentioned = message.mentions.has(this.client.user);
 
             if (isDM || isMentioned) {
                 try {
-                    // Clean up the message if it's a mention
                     let cleanContent = message.content;
                     if (isMentioned) {
-                        cleanContent = message.content.replace(`<@!${this.client.user.id}>`, '').replace(`<@${this.client.user.id}>`, '').trim();
+                        cleanContent = message.content
+                            .replace(`<@!${this.client.user.id}>`, '')
+                            .replace(`<@${this.client.user.id}>`, '')
+                            .trim();
                     }
-
                     if (!cleanContent) return;
-
-                    // Show typing indicator
                     await message.channel.sendTyping();
-
-                    // Send to Mint AI Brain
                     const result = await handleChat(cleanContent);
-
-                    // Reply to user
                     if (result && result.response) {
                         await message.reply(result.response);
                     }

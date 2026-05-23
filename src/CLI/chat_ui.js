@@ -59,6 +59,8 @@ function formatActivityStep(info = {}) {
             return { title: 'Explored', detail: `Search ${rawText}` };
         case 'web_search':
             return { title: 'Searched', detail: rawText };
+        case 'warn':
+            return { title: '⚠ Notice', detail: rawText };
         case 'run_shell':
             return { title: 'Ran', detail: rawText };
         case 'apply_patch':

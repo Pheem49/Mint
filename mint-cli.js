@@ -1,36 +1,37 @@
 #!/usr/bin/env node
 require('dotenv').config({ quiet: true });
+
 // Suppress experimental SQLite warning
 const originalEmit = process.emit;
 process.emit = function (name, data, ...args) {
-    if (name === 'warning' && typeof data === 'object' && data.name === 'ExperimentalWarning' && data.message.includes('SQLite')) {
+    if (name === 'warning' && typeof data === 'object' &&
+        data.name === 'ExperimentalWarning' && data.message.includes('SQLite')) {
         return false;
     }
     return originalEmit.apply(process, [name, data, ...args]);
 };
+
 const { Command } = require('commander');
-const fs = require('fs');
-const path = require('path');
-const { handleChat, handleGeminiChatStream, resetChat, refreshApiKeyFromConfig, getChatTranscript } = require('./src/AI_Brain/Gemini_API');
-const agentOrchestrator = require('./src/AI_Brain/agent_orchestrator');
-const workspaceManager = require('./src/CLI/workspace_manager');
-const systemMonitor = require('./src/Plugins/system_monitor');
-const { sendNotification } = require('./src/System/notifications');
-const pkg = require('./package.json');
-const { runOnboarding } = require('./src/CLI/onboarding');
-const { startAgent } = require('./src/AI_Brain/headless_agent');
-const { displayFeatures } = require('./src/CLI/list_features');
-const { readConfig, writeConfig } = require('./src/System/config_manager');
-const { executeCodeTask } = require('./src/CLI/code_agent');
-const { detectCodeIntent, runChatRoutedTask } = require('./src/CLI/chat_router');
-const memoryStore = require('./src/AI_Brain/memory_store');
-const readline = require('readline');
-const { createChatUI } = require('./src/CLI/chat_ui');
+
+// ── CLI modules ──────────────────────────────────────────────────────────────
+const { colors, exitWithGoodbye }        = require('./src/CLI/cli_colors');
+const { formatProgress }                 = require('./src/CLI/cli_formatters');
+const { startInteractiveChat }           = require('./src/CLI/interactive_chat');
+const { requestCodeApproval }            = require('./src/CLI/approval_handler');
+const { learnSkillFile }                 = require('./src/CLI/skill_manager');
+
+// ── Feature / system modules ────────────────────────────────────────────────
+const { runOnboarding }                  = require('./src/CLI/onboarding');
+const { startAgent }                     = require('./src/AI_Brain/headless_agent');
+const { displayFeatures }                = require('./src/CLI/list_features');
+const { readConfig, writeConfig }        = require('./src/System/config_manager');
+const { executeCodeTask }                = require('./src/CLI/code_agent');
+const memoryStore                        = require('./src/AI_Brain/memory_store');
 const { runUpdate, runStartupAutoUpdate, shouldRunAutoUpdate } = require('./src/CLI/updater');
-const { runGmailAuth } = require('./src/CLI/gmail_auth');
-const { loadImageAsDataUri, loadClipboardImageAsDataUri } = require('./src/CLI/image_input');
+const { runGmailAuth }                   = require('./src/CLI/gmail_auth');
+const { loadImageAsDataUri }             = require('./src/CLI/image_input');
 const { summarizeRepository, formatRepoSummary } = require('./src/CLI/repo_summarizer');
-const { buildSymbolIndex, formatSymbolIndex } = require('./src/CLI/symbol_indexer');
+const { buildSymbolIndex, formatSymbolIndex }    = require('./src/CLI/symbol_indexer');
 const {
     indexSemanticCode,
     searchSemanticCode,
@@ -38,10 +39,12 @@ const {
     formatSemanticCodeSearch
 } = require('./src/CLI/semantic_code_search');
 
-// Startup Info
-const startupConfig = readConfig();
+const pkg = require('./package.json');
+
+// ── Startup banner ───────────────────────────────────────────────────────────
+const startupConfig   = readConfig();
 const startupProvider = startupConfig.aiProvider || 'gemini';
-const startupModel = startupProvider === 'openai'
+const startupModel    = startupProvider === 'openai'
     ? (startupConfig.openaiModel || 'gpt-4o')
     : startupProvider === 'anthropic'
         ? (startupConfig.anthropicModel || 'claude-3-5-sonnet-latest')
@@ -50,272 +53,17 @@ const startupModel = startupProvider === 'openai'
             : startupProvider === 'ollama'
                 ? (startupConfig.ollamaModel || 'llama3:latest')
                 : (startupConfig.geminiModel || 'gemini-2.5-flash');
-const startupNow = new Date();
-const startupTime = startupNow.toLocaleString('th-TH', { 
-    day: '2-digit', month: '2-digit', year: 'numeric', 
-    hour: '2-digit', minute: '2-digit', hour12: false 
+
+const startupNow  = new Date();
+const startupTime = startupNow.toLocaleString('th-TH', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false
 }).replace(',', '');
-console.log(`\x1b[38;5;121m[Mint] v${pkg.version} | ${startupTime} | Active AI: ${startupProvider} • ${startupModel}\x1b[0m`);
+console.log(`${colors.mint}[Mint] v${pkg.version} | ${startupTime} | Active AI: ${startupProvider} • ${startupModel}${colors.reset}`);
 
-// ANSI Colors
-const colors = {
-    reset: "\x1b[0m",
-    bright: "\x1b[1m",
-    mint: "\x1b[38;5;121m",
-    pink: "\x1b[38;5;213m",
-    gray: "\x1b[90m",
-    cyan: "\x1b[36m",
-    yellow: "\x1b[33m"
-};
+process.once('SIGINT', () => exitWithGoodbye(0));
 
-let isExiting = false;
-
-function exitWithGoodbye(code = 0) {
-    if (isExiting) return;
-    isExiting = true;
-
-    process.stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l');
-    process.stdout.write('\x1b[?25h');
-    console.log(`\n${colors.pink}Goodbye! See you again soon!${colors.reset}\n`);
-    process.exit(code);
-}
-
-process.once('SIGINT', () => {
-    exitWithGoodbye(0);
-});
-
-function formatProgress(info) {
-    if (typeof info === 'string') return `${colors.gray}[Mint Code] ${info}${colors.reset}`;
-
-    const { step, phase, action, target, message } = info;
-    
-    if (action === 'ask_user') {
-        return `\n${colors.mint}✓${colors.reset} ${colors.bright}Ask User${colors.reset}\n${colors.gray}   ${target || message || ''}${colors.reset}`;
-    }
-
-    let icon = `${colors.mint}✓${colors.reset}`;
-    let label = action || phase;
-    let color = colors.reset;
-
-    switch (action) {
-        case 'thinking': 
-            return `\n${colors.yellow}* ${colors.bright}Thinking${colors.reset}`;
-        case 'web_search': label = 'WebSearch'; break;
-        case 'list_files':
-        case 'find_path': label = 'Explored'; break;
-        case 'read_file': label = 'ReadFile'; break;
-        case 'search_code': label = 'SearchText'; break;
-        case 'apply_patch':
-        case 'write_file': label = 'Edited'; break;
-        case 'run_shell': label = 'Ran command'; break;
-        case 'json_repair': icon = '*'; label = 'Repairing JSON'; break;
-        case 'reviewer_start': label = 'Reviewing'; break;
-    }
-
-    const content = target || message || '';
-    return ` ${icon} ${colors.bright}${label}${colors.reset} ${color}${content}${colors.reset}`;
-}
-
-function formatMemoryInteractions(interactions, title = 'Remembered interactions') {
-    if (!Array.isArray(interactions) || interactions.length === 0) {
-        return `${title}:\n(no memories found)`;
-    }
-
-    const lines = [`${title}:`];
-    interactions.forEach((item, index) => {
-        const when = item.created_at ? ` (${item.created_at})` : '';
-        const id = item.id ? `#${item.id} ` : '';
-        lines.push(`${index + 1}. ${id}User${when}: ${item.user_text}`);
-        lines.push(`   Mint: ${item.ai_text}`);
-    });
-    return lines.join('\n');
-}
-
-function isRepoSummaryRequest(text) {
-    const input = (text || '').trim().toLowerCase();
-    if (!input) return false;
-
-    const hasRepoTarget = /\b(repo|repository|project|workspace|codebase)\b|รีโป|โปรเจค|โปรเจ็กต์|โปรเจกต์|โปรเจ็ค/.test(input);
-    const asksSummary = /\b(summarize|summary|overview)\b|สรุป|ภาพรวม/.test(input);
-    const asksQuestion = /\b(have|has|มีไหม|มีมั้ย|มีหรือเปล่า)\b/.test(input);
-
-    return hasRepoTarget && asksSummary && !asksQuestion;
-}
-
-function parseRepoSummaryArgs(rawArgs) {
-    const args = (rawArgs || '').split(/\s+/).filter(Boolean);
-    const json = args.includes('--json');
-    const pathArgs = args.filter(arg => arg !== '--json');
-    return {
-        targetPath: pathArgs.length > 0 ? pathArgs.join(' ') : process.cwd(),
-        json
-    };
-}
-
-function isSymbolIndexRequest(text) {
-    const input = (text || '').trim().toLowerCase();
-    if (!input) return false;
-
-    const hasSymbolTarget = /\b(symbol|symbols|ast|lsp)\b|ซิมโบล|สัญลักษณ์/.test(input);
-    const asksIndex = /\b(index|list|show|build|scan|overview)\b|ทำ|สร้าง|แสดง|ลิสต์|สแกน/.test(input);
-    const referencesWorkspace = /\b(repo|repository|project|workspace|codebase|source|code)\b|รีโป|โปรเจค|โปรเจ็กต์|โปรเจกต์|โค้ด/.test(input);
-    const asksQuestion = /\b(do i|have|has)\b|มีไหม|มีมั้ย|มีหรือเปล่า/.test(input);
-
-    return hasSymbolTarget && (asksIndex || referencesWorkspace) && !asksQuestion;
-}
-
-function parseSymbolIndexArgs(rawArgs) {
-    const args = (rawArgs || '').split(/\s+/).filter(Boolean);
-    const json = args.includes('--json');
-    let limit = 80;
-    const pathArgs = [];
-
-    for (let index = 0; index < args.length; index++) {
-        const arg = args[index];
-        if (arg === '--json') continue;
-        if (arg === '--limit') {
-            const next = Number(args[index + 1]);
-            if (Number.isFinite(next) && next >= 0) {
-                limit = next;
-                index++;
-            }
-            continue;
-        }
-        if (arg.startsWith('--limit=')) {
-            const next = Number(arg.slice('--limit='.length));
-            if (Number.isFinite(next) && next >= 0) {
-                limit = next;
-            }
-            continue;
-        }
-        pathArgs.push(arg);
-    }
-
-    return {
-        targetPath: pathArgs.length > 0 ? pathArgs.join(' ') : process.cwd(),
-        json,
-        limit
-    };
-}
-
-function isSemanticCodeSearchRequest(text) {
-    const input = (text || '').trim().toLowerCase();
-    if (!input) return false;
-
-    const hasSemanticSearch = /\bsemantic\b/.test(input) && /\b(search|find|look for)\b/.test(input);
-    const referencesCode = /\b(code|repo|repository|project|workspace|codebase|source)\b|โค้ด|รีโป|โปรเจค|โปรเจ็กต์|โปรเจกต์/.test(input);
-    const thaiSemanticSearch = /ค้นหา/.test(input) && /ความหมาย|semantic/.test(input) && /โค้ด|โปรเจค|รีโป/.test(input);
-    const asksQuestion = /\b(do i|have|has)\b|มีไหม|มีมั้ย|มีหรือเปล่า/.test(input);
-
-    return (hasSemanticSearch && referencesCode || thaiSemanticSearch) && !asksQuestion;
-}
-
-function parseSemanticCodeArgs(rawArgs) {
-    const args = (rawArgs || '').split(/\s+/).filter(Boolean);
-    const json = args.includes('--json');
-    let topK = 5;
-    const pathArgs = [];
-    const queryArgs = [];
-    let mode = 'search';
-
-    for (let index = 0; index < args.length; index++) {
-        const arg = args[index];
-        if (arg === 'index' || arg === 'search') {
-            mode = arg;
-            continue;
-        }
-        if (arg === '--json') continue;
-        if (arg === '--top-k' || arg === '--limit') {
-            const next = Number(args[index + 1]);
-            if (Number.isFinite(next) && next > 0) {
-                topK = next;
-                index++;
-            }
-            continue;
-        }
-        if (arg.startsWith('--top-k=') || arg.startsWith('--limit=')) {
-            const next = Number(arg.slice(arg.indexOf('=') + 1));
-            if (Number.isFinite(next) && next > 0) {
-                topK = next;
-            }
-            continue;
-        }
-        if (arg === '--path') {
-            if (args[index + 1]) {
-                pathArgs.push(args[index + 1]);
-                index++;
-            }
-            continue;
-        }
-        queryArgs.push(arg);
-    }
-
-    return {
-        mode,
-        query: queryArgs.join(' ').trim(),
-        targetPath: pathArgs.length > 0 ? pathArgs.join(' ') : process.cwd(),
-        json,
-        topK
-    };
-}
-
-function extractSemanticCodeQuery(text) {
-    return String(text || '')
-        .replace(/semantic\s+code\s+search/ig, '')
-        .replace(/semantic\s+search/ig, '')
-        .replace(/search\s+code/ig, '')
-        .replace(/ค้นหาโค้ดแบบความหมาย/g, '')
-        .replace(/ค้นหาแบบ semantic/g, '')
-        .replace(/ใน repo นี้|ในโปรเจคนี้|ในรีโปนี้/g, '')
-        .trim();
-}
-
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-function splitResponseSentences(text) {
-    const normalized = String(text || '').replace(/\r\n/g, '\n');
-    if (!normalized) return [];
-
-    const chunks = [];
-    let buffer = '';
-    for (const char of normalized) {
-        buffer += char;
-        if (char === '\n' || /[.!?。！？…]/u.test(char)) {
-            const sentence = buffer;
-            if (sentence.trim()) chunks.push(sentence);
-            buffer = '';
-        }
-    }
-
-    if (buffer.trim()) chunks.push(buffer);
-    return chunks.length > 0 ? chunks : [normalized];
-}
-
-function learnSkillFile(filePath) {
-    const targetPath = path.resolve(process.cwd(), filePath);
-    if (!fs.existsSync(targetPath)) {
-        throw new Error(`File not found: ${targetPath}`);
-    }
-
-    const stat = fs.statSync(targetPath);
-    if (!stat.isFile()) {
-        throw new Error(`Path is not a file: ${targetPath}`);
-    }
-
-    const ext = path.extname(targetPath).toLowerCase();
-    if (ext !== '.md' && ext !== '.txt') {
-        throw new Error('Mint learn currently supports .md and .txt files only.');
-    }
-
-    const maxBytes = 256 * 1024;
-    if (stat.size > maxBytes) {
-        throw new Error(`File is too large (${stat.size} bytes). Limit is ${maxBytes} bytes.`);
-    }
-
-    const content = fs.readFileSync(targetPath, 'utf8');
-    return memoryStore.addLearnedSkill(path.basename(targetPath), targetPath, content);
-}
-
+// ── Commander program ────────────────────────────────────────────────────────
 const program = new Command();
 
 program
@@ -323,20 +71,11 @@ program
     .description('Mint - Your Personal AI Assistant CLI')
     .version(pkg.version);
 
+// Auto-update hook
 program.hook('preAction', async (thisCommand, actionCommand) => {
-    if (actionCommand.name() === 'update' || process.env.MINT_SKIP_AUTO_UPDATE === '1') {
-        return;
-    }
-
+    if (actionCommand.name() === 'update' || process.env.MINT_SKIP_AUTO_UPDATE === '1') return;
     const config = readConfig();
-    if (config.enableAutoUpdate === false) {
-        return;
-    }
-
-    if (!shouldRunAutoUpdate(config)) {
-        return;
-    }
-
+    if (config.enableAutoUpdate === false || !shouldRunAutoUpdate(config)) return;
     console.log(`${colors.gray}[Mint Update] Checking for updates...${colors.reset}`);
     const result = await runStartupAutoUpdate(config, writeConfig);
     if (result.status === 'updated') {
@@ -346,7 +85,8 @@ program.hook('preAction', async (thisCommand, actionCommand) => {
     }
 });
 
-// Chat Command (Interactive Mode)
+// ── Commands ─────────────────────────────────────────────────────────────────
+
 program
     .command('chat', { isDefault: true })
     .description('Start interactive chat session with Mint')
@@ -356,7 +96,6 @@ program
         await startInteractiveChat(message, { imagePath: options.image });
     });
 
-// Onboard Command
 program
     .command('onboard')
     .description('Setup Mint for the first time')
@@ -365,7 +104,6 @@ program
         await runOnboarding(options);
     });
 
-// Agent Command (Headless Daemon Mode)
 program
     .command('agent')
     .description('Run Mint as a background agent (headless)')
@@ -379,13 +117,10 @@ program
         await startAgent();
     });
 
-// List Command
 program
     .command('list')
     .description('Show list of Mint features and commands')
-    .action(() => {
-        displayFeatures();
-    });
+    .action(() => displayFeatures());
 
 program
     .command('summarize')
@@ -396,10 +131,7 @@ program
     .action((targetPath, options) => {
         try {
             const summary = summarizeRepository(targetPath);
-            if (options.json) {
-                console.log(JSON.stringify(summary, null, 2));
-                return;
-            }
+            if (options.json) { console.log(JSON.stringify(summary, null, 2)); return; }
             console.log(`\n${formatRepoSummary(summary)}\n`);
         } catch (error) {
             console.error(`\n${colors.pink}Summarize failed:${colors.reset} ${error.message}\n`);
@@ -417,10 +149,7 @@ program
     .action((targetPath, options) => {
         try {
             const index = buildSymbolIndex(targetPath);
-            if (options.json) {
-                console.log(JSON.stringify(index, null, 2));
-                return;
-            }
+            if (options.json) { console.log(JSON.stringify(index, null, 2)); return; }
             console.log(`\n${formatSymbolIndex(index, { limit: options.limit })}\n`);
         } catch (error) {
             console.error(`\n${colors.pink}Symbol index failed:${colors.reset} ${error.message}\n`);
@@ -447,10 +176,7 @@ semanticCodeCommand
                     }
                 }
             });
-            if (options.json) {
-                console.log(JSON.stringify(index, null, 2));
-                return;
-            }
+            if (options.json) { console.log(JSON.stringify(index, null, 2)); return; }
             console.log(`\n${formatSemanticCodeIndex(index)}\n`);
         } catch (error) {
             console.error(`\n${colors.pink}Semantic code index failed:${colors.reset} ${error.message}\n`);
@@ -468,10 +194,7 @@ semanticCodeCommand
     .action(async (query, options) => {
         try {
             const results = await searchSemanticCode(query.join(' '), options.path, { topK: options.topK });
-            if (options.json) {
-                console.log(JSON.stringify(results, null, 2));
-                return;
-            }
+            if (options.json) { console.log(JSON.stringify(results, null, 2)); return; }
             console.log(`\n${formatSemanticCodeSearch(results)}\n`);
         } catch (error) {
             console.error(`\n${colors.pink}Semantic code search failed:${colors.reset} ${error.message}\n`);
@@ -489,10 +212,7 @@ program
         try {
             if (options.list) {
                 const skills = memoryStore.getLearnedSkills(50);
-                if (skills.length === 0) {
-                    console.log(`\n${colors.gray}No learned skills stored.${colors.reset}\n`);
-                    return;
-                }
+                if (skills.length === 0) { console.log(`\n${colors.gray}No learned skills stored.${colors.reset}\n`); return; }
                 console.log(`\n${colors.bright}Learned Skills:${colors.reset}`);
                 skills.forEach(skill => {
                     console.log(`${colors.mint}#${skill.id}${colors.reset} ${skill.name}`);
@@ -501,7 +221,6 @@ program
                 console.log('');
                 return;
             }
-
             if (options.delete) {
                 const deleted = memoryStore.deleteLearnedSkill(options.delete);
                 if (deleted > 0) {
@@ -512,10 +231,7 @@ program
                 }
                 return;
             }
-
-            if (!filePath) {
-                throw new Error('Usage: mint learn <path-to-skill.md>');
-            }
+            if (!filePath) throw new Error('Usage: mint learn <path-to-skill.md>');
 
             const learned = learnSkillFile(filePath);
             console.log(`\n${colors.mint}✓${colors.reset} Learned skill: ${learned.name}`);
@@ -530,7 +246,6 @@ program
         }
     });
 
-// Task Command (Autonomous Background Task)
 program
     .command('task')
     .description('Delegate a complex task to the background agent')
@@ -548,23 +263,18 @@ program
 program
     .command('update')
     .description('Check for and install the latest Mint CLI version from npm')
-    .option('--check', 'Only check whether an update is available')
+    .option('--check',   'Only check whether an update is available')
     .option('--dry-run', 'Show the npm update operation without installing')
     .action(async (options) => {
         console.log(`\n${colors.mint}${colors.bright}[Mint Update]${colors.reset} Checking npm for updates...`);
-
         try {
             const result = await runUpdate({
-                checkOnly: options.check === true,
-                dryRun: options.dryRun === true
+                checkOnly: options.check   === true,
+                dryRun:    options.dryRun  === true
             });
-
             const color = result.status === 'error' ? colors.pink : colors.mint;
             console.log(`${color}${result.message}${colors.reset}\n`);
-
-            if (result.status === 'error') {
-                process.exitCode = 1;
-            }
+            if (result.status === 'error') process.exitCode = 1;
         } catch (error) {
             console.error(`${colors.pink}Update failed: ${error.message}${colors.reset}\n`);
             process.exitCode = 1;
@@ -576,28 +286,21 @@ program
     .description('Manage MCP (Model Context Protocol) servers')
     .addCommand(new Command('add')
         .description('Add a new MCP server')
-        .argument('<name>', 'Server name')
+        .argument('<name>',    'Server name')
         .argument('<command>', 'Command to run (e.g. npx)')
         .option('-a, --args <args...>', 'Command arguments')
-        .option('-e, --env <env...>', 'Environment variables (KEY=VALUE)')
+        .option('-e, --env <env...>',   'Environment variables (KEY=VALUE)')
         .action((name, command, options) => {
-            const config = readConfig();
+            const config     = readConfig();
             const mcpServers = config.mcpServers || {};
-            
-            const env = {};
+            const env        = {};
             if (options.env) {
                 options.env.forEach(kv => {
                     const [k, v] = kv.split('=');
                     if (k && v) env[k] = v;
                 });
             }
-
-            mcpServers[name] = {
-                command,
-                args: options.args || [],
-                env
-            };
-
+            mcpServers[name] = { command, args: options.args || [], env };
             config.mcpServers = mcpServers;
             writeConfig(config);
             console.log(`\n${colors.mint}✓${colors.reset} MCP server "${name}" added successfully.`);
@@ -620,7 +323,7 @@ program
     .addCommand(new Command('list')
         .description('List configured MCP servers')
         .action(() => {
-            const config = readConfig();
+            const config  = readConfig();
             const servers = Object.keys(config.mcpServers || {});
             if (servers.length === 0) {
                 console.log(`\n${colors.gray}No MCP servers configured.${colors.reset}`);
@@ -650,13 +353,13 @@ program
     .addCommand(new Command('auth')
         .description('Open Google OAuth login and save a Gmail refresh token')
         .option('--port <port>', 'Local callback port, defaults to a random available port')
-        .option('--no-open', 'Print the auth link without opening a browser')
+        .option('--no-open',     'Print the auth link without opening a browser')
         .action(async (options) => {
             try {
                 const result = await runGmailAuth({
-                    port: options.port ? Number(options.port) : 0,
+                    port:        options.port ? Number(options.port) : 0,
                     openBrowser: options.open,
-                    logger: console
+                    logger:      console
                 });
                 console.log(`\n${colors.mint}✓${colors.reset} Gmail connected for ${result.userId}. Refresh token saved.`);
                 console.log(`${colors.gray}Scopes: ${result.scopes.join(', ')}${colors.reset}\n`);
@@ -674,24 +377,19 @@ program
     .option('-i, --image <path>', 'Attach an image file as context for the coding task')
     .action(async (task, options) => {
         console.log(`\n${colors.mint}${colors.bright}[Mint Code]${colors.reset} Workspace: ${process.cwd()}`);
-
         try {
-            let effectiveTask = task;
             let image = null;
             if (options.image) {
                 image = loadImageAsDataUri(options.image);
                 console.log(`${colors.gray}[Mint Code] Image: ${image.path}${colors.reset}`);
             }
-
             console.log(`${colors.gray}[Mint Code] Task: ${task}${colors.reset}\n`);
 
-            const result = await executeCodeTask(effectiveTask, {
-                cwd: process.cwd(),
-                imageDataUri: image ? image.dataUri : null,
-                imagePath: image ? image.path : null,
-                onProgress: (info) => {
-                    console.log(formatProgress(info));
-                },
+            const result = await executeCodeTask(task, {
+                cwd:           process.cwd(),
+                imageDataUri:  image ? image.dataUri : null,
+                imagePath:     image ? image.path    : null,
+                onProgress:    (info) => console.log(formatProgress(info)),
                 requestApproval: requestCodeApproval
             });
 
@@ -705,882 +403,8 @@ program
         }
     });
 
+// ── Parse ────────────────────────────────────────────────────────────────────
 program.parseAsync(process.argv).catch((error) => {
     console.error(`${colors.pink}${error.message}${colors.reset}`);
     process.exitCode = 1;
 });
-
-/**
- * The Interactive Chat Loop — Gemini-style TUI
- */
-async function startInteractiveChat(initialMessage = null, options = {}) {
-    let lastResponseText = "";
-    let recentImageContextText = "";
-    const formatErrorMessage = (err) => err && err.message ? err.message : String(err || 'Unknown error');
-    const streamAssistantSentences = async (text, appendMessage, metadata = {}, streamMessage = null) => {
-        const sentences = splitResponseSentences(text);
-        const chunks = sentences.filter(sentence => String(sentence || '').trim());
-        if (typeof streamMessage === 'function') {
-            const stream = streamMessage(metadata);
-            for (let index = 0; index < chunks.length; index++) {
-                stream.appendChunk(chunks[index]);
-                if (index < chunks.length - 1) {
-                    await sleep(90);
-                }
-            }
-            stream.finalize();
-            return;
-        }
-
-        for (let index = 0; index < chunks.length; index++) {
-            appendMessage('assistant', chunks[index], index === 0 ? metadata : {});
-            if (index < chunks.length - 1) {
-                await sleep(90);
-            }
-        }
-    };
-    const sendRepoSummaryMessage = async ({ rawArgs = '', appendMessage, streamMessage, setThinking }) => {
-        try {
-            if (typeof setThinking === 'function') setThinking(false);
-            const options = parseRepoSummaryArgs(rawArgs);
-            const summary = summarizeRepository(options.targetPath);
-            const responseText = options.json
-                ? JSON.stringify(summary, null, 2)
-                : formatRepoSummary(summary);
-            lastResponseText = responseText;
-            await streamAssistantSentences(responseText, appendMessage, {}, streamMessage);
-            return responseText;
-        } catch (err) {
-            if (typeof setThinking === 'function') setThinking(false);
-            appendMessage('error', formatErrorMessage(err));
-            return '';
-        }
-    };
-    const sendSymbolIndexMessage = async ({ rawArgs = '', appendMessage, streamMessage, setThinking }) => {
-        try {
-            if (typeof setThinking === 'function') setThinking(false);
-            const options = parseSymbolIndexArgs(rawArgs);
-            const index = buildSymbolIndex(options.targetPath);
-            const responseText = options.json
-                ? JSON.stringify(index, null, 2)
-                : formatSymbolIndex(index, { limit: options.limit });
-            lastResponseText = responseText;
-            await streamAssistantSentences(responseText, appendMessage, {}, streamMessage);
-            return responseText;
-        } catch (err) {
-            if (typeof setThinking === 'function') setThinking(false);
-            appendMessage('error', formatErrorMessage(err));
-            return '';
-        }
-    };
-    const sendSemanticCodeMessage = async ({ rawArgs = '', appendMessage, streamMessage, setThinking, appendCodeStep }) => {
-        const options = parseSemanticCodeArgs(rawArgs);
-        try {
-            if (typeof setThinking === 'function') setThinking(true, 0);
-            let responseText;
-            if (options.mode === 'index') {
-                const index = await indexSemanticCode(options.targetPath, {
-                    onProgress: (info) => {
-                        if (typeof appendCodeStep === 'function' && (info.current === 1 || info.current === info.total || info.current % 25 === 0)) {
-                            appendCodeStep({
-                                action: 'semantic_code_index',
-                                target: `${info.current}/${info.total} ${info.file}`
-                            });
-                        }
-                    }
-                });
-                responseText = options.json
-                    ? JSON.stringify(index, null, 2)
-                    : formatSemanticCodeIndex(index);
-            } else {
-                if (!options.query) {
-                    throw new Error('Usage: /semantic-code search <query>');
-                }
-                const results = await searchSemanticCode(options.query, options.targetPath, { topK: options.topK });
-                responseText = options.json
-                    ? JSON.stringify(results, null, 2)
-                    : formatSemanticCodeSearch(results);
-            }
-            if (typeof setThinking === 'function') setThinking(false);
-            lastResponseText = responseText;
-            await streamAssistantSentences(responseText, appendMessage, {}, streamMessage);
-            return responseText;
-        } catch (err) {
-            if (typeof setThinking === 'function') setThinking(false);
-            appendMessage('error', formatErrorMessage(err));
-            return '';
-        }
-    };
-    const sendImageMessage = async ({ images, image, prompt, appendMessage, streamMessage, setThinking, appendCodeStep }) => {
-        const imageList = images || (image ? [image] : []);
-        const message = prompt || 'Analyze this image.';
-        const labels = imageList.map((_, index) => `[Image #${index + 1}]`).join(' ');
-        const displayMessage = labels && message.includes(labels)
-            ? message
-            : `${message}\n${labels}`;
-        appendMessage('user', displayMessage);
-        if (appendCodeStep) {
-            appendCodeStep({
-                thought: imageList.length > 1
-                    ? `Analyzing ${imageList.length} attached images before answering.`
-                    : 'Analyzing the attached image before answering.'
-            });
-        }
-
-        let seconds = 0;
-        setThinking(true, seconds);
-        const timer = setInterval(() => {
-            seconds++;
-            setThinking(true, seconds);
-        }, 1000);
-
-        try {
-            const result = await handleChat(message, imageList.map(item => item.dataUri), null);
-            clearInterval(timer);
-            setThinking(false);
-            const responseText = result.response || '';
-            lastResponseText = responseText;
-            recentImageContextText = [
-                `Recent image context: the user attached ${imageList.length} image(s) labelled ${labels || '[Image #1]'}.`,
-                'The terminal UI displays image attachments as labels only; it does not render thumbnails inside the chat.',
-                `Assistant response to those image(s): ${responseText}`
-            ].join('\n');
-            await streamAssistantSentences(responseText, appendMessage, { providerInfo: result.providerInfo }, streamMessage);
-            return responseText;
-        } catch (err) {
-            clearInterval(timer);
-            setThinking(false);
-            appendMessage('error', formatErrorMessage(err));
-            return '';
-        }
-    };
-    
-    const ui = await createChatUI({
-        onPasteImage: async () => {
-            try {
-                const image = loadClipboardImageAsDataUri();
-                return { label: image.path, image };
-            } catch (err) {
-                throw new Error(formatErrorMessage(err));
-            }
-        },
-        onSubmit: async (text, submitOptions = {}) => {
-            const { screen, appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser, attachImage, setInputText, setPendingPasteText, setFastMode, toggleFastMode, getFastMode } = ui;
-            if (submitOptions.images && submitOptions.images.length > 0) {
-                const images = submitOptions.images.map(item => item.image || item);
-                await sendImageMessage({
-                    images,
-                    prompt: text.trim() || 'Analyze this image.',
-                    appendMessage,
-                    streamMessage,
-                    setThinking,
-                    appendCodeStep
-                });
-                return;
-            }
-
-            if (text.startsWith('/')) {
-                if (text.startsWith('/agent')) {
-                    const args = text.split(' ');
-                    if (args[1] === 'list') {
-                        appendMessage('system', `Available Agents: ${agentOrchestrator.listAgents().join(', ')}`);
-                    } else if (args[1]) {
-                        const success = agentOrchestrator.setAgent(args[1]);
-                        if (success) {
-                            const agent = agentOrchestrator.getCurrentAgent();
-                            appendMessage('system', `Switched to Agent: ${agent.icon} ${agent.name}`);
-                            updateStatusModel(agent.name); // Pass name to status bar
-                            resetChat(); // Reset to apply new system prompt
-                        } else {
-                            appendMessage('error', `Agent "${args[1]}" not found. Try /agent list`);
-                        }
-                    } else {
-                        const agent = agentOrchestrator.getCurrentAgent();
-                        appendMessage('system', `Current Agent: ${agent.icon} ${agent.name}\nUsage: /agent <type> or /agent list`);
-                    }
-                    return;
-                }
-
-                if (text.startsWith('/stats')) {
-                    appendMessage('system', '📊 Fetching system statistics...');
-                    const stats = await systemMonitor.execute('stats');
-                    appendMessage('system', stats);
-                    return;
-                }
-
-                if (text.startsWith('/workspace')) {
-                    const args = text.split(' ');
-                    const subCmd = args[1];
-
-                    if (subCmd === 'add') {
-                        const name = args[2];
-                        const wsPath = args[3] || '.';
-                        const instructions = args.slice(4).join(' ');
-                        if (!name) {
-                            appendMessage('error', 'Usage: /workspace add <name> [path] [instructions]');
-                        } else {
-                            workspaceManager.addWorkspace(name, wsPath, instructions);
-                            appendMessage('system', `Workspace "${name}" registered at ${path.resolve(wsPath)}`);
-                            resetChat();
-                        }
-                    } else if (subCmd === 'list') {
-                        const all = workspaceManager.listWorkspaces();
-                        let listMsg = "Registered Workspaces:\n";
-                        for (const n in all) listMsg += `- ${n}: ${all[n].path}\n`;
-                        appendMessage('system', Object.keys(all).length ? listMsg : "No workspaces registered.");
-                    } else if (subCmd === 'remove') {
-                        const name = args[2];
-                        if (workspaceManager.removeWorkspace(name)) {
-                            appendMessage('system', `Removed workspace "${name}"`);
-                            resetChat();
-                        } else {
-                            appendMessage('error', `Workspace "${name}" not found.`);
-                        }
-                    } else if (subCmd === 'use' || subCmd === 'switch') {
-                        const name = args[2];
-                        const all = workspaceManager.listWorkspaces();
-                        if (all[name]) {
-                            const newPath = all[name].path;
-                            try {
-                                process.chdir(newPath);
-                                updateWorkspace(newPath);
-                                appendMessage('system', `✓ Switched to workspace "${name}" at ${newPath}`);
-                                resetChat();
-                            } catch (e) {
-                                appendMessage('error', `Failed to change directory: ${e.message}`);
-                            }
-                        } else {
-                            appendMessage('error', `Workspace "${name}" not found. Try /workspace list`);
-                        }
-                    } else {
-                        const ws = workspaceManager.getWorkspaceByPath(process.cwd());
-                        appendMessage('system', ws ? `Current Workspace: ${ws.name}\nPath: ${ws.path}` : `Not currently in a registered workspace.\nActive Path: ${process.cwd()}\nUsage: /workspace <add|use|list|remove>`);
-                    }
-                    return;
-                }
-
-                if (text.startsWith('/review')) {
-                    if (!lastResponseText) {
-                        appendMessage('error', 'Nothing to review yet. Get a response first.');
-                        return;
-                    }
-                    agentOrchestrator.setAgent('reviewer');
-                    appendMessage('system', '⚖️ Requesting second-pass review from Mint Reviewer...');
-                    text = `Please review this previous response and provide a critique:\n\n${lastResponseText}`;
-                } else {
-                    // Other slash commands
-                    const fakeRl = { close: () => { } };
-                    if (!text.startsWith('/image') && !text.startsWith('/paste')) {
-                        appendMessage('user', text);
-                    }
-                    const slashResult = await handleSlashCommandUI(text, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode, appendCodeStep, updateWorkspace, {
-                        sendImageMessage,
-                        formatErrorMessage,
-                        attachImage,
-                        setInputText,
-                        setPendingPasteText,
-                        setFastMode,
-                        toggleFastMode,
-                        getFastMode,
-                        sendRepoSummaryMessage,
-                        sendSymbolIndexMessage,
-                        sendSemanticCodeMessage,
-                        streamAssistantSentences,
-                        streamMessage
-                    });
-                    if (slashResult && slashResult.lastResponseText) {
-                        lastResponseText = slashResult.lastResponseText;
-                    }
-                    return;
-                }
-            }
-            appendMessage('user', text);
-
-            if (isRepoSummaryRequest(text)) {
-                await sendRepoSummaryMessage({ appendMessage, streamMessage, setThinking });
-                return;
-            }
-
-            if (isSymbolIndexRequest(text)) {
-                await sendSymbolIndexMessage({ appendMessage, streamMessage, setThinking });
-                return;
-            }
-
-            if (isSemanticCodeSearchRequest(text)) {
-                const query = extractSemanticCodeQuery(text);
-                await sendSemanticCodeMessage({
-                    rawArgs: `search ${query}`,
-                    appendMessage,
-                    streamMessage,
-                    setThinking,
-                    appendCodeStep
-                });
-                return;
-            }
-
-            const transcript = await getChatTranscript();
-            const contextualHistory = recentImageContextText
-                ? [...transcript, { sender: 'system', text: recentImageContextText, timestamp: new Date().toISOString() }]
-                : transcript;
-            if (setMode) setMode('Agent');
-
-            let seconds = 0;
-            setThinking(true, seconds);
-            const timer = setInterval(() => {
-                seconds++;
-                setThinking(true, seconds);
-            }, 1000);
-
-            try {
-                const config = require('./src/System/config_manager').readConfig();
-                const availableProviders = require('./src/System/config_manager').getAvailableProviders(config);
-                const preferredProvider = require('./src/CLI/code_agent')._helpers.selectSupportedCodeProvider(config, availableProviders);
-                let streamedFinalSummary = false;
-
-                const result = await executeCodeTask(text, {
-                    cwd: process.cwd(),
-                    requestApproval,
-                    askUser,
-                    provider: preferredProvider,
-                    history: contextualHistory,
-                    onProgress: (info) => {
-                        if (appendCodeStep) appendCodeStep(info);
-                    },
-                    onFinalSummary: async (info) => {
-                        clearInterval(timer);
-                        setThinking(false);
-                        streamedFinalSummary = true;
-                        await streamAssistantSentences(info.summary, appendMessage, { providerInfo: info.providerInfo }, streamMessage);
-                    }
-                });
-
-                clearInterval(timer);
-                setThinking(false);
-                lastResponseText = result.summary;
-                if (!streamedFinalSummary) {
-                    await streamAssistantSentences(result.summary, appendMessage, { providerInfo: result.providerInfo }, streamMessage);
-                }
-
-            } catch (err) {
-                clearInterval(timer);
-                setThinking(false);
-                appendMessage('error', formatErrorMessage(err));
-            } finally {
-                if (setMode) setMode('Agent');
-            }
-        },
-        onExit: () => {
-            exitWithGoodbye(0);
-        }
-    });
-
-    // Handle initial image if passed via CLI option.
-    if (options.imagePath) {
-        const { appendMessage, streamMessage, setThinking, appendCodeStep } = ui;
-        const image = loadImageAsDataUri(options.imagePath);
-        const prompt = initialMessage || 'Analyze this image.';
-        await sendImageMessage({ images: [image], prompt, appendMessage, streamMessage, setThinking, appendCodeStep });
-
-        return;
-    }
-
-    // Handle initial message if passed via CLI arg
-    if (initialMessage) {
-        const { appendMessage, streamMessage, setThinking, updateStatusModel, copyLastResponse, requestApproval, setMode, appendCodeStep, updateWorkspace, askUser } = ui;
-        appendMessage('user', initialMessage);
-        if (isRepoSummaryRequest(initialMessage)) {
-            await sendRepoSummaryMessage({ appendMessage, streamMessage, setThinking });
-            return;
-        }
-        if (isSymbolIndexRequest(initialMessage)) {
-            await sendSymbolIndexMessage({ appendMessage, streamMessage, setThinking });
-            return;
-        }
-        if (isSemanticCodeSearchRequest(initialMessage)) {
-            const query = extractSemanticCodeQuery(initialMessage);
-            await sendSemanticCodeMessage({
-                rawArgs: `search ${query}`,
-                appendMessage,
-                streamMessage,
-                setThinking,
-                appendCodeStep
-            });
-            return;
-        }
-        const transcript = await getChatTranscript();
-        const contextualHistory = recentImageContextText
-            ? [...transcript, { sender: 'system', text: recentImageContextText, timestamp: new Date().toISOString() }]
-            : transcript;
-        if (setMode) setMode('Agent');
-
-        let seconds = 0;
-        setThinking(true, seconds);
-        const timer = setInterval(() => {
-            seconds++;
-            setThinking(true, seconds);
-        }, 1000);
-
-        try {
-            const config = require('./src/System/config_manager').readConfig();
-            const availableProviders = require('./src/System/config_manager').getAvailableProviders(config);
-            const preferredProvider = require('./src/CLI/code_agent')._helpers.selectSupportedCodeProvider(config, availableProviders);
-            let streamedFinalSummary = false;
-
-            const result = await executeCodeTask(initialMessage, {
-                cwd: process.cwd(),
-                requestApproval,
-                askUser,
-                provider: preferredProvider,
-                history: contextualHistory,
-                onProgress: (info) => {
-                    if (appendCodeStep) appendCodeStep(info);
-                },
-                onFinalSummary: async (info) => {
-                    clearInterval(timer);
-                    setThinking(false);
-                    streamedFinalSummary = true;
-                    await streamAssistantSentences(info.summary, appendMessage, { providerInfo: info.providerInfo }, streamMessage);
-                }
-            });
-
-            clearInterval(timer);
-            setThinking(false);
-            lastResponseText = result.summary;
-            if (!streamedFinalSummary) {
-                await streamAssistantSentences(result.summary, appendMessage, { providerInfo: result.providerInfo }, streamMessage);
-            }
-
-        } catch (err) {
-            clearInterval(timer);
-            setThinking(false);
-            appendMessage('error', formatErrorMessage(err));
-        } finally {
-            if (setMode) setMode('Agent');
-        }
-    }
-}
-
-/**
- * Handles slash commands within the TUI context
- */
-async function handleSlashCommandUI(input, appendMessage, updateStatusModel, copyLastResponse, setThinking, requestApproval, setMode, appendCodeStep, updateWorkspace, helpers = {}) {
-    const parts = input.split(' ');
-    const command = parts[0].toLowerCase();
-    const args = parts.slice(1);
-
-    switch (command) {
-        case '/help':
-        case '/?':
-            appendMessage('system', [
-                'Mint Slash Commands:',
-                '  /image <path> [prompt] — Attach an image from your computer',
-                '  /paste [prompt]   — Attach an image from your clipboard',
-                '  /fast [on|off]    — Hide or show thinking/progress output',
-                '  /summarize [path] [--json] — Summarize repository structure',
-                '  /symbols [path] [--json] [--limit n] — Build a source symbol index',
-                '  /semantic-code index|search <query> — Embed and search code semantically',
-                '  /learn <path>     — Remember a .md/.txt file as a Mint skill',
-                '  /code <task>      — Force workspace Code Mode',
-                '  /cd <path>        — Change current working directory',
-                '  /models [name]   — List or switch Gemini models',
-                '  /memory [cmd]    — Manage long-term memory',
-                '  /config          — Show current configuration',
-                '  /copy            — Copy last response to clipboard',
-                '  /clear           — Clear conversation history',
-                '  /reset           — Reset conversation history',
-                '  /exit            — Exit Mint'
-            ].join('\n'));
-            break;
-
-        case '/fast': {
-            if (!helpers.toggleFastMode || !helpers.setFastMode || !helpers.getFastMode) {
-                appendMessage('error', 'Fast mode is not available in this UI.');
-                break;
-            }
-
-            const option = (args[0] || '').toLowerCase();
-            let enabled;
-            if (option === 'on' || option === 'true' || option === '1') {
-                enabled = helpers.setFastMode(true);
-            } else if (option === 'off' || option === 'false' || option === '0') {
-                enabled = helpers.setFastMode(false);
-            } else if (option === 'status') {
-                enabled = helpers.getFastMode();
-            } else {
-                enabled = helpers.toggleFastMode();
-            }
-
-            appendMessage('system', `Fast mode: ${enabled ? 'ON' : 'OFF'}`);
-            break;
-        }
-
-        case '/summarize':
-        case '/summary': {
-            if (typeof helpers.sendRepoSummaryMessage !== 'function') {
-                appendMessage('error', 'Repository summary is not available in this UI.');
-                break;
-            }
-            const responseText = await helpers.sendRepoSummaryMessage({
-                rawArgs: input.slice(command.length).trim(),
-                appendMessage,
-                streamMessage: helpers.streamMessage,
-                setThinking
-            });
-            return { lastResponseText: responseText };
-        }
-
-        case '/symbols':
-        case '/symbol-index': {
-            if (typeof helpers.sendSymbolIndexMessage !== 'function') {
-                appendMessage('error', 'Symbol index is not available in this UI.');
-                break;
-            }
-            const responseText = await helpers.sendSymbolIndexMessage({
-                rawArgs: input.slice(command.length).trim(),
-                appendMessage,
-                streamMessage: helpers.streamMessage,
-                setThinking
-            });
-            return { lastResponseText: responseText };
-        }
-
-        case '/semantic-code':
-        case '/semantic': {
-            if (typeof helpers.sendSemanticCodeMessage !== 'function') {
-                appendMessage('error', 'Semantic code search is not available in this UI.');
-                break;
-            }
-            const responseText = await helpers.sendSemanticCodeMessage({
-                rawArgs: input.slice(command.length).trim(),
-                appendMessage,
-                streamMessage: helpers.streamMessage,
-                setThinking,
-                appendCodeStep
-            });
-            return { lastResponseText: responseText };
-        }
-
-        case '/learn': {
-            const filePath = input.slice(command.length).trim();
-            if (!filePath) {
-                appendMessage('system', 'Usage: /learn <path-to-skill.md>');
-                break;
-            }
-
-            try {
-                const learned = learnSkillFile(filePath);
-                appendMessage('system', [
-                    `✓ Learned skill: ${learned.name}`,
-                    `Path: ${learned.source_path}`,
-                    learned.stored_length < learned.content_length
-                        ? `Stored first ${learned.stored_length} of ${learned.content_length} characters.`
-                        : `Stored ${learned.stored_length} characters.`
-                ].join('\n'));
-            } catch (err) {
-                appendMessage('error', err && err.message ? err.message : String(err || 'Unknown error'));
-            }
-            break;
-        }
-
-        case '/image': {
-            if (args.length === 0) {
-                appendMessage('system', 'Usage: /image <path> [prompt]');
-                break;
-            }
-
-            const imagePath = args[0];
-            const prompt = args.slice(1).join(' ').trim();
-
-            try {
-                const image = loadImageAsDataUri(imagePath);
-                if (helpers.attachImage) {
-                    helpers.attachImage({ label: image.path, image });
-                    if (prompt && helpers.setInputText) {
-                        helpers.setInputText(prompt);
-                    }
-                    appendMessage('system', 'Attached image. Press Enter to send.');
-                } else {
-                    appendMessage('error', 'Image attachment is not available in this UI.');
-                }
-            } catch (err) {
-                appendMessage('error', err && err.message ? err.message : String(err || 'Unknown error'));
-            }
-            break;
-        }
-
-        case '/paste': {
-            try {
-                const image = loadClipboardImageAsDataUri();
-                if (helpers.attachImage) {
-                    helpers.attachImage({ label: image.path, image });
-                    const prompt = args.join(' ').trim();
-                    if (prompt && helpers.setInputText) {
-                        helpers.setInputText(prompt);
-                    }
-                    appendMessage('system', 'Attached clipboard image. Press Enter to send.');
-                } else {
-                    appendMessage('error', 'Image attachment is not available in this UI.');
-                }
-            } catch (err) {
-                appendMessage('error', helpers.formatErrorMessage ? helpers.formatErrorMessage(err) : (err && err.message ? err.message : String(err || 'Unknown error')));
-            }
-            break;
-        }
-
-        case '/memory': {
-            const subCommand = (args[0] || 'list').toLowerCase();
-            const query = args.slice(1).join(' ').trim();
-
-            if (subCommand === 'help') {
-                appendMessage('system', [
-                    'Memory Commands:',
-                    '  /memory list [n]       — Show recent remembered interactions',
-                    '  /memory search <query> — Search remembered interactions',
-                    '  /memory skills        — Show learned skill files',
-                    '  /memory skills delete <id|path|name> — Delete a learned skill',
-                    '  /memory profile        — Show remembered profile fields',
-                    '  /memory context [q]    — Show context Mint injects into prompts',
-                    '  /memory delete <id>    — Delete one remembered interaction',
-                    '  /memory export [path]  — Export memory snapshot as JSON',
-                    '  /memory clear          — Clear episodic interaction memories'
-                ].join('\n'));
-                break;
-            }
-
-            if (subCommand === 'profile') {
-                const profile = memoryStore.getAllProfile();
-                appendMessage('system', Object.keys(profile).length
-                    ? JSON.stringify(profile, null, 2)
-                    : 'No profile memory stored yet.');
-                break;
-            }
-
-            if (subCommand === 'skills') {
-                if ((args[1] || '').toLowerCase() === 'delete') {
-                    const identifier = args.slice(2).join(' ').trim();
-                    if (!identifier) {
-                        appendMessage('system', 'Usage: /memory skills delete <id|path|name>');
-                        break;
-                    }
-                    const deleted = memoryStore.deleteLearnedSkill(identifier);
-                    appendMessage('system', deleted > 0
-                        ? `Deleted learned skill: ${identifier}`
-                        : `Learned skill not found: ${identifier}`);
-                    break;
-                }
-
-                const skills = memoryStore.getLearnedSkills(20);
-                appendMessage('system', skills.length
-                    ? [
-                        'Learned skills:',
-                        ...skills.map((skill) => `#${skill.id} ${skill.name}\n   ${skill.source_path}`)
-                    ].join('\n')
-                    : 'No learned skills stored yet.');
-                break;
-            }
-
-            if (subCommand === 'context') {
-                const ctx = memoryStore.getUserContext(query);
-                appendMessage('system', ctx || 'No memory context stored yet.');
-                break;
-            }
-
-            if (subCommand === 'search') {
-                if (!query) {
-                    appendMessage('system', 'Usage: /memory search <query>');
-                    break;
-                }
-                const results = memoryStore.searchInteractions(query, 10);
-                appendMessage('system', formatMemoryInteractions(results, `Search results for "${query}"`));
-                break;
-            }
-
-            if (subCommand === 'export') {
-                const exportPath = query
-                    ? path.resolve(process.cwd(), query)
-                    : path.join(process.cwd(), `mint-memory-export-${Date.now()}.json`);
-                fs.writeFileSync(exportPath, JSON.stringify(memoryStore.exportMemorySnapshot(), null, 2), 'utf8');
-                appendMessage('system', `Memory exported to: ${exportPath}`);
-                break;
-            }
-
-            if (subCommand === 'delete') {
-                const id = Number.parseInt(args[1] || '', 10);
-                if (!Number.isFinite(id)) {
-                    appendMessage('system', 'Usage: /memory delete <id>');
-                    break;
-                }
-                const deleted = memoryStore.deleteInteractionMemory(id);
-                appendMessage('system', deleted ? `Deleted memory #${id}.` : `Memory #${id} was not found.`);
-                break;
-            }
-
-            if (subCommand === 'clear') {
-                memoryStore.clearInteractionMemories();
-                appendMessage('system', 'Cleared episodic interaction memories. Profile memory is unchanged.');
-                break;
-            }
-
-            const limit = Number.parseInt(args[0] || '10', 10);
-            const interactions = memoryStore.getRecentInteractions(Number.isFinite(limit) ? limit : 10);
-            appendMessage('system', formatMemoryInteractions(interactions, 'Recent remembered interactions'));
-            break;
-        }
-
-        case '/cd':
-            if (args.length === 0) {
-                appendMessage('system', `Current Directory: ${process.cwd()}`);
-                break;
-            }
-            try {
-                const newPath = path.resolve(process.cwd(), args[0]);
-                if (fs.existsSync(newPath) && fs.lstatSync(newPath).isDirectory()) {
-                    process.chdir(newPath);
-                    if (updateWorkspace) updateWorkspace(newPath);
-                    appendMessage('system', `✓ Directory changed to: ${newPath}`);
-                } else {
-                    appendMessage('error', `Directory not found: ${newPath}`);
-                }
-            } catch (err) {
-                appendMessage('error', `Error: ${err.message}`);
-            }
-            break;
-
-        case '/model':
-        case '/models':
-            const config = readConfig();
-            if (args.length === 0) {
-                appendMessage('system', [
-                    `Current Provider: ${config.aiProvider}`,
-                    `Current Gemini Model: ${config.geminiModel}`,
-                    'Available Providers/Presets:',
-                    '  - gemini-2.5-flash (Default Gemini)',
-                    '  - ollama (Local provider)',
-                    '  - anthropic (Claude)',
-                    '  - openai (GPT)',
-                    '  - huggingface (Inference API)',
-                    '  - local (LM Studio / OpenAI Compatible)',
-                    'Usage: /models <name> to switch'
-                ].join('\n'));
-            } else {
-                const { writeConfig } = require('./src/System/config_manager');
-                const newModel = args[0];
-                let newProvider = 'gemini';
-                
-                if (newModel === 'ollama') {
-                    newProvider = 'ollama';
-                } else if (newModel === 'anthropic') {
-                    newProvider = 'anthropic';
-                } else if (newModel === 'openai') {
-                    newProvider = 'openai';
-                } else if (newModel === 'huggingface') {
-                    newProvider = 'huggingface';
-                } else if (newModel === 'local' || newModel === 'local_openai') {
-                    newProvider = 'local_openai';
-                } else if (newModel.startsWith('gpt-')) {
-                    newProvider = 'openai';
-                    config.openaiModel = newModel;
-                } else if (newModel.startsWith('claude-')) {
-                    newProvider = 'anthropic';
-                    config.anthropicModel = newModel;
-                } else {
-                    newProvider = 'gemini';
-                    config.geminiModel = newModel;
-                }
-                
-                config.aiProvider = newProvider;
-                writeConfig(config);
-                appendMessage('system', `✅ Switched to: ${newProvider} ${newProvider === 'gemini' ? `(${newModel})` : ''}`);
-                if (updateStatusModel) updateStatusModel(newProvider === 'gemini' ? newModel : newProvider);
-            }
-            break;
-
-        case '/code':
-            if (args.length === 0) {
-                appendMessage('system', 'Usage: /code <task>');
-                break;
-            }
-            await runChatRoutedTask(`/code ${args.join(' ')}`, {
-                appendMessage,
-                setThinking,
-                requestApproval,
-                appendCodeStep,
-                setMode,
-                streamAssistantSentences: helpers.streamAssistantSentences,
-                streamMessage: helpers.streamMessage,
-                askUser: () => Promise.resolve(''),
-                history: await getChatTranscript()
-            });
-            break;
-
-        case '/config':
-            const currentCfg = readConfig();
-            appendMessage('system', [
-                'Current Configuration:',
-                `  Version   : v${pkg.version}`,
-                `  Provider  : ${currentCfg.aiProvider}`,
-                `  Model     : ${currentCfg.geminiModel}`,
-                `  Ollama    : ${currentCfg.ollamaModel}`,
-                `  Voice     : ${currentCfg.enableVoiceReply ? 'ON' : 'OFF'}`,
-                `  Language  : ${currentCfg.language}`,
-                `  API Key   : ${currentCfg.apiKey ? 'SET (****)' : 'NOT SET'}`
-            ].join('\n'));
-            break;
-
-        case '/copy':
-            if (copyLastResponse && copyLastResponse()) {
-                appendMessage('system', '✓ Last response copied to clipboard.');
-            } else {
-                appendMessage('system', '✖ Nothing to copy, or xclip/xsel not installed.');
-            }
-            break;
-
-        case '/clear':
-        case '/reset':
-            resetChat();
-            appendMessage('system', 'Conversation history cleared.');
-            break;
-
-        case '/exit':
-        case '/quit':
-            exitWithGoodbye(0);
-            break;
-
-        default:
-            appendMessage('system', `Unknown command: ${command}. Type /help for options.`);
-    }
-}
-
-async function requestCodeApproval(request) {
-    const typeLabel = request.type === 'shell'
-        ? 'Shell Command'
-        : request.type === 'patch'
-            ? 'Patch Edit'
-            : 'File Write';
-
-    console.log(`\n${colors.yellow}${colors.bright}[Approval Required]${colors.reset} ${typeLabel}`);
-    if (request.label) {
-        console.log(`${colors.gray}${request.label}${colors.reset}`);
-    }
-    if (request.preview) {
-        console.log(`${colors.gray}${request.preview}${colors.reset}\n`);
-    }
-
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
-
-    const answer = await new Promise((resolve) => {
-        rl.question('Approve this action? [y/N]: ', (value) => {
-            rl.close();
-            resolve((value || '').trim().toLowerCase());
-        });
-    });
-
-    const approved = answer === 'y' || answer === 'yes';
-    console.log(approved
-        ? `${colors.mint}[Mint Code] Approved.${colors.reset}\n`
-        : `${colors.pink}[Mint Code] Denied.${colors.reset}\n`);
-    return approved;
-}

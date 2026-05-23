@@ -1,9 +1,16 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+'use strict';
+
+const { requireOptional } = require('../System/optional_require');
 const { handleChat } = require('../AI_Brain/Gemini_API');
 
 class WhatsappBridge {
     constructor() {
+        // Dynamic require — only loads if user has installed whatsapp-web.js
+        const { Client, LocalAuth } = requireOptional(
+            'whatsapp-web.js',
+            'npm install whatsapp-web.js qrcode-terminal'
+        );
+        this._qrcode = requireOptional('qrcode-terminal', 'npm install qrcode-terminal');
         this.client = new Client({
             authStrategy: new LocalAuth({
                 dataPath: require('path').join(require('os').homedir(), '.config', 'mint', 'whatsapp-session')
@@ -17,7 +24,7 @@ class WhatsappBridge {
     async connect() {
         this.client.on('qr', (qr) => {
             console.log('[WhatsApp Bridge] Scan this QR code to login:');
-            qrcode.generate(qr, { small: true });
+            this._qrcode.generate(qr, { small: true });
         });
 
         this.client.on('ready', () => {
@@ -26,13 +33,8 @@ class WhatsappBridge {
 
         this.client.on('message', async (msg) => {
             try {
-                // Ignore messages from groups unless mentioned (simple implementation)
                 const chat = await msg.getChat();
-                if (chat.isGroup) {
-                    // For groups, we could add a mention check here if desired
-                    return;
-                }
-
+                if (chat.isGroup) return;
                 const result = await handleChat(msg.body);
                 if (result && result.response) {
                     await msg.reply(result.response);

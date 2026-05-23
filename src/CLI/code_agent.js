@@ -16,62 +16,103 @@ const sandboxRunner = require('../System/sandbox_runner');
 async function webSearch(query, onProgress = () => {}) {
     if (!query) throw new Error('Search query required.');
     const config = readConfig();
+    const debug  = process.env.MINT_DEBUG === '1';
+    const errors = [];
 
-    // 1. Try Google Search API if configured
+    const formatResults = (source, hits) => {
+        const instruction = `[CRITICAL AGENT INSTRUCTION: You MUST start your response by explicitly telling the user that you found this information using ${source}. Example: "อ้างอิงจากข้อมูลบน ${source}..." or "According to ${source}..."]\n\n`;
+        return instruction + `[Source: ${source}]\n\n` + hits;
+    };
+
+    // 1. Google Custom Search API (requires googleSearchApiKey + googleSearchCx in config)
     if (config.googleSearchApiKey && config.googleSearchCx) {
         try {
             const GoogleSearch = require('../Channels/google_search_bridge');
             const google = new GoogleSearch({ apiKey: config.googleSearchApiKey, cx: config.googleSearchCx });
             const results = await google.search(query);
             if (results.length > 0) {
-                return results.map(r => `Title: ${r.title}\nSnippet: ${r.snippet}\nURL: ${r.link}`).join('\n\n');
+                return formatResults('Google Search API', results.map(r => `Title: ${r.title}\nSnippet: ${r.snippet}\nURL: ${r.link}`).join('\n\n'));
             }
-        } catch (e) { 
-            onProgress({ phase: 'error', action: 'web_search', message: e.message });
+        } catch (e) {
+            errors.push(`Google: ${e.message}`);
+            if (debug) console.error('[webSearch] Google failed:', e.message);
         }
     }
 
-    // 2. Try Brave Search API if configured
+    // 2. Brave Search API (requires braveSearchApiKey in config)
     if (config.braveSearchApiKey) {
         try {
             const BraveSearch = require('../Channels/brave_search_bridge');
             const brave = new BraveSearch({ apiKey: config.braveSearchApiKey });
             const results = await brave.search(query);
             if (results.length > 0) {
-                return results.map(r => `Title: ${r.title}\nSnippet: ${r.snippet}\nURL: ${r.link}`).join('\n\n');
+                return formatResults('Brave Search API', results.map(r => `Title: ${r.title}\nSnippet: ${r.snippet}\nURL: ${r.link}`).join('\n\n'));
             }
-        } catch (e) { 
-            onProgress({ phase: 'error', action: 'web_search', message: e.message });
+        } catch (e) {
+            errors.push(`Brave: ${e.message}`);
+            if (debug) console.error('[webSearch] Brave failed:', e.message);
         }
     }
 
-    // 3. Fallback to DuckDuckGo Scraping
+    // 3. Fallback: DuckDuckGo HTML (No key required, but might get blocked by Captcha)
     try {
-        const response = await axios.get(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36'
+        const cheerio = require('cheerio');
+        const ddgResponse = await axios.get(
+            `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+            {
+                timeout: 8000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                    'Accept-Language': 'en-US,en;q=0.9'
+                }
             }
-        });
-        const $ = cheerio.load(response.data);
-        const results = [];
-        $('.result__body').each((i, el) => {
+        );
+        const $ddg = cheerio.load(ddgResponse.data);
+        const ddgResults = [];
+        $ddg('.result__body').each((i, el) => {
             if (i >= 5) return false;
-            const title = $(el).find('.result__title').text().trim();
-            const snippet = $(el).find('.result__snippet').text().trim();
-            const link = $(el).find('.result__url').attr('href');
-            if (title && link) {
-                results.push(`Title: ${title}\nSnippet: ${snippet}\nURL: ${link}`);
-            }
+            const title   = $ddg(el).find('.result__title').text().trim();
+            const snippet = $ddg(el).find('.result__snippet').text().trim();
+            const link    = $ddg(el).find('.result__url').attr('href');
+            if (title && link) ddgResults.push(`Title: ${title}\nSnippet: ${snippet}\nURL: ${link}`);
         });
-
-        if (results.length === 0) {
-             onProgress({ phase: 'error', action: 'web_search', message: 'DuckDuckGo scraping returned no results. It might be blocking us.' });
+        if (ddgResults.length > 0) {
+            return formatResults('DuckDuckGo', ddgResults.join('\n\n'));
         }
-
-        return results.length > 0 ? results.join('\n\n') : 'No results found.';
+        errors.push('DuckDuckGo: no results (captcha?)');
+        if (debug) console.error('[webSearch] DuckDuckGo returned no results');
     } catch (e) {
-        onProgress({ phase: 'error', action: 'web_search', message: `DuckDuckGo fallback failed: ${e.message}` });
-        return `Search failed: ${e.message}`;
+        errors.push(`DuckDuckGo: ${e.message}`);
+        if (debug) console.error('[webSearch] DuckDuckGo failed:', e.message);
+    }
+
+    // 4. Fallback: Wikipedia API (Free, no key required, good for factual queries)
+    try {
+        const wikiResponse = await axios.get('https://en.wikipedia.org/w/api.php', {
+            params: { action: 'query', list: 'search', srsearch: query, format: 'json', srlimit: 3 },
+            timeout: 5000,
+            headers: { 'User-Agent': 'Mint-CLI/1.5 (https://github.com/pheem49/mint)' }
+        });
+        const hits = wikiResponse.data?.query?.search || [];
+        if (hits.length > 0) {
+            return formatResults('Wikipedia API', hits.map(r => `Title: ${r.title}\nSnippet: ${r.snippet.replace(/<[^>]+>/g, '')}\nURL: https://en.wikipedia.org/wiki/${encodeURIComponent(r.title.replace(/ /g, '_'))}`).join('\n\n'));
+        }
+        errors.push('Wikipedia: no results');
+    } catch (e) {
+        errors.push(`Wikipedia: ${e.message}`);
+        if (debug) console.error('[webSearch] Wikipedia failed:', e.message);
+    }
+
+    // All engines exhausted — inform agent clearly WHY it failed
+    const hasKeys = !!(config.googleSearchApiKey || config.braveSearchApiKey);
+    const summary = errors.length > 0 ? errors.join(' | ') : 'all search engines unavailable';
+    
+    if (!hasKeys) {
+        onProgress({ phase: 'warn', action: 'web_search', message: `No Search API keys configured. Using training knowledge.` });
+        return `CRITICAL SYSTEM INSTRUCTION: Web search failed because no API keys are configured. You MUST inform the user that they need to set 'googleSearchApiKey' or 'braveSearchApiKey' in their Mint config file (~/.config/mint/config.json) to enable real-time internet search. Then, answer their query using your training knowledge.`;
+    } else {
+        onProgress({ phase: 'warn', action: 'web_search', message: `Web search unavailable (${summary}). Answering from training knowledge.` });
+        return `CRITICAL SYSTEM INSTRUCTION: Web search is temporarily unavailable. You MUST inform the user that live search failed, and then answer their query using only your training knowledge.`;
     }
 }
 
@@ -102,8 +143,9 @@ Rules:
 1. Respond with valid JSON only.
 2. If the user asks a conversational question, you can just use "finish" to reply directly.
 3. If you need information, use "web_search", "read_file", or "ask_user" before replying.
-4. Make focused edits that preserve existing project style.
-5. Use shell commands for inspection, tests, and formatting when useful.
+4. When using "web_search", always explicitly mention the source engine you used in your final summary (e.g. "According to Brave Search..." or "อ้างอิงจากข้อมูลบน Google..."). Match the language of your response.
+5. Make focused edits that preserve existing project style.
+6. Use shell commands for inspection, tests, and formatting when useful.
 6. Never use destructive commands like "rm -rf", "git reset --hard", or overwrite unrelated files.
 7. Before any shell command or file patch is executed, the user must approve it. Plan accordingly.
 8. When editing, prefer "apply_patch" with precise hunks over whole-file rewrites.

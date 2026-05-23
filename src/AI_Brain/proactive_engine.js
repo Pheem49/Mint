@@ -5,9 +5,14 @@ const { readConfig } = require('../System/config_manager');
 // Proactive Engine — Smart Suggestion Engine (Multi-Choice)
 // ============================================================
 
-const ai = new GoogleGenAI({});
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 let lastLoggedModel = '';
+let _ai = null;
+
+function getAi(apiKey) {
+    if (!_ai) _ai = new GoogleGenAI({ apiKey });
+    return _ai;
+}
 
 const PROACTIVE_SYSTEM_PROMPT = `You are a Smart Suggestion Engine built into a Desktop AI Agent called "Mint".
 Your job: observe the user's screen + behavior, then offer MULTIPLE relevant quick-action options — NOT just one question.
@@ -89,11 +94,15 @@ function getMinSuggestionIntervalMs() {
  */
 async function analyzeAndSuggest(base64Image, behaviorSummary) {
     try {
-        const model = resolveGeminiModel();
+        const cfg = readConfig();
+        const apiKey = cfg.apiKey || process.env.GEMINI_API_KEY;
+        if (!apiKey) return null; // silently skip if no API key configured
+        const model = (cfg.geminiModel || '').trim() || DEFAULT_GEMINI_MODEL;
         if (model && model !== lastLoggedModel) {
             console.log(`[Gemini] Proactive Engine model: ${model}`);
             lastLoggedModel = model;
         }
+        const ai = getAi(apiKey);
 
         const now = Date.now();
         const minInterval = getMinSuggestionIntervalMs();
@@ -126,6 +135,7 @@ Rules: Only suggest if you see a clear opportunity. Return 2–4 relevant chips.
             },
             contents: [{ role: 'user', parts: userMessage }]
         });
+
 
         let parsed;
         try {

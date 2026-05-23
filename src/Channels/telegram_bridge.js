@@ -1,9 +1,12 @@
-const { Telegraf } = require('telegraf');
+'use strict';
+
+const { requireOptional } = require('../System/optional_require');
 const { handleChat } = require('../AI_Brain/Gemini_API');
 
 class TelegramBridge {
     constructor(token) {
         this.token = token;
+        const { Telegraf } = requireOptional('telegraf', 'npm install telegraf');
         this.bot = new Telegraf(token);
     }
 
@@ -12,19 +15,11 @@ class TelegramBridge {
 
         this.bot.on('text', async (ctx) => {
             try {
-                // Show typing status
                 await ctx.sendChatAction('typing');
-
                 const message = ctx.message.text;
                 if (!message) return;
-
-                // Send to Mint AI Brain
                 const result = await handleChat(message);
-
-                // Reply to user
-                if (result && result.response) {
-                    await ctx.reply(result.response);
-                }
+                if (result && result.response) await ctx.reply(result.response);
             } catch (err) {
                 console.error('[Telegram Bridge] Error processing message:', err);
                 await ctx.reply('ขออภัยค่ะ เกิดข้อผิดพลาดบางอย่างในการประมวลผลข้อความ');
@@ -34,15 +29,12 @@ class TelegramBridge {
         this.bot.launch();
         console.log('[Telegram Bridge] Bot started!');
 
-        // Enable graceful stop
         process.once('SIGINT', () => this.bot.stop('SIGINT'));
         process.once('SIGTERM', () => this.bot.stop('SIGTERM'));
     }
 
     async disconnect() {
-        if (this.bot) {
-            await this.bot.stop();
-        }
+        if (this.bot) await this.bot.stop();
     }
 }
 

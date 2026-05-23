@@ -1,22 +1,25 @@
-const line = require('@line/bot-sdk');
-const express = require('express');
+'use strict';
+
+const { requireOptional } = require('../System/optional_require');
 const { handleChat } = require('../AI_Brain/Gemini_API');
 
 class LineBridge {
     constructor(credentials) {
+        this._line    = requireOptional('@line/bot-sdk', 'npm install @line/bot-sdk express');
+        this._express = requireOptional('express',       'npm install @line/bot-sdk express');
         this.config = {
             channelAccessToken: credentials.accessToken,
             channelSecret: credentials.secret,
         };
-        this.port = credentials.port || 3000;
-        this.client = new line.messagingApi.MessagingApiClient({
+        this.port   = credentials.port || 3000;
+        this.client = new this._line.messagingApi.MessagingApiClient({
             channelAccessToken: credentials.accessToken
         });
-        this.app = express();
+        this.app    = this._express();
     }
 
     async connect() {
-        this.app.post('/callback', line.middleware(this.config), (req, res) => {
+        this.app.post('/callback', this._line.middleware(this.config), (req, res) => {
             Promise
                 .all(req.body.events.map(event => this.handleEvent(event)))
                 .then((result) => res.json(result))
@@ -36,7 +39,6 @@ class LineBridge {
         if (event.type !== 'message' || event.message.type !== 'text') {
             return Promise.resolve(null);
         }
-
         try {
             const result = await handleChat(event.message.text);
             if (result && result.response) {
@@ -51,9 +53,7 @@ class LineBridge {
     }
 
     async disconnect() {
-        if (this.server) {
-            this.server.close();
-        }
+        if (this.server) this.server.close();
     }
 }
 

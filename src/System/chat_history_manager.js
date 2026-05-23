@@ -19,21 +19,29 @@ if (!fs.existsSync(CONFIG_DIR)) {
 
 const CHAT_HISTORY_PATH = path.join(CONFIG_DIR, 'mint-chat-history.json');
 
-// Migration Logic: Consolidate from Electron userData or old ~/.mint to ~/.config/mint
+// Migration Logic: Consolidate from various legacy locations to ~/.config/mint/
 if (!fs.existsSync(CHAT_HISTORY_PATH)) {
     const electronUserData = app && app.getPath ? path.join(app.getPath('userData'), 'mint-chat-history.json') : null;
-    const legacyPath = path.join(MINT_DIR, 'mint-chat-history.json');
+    const legacyDotMint    = path.join(MINT_DIR, 'mint-chat-history.json');
+    // Legacy: file was written to the project root (CWD) before v1.5.2
+    const legacyProjectRoot = path.join(process.cwd(), 'mint-chat-history.json');
 
-    if (electronUserData && fs.existsSync(electronUserData)) {
-        try {
-            fs.copyFileSync(electronUserData, CHAT_HISTORY_PATH);
-            console.log('[History] Migrated chat history from Electron userData');
-        } catch (e) { console.error('[History] Migration from Electron failed:', e); }
-    } else if (fs.existsSync(legacyPath)) {
-        try {
-            fs.copyFileSync(legacyPath, CHAT_HISTORY_PATH);
-            console.log('[History] Migrated chat history from ~/.mint');
-        } catch (e) { console.error('[History] Migration from ~/.mint failed:', e); }
+    const candidates = [
+        electronUserData,
+        legacyDotMint,
+        legacyProjectRoot
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        if (candidate !== CHAT_HISTORY_PATH && fs.existsSync(candidate)) {
+            try {
+                fs.copyFileSync(candidate, CHAT_HISTORY_PATH);
+                console.log(`[History] Migrated chat history from ${candidate}`);
+            } catch (e) {
+                console.error('[History] Migration failed:', e);
+            }
+            break;
+        }
     }
 }
 
