@@ -1,4 +1,9 @@
-const { compareVersions, normalizeNpmVersionOutput, shouldRunAutoUpdate } = require('../src/CLI/updater');
+const {
+    compareVersions,
+    normalizeNpmVersionOutput,
+    shouldRunAutoUpdate,
+    _private
+} = require('../src/CLI/updater');
 
 describe('Mint updater', () => {
     test('compares semantic versions', () => {
@@ -28,5 +33,14 @@ describe('Mint updater', () => {
             autoUpdateCheckIntervalHours: 6,
             lastUpdateCheckAt: '2026-05-14T00:00:00.000Z'
         }, now)).toBe(true);
+    });
+
+    test('distinguishes failed update checks from failed installs', () => {
+        const error = new Error('Command failed: npm view @pheem49/mint version --json');
+        error.stderr = 'npm ERR! code E404\nnpm ERR! 404 Not Found';
+
+        expect(_private.formatUpdateCheckError(error)).toContain('Update check unavailable');
+        expect(_private.formatUpdateCheckError(error)).toContain('does not mean your local Mint version is outdated');
+        expect(_private.formatUpdateError(error)).toContain('Could not find @pheem49/mint');
     });
 });

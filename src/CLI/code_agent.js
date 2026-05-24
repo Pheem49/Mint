@@ -138,6 +138,8 @@ PERSONALITY & TONE:
   - **WHEN RESPONDING IN THAI:** Use natural female polite particles such as "ค่ะ" or "นะคะ" where appropriate. Refer to yourself as "มิ้นท์" when it sounds natural.
   - **WHEN RESPONDING IN ENGLISH:** Use a polite, concise, professional tone.
 - Emojis: Avoid emojis in technical, review, debugging, and code-editing responses unless the user explicitly uses or asks for them.
+- For technical/code/debugging tasks, keep progress notes and final summaries factual and compact. Do not cheerlead, over-apologize, roleplay, or add affectionate language.
+- For code edits, final summaries should lead with changed files/behavior and verification. Avoid "เรียบร้อยแล้วค่ะ" repetition and decorative closing lines.
 
 Rules:
 1. Respond with valid JSON only.
@@ -151,6 +153,13 @@ Rules:
 8. Before editing more than one file, you MUST first use the "plan" action and wait for user approval. The plan must start with "Plan:" and include one bullet per file, for example "- แก้ src/CLI/agent.js". After approval, make the edits.
 9. When editing, prefer "apply_patch" with precise hunks over whole-file rewrites.
 10. When you are done, return "finish" with your final response to the user in the "summary" field.
+
+Progress updates:
+- The "thought" field is shown to the user as a live progress note. Do not put private chain-of-thought there.
+- Write "thought" as one short, concrete status sentence in the user's language.
+- Mention what you just learned from the previous observation when it matters, then say what you will inspect or change next.
+- Before editing, explain the specific file and behavior you are about to change.
+- Before verifying, explain what check you are running and why.
 
 Response format:
 {
@@ -993,16 +1002,6 @@ async function executeCodeTask(task, options = {}) {
             finalSessionSummary = input.sessionSummary || input.summary || task;
             finalSummary = input.summary || 'Task complete.';
             finalVerification = input.verification || 'Not specified.';
-            if (onFinalSummary) {
-                await onFinalSummary({
-                    summary: finalSummary,
-                    verification: finalVerification,
-                    providerInfo: {
-                        provider: client.lastSuccessfulProvider || client.provider || provider,
-                        model: getCodeProviderModel(client.lastSuccessfulProvider || client.provider || provider, config)
-                    }
-                });
-            }
             writeWorkspaceSession(workspaceRoot, {
                 summary: finalSessionSummary,
                 lastTask: task,
@@ -1254,7 +1253,7 @@ async function executeCodeTask(task, options = {}) {
     if (finalSummary) {
         memoryStore.recordInteraction(task, finalSummary);
         const answeredProvider = client.lastSuccessfulProvider || client.provider || provider;
-        return {
+        const result = {
             summary: finalSummary,
             verification: finalVerification,
             steps: executedSteps,
@@ -1263,6 +1262,10 @@ async function executeCodeTask(task, options = {}) {
                 model: getCodeProviderModel(answeredProvider, config)
             }
         };
+        if (onFinalSummary) {
+            await onFinalSummary(result);
+        }
+        return result;
     }
 
     writeWorkspaceSession(workspaceRoot, {

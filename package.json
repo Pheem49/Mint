@@ -1,6 +1,6 @@
 {
   "name": "@pheem49/mint",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "A powerful Electron-based AI desktop assistant powered by Google Gemini, featuring screen vision, web automation, and proactive suggestions.",
   "main": "main.js",
   "scripts": {
@@ -11,7 +11,8 @@
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
     "build:all": "electron-builder --linux --mac --win",
-    "cli": "node mint-cli.js"
+    "cli": "node mint-cli.js",
+    "install:desktop": "node scripts/install_linux_desktop_entry.js"
   },
   "jest": {
     "testEnvironment": "node",

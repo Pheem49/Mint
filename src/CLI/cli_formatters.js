@@ -10,7 +10,11 @@ const { colors } = require('./cli_colors');
 function formatProgress(info) {
     if (typeof info === 'string') return `${colors.gray}[Mint Code] ${info}${colors.reset}`;
 
-    const { action, target, message } = info;
+    const { action, target, message, thought } = info;
+
+    if (thought && process.env.MINT_HIDE_AGENT_NOTES !== '1') {
+        return `\n${colors.gray}${colors.bright}•${colors.reset} ${colors.gray}${thought}${colors.reset}`;
+    }
 
     if (action === 'ask_user') {
         return `\n${colors.mint}✓${colors.reset} ${colors.bright}Ask User${colors.reset}\n${colors.gray}   ${target || message || ''}${colors.reset}`;

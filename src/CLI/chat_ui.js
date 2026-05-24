@@ -382,11 +382,11 @@ async function createChatUI(options) {
                         return;
                     }
                     if (thought) {
-                        if (process.env.MINT_SHOW_THINKING_TRACE !== '1') {
+                        if (process.env.MINT_HIDE_AGENT_NOTES === '1') {
                             return;
                         }
                         text = thought;
-                        label = 'Thinking';
+                        label = 'Working';
                         labelColor = 'gray';
                         isThought = true;
                     } else if (action === 'thinking' || phase === 'thinking') {

@@ -112,6 +112,25 @@ function formatUpdateError(error) {
     return `Update failed: ${detail || 'Unknown npm error'}`;
 }
 
+function formatUpdateCheckError(error) {
+    const detail = [error.stderr, error.stdout, error.message].filter(Boolean).join('\n').trim();
+    if (/E404|404 Not Found|not in this registry/i.test(detail)) {
+        return [
+            `Update check unavailable: ${pkg.name} is not published on the npm registry.`,
+            'This does not mean your local Mint version is outdated.'
+        ].join('\n');
+    }
+
+    if (/ENOTFOUND|ETIMEDOUT|ECONNRESET|ECONNREFUSED|network|timeout/i.test(detail)) {
+        return [
+            'Update check unavailable: npm registry could not be reached.',
+            'This does not mean your local Mint version is outdated.'
+        ].join('\n');
+    }
+
+    return `Update check unavailable: ${detail || 'Unknown npm error'}`;
+}
+
 async function runUpdate(options = {}) {
     const currentVersion = pkg.version;
     let latestVersion = '';
@@ -123,7 +142,7 @@ async function runUpdate(options = {}) {
             status: 'error',
             currentVersion,
             latestVersion,
-            message: formatUpdateError(error)
+            message: formatUpdateCheckError(error)
         };
     }
 
@@ -205,6 +224,7 @@ module.exports = {
     _private: {
         parseVersion,
         formatUpdateError,
+        formatUpdateCheckError,
         getAutoUpdateIntervalMs
     }
 };

@@ -1,6 +1,15 @@
 const { app, BrowserWindow, ipcMain, shell, globalShortcut, clipboard } = require('electron');
 require('dotenv').config();
 
+// Linux docks match running windows to a .desktop file through WM_CLASS.
+app.setName('Mint');
+if (process.platform === 'linux') {
+    app.commandLine.appendSwitch('class', 'Mint');
+    if (typeof app.setDesktopName === 'function') {
+        app.setDesktopName('mint-ai.desktop');
+    }
+}
+
 const { getSystemInfo, getWeather } = require('./src/System/system_info');
 const { readConfig, writeConfig } = require('./src/System/config_manager');
 const { parseCommand } = require('./src/Command_Parser/parser');

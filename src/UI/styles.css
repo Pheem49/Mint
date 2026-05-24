@@ -98,6 +98,17 @@ body {
   min-width: 0;
 }
 
+.app-logo {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  object-fit: contain;
+  border-radius: 9px;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.35));
+}
+
 .status-indicator {
   width: 10px;
   height: 10px;

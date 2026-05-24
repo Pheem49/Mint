@@ -9,12 +9,13 @@ function createWindowManager(projectRoot) {
     let tray = null;
 
     function createMainWindow() {
+        const iconPath = path.join(projectRoot, 'assets', 'icon.png');
         mainWindow = new BrowserWindow({
             width: 1180,
             height: 860,
             minWidth: 900,
             minHeight: 680,
-            icon: path.join(projectRoot, 'assets', 'icon.png'),
+            icon: nativeImage.createFromPath(iconPath),
             webPreferences: {
                 preload: path.join(projectRoot, 'preload.js'),
                 nodeIntegration: false,
@@ -75,12 +76,13 @@ function createWindowManager(projectRoot) {
             return settingsWindow;
         }
 
+        const iconPath = path.join(projectRoot, 'assets', 'icon.png');
         settingsWindow = new BrowserWindow({
             width: 720,
             height: 620,
             minWidth: 640,
             minHeight: 560,
-            icon: path.join(projectRoot, 'assets', 'icon.png'),
+            icon: nativeImage.createFromPath(iconPath),
             webPreferences: {
                 preload: path.join(projectRoot, 'preload-settings.js'),
                 nodeIntegration: false,
