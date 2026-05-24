@@ -55,4 +55,15 @@ describe('CLI chat UI formatting', () => {
         expect(_helpers.formatDuration(5)).toBe('5s');
         expect(_helpers.formatDuration(118)).toBe('1m 58s');
     });
+
+    test('splits edit diff stats for colored rendering', () => {
+        expect(_helpers.splitDiffStatSegments('Edited src/CLI/code_agent.js (+52 -0)')).toEqual([
+            { text: 'Edited src/CLI/code_agent.js ', color: 'cyanBright' },
+            { text: '(', color: 'gray' },
+            { text: '+52', color: 'greenBright' },
+            { text: ' ', color: 'gray' },
+            { text: '-0', color: 'redBright' },
+            { text: ')', color: 'gray' }
+        ]);
+    });
 });

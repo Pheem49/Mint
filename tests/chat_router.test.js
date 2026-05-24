@@ -35,6 +35,14 @@ describe('chat_router helpers', () => {
         expect(_helpers.isLargeCodeTaskRequest('ดูไฟล์ package.json ให้หน่อย', process.cwd())).toBe(false);
     });
 
+    test('treats short assistant mention as normal chat', async () => {
+        const { detectCodeIntent, _helpers } = require('../src/CLI/chat_router');
+        expect(_helpers.detectCodeIntentHeuristic('มิ้น', process.cwd())).toBe(false);
+        await expect(detectCodeIntent('มิ้น', process.cwd(), [])).resolves.toMatchObject({
+            route: 'chat'
+        });
+    });
+
     test('treats substantial project fix request as code task', () => {
         const { _helpers } = require('../src/CLI/chat_router');
         expect(_helpers.isLargeCodeTaskRequest('fix the failing tests in this project and verify the result', process.cwd())).toBe(true);

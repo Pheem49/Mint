@@ -80,4 +80,34 @@ describe('Gemini_API provider routing helpers', () => {
         expect(order).not.toContain('openai');
         expect(order[0]).toBe('ollama');
     });
+
+    test('normalizes accidental multi-action chat response to safe text', () => {
+        const geminiApi = require('../src/AI_Brain/Gemini_API');
+        const result = geminiApi._helpers.normalizeParsedResult([
+            {
+                response: 'จะพิมพ์ให้นะคะ',
+                action: { type: 'type_text', target: 'timeout 15s npm start' }
+            },
+            {
+                response: 'กด enter',
+                action: { type: 'key_tap', target: 'enter' }
+            }
+        ], 'พิมพ์คำสั่งให้หน่อย รันแอพสัก 15 วิ');
+
+        expect(result).toEqual({
+            response: 'คำสั่งคือ:\ntimeout 15s npm start',
+            action: { type: 'none', target: '' }
+        });
+    });
+
+    test('does not type command text when user asks for the command', () => {
+        const geminiApi = require('../src/AI_Brain/Gemini_API');
+        const result = geminiApi._helpers.normalizeParsedResult({
+            response: 'ส่งคำสั่งให้แล้วค่ะ',
+            action: { type: 'type_text', target: 'npm start' }
+        }, 'ช่วยพิมพ์คำสั่งรันแอพให้หน่อย');
+
+        expect(result.action).toEqual({ type: 'none', target: '' });
+        expect(result.response).toContain('npm start');
+    });
 });

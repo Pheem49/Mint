@@ -119,6 +119,13 @@ async function detectCodeIntent(text, workspaceRoot = process.cwd(), history = [
     }
 
     const heuristicRoute = detectCodeIntentHeuristic(input, workspaceRoot);
+    if (!heuristicRoute) {
+        return {
+            route: 'chat',
+            reason: 'No substantial code intent detected.'
+        };
+    }
+
     const routerClient = getRouterClient();
     if (!routerClient) {
         return {

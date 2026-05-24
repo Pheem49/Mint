@@ -148,6 +148,22 @@ function formatDuration(totalSeconds) {
     return `${minutes}m ${remainingSeconds}s`;
 }
 
+function splitDiffStatSegments(value) {
+    const text = String(value || '');
+    const match = text.match(/\(\+(\d+)\s+-(\d+)\)/);
+    if (!match) return [{ text, color: 'cyanBright' }];
+
+    return [
+        { text: text.slice(0, match.index), color: 'cyanBright' },
+        { text: '(', color: 'gray' },
+        { text: `+${match[1]}`, color: 'greenBright' },
+        { text: ' ', color: 'gray' },
+        { text: `-${match[2]}`, color: 'redBright' },
+        { text: ')', color: 'gray' },
+        { text: text.slice(match.index + match[0].length), color: 'cyanBright' }
+    ].filter(part => part.text);
+}
+
 function shouldAppendMessage(role, text) {
     if (role === 'assistant' || role === 'system') {
         return String(text || '').trim().length > 0;
@@ -379,6 +395,9 @@ async function createChatUI(options) {
                 } else {
                     const { action, phase, target, message, thought } = info;
                     if (action === 'memory_context' && process.env.MINT_SHOW_MEMORY_TRACE !== '1') {
+                        return;
+                    }
+                    if (phase === 'tool_call') {
                         return;
                     }
                     if (thought) {
@@ -641,6 +660,17 @@ async function createChatUI(options) {
             setInput(normalizedValue);
         };
 
+        const renderActivityDetail = (value) => {
+            const segments = splitDiffStatSegments(value);
+            return segments.map((segment, segmentIndex) =>
+                h(Text, {
+                    key: `activity-detail-${segmentIndex}`,
+                    color: segment.color,
+                    wrap: 'wrap'
+                }, segment.text)
+            );
+        };
+
         const renderMessage = (msg, index, keyPrefix = 'msg') => {
             if (msg.isThought) {
                 return h(Box, { key: `${keyPrefix}-${index}`, flexDirection: 'row', marginBottom: 0, paddingLeft: 2 },
@@ -656,7 +686,7 @@ async function createChatUI(options) {
                     ),
                     h(Box, { paddingLeft: 2, marginBottom: 1 },
                         h(Text, { color: 'gray' }, '└ '),
-                        h(Text, { color: 'cyanBright', wrap: 'wrap' }, msg.activityDetail || msg.text)
+                        ...renderActivityDetail(msg.activityDetail || msg.text)
                     )
                 );
             }
@@ -718,31 +748,31 @@ async function createChatUI(options) {
                 pendingApproval && h(Box, {
                     flexDirection: 'column',
                     borderStyle: 'single',
-                    borderColor: 'yellow',
+                    borderColor: approvalChoice === 'deny' ? 'redBright' : 'cyanBright',
                     paddingX: 1,
                     marginBottom: 1
                 },
                     h(Box, null,
-                        h(Text, { bold: true, color: 'yellow' }, 'Approval '),
-                        h(Text, { color: 'gray' }, `[${pendingApproval.type}] `),
+                        h(Text, { bold: true, color: 'greenBright' }, 'Approval '),
+                        h(Text, { color: 'cyanBright' }, `[${pendingApproval.type}] `),
                         h(Text, { color: 'white' }, pendingApproval.label)
                     ),
                     pendingApproval.preview && pendingApproval.preview !== pendingApproval.label && h(Box, null,
-                        h(Text, { color: 'gray' }, pendingApproval.preview)
+                        h(Text, { color: 'gray', dimColor: true }, pendingApproval.preview)
                     ),
                     h(Box, null,
                         h(Text, {
                             color: approvalChoice === 'approve' ? 'black' : 'greenBright',
                             backgroundColor: approvalChoice === 'approve' ? 'greenBright' : undefined,
                             bold: true
-                        }, ' Approve '),
+                        }, approvalChoice === 'approve' ? ' ▸ Approve ' : '   Approve '),
                         h(Text, { color: 'gray' }, ' '),
                         h(Text, {
                             color: approvalChoice === 'deny' ? 'white' : 'redBright',
                             backgroundColor: approvalChoice === 'deny' ? 'redBright' : undefined,
                             bold: true
-                        }, ' Deny '),
-                        h(Text, { color: 'gray' }, '  Tab/←/→ Enter')
+                        }, approvalChoice === 'deny' ? ' ▸ Deny ' : '   Deny '),
+                        h(Text, { color: 'gray', dimColor: true }, '  Tab/←/→ Enter')
                     )
                 ),
 
@@ -791,9 +821,10 @@ async function createChatUI(options) {
     console.log(`\x1b[90mType naturally to chat. Esc to exit.\x1b[0m\n`);
 
     const ref = createRef();
-    render(h(App, { ref, ...options }), { exitOnCtrlC: false });
+    const instance = render(h(App, { ref, ...options }), { exitOnCtrlC: false });
 
     return {
+        unmount: () => instance.unmount(),
         appendMessage: (role, text, metadata) => ref.current?.appendMessage(role, text, metadata),
         setThinking: (val, seconds) => ref.current?.setThinking(val, seconds),
         setMode: (val) => ref.current?.setMode(val),
@@ -824,4 +855,4 @@ async function createChatUI(options) {
     };
 }
 
-module.exports = { createChatUI, _helpers: { cleanDisplayText, stripInlineMarkdown, compactPathLabel, formatActivityStep, formatDuration, shouldAppendMessage } };
+module.exports = { createChatUI, _helpers: { cleanDisplayText, stripInlineMarkdown, compactPathLabel, formatActivityStep, formatDuration, splitDiffStatSegments, shouldAppendMessage } };

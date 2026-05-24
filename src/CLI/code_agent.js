@@ -154,6 +154,15 @@ Rules:
 9. When editing, prefer "apply_patch" with precise hunks over whole-file rewrites.
 10. When you are done, return "finish" with your final response to the user in the "summary" field.
 
+Action safety and intent discipline:
+- The latest user message is authoritative. Do not continue an older unfinished task unless the latest message explicitly asks you to continue or clearly refers to that task.
+- For greetings, name-calls, acknowledgements, or backchannels such as "มิ้น", "มิ้นๆ", "อ๋อ", "โอเค", "ขอบคุณ", "hi", "hello", "ok", or "thanks": use "finish" only. Do not inspect files, run shell commands, search code, or claim you checked anything.
+- If the user asks for a command to type, provide the command in "finish". Do not run it unless the user explicitly asks you to run it.
+- If the user explicitly asks you to run a command or provided code, such as "รันคำสั่ง npm test ให้หน่อย", "รันโค้ดนี้หน่อย", or "run npm test", choose "run_shell" with the exact command when it is clear. The app will ask the user for approval before execution.
+- If the user asks you to run something but no exact command/code is provided, use "ask_user" to request the command instead of guessing.
+- If the user asks what is inside a folder and a concrete path is present in the latest message or recent context, use "list_files" for that path. If no concrete target is clear, ask for clarification instead of guessing.
+- Never say you opened, checked, inspected, or verified a file/folder unless a tool observation in this turn actually supports it.
+
 Progress updates:
 - The "thought" field is shown to the user as a live progress note. Do not put private chain-of-thought there.
 - Write "thought" as one short, concrete status sentence in the user's language.
@@ -275,6 +284,25 @@ function evaluateActionResult(action, toolResult = '') {
         status: 'passed',
         message: `Evaluator: ${action} completed without obvious errors.`
     };
+}
+
+function getToolCallStatus(action, toolResult = '', evaluation = null) {
+    const text = String(toolResult || '');
+    if (/^Error:|User denied|blocked|denied|failed|exception|not found/i.test(text)) {
+        return 'failed';
+    }
+    if (evaluation && evaluation.status === 'failed') {
+        return 'failed';
+    }
+    if (action === 'run_shell' && /(ERR!|Error:|FAIL|failed|not found|permission denied)/i.test(text)) {
+        return 'failed';
+    }
+    return 'success';
+}
+
+function summarizeToolTarget(action, input = {}) {
+    if (action === 'plan') return 'Multi-file plan';
+    return formatActionPreview(action, input);
 }
 
 function splitDataUri(dataUri = '') {
@@ -720,6 +748,35 @@ class UnifiedAgentClient {
         this.history = [];
         this.systemInstruction = CODE_AGENT_PROMPT;
         this.lastSuccessfulProvider = null;
+        this.usageTotals = {};
+    }
+
+    recordUsage(provider, model, usage = {}) {
+        const key = `${provider}:${model || ''}`;
+        if (!this.usageTotals[key]) {
+            this.usageTotals[key] = {
+                provider,
+                model,
+                requests: 0,
+                inputTokens: 0,
+                cacheReads: 0,
+                outputTokens: 0,
+                reasoningTokens: 0,
+                totalTokens: 0
+            };
+        }
+
+        const row = this.usageTotals[key];
+        row.requests += 1;
+        row.inputTokens += Number(usage.inputTokens) || 0;
+        row.cacheReads += Number(usage.cacheReads) || 0;
+        row.outputTokens += Number(usage.outputTokens) || 0;
+        row.reasoningTokens += Number(usage.reasoningTokens) || 0;
+        row.totalTokens += Number(usage.totalTokens) || 0;
+    }
+
+    getUsageSummary() {
+        return Object.values(this.usageTotals);
     }
 
     async sendMessage(observation) {
@@ -772,6 +829,13 @@ class UnifiedAgentClient {
                 'content-type': 'application/json'
             }
         });
+        const usage = response.data.usage || {};
+        this.recordUsage('anthropic', this.config.anthropicModel || 'claude-3-5-sonnet-latest', {
+            inputTokens: usage.input_tokens,
+            cacheReads: usage.cache_read_input_tokens,
+            outputTokens: usage.output_tokens,
+            totalTokens: (Number(usage.input_tokens) || 0) + (Number(usage.output_tokens) || 0)
+        });
         return response.data.content[0].text;
     }
 
@@ -798,6 +862,14 @@ class UnifiedAgentClient {
                 'Authorization': `Bearer ${apiKey}`,
                 'Content-Type': 'application/json'
             }
+        });
+        const usage = response.data.usage || {};
+        this.recordUsage(this.provider, model, {
+            inputTokens: usage.prompt_tokens,
+            cacheReads: usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens,
+            outputTokens: usage.completion_tokens,
+            reasoningTokens: usage.completion_tokens_details && usage.completion_tokens_details.reasoning_tokens,
+            totalTokens: usage.total_tokens
         });
         return response.data.choices[0].message.content;
     }
@@ -827,6 +899,14 @@ class UnifiedAgentClient {
         });
 
         const response = await chat.sendMessage({ message: contentToGeminiParts(lastEntry.content) });
+        const usage = response.usageMetadata || {};
+        this.recordUsage('gemini', model, {
+            inputTokens: usage.promptTokenCount,
+            cacheReads: usage.cachedContentTokenCount,
+            outputTokens: usage.candidatesTokenCount,
+            reasoningTokens: usage.thoughtsTokenCount,
+            totalTokens: usage.totalTokenCount
+        });
         return typeof response.text === 'function' ? response.text() : response.text;
     }
 }
@@ -1175,6 +1255,7 @@ async function executeCodeTask(task, options = {}) {
         }
 
         const evaluation = evaluateActionResult(action, toolResult);
+        const toolStatus = getToolCallStatus(action, toolResult, evaluation);
         if (evaluation) {
             onProgress({
                 step,
@@ -1189,6 +1270,14 @@ async function executeCodeTask(task, options = {}) {
                 `${evaluation.status}: ${evaluation.message}`
             ].join('\n');
         }
+
+        onProgress({
+            step,
+            phase: 'tool_call',
+            action,
+            status: toolStatus,
+            target: summarizeToolTarget(action, input)
+        });
 
         // Log the finished step with result
         let resultSummary = '';
@@ -1259,7 +1348,8 @@ async function executeCodeTask(task, options = {}) {
             steps: executedSteps,
             providerInfo: {
                 provider: answeredProvider,
-                model: getCodeProviderModel(answeredProvider, config)
+                model: getCodeProviderModel(answeredProvider, config),
+                usage: client.getUsageSummary()
             }
         };
         if (onFinalSummary) {
@@ -1281,7 +1371,8 @@ async function executeCodeTask(task, options = {}) {
         steps: executedSteps || MAX_AGENT_STEPS,
         providerInfo: {
             provider: answeredProvider,
-            model: getCodeProviderModel(answeredProvider, config)
+            model: getCodeProviderModel(answeredProvider, config),
+            usage: client.getUsageSummary()
         }
     };
 }

@@ -72,9 +72,19 @@ NATURAL CHAT FLOW:
 - You have the autonomy to suggest better ways to achieve a goal, provide alternative perspectives, and take initiative in helping the user.
 - Separate distinct points with blank lines (double newline) for readability.
 - Ask follow-up questions only when they add significant value to the task or conversation.
+- The latest user message is authoritative. Do not continue or describe older tasks unless the latest message explicitly asks you to continue them.
+- For greetings, name-calls, acknowledgements, and backchannels such as "มิ้น", "มิ้นๆ", "อ๋อ", "โอเค", "ขอบคุณ", "hi", "hello", "ok", or "thanks", return action "none" and a short reply only.
 
 GOAL:
-Your goal is to help the user with their queries. If they ask to open an application, open a website, search, manage files, or get system info, you must trigger an action in the structured JSON format below. **NEVER provide a conversational response about performing an action without including the actual "action" object in your JSON.**
+Your goal is to help the user with their queries. This Electron app is Chat Mode, not Code Agent Mode: use at most ONE simple action per user message, only when the latest message explicitly asks for that local action. If the user asks a question or asks you to provide text/commands, answer with action "none".
+
+ACTION DISCIPLINE:
+- Always return a single JSON object. Never return a JSON array or multiple actions.
+- If the user asks "พิมพ์คำสั่งให้หน่อย", "บอกคำสั่ง", "ขอคำสั่ง", "what command", or "type the command", provide the command in "response" and set action "none". Do NOT use "type_text" or "key_tap".
+- Use "type_text", "key_tap", "mouse_click", or "mouse_move" only when the user explicitly asks you to control the currently focused UI, not when they ask for a command to copy/type themselves.
+- If the user asks to run terminal commands or code, Chat Mode should provide the command or tell them to use the CLI agent. Do not type or press Enter on their behalf.
+- Never say you opened, checked, inspected, or verified a file/folder unless the selected action actually does it and the app will execute that action.
+- If the request needs workspace code inspection, edits, tests, or shell execution, tell the user to use the Mint CLI agent instead of pretending to inspect files.
 
 CREATOR INFO:
 - The creator is Pheem49.
@@ -223,6 +233,42 @@ function validateParsedAction(parsedResult) {
     return parsedResult;
 }
 
+function normalizeParsedResult(parsedResult, originalText = '') {
+    if (Array.isArray(parsedResult)) {
+        const first = parsedResult.find(item => item && typeof item === 'object') || {};
+        const commandAction = parsedResult.find(item =>
+            item && item.action && item.action.type === 'type_text' && item.action.target
+        );
+        return {
+            response: commandAction
+                ? `คำสั่งคือ:\n${commandAction.action.target}`
+                : (first.response || 'มิ้นท์ตอบได้ทีละ action ต่อข้อความนะคะ ลองสั่งใหม่อีกครั้งได้เลยค่ะ'),
+            action: { type: 'none', target: '' }
+        };
+    }
+
+    if (!parsedResult || typeof parsedResult !== 'object') {
+        return { response: String(parsedResult || ''), action: { type: 'none', target: '' } };
+    }
+
+    if (!parsedResult.action || typeof parsedResult.action !== 'object') {
+        parsedResult.action = { type: 'none', target: '' };
+    }
+
+    const input = String(originalText || '').toLowerCase();
+    const asksForCommandText = /พิมพ์คำสั่ง|บอกคำสั่ง|ขอคำสั่ง|คำสั่ง.*ให้หน่อย|type.*command|what command|give.*command/.test(input);
+    const actionType = parsedResult.action.type;
+    if (asksForCommandText && (actionType === 'type_text' || actionType === 'key_tap')) {
+        const typed = actionType === 'type_text' ? String(parsedResult.action.target || '').trim() : '';
+        parsedResult.response = typed
+            ? `คำสั่งคือ:\n${typed}`
+            : (parsedResult.response || 'ได้ค่ะ แต่คำขอนี้ควรตอบเป็นข้อความ ไม่ควรพิมพ์หรือกดปุ่มแทนค่ะ');
+        parsedResult.action = { type: 'none', target: '' };
+    }
+
+    return parsedResult;
+}
+
 function resolveApiKey() {
   let settingsKey = '';
   try {
@@ -292,7 +338,8 @@ function withProviderInfo(result, provider, config = {}) {
     : { response: String(result || ''), action: { type: 'none', target: '' } };
   const providerInfo = {
     provider,
-    model: getProviderModel(provider, config)
+    model: getProviderModel(provider, config),
+    usage: normalized.usageMetadata || normalized.usage || null
   };
 
   attachProviderInfoToLatestHistory(providerInfo);
@@ -536,6 +583,8 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
       }
     }
 
+    parsedResult = normalizeParsedResult(parsedResult, finalMessage);
+
     // Decode any remaining unicode escapes in the response text
     if (parsedResult && typeof parsedResult.response === 'string') {
         parsedResult.response = decodeUnicode(parsedResult.response);
@@ -557,6 +606,7 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
         });
     }
 
+    parsedResult.usageMetadata = aiResponse.usageMetadata || null;
     return parsedResult;
 
   } catch (error) {
@@ -646,6 +696,8 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
             parsedResult = { response: fullText, action: { type: 'none', target: '' } };
         }
     }
+    parsedResult = normalizeParsedResult(parsedResult, finalMessage);
+
     if (parsedResult && typeof parsedResult.response === 'string') {
         parsedResult.response = decodeUnicode(parsedResult.response);
         parsedResult.response = stripRelevantMemoryBlock(parsedResult.response);
@@ -866,6 +918,8 @@ function parseAiResponse(outputText) {
             parsedResult = { response: outputText, action: { type: "none", target: "" } };
         }
     }
+    parsedResult = normalizeParsedResult(parsedResult);
+
     if (parsedResult && typeof parsedResult.response === 'string') {
         parsedResult.response = decodeUnicode(parsedResult.response);
     }
@@ -931,6 +985,7 @@ async function handleOllamaChat(finalMessage, base64Image, base64Audio, config) 
             parsedResult = { response: outputText, action: { type: "none", target: "" } };
         }
     }
+    parsedResult = normalizeParsedResult(parsedResult, currentContent);
     validateParsedAction(parsedResult);
     return parsedResult;
 }
@@ -1058,6 +1113,7 @@ module.exports = {
     translateImageContent,
     refreshApiKeyFromConfig,
     _helpers: {
-        getProviderAttemptOrder
+        getProviderAttemptOrder,
+        normalizeParsedResult
     }
 };
