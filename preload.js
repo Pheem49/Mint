@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
     maximizeWindow: () => ipcRenderer.send('maximize-window'),
     resetChat: () => ipcRenderer.invoke('reset-chat'),
     getChatHistory: () => ipcRenderer.invoke('get-chat-history'),
+    listSavedPictures: () => ipcRenderer.invoke('list-saved-pictures'),
     openSettings: () => ipcRenderer.invoke('open-settings'),
     // Clipboard
     readClipboard: () => ipcRenderer.invoke('clipboard-read'),

@@ -12,6 +12,7 @@ const DEFAULT_CONFIG = {
     proactiveCooldown: 120,
     glassBlur: 'blur(16px)',
     fontFamily: "'Outfit', sans-serif",
+    fontSize: '15px',
     aiProvider: 'gemini',
     ollamaModel: 'llama3:latest',
     enableVoiceReply: true,
@@ -55,8 +56,15 @@ function applyConfig(config) {
     } else {
         document.getElementById('custom-theme-controls').style.display = 'none';
         // Reset dynamic style variables if not custom
-        document.documentElement.style.removeProperty('--bg-gradient');
-        document.documentElement.style.removeProperty('--panel-bg');
+        [
+            '--bg-gradient',
+            '--panel-bg',
+            '--sidebar-bg',
+            '--chrome-bg',
+            '--surface-bg',
+            '--surface-strong',
+            '--input-bg'
+        ].forEach(name => document.documentElement.style.removeProperty(name));
     }
 
     // Apply accent color
@@ -170,6 +178,9 @@ function applyConfig(config) {
 
     document.getElementById('font-family-select').value = config.fontFamily || "'Outfit', sans-serif";
     document.body.style.fontFamily = config.fontFamily || "'Outfit', sans-serif";
+
+    document.getElementById('font-size-select').value = config.fontSize || '15px';
+    document.documentElement.style.fontSize = config.fontSize || '15px';
 
     // Update active theme card
     document.querySelectorAll('.theme-card').forEach(card => {
@@ -423,6 +434,11 @@ function applyCustomThemeStyles(cfg) {
     // Convert hex to rgba for panel bg to keep transparency
     const panelRgb = hexToRgb(cfg.customPanelBg);
     document.documentElement.style.setProperty('--panel-bg', `rgba(${panelRgb.r}, ${panelRgb.g}, ${panelRgb.b}, 0.75)`);
+    document.documentElement.style.setProperty('--sidebar-bg', `rgba(${panelRgb.r}, ${panelRgb.g}, ${panelRgb.b}, 0.82)`);
+    document.documentElement.style.setProperty('--chrome-bg', `rgba(${panelRgb.r}, ${panelRgb.g}, ${panelRgb.b}, 0.78)`);
+    document.documentElement.style.setProperty('--surface-bg', `rgba(${panelRgb.r}, ${panelRgb.g}, ${panelRgb.b}, 0.42)`);
+    document.documentElement.style.setProperty('--surface-strong', `rgba(${panelRgb.r}, ${panelRgb.g}, ${panelRgb.b}, 0.62)`);
+    document.documentElement.style.setProperty('--input-bg', `rgba(${panelRgb.r}, ${panelRgb.g}, ${panelRgb.b}, 0.58)`);
     updateCustomPreviewBox(cfg);
 }
 
@@ -453,6 +469,21 @@ document.getElementById('custom-bg-end').addEventListener('input', (e) => {
 document.getElementById('custom-panel-bg').addEventListener('input', (e) => {
     currentConfig.customPanelBg = e.target.value;
     if (currentConfig.theme === 'custom') applyCustomThemeStyles(currentConfig);
+});
+
+document.getElementById('glass-blur-select').addEventListener('change', (e) => {
+    currentConfig.glassBlur = e.target.value;
+    document.documentElement.style.setProperty('--glass-blur', e.target.value);
+});
+
+document.getElementById('font-family-select').addEventListener('change', (e) => {
+    currentConfig.fontFamily = e.target.value;
+    document.body.style.fontFamily = e.target.value;
+});
+
+document.getElementById('font-size-select').addEventListener('change', (e) => {
+    currentConfig.fontSize = e.target.value;
+    document.documentElement.style.fontSize = e.target.value;
 });
 
 // Proactive sliders
@@ -560,6 +591,7 @@ document.getElementById('save-btn').addEventListener('click', async () => {
     currentConfig.systemTextColor = document.getElementById('system-text-color').value;
     currentConfig.glassBlur = document.getElementById('glass-blur-select').value;
     currentConfig.fontFamily = document.getElementById('font-family-select').value;
+    currentConfig.fontSize = document.getElementById('font-size-select').value;
     
     currentConfig.customBgStart = document.getElementById('custom-bg-start').value;
     currentConfig.customBgEnd = document.getElementById('custom-bg-end').value;

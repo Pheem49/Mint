@@ -17,6 +17,8 @@ function registerIpcHandlers({
         getWeather,
         readConfig,
         writeConfig,
+        saveChatImages,
+        listSavedPictures,
         parseCommand,
         executeAction,
         getGoogleTtsUrls,
@@ -25,6 +27,10 @@ function registerIpcHandlers({
 
     ipcMain.handle('chat-message', async (event, message, base64Image = null, base64Audio = null) => {
         try {
+            if (base64Image && saveChatImages) {
+                saveChatImages(base64Image, { source: 'chat', message });
+            }
+
             const rawResponse = await handleChat(message, base64Image, base64Audio);
             const aiResponse = parseCommand(rawResponse);
 
@@ -78,6 +84,10 @@ function registerIpcHandlers({
     });
 
     ipcMain.handle('get-chat-history', () => getChatTranscript());
+
+    ipcMain.handle('list-saved-pictures', () => {
+        return listSavedPictures ? listSavedPictures() : [];
+    });
 
     ipcMain.handle('open-settings', () => {
         windowManager.createSettingsWindow();

@@ -18,6 +18,7 @@ const { createWindowManager } = require('./src/System/window_manager');
 const { createProactiveLoop } = require('./src/System/proactive_loop');
 const { createScreenCaptureController } = require('./src/System/screen_capture');
 const { registerIpcHandlers } = require('./src/System/ipc_handlers');
+const { saveChatImages, listSavedPictures } = require('./src/System/picture_store');
 
 const systemEvents = require('./src/System/system_events');
 const customWorkflows = require('./src/System/custom_workflows');
@@ -66,6 +67,8 @@ registerIpcHandlers({
         getWeather,
         readConfig,
         writeConfig,
+        saveChatImages,
+        listSavedPictures,
         parseCommand,
         executeAction: (...args) => getActionExecutor().executeAction(...args),
         getGoogleTtsUrls,

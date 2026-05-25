@@ -10,11 +10,17 @@ function createWindowManager(projectRoot) {
 
     function createMainWindow() {
         const iconPath = path.join(projectRoot, 'assets', 'icon.png');
+        const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
+        const windowWidth = Math.min(1360, Math.max(1180, screenWidth - 40));
+        const windowHeight = Math.min(920, Math.max(860, screenHeight - 40));
+
         mainWindow = new BrowserWindow({
-            width: 1180,
-            height: 860,
+            width: windowWidth,
+            height: windowHeight,
             minWidth: 900,
             minHeight: 680,
+            x: Math.floor((screenWidth - windowWidth) / 2),
+            y: Math.floor((screenHeight - windowHeight) / 2),
             icon: nativeImage.createFromPath(iconPath),
             webPreferences: {
                 preload: path.join(projectRoot, 'preload.js'),
@@ -78,10 +84,10 @@ function createWindowManager(projectRoot) {
 
         const iconPath = path.join(projectRoot, 'assets', 'icon.png');
         settingsWindow = new BrowserWindow({
-            width: 720,
-            height: 620,
-            minWidth: 640,
-            minHeight: 560,
+            width: 1020,
+            height: 720,
+            minWidth: 860,
+            minHeight: 620,
             icon: nativeImage.createFromPath(iconPath),
             webPreferences: {
                 preload: path.join(projectRoot, 'preload-settings.js'),

@@ -29,6 +29,7 @@ const systemMonitor     = require('../Plugins/system_monitor');
 const workspaceManager  = require('./workspace_manager');
 const { executeCodeTask } = require('./code_agent');
 const { resetChat }       = require('../AI_Brain/Gemini_API');
+const { saveChatImages }  = require('../System/picture_store');
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -262,7 +263,13 @@ async function sendImageMessage({ images, image, prompt, appendMessage, streamMe
     const cancelTimer = startThinkingTimer(setThinking);
     if (stats) markAgentActive(stats, true);
     try {
-        const result      = await handleChat(message, imageList.map(item => item.dataUri), null);
+        const imageDataUris = imageList.map(item => item.dataUri);
+        const result        = await handleChat(message, imageDataUris, null);
+        try {
+            saveChatImages(imageDataUris, { source: 'cli', message });
+        } catch (saveError) {
+            console.error('[Pictures] Failed to save CLI image:', saveError.message);
+        }
         cancelTimer();
         setThinking(false);
         if (stats) markAgentActive(stats, false);

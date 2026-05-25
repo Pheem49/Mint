@@ -6,6 +6,16 @@ const maximizeBtn = document.getElementById('maximize-btn');
 const minimizeBtn = document.getElementById('minimize-btn');
 const clearBtn = document.getElementById('clear-btn');
 const settingsBtn = document.getElementById('settings-btn');
+const sidebarNewChatBtn = document.getElementById('sidebar-new-chat');
+const sidebarSettingsBtn = document.getElementById('sidebar-settings');
+const sidebarToggleBtn = document.getElementById('sidebar-toggle');
+const appBody = document.querySelector('.app-body');
+const sidebarChatBtn = document.getElementById('sidebar-chat-btn');
+const sidebarPicturesBtn = document.getElementById('sidebar-pictures-btn');
+const picturesLibrary = document.getElementById('pictures-library');
+const picturesGrid = document.getElementById('pictures-grid');
+const picturesEmpty = document.getElementById('pictures-empty');
+const picturesCloseBtn = document.getElementById('pictures-close-btn');
 const micBtn = document.getElementById('mic-btn');
 const visionBtn = document.getElementById('vision-btn');
 const imagePreviewContainer = document.getElementById('image-preview-container');
@@ -14,6 +24,12 @@ const removeImageBtn = document.getElementById('remove-image-btn');
 const modelMount = document.getElementById('model-mount');
 const modelShell = document.getElementById('model-shell');
 const modelStatus = document.getElementById('model-status');
+const startupLoading = document.getElementById('startup-loading');
+
+if (startupLoading) {
+    startupLoading.style.background = 'var(--bg-gradient)';
+    startupLoading.style.color = 'var(--text-muted)';
+}
 
 // Proactive Assistant elements
 const proactiveBar = document.getElementById('proactive-bar');
@@ -56,8 +72,11 @@ function buildInteractionLanguageInstruction() {
 // --- Theme Loading ---
 function applyTheme(theme, accentColor, systemTextColor, config = {}) {
     document.documentElement.setAttribute('data-theme', theme || 'dark');
-    const accent = accentColor || '#8b5cf6';
-    const textColor = systemTextColor || '#f8fafc';
+    const accent = accentColor || '#8f6cf5';
+    const defaultTextColor = theme === 'light' ? '#0f172a' : '#e8e8ea';
+    const textColor = (!systemTextColor || (theme === 'light' && systemTextColor === '#f8fafc'))
+        ? defaultTextColor
+        : systemTextColor;
     document.documentElement.style.setProperty('--accent', accent);
     document.documentElement.style.setProperty('--accent-hover', lightenColor(accent, 20));
     document.documentElement.style.setProperty('--text-main', textColor);
@@ -65,19 +84,36 @@ function applyTheme(theme, accentColor, systemTextColor, config = {}) {
     // Dynamic UI Customizations
     document.documentElement.style.setProperty('--glass-blur', config.glassBlur || 'blur(16px)');
     document.body.style.fontFamily = config.fontFamily || "'Outfit', sans-serif";
+    document.documentElement.style.fontSize = config.fontSize || '15px';
 
     if (theme === 'custom') {
         if (config.customBgStart && config.customBgEnd) {
             const gradient = `linear-gradient(135deg, ${config.customBgStart} 0%, ${config.customBgEnd} 100%)`;
+            document.documentElement.style.setProperty('--bg-color', config.customBgStart);
             document.documentElement.style.setProperty('--bg-gradient', gradient);
         }
         if (config.customPanelBg) {
             const rgb = hexToRgb(config.customPanelBg);
             document.documentElement.style.setProperty('--panel-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.75)`);
+            document.documentElement.style.setProperty('--panel-raised', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.82)`);
+            document.documentElement.style.setProperty('--panel-soft', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.46)`);
+            document.documentElement.style.setProperty('--chrome-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.88)`);
+            document.documentElement.style.setProperty('--surface-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.62)`);
+            document.documentElement.style.setProperty('--surface-strong', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.86)`);
+            document.documentElement.style.setProperty('--input-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.72)`);
         }
     } else {
-        document.documentElement.style.removeProperty('--bg-gradient');
-        document.documentElement.style.removeProperty('--panel-bg');
+        [
+            '--bg-color',
+            '--bg-gradient',
+            '--panel-bg',
+            '--panel-raised',
+            '--panel-soft',
+            '--chrome-bg',
+            '--surface-bg',
+            '--surface-strong',
+            '--input-bg'
+        ].forEach(name => document.documentElement.style.removeProperty(name));
     }
 }
 
@@ -540,9 +576,82 @@ maximizeBtn.addEventListener('click', () => {
 });
 
 // Settings button
-settingsBtn.addEventListener('click', () => {
+function openSettings() {
     window.api.openSettings();
-});
+}
+
+settingsBtn.addEventListener('click', openSettings);
+sidebarSettingsBtn?.addEventListener('click', openSettings);
+
+async function renderPicturesLibrary() {
+    if (!picturesGrid || !picturesEmpty) return;
+    picturesGrid.innerHTML = '';
+
+    const pictures = await window.api.listSavedPictures();
+    picturesEmpty.classList.toggle('is-hidden', pictures.length > 0);
+
+    for (const picture of pictures) {
+        const card = document.createElement('article');
+        card.className = 'picture-card';
+
+        const img = document.createElement('img');
+        img.src = picture.url;
+        img.alt = picture.filename || 'Saved picture';
+        img.loading = 'lazy';
+
+        const meta = document.createElement('div');
+        meta.className = 'picture-card-meta';
+        const date = picture.createdAt ? new Date(picture.createdAt).toLocaleString() : '';
+        meta.textContent = picture.message || date || picture.filename || 'Saved picture';
+        meta.title = [picture.filename, picture.message, date].filter(Boolean).join('\n');
+
+        card.appendChild(img);
+        card.appendChild(meta);
+        picturesGrid.appendChild(card);
+    }
+}
+
+async function openPicturesLibrary() {
+    if (!appBody || !picturesLibrary) return;
+    picturesLibrary.hidden = false;
+    requestAnimationFrame(() => {
+        appBody.classList.add('pictures-open');
+    });
+    sidebarChatBtn?.classList.remove('is-active');
+    sidebarPicturesBtn?.classList.add('is-active');
+    await renderPicturesLibrary();
+}
+
+function closePicturesLibrary() {
+    if (!appBody || !picturesLibrary) return;
+    appBody.classList.remove('pictures-open');
+    setTimeout(() => {
+        if (!appBody.classList.contains('pictures-open')) {
+            picturesLibrary.hidden = true;
+        }
+    }, 240);
+    sidebarChatBtn?.classList.add('is-active');
+    sidebarPicturesBtn?.classList.remove('is-active');
+}
+
+sidebarChatBtn?.addEventListener('click', closePicturesLibrary);
+sidebarPicturesBtn?.addEventListener('click', openPicturesLibrary);
+picturesCloseBtn?.addEventListener('click', closePicturesLibrary);
+
+function setSidebarCollapsed(isCollapsed) {
+    if (!appBody || !sidebarToggleBtn) return;
+    appBody.classList.toggle('sidebar-collapsed', isCollapsed);
+    sidebarToggleBtn.setAttribute('aria-expanded', String(!isCollapsed));
+    sidebarToggleBtn.setAttribute('aria-label', isCollapsed ? 'Show sidebar' : 'Hide sidebar');
+    sidebarToggleBtn.setAttribute('title', isCollapsed ? 'Show sidebar' : 'Hide sidebar');
+}
+
+if (appBody && sidebarToggleBtn) {
+    setSidebarCollapsed(true);
+    sidebarToggleBtn.addEventListener('click', () => {
+        setSidebarCollapsed(!appBody.classList.contains('sidebar-collapsed'));
+    });
+}
 
 // Throttle utility to prevent UI spam
 function throttle(func, limit) {
@@ -587,14 +696,21 @@ function formatTime(isoString) {
 }
 
 // Clear chat history
-clearBtn.addEventListener('click', async () => {
+async function clearChatHistory(confirmMessage = 'Clear current chat history?') {
+    const shouldClear = window.confirm(confirmMessage);
+    if (!shouldClear) return;
+
+    closePicturesLibrary();
     await window.api.resetChat();
     // Remove all messages except the initial greeting
     const messages = chatContainer.querySelectorAll('.message:not(.initial)');
     messages.forEach(m => m.remove());
     // Append a clear confirmation
     appendMessage('Chat history cleared. Starting fresh! 🌿', 'ai', null, new Date().toISOString());
-});
+}
+
+clearBtn.addEventListener('click', () => clearChatHistory('Clear current chat history?'));
+sidebarNewChatBtn?.addEventListener('click', () => clearChatHistory('Start a new chat and clear current history?'));
 
 function formatProviderInfo(providerInfo) {
     if (!providerInfo || typeof providerInfo !== 'object') return '';
@@ -898,8 +1014,17 @@ function loadScript(src) {
     });
 }
 
+function hideStartupLoading() {
+    if (!startupLoading) return;
+    startupLoading.classList.add('is-hidden');
+    setTimeout(() => startupLoading.remove(), 400);
+}
+
 async function loadLive2DWhenIdle() {
-    if (!modelMount || window.Live2DManager) return;
+    if (!modelMount || window.Live2DManager) {
+        hideStartupLoading();
+        return;
+    }
     try {
         await loadScript('../../node_modules/@hazart-pkg/live2d-core/live2dcubismcore.min.js');
         await loadScript('../../node_modules/pixi.js/dist/browser/pixi.min.js');
@@ -914,6 +1039,8 @@ async function loadLive2DWhenIdle() {
             modelStatus.classList.add('is-error');
             modelStatus.textContent = 'Live2D model unavailable.';
         }
+    } finally {
+        hideStartupLoading();
     }
 }
 
@@ -1127,8 +1254,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     chatInput.focus();
     await loadTheme();
     await loadChatHistory();
-    const scheduleLive2DLoad = window.requestIdleCallback || ((callback) => setTimeout(callback, 750));
-    scheduleLive2DLoad(() => loadLive2DWhenIdle());
+    loadLive2DWhenIdle();
 });
 
 // Proactive OS Notifications (Battery, Network, etc.)

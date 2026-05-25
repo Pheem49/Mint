@@ -212,12 +212,32 @@ function cleanHistoryForStorage(history) {
         parts: Array.isArray(msg.parts) 
             ? msg.parts.map(part => {
                 if (part.text) {
-                    return { ...part, text: stripRelevantMemoryBlock(part.text) };
+                    return {
+                        text: stripRelevantMemoryBlock(part.text)
+                            .replace(/data:image\/[\w.+-]+;base64,[A-Za-z0-9+/=]+/g, '[Image omitted from chat history]')
+                    };
+                }
+                if (part.inlineData || part.fileData || part.image_url || part.imageUrl) {
+                    return { text: '[Image omitted from chat history; saved locally when sent by the user.]' };
                 }
                 return part;
             })
             : msg.parts
     }));
+}
+
+function preserveHistoryMetadata(nextHistory, previousHistory, now) {
+    if (!Array.isArray(nextHistory)) return [];
+    const previous = Array.isArray(previousHistory) ? previousHistory : [];
+
+    return nextHistory.map((msg, index) => {
+        const prior = previous[index] || {};
+        return {
+            ...msg,
+            timestamp: msg.timestamp || prior.timestamp || (index >= nextHistory.length - 2 ? now : null),
+            providerInfo: msg.providerInfo || prior.providerInfo || null
+        };
+    });
 }
 
 function validateParsedAction(parsedResult) {
@@ -494,6 +514,7 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
 async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
   try {
     const images = normalizeImageList(base64Image);
+    const previousHistory = readChatHistory();
     // 1. Check cache first for text-only messages
     if (finalMessage && images.length === 0 && !base64Audio) {
         const cached = memoryStore.getCachedResponse(finalMessage);
@@ -540,7 +561,7 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
     aiResponse = await chat.sendMessage({ message: parts });
 
     // Save history with timestamps
-    const history = await chat.getHistory();
+    const history = preserveHistoryMetadata(await chat.getHistory(), previousHistory, new Date().toISOString());
     const now = new Date().toISOString();
     
     // Add timestamp to the last two messages (User and Model) if they don't have one
@@ -623,6 +644,7 @@ async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
 async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
   try {
     const images = normalizeImageList(base64Image);
+    const previousHistory = readChatHistory();
     // 1. Check cache first
     if (finalMessage && images.length === 0 && !base64Audio) {
         const cached = memoryStore.getCachedResponse(finalMessage);
@@ -674,7 +696,7 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
     fullText = stripRelevantMemoryBlock(fullText);
 
     // Save history
-    const history = await chat.getHistory();
+    const history = preserveHistoryMetadata(await chat.getHistory(), previousHistory, new Date().toISOString());
     const now = new Date().toISOString();
     if (history.length >= 2) {
         const modelMsg = history[history.length - 1];
@@ -1035,7 +1057,7 @@ function historyToTranscript(history) {
     transcript.push({ 
         sender, 
         text, 
-        timestamp: content.timestamp || new Date().toISOString(),
+        timestamp: content.timestamp || null,
         providerInfo: content.providerInfo || null
     });
   }

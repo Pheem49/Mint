@@ -20,6 +20,10 @@ Mint is an AI assistant built to live in your desktop and terminal. It combines 
 
 ## What's New
 
+- **Antigravity-style Desktop Layout:** Desktop UI now has a collapsible sidebar, Chat/Pictures navigation, smoother page transitions, startup loading polish, and clearer destructive-action confirmations.
+- **Local Pictures Library:** Images sent from the desktop chat are saved locally under `~/.config/mint/Pictures` after the user sends the message, with an in-app Pictures gallery and local metadata index.
+- **Image Privacy Hardening:** Chat history no longer stores raw image base64 data for saved images; history keeps a text placeholder while the actual file stays in the local Pictures folder.
+- **Theme & UI Controls:** Settings now include theme, accent color, system text color, glass blur, font family, and font size controls that apply to the desktop interface.
 - **Unified CLI Agent:** `mint` now routes every normal message through the same agent loop. It can think, answer conversationally, inspect projects, edit files, run tools, and finish directly for simple chat.
 - **Fast Mode:** `/fast` switches the interactive CLI into a quieter `[Fast]` status that keeps the working indicator visible but hides internal `Thinking:` and tool-progress trace messages.
 - **Live CLI Replies:** Mint responses now appear in one live-updating `Mint` message instead of waiting for the whole final answer to render at once.
@@ -33,7 +37,75 @@ Mint is an AI assistant built to live in your desktop and terminal. It combines 
 - **CI & Audit Baseline:** GitHub Actions runs install, tests, and security audit. Current local test baseline is `137` passing tests and `0` high vulnerabilities.
 - **Dependency Hardening:** Removed vulnerable `google-tts-api` and `xlsx`; replaced with internal Google TTS URL generation and `read-excel-file`.
 
+## Installation & Setup
+
+### Global Install
+
+```bash
+npm install -g @pheem49/mint@latest
+```
+
+### Local Development
+
+```bash
+git clone https://github.com/Pheem49/Mint.git
+cd Mint
+npm install
+```
+
+### Quick Start
+
+```bash
+mint onboard
+mint
+npm start
+```
+
+Most integrations can be configured from:
+
+```bash
+mint onboard
+```
+
+### Gmail
+
+Gmail uses Google OAuth, not a plain Gmail address/password. Configure the OAuth Client ID and Client Secret in onboarding, leave the refresh token empty if you do not have one yet, and keep `Gmail User ID` as `me` for the signed-in account.
+
+After onboarding, run one of:
+
+```bash
+mint gmail auth
+mint gmail auth --no-open
+```
+
+`mint gmail auth` opens the browser automatically. `mint gmail auth --no-open` prints the auth link for you to open manually. Both flows save `gmailRefreshToken` locally after Google redirects back to Mint. Recommended scopes are `gmail.readonly` and `gmail.compose`; Mint creates drafts only and does not send email automatically.
+
+### Google Calendar
+
+Google Calendar uses OAuth credentials and a refresh token. Onboarding stores:
+
+- `googleCalendarClientId`
+- `googleCalendarClientSecret`
+- `googleCalendarRefreshToken`
+- `googleCalendarId`, usually `primary`
+
+The plugin can list events and create events through the Calendar API. If OAuth is not configured, it falls back to opening Google Calendar in the browser.
+
+### Notion
+
+Notion uses an internal integration secret. After creating an integration in Notion, share the target page or database with that integration, then configure:
+
+- `notionApiKey`
+- `notionDatabaseId`, optional default database
+- `notionPageId`, optional default page
+- `notionTitleProperty`, default `Name`
+
+The plugin can create pages, query database pages, and append text blocks.
+
 ## Key Features
+
+<details>
+<summary>Show details</summary>
 
 ### Unified CLI Agent
 
@@ -52,6 +124,9 @@ Mint CLI is not just a chat wrapper. It is a workspace-aware agent loop.
 ### Desktop Assistant
 
 - **Electron Desktop UI:** Transparent desktop assistant window with tray support.
+- **Collapsible Workspace Sidebar:** Desktop navigation starts collapsed on app launch and can be expanded for Chat, Pictures, model controls, and settings.
+- **Chat Navigation Safety:** `New Chat` and `Clear` ask for confirmation before clearing the current conversation history.
+- **Pictures Gallery:** Sent images are available in a local-only Pictures view inside the desktop app.
 - **Live2D Model View:** Optional Live2D assistant panel with model show/hide persistence. New installs start with the model hidden until the user enables it.
 - **Live2D Expressions:** Cycle model expressions from the toolbar and show an on-canvas expression toast for the active expression.
 - **Click Reactions:** Named model interaction zones (`Head Pat`, `Cheek Poke`, `Hand Tap`, `Shoulder Tap`, and `Careful`) can trigger temporary expressions and send short contextual prompts into the normal chat flow.
@@ -64,6 +139,7 @@ Mint CLI is not just a chat wrapper. It is a workspace-aware agent loop.
 - **Proactive Suggestions:** Periodic screen/context analysis with behavior memory.
 - **System Notifications:** Low battery, connection changes, and proactive notices.
 - **Settings UI:** Configure provider, model, theme, keys, bridge options, MCP, and assistant behavior.
+- **Appearance Controls:** Customize theme, accent color, text color, glass blur, font family, and UI font size.
 
 ### Automation
 
@@ -78,6 +154,8 @@ Mint CLI is not just a chat wrapper. It is a workspace-aware agent loop.
 ### Knowledge and Memory
 
 - **Chat History:** Persistent local chat transcript.
+- **Timestamp Preservation:** Desktop chat history keeps original message timestamps across app restarts and history syncs.
+- **Local Sent-Image Storage:** Desktop image attachments are saved as local files only after sending, under `~/.config/mint/Pictures`.
 - **Behavior Memory:** Stores recurring user context for proactive suggestions.
 - **Long-Term Memory Store:** SQLite-backed user context, session memories, usage patterns, and response cache.
 - **Learned Skill Files:** Import `.md` or `.txt` instruction files with `mint learn <path>` or `/learn <path>`. Mint remembers them as persistent skill/instruction context.
@@ -128,7 +206,12 @@ Example:
 mint mcp add google-search npx --args -y @modelcontextprotocol/server-google-search --env GOOGLE_API_KEY=your_key GOOGLE_SEARCH_ENGINE_ID=your_id
 ```
 
+</details>
+
 ## Safety System
+
+<details>
+<summary>Show details</summary>
 
 Mint includes a central safety layer in `src/System/safety_manager.js`.
 
@@ -140,42 +223,32 @@ Mint includes a central safety layer in `src/System/safety_manager.js`.
 - **Action Logs:** Writes JSONL records to `~/.config/mint/action-log.jsonl`.
 - **Test Coverage:** Safety tests verify destructive command blocking, dangerous action classification, path traversal protection, and action executor enforcement.
 
+</details>
+
 ## Screenshots
+
+<details>
+<summary>Show screenshots</summary>
 
 <p align="center">
   <img src="assets/Agent_Mint.png" alt="Mint Desktop UI" width="48%">
   <img src="assets/Settings.png" alt="Mint Settings" width="48%">
+  <br>
+  <sub><strong>Desktop Assistant UI</strong> with Live2D model, chat panel, sidebar navigation, and local Pictures view. <strong>Settings UI</strong> for providers, automation, theme, voice, plugins, and MCP configuration.</sub>
 </p>
 
 <p align="center">
   <img src="assets/CLI_Screen.png" alt="Mint CLI" width="100%">
+  <br>
+  <sub><strong>Unified CLI Agent</strong> for chat, coding tasks, tool use, workspace context, image input, and command workflows.</sub>
 </p>
 
-## Installation
-
-### Global Install
-
-```bash
-npm install -g @pheem49/mint@latest
-```
-
-### Local Development
-
-```bash
-git clone https://github.com/Pheem49/Mint.git
-cd Mint
-npm install
-```
-
-## Quick Start
-
-```bash
-mint onboard
-mint
-npm start
-```
+</details>
 
 ## CLI Commands
+
+<details>
+<summary>Show details</summary>
 
 - `mint` / `mint chat` - Start the unified interactive agent UI.
 - `mint chat "<message>"` - Start with an initial message.
@@ -201,7 +274,12 @@ npm start
 - `mint list` - Display available features and commands.
 - `mint onboard` - Configure Mint for first use.
 
+</details>
+
 ## CLI Updates
+
+<details>
+<summary>Show details</summary>
 
 Mint CLI checks for updates automatically on startup. The auto-check is enabled by default, uses a 24-hour cooldown, and updates from npm with `npm install -g @pheem49/mint@latest` when a newer package version is available.
 
@@ -221,50 +299,12 @@ MINT_SKIP_AUTO_UPDATE=1 mint
 
 To disable automatic update checks, set `enableAutoUpdate` to `false` in your Mint config file.
 
-## Integration Setup
-
-Most integrations can be configured from:
-
-```bash
-mint onboard
-```
-
-### Gmail
-
-Gmail uses Google OAuth, not a plain Gmail address/password. Configure the OAuth Client ID and Client Secret in onboarding, leave the refresh token empty if you do not have one yet, and keep `Gmail User ID` as `me` for the signed-in account.
-
-After onboarding, run one of:
-
-```bash
-mint gmail auth
-mint gmail auth --no-open
-```
-
-`mint gmail auth` opens the browser automatically. `mint gmail auth --no-open` prints the auth link for you to open manually. Both flows save `gmailRefreshToken` locally after Google redirects back to Mint. Recommended scopes are `gmail.readonly` and `gmail.compose`; Mint creates drafts only and does not send email automatically.
-
-### Google Calendar
-
-Google Calendar uses OAuth credentials and a refresh token. Onboarding stores:
-
-- `googleCalendarClientId`
-- `googleCalendarClientSecret`
-- `googleCalendarRefreshToken`
-- `googleCalendarId`, usually `primary`
-
-The plugin can list events and create events through the Calendar API. If OAuth is not configured, it falls back to opening Google Calendar in the browser.
-
-### Notion
-
-Notion uses an internal integration secret. After creating an integration in Notion, share the target page or database with that integration, then configure:
-
-- `notionApiKey`
-- `notionDatabaseId`, optional default database
-- `notionPageId`, optional default page
-- `notionTitleProperty`, default `Name`
-
-The plugin can create pages, query database pages, and append text blocks.
+</details>
 
 ## Interactive Slash Commands
+
+<details>
+<summary>Show details</summary>
 
 Inside `mint`:
 
@@ -292,7 +332,12 @@ Inside `mint`:
 - `/review` - Ask reviewer persona to critique the last answer.
 - `/exit` - Exit.
 
+</details>
+
 ## Development
+
+<details>
+<summary>Show details</summary>
 
 ```bash
 npm test
@@ -302,7 +347,12 @@ npm start
 npm run build:linux
 ```
 
+</details>
+
 ## Project Structure
+
+<details>
+<summary>Show details</summary>
 
 ```text
 Mint/
@@ -323,22 +373,38 @@ Mint/
 └── package.json
 ```
 
+</details>
+
 ## Runtime Notes
+
+<details>
+<summary>Show details</summary>
 
 - Mint is currently a **Node.js + CommonJS** project, not TypeScript.
 - API keys are stored locally in Mint config or environment variables.
 - Google OAuth refresh tokens for Gmail and Calendar are stored locally in Mint config.
+- Desktop chat images sent by the user are stored locally in `~/.config/mint/Pictures`, with metadata in `~/.config/mint/Pictures/pictures.json`.
+- Desktop chat history is stored locally in `~/.config/mint/mint-chat-history.json`.
 - Local OpenAI-compatible providers require a running local server such as LM Studio.
 - Some desktop features depend on Linux tools such as `xdg-open`, `gio`, `xdotool`, `amixer`, `pactl`, `brightnessctl`, or `xbacklight`.
 - Electron GUI behavior should be smoke-tested manually after large UI or main-process changes.
 
+</details>
+
 ## Security & Privacy
 
+<details>
+<summary>Show details</summary>
+
 - **Local Control:** Mint prioritizes local execution and local configuration.
+- **Local Picture Storage:** Desktop images are saved only on the user's machine, under `~/.config/mint/Pictures`, after the user sends a message with an image.
+- **No Raw Image History:** Saved desktop images are omitted from chat history as raw base64 and replaced with a text placeholder.
 - **User Approval:** Shell commands, patches, and file writes require explicit approval in the CLI agent.
 - **Safety Manager:** Dangerous commands and actions are blocked or gated by deterministic policy.
 - **Action Audit Trail:** Tool actions are logged locally for debugging and accountability.
 - **Secure Config Practice:** Keys stay on the user's machine and are only sent to the selected AI/search provider.
+
+</details>
 
 ## License
 
