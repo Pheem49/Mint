@@ -190,4 +190,4 @@ function isPlaceholder(val) {
     return !val || val.startsWith('your_') || val.includes('key_here') || val.trim() === '';
 }
 
-module.exports = { readConfig, writeConfig, getAvailableProviders, isPlaceholder, CONFIG_PATH };
+module.exports = { readConfig, writeConfig, getAvailableProviders, isPlaceholder, CONFIG_PATH, CONFIG_DIR };

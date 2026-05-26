@@ -67,6 +67,13 @@ describe('CLI chat UI formatting', () => {
         ]);
     });
 
+    test('cycles approval choices including approve for session', () => {
+        expect(_helpers.getNextApprovalChoice('approve')).toBe('approve_session');
+        expect(_helpers.getNextApprovalChoice('approve_session')).toBe('deny');
+        expect(_helpers.getNextApprovalChoice('deny')).toBe('approve');
+        expect(_helpers.getNextApprovalChoice('approve', -1)).toBe('deny');
+    });
+
     test('parses unified diff previews for approval rendering', () => {
         const files = _helpers.parseUnifiedDiffPreview([
             '--- a/src/demo.js',

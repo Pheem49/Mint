@@ -164,6 +164,15 @@ function splitDiffStatSegments(value) {
     ].filter(part => part.text);
 }
 
+const APPROVAL_CHOICES = ['approve', 'approve_session', 'deny'];
+
+function getNextApprovalChoice(current, direction = 1) {
+    const choices = APPROVAL_CHOICES;
+    const index = choices.indexOf(current);
+    const start = index === -1 ? 0 : index;
+    return choices[(start + direction + choices.length) % choices.length];
+}
+
 function parseUnifiedDiffPreview(preview) {
     const lines = String(preview || '').replace(/\r\n/g, '\n').split('\n');
     const files = [];
@@ -269,6 +278,8 @@ async function createChatUI(options) {
         const [pendingPastePrefix, setPendingPastePrefix] = useState('');
         const [pendingApproval, setPendingApproval] = useState(null);
         const [approvalChoice, setApprovalChoice] = useState('approve');
+        const [approvalSessionAutoApprove, setApprovalSessionAutoApprove] = useState(false);
+        const [inputResetKey, setInputResetKey] = useState(0);
 
         // Suggestions State
         const [selectedIndex, setSelectedIndex] = useState(0);
@@ -280,9 +291,11 @@ async function createChatUI(options) {
         const thinkingStartedAtRef = React.useRef(null);
         const fastModeRef = React.useRef(fastMode);
         const suppressPasteCharRef = React.useRef(false);
+        const suppressPasteBurstRef = React.useRef(false);
         const selectedIndexRef = React.useRef(selectedIndex);
         const pendingApprovalRef = React.useRef(null);
         const approvalChoiceRef = React.useRef('approve');
+        const approvalSessionAutoApproveRef = React.useRef(false);
 
         const removePasteArtifact = (value) => {
             const text = String(value || '');
@@ -296,6 +309,10 @@ async function createChatUI(options) {
         const shouldStoreAsPastedContent = (value) => {
             const text = String(value || '');
             return text.length > 500 || /[\r\n]/.test(text);
+        };
+
+        const resetInputCursorToEnd = () => {
+            setInputResetKey(key => key + 1);
         };
         
         useEffect(() => {
@@ -348,6 +365,10 @@ async function createChatUI(options) {
         useEffect(() => {
             approvalChoiceRef.current = approvalChoice;
         }, [approvalChoice]);
+
+        useEffect(() => {
+            approvalSessionAutoApproveRef.current = approvalSessionAutoApprove;
+        }, [approvalSessionAutoApprove]);
 
         const showSuggestions = input.startsWith('/') && !input.includes(' ');
         const suggestions = useMemo(() => {
@@ -430,6 +451,7 @@ async function createChatUI(options) {
                 const next = val || '';
                 inputRef.current = next;
                 setInput(next);
+                resetInputCursorToEnd();
             },
             setPendingPasteText: (text) => {
                 const normalized = normalizeInputText(text);
@@ -445,6 +467,7 @@ async function createChatUI(options) {
                     setInput(current => {
                         const next = appendInlineImageToken(current, imageIndex);
                         inputRef.current = next;
+                        resetInputCursorToEnd();
                         return next;
                     });
                     return [...prev, image];
@@ -526,11 +549,17 @@ async function createChatUI(options) {
                 }]);
             },
             requestApproval: (request = {}) => {
+                if (approvalSessionAutoApproveRef.current) {
+                    return Promise.resolve(true);
+                }
+
                 return new Promise((resolve) => {
                     const approval = {
                         type: request.type || 'action',
                         label: request.label || 'Requested action',
                         preview: request.preview || '',
+                        summary: request.summary || '',
+                        openPath: request.openPath || '',
                         warnings: Array.isArray(request.warnings) ? request.warnings.filter(Boolean) : [],
                         resolve
                     };
@@ -544,7 +573,11 @@ async function createChatUI(options) {
         useInput((inputStr, key) => {
             const approval = pendingApprovalRef.current;
             if (approval) {
-                const resolveApproval = (approved) => {
+                const resolveApproval = (approved, approveForSession = false) => {
+                    if (approveForSession) {
+                        approvalSessionAutoApproveRef.current = true;
+                        setApprovalSessionAutoApprove(true);
+                    }
                     pendingApprovalRef.current = null;
                     setPendingApproval(null);
                     setHistory(prev => {
@@ -563,15 +596,18 @@ async function createChatUI(options) {
                             role: 'system',
                             label: 'Approval',
                             labelColor: approved ? 'greenBright' : 'redBright',
-                            text: `${approved ? 'Approved' : 'Denied'}: ${approval.label}`,
+                            text: `${approveForSession ? 'Approved this session' : (approved ? 'Approved' : 'Denied')}: ${approval.label}`,
                             time: new Date()
                         }];
                     });
                     approval.resolve(approved);
                 };
 
-                if (key.leftArrow || key.rightArrow || key.tab) {
-                    const next = approvalChoiceRef.current === 'approve' ? 'deny' : 'approve';
+                if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.tab) {
+                    const next = getNextApprovalChoice(
+                        approvalChoiceRef.current,
+                        (key.upArrow || key.leftArrow) ? -1 : 1
+                    );
                     approvalChoiceRef.current = next;
                     setApprovalChoice(next);
                     return;
@@ -579,11 +615,15 @@ async function createChatUI(options) {
 
                 const answer = String(inputStr || '').toLowerCase();
                 if (key.return) {
-                    resolveApproval(approvalChoiceRef.current === 'approve');
+                    resolveApproval(approvalChoiceRef.current !== 'deny', approvalChoiceRef.current === 'approve_session');
                     return;
                 }
                 if (answer === 'y') {
                     resolveApproval(true);
+                    return;
+                }
+                if (answer === 'a') {
+                    resolveApproval(true, true);
                     return;
                 }
                 if (answer === 'n' || key.escape || (key.ctrl && inputStr === 'c')) {
@@ -599,6 +639,7 @@ async function createChatUI(options) {
                 setInput(current => {
                     const next = removeAllImageTokens(current);
                     inputRef.current = next;
+                    resetInputCursorToEnd();
                     return next;
                 });
                 return;
@@ -609,6 +650,10 @@ async function createChatUI(options) {
                 pendingPasteRef.current = null;
                 setPendingPastePrefix('');
                 pendingPastePrefixRef.current = '';
+                suppressPasteBurstRef.current = false;
+                inputRef.current = '';
+                setInput('');
+                resetInputCursorToEnd();
                 return;
             }
 
@@ -620,6 +665,7 @@ async function createChatUI(options) {
                 setInput(current => {
                     const next = removeImageToken(current, imageIndex);
                     inputRef.current = next;
+                    resetInputCursorToEnd();
                     return next;
                 });
                 return;
@@ -646,6 +692,7 @@ async function createChatUI(options) {
                                         const cleaned = removePasteArtifact(current);
                                         const next = appendInlineImageToken(cleaned || inputBeforePaste, imageIndex);
                                         inputRef.current = next;
+                                        resetInputCursorToEnd();
                                         return next;
                                     });
                                     return [...prev, image];
@@ -720,16 +767,30 @@ async function createChatUI(options) {
             pendingImagesRef.current = [];
             pendingPasteRef.current = null;
             pendingPastePrefixRef.current = '';
+            suppressPasteBurstRef.current = false;
             onSubmit(submittedText, { images, pasted });
         };
 
         const handleInputChange = (value) => {
+            if (suppressPasteBurstRef.current && pendingPasteRef.current) {
+                inputRef.current = '';
+                setInput('');
+                resetInputCursorToEnd();
+                return;
+            }
+
             if (shouldStoreAsPastedContent(value)) {
                 const normalized = normalizeInputText(value);
                 const previous = normalizeInputText(inputRef.current).trim();
-                setPendingPaste({ text: normalized, label: `[Pasted Content ${normalized.length} chars]` });
+                const pasted = { text: normalized, label: `[Pasted Content ${normalized.length} chars]` };
+                pendingPasteRef.current = pasted;
+                pendingPastePrefixRef.current = previous;
+                suppressPasteBurstRef.current = true;
+                setPendingPaste(pasted);
                 setPendingPastePrefix(previous);
+                inputRef.current = '';
                 setInput('');
+                resetInputCursorToEnd();
                 return;
             }
 
@@ -746,6 +807,7 @@ async function createChatUI(options) {
                     return;
                 }
             }
+            inputRef.current = normalizedValue;
             setInput(normalizedValue);
         };
 
@@ -795,6 +857,13 @@ async function createChatUI(options) {
 
         const renderApprovalPreview = (approval) => {
             const preview = approval && approval.preview ? approval.preview : '';
+            if (approval && approval.type === 'plan') {
+                return h(Box, { flexDirection: 'column', marginTop: 1 },
+                    h(Text, { color: 'gray' }, approval.summary || 'Mint prepared a plan for this task.'),
+                    approval.openPath && h(Text, { color: 'gray', dimColor: true }, `Details: ${approval.label}`)
+                );
+            }
+
             const diffPreview = renderDiffPreview(preview);
             if (!diffPreview) {
                 return preview && preview !== approval.label
@@ -893,9 +962,13 @@ async function createChatUI(options) {
                     marginBottom: 0
                 },
                     h(Box, null,
-                        h(Text, { bold: true, color: 'greenBright' }, 'Approval '),
-                        h(Text, { color: 'cyanBright' }, `[${pendingApproval.type}] `),
-                        h(Text, { color: 'white' }, pendingApproval.label)
+                        pendingApproval.type === 'plan'
+                            ? h(Text, { bold: true, color: 'greenBright' }, 'Plan')
+                            : [
+                                h(Text, { key: 'approval-title', bold: true, color: 'greenBright' }, 'Approval '),
+                                h(Text, { key: 'approval-type', color: 'cyanBright' }, `[${pendingApproval.type}] `),
+                                h(Text, { key: 'approval-label', color: 'white' }, pendingApproval.label)
+                            ]
                     ),
                     pendingApproval.warnings && pendingApproval.warnings.length > 0 && h(Box, { flexDirection: 'column', marginTop: 1, marginBottom: 1 },
                         ...pendingApproval.warnings.map((warning, index) =>
@@ -909,7 +982,7 @@ async function createChatUI(options) {
                 ),
 
                 pendingApproval && h(Box, {
-                    flexDirection: 'row',
+                    flexDirection: 'column',
                     borderStyle: 'single',
                     borderColor: approvalChoice === 'deny' ? 'redBright' : 'greenBright',
                     paddingX: 1,
@@ -920,14 +993,24 @@ async function createChatUI(options) {
                             color: approvalChoice === 'approve' ? 'black' : 'greenBright',
                             backgroundColor: approvalChoice === 'approve' ? 'greenBright' : undefined,
                             bold: true
-                        }, approvalChoice === 'approve' ? ' ▸ Approve ' : '   Approve '),
-                        h(Text, { color: 'gray' }, ' '),
+                        }, approvalChoice === 'approve' ? '▸ Approve' : '  Approve')
+                    ),
+                    h(Box, null,
+                        h(Text, {
+                            color: approvalChoice === 'approve_session' ? 'black' : 'cyanBright',
+                            backgroundColor: approvalChoice === 'approve_session' ? 'cyanBright' : undefined,
+                            bold: true
+                        }, approvalChoice === 'approve_session' ? '▸ Approve Session' : '  Approve Session')
+                    ),
+                    h(Box, null,
                         h(Text, {
                             color: approvalChoice === 'deny' ? 'white' : 'redBright',
                             backgroundColor: approvalChoice === 'deny' ? 'redBright' : undefined,
                             bold: true
-                        }, approvalChoice === 'deny' ? ' ▸ Deny ' : '   Deny '),
-                        h(Text, { color: 'gray', dimColor: true }, '  Tab/←/→ Enter')
+                        }, approvalChoice === 'deny' ? '▸ Deny' : '  Deny')
+                    ),
+                    h(Box, null,
+                        h(Text, { color: 'gray', dimColor: true }, '  ↑/↓ Enter  y/a/n')
                     )
                 ),
 
@@ -945,6 +1028,7 @@ async function createChatUI(options) {
                     h(Box, { flexDirection: 'row' },
                         h(Text, { bold: true, color: 'greenBright' }, '› '),
                         h(TextInput, {
+                            key: `input-${inputResetKey}`,
                             value: input,
                             onChange: pendingApproval ? () => {} : handleInputChange,
                             onSubmit: pendingApproval ? () => {} : handleSubmit,
@@ -957,7 +1041,8 @@ async function createChatUI(options) {
                 h(Box, { justifyContent: 'space-between' },
                     h(Box, null,
                         h(Text, { color: 'cyan' }, `[${fastMode ? 'Fast' : mode}] `),
-                        h(Text, { color: 'magentaBright' }, (model || config.geminiModel || 'gemini').slice(0, 46))
+                        h(Text, { color: 'magentaBright' }, (model || config.geminiModel || 'gemini').slice(0, 46)),
+                        approvalSessionAutoApprove && h(Text, { color: 'greenBright' }, ' approvals:session')
                     ),
                     h(Box, null,
                         h(Text, { color: 'gray' }, `path: ...${workspace.slice(-20)}`)
@@ -1018,6 +1103,7 @@ module.exports = {
         formatActivityStep,
         formatDuration,
         splitDiffStatSegments,
+        getNextApprovalChoice,
         parseUnifiedDiffPreview,
         isUnifiedDiffPreview,
         getDiffLineStyle,

@@ -5,7 +5,7 @@ const { execFile, execFileSync } = require('child_process');
 const { promisify } = require('util');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const { readConfig, getAvailableProviders } = require('../System/config_manager');
+const { readConfig, getAvailableProviders, CONFIG_DIR } = require('../System/config_manager');
 const safetyManager = require('../System/safety_manager');
 const memoryStore = require('../AI_Brain/memory_store');
 const { readWorkspaceSession, writeWorkspaceSession } = require('./code_session_memory');
@@ -124,6 +124,9 @@ const MAX_TOOL_OUTPUT = 12000;
 const MAX_AGENT_STEPS = 16;
 const MAX_JSON_REPAIR_ATTEMPTS = 2;
 const DEFAULT_VERIFICATION_BUDGET = 2;
+const MINT_CONFIG_DIR = CONFIG_DIR || path.join(os.homedir(), '.config', 'mint');
+const PLAN_FILE_PATH = path.join(MINT_CONFIG_DIR, 'mint_plan.md');
+const PLAN_FILE_LABEL = path.join('~', '.config', 'mint', 'mint_plan.md');
 const SUPPORTED_CODE_PROVIDERS = ['gemini', 'anthropic', 'openai', 'local_openai'];
 
 const CODE_AGENT_PROMPT = `You are "Mint" (มิ้นท์), a pragmatic, polite, and highly helpful AI assistant that can chat, reason, write code, and search the web.
@@ -136,6 +139,8 @@ PERSONALITY & TONE:
   - If the latest user message contains Thai characters, respond in Thai.
   - If the latest user message is English, ASCII-only, or a short English greeting such as "hi", "hello", "ok", or "thanks", respond in English.
   - Do not use Thai just because your persona mentions Mint/มิ้นท์, previous history was Thai, or app settings use th-TH.
+  - This language routing applies to user-facing final answers and ask_user questions.
+  - Internal progress notes, the JSON "thought" field, and "plan" action bullet text MUST be written in English.
 - Politeness: 
   - **WHEN RESPONDING IN THAI:** Use natural female polite particles such as "ค่ะ" or "นะคะ" where appropriate. Refer to yourself as "มิ้นท์" when it sounds natural.
   - **WHEN RESPONDING IN ENGLISH:** Use a polite, concise, professional tone.
@@ -152,7 +157,7 @@ Rules:
 6. Use shell commands for inspection, tests, and formatting when useful.
 6. Never use destructive commands like "rm -rf", "git reset --hard", or overwrite unrelated files.
 7. Before any shell command or file patch is executed, the user must approve it. Plan accordingly.
-8. Before editing more than one file, you MUST first use the "plan" action and wait for user approval. The plan must start with "Plan:" and include one bullet per file, for example "- แก้ src/CLI/agent.js". After approval, make the edits.
+8. Before editing more than one file, you MUST first use the "plan" action and wait for user approval. The plan must be written in English, start with "Plan:", and include one bullet per file, for example "- Update src/CLI/agent.js". After approval, make the edits.
 9. When editing, prefer "apply_patch" with precise hunks over whole-file rewrites.
 10. Before any "apply_patch" or "write_file" action, the "thought" field MUST explicitly name the file you will edit and why that file is the right target. If the file is under "scratch/" or "tests/fixtures/", call that out and explain why editing disposable/test fixture content is intentional.
 11. When you are done, return "finish" with your final response to the user in the "summary" field.
@@ -168,7 +173,7 @@ Action safety and intent discipline:
 
 Progress updates:
 - The "thought" field is shown to the user as a live progress note. Do not put private chain-of-thought there.
-- Write "thought" as one short, concrete status sentence in the user's language.
+- Write "thought" as one short, concrete status sentence in English, even when the user writes in Thai or another language.
 - Mention what you just learned from the previous observation when it matters, then say what you will inspect or change next.
 - Before editing, explain the specific file and behavior you are about to change.
 - Before verifying, explain what check you are running and why.
@@ -188,7 +193,7 @@ Response format:
     "startLine": 1,
     "endLine": 120,
     "content": "full file content for write_file",
-    "plan": ["- แก้ relative/path.js", "- เพิ่ม test ใน tests/example.test.js"],
+    "plan": ["- Update relative/path.js", "- Add tests in tests/example.test.js"],
     "files": ["relative/path.js", "tests/example.test.js"],
     "summary": "your final conversational or technical response to the user (Matches user language and uses polite particles)",
     "verification": "tests or checks (if applicable)",
@@ -213,7 +218,7 @@ Tool notes:
 - "find_path": find files or directories by path/name when the user is looking for a folder, filename, or location.
 - "run_shell": run a non-destructive command in the workspace.
 - "verify": run the detected or provided test/build/lint commands. If verification fails, inspect the output, patch the issue, and verify again within the remaining budget.
-- "plan": present a user-visible multi-file edit plan before changing more than one file. Use input.plan as bullet strings and input.files as the expected touched files.
+- "plan": present a user-visible multi-file edit plan before changing more than one file. Use English input.plan bullet strings and input.files as the expected touched files.
 - "apply_patch": update an existing file using one or more exact replacement hunks.
 - "write_file": create a new file or fully rewrite a file when replacement is not practical.
 - "ask_user": ask the user for clarification, preference, or more information before proceeding.
@@ -736,6 +741,33 @@ function normalizePlanItems(plan) {
         .filter(Boolean);
 }
 
+function normalizePlanItemLanguage(item) {
+    let text = String(item || '').trim();
+    const hasBullet = text.startsWith('- ');
+    if (hasBullet) text = text.slice(2).trim();
+
+    const replacements = [
+        [/^แก้\s+(.+)$/i, 'Update $1'],
+        [/^แก้ไข\s+(.+)$/i, 'Update $1'],
+        [/^อัปเดต\s+(.+)$/i, 'Update $1'],
+        [/^ปรับ\s+(.+)$/i, 'Update $1'],
+        [/^สร้าง\s+(.+)$/i, 'Create $1'],
+        [/^เพิ่ม\s+(.+)$/i, 'Add $1'],
+        [/^ลบ\s+(.+)$/i, 'Remove $1'],
+        [/^ตรวจสอบ\s+(.+)$/i, 'Verify $1'],
+        [/^ทดสอบ\s+(.+)$/i, 'Test $1']
+    ];
+
+    for (const [pattern, replacement] of replacements) {
+        if (pattern.test(text)) {
+            text = text.replace(pattern, replacement);
+            break;
+        }
+    }
+
+    return hasBullet ? `- ${text}` : text;
+}
+
 function formatPlanPreview(input = {}) {
     const items = normalizePlanItems(input.plan);
     const files = Array.isArray(input.files)
@@ -745,13 +777,88 @@ function formatPlanPreview(input = {}) {
 
     if (items.length > 0) {
         items.forEach(item => {
-            lines.push(item.startsWith('- ') ? item : `- ${item}`);
+            const normalizedItem = normalizePlanItemLanguage(item);
+            lines.push(normalizedItem.startsWith('- ') ? normalizedItem : `- ${normalizedItem}`);
         });
     } else {
-        files.forEach(file => lines.push(`- แก้ ${file}`));
+        files.forEach(file => lines.push(`- Update ${file}`));
     }
 
     return lines.join('\n');
+}
+
+function formatPlanApprovalSummary(input = {}) {
+    const items = normalizePlanItems(input.plan);
+    const files = Array.isArray(input.files)
+        ? input.files.map(file => String(file || '').trim()).filter(Boolean)
+        : [];
+    if (files.length > 0) {
+        return `${items.length || files.length} planned changes across ${files.length} files.`;
+    }
+    return `${items.length || 1} planned change${(items.length || 1) === 1 ? '' : 's'} prepared.`;
+}
+
+function formatPlanMarkdown(input = {}, context = {}) {
+    const preview = formatPlanPreview(input);
+    const files = Array.isArray(input.files)
+        ? input.files.map(file => String(file || '').trim()).filter(Boolean)
+        : [];
+    const task = String(context.task || input.task || '').trim();
+    const createdAt = context.createdAt || new Date().toISOString();
+    const approvalStatus = context.approvalStatus || 'Pending user approval';
+    const approvalTime = context.approvalTime || '';
+    const lines = [
+        '# Mint Plan',
+        '',
+        `Created: ${createdAt}`
+    ];
+
+    if (task) {
+        lines.push('', '## Task', '', task);
+    }
+
+    lines.push('', '## Plan', '', preview);
+
+    if (files.length > 0) {
+        lines.push('', '## Expected Files', '');
+        files.forEach(file => lines.push(`- ${file}`));
+    }
+
+    lines.push(
+        '',
+        '## Approval',
+        '',
+        `Status: ${approvalStatus}`
+    );
+
+    if (approvalTime) {
+        lines.push(`${approvalStatus}: ${approvalTime}`);
+    }
+
+    lines.push('');
+
+    return lines.join('\n');
+}
+
+function writePlanFile(workspaceRoot, input = {}, context = {}) {
+    const planPath = context.planPath || PLAN_FILE_PATH;
+    const content = formatPlanMarkdown(input, context);
+    fs.mkdirSync(path.dirname(planPath), { recursive: true });
+    fs.writeFileSync(planPath, content, 'utf8');
+    return {
+        path: planPath,
+        content
+    };
+}
+
+function updatePlanApprovalStatus(planFile, input = {}, context = {}) {
+    const content = formatPlanMarkdown(input, context);
+    fs.mkdirSync(path.dirname(planFile.path), { recursive: true });
+    fs.writeFileSync(planFile.path, content, 'utf8');
+    return {
+        ...planFile,
+        content
+    };
 }
 
 function getEditTargetPath(action, input = {}) {
@@ -774,6 +881,17 @@ function requiresMultiFilePlan(action, input = {}, editPlanState = {}) {
         ? editPlanState.touchedFiles
         : new Set(editPlanState.touchedFiles || []);
     return touchedFiles.size > 0 && !touchedFiles.has(targetPath);
+}
+
+function getMissingPlanFiles(editPlanState = {}) {
+    const expectedFiles = editPlanState.expectedFiles instanceof Set
+        ? editPlanState.expectedFiles
+        : new Set(editPlanState.expectedFiles || []);
+    const touchedFiles = editPlanState.touchedFiles instanceof Set
+        ? editPlanState.touchedFiles
+        : new Set(editPlanState.touchedFiles || []);
+
+    return Array.from(expectedFiles).filter(file => file && !touchedFiles.has(file));
 }
 
 function validateEditExplanation(action, input = {}, thought = '') {
@@ -993,7 +1111,8 @@ async function executeCodeTask(task, options = {}) {
     let executedSteps = 0;
     const editPlanState = {
         approved: false,
-        touchedFiles: new Set()
+        touchedFiles: new Set(),
+        expectedFiles: new Set()
     };
     let verificationAttempts = 0;
     const verificationBudget = Number.isFinite(options.verificationBudget)
@@ -1027,15 +1146,21 @@ async function executeCodeTask(task, options = {}) {
             continue;
         }
 
-        // Immediately show the agent's thought/reasoning
-        onProgress({
-            step,
-            phase: 'acting',
-            action: 'thinking',
-            thought: decision.thought
-        });
-
         if (action === 'finish') {
+            const missingPlanFiles = getMissingPlanFiles(editPlanState);
+            if (missingPlanFiles.length > 0) {
+                observation = [
+                    `Previous thought: ${decision.thought || '(none)'}`,
+                    'Action: finish',
+                    'Observation:',
+                    [
+                        'Error: Approved plan is not complete yet.',
+                        `Missing planned file edits: ${missingPlanFiles.join(', ')}`,
+                        'Complete every file listed in the approved plan before finishing, or create a new plan if the scope changed.'
+                    ].join('\n')
+                ].join('\n');
+                continue;
+            }
             finalSessionSummary = input.sessionSummary || input.summary || task;
             finalSummary = input.summary || 'Task complete.';
             finalVerification = input.verification || 'Not specified.';
@@ -1077,6 +1202,14 @@ async function executeCodeTask(task, options = {}) {
                     continue;
                 }
             }
+
+            // Show progress only after the action passes local validation, so retry attempts do not spam near-duplicate notes.
+            onProgress({
+                step,
+                phase: 'acting',
+                action: 'thinking',
+                thought: decision.thought
+            });
 
             switch (action) {
                 case 'web_search':
@@ -1142,24 +1275,45 @@ async function executeCodeTask(task, options = {}) {
                     break;
                 }
                 case 'plan': {
-                    const preview = formatPlanPreview(input);
+                    const createdAt = new Date().toISOString();
+                    let planFile = writePlanFile(workspaceRoot, input, { task, createdAt });
                     const approved = await requestApproval({
                         type: 'plan',
-                        label: 'Multi-file plan',
-                        preview
+                        label: PLAN_FILE_LABEL,
+                        preview: planFile.content,
+                        summary: formatPlanApprovalSummary(input),
+                        openPath: planFile.path
                     });
                     if (!approved) {
+                        planFile = updatePlanApprovalStatus(planFile, input, {
+                            task,
+                            createdAt,
+                            approvalStatus: 'Denied',
+                            approvalTime: new Date().toISOString()
+                        });
                         toolResult = 'User denied multi-file plan.';
                         break;
                     }
+                    planFile = updatePlanApprovalStatus(planFile, input, {
+                        task,
+                        createdAt,
+                        approvalStatus: 'Approved',
+                        approvalTime: new Date().toISOString()
+                    });
                     editPlanState.approved = true;
+                    editPlanState.expectedFiles = new Set(
+                        Array.isArray(input.files)
+                            ? input.files.map(file => String(file || '').trim()).filter(Boolean)
+                            : []
+                    );
                     safetyManager.appendActionLog({
                         source: 'code_agent',
                         action: 'plan',
-                        preview,
+                        path: planFile.path,
+                        preview: planFile.content,
                         approved
                     });
-                    toolResult = `User approved multi-file plan:\n${preview}`;
+                    toolResult = `User approved multi-file plan at ${PLAN_FILE_LABEL}:\n${planFile.content}`;
                     break;
                 }
                 case 'apply_patch': {
@@ -1416,8 +1570,15 @@ module.exports = {
         formatPatchPreview,
         formatWritePreview,
         formatPlanPreview,
+        formatPlanApprovalSummary,
+        formatPlanMarkdown,
+        writePlanFile,
+        updatePlanApprovalStatus,
         normalizePlanItems,
+        normalizePlanItemLanguage,
         requiresMultiFilePlan,
-        getEditTargetPath
+        getMissingPlanFiles,
+        getEditTargetPath,
+        PLAN_FILE_PATH
     }
 };

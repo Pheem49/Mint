@@ -134,17 +134,118 @@ describe('code_agent helpers', () => {
         const { _helpers } = require('../src/CLI/code_agent');
         const preview = _helpers.formatPlanPreview({
             plan: [
-                'แก้ src/CLI/code_agent.js',
-                '- เพิ่ม test ใน tests/code_agent.test.js'
+                'Update src/CLI/code_agent.js',
+                '- Add tests in tests/code_agent.test.js'
             ],
             files: ['src/CLI/code_agent.js', 'tests/code_agent.test.js']
         });
 
         expect(preview).toBe([
             'Plan:',
-            '- แก้ src/CLI/code_agent.js',
-            '- เพิ่ม test ใน tests/code_agent.test.js'
+            '- Update src/CLI/code_agent.js',
+            '- Add tests in tests/code_agent.test.js'
         ].join('\n'));
+    });
+
+    test('formatPlanPreview normalizes common Thai plan verbs to English', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const preview = _helpers.formatPlanPreview({
+            plan: [
+                'แก้ index.html',
+                '- สร้าง styles.css',
+                'เพิ่ม tests/code_agent.test.js'
+            ],
+            files: ['index.html', 'styles.css', 'tests/code_agent.test.js']
+        });
+
+        expect(preview).toBe([
+            'Plan:',
+            '- Update index.html',
+            '- Create styles.css',
+            '- Add tests/code_agent.test.js'
+        ].join('\n'));
+    });
+
+    test('formatPlanMarkdown renders plan file content with task and files', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const markdown = _helpers.formatPlanMarkdown({
+            plan: ['Update src/CLI/code_agent.js'],
+            files: ['src/CLI/code_agent.js']
+        }, {
+            task: 'เพิ่ม plan file approval',
+            createdAt: '2026-05-26T00:00:00.000Z'
+        });
+
+        expect(markdown).toContain('# Mint Plan');
+        expect(markdown).toContain('Created: 2026-05-26T00:00:00.000Z');
+        expect(markdown).toContain('## Task\n\nเพิ่ม plan file approval');
+        expect(markdown).toContain('Plan:\n- Update src/CLI/code_agent.js');
+        expect(markdown).toContain('## Expected Files\n\n- src/CLI/code_agent.js');
+        expect(markdown).toContain('Status: Pending user approval');
+    });
+
+    test('formatPlanApprovalSummary summarizes planned file changes for compact UI', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        expect(_helpers.formatPlanApprovalSummary({
+            plan: ['Update index.html', 'Create styles.css'],
+            files: ['index.html', 'styles.css']
+        })).toBe('2 planned changes across 2 files.');
+    });
+
+    test('writePlanFile writes mint_plan.md to the configured Mint directory', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-plan-'));
+
+        try {
+            const planPath = path.join(tempDir, 'mint_plan.md');
+            const result = _helpers.writePlanFile(tempDir, {
+                plan: ['Update README.md'],
+                files: ['README.md']
+            }, {
+                task: 'ทดสอบ plan file',
+                createdAt: '2026-05-26T00:00:00.000Z',
+                planPath
+            });
+
+            expect(result.path).toBe(planPath);
+            expect(fs.existsSync(planPath)).toBe(true);
+            expect(fs.readFileSync(planPath, 'utf8')).toBe(result.content);
+            expect(result.content).toContain('ทดสอบ plan file');
+        } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test('updatePlanApprovalStatus rewrites plan file with approved state', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-plan-status-'));
+
+        try {
+            const planPath = path.join(tempDir, 'mint_plan.md');
+            const input = {
+                plan: ['แก้ README.md'],
+                files: ['README.md']
+            };
+            const planFile = _helpers.writePlanFile(tempDir, input, {
+                task: 'ทดสอบ approval status',
+                createdAt: '2026-05-26T00:00:00.000Z',
+                planPath
+            });
+            const updated = _helpers.updatePlanApprovalStatus(planFile, input, {
+                task: 'ทดสอบ approval status',
+                createdAt: '2026-05-26T00:00:00.000Z',
+                approvalStatus: 'Approved',
+                approvalTime: '2026-05-26T00:01:00.000Z'
+            });
+            const written = fs.readFileSync(planPath, 'utf8');
+
+            expect(updated.content).toBe(written);
+            expect(written).toContain('Status: Approved');
+            expect(written).toContain('Approved: 2026-05-26T00:01:00.000Z');
+            expect(written).not.toContain('Status: Pending user approval');
+        } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
     });
 
     test('formatWritePreview renders full-file writes as unified diff', () => {
@@ -213,6 +314,20 @@ describe('code_agent helpers', () => {
         expect(_helpers.requiresMultiFilePlan('write_file', {
             path: 'tests/code_agent.test.js'
         }, editPlanState)).toBe(false);
+    });
+
+    test('getMissingPlanFiles reports approved plan files that were not touched', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const editPlanState = {
+            approved: true,
+            expectedFiles: new Set(['celebrate.html', 'celebrate.css', 'celebrate.js', 'script.js']),
+            touchedFiles: new Set(['celebrate.html', 'celebrate.css', 'celebrate.js'])
+        };
+
+        expect(_helpers.getMissingPlanFiles(editPlanState)).toEqual(['script.js']);
+
+        editPlanState.touchedFiles.add('script.js');
+        expect(_helpers.getMissingPlanFiles(editPlanState)).toEqual([]);
     });
 
 });
