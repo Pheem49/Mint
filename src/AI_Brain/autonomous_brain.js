@@ -1,16 +1,15 @@
-const { GoogleGenAI } = require('@google/genai');
 const { readConfig } = require('../System/config_manager');
 const { performWebAutomation } = require('../Automation_Layer/browser_automation');
 const { createFolder, deleteFile } = require('../Automation_Layer/file_operations');
 const { searchKnowledge } = require('./knowledge_base');
 const safetyManager = require('../System/safety_manager');
+const providerAdapter = require('./provider_adapter');
+const taskManager = require('../System/task_manager');
 const fs = require('fs');
 const path = require('path');
 
 const os = require('os');
 const { sendNotification } = require('../System/notifications');
-
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
 function expandHome(filePath) {
     if (filePath.startsWith('~/')) {
@@ -47,24 +46,23 @@ TOOL DETAILS:
 - "done": Target is the final summary of what was accomplished.
 `;
 
-async function executeAutonomousTask(taskDescription, notifyCallback) {
+async function executeAutonomousTask(taskDescription, notifyCallback, options = {}) {
     const config = readConfig();
-    const modelName = config.geminiModel || DEFAULT_GEMINI_MODEL;
-    const apiKey = config.apiKey || process.env.GEMINI_API_KEY;
-    
-    // Use the custom chat creation pattern from the project
-    const ai = new GoogleGenAI({ apiKey });
-    const chat = ai.chats.create({
-        model: modelName,
-        config: {
-            systemInstruction: AUTONOMOUS_SYSTEM_PROMPT,
-            responseMimeType: "application/json"
-        },
-        history: []
+    const providerOrder = providerAdapter.getProviderAttemptOrder(config, {
+        supported: ['gemini', 'anthropic', 'openai', 'local_openai'],
+        priority: ['anthropic', 'openai', 'gemini', 'local_openai']
+    });
+    const client = new providerAdapter.AgentProviderClient({
+        provider: providerOrder[0],
+        providerOrder,
+        config,
+        systemInstruction: AUTONOMOUS_SYSTEM_PROMPT,
+        responseMimeType: 'application/json',
+        maxTokens: 4096
     });
 
     let currentObservation = `Task: ${taskDescription}\nWhat is your first step?`;
-    let maxSteps = 10;
+    let maxSteps = Number.isFinite(options.maxSteps) ? options.maxSteps : 10;
     let step = 0;
     let result = null;
 
@@ -73,12 +71,20 @@ async function executeAutonomousTask(taskDescription, notifyCallback) {
         if (notifyCallback) notifyCallback(`Step ${step}: Thinking...`);
 
         try {
-            const response = await chat.sendMessage({ message: [{ text: currentObservation }] });
-            const text = response.text;
+            const text = await client.sendMessage(currentObservation);
             const actionObj = JSON.parse(text);
 
             console.log(`[Brain] Thought: ${actionObj.thought}`);
             console.log(`[Brain] Action: ${actionObj.action} -> ${actionObj.target}`);
+            if (options.taskId) {
+                taskManager.addCheckpoint(options.taskId, {
+                    phase: 'autonomous_step',
+                    step,
+                    thought: actionObj.thought,
+                    action: actionObj.action,
+                    target: actionObj.target
+                });
+            }
 
             if (actionObj.action === 'done') {
                 result = actionObj.target;
@@ -111,6 +117,13 @@ async function executeAutonomousTask(taskDescription, notifyCallback) {
                             approved: true
                         });
                         fs.writeFileSync(filePath, actionObj.data || '');
+                        if (options.taskId) {
+                            taskManager.addArtifact(options.taskId, {
+                                type: 'file',
+                                path: filePath,
+                                description: `Written by autonomous task step ${step}`
+                            });
+                        }
                         observation = `File written successfully to ${actionObj.target}`;
                     } catch (e) {
                         observation = `Failed to write file: ${e.message}`;
@@ -139,10 +152,24 @@ async function executeAutonomousTask(taskDescription, notifyCallback) {
             }
 
             currentObservation = `Observation: ${observation}`;
+            if (options.taskId) {
+                taskManager.addCheckpoint(options.taskId, {
+                    phase: 'observation',
+                    step,
+                    message: observation
+                });
+            }
 
         } catch (err) {
             console.error('[AutonomousBrain] Error during loop:', err);
             currentObservation = `Error occurred: ${err.message}. Please try a different approach or conclude if task is impossible.`;
+            if (options.taskId) {
+                taskManager.addCheckpoint(options.taskId, {
+                    phase: 'error',
+                    step,
+                    message: err.message
+                });
+            }
         }
     }
 

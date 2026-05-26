@@ -244,12 +244,25 @@ async function sendSemanticCodeMessage({ rawArgs = '', appendMessage, streamMess
     }
 }
 
+function hasAllImageLabels(message = '', imageCount = 0) {
+    const text = String(message || '');
+    for (let index = 1; index <= imageCount; index++) {
+        if (!text.includes(`[Image #${index}]`)) return false;
+    }
+    return imageCount > 0;
+}
+
+function formatImageDisplayMessage(message = '', labels = '', imageCount = 0) {
+    if (!labels) return message;
+    return hasAllImageLabels(message, imageCount) ? message : `${message}\n${labels}`;
+}
+
 async function sendImageMessage({ images, image, prompt, appendMessage, streamMessage, setThinking, appendCodeStep, stats }) {
     const formatErr = (err) => err && err.message ? err.message : String(err || 'Unknown error');
     const imageList = images || (image ? [image] : []);
     const message   = prompt || 'Analyze this image.';
     const labels    = imageList.map((_, i) => `[Image #${i + 1}]`).join(' ');
-    const displayMessage = labels && message.includes(labels) ? message : `${message}\n${labels}`;
+    const displayMessage = formatImageDisplayMessage(message, labels, imageList.length);
 
     appendMessage('user', displayMessage);
     if (appendCodeStep) {
@@ -619,4 +632,10 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
     }
 }
 
-module.exports = { startInteractiveChat };
+module.exports = {
+    startInteractiveChat,
+    _helpers: {
+        hasAllImageLabels,
+        formatImageDisplayMessage
+    }
+};

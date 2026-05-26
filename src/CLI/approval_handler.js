@@ -18,6 +18,11 @@ async function requestCodeApproval(request) {
 
     console.log(`\n${colors.yellow}${colors.bright}[Approval Required]${colors.reset} ${typeLabel}`);
     if (request.label)   console.log(`${colors.gray}${request.label}${colors.reset}`);
+    if (Array.isArray(request.warnings) && request.warnings.length > 0) {
+        request.warnings.forEach((warning) => {
+            console.log(`${colors.yellow}Warning:${colors.reset} ${warning}`);
+        });
+    }
     if (request.preview) console.log(`${colors.gray}${request.preview}${colors.reset}\n`);
 
     const rl = readline.createInterface({

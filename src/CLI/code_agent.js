@@ -1,8 +1,8 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
 const { promisify } = require('util');
-const { GoogleGenAI } = require('@google/genai');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { readConfig, getAvailableProviders } = require('../System/config_manager');
@@ -12,6 +12,8 @@ const { readWorkspaceSession, writeWorkspaceSession } = require('./code_session_
 const { executeAction } = require('../System/action_executor');
 const toolRegistry = require('../System/tool_registry');
 const sandboxRunner = require('../System/sandbox_runner');
+const providerAdapter = require('../AI_Brain/provider_adapter');
+const taskManager = require('../System/task_manager');
 
 async function webSearch(query, onProgress = () => {}) {
     if (!query) throw new Error('Search query required.');
@@ -118,10 +120,10 @@ async function webSearch(query, onProgress = () => {}) {
 
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const MAX_TOOL_OUTPUT = 12000;
 const MAX_AGENT_STEPS = 16;
 const MAX_JSON_REPAIR_ATTEMPTS = 2;
+const DEFAULT_VERIFICATION_BUDGET = 2;
 const SUPPORTED_CODE_PROVIDERS = ['gemini', 'anthropic', 'openai', 'local_openai'];
 
 const CODE_AGENT_PROMPT = `You are "Mint" (มิ้นท์), a pragmatic, polite, and highly helpful AI assistant that can chat, reason, write code, and search the web.
@@ -152,7 +154,8 @@ Rules:
 7. Before any shell command or file patch is executed, the user must approve it. Plan accordingly.
 8. Before editing more than one file, you MUST first use the "plan" action and wait for user approval. The plan must start with "Plan:" and include one bullet per file, for example "- แก้ src/CLI/agent.js". After approval, make the edits.
 9. When editing, prefer "apply_patch" with precise hunks over whole-file rewrites.
-10. When you are done, return "finish" with your final response to the user in the "summary" field.
+10. Before any "apply_patch" or "write_file" action, the "thought" field MUST explicitly name the file you will edit and why that file is the right target. If the file is under "scratch/" or "tests/fixtures/", call that out and explain why editing disposable/test fixture content is intentional.
+11. When you are done, return "finish" with your final response to the user in the "summary" field.
 
 Action safety and intent discipline:
 - The latest user message is authoritative. Do not continue an older unfinished task unless the latest message explicitly asks you to continue or clearly refers to that task.
@@ -173,7 +176,7 @@ Progress updates:
 Response format:
 {
   "thought": "short reasoning about what to do next",
-  "action": "web_search" | "list_files" | "read_file" | "search_code" | "find_path" | "run_shell" | "plan" | "apply_patch" | "write_file" | "ask_user" | "open_url" | "open_app" | "open_file" | "open_folder" | "create_folder" | "system_info" | "system_automation" | "finish",
+  "action": "web_search" | "list_files" | "read_file" | "search_code" | "find_path" | "run_shell" | "verify" | "plan" | "apply_patch" | "write_file" | "ask_user" | "open_url" | "search" | "open_app" | "web_automation" | "open_file" | "open_folder" | "create_folder" | "delete_file" | "clipboard_write" | "learn_file" | "learn_folder" | "system_info" | "plugin" | "mcp_tool" | "mouse_move" | "mouse_click" | "type_text" | "key_tap" | "system_automation" | "finish",
   "input": {
     "question": "your question to the user for ask_user",
     "query": "search text for web_search, search_code, or find_path",
@@ -181,6 +184,7 @@ Response format:
     "path": "relative/path",
     "type": "file" | "dir" | "any",
     "command": "shell command",
+    "commands": ["npm test", "npm run build"],
     "startLine": 1,
     "endLine": 120,
     "content": "full file content for write_file",
@@ -208,6 +212,7 @@ Tool notes:
 - "search_code": search by text or regex-like pattern.
 - "find_path": find files or directories by path/name when the user is looking for a folder, filename, or location.
 - "run_shell": run a non-destructive command in the workspace.
+- "verify": run the detected or provided test/build/lint commands. If verification fails, inspect the output, patch the issue, and verify again within the remaining budget.
 - "plan": present a user-visible multi-file edit plan before changing more than one file. Use input.plan as bullet strings and input.files as the expected touched files.
 - "apply_patch": update an existing file using one or more exact replacement hunks.
 - "write_file": create a new file or fully rewrite a file when replacement is not practical.
@@ -216,6 +221,8 @@ Tool notes:
 - "open_app": open a local application on the user's computer.
 - "system_info": get system information like CPU, memory, date, or weather.
 - "system_automation": control system settings like volume, brightness, or power.
+- "plugin": run a configured Mint plugin.
+- "mcp_tool": call a configured MCP tool.
 - "finish": stop and reply to the user using the "summary" field.
 `;
 
@@ -305,75 +312,13 @@ function summarizeToolTarget(action, input = {}) {
     return formatActionPreview(action, input);
 }
 
-function splitDataUri(dataUri = '') {
-    const match = String(dataUri).match(/^data:([^;]+);base64,([\s\S]+)$/);
-    if (!match) return null;
-    return {
-        mimeType: match[1],
-        data: match[2]
-    };
-}
-
-function contentToText(content) {
-    if (content && typeof content === 'object' && !Array.isArray(content)) {
-        return String(content.text || '');
-    }
-    return String(content || '');
-}
-
-function contentToGeminiParts(content) {
-    const text = contentToText(content);
-    const parts = text ? [{ text }] : [];
-    if (content && typeof content === 'object' && content.imageDataUri) {
-        const image = splitDataUri(content.imageDataUri);
-        if (image) {
-            parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
-        }
-    }
-    return parts.length > 0 ? parts : [{ text: '' }];
-}
-
-function contentToOpenAIContent(content) {
-    const text = contentToText(content) || 'Analyze this input.';
-    if (content && typeof content === 'object' && content.imageDataUri) {
-        return [
-            { type: 'text', text },
-            { type: 'image_url', image_url: { url: content.imageDataUri } }
-        ];
-    }
-    return text;
-}
-
-function contentToAnthropicContent(content) {
-    const text = contentToText(content) || 'Analyze this input.';
-    if (content && typeof content === 'object' && content.imageDataUri) {
-        const image = splitDataUri(content.imageDataUri);
-        if (image) {
-            return [
-                { type: 'image', source: { type: 'base64', media_type: image.mimeType, data: image.data } },
-                { type: 'text', text }
-            ];
-        }
-    }
-    return text;
-}
-
 function getSupportedCodeProviderOrder(config, availableProviders = getAvailableProviders(config || {}), requestedOverride = null) {
-    const requestedProvider = requestedOverride || (config && config.aiProvider) || 'gemini';
-    const priority = ['anthropic', 'openai', 'gemini', 'local_openai'];
-    const ordered = [];
-
-    if (SUPPORTED_CODE_PROVIDERS.includes(requestedProvider) && availableProviders.includes(requestedProvider)) {
-        ordered.push(requestedProvider);
-    }
-
-    for (const provider of priority) {
-        if (availableProviders.includes(provider) && !ordered.includes(provider)) {
-            ordered.push(provider);
-        }
-    }
-
-    return ordered.length > 0 ? ordered : ['gemini'];
+    return providerAdapter.getProviderAttemptOrder(config || {}, {
+        supported: SUPPORTED_CODE_PROVIDERS,
+        availableProviders,
+        requested: requestedOverride || (config && config.aiProvider) || 'gemini',
+        priority: ['anthropic', 'openai', 'gemini', 'local_openai']
+    });
 }
 
 function selectSupportedCodeProvider(config, availableProviders = getAvailableProviders(config || {})) {
@@ -381,17 +326,7 @@ function selectSupportedCodeProvider(config, availableProviders = getAvailablePr
 }
 
 function getCodeProviderModel(provider, config = {}) {
-    switch (provider) {
-        case 'anthropic':
-            return config.anthropicModel || 'claude-3-5-sonnet-latest';
-        case 'openai':
-            return config.openaiModel || 'gpt-4o';
-        case 'local_openai':
-            return config.localModelName || 'local-model';
-        case 'gemini':
-        default:
-            return config.geminiModel || DEFAULT_GEMINI_MODEL;
-    }
+    return providerAdapter.getProviderModel(provider, config);
 }
 
 function resolveWorkspacePath(workspaceRoot, targetPath = '.') {
@@ -568,6 +503,66 @@ async function runShell(workspaceRoot, command) {
     return truncate([stdout, stderr].filter(Boolean).join('\n') || '(no output)');
 }
 
+async function runVerificationCommands(workspaceRoot, commands = [], options = {}) {
+    const detected = detectTestCommands(workspaceRoot);
+    const requested = Array.isArray(commands)
+        ? commands.map(command => String(command || '').trim()).filter(Boolean)
+        : [];
+    const commandList = requested.length > 0 ? requested : detected;
+
+    if (commandList.length === 0) {
+        return {
+            passed: true,
+            output: 'No verification commands detected.'
+        };
+    }
+
+    const requestApproval = typeof options.requestApproval === 'function'
+        ? options.requestApproval
+        : async () => true;
+    const budget = Number.isFinite(options.budget) ? options.budget : DEFAULT_VERIFICATION_BUDGET;
+    const attempt = Number.isFinite(options.attempt) ? options.attempt : 1;
+    const lines = [
+        `Verification attempt ${attempt}/${budget}`,
+        `Commands: ${commandList.join(' && ')}`
+    ];
+
+    for (const command of commandList) {
+        const approved = await requestApproval({
+            type: 'verify',
+            label: command,
+            preview: command
+        });
+        if (!approved) {
+            lines.push(`SKIP ${command}: User denied verification command.`);
+            return {
+                passed: false,
+                output: lines.join('\n')
+            };
+        }
+
+        try {
+            const output = await runShell(workspaceRoot, command);
+            lines.push(`PASS ${command}`);
+            if (output && output !== '(no output)') {
+                lines.push(truncate(output, 4000));
+            }
+        } catch (error) {
+            lines.push(`FAIL ${command}`);
+            lines.push(truncate([error.stdout, error.stderr, error.message].filter(Boolean).join('\n'), 6000));
+            return {
+                passed: false,
+                output: lines.join('\n')
+            };
+        }
+    }
+
+    return {
+        passed: true,
+        output: lines.join('\n')
+    };
+}
+
 function splitDiffLines(text) {
     const normalized = String(text || '').replace(/\r\n/g, '\n');
     const lines = normalized.split('\n');
@@ -577,11 +572,66 @@ function splitDiffLines(text) {
     return lines;
 }
 
-function formatDiffRange(startLine, count) {
-    return count === 1 ? `${startLine}` : `${startLine},${count}`;
+function normalizeGitNoIndexDiff(stdout, targetPath) {
+    const lines = String(stdout || '').replace(/\r\n/g, '\n').split('\n');
+    const filtered = [];
+    for (const line of lines) {
+        if (!line) continue;
+        if (line.startsWith('diff --git ') || line.startsWith('index ')) continue;
+        if (line.startsWith('--- ')) {
+            filtered.push(`--- a/${targetPath}`);
+            continue;
+        }
+        if (line.startsWith('+++ ')) {
+            filtered.push(`+++ b/${targetPath}`);
+            continue;
+        }
+        filtered.push(line);
+    }
+    return filtered.join('\n');
 }
 
-function buildUnifiedDiffPreview(workspaceRoot, patchInput, options = {}) {
+function buildSimpleFullFileDiff(targetPath, previousContent = '', nextContent = '') {
+    const previousLines = splitDiffLines(previousContent);
+    const nextLines = splitDiffLines(nextContent || '');
+    const oldRange = previousLines.length || 0;
+    const newRange = nextLines.length || 0;
+    const output = [
+        `--- a/${targetPath}`,
+        `+++ b/${targetPath}`,
+        `@@ -1,${oldRange} +1,${newRange} @@`
+    ];
+
+    previousLines.forEach(line => output.push(`-${line}`));
+    nextLines.forEach(line => output.push(`+${line}`));
+    return output.join('\n');
+}
+
+function buildContentDiffPreview(targetPath, previousContent = '', nextContent = '') {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-diff-'));
+    const oldPath = path.join(tempDir, 'old');
+    const newPath = path.join(tempDir, 'new');
+
+    try {
+        fs.writeFileSync(oldPath, previousContent || '', 'utf8');
+        fs.writeFileSync(newPath, nextContent || '', 'utf8');
+        try {
+            const stdout = execFileSync('git', ['diff', '--no-index', '--', oldPath, newPath], {
+                encoding: 'utf8',
+                maxBuffer: 1024 * 1024 * 4
+            });
+            return normalizeGitNoIndexDiff(stdout, targetPath);
+        } catch (error) {
+            const stdout = error.stdout || '';
+            if (stdout) return normalizeGitNoIndexDiff(stdout, targetPath);
+            return buildSimpleFullFileDiff(targetPath, previousContent, nextContent);
+        }
+    } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+}
+
+function buildPatchedContent(workspaceRoot, patchInput) {
     if (!patchInput || !patchInput.path) {
         throw new Error('Patch path is required.');
     }
@@ -596,47 +646,16 @@ function buildUnifiedDiffPreview(workspaceRoot, patchInput, options = {}) {
         throw new Error('Patch hunks are required.');
     }
 
-    const contextLines = Number.isFinite(options.contextLines) ? options.contextLines : 3;
-    let content = fs.readFileSync(resolved, 'utf8');
-    const output = [
-        `--- a/${patchInput.path}`,
-        `+++ b/${patchInput.path}`
-    ];
+    const previousContent = fs.readFileSync(resolved, 'utf8');
+    return {
+        previousContent,
+        nextContent: applyHunksToContent(previousContent, hunks, patchInput.path)
+    };
+}
 
-    hunks.forEach((hunk, index) => {
-        if (typeof hunk.oldText !== 'string' || typeof hunk.newText !== 'string') {
-            throw new Error(`Patch hunk ${index + 1} is invalid.`);
-        }
-
-        const offset = content.indexOf(hunk.oldText);
-        if (offset === -1) {
-            throw new Error(`Patch hunk ${index + 1} oldText not found in ${patchInput.path}`);
-        }
-
-        const beforeText = content.slice(0, offset);
-        const oldStartLine = beforeText.length === 0 ? 1 : splitDiffLines(beforeText).length + 1;
-        const fileLines = splitDiffLines(content);
-        const oldLines = splitDiffLines(hunk.oldText);
-        const newLines = splitDiffLines(hunk.newText);
-        const oldStartIndex = oldStartLine - 1;
-        const contextStartIndex = Math.max(0, oldStartIndex - contextLines);
-        const contextEndIndex = Math.min(fileLines.length, oldStartIndex + oldLines.length + contextLines);
-        const beforeContext = fileLines.slice(contextStartIndex, oldStartIndex);
-        const afterContext = fileLines.slice(oldStartIndex + oldLines.length, contextEndIndex);
-        const oldRangeStart = contextStartIndex + 1;
-        const oldRangeCount = beforeContext.length + oldLines.length + afterContext.length;
-        const newRangeCount = beforeContext.length + newLines.length + afterContext.length;
-
-        output.push(`@@ -${formatDiffRange(oldRangeStart, oldRangeCount)} +${formatDiffRange(oldRangeStart, newRangeCount)} @@`);
-        beforeContext.forEach(line => output.push(` ${line}`));
-        oldLines.forEach(line => output.push(`-${line}`));
-        newLines.forEach(line => output.push(`+${line}`));
-        afterContext.forEach(line => output.push(` ${line}`));
-
-        content = `${content.slice(0, offset)}${hunk.newText}${content.slice(offset + hunk.oldText.length)}`;
-    });
-
-    return output.join('\n');
+function buildUnifiedDiffPreview(workspaceRoot, patchInput, options = {}) {
+    const { previousContent, nextContent } = buildPatchedContent(workspaceRoot, patchInput);
+    return buildContentDiffPreview(patchInput.path, previousContent, nextContent);
 }
 
 function formatPatchPreview(workspaceRoot, patchInput) {
@@ -645,6 +664,64 @@ function formatPatchPreview(workspaceRoot, patchInput) {
     } catch (error) {
         return `Patch preview failed: ${error.message}`;
     }
+}
+
+function buildFullFileDiffPreview(workspaceRoot, targetPath, nextContent = '') {
+    if (!targetPath) {
+        throw new Error('Write path is required.');
+    }
+
+    const resolved = resolveWorkspacePath(workspaceRoot, targetPath);
+    const previousContent = fs.existsSync(resolved) ? fs.readFileSync(resolved, 'utf8') : '';
+    return buildContentDiffPreview(targetPath, previousContent, nextContent || '');
+}
+
+function formatWritePreview(workspaceRoot, targetPath, content) {
+    try {
+        return buildFullFileDiffPreview(workspaceRoot, targetPath, content);
+    } catch (error) {
+        return `Write preview failed: ${error.message}\n${targetPath}\n${truncate(content || '', 800)}`;
+    }
+}
+
+function normalizeRelativePathForWarning(targetPath = '') {
+    return String(targetPath || '').replace(/\\/g, '/').replace(/^\.\/+/, '');
+}
+
+function contentLooksLikeGuide(text = '') {
+    return /(guide|installation|publish|npm|registry|setup|documentation|คู่มือ|ติดตั้ง|เผยแพร่)/i.test(String(text || ''));
+}
+
+function contentLooksLikeBio(text = '') {
+    return /(bio|biography|profile|created by|assistant|ประวัติ|โปรไฟล์)/i.test(String(text || ''));
+}
+
+function contentLooksLikeConfig(text = '') {
+    return /(apiKey|token|secret|config|settings|\.env|clientSecret|refreshToken)/i.test(String(text || ''));
+}
+
+function buildApprovalWarnings(targetPath = '', nextContent = '') {
+    const normalized = normalizeRelativePathForWarning(targetPath);
+    const basename = path.basename(normalized).toLowerCase();
+    const warnings = [];
+
+    if (normalized.startsWith('scratch/')) {
+        warnings.push('Target is under scratch/, which is usually disposable/test content. Confirm this is intentional.');
+    }
+    if (normalized.startsWith('tests/fixtures/') || normalized.includes('/tests/fixtures/')) {
+        warnings.push('Target is under tests/fixtures/, so this may change test fixture behavior.');
+    }
+    if (/bio|profile|about/.test(basename) && contentLooksLikeGuide(nextContent)) {
+        warnings.push('File name looks like profile/bio content, but the new content looks like a guide or publishing document.');
+    }
+    if (/(guide|readme|docs?|manual)/.test(basename) && contentLooksLikeBio(nextContent)) {
+        warnings.push('File name looks like documentation, but the new content looks like biography/profile content.');
+    }
+    if (!/(config|settings|env|secret|token)/.test(basename) && contentLooksLikeConfig(nextContent)) {
+        warnings.push('New content appears to include config/secret-like terms; verify this file is the right place.');
+    }
+
+    return warnings;
 }
 
 function normalizePlanItems(plan) {
@@ -699,6 +776,37 @@ function requiresMultiFilePlan(action, input = {}, editPlanState = {}) {
     return touchedFiles.size > 0 && !touchedFiles.has(targetPath);
 }
 
+function validateEditExplanation(action, input = {}, thought = '') {
+    const targetPath = getEditTargetPath(action, input);
+    if (!targetPath) return { ok: true };
+
+    const text = String(thought || '').toLowerCase();
+    const normalized = normalizeRelativePathForWarning(targetPath).toLowerCase();
+    const basename = path.basename(normalized).toLowerCase();
+    const mentionsTarget = text.includes(normalized) || (basename && text.includes(basename));
+    const explainsWhy = /(because|why|so that|in order|to update|to change|to edit|เพื่อ|เพราะ|เนื่องจาก|จะปรับ|จะแก้|อัปเดต|แก้ไข)/i.test(thought || '');
+    if (!mentionsTarget || !explainsWhy) {
+        return {
+            ok: false,
+            message: `Before editing ${targetPath}, explain in the thought field which file you will edit and why this is the correct target.`
+        };
+    }
+
+    const sensitiveScratchPath = normalized.startsWith('scratch/') ||
+        normalized.startsWith('tests/fixtures/') ||
+        normalized.includes('/tests/fixtures/');
+    const mentionsSensitiveLocation = /(scratch|fixture|test fixture|tests\/fixtures|ทดลอง|fixture)/i.test(thought || '');
+    const marksIntentional = /(intentional|intentionally|disposable|test content|test fixture|ตั้งใจ|ชั่วคราว|เนื้อหาทดลอง|ไฟล์ทดสอบ)/i.test(thought || '');
+    if (sensitiveScratchPath && !(mentionsSensitiveLocation && marksIntentional)) {
+        return {
+            ok: false,
+            message: `Before editing ${targetPath}, explicitly mention that it is under scratch/ or tests/fixtures/ and why editing that disposable/test fixture content is intentional.`
+        };
+    }
+
+    return { ok: true };
+}
+
 function applyHunksToContent(content, hunks, filePath) {
     let nextContent = content;
     hunks.forEach((hunk, index) => {
@@ -738,177 +846,6 @@ function writeFile(workspaceRoot, targetPath, content) {
     fs.mkdirSync(path.dirname(resolved), { recursive: true });
     fs.writeFileSync(resolved, content || '', 'utf8');
     return `Wrote ${targetPath}`;
-}
-
-class UnifiedAgentClient {
-    constructor(provider, config, providerOrder = [provider]) {
-        this.provider = SUPPORTED_CODE_PROVIDERS.includes(provider) ? provider : 'gemini';
-        this.providerOrder = providerOrder.length > 0 ? providerOrder : [this.provider];
-        this.config = config;
-        this.history = [];
-        this.systemInstruction = CODE_AGENT_PROMPT;
-        this.lastSuccessfulProvider = null;
-        this.usageTotals = {};
-    }
-
-    recordUsage(provider, model, usage = {}) {
-        const key = `${provider}:${model || ''}`;
-        if (!this.usageTotals[key]) {
-            this.usageTotals[key] = {
-                provider,
-                model,
-                requests: 0,
-                inputTokens: 0,
-                cacheReads: 0,
-                outputTokens: 0,
-                reasoningTokens: 0,
-                totalTokens: 0
-            };
-        }
-
-        const row = this.usageTotals[key];
-        row.requests += 1;
-        row.inputTokens += Number(usage.inputTokens) || 0;
-        row.cacheReads += Number(usage.cacheReads) || 0;
-        row.outputTokens += Number(usage.outputTokens) || 0;
-        row.reasoningTokens += Number(usage.reasoningTokens) || 0;
-        row.totalTokens += Number(usage.totalTokens) || 0;
-    }
-
-    getUsageSummary() {
-        return Object.values(this.usageTotals);
-    }
-
-    async sendMessage(observation) {
-        this.history.push({ role: 'user', content: observation });
-
-        const failures = [];
-        for (const provider of this.providerOrder) {
-            this.provider = SUPPORTED_CODE_PROVIDERS.includes(provider) ? provider : 'gemini';
-            try {
-                let responseText = '';
-                if (this.provider === 'anthropic') {
-                    responseText = await this._callAnthropic();
-                } else if (this.provider === 'openai' || this.provider === 'local_openai') {
-                    responseText = await this._callOpenAI();
-                } else {
-                    responseText = await this._callGemini();
-                }
-
-                this.history.push({ role: 'assistant', content: responseText });
-                this.lastSuccessfulProvider = this.provider;
-                return responseText;
-            } catch (error) {
-                const message = error.message || error.code || 'unknown error';
-                failures.push(`${this.provider}: ${message}`);
-                if (process.env.MINT_DEBUG === '1') {
-                    console.error(`[Code Agent Fallback] Provider '${this.provider}' failed: ${message}`);
-                }
-            }
-        }
-
-        throw new Error(`All code agent providers failed. ${failures.join(' | ')}`);
-    }
-
-    async _callAnthropic() {
-        const apiKey = this.config.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
-        const messages = this.history.map(m => ({
-            role: m.role,
-            content: contentToAnthropicContent(m.content)
-        }));
-
-        const response = await axios.post('https://api.anthropic.com/v1/messages', {
-            model: this.config.anthropicModel || 'claude-3-5-sonnet-latest',
-            max_tokens: 8192,
-            system: this.systemInstruction,
-            messages: messages
-        }, {
-            headers: {
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01',
-                'content-type': 'application/json'
-            }
-        });
-        const usage = response.data.usage || {};
-        this.recordUsage('anthropic', this.config.anthropicModel || 'claude-3-5-sonnet-latest', {
-            inputTokens: usage.input_tokens,
-            cacheReads: usage.cache_read_input_tokens,
-            outputTokens: usage.output_tokens,
-            totalTokens: (Number(usage.input_tokens) || 0) + (Number(usage.output_tokens) || 0)
-        });
-        return response.data.content[0].text;
-    }
-
-    async _callOpenAI() {
-        const isLocal = this.provider === 'local_openai';
-        const apiKey = isLocal ? 'not-needed' : (this.config.openaiApiKey || process.env.OPENAI_API_KEY);
-        const baseUrl = isLocal ? (this.config.localApiBaseUrl || 'http://localhost:1234/v1') : 'https://api.openai.com/v1';
-        const model = isLocal ? (this.config.localModelName || 'local-model') : (this.config.openaiModel || 'gpt-4o');
-
-        const messages = [
-            { role: 'system', content: this.systemInstruction },
-            ...this.history.map(m => ({
-                role: m.role,
-                content: contentToOpenAIContent(m.content)
-            }))
-        ];
-
-        const response = await axios.post(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
-            model: model,
-            messages: messages,
-            response_format: isLocal ? undefined : { type: "json_object" }
-        }, {
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
-            }
-        });
-        const usage = response.data.usage || {};
-        this.recordUsage(this.provider, model, {
-            inputTokens: usage.prompt_tokens,
-            cacheReads: usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens,
-            outputTokens: usage.completion_tokens,
-            reasoningTokens: usage.completion_tokens_details && usage.completion_tokens_details.reasoning_tokens,
-            totalTokens: usage.total_tokens
-        });
-        return response.data.choices[0].message.content;
-    }
-
-    async _callGemini() {
-        const apiKey = this.config.apiKey || process.env.GEMINI_API_KEY;
-        const model = this.config.geminiModel || DEFAULT_GEMINI_MODEL;
-        const ai = new GoogleGenAI({ apiKey });
-        
-        const recentHistory = this.history.slice(-16);
-        const priorHistory = recentHistory.slice(0, -1);
-        const lastEntry = recentHistory[recentHistory.length - 1] || { content: '' };
-
-        // Convert history for Gemini, ensuring parts are correctly structured
-        const geminiHistory = priorHistory.map(m => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: contentToGeminiParts(m.content)
-        }));
-
-        const chat = ai.chats.create({
-            model,
-            config: {
-                systemInstruction: this.systemInstruction,
-                responseMimeType: 'application/json'
-            },
-            history: geminiHistory
-        });
-
-        const response = await chat.sendMessage({ message: contentToGeminiParts(lastEntry.content) });
-        const usage = response.usageMetadata || {};
-        this.recordUsage('gemini', model, {
-            inputTokens: usage.promptTokenCount,
-            cacheReads: usage.cachedContentTokenCount,
-            outputTokens: usage.candidatesTokenCount,
-            reasoningTokens: usage.thoughtsTokenCount,
-            totalTokens: usage.totalTokenCount
-        });
-        return typeof response.text === 'function' ? response.text() : response.text;
-    }
 }
 
 async function getAgentDecision(client, observation, options = {}) {
@@ -1022,7 +959,14 @@ async function executeCodeTask(task, options = {}) {
     const availableProviders = getAvailableProviders(config);
     const providerOrder = getSupportedCodeProviderOrder(config, availableProviders, options.provider);
     const provider = providerOrder[0];
-    const client = new UnifiedAgentClient(provider, config, providerOrder);
+    const client = new providerAdapter.AgentProviderClient({
+        provider,
+        config,
+        providerOrder,
+        systemInstruction: CODE_AGENT_PROMPT,
+        responseMimeType: 'application/json',
+        maxTokens: 8192
+    });
 
     const initialObservationText = await buildInitialObservation(task, workspaceRoot, history);
     const relevantMemoryCount = memoryStore.searchInteractions(task, 5).length;
@@ -1051,6 +995,19 @@ async function executeCodeTask(task, options = {}) {
         approved: false,
         touchedFiles: new Set()
     };
+    let verificationAttempts = 0;
+    const verificationBudget = Number.isFinite(options.verificationBudget)
+        ? options.verificationBudget
+        : DEFAULT_VERIFICATION_BUDGET;
+
+    if (options.taskId) {
+        taskManager.addCheckpoint(options.taskId, {
+            phase: 'code_agent_start',
+            message: task,
+            provider,
+            providerOrder
+        });
+    }
 
     for (let step = 1; step <= MAX_AGENT_STEPS; step++) {
         executedSteps = step;
@@ -1108,6 +1065,19 @@ async function executeCodeTask(task, options = {}) {
                 continue;
             }
 
+            if (action === 'apply_patch' || action === 'write_file') {
+                const explanation = validateEditExplanation(action, input, decision.thought);
+                if (!explanation.ok) {
+                    observation = [
+                        `Previous thought: ${decision.thought || '(none)'}`,
+                        `Action: ${action}`,
+                        'Observation:',
+                        `Error: ${explanation.message}`
+                    ].join('\n');
+                    continue;
+                }
+            }
+
             switch (action) {
                 case 'web_search':
                     toolResult = await webSearch(input.query, onProgress);
@@ -1150,6 +1120,27 @@ async function executeCodeTask(task, options = {}) {
                     toolResult = await runShell(workspaceRoot, input.command);
                     break;
                 }
+                case 'verify': {
+                    verificationAttempts += 1;
+                    const result = await runVerificationCommands(workspaceRoot, input.commands, {
+                        requestApproval,
+                        budget: verificationBudget,
+                        attempt: verificationAttempts
+                    });
+                    toolResult = result.output;
+                    if (options.taskId) {
+                        taskManager.addCheckpoint(options.taskId, {
+                            phase: 'verification',
+                            attempt: verificationAttempts,
+                            passed: result.passed,
+                            output: truncate(result.output, 4000)
+                        });
+                    }
+                    if (!result.passed && verificationAttempts >= verificationBudget) {
+                        toolResult += '\nVerification budget exhausted. Finish with the remaining failure clearly explained.';
+                    }
+                    break;
+                }
                 case 'plan': {
                     const preview = formatPlanPreview(input);
                     const approved = await requestApproval({
@@ -1173,10 +1164,20 @@ async function executeCodeTask(task, options = {}) {
                 }
                 case 'apply_patch': {
                     const patchInput = input.patch || {};
+                    let patchWarnings = [];
+                    try {
+                        patchWarnings = buildApprovalWarnings(
+                            patchInput.path,
+                            buildPatchedContent(workspaceRoot, patchInput).nextContent
+                        );
+                    } catch (_) {
+                        patchWarnings = buildApprovalWarnings(patchInput.path, '');
+                    }
                     const approved = await requestApproval({
                         type: 'patch',
                         label: patchInput.path,
-                        preview: formatPatchPreview(workspaceRoot, patchInput)
+                        preview: formatPatchPreview(workspaceRoot, patchInput),
+                        warnings: patchWarnings
                     });
                     if (!approved) {
                         toolResult = `User denied patch for ${patchInput.path}`;
@@ -1196,7 +1197,8 @@ async function executeCodeTask(task, options = {}) {
                     const approved = await requestApproval({
                         type: 'write_file',
                         label: input.path,
-                        preview: `${input.path}\n${truncate(input.content || '', 800)}`
+                        preview: formatWritePreview(workspaceRoot, input.path, input.content),
+                        warnings: buildApprovalWarnings(input.path, input.content)
                     });
                     if (!approved) {
                         toolResult = `User denied full file write for ${input.path}`;
@@ -1218,11 +1220,23 @@ async function executeCodeTask(task, options = {}) {
                     break;
                 }
                 case 'open_url':
+                case 'search':
                 case 'open_app':
+                case 'web_automation':
                 case 'open_file':
                 case 'open_folder':
                 case 'create_folder':
+                case 'delete_file':
+                case 'clipboard_write':
+                case 'learn_file':
+                case 'learn_folder':
                 case 'system_info':
+                case 'plugin':
+                case 'mcp_tool':
+                case 'mouse_move':
+                case 'mouse_click':
+                case 'type_text':
+                case 'key_tap':
                 case 'system_automation': {
                     const executorAction = normalizeExecutorAction(action, input);
                     const safety = safetyManager.classifyAction(executorAction);
@@ -1322,7 +1336,14 @@ async function executeCodeTask(task, options = {}) {
         if (reviewerProvider && finalSummary) {
             onProgress({ phase: 'reviewing', action: 'reviewer_start', message: `Invoking Reviewer Agent (${reviewerProvider})...` });
             
-            const reviewerClient = new UnifiedAgentClient(reviewerProvider, config);
+            const reviewerClient = new providerAdapter.AgentProviderClient({
+                provider: reviewerProvider,
+                config,
+                providerOrder: [reviewerProvider],
+                systemInstruction: CODE_AGENT_PROMPT,
+                responseMimeType: 'application/json',
+                maxTokens: 4096
+            });
             reviewerClient.systemInstruction = CODE_AGENT_PROMPT + "\n\nYou are the Reviewer Agent. Review the primary agent's changes, test output, and verification. If you spot a critical bug, point it out. Otherwise, confirm it looks good. Return JSON with action: 'finish' and your review in the 'summary' field.";
             
             const reviewPrompt = `The primary agent (${provider}) just completed the task: "${task}".\nSummary: ${finalSummary}\nVerification: ${finalVerification}\nGit Status: ${(await getGitContext(workspaceRoot)).status}\n\nPlease review this. Return JSON with action: 'finish'.`;
@@ -1386,9 +1407,14 @@ module.exports = {
         findPaths,
         listFiles,
         searchCode,
+        runVerificationCommands,
         walkDirectory,
         buildUnifiedDiffPreview,
+        buildFullFileDiffPreview,
+        buildApprovalWarnings,
+        validateEditExplanation,
         formatPatchPreview,
+        formatWritePreview,
         formatPlanPreview,
         normalizePlanItems,
         requiresMultiFilePlan,

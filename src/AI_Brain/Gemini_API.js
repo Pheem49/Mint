@@ -1,17 +1,17 @@
 const { GoogleGenAI } = require('@google/genai');
 const { readChatHistory, writeChatHistory, clearChatHistory } = require('../System/chat_history_manager');
-const { readConfig, getAvailableProviders, isPlaceholder } = require('../System/config_manager');
+const { readConfig, getAvailableProviders } = require('../System/config_manager');
 const pluginManager = require('../Plugins/plugin_manager');
 const mcpManager = require('../Plugins/mcp_manager');
 const memoryStore = require('./memory_store');
 const agentOrchestrator = require('./agent_orchestrator');
 const workspaceManager = require('../CLI/workspace_manager');
 const toolRegistry = require('../System/tool_registry');
+const providerAdapter = require('./provider_adapter');
 
 let ai = null;
 let activeApiKey = '';
 const initialEnvKey = (process.env.GEMINI_API_KEY || '').trim();
-const axios = require('axios');
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
 function decodeUnicode(str) {
@@ -40,10 +40,6 @@ function imageDataUriToInlineData(base64Image) {
     mimeType: fallbackMimeType,
     data: String(base64Image || '').replace(/^data:image\/\w+;base64,/, '')
   };
-}
-
-function imageDataUriToBase64(base64Image) {
-  return imageDataUriToInlineData(base64Image).data;
 }
 
 function normalizeImageList(base64Image) {
@@ -325,64 +321,15 @@ function resolveGeminiModel() {
 }
 
 function getProviderAttemptOrder(config) {
-  const provider = config.aiProvider || 'gemini';
   const availableProviders = getAvailableProviders(config);
-  const ordered = availableProviders.includes(provider)
-    ? [provider, ...availableProviders.filter(p => p !== provider)]
-    : availableProviders;
-  return ordered.length > 0 ? ordered : ['gemini'];
+  return providerAdapter.getProviderAttemptOrder(config, {
+    availableProviders,
+    priority: availableProviders
+  });
 }
 
 function getProviderModel(provider, config = {}) {
-  switch (provider) {
-    case 'gemini':
-      return (config.geminiModel || DEFAULT_GEMINI_MODEL).trim() || DEFAULT_GEMINI_MODEL;
-    case 'anthropic':
-      return config.anthropicModel || 'claude-3-5-sonnet-latest';
-    case 'openai':
-      return config.openaiModel || 'gpt-4o';
-    case 'local_openai':
-      return config.localModelName || 'local-model';
-    case 'huggingface':
-      return config.hfModel || 'meta-llama/Meta-Llama-3-8B-Instruct';
-    case 'ollama':
-      return config.ollamaModel || 'llama3:latest';
-    default:
-      return '';
-  }
-}
-
-function withProviderInfo(result, provider, config = {}) {
-  const normalized = (result && typeof result === 'object')
-    ? result
-    : { response: String(result || ''), action: { type: 'none', target: '' } };
-  const providerInfo = {
-    provider,
-    model: getProviderModel(provider, config),
-    usage: normalized.usageMetadata || normalized.usage || null
-  };
-
-  attachProviderInfoToLatestHistory(providerInfo);
-
-  return {
-    ...normalized,
-    providerInfo
-  };
-}
-
-function attachProviderInfoToLatestHistory(providerInfo) {
-  try {
-    const history = readChatHistory();
-    for (let i = history.length - 1; i >= 0; i -= 1) {
-      if (history[i] && history[i].role === 'model') {
-        history[i].providerInfo = providerInfo;
-        writeChatHistory(cleanHistoryForStorage(history));
-        return;
-      }
-    }
-  } catch (error) {
-    console.warn('[Provider Info] Failed to persist provider metadata:', error.message);
-  }
+  return providerAdapter.getProviderModel(provider, config);
 }
 
 // Chat session — maintains conversation history within the session
@@ -437,9 +384,89 @@ function shouldUseKnowledgeSearch(message) {
   return knowledgeHints.some(hint => text.includes(hint));
 }
 
+function chatHistoryToProviderHistory(history = []) {
+  return (Array.isArray(history) ? history : [])
+    .slice(-MAX_HISTORY_MESSAGES)
+    .map((msg) => {
+      const role = msg.role === 'model' ? 'assistant' : 'user';
+      const text = Array.isArray(msg.parts)
+        ? msg.parts.map(part => typeof part.text === 'string' ? stripRelevantMemoryBlock(part.text) : '').filter(Boolean).join('\n')
+        : '';
+      if (!text.trim()) return null;
+      return { role, content: text };
+    })
+    .filter(Boolean);
+}
+
+function buildChatObservation(finalMessage, images = [], base64Audio = null) {
+  let text = '';
+  if (finalMessage) {
+    text = buildMessageWithRelevantMemory(finalMessage);
+  } else if (base64Audio && images.length === 0) {
+    text = 'Please listen to this voice command and respond in Thai with the appropriate JSON action if needed.';
+  } else if (images.length === 0 && !base64Audio) {
+    text = 'Analyze this input.';
+  } else {
+    text = 'Analyze this input.';
+  }
+
+  return {
+    text,
+    imageDataUris: images,
+    audioDataUri: base64Audio || null
+  };
+}
+
+function parseChatProviderResponse(outputText, originalText = '', now = new Date().toISOString()) {
+  const cleaned = stripRelevantMemoryBlock(String(outputText || ''));
+  let parsedResult;
+  try {
+    parsedResult = JSON.parse(cleaned);
+  } catch (e) {
+    const jsonMatch = cleaned.match(/```json\n([\s\S]*?)\n```/) || cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      parsedResult = JSON.parse(jsonMatch[jsonMatch.length > 1 ? 1 : 0]);
+    } else {
+      parsedResult = {
+        response: cleaned,
+        action: { type: 'none', target: '' }
+      };
+    }
+  }
+
+  parsedResult = normalizeParsedResult(parsedResult, originalText);
+  if (parsedResult && typeof parsedResult.response === 'string') {
+    parsedResult.response = stripRelevantMemoryBlock(decodeUnicode(parsedResult.response));
+  }
+  validateParsedAction(parsedResult);
+  parsedResult.timestamp = now;
+  return parsedResult;
+}
+
+function appendChatProviderHistory(previousHistory, finalMessage, outputText, providerInfo, now) {
+  const nextHistory = [
+    ...(Array.isArray(previousHistory) ? previousHistory : []),
+    {
+      role: 'user',
+      parts: [{ text: finalMessage || 'Analyze this input.' }],
+      timestamp: now
+    },
+    {
+      role: 'model',
+      parts: [{ text: String(outputText || '') }],
+      timestamp: now,
+      providerInfo
+    }
+  ].slice(-MAX_STORED_HISTORY_MESSAGES);
+
+  writeChatHistory(cleanHistoryForStorage(nextHistory));
+}
+
 async function handleChat(message, base64Image = null, base64Audio = null) {
   try {
     const config = readConfig();
+    const images = normalizeImageList(base64Image);
+    const previousHistory = readChatHistory();
 
     let finalMessage = message;
     
@@ -456,183 +483,47 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
         }
     }
 
-    const providersToTry = getProviderAttemptOrder(config);
-
-    for (let i = 0; i < providersToTry.length; i++) {
-        const currentProv = providersToTry[i];
-        try {
-            if (currentProv === 'ollama') {
-                return withProviderInfo(await handleOllamaChat(finalMessage, base64Image, base64Audio, config), currentProv, config);
-            }
-            if (currentProv === 'anthropic') {
-                return withProviderInfo(await handleAnthropicChat(finalMessage, base64Image, config), currentProv, config);
-            }
-            if (currentProv === 'openai') {
-                return withProviderInfo(await handleOpenAIChat(finalMessage, base64Image, config), currentProv, config);
-            }
-            if (currentProv === 'local_openai') {
-                return withProviderInfo(await handleLocalOpenAIChat(finalMessage, base64Image, config), currentProv, config);
-            }
-            if (currentProv === 'huggingface') {
-                return withProviderInfo(await handleHuggingFaceChat(finalMessage, base64Image, config), currentProv, config);
-            }
-
-            const currentKey = resolveApiKey();
-            if (!currentKey) {
-                if (i === providersToTry.length - 1) {
-                    return withProviderInfo({
-                        response: "I couldn't find your Gemini API Key. Please run 'mint onboard' to set it up!",
-                        action: { type: "none", target: "" }
-                    }, currentProv, config);
-                }
-                console.warn("[Fallback System] Gemini API key missing. Skipping Gemini provider.");
-                continue;
-            }
-
-            if (!ai || activeApiKey !== currentKey) {
-                initAiClient();
-                createChat(readChatHistory());
-            }
-
-            return withProviderInfo(await handleGeminiChat(finalMessage, base64Image, base64Audio), currentProv, config);
-        } catch (error) {
-            console.error(`[Fallback System] Provider '${currentProv}' failed:`, error.message);
-            if (i === providersToTry.length - 1) {
-                console.error("[Fallback System] All available providers failed.");
-                throw error; // No more providers to fallback to
-            }
-            console.log(`[Fallback System] Switching to next available provider: '${providersToTry[i+1]}'`);
-            // Continue the loop to try the next provider
-        }
+    if (finalMessage && images.length === 0 && !base64Audio) {
+      const cached = memoryStore.getCachedResponse(finalMessage);
+      if (cached) return cached;
     }
+
+    const providersToTry = getProviderAttemptOrder(config);
+    const client = new providerAdapter.AgentProviderClient({
+      provider: providersToTry[0],
+      providerOrder: providersToTry,
+      config,
+      history: chatHistoryToProviderHistory(previousHistory),
+      systemInstruction: buildSystemPrompt(),
+      responseMimeType: 'application/json',
+      maxTokens: 4096
+    });
+    const observation = buildChatObservation(finalMessage, images, base64Audio);
+    const outputText = await client.sendMessage(observation);
+    const now = new Date().toISOString();
+    const provider = client.lastSuccessfulProvider || client.provider || providersToTry[0];
+    const providerInfo = {
+      provider,
+      model: getProviderModel(provider, config),
+      usage: client.getUsageSummary()
+    };
+    const parsedResult = parseChatProviderResponse(outputText, finalMessage, now);
+    parsedResult.providerInfo = providerInfo;
+    appendChatProviderHistory(previousHistory, finalMessage, outputText, providerInfo, now);
+
+    if (finalMessage && parsedResult.response) {
+      setImmediate(() => {
+        memoryStore.recordInteraction(finalMessage, parsedResult.response);
+        if (images.length === 0 && !base64Audio) {
+          memoryStore.cacheResponse(finalMessage, parsedResult);
+        }
+      });
+    }
+
+    return parsedResult;
   } catch (globalError) {
     console.error("handleChat error:", globalError);
     throw globalError;
-  }
-}
-
-async function handleGeminiChat(finalMessage, base64Image, base64Audio) {
-  try {
-    const images = normalizeImageList(base64Image);
-    const previousHistory = readChatHistory();
-    // 1. Check cache first for text-only messages
-    if (finalMessage && images.length === 0 && !base64Audio) {
-        const cached = memoryStore.getCachedResponse(finalMessage);
-        if (cached) return cached;
-    }
-
-    const desiredModel = resolveGeminiModel();
-    if (!chat || activeModel !== desiredModel) {
-        createChat(readChatHistory());
-    }
-
-    let aiResponse;
-    const parts = [];
-    if (finalMessage) {
-        parts.push({ text: buildMessageWithRelevantMemory(finalMessage) });
-    } else if (base64Audio && images.length === 0) {
-        // Provide a guiding prompt when only audio is provided to ensure Gemini follows instructions
-        parts.push({ text: "Please listen to this voice command and respond in Thai with the appropriate JSON action if needed." });
-    } else if (images.length === 0 && !base64Audio) {
-        parts.push({ text: "Analyze this input." });
-    }
-
-    for (const item of images) {
-        const image = imageDataUriToInlineData(item);
-        parts.push({
-            inlineData: image
-        });
-    }
-
-    if (base64Audio) {
-        // Extract MIME type from the data URI if present, fallback to audio/webm
-        let mimeType = "audio/webm";
-        const mimeMatch = base64Audio.match(/^data:(audio\/\w+);base64,/);
-        if (mimeMatch) {
-            mimeType = mimeMatch[1];
-        }
-        
-        const base64Data = base64Audio.replace(/^data:audio\/\w+;base64,/, '');
-        parts.push({
-            inlineData: { mimeType: mimeType, data: base64Data }
-        });
-    }
-
-    aiResponse = await chat.sendMessage({ message: parts });
-
-    // Save history with timestamps
-    const history = preserveHistoryMetadata(await chat.getHistory(), previousHistory, new Date().toISOString());
-    const now = new Date().toISOString();
-    
-    // Add timestamp to the last two messages (User and Model) if they don't have one
-    if (history.length >= 2) {
-        const modelMsg = history[history.length - 1];
-        const userMsg = history[history.length - 2];
-        if (!modelMsg.timestamp) modelMsg.timestamp = now;
-        if (!userMsg.timestamp) userMsg.timestamp = now;
-    } else if (history.length === 1) {
-        const msg = history[0];
-        if (!msg.timestamp) msg.timestamp = now;
-    }
-
-    writeChatHistory(cleanHistoryForStorage(history));
-
-    let outputText = '';
-    try {
-        // Robust text extraction
-        outputText = (typeof aiResponse.text === 'function') ? aiResponse.text() : (aiResponse.text || '');
-    } catch (e) {
-        outputText = String(aiResponse || '');
-    }
-
-    outputText = stripRelevantMemoryBlock(outputText);
-
-    let parsedResult;
-    try {
-      parsedResult = JSON.parse(outputText);
-    } catch (e) {
-      // Fallback in case the model failed to return pure JSON
-      console.error("Failed to parse JSON directly:", e);
-      const jsonMatch = outputText.match(/```json\n([\s\S]*?)\n```/) || outputText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsedResult = JSON.parse(jsonMatch[jsonMatch.length > 1 ? 1 : 0]);
-      } else {
-        parsedResult = {
-          response: outputText,
-          action: { type: "none", target: "" }
-        };
-      }
-    }
-
-    parsedResult = normalizeParsedResult(parsedResult, finalMessage);
-
-    // Decode any remaining unicode escapes in the response text
-    if (parsedResult && typeof parsedResult.response === 'string') {
-        parsedResult.response = decodeUnicode(parsedResult.response);
-        parsedResult.response = stripRelevantMemoryBlock(parsedResult.response);
-    }
-    
-    // Attach timestamp to the result
-    validateParsedAction(parsedResult);
-    parsedResult.timestamp = now;
-
-    // Record interaction for long-term memory (non-blocking)
-    if (finalMessage && parsedResult.response) {
-        setImmediate(() => {
-            memoryStore.recordInteraction(finalMessage, parsedResult.response);
-            // Cache text-only responses
-            if (images.length === 0 && !base64Audio) {
-                memoryStore.cacheResponse(finalMessage, parsedResult);
-            }
-        });
-    }
-
-    parsedResult.usageMetadata = aiResponse.usageMetadata || null;
-    return parsedResult;
-
-  } catch (error) {
-    console.error("AI API Error:", error);
-    throw error;
   }
 }
 
@@ -744,272 +635,6 @@ async function* handleGeminiChatStream(finalMessage, base64Image, base64Audio) {
     console.error('[Stream] Gemini stream error:', error);
     throw error;
   }
-}
-
-async function handleAnthropicChat(finalMessage, base64Image, config) {
-    const history = readChatHistory() || [];
-    const images = normalizeImageList(base64Image);
-    const apiKey = config.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
-    if (isPlaceholder(apiKey)) return { response: "กรุณาใส่ Anthropic API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
-
-    const systemPrompt = buildSystemPrompt();
-    
-    const messages = [];
-    for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
-        const role = msg.role === 'model' ? 'assistant' : 'user';
-        let text = Array.isArray(msg.parts) ? msg.parts.map(p => p.text || '').join('\n') : '';
-        if (text) messages.push({ role, content: text });
-    }
-
-    const content = [];
-    for (const item of images) {
-        const image = imageDataUriToInlineData(item);
-        content.push({
-            type: "image",
-            source: { type: "base64", media_type: image.mimeType, data: image.data }
-        });
-    }
-    content.push({ type: "text", text: finalMessage || "Analyze this." });
-    messages.push({ role: "user", content });
-
-    const response = await axios.post('https://api.anthropic.com/v1/messages', {
-        model: config.anthropicModel || 'claude-3-5-sonnet-latest',
-        max_tokens: 4096,
-        system: systemPrompt,
-        messages: messages
-    }, {
-        headers: {
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json'
-        }
-    });
-
-    const outputText = response.data.content[0].text;
-    history.push({ role: 'user', parts: [{ text: finalMessage }] });
-    history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_STORED_HISTORY_MESSAGES)));
-
-    return parseAiResponse(outputText);
-}
-
-async function handleOpenAIChat(finalMessage, base64Image, config) {
-    const history = readChatHistory() || [];
-    const images = normalizeImageList(base64Image);
-    const apiKey = config.openaiApiKey || process.env.OPENAI_API_KEY;
-    if (isPlaceholder(apiKey)) return { response: "กรุณาใส่ OpenAI API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
-
-    const systemPrompt = buildSystemPrompt();
-    
-    const messages = [{ role: "system", content: systemPrompt }];
-    for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
-        const role = msg.role === 'model' ? 'assistant' : 'user';
-        let text = Array.isArray(msg.parts) ? msg.parts.map(p => p.text || '').join('\n') : '';
-        if (text) messages.push({ role, content: text });
-    }
-
-    const content = [{ type: "text", text: finalMessage || "Analyze this." }];
-    for (const item of images) {
-        content.push({
-            type: "image_url",
-            image_url: { url: item }
-        });
-    }
-    messages.push({ role: "user", content });
-
-    const response = await axios.post('https://api.openai.com/v1/chat/completions', {
-        model: config.openaiModel || 'gpt-4o',
-        messages: messages,
-        response_format: { type: "json_object" }
-    }, {
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        }
-    });
-
-    const outputText = response.data.choices[0].message.content;
-    history.push({ role: 'user', parts: [{ text: finalMessage }] });
-    history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_STORED_HISTORY_MESSAGES)));
-
-    return parseAiResponse(outputText);
-}
-
-async function handleLocalOpenAIChat(finalMessage, base64Image, config) {
-    const history = readChatHistory() || [];
-    const images = normalizeImageList(base64Image);
-    const apiKey = 'lm-studio';
-    const baseUrl = config.localApiBaseUrl || 'http://localhost:1234/v1';
-
-    const systemPrompt = buildSystemPrompt();
-    
-    const messages = [{ role: "system", content: systemPrompt }];
-    for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
-        const role = msg.role === 'model' ? 'assistant' : 'user';
-        let text = Array.isArray(msg.parts) ? msg.parts.map(p => p.text || '').join('\n') : '';
-        if (text) messages.push({ role, content: text });
-    }
-
-    const content = [{ type: "text", text: finalMessage || "Analyze this." }];
-    for (const item of images) {
-        content.push({
-            type: "image_url",
-            image_url: { url: item }
-        });
-    }
-    messages.push({ role: "user", content });
-
-    const response = await axios.post(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
-        model: config.localModelName || 'local-model',
-        messages: messages,
-        // response_format json_object is sometimes problematic on weak local models, but required by our prompt.
-        // We'll keep it as some local servers like LM Studio support it for specific models.
-        // If not supported, the system prompt usually coerces it anyway.
-        response_format: { type: "json_object" }
-    }, {
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        }
-    });
-
-    const outputText = response.data.choices[0].message.content;
-    history.push({ role: 'user', parts: [{ text: finalMessage }] });
-    history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_STORED_HISTORY_MESSAGES)));
-
-    return parseAiResponse(outputText);
-}
-
-async function handleHuggingFaceChat(finalMessage, base64Image, config) {
-    const history = readChatHistory() || [];
-    const images = normalizeImageList(base64Image);
-    const apiKey = config.hfApiKey || process.env.HF_API_KEY;
-    if (isPlaceholder(apiKey)) return { response: "กรุณาใส่ Hugging Face API Key ในการตั้งค่าก่อนนะคะ", action: { type: "none" } };
-
-    const modelId = config.hfModel || 'meta-llama/Meta-Llama-3-8B-Instruct';
-    const baseUrl = `https://api-inference.huggingface.co/models/${modelId}/v1/chat/completions`;
-
-    const systemPrompt = buildSystemPrompt();
-    
-    const messages = [{ role: "system", content: systemPrompt }];
-    for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
-        const role = msg.role === 'model' ? 'assistant' : 'user';
-        let text = Array.isArray(msg.parts) ? msg.parts.map(p => p.text || '').join('\n') : '';
-        if (text) messages.push({ role, content: text });
-    }
-
-    const content = [{ type: "text", text: finalMessage || "Analyze this." }];
-    for (const item of images) {
-        content.push({
-            type: "image_url",
-            image_url: { url: item }
-        });
-    }
-    messages.push({ role: "user", content });
-
-    const response = await axios.post(baseUrl, {
-        model: modelId,
-        messages: messages,
-        max_tokens: 4096
-    }, {
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        }
-    });
-
-    const outputText = response.data.choices[0].message.content;
-    history.push({ role: 'user', parts: [{ text: finalMessage }] });
-    history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_STORED_HISTORY_MESSAGES)));
-
-    return parseAiResponse(outputText);
-}
-
-function parseAiResponse(outputText) {
-    let parsedResult;
-    try {
-        parsedResult = JSON.parse(outputText);
-    } catch (e) {
-        const jsonMatch = outputText.match(/```json\n([\s\S]*?)\n```/) || outputText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            parsedResult = JSON.parse(jsonMatch[jsonMatch.length > 1 ? 1 : 0]);
-        } else {
-            parsedResult = { response: outputText, action: { type: "none", target: "" } };
-        }
-    }
-    parsedResult = normalizeParsedResult(parsedResult);
-
-    if (parsedResult && typeof parsedResult.response === 'string') {
-        parsedResult.response = decodeUnicode(parsedResult.response);
-    }
-    validateParsedAction(parsedResult);
-    parsedResult.timestamp = new Date().toISOString();
-    return parsedResult;
-}
-
-async function handleOllamaChat(finalMessage, base64Image, base64Audio, config) {
-    const history = readChatHistory() || [];
-    const imageInputs = normalizeImageList(base64Image);
-    
-    const ollamaMessages = [
-        { role: 'system', content: buildSystemPrompt() }
-    ];
-    
-    for (const msg of history.slice(-MAX_HISTORY_MESSAGES)) {
-        const role = msg.role === 'model' ? 'assistant' : 'user';
-        let text = '';
-        if (Array.isArray(msg.parts)) {
-             text = msg.parts.map(p => p.text || '').join('\n');
-        }
-        if (text) ollamaMessages.push({ role, content: text });
-    }
-    
-    let currentContent = finalMessage || 'Analyze this input.';
-    let images = [];
-    for (const item of imageInputs) {
-        images.push(imageDataUriToBase64(item));
-    }
-    
-    if (base64Audio && imageInputs.length === 0 && !finalMessage) {
-        currentContent = "Please analyze this audio requirement based on text if any was transacted, otherwise reply with appropriate action.";
-    }
-    
-    const userMessage = { role: 'user', content: currentContent };
-    if (images.length > 0) userMessage.images = images;
-    
-    ollamaMessages.push(userMessage);
-    
-    const ollamaBaseUrl = (config.ollamaHost || 'http://localhost:11434').replace(/\/$/, '');
-    const response = await axios.post(`${ollamaBaseUrl}/api/chat`, {
-        model: config.ollamaModel || 'llama3:latest',
-        messages: ollamaMessages,
-        format: 'json',
-        stream: false
-    });
-    
-    const outputText = response.data.message.content;
-    
-    history.push({ role: 'user', parts: [{ text: currentContent }] });
-    history.push({ role: 'model', parts: [{ text: outputText }] });
-    writeChatHistory(cleanHistoryForStorage(history.slice(-MAX_STORED_HISTORY_MESSAGES)));
-    
-    let parsedResult;
-    try {
-        parsedResult = JSON.parse(outputText);
-    } catch(e) {
-        const jsonMatch = outputText.match(/```json\n([\s\S]*?)\n```/) || outputText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            parsedResult = JSON.parse(jsonMatch[jsonMatch.length > 1 ? 1 : 0]);
-        } else {
-            parsedResult = { response: outputText, action: { type: "none", target: "" } };
-        }
-    }
-    parsedResult = normalizeParsedResult(parsedResult, currentContent);
-    validateParsedAction(parsedResult);
-    return parsedResult;
 }
 
 function resetChat() {

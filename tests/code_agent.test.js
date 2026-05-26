@@ -97,6 +97,39 @@ describe('code_agent helpers', () => {
         }
     });
 
+    test('buildUnifiedDiffPreview merges nearby hunks through git diff style output', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-merged-diff-'));
+        const targetFile = path.join(tempDir, 'guide.md');
+        fs.writeFileSync(targetFile, [
+            '# Title',
+            'Intro',
+            '## One',
+            'Body one',
+            '## Two',
+            'Body two'
+        ].join('\n'));
+
+        try {
+            const preview = _helpers.buildUnifiedDiffPreview(tempDir, {
+                path: 'guide.md',
+                hunks: [
+                    { oldText: '## One', newText: '## One - Updated' },
+                    { oldText: '## Two', newText: '## Two - Updated' }
+                ]
+            });
+
+            const hunkCount = (preview.match(/^@@/gm) || []).length;
+            expect(hunkCount).toBe(1);
+            expect(preview).toContain('-## One');
+            expect(preview).toContain('+## One - Updated');
+            expect(preview).toContain('-## Two');
+            expect(preview).toContain('+## Two - Updated');
+        } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
     test('formatPlanPreview displays a user-visible multi-file plan', () => {
         const { _helpers } = require('../src/CLI/code_agent');
         const preview = _helpers.formatPlanPreview({
@@ -112,6 +145,53 @@ describe('code_agent helpers', () => {
             '- แก้ src/CLI/code_agent.js',
             '- เพิ่ม test ใน tests/code_agent.test.js'
         ].join('\n'));
+    });
+
+    test('formatWritePreview renders full-file writes as unified diff', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-write-diff-'));
+        const targetFile = path.join(tempDir, 'demo.txt');
+        fs.writeFileSync(targetFile, 'old\n');
+
+        try {
+            const preview = _helpers.formatWritePreview(tempDir, 'demo.txt', 'new\n');
+            expect(preview).toContain('--- a/demo.txt');
+            expect(preview).toContain('+++ b/demo.txt');
+            expect(preview).toContain('-old');
+            expect(preview).toContain('+new');
+        } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test('buildApprovalWarnings flags scratch paths and mismatched bio guide content', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const warnings = _helpers.buildApprovalWarnings(
+            'scratch/rag_test_folder/bio.txt',
+            '# NPM Publishing Guide\nRun npm publish.'
+        );
+
+        expect(warnings.join('\n')).toMatch(/scratch/);
+        expect(warnings.join('\n')).toMatch(/profile\/bio|guide or publishing/);
+    });
+
+    test('validateEditExplanation requires file and reason before edits', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        expect(_helpers.validateEditExplanation('write_file', {
+            path: 'src/demo.js'
+        }, 'I will edit src/demo.js because this file owns the demo behavior.')).toEqual({ ok: true });
+
+        expect(_helpers.validateEditExplanation('write_file', {
+            path: 'src/demo.js'
+        }, 'I will make the change now.').ok).toBe(false);
+
+        expect(_helpers.validateEditExplanation('apply_patch', {
+            patch: { path: 'scratch/demo.txt' }
+        }, 'I will edit scratch/demo.txt because this is intentionally disposable test content.')).toEqual({ ok: true });
+
+        expect(_helpers.validateEditExplanation('apply_patch', {
+            patch: { path: 'scratch/demo.txt' }
+        }, 'I will edit scratch/demo.txt because it has the target text.').ok).toBe(false);
     });
 
     test('requiresMultiFilePlan blocks a second file edit without approved plan', () => {
@@ -134,4 +214,5 @@ describe('code_agent helpers', () => {
             path: 'tests/code_agent.test.js'
         }, editPlanState)).toBe(false);
     });
+
 });

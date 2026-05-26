@@ -164,11 +164,83 @@ function splitDiffStatSegments(value) {
     ].filter(part => part.text);
 }
 
+function parseUnifiedDiffPreview(preview) {
+    const lines = String(preview || '').replace(/\r\n/g, '\n').split('\n');
+    const files = [];
+    let current = null;
+
+    for (const line of lines) {
+        if (line.startsWith('--- a/')) {
+            current = {
+                path: line.slice('--- a/'.length),
+                additions: 0,
+                deletions: 0,
+                lines: []
+            };
+            files.push(current);
+            continue;
+        }
+
+        if (!current) continue;
+        if (line.startsWith('+++ b/')) {
+            current.path = line.slice('+++ b/'.length) || current.path;
+            continue;
+        }
+
+        if (line.startsWith('@@')) {
+            current.lines.push({ type: 'hunk', text: line });
+            continue;
+        }
+
+        if (line.startsWith('+')) {
+            current.additions += 1;
+            current.lines.push({ type: 'add', text: line });
+            continue;
+        }
+
+        if (line.startsWith('-')) {
+            current.deletions += 1;
+            current.lines.push({ type: 'delete', text: line });
+            continue;
+        }
+
+        current.lines.push({ type: 'context', text: line });
+    }
+
+    return files.filter(file => file.lines.length > 0 || file.additions > 0 || file.deletions > 0);
+}
+
+function isUnifiedDiffPreview(preview) {
+    return parseUnifiedDiffPreview(preview).length > 0;
+}
+
+function getDiffLineStyle(line = {}) {
+    if (line.type === 'add') return { color: 'greenBright' };
+    if (line.type === 'delete') return { color: 'redBright' };
+    if (line.type === 'hunk') return { color: 'cyanBright' };
+    return { color: 'gray', dimColor: true };
+}
+
 function shouldAppendMessage(role, text) {
     if (role === 'assistant' || role === 'system') {
         return String(text || '').trim().length > 0;
     }
     return true;
+}
+
+function appendInlineImageToken(value, imageIndex) {
+    const token = `[Image #${imageIndex}]`;
+    const text = String(value || '').replace(/\s*[\r\n]+\s*/g, ' ').trimEnd();
+    return text ? `${text} ${token}` : token;
+}
+
+function removeImageToken(value, imageIndex) {
+    const tokenPattern = new RegExp(`\\s*\\[Image #${imageIndex}\\]`, 'g');
+    return String(value || '').replace(tokenPattern, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+function removeAllImageTokens(value) {
+    return String(value || '').replace(/\s*\[Image #\d+\]/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
 /**
@@ -193,7 +265,6 @@ async function createChatUI(options) {
         const [model, setModel] = useState('');
         const [workspace, setWorkspace] = useState(process.cwd());
         const [pendingImages, setPendingImages] = useState([]);
-        const [pendingImagePrefix, setPendingImagePrefix] = useState('');
         const [pendingPaste, setPendingPaste] = useState(null);
         const [pendingPastePrefix, setPendingPastePrefix] = useState('');
         const [pendingApproval, setPendingApproval] = useState(null);
@@ -203,7 +274,6 @@ async function createChatUI(options) {
         const [selectedIndex, setSelectedIndex] = useState(0);
         const inputRef = React.useRef(input);
         const pendingImagesRef = React.useRef(pendingImages);
-        const pendingImagePrefixRef = React.useRef(pendingImagePrefix);
         const pendingPasteRef = React.useRef(pendingPaste);
         const pendingPastePrefixRef = React.useRef(pendingPastePrefix);
         const liveAssistantRef = React.useRef(liveAssistant);
@@ -235,10 +305,6 @@ async function createChatUI(options) {
         useEffect(() => {
             pendingImagesRef.current = pendingImages;
         }, [pendingImages]);
-
-        useEffect(() => {
-            pendingImagePrefixRef.current = pendingImagePrefix;
-        }, [pendingImagePrefix]);
 
         useEffect(() => {
             pendingPasteRef.current = pendingPaste;
@@ -360,7 +426,11 @@ async function createChatUI(options) {
                 return next;
             },
             getFastMode: () => fastModeRef.current,
-            setInputText: (val) => setInput(val || ''),
+            setInputText: (val) => {
+                const next = val || '';
+                inputRef.current = next;
+                setInput(next);
+            },
             setPendingPasteText: (text) => {
                 const normalized = normalizeInputText(text);
                 setPendingPaste({ text: normalized, label: `[Pasted Content ${normalized.length} chars]` });
@@ -371,12 +441,12 @@ async function createChatUI(options) {
             updateWorkspace: (val) => setWorkspace(val),
             attachImage: (image) => {
                 setPendingImages(prev => {
-                    if (prev.length === 0) {
-                        const prefix = normalizeInputText(inputRef.current).trim();
-                        setPendingImagePrefix(prefix);
-                        pendingImagePrefixRef.current = prefix;
-                        setInput('');
-                    }
+                    const imageIndex = prev.length + 1;
+                    setInput(current => {
+                        const next = appendInlineImageToken(current, imageIndex);
+                        inputRef.current = next;
+                        return next;
+                    });
                     return [...prev, image];
                 });
             },
@@ -461,6 +531,7 @@ async function createChatUI(options) {
                         type: request.type || 'action',
                         label: request.label || 'Requested action',
                         preview: request.preview || '',
+                        warnings: Array.isArray(request.warnings) ? request.warnings.filter(Boolean) : [],
                         resolve
                     };
                     pendingApprovalRef.current = approval;
@@ -476,13 +547,26 @@ async function createChatUI(options) {
                 const resolveApproval = (approved) => {
                     pendingApprovalRef.current = null;
                     setPendingApproval(null);
-                    setHistory(prev => [...prev, {
-                        role: 'system',
-                        label: 'Approval',
-                        labelColor: approved ? 'greenBright' : 'redBright',
-                        text: `${approved ? 'Approved' : 'Denied'}: ${approval.label}`,
-                        time: new Date()
-                    }]);
+                    setHistory(prev => {
+                        if (approved && isUnifiedDiffPreview(approval.preview)) {
+                            return [...prev, {
+                                role: 'system',
+                                label: 'Edited',
+                                labelColor: 'greenBright',
+                                preview: approval.preview,
+                                isDiffPreview: true,
+                                time: new Date()
+                            }];
+                        }
+
+                        return [...prev, {
+                            role: 'system',
+                            label: 'Approval',
+                            labelColor: approved ? 'greenBright' : 'redBright',
+                            text: `${approved ? 'Approved' : 'Denied'}: ${approval.label}`,
+                            time: new Date()
+                        }];
+                    });
                     approval.resolve(approved);
                 };
 
@@ -512,8 +596,11 @@ async function createChatUI(options) {
             if (key.escape && pendingImagesRef.current.length > 0) {
                 setPendingImages([]);
                 pendingImagesRef.current = [];
-                setPendingImagePrefix('');
-                pendingImagePrefixRef.current = '';
+                setInput(current => {
+                    const next = removeAllImageTokens(current);
+                    inputRef.current = next;
+                    return next;
+                });
                 return;
             }
 
@@ -526,12 +613,15 @@ async function createChatUI(options) {
             }
 
             if (key.ctrl && key.backspace && pendingImagesRef.current.length > 0) {
-                setPendingImages(prev => prev.slice(0, -1));
-                pendingImagesRef.current = pendingImagesRef.current.slice(0, -1);
-                if (pendingImagesRef.current.length === 0) {
-                    setPendingImagePrefix('');
-                    pendingImagePrefixRef.current = '';
-                }
+                const imageIndex = pendingImagesRef.current.length;
+                const nextImages = pendingImagesRef.current.slice(0, -1);
+                pendingImagesRef.current = nextImages;
+                setPendingImages(nextImages);
+                setInput(current => {
+                    const next = removeImageToken(current, imageIndex);
+                    inputRef.current = next;
+                    return next;
+                });
                 return;
             }
 
@@ -551,11 +641,13 @@ async function createChatUI(options) {
                         .then((image) => {
                             if (image) {
                                 setPendingImages(prev => {
-                                    if (prev.length === 0) {
-                                        const prefix = normalizeInputText(inputBeforePaste).trim();
-                                        setPendingImagePrefix(prefix);
-                                        pendingImagePrefixRef.current = prefix;
-                                    }
+                                    const imageIndex = prev.length + 1;
+                                    setInput(current => {
+                                        const cleaned = removePasteArtifact(current);
+                                        const next = appendInlineImageToken(cleaned || inputBeforePaste, imageIndex);
+                                        inputRef.current = next;
+                                        return next;
+                                    });
                                     return [...prev, image];
                                 });
                             }
@@ -603,14 +695,13 @@ async function createChatUI(options) {
         const handleSubmit = (value) => {
             const text = normalizeInputText(value).trim();
             const images = pendingImagesRef.current;
-            const imagePrefix = normalizeInputText(pendingImagePrefixRef.current).trim();
             const imageLabels = images.map((_, index) => `[Image #${index + 1}]`).join(' ');
             const pasted = pendingPasteRef.current;
             const pastePrefix = normalizeInputText(pendingPastePrefixRef.current).trim();
             const submittedText = pasted
                 ? [pastePrefix, pasted.text, text].filter(Boolean).join('\n\n')
                 : images.length > 0
-                    ? [imagePrefix, imageLabels, text].filter(Boolean).join('\n\n')
+                    ? (text || imageLabels)
                     : text;
             if (!submittedText && images.length === 0) return;
 
@@ -624,11 +715,9 @@ async function createChatUI(options) {
 
             setInput('');
             setPendingImages([]);
-            setPendingImagePrefix('');
             setPendingPaste(null);
             setPendingPastePrefix('');
             pendingImagesRef.current = [];
-            pendingImagePrefixRef.current = '';
             pendingPasteRef.current = null;
             pendingPastePrefixRef.current = '';
             onSubmit(submittedText, { images, pasted });
@@ -671,6 +760,51 @@ async function createChatUI(options) {
             );
         };
 
+        const renderDiffLine = (line, index) => {
+            const style = getDiffLineStyle(line);
+            return h(Text, {
+                key: `diff-line-${index}`,
+                ...style
+            }, line.text || ' ');
+        };
+
+        const renderDiffPreview = (preview) => {
+            const files = parseUnifiedDiffPreview(preview);
+            if (files.length === 0) return null;
+
+            return h(Box, { flexDirection: 'column', marginTop: 1 },
+                ...files.map((file, fileIndex) =>
+                    h(Box, { key: `approval-diff-${fileIndex}`, flexDirection: 'column', marginBottom: 1 },
+                        h(Box, null,
+                            h(Text, { color: 'gray' }, '• '),
+                            h(Text, { bold: true, color: 'white' }, `Edited ${file.path} `),
+                            h(Text, { color: 'gray' }, '('),
+                            h(Text, { color: 'greenBright' }, `+${file.additions}`),
+                            h(Text, { color: 'gray' }, ' '),
+                            h(Text, { color: 'redBright' }, `-${file.deletions}`),
+                            h(Text, { color: 'gray' }, ')')
+                        ),
+                        h(Box, { flexDirection: 'column', paddingLeft: 2 },
+                            ...file.lines.slice(0, 120).map(renderDiffLine),
+                            file.lines.length > 120 && h(Text, { color: 'gray', dimColor: true }, `... ${file.lines.length - 120} more diff lines`)
+                        )
+                    )
+                )
+            );
+        };
+
+        const renderApprovalPreview = (approval) => {
+            const preview = approval && approval.preview ? approval.preview : '';
+            const diffPreview = renderDiffPreview(preview);
+            if (!diffPreview) {
+                return preview && preview !== approval.label
+                    ? h(Box, null, h(Text, { color: 'gray', dimColor: true }, preview))
+                    : null;
+            }
+
+            return diffPreview;
+        };
+
         const renderMessage = (msg, index, keyPrefix = 'msg') => {
             if (msg.isThought) {
                 return h(Box, { key: `${keyPrefix}-${index}`, flexDirection: 'row', marginBottom: 0, paddingLeft: 2 },
@@ -688,6 +822,12 @@ async function createChatUI(options) {
                         h(Text, { color: 'gray' }, '└ '),
                         ...renderActivityDetail(msg.activityDetail || msg.text)
                     )
+                );
+            }
+
+            if (msg.isDiffPreview) {
+                return h(Box, { key: `${keyPrefix}-${index}`, flexDirection: 'column', marginBottom: 0 },
+                    renderDiffPreview(msg.preview || '')
                 );
             }
 
@@ -748,18 +888,33 @@ async function createChatUI(options) {
                 pendingApproval && h(Box, {
                     flexDirection: 'column',
                     borderStyle: 'single',
-                    borderColor: approvalChoice === 'deny' ? 'redBright' : 'cyanBright',
+                    borderColor: 'cyanBright',
                     paddingX: 1,
-                    marginBottom: 1
+                    marginBottom: 0
                 },
                     h(Box, null,
                         h(Text, { bold: true, color: 'greenBright' }, 'Approval '),
                         h(Text, { color: 'cyanBright' }, `[${pendingApproval.type}] `),
                         h(Text, { color: 'white' }, pendingApproval.label)
                     ),
-                    pendingApproval.preview && pendingApproval.preview !== pendingApproval.label && h(Box, null,
-                        h(Text, { color: 'gray', dimColor: true }, pendingApproval.preview)
+                    pendingApproval.warnings && pendingApproval.warnings.length > 0 && h(Box, { flexDirection: 'column', marginTop: 1, marginBottom: 1 },
+                        ...pendingApproval.warnings.map((warning, index) =>
+                            h(Box, { key: `approval-warning-${index}` },
+                                h(Text, { color: 'yellowBright' }, 'Warning: '),
+                                h(Text, { color: 'yellowBright' }, warning)
+                            )
+                        )
                     ),
+                    renderApprovalPreview(pendingApproval)
+                ),
+
+                pendingApproval && h(Box, {
+                    flexDirection: 'row',
+                    borderStyle: 'single',
+                    borderColor: approvalChoice === 'deny' ? 'redBright' : 'greenBright',
+                    paddingX: 1,
+                    marginBottom: 0
+                },
                     h(Box, null,
                         h(Text, {
                             color: approvalChoice === 'approve' ? 'black' : 'greenBright',
@@ -779,8 +934,7 @@ async function createChatUI(options) {
                 // Compact Input Area
                 h(Box, { borderStyle: 'round', borderColor: pendingApproval ? 'gray' : 'greenBright', paddingX: 1, flexDirection: 'column' },
                     pendingImages.length > 0 && h(Box, null,
-                        pendingImagePrefix && h(Text, { color: 'cyanBright' }, '[Text before] '),
-                        h(Text, { color: 'greenBright' }, pendingImages.map((_, index) => `[Image #${index + 1}]`).join(' ') + ' '),
+                        h(Text, { color: 'greenBright' }, `${pendingImages.length} image${pendingImages.length === 1 ? '' : 's'} attached `),
                         h(Text, { color: 'gray' }, 'Enter to send, Ctrl+Backspace remove, Esc clear')
                     ),
                     pendingPaste && h(Box, null,
@@ -855,4 +1009,21 @@ async function createChatUI(options) {
     };
 }
 
-module.exports = { createChatUI, _helpers: { cleanDisplayText, stripInlineMarkdown, compactPathLabel, formatActivityStep, formatDuration, splitDiffStatSegments, shouldAppendMessage } };
+module.exports = {
+    createChatUI,
+    _helpers: {
+        cleanDisplayText,
+        stripInlineMarkdown,
+        compactPathLabel,
+        formatActivityStep,
+        formatDuration,
+        splitDiffStatSegments,
+        parseUnifiedDiffPreview,
+        isUnifiedDiffPreview,
+        getDiffLineStyle,
+        shouldAppendMessage,
+        appendInlineImageToken,
+        removeImageToken,
+        removeAllImageTokens
+    }
+};

@@ -41,6 +41,13 @@ const TOOL_REGISTRY = Object.freeze({
         important: true,
         description: 'Run a non-destructive shell command after user approval.'
     },
+    verify: {
+        permission: 'approval',
+        required: [],
+        codeAgentOnly: true,
+        important: true,
+        description: 'Run test/build/lint verification commands after user approval.'
+    },
     plan: {
         permission: 'approval',
         required: ['plan'],

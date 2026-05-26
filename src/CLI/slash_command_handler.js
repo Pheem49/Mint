@@ -169,8 +169,8 @@ async function handleSlashCommandUI(
             try {
                 const image = loadImageAsDataUri(imagePath);
                 if (helpers.attachImage) {
-                    helpers.attachImage({ label: image.path, image });
                     if (prompt && helpers.setInputText) helpers.setInputText(prompt);
+                    helpers.attachImage({ label: image.path, image });
                     appendMessage('system', 'Attached image. Press Enter to send.');
                 } else {
                     appendMessage('error', 'Image attachment is not available in this UI.');
@@ -186,9 +186,9 @@ async function handleSlashCommandUI(
             try {
                 const image = loadClipboardImageAsDataUri();
                 if (helpers.attachImage) {
-                    helpers.attachImage({ label: image.path, image });
                     const prompt = args.join(' ').trim();
                     if (prompt && helpers.setInputText) helpers.setInputText(prompt);
+                    helpers.attachImage({ label: image.path, image });
                     appendMessage('system', 'Attached clipboard image. Press Enter to send.');
                 } else {
                     appendMessage('error', 'Image attachment is not available in this UI.');

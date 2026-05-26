@@ -23,6 +23,10 @@ let isProcessingTask = false;
 async function startAgent() {
     console.log(`\n${colors.mint}${colors.bright}[Mint-Agent] Background agent started.${colors.reset}`);
     console.log(`${colors.gray}[Mint-Agent] Monitoring system events and task queue...${colors.reset}\n`);
+    const resumed = taskManager.resumeRunningTasks();
+    if (resumed.length > 0) {
+        console.log(`${colors.gray}[Mint-Agent] Re-queued ${resumed.length} interrupted task(s).${colors.reset}`);
+    }
 
     // Initialize System Monitoring
     systemEvents.startMonitoring();
@@ -70,25 +74,40 @@ async function checkTaskQueue() {
     console.log(`\n${colors.mint}[Agent] Picking up task: ${task.description}${colors.reset}`);
     
     taskManager.updateTask(task.id, { status: 'running' });
+    taskManager.addCheckpoint(task.id, {
+        phase: 'started',
+        message: task.description
+    });
     sendNotification("🚀 เริ่มทำงานให้แล้วนะคะ", `กำลังดำเนินการ: ${task.description}`);
 
     try {
         const result = await executeAutonomousTask(task.description, (progress) => {
             console.log(`${colors.gray}[Progress] ${progress}${colors.reset}`);
+            taskManager.addCheckpoint(task.id, {
+                phase: 'progress',
+                message: progress
+            });
             // Send periodic progress notifications if important
             if (progress.includes('เสนอให้รันคำสั่ง')) {
                 sendNotification("💡 มิ้นท์มีข้อแนะนำค่ะ", progress);
             }
-        });
+        }, { taskId: task.id });
 
+        taskManager.addArtifact(task.id, {
+            type: 'final_result',
+            content: result
+        });
         taskManager.updateTask(task.id, { status: 'completed', result });
         sendNotification("✅ งานเสร็จเรียบร้อยแล้วค่ะ!", result);
         console.log(`\n${colors.mint}[Agent] Task completed successfully.${colors.reset}`);
 
     } catch (err) {
         console.error('[Agent] Task execution failed:', err);
-        taskManager.updateTask(task.id, { status: 'failed', result: err.message });
+        const next = taskManager.failTaskWithRetry(task.id, err.message);
         sendNotification("❌ เกิดข้อผิดพลาดในการทำงาน", err.message);
+        if (next && next.status === 'pending') {
+            console.log(`${colors.gray}[Agent] Task scheduled for retry (${next.retryCount}/${next.maxRetries}).${colors.reset}`);
+        }
     } finally {
         isProcessingTask = false;
     }

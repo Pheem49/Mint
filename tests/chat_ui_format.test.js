@@ -66,4 +66,49 @@ describe('CLI chat UI formatting', () => {
             { text: ')', color: 'gray' }
         ]);
     });
+
+    test('parses unified diff previews for approval rendering', () => {
+        const files = _helpers.parseUnifiedDiffPreview([
+            '--- a/src/demo.js',
+            '+++ b/src/demo.js',
+            '@@ -1,2 +1,2 @@',
+            '-const oldValue = true;',
+            '+const newValue = true;',
+            ' context'
+        ].join('\n'));
+
+        expect(files).toEqual([{
+            path: 'src/demo.js',
+            additions: 1,
+            deletions: 1,
+            lines: [
+                { type: 'hunk', text: '@@ -1,2 +1,2 @@' },
+                { type: 'delete', text: '-const oldValue = true;' },
+                { type: 'add', text: '+const newValue = true;' },
+                { type: 'context', text: ' context' }
+            ]
+        }]);
+        expect(_helpers.isUnifiedDiffPreview('plain text')).toBe(false);
+    });
+
+    test('styles diff lines with foreground colors only', () => {
+        expect(_helpers.getDiffLineStyle({ type: 'add' })).toEqual({ color: 'greenBright' });
+        expect(_helpers.getDiffLineStyle({ type: 'delete' })).toEqual({ color: 'redBright' });
+        expect(_helpers.getDiffLineStyle({ type: 'hunk' })).toEqual({ color: 'cyanBright' });
+        expect(_helpers.getDiffLineStyle({ type: 'context' })).toEqual({ color: 'gray', dimColor: true });
+        expect(_helpers.getDiffLineStyle({ type: 'add' })).not.toHaveProperty('backgroundColor');
+        expect(_helpers.getDiffLineStyle({ type: 'delete' })).not.toHaveProperty('backgroundColor');
+    });
+
+    test('inserts image placeholders inline with the typed prompt', () => {
+        expect(_helpers.appendInlineImageToken('ฉันอยากทำ', 1)).toBe('ฉันอยากทำ [Image #1]');
+        expect(_helpers.appendInlineImageToken('ฉันอยากทำ ', 1)).toBe('ฉันอยากทำ [Image #1]');
+        expect(_helpers.appendInlineImageToken('', 1)).toBe('[Image #1]');
+        expect(_helpers.appendInlineImageToken('เทียบ [Image #1] กับ', 2)).toBe('เทียบ [Image #1] กับ [Image #2]');
+    });
+
+    test('removes inline image placeholders when attachments are removed', () => {
+        expect(_helpers.removeImageToken('ฉันอยากทำ [Image #1] ต่อ', 1)).toBe('ฉันอยากทำ ต่อ');
+        expect(_helpers.removeAllImageTokens('ดู [Image #1] กับ [Image #2] หน่อย')).toBe('ดู กับ หน่อย');
+    });
 });

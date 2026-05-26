@@ -57,6 +57,12 @@ function addTask(description) {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         steps: [],
+        subtasks: [],
+        checkpoints: [],
+        artifacts: [],
+        retryCount: 0,
+        maxRetries: 1,
+        lastCheckpointAt: null,
         result: null
     };
     tasks.push(newTask);
@@ -80,6 +86,120 @@ function updateTask(id, updates) {
     return null;
 }
 
+function getTask(id) {
+    return readTasks().find(t => t.id === id) || null;
+}
+
+function normalizeTask(task) {
+    return {
+        ...task,
+        steps: Array.isArray(task.steps) ? task.steps : [],
+        subtasks: Array.isArray(task.subtasks) ? task.subtasks : [],
+        checkpoints: Array.isArray(task.checkpoints) ? task.checkpoints : [],
+        artifacts: Array.isArray(task.artifacts) ? task.artifacts : [],
+        retryCount: Number.isFinite(task.retryCount) ? task.retryCount : 0,
+        maxRetries: Number.isFinite(task.maxRetries) ? task.maxRetries : 1
+    };
+}
+
+function mutateTask(id, mutator) {
+    const tasks = readTasks();
+    const idx = tasks.findIndex(t => t.id === id);
+    if (idx === -1) return null;
+    const next = normalizeTask(tasks[idx]);
+    mutator(next);
+    next.updatedAt = new Date().toISOString();
+    tasks[idx] = next;
+    writeTasks(tasks);
+    return next;
+}
+
+function addSubtask(taskId, title, extra = {}) {
+    return mutateTask(taskId, task => {
+        task.subtasks.push({
+            id: `${taskId}-${task.subtasks.length + 1}`,
+            title,
+            status: extra.status || 'pending',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            ...extra
+        });
+    });
+}
+
+function updateSubtask(taskId, subtaskId, updates = {}) {
+    return mutateTask(taskId, task => {
+        const subtask = task.subtasks.find(item => item.id === subtaskId);
+        if (!subtask) return;
+        Object.assign(subtask, updates, { updatedAt: new Date().toISOString() });
+    });
+}
+
+function addCheckpoint(taskId, checkpoint = {}) {
+    return mutateTask(taskId, task => {
+        const entry = {
+            id: `${taskId}-checkpoint-${task.checkpoints.length + 1}`,
+            time: new Date().toISOString(),
+            ...checkpoint
+        };
+        task.checkpoints.push(entry);
+        task.lastCheckpointAt = entry.time;
+        task.steps.push(entry);
+    });
+}
+
+function addArtifact(taskId, artifact = {}) {
+    return mutateTask(taskId, task => {
+        task.artifacts.push({
+            id: `${taskId}-artifact-${task.artifacts.length + 1}`,
+            time: new Date().toISOString(),
+            ...artifact
+        });
+    });
+}
+
+function failTaskWithRetry(id, errorMessage) {
+    return mutateTask(id, task => {
+        const retryCount = Number(task.retryCount) || 0;
+        const maxRetries = Number.isFinite(task.maxRetries) ? task.maxRetries : 1;
+        task.result = errorMessage;
+        task.retryCount = retryCount + 1;
+        task.status = task.retryCount <= maxRetries ? 'pending' : 'failed';
+        const checkpoint = {
+            id: `${id}-checkpoint-${task.checkpoints.length + 1}`,
+            time: new Date().toISOString(),
+            phase: task.status === 'pending' ? 'retry_scheduled' : 'failed',
+            message: errorMessage,
+            retryCount: task.retryCount,
+            maxRetries
+        };
+        task.checkpoints.push(checkpoint);
+        task.steps.push(checkpoint);
+    });
+}
+
+function resumeRunningTasks() {
+    const resumed = [];
+    const tasks = readTasks().map(task => {
+        if (task.status !== 'running') return task;
+        const normalized = normalizeTask(task);
+        normalized.status = 'pending';
+        const checkpoint = {
+            id: `${normalized.id}-checkpoint-${normalized.checkpoints.length + 1}`,
+            time: new Date().toISOString(),
+            phase: 'resume_after_restart',
+            message: 'Task was running during shutdown and has been re-queued.'
+        };
+        normalized.checkpoints.push(checkpoint);
+        normalized.steps.push(checkpoint);
+        normalized.updatedAt = new Date().toISOString();
+        resumed.push(normalized);
+        return normalized;
+    });
+    writeTasks(tasks);
+    return resumed;
+}
+
 function clearCompletedTasks() {
     const tasks = readTasks();
     const activeTasks = tasks.filter(t => t.status === 'pending' || t.status === 'running');
@@ -88,8 +208,15 @@ function clearCompletedTasks() {
 
 module.exports = {
     addTask,
+    addArtifact,
+    addCheckpoint,
+    addSubtask,
+    failTaskWithRetry,
+    getTask,
     getPendingTask,
+    resumeRunningTasks,
     updateTask,
+    updateSubtask,
     readTasks,
     clearCompletedTasks
 };
