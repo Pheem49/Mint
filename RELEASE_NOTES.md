@@ -80,6 +80,9 @@ The actual image file remains in the local Pictures folder when it was sent by t
   - text before image
   - image labels
   - text after image
+- Code Agent `search_code` can now scope searches to a relative file or folder with `input.path`, avoiding whole-project scans when the likely area is known.
+- Scoped search activity now displays the target folder, for example `Search requestApproval in src/CLI`.
+- Code Agent search heuristics now inspect or use the current project layout before choosing a scoped search path, so Mint works better across projects with different structures.
 
 #### Provider and Vision Handling
 
@@ -89,5 +92,5 @@ The actual image file remains in the local Pictures folder when it was sent by t
 
 ### Current Test Status
 
-- **137 tests passed**
-- **20 test suites passed**
+- **190 tests passed**
+- **29 test suites passed**

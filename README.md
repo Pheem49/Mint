@@ -116,7 +116,7 @@ Mint CLI is not just a chat wrapper. It is a workspace-aware agent loop.
 - **Live Answer Rendering:** Final answers are streamed into a single Mint message block as they arrive.
 - **Conversational + Coding in One Flow:** Casual messages can finish directly; coding tasks can inspect, plan, edit, and verify.
 - **Workspace Context:** Reads current path, git status, diff summary, package scripts, and previous workspace session memory.
-- **Tool Use:** Supports web search, file listing, file reading, code search, path finding, shell commands, patch edits, file writes, opening folders, and asking the user.
+- **Tool Use:** Supports web search, file listing, file reading, scoped code search, path finding, shell commands, patch edits, file writes, opening folders, and asking the user.
 - **Approval Flow:** Shell commands, patches, and full-file writes require user approval.
 - **Provider Support:** Gemini, OpenAI, Anthropic, and local OpenAI-compatible endpoints for agent tasks.
 - **Agent Collaboration Option:** Optional reviewer pass can be enabled for longer tasks.
