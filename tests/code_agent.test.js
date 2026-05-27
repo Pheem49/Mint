@@ -330,4 +330,52 @@ describe('code_agent helpers', () => {
         expect(_helpers.getMissingPlanFiles(editPlanState)).toEqual([]);
     });
 
+    test('isReadOnlyTask detects no-edit analysis requests', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+
+        expect(_helpers.isReadOnlyTask('อ่านไฟล์นี้แล้วสรุปให้หน่อย ห้ามแก้ไฟล์')).toBe(true);
+        expect(_helpers.isReadOnlyTask('Please inspect this file, do not edit anything.')).toBe(true);
+        expect(_helpers.isReadOnlyTask('ช่วยสร้างเว็บ HBD ให้หน่อย')).toBe(false);
+    });
+
+    test('isWriteLikeAction identifies actions blocked for read-only tasks', () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+
+        expect(_helpers.isWriteLikeAction('plan')).toBe(true);
+        expect(_helpers.isWriteLikeAction('apply_patch')).toBe(true);
+        expect(_helpers.isWriteLikeAction('write_file')).toBe(true);
+        expect(_helpers.isWriteLikeAction('read_file')).toBe(false);
+        expect(_helpers.isWriteLikeAction('search_code')).toBe(false);
+    });
+
+    test('searchCode can be scoped to a relative workspace path', async () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-search-'));
+
+        try {
+            fs.mkdirSync(path.join(tempDir, 'src', 'CLI'), { recursive: true });
+            fs.mkdirSync(path.join(tempDir, 'src', 'UI'), { recursive: true });
+            fs.writeFileSync(path.join(tempDir, 'src', 'CLI', 'agent.js'), 'const requestApproval = true;\n', 'utf8');
+            fs.writeFileSync(path.join(tempDir, 'src', 'UI', 'renderer.js'), 'const requestApproval = false;\n', 'utf8');
+
+            const result = await _helpers.searchCode(tempDir, 'requestApproval', 'src/CLI');
+
+            expect(result).toContain('agent.js');
+            expect(result).not.toContain('renderer.js');
+        } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test('searchCode rejects paths outside the workspace', async () => {
+        const { _helpers } = require('../src/CLI/code_agent');
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-search-safety-'));
+
+        try {
+            await expect(_helpers.searchCode(tempDir, 'anything', '..')).rejects.toThrow(/outside the workspace/);
+        } finally {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
 });

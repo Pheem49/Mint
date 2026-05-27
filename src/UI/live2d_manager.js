@@ -18,6 +18,9 @@ window.Live2DManager = {
         cat: { paramId: 'Param54', label: 'Cat Filter' }
     },
     pointerTrackingEnabled: true,
+    zoomMultiplier: 1,
+    interactionZoneOrigin: { x: 0.5, y: 0.58 },
+    fitModelToMount: null,
     pointerTrackingFrame: null,
     pointerTracking: {
         targetX: 0,
@@ -135,7 +138,7 @@ window.Live2DManager = {
                 const heightScale = mountHeight / Math.max(modelHeight, 1);
                 
                 // Reduced zoom to 2.0 as requested
-                const scale = Math.min(widthScale, heightScale) * 1.85;
+                const scale = Math.min(widthScale, heightScale) * 1.85 * this.zoomMultiplier;
 
                 this.model.scale.set(scale);
                 // Adjusted Y offset to 1.0 as requested
@@ -145,6 +148,7 @@ window.Live2DManager = {
                 };
                 this.applyModelFollowOffset();
             };
+            this.fitModelToMount = fitModel;
 
             requestAnimationFrame(() => {
                 fitModel();
@@ -214,9 +218,9 @@ window.Live2DManager = {
         try {
             const point = this.getPointerViewportPoint(event);
             if (!point) return null;
-            const { x, y } = point;
+            const { x, y } = this.toInteractionZonePoint(point);
 
-            if (this.isPointInZone(x, y, 0.38, 0.40, 0.24, 0.115)) {
+            if (this.isPointInZone(x, y, 0.36, 0.375, 0.28, 0.12)) {
                 return {
                     id: 'face',
                     label: 'Cat Ears',
@@ -225,7 +229,7 @@ window.Live2DManager = {
                 };
             }
 
-            if (this.isPointInZone(x, y, 0.34, 0.255, 0.32, 0.15)) {
+            if (this.isPointInZone(x, y, 0.34, 0.205, 0.32, 0.155)) {
                 return {
                     id: 'head',
                     label: 'Head Pat',
@@ -234,8 +238,8 @@ window.Live2DManager = {
                 };
             }
 
-            const isLeftHand = this.isPointInZone(x, y, 0.22, 0.68, 0.20, 0.16);
-            const isRightHand = this.isPointInZone(x, y, 0.61, 0.68, 0.19, 0.16);
+            const isLeftHand = this.isPointInZone(x, y, 0.14, 0.70, 0.22, 0.16);
+            const isRightHand = this.isPointInZone(x, y, 0.65, 0.69, 0.23, 0.17);
             if (isLeftHand || isRightHand) {
                 return {
                     id: isLeftHand ? 'left-hand' : 'right-hand',
@@ -245,7 +249,7 @@ window.Live2DManager = {
                 };
             }
 
-            if (this.isPointInZone(x, y, 0.38, 0.77, 0.30, 0.23)) {
+            if (this.isPointInZone(x, y, 0.34, 0.74, 0.30, 0.24)) {
                 return {
                     id: 'lower-body',
                     label: 'Careful',
@@ -254,7 +258,7 @@ window.Live2DManager = {
                 };
             }
 
-            if (this.isPointInZone(x, y, 0.37, 0.555, 0.29, 0.14)) {
+            if (this.isPointInZone(x, y, 0.36, 0.53, 0.29, 0.145)) {
                 return {
                     id: 'body',
                     label: 'Shoulder Tap',
@@ -293,6 +297,17 @@ window.Live2DManager = {
         return x >= left && x <= left + width && y >= top && y <= top + height;
     },
 
+    toInteractionZonePoint(point) {
+        const scale = this.zoomMultiplier || 1;
+        if (Math.abs(scale - 1) < 0.001) return point;
+
+        const origin = this.interactionZoneOrigin;
+        return {
+            x: origin.x + (point.x - origin.x) / scale,
+            y: origin.y + (point.y - origin.y) / scale
+        };
+    },
+
     cycleExpression() {
         if (!this.model) return;
         this.expIndex = (this.expIndex + 1) % this.expressionNames.length;
@@ -314,6 +329,25 @@ window.Live2DManager = {
 
         this.model.interactive = this.interactionEnabled;
         this.model.buttonMode = this.interactionEnabled;
+    },
+
+    setPointerTrackingEnabled(isEnabled) {
+        this.pointerTrackingEnabled = Boolean(isEnabled);
+        if (this.pointerTrackingEnabled) return;
+
+        this.resetPointerTrackingTarget();
+        this.pointerTracking.currentX = 0;
+        this.pointerTracking.currentY = 0;
+        this.applyModelFollowOffset();
+    },
+
+    setZoomMultiplier(multiplier) {
+        const value = Number(multiplier);
+        this.zoomMultiplier = this.clamp(Number.isFinite(value) ? value : 1, 0.78, 1.28);
+        document.documentElement.style.setProperty('--model-zone-scale', String(this.zoomMultiplier));
+        if (typeof this.fitModelToMount === 'function') {
+            this.fitModelToMount();
+        }
     },
 
     getSavedInteractionEnabled() {

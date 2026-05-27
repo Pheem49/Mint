@@ -18,13 +18,18 @@ const picturesEmpty = document.getElementById('pictures-empty');
 const picturesCloseBtn = document.getElementById('pictures-close-btn');
 const micBtn = document.getElementById('mic-btn');
 const visionBtn = document.getElementById('vision-btn');
+const chatProviderSelect = document.getElementById('chat-provider-select');
 const imagePreviewContainer = document.getElementById('image-preview-container');
 const imagePreview = document.getElementById('image-preview');
 const removeImageBtn = document.getElementById('remove-image-btn');
 const modelMount = document.getElementById('model-mount');
 const modelShell = document.getElementById('model-shell');
 const modelStatus = document.getElementById('model-status');
+const mintStatus = document.getElementById('mint-status');
+const mintStatusLabel = document.getElementById('mint-status-label');
+const modelActivityBadge = document.getElementById('model-activity-badge');
 const startupLoading = document.getElementById('startup-loading');
+const appContainer = document.querySelector('.app-container');
 
 if (startupLoading) {
     startupLoading.style.background = 'var(--bg-gradient)';
@@ -44,6 +49,86 @@ let ttsVolume = 1.0;
 let ttsSpeed = 1.0;
 let ttsPitch = 1.0;
 let lastConversationLanguage = 'auto';
+let mintActivityResetTimer = null;
+let currentSettings = {};
+
+const PROVIDER_PICKER_OPTIONS = [
+    ['gemini', 'Gemini'],
+    ['anthropic', 'Claude'],
+    ['openai', 'OpenAI'],
+    ['ollama', 'Ollama'],
+    ['huggingface', 'Hugging Face'],
+    ['local_openai', 'Local']
+];
+
+function buildProviderPicker(settings = currentSettings) {
+    if (!chatProviderSelect) return;
+    chatProviderSelect.textContent = '';
+    PROVIDER_PICKER_OPTIONS.forEach(([value, label]) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        chatProviderSelect.appendChild(option);
+    });
+    chatProviderSelect.value = settings.aiProvider || 'gemini';
+}
+
+async function changeChatProvider(provider) {
+    if (!PROVIDER_PICKER_OPTIONS.some(([value]) => value === provider)) return;
+    const nextSettings = { ...currentSettings, aiProvider: provider };
+    chatProviderSelect.disabled = true;
+    try {
+        const result = await window.api.saveSettings(nextSettings);
+        if (!result || result.success !== false) {
+            currentSettings = nextSettings;
+            buildProviderPicker(currentSettings);
+        } else {
+            throw new Error(result.message || 'Unable to save provider setting');
+        }
+    } catch (error) {
+        console.error('Failed to change provider:', error);
+        buildProviderPicker(currentSettings);
+        setMintActivity('error');
+    } finally {
+        chatProviderSelect.disabled = false;
+    }
+}
+
+const MINT_ACTIVITY_STATES = {
+    idle: { label: 'Idle', title: 'Mint is idle' },
+    listening: { label: 'Listening', title: 'Mint is listening' },
+    thinking: { label: 'Thinking', title: 'Mint is thinking' },
+    speaking: { label: 'Speaking', title: 'Mint is speaking' },
+    error: { label: 'Error', title: 'Mint needs attention' }
+};
+
+function setMintActivity(state, options = {}) {
+    const normalizedState = MINT_ACTIVITY_STATES[state] ? state : 'idle';
+    const meta = MINT_ACTIVITY_STATES[normalizedState];
+    if (mintActivityResetTimer) {
+        clearTimeout(mintActivityResetTimer);
+        mintActivityResetTimer = null;
+    }
+
+    [mintStatus, modelActivityBadge].forEach((element) => {
+        if (!element) return;
+        element.dataset.state = normalizedState;
+        element.title = meta.title;
+        const label = element.querySelector('.mint-status-label');
+        if (label) label.textContent = meta.label;
+    });
+    if (mintStatusLabel) mintStatusLabel.textContent = meta.label;
+
+    if (window.api && window.api.setAiState) {
+        window.api.setAiState(normalizedState);
+    }
+
+    if (normalizedState === 'error' || options.resetAfter) {
+        mintActivityResetTimer = setTimeout(() => {
+            setMintActivity('idle');
+        }, options.resetAfter || 3500);
+    }
+}
 
 function detectConversationLanguage(text) {
     const value = String(text || '');
@@ -129,14 +214,17 @@ function hexToRgb(hex) {
 async function loadTheme() {
     try {
         const config = await window.api.getSettings();
+        currentSettings = config || {};
         applyTheme(config.theme, config.accentColor, config.systemTextColor, config);
         enableVoiceReply = config.enableVoiceReply !== false;
         ttsProvider = config.ttsProvider || 'google';
         ttsVolume = config.ttsVolume !== undefined ? config.ttsVolume : 1.0;
         ttsSpeed = config.ttsSpeed !== undefined ? config.ttsSpeed : 1.0;
         ttsPitch = config.ttsPitch !== undefined ? config.ttsPitch : 1.0;
+        buildProviderPicker(currentSettings);
     } catch (e) {
         applyTheme('dark', '#8b5cf6', '#f8fafc');
+        buildProviderPicker(currentSettings);
     }
 }
 
@@ -152,12 +240,18 @@ function lightenColor(hex, amount) {
 
 // 🔔 Real-time theme sync from Settings window
 window.api.onSettingsChanged((config) => {
+    currentSettings = config || currentSettings;
     applyTheme(config.theme, config.accentColor, config.systemTextColor, config);
     enableVoiceReply = config.enableVoiceReply !== false;
     ttsProvider = config.ttsProvider || 'google';
     ttsVolume = config.ttsVolume !== undefined ? config.ttsVolume : 1.0;
     ttsSpeed = config.ttsSpeed !== undefined ? config.ttsSpeed : 1.0;
     ttsPitch = config.ttsPitch !== undefined ? config.ttsPitch : 1.0;
+    buildProviderPicker(currentSettings);
+});
+
+chatProviderSelect?.addEventListener('change', (event) => {
+    changeChatProvider(event.target.value);
 });
 
 // --- Voice Input Setup ---
@@ -226,6 +320,7 @@ function setupSpeechRecognition() {
     speechRecognition.onstart = () => {
         micBtn.classList.add('listening');
         chatInput.placeholder = "Listening... (Click to stop)";
+        setMintActivity('listening');
         speechHadResult = false;
         if (speechFallbackTimer) clearTimeout(speechFallbackTimer);
         speechFallbackTimer = setTimeout(() => {
@@ -264,6 +359,7 @@ function setupSpeechRecognition() {
 
     speechRecognition.onerror = (err) => {
         console.error("Speech recognition error:", err);
+        setMintActivity('error');
         fallbackToMediaRecorder();
         isSpeechStreaming = false;
         resetMicUI();
@@ -336,10 +432,12 @@ async function setupMediaRecorder() {
         mediaRecorder.onstart = () => {
             micBtn.classList.add('listening');
             chatInput.placeholder = "Listening... (Click to stop)";
+            setMintActivity('listening');
         };
 
     } catch (err) {
         console.error("Microphone access error:", err);
+        setMintActivity('error');
         micBtn.style.display = 'none';
         appendMessage("❌ ไม่สามารถเข้าถึงไมโครโฟนได้ค่ะ กรุณาตรวจสอบการตั้งค่าระดับระบบ", 'ai');
     }
@@ -348,11 +446,15 @@ async function setupMediaRecorder() {
 function resetMicUI() {
     micBtn.classList.remove('listening');
     chatInput.placeholder = DEFAULT_PLACEHOLDER;
+    if (voiceMode !== 'speech' && (!mediaRecorder || mediaRecorder.state === 'inactive')) {
+        setMintActivity('idle');
+    }
 }
 
 async function sendVoiceMessage(base64Audio) {
     showTyping();
     chatInput.placeholder = "Processing voice...";
+    setMintActivity('thinking');
     try {
         // Send empty text, but include the audio
         const response = await window.api.sendMessage("", null, base64Audio);
@@ -371,6 +473,7 @@ async function sendVoiceMessage(base64Audio) {
         }
     } catch (error) {
         removeTyping();
+        setMintActivity('error');
         appendMessage("ขออภัยค่ะ เกิดข้อผิดพลาดในการประมวลผลเสียง", 'ai');
         console.error(error);
         resumeSpeechIfNeeded();
@@ -409,10 +512,10 @@ micBtn.addEventListener('click', (e) => {
         if (mediaRecorder.state === 'inactive') {
             audioChunks = [];
             mediaRecorder.start();
-            if (window.api && window.api.setAiState) window.api.setAiState('listening');
+            setMintActivity('listening');
         } else {
             mediaRecorder.stop();
-            if (window.api && window.api.setAiState) window.api.setAiState('thinking');
+            setMintActivity('thinking');
             voiceMode = null;
         }
         return;
@@ -444,10 +547,10 @@ micBtn.addEventListener('click', (e) => {
     if (mediaRecorder.state === 'inactive') {
         audioChunks = [];
         mediaRecorder.start();
-        if (window.api && window.api.setAiState) window.api.setAiState('listening');
+        setMintActivity('listening');
     } else {
         mediaRecorder.stop();
-        if (window.api && window.api.setAiState) window.api.setAiState('thinking');
+        setMintActivity('thinking');
     }
 });
 
@@ -455,7 +558,7 @@ micBtn.addEventListener('click', (e) => {
 let currentAudioPlayer = null;
 
 function speakText(text, options = {}) {
-    if (window.api && window.api.setAiState) window.api.setAiState('speaking');
+    setMintActivity('speaking');
     const onEnd = typeof options.onEnd === 'function' ? options.onEnd : () => {};
     
     const wrappedOnEnd = () => {
@@ -465,7 +568,7 @@ function speakText(text, options = {}) {
 
     return new Promise(async (resolve) => {
         if (!enableVoiceReply) {
-            if (window.api && window.api.setAiState) window.api.setAiState('idle');
+            setMintActivity('idle');
             wrappedOnEnd();
             return resolve();
         }
@@ -483,7 +586,7 @@ function speakText(text, options = {}) {
         }
 
         if (!text || !text.trim()) {
-            if (window.api && window.api.setAiState) window.api.setAiState('idle');
+            setMintActivity('idle');
             wrappedOnEnd();
             return resolve();
         }
@@ -497,7 +600,7 @@ function speakText(text, options = {}) {
                     let i = 0;
                     const playNext = () => {
                         if (i >= urls.length) {
-                            if (window.api && window.api.setAiState) window.api.setAiState('idle');
+                            setMintActivity('idle');
                             wrappedOnEnd();
                             return resolve();
                         }
@@ -535,6 +638,7 @@ function speakText(text, options = {}) {
 
 function fallbackSpeak(text, onEnd, resolve) {
     if (!('speechSynthesis' in window)) {
+        setMintActivity('idle');
         if (onEnd) onEnd();
         resolve();
         return;
@@ -551,7 +655,7 @@ function fallbackSpeak(text, onEnd, resolve) {
     const done = () => {
         if (finished) return;
         finished = true;
-        if (window.api && window.api.setAiState) window.api.setAiState('idle');
+        setMintActivity('idle');
         if (onEnd) onEnd();
         resolve();
     };
@@ -642,8 +746,8 @@ function setSidebarCollapsed(isCollapsed) {
     if (!appBody || !sidebarToggleBtn) return;
     appBody.classList.toggle('sidebar-collapsed', isCollapsed);
     sidebarToggleBtn.setAttribute('aria-expanded', String(!isCollapsed));
-    sidebarToggleBtn.setAttribute('aria-label', isCollapsed ? 'Show sidebar' : 'Hide sidebar');
-    sidebarToggleBtn.setAttribute('title', isCollapsed ? 'Show sidebar' : 'Hide sidebar');
+    sidebarToggleBtn.setAttribute('aria-label', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    sidebarToggleBtn.setAttribute('title', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
 }
 
 if (appBody && sidebarToggleBtn) {
@@ -718,6 +822,85 @@ function formatProviderInfo(providerInfo) {
     const model = String(providerInfo.model || '').trim();
     if (!provider && !model) return '';
     return model ? `${provider || 'AI'} • ${model}` : provider;
+}
+
+function formatNumber(value) {
+    const number = Number(value) || 0;
+    return number.toLocaleString('en-US');
+}
+
+function summarizeProviderUsage(providerInfo) {
+    const usage = Array.isArray(providerInfo?.usage) ? providerInfo.usage : [];
+    const selectedProvider = String(providerInfo?.provider || '').trim();
+    const selectedModel = String(providerInfo?.model || '').trim();
+    const row = usage.find(item =>
+        String(item.provider || '') === selectedProvider &&
+        String(item.model || '') === selectedModel
+    ) || usage[0] || {};
+
+    return {
+        requests: Number(row.requests) || 0,
+        inputTokens: Number(row.inputTokens) || 0,
+        outputTokens: Number(row.outputTokens) || 0,
+        reasoningTokens: Number(row.reasoningTokens) || 0,
+        cacheReads: Number(row.cacheReads) || 0,
+        totalTokens: Number(row.totalTokens) || 0
+    };
+}
+
+function closeProviderPopover() {
+    document.querySelectorAll('.provider-popover').forEach(popover => popover.remove());
+    document.querySelectorAll('.provider-badge.is-open').forEach(badge => badge.classList.remove('is-open'));
+}
+
+function createProviderRow(label, value) {
+    const row = document.createElement('div');
+    row.className = 'provider-popover-row';
+    const labelEl = document.createElement('span');
+    labelEl.textContent = label;
+    const valueEl = document.createElement('strong');
+    valueEl.textContent = value;
+    row.appendChild(labelEl);
+    row.appendChild(valueEl);
+    return row;
+}
+
+function showProviderPopover(anchor, providerInfo) {
+    closeProviderPopover();
+    anchor.classList.add('is-open');
+
+    const provider = String(providerInfo?.provider || 'AI').trim();
+    const model = String(providerInfo?.model || 'Unknown model').trim();
+    const usage = summarizeProviderUsage(providerInfo);
+    const popover = document.createElement('div');
+    popover.className = 'provider-popover';
+
+    const title = document.createElement('div');
+    title.className = 'provider-popover-title';
+    title.textContent = 'Model details';
+    popover.appendChild(title);
+
+    popover.appendChild(createProviderRow('Provider', provider));
+    popover.appendChild(createProviderRow('Model', model));
+    popover.appendChild(createProviderRow('Context tokens', formatNumber(usage.inputTokens)));
+    popover.appendChild(createProviderRow('Output tokens', formatNumber(usage.outputTokens)));
+    if (usage.reasoningTokens) {
+        popover.appendChild(createProviderRow('Reasoning tokens', formatNumber(usage.reasoningTokens)));
+    }
+    popover.appendChild(createProviderRow('Total tokens', formatNumber(usage.totalTokens)));
+
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'provider-popover-action';
+    action.textContent = 'Change model in Settings';
+    action.addEventListener('click', (event) => {
+        event.stopPropagation();
+        closeProviderPopover();
+        if (window.api?.openSettings) window.api.openSettings();
+    });
+    popover.appendChild(action);
+
+    anchor.after(popover);
 }
 
 function splitListOutro(text) {
@@ -842,10 +1025,20 @@ function appendMessage(text, sender, base64Image = null, timestamp = null, optio
         const timeDiv = document.createElement('div');
         timeDiv.classList.add('message-time');
         if (providerLabel) {
-            const providerSpan = document.createElement('span');
-            providerSpan.classList.add('provider-badge');
-            providerSpan.textContent = providerLabel;
-            timeDiv.appendChild(providerSpan);
+            const providerButton = document.createElement('button');
+            providerButton.type = 'button';
+            providerButton.classList.add('provider-badge');
+            providerButton.textContent = providerLabel;
+            providerButton.title = 'View model details';
+            providerButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                if (providerButton.classList.contains('is-open')) {
+                    closeProviderPopover();
+                    return;
+                }
+                showProviderPopover(providerButton, options.providerInfo);
+            });
+            timeDiv.appendChild(providerButton);
         }
         if (timestamp) {
             const timeSpan = document.createElement('span');
@@ -1015,6 +1208,7 @@ function loadScript(src) {
 }
 
 function hideStartupLoading() {
+    appContainer?.classList.remove('is-loading');
     if (!startupLoading) return;
     startupLoading.classList.add('is-hidden');
     setTimeout(() => startupLoading.remove(), 400);
@@ -1032,6 +1226,7 @@ async function loadLive2DWhenIdle() {
         await loadScript('live2d_manager.js');
         if (window.Live2DManager) {
             await Live2DManager.loadModel(modelMount, modelStatus, modelShell);
+            applyModelPanelControlState();
         }
     } catch (err) {
         console.error('[Live2D] Deferred load failed:', err);
@@ -1107,6 +1302,7 @@ async function sendTextMessage(text, options = {}) {
 
     // Show typing early so user knows we are processing
     showTyping();
+    setMintActivity('thinking');
 
     // Check Smart Context Toggle
     const smartToggle = document.getElementById('smart-context-toggle');
@@ -1171,6 +1367,7 @@ async function sendTextMessage(text, options = {}) {
         }
     } catch (error) {
         removeTyping();
+        setMintActivity('error');
         appendMessage("Sorry, I encountered an error communicating with the main process.", 'ai');
         console.error(error);
         resumeSpeechIfNeeded();
@@ -1179,7 +1376,6 @@ async function sendTextMessage(text, options = {}) {
 
 chatForm.addEventListener('submit', throttle(async (e) => {
     e.preventDefault();
-    if (window.api && window.api.setAiState) window.api.setAiState('thinking');
     const text = chatInput.value.trim();
     await sendTextMessage(text);
 }, 500));
@@ -1187,7 +1383,7 @@ chatForm.addEventListener('submit', throttle(async (e) => {
 window.addEventListener('live2d-model-interaction', async (event) => {
     const prompt = event?.detail?.prompt;
     if (!prompt) return;
-    if (window.api && window.api.setAiState) window.api.setAiState('thinking');
+    setMintActivity('thinking');
     const interactionPrompt = `${prompt}\n\n${buildInteractionLanguageInstruction()}`;
     const displayPrefix = lastConversationLanguage === 'thai' ? 'แตะโมเดล' : 'Model interaction';
     await sendTextMessage(interactionPrompt, {
@@ -1253,6 +1449,7 @@ inputArea.addEventListener('drop', (e) => {
 window.addEventListener('DOMContentLoaded', async () => {
     chatInput.focus();
     await loadTheme();
+    setMintActivity('idle');
     await loadChatHistory();
     loadLive2DWhenIdle();
 });
@@ -1267,6 +1464,11 @@ window.api.onProactiveNotification((data) => {
 
 window.addEventListener('focus', () => {
     if (window.api.clearAiNotifications) window.api.clearAiNotifications();
+});
+
+document.addEventListener('click', closeProviderPopover);
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeProviderPopover();
 });
 
 // =====================
@@ -1350,33 +1552,120 @@ if (smartContextToggle) {
 // Toggle Live2D Model visibility
 const toggleModelBtn = document.getElementById('toggle-model-btn');
 const assistantWorkspace = document.querySelector('.assistant-workspace');
+const modelLockBtn = document.getElementById('model-lock-btn');
+const modelScaleSlider = document.getElementById('model-scale-slider');
+const modelScaleValue = document.getElementById('model-scale-value');
+const modelScaleResetBtn = document.getElementById('model-scale-reset-btn');
+const modelBgBtn = document.getElementById('model-bg-btn');
+const layoutPresetBtns = document.querySelectorAll('.layout-preset-btn');
+
+const modelBgStorageKey = 'mint-model-background';
+const modelScaleStorageKey = 'mint-model-scale';
+const modelPositionLockStorageKey = 'mint-model-position-locked';
+const workspaceLayoutStorageKey = 'mint-workspace-layout';
+const modelBgClasses = ['model-bg-default', 'model-bg-clear', 'model-bg-grid', 'model-bg-stage'];
+const modelBgLabels = ['Default background', 'Clear background', 'Grid background', 'Stage background'];
+const workspaceLayoutClasses = ['layout-chat'];
+const workspaceLayoutPresets = ['companion', 'chat'];
+
+function setModelHidden(isHidden) {
+    if (!assistantWorkspace || !toggleModelBtn) return;
+    assistantWorkspace.classList.toggle('model-hidden', Boolean(isHidden));
+    toggleModelBtn.classList.toggle('active', Boolean(isHidden));
+    toggleModelBtn.setAttribute('aria-pressed', String(Boolean(isHidden)));
+    localStorage.setItem('mint-model-hidden', String(Boolean(isHidden)));
+
+    if (!isHidden && window.Live2DManager && Live2DManager.model) {
+        setTimeout(() => {
+            window.dispatchEvent(new Event('resize'));
+            if (typeof Live2DManager.fitModelToMount === 'function') {
+                Live2DManager.fitModelToMount();
+            }
+        }, 450);
+    }
+}
+
+function setModelPositionLocked(isLocked) {
+    const locked = Boolean(isLocked);
+    localStorage.setItem(modelPositionLockStorageKey, String(locked));
+    modelLockBtn?.classList.toggle('is-active', locked);
+    modelLockBtn?.setAttribute('aria-pressed', String(locked));
+    modelLockBtn?.setAttribute('title', locked ? 'Unlock model position' : 'Lock model position');
+    if (window.Live2DManager) {
+        Live2DManager.setPointerTrackingEnabled(!locked);
+    }
+}
+
+function setModelBackground(index) {
+    if (!modelShell) return;
+    const normalized = ((Number(index) || 0) + modelBgClasses.length) % modelBgClasses.length;
+    modelBgClasses.forEach(className => modelShell.classList.remove(className));
+    if (normalized > 0) {
+        modelShell.classList.add(modelBgClasses[normalized]);
+    }
+    localStorage.setItem(modelBgStorageKey, String(normalized));
+    modelBgBtn?.setAttribute('title', modelBgLabels[normalized]);
+}
+
+function setModelScale(value) {
+    const next = Math.max(78, Math.min(128, Number(value) || 100));
+    localStorage.setItem(modelScaleStorageKey, String(next));
+    if (modelScaleSlider) modelScaleSlider.value = String(next);
+    if (modelScaleValue) modelScaleValue.textContent = `${(next / 100).toFixed(2)}x`;
+    if (window.Live2DManager) {
+        Live2DManager.setZoomMultiplier(next / 100);
+    }
+}
+
+function applyModelPanelControlState() {
+    setModelPositionLocked(localStorage.getItem(modelPositionLockStorageKey) === 'true');
+    setModelBackground(Number(localStorage.getItem(modelBgStorageKey) || 0));
+    setModelScale(Number(localStorage.getItem(modelScaleStorageKey) || 100));
+    setWorkspaceLayout(localStorage.getItem(workspaceLayoutStorageKey) || 'companion');
+}
+
+function setWorkspaceLayout(layout) {
+    if (!assistantWorkspace) return;
+    const normalized = workspaceLayoutPresets.includes(layout) ? layout : 'companion';
+    workspaceLayoutClasses.forEach(className => assistantWorkspace.classList.remove(className));
+    if (normalized !== 'companion') {
+        assistantWorkspace.classList.add(`layout-${normalized}`);
+    }
+    localStorage.setItem(workspaceLayoutStorageKey, normalized);
+    layoutPresetBtns.forEach((button) => {
+        const isActive = button.dataset.layoutPreset === normalized;
+        button.classList.toggle('is-active', isActive);
+        button.setAttribute('aria-pressed', String(isActive));
+    });
+}
 
 if (toggleModelBtn && assistantWorkspace) {
     toggleModelBtn.addEventListener('click', () => {
-        const isHidden = assistantWorkspace.classList.toggle('model-hidden');
-        toggleModelBtn.classList.toggle('active', isHidden);
-        
-        // Save preference to local storage
-        localStorage.setItem('mint-model-hidden', String(isHidden));
-        
-        // Refit model if shown
-        if (!isHidden && window.Live2DManager && Live2DManager.model) {
-            // Wait for transition
-            setTimeout(() => {
-                // Trigger a resize event to refit
-                window.dispatchEvent(new Event('resize'));
-            }, 450);
-        }
+        setModelHidden(!assistantWorkspace.classList.contains('model-hidden'));
     });
 
     // Restore preference on load
     const savedModelHidden = localStorage.getItem('mint-model-hidden');
     const savedHidden = savedModelHidden === null || savedModelHidden === 'true';
     if (savedHidden) {
-        assistantWorkspace.classList.add('model-hidden');
-        toggleModelBtn.classList.add('active');
+        setModelHidden(true);
     }
 }
+
+modelLockBtn?.addEventListener('click', () => {
+    setModelPositionLocked(localStorage.getItem(modelPositionLockStorageKey) !== 'true');
+});
+modelScaleSlider?.addEventListener('input', (event) => setModelScale(event.target.value));
+modelScaleResetBtn?.addEventListener('click', () => setModelScale(100));
+modelBgBtn?.addEventListener('click', () => {
+    const current = Number(localStorage.getItem(modelBgStorageKey) || 0);
+    setModelBackground(current + 1);
+});
+layoutPresetBtns.forEach((button) => {
+    button.addEventListener('click', () => setWorkspaceLayout(button.dataset.layoutPreset));
+});
+
+applyModelPanelControlState();
 
 // Cycle Shiroko's Expression
 const changeExpressionBtn = document.getElementById('change-expression-btn');

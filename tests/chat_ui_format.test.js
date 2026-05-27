@@ -74,6 +74,41 @@ describe('CLI chat UI formatting', () => {
         expect(_helpers.getNextApprovalChoice('approve', -1)).toBe('deny');
     });
 
+    test('limits visible slash command suggestions to a scrolling window', () => {
+        const suggestions = Array.from({ length: 10 }, (_, index) => ({
+            cmd: `/cmd${index + 1}`,
+            desc: `Command ${index + 1}`
+        }));
+
+        expect(_helpers.getVisibleSuggestions(suggestions, 0, 5)).toMatchObject({
+            start: 0,
+            current: 1,
+            total: 10
+        });
+        expect(_helpers.getVisibleSuggestions(suggestions, 0, 5).visible.map(item => item.cmd)).toEqual([
+            '/cmd1',
+            '/cmd2',
+            '/cmd3',
+            '/cmd4',
+            '/cmd5'
+        ]);
+        expect(_helpers.getVisibleSuggestions(suggestions, 4, 5).visible.map(item => item.cmd)).toEqual([
+            '/cmd1',
+            '/cmd2',
+            '/cmd3',
+            '/cmd4',
+            '/cmd5'
+        ]);
+        expect(_helpers.getVisibleSuggestions(suggestions, 5, 5).visible.map(item => item.cmd)).toEqual([
+            '/cmd2',
+            '/cmd3',
+            '/cmd4',
+            '/cmd5',
+            '/cmd6'
+        ]);
+        expect(_helpers.getVisibleSuggestions(suggestions, 5, 5).current).toBe(6);
+    });
+
     test('parses unified diff previews for approval rendering', () => {
         const files = _helpers.parseUnifiedDiffPreview([
             '--- a/src/demo.js',

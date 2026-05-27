@@ -166,6 +166,8 @@ Action safety and intent discipline:
 - The latest user message is authoritative. Do not continue an older unfinished task unless the latest message explicitly asks you to continue or clearly refers to that task.
 - For greetings, name-calls, acknowledgements, or backchannels such as "มิ้น", "มิ้นๆ", "อ๋อ", "โอเค", "ขอบคุณ", "hi", "hello", "ok", or "thanks": use "finish" only. Do not inspect files, run shell commands, search code, or claim you checked anything.
 - If the user asks for a command to type, provide the command in "finish". Do not run it unless the user explicitly asks you to run it.
+- If the user asks not to edit or says this is read-only analysis (for example "ห้ามแก้ไฟล์", "ไม่ต้องแก้", "แค่อ่าน", "แค่สรุป", "do not edit", "no edits", "read only"), do not use "plan", "apply_patch", "write_file", "create_folder", "delete_file", "clipboard_write", or system-changing actions. Inspect with read/search tools and finish with a summary only.
+- If the user explicitly asks to search keywords, method names, class names, or symbols, use "search_code" before repeatedly reading more file ranges. When the search is about a known folder or file, set input.path to that relative path so the search stays scoped.
 - If the user explicitly asks you to run a command or provided code, such as "รันคำสั่ง npm test ให้หน่อย", "รันโค้ดนี้หน่อย", or "run npm test", choose "run_shell" with the exact command when it is clear. The app will ask the user for approval before execution.
 - If the user asks you to run something but no exact command/code is provided, use "ask_user" to request the command instead of guessing.
 - If the user asks what is inside a folder and a concrete path is present in the latest message or recent context, use "list_files" for that path. If no concrete target is clear, ask for clarification instead of guessing.
@@ -214,7 +216,7 @@ Tool notes:
 - "web_search": search the internet for information when you lack knowledge.
 - "list_files": inspect the workspace or a subdirectory.
 - "read_file": read a file, optionally with startLine/endLine.
-- "search_code": search by text or regex-like pattern.
+- "search_code": search by text or regex-like pattern. Optionally set input.path to a relative file or directory to avoid scanning the whole workspace.
 - "find_path": find files or directories by path/name when the user is looking for a folder, filename, or location.
 - "run_shell": run a non-destructive command in the workspace.
 - "verify": run the detected or provided test/build/lint commands. If verification fails, inspect the output, patch the issue, and verify again within the remaining budget.
@@ -265,6 +267,10 @@ function normalizeExecutorAction(action, input = {}) {
 }
 
 function formatActionPreview(action, input = {}) {
+    if (action === 'search_code') {
+        const query = input.query || 'search';
+        return input.path ? `${query} in ${input.path}` : query;
+    }
     if (input.command) return input.command;
     if (input.path) return input.path;
     if (input.target) return input.target;
@@ -413,12 +419,16 @@ function readFileRange(workspaceRoot, targetPath, startLine = 1, endLine = 200) 
         .join('\n');
 }
 
-async function searchCode(workspaceRoot, query) {
+async function searchCode(workspaceRoot, query, targetPath = '.') {
     if (!query || !query.trim()) {
         throw new Error('Search query is required.');
     }
+    const searchRoot = resolveWorkspacePath(workspaceRoot, targetPath || '.');
+    if (!fs.existsSync(searchRoot)) {
+        throw new Error(`Search path does not exist: ${targetPath}`);
+    }
     try {
-        const { stdout } = await execFileAsync('rg', ['-n', '--hidden', '--glob', '!.git', query, workspaceRoot], {
+        const { stdout } = await execFileAsync('rg', ['-n', '--hidden', '--glob', '!.git', query, searchRoot], {
             cwd: workspaceRoot,
             maxBuffer: 1024 * 1024 * 4
         });
@@ -894,6 +904,27 @@ function getMissingPlanFiles(editPlanState = {}) {
     return Array.from(expectedFiles).filter(file => file && !touchedFiles.has(file));
 }
 
+function isReadOnlyTask(task = '') {
+    const text = String(task || '').toLowerCase();
+    return /(?:ห้ามแก้|ไม่ต้องแก้|อย่าแก้|ไม่แก้ไฟล์|ห้ามเขียน|แค่อ่าน|อ่านอย่างเดียว|แค่สรุป|สรุปอย่างเดียว|แค่อธิบาย|อธิบายอย่างเดียว|do not edit|don't edit|no edits?|read[-\s]?only|only read|only summarize|summari[sz]e only|do not modify|don't modify|no changes?|analysis only)/i.test(text);
+}
+
+function isWriteLikeAction(action) {
+    return new Set([
+        'plan',
+        'apply_patch',
+        'write_file',
+        'create_folder',
+        'delete_file',
+        'clipboard_write',
+        'system_automation',
+        'mouse_move',
+        'mouse_click',
+        'type_text',
+        'key_tap'
+    ]).has(action);
+}
+
 function validateEditExplanation(action, input = {}, thought = '') {
     const targetPath = getEditTargetPath(action, input);
     if (!targetPath) return { ok: true };
@@ -1109,6 +1140,7 @@ async function executeCodeTask(task, options = {}) {
     let finalVerification = '';
     let finalSessionSummary = '';
     let executedSteps = 0;
+    const readOnlyTask = isReadOnlyTask(task);
     const editPlanState = {
         approved: false,
         touchedFiles: new Set(),
@@ -1174,6 +1206,20 @@ async function executeCodeTask(task, options = {}) {
 
         let toolResult = '';
         try {
+            if (readOnlyTask && isWriteLikeAction(action)) {
+                observation = [
+                    `Previous thought: ${decision.thought || '(none)'}`,
+                    `Action: ${action}`,
+                    'Observation:',
+                    [
+                        'Error: The latest user request is read-only and explicitly forbids edits or changes.',
+                        'Do not create a plan or request approval for edits.',
+                        'Use read_file/search_code/find_path as needed, then finish with an analysis summary.'
+                    ].join('\n')
+                ].join('\n');
+                continue;
+            }
+
             if (requiresMultiFilePlan(action, input, editPlanState)) {
                 const nextPath = getEditTargetPath(action, input);
                 observation = [
@@ -1222,7 +1268,7 @@ async function executeCodeTask(task, options = {}) {
                     toolResult = readFileRange(workspaceRoot, input.path, input.startLine, input.endLine);
                     break;
                 case 'search_code':
-                    toolResult = await searchCode(workspaceRoot, input.query);
+                    toolResult = await searchCode(workspaceRoot, input.query, input.path || '.');
                     break;
                 case 'find_path':
                     toolResult = await findPaths(workspaceRoot, input.query, input.type);
@@ -1460,7 +1506,7 @@ async function executeCodeTask(task, options = {}) {
             step,
             phase: 'finished',
             action,
-            target: (action === 'plan' ? formatPlanPreview(input) : (input.path || input.command || input.query || '')) + resultSummary
+            target: summarizeToolTarget(action, input) + resultSummary
         });
 
         // Format tool result to be more readable and structured for the agent
@@ -1477,7 +1523,7 @@ async function executeCodeTask(task, options = {}) {
         ].join('\n');    }
 
     // Check for Agent Collaboration (Review) - Disabled by default to save tokens
-    if (config.enableAgentCollaboration === true && executedSteps > 8 && finalSummary) {
+    if (config.enableAgentCollaboration === true && !readOnlyTask && executedSteps > 8 && finalSummary) {
         const availableProviders = getAvailableProviders(config);
         // Exclude providers that often need special local setup or are slow/unreliable for tiny reviews
         const altProviders = availableProviders.filter(p => p !== provider && p !== 'ollama' && p !== 'huggingface' && p !== 'local_openai');
@@ -1578,6 +1624,8 @@ module.exports = {
         normalizePlanItemLanguage,
         requiresMultiFilePlan,
         getMissingPlanFiles,
+        isReadOnlyTask,
+        isWriteLikeAction,
         getEditTargetPath,
         PLAN_FILE_PATH
     }

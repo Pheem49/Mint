@@ -165,12 +165,31 @@ function splitDiffStatSegments(value) {
 }
 
 const APPROVAL_CHOICES = ['approve', 'approve_session', 'deny'];
+const SUGGESTION_WINDOW_SIZE = 5;
 
 function getNextApprovalChoice(current, direction = 1) {
     const choices = APPROVAL_CHOICES;
     const index = choices.indexOf(current);
     const start = index === -1 ? 0 : index;
     return choices[(start + direction + choices.length) % choices.length];
+}
+
+function getVisibleSuggestions(suggestions, selectedIndex, limit = SUGGESTION_WINDOW_SIZE) {
+    const items = Array.isArray(suggestions) ? suggestions : [];
+    const safeLimit = Math.max(1, Number(limit) || SUGGESTION_WINDOW_SIZE);
+    const safeSelected = Math.min(Math.max(0, Number(selectedIndex) || 0), Math.max(0, items.length - 1));
+    const start = Math.min(
+        Math.max(0, safeSelected - safeLimit + 1),
+        Math.max(0, items.length - safeLimit)
+    );
+    const visible = items.slice(start, start + safeLimit);
+
+    return {
+        start,
+        visible,
+        current: items.length > 0 ? safeSelected + 1 : 0,
+        total: items.length
+    };
 }
 
 function parseUnifiedDiffPreview(preview) {
@@ -376,6 +395,10 @@ async function createChatUI(options) {
             const query = input.toLowerCase();
             return SLASH_COMMANDS.filter(s => s.cmd.startsWith(query));
         }, [input, showSuggestions]);
+        const visibleSuggestions = useMemo(
+            () => getVisibleSuggestions(suggestions, selectedIndex),
+            [suggestions, selectedIndex]
+        );
 
         // Reset index when suggestions change
         useEffect(() => {
@@ -937,23 +960,6 @@ async function createChatUI(options) {
                     h(Text, { color: 'yellow' }, '● Mint is thinking...')
                 ),
 
-                // Suggestions Menu
-                showSuggestions && suggestions.length > 0 && h(Box, { 
-                    flexDirection: 'column', 
-                    borderStyle: 'single', 
-                    borderColor: 'gray',
-                    paddingX: 1,
-                    marginBottom: 0
-                },
-                    suggestions.map((s, i) => h(Box, { key: s.cmd, flexDirection: 'row' },
-                        h(Text, { 
-                            backgroundColor: i === selectedIndex ? 'green' : undefined,
-                            color: i === selectedIndex ? 'white' : 'greenBright' 
-                        }, s.cmd.padEnd(12)),
-                        h(Text, { color: 'gray' }, ` ${s.desc}`)
-                    ))
-                ),
-
                 pendingApproval && h(Box, {
                     flexDirection: 'column',
                     borderStyle: 'single',
@@ -1037,6 +1043,30 @@ async function createChatUI(options) {
                     )
                 ),
 
+                // Suggestions Menu
+                showSuggestions && suggestions.length > 0 && h(Box, {
+                    flexDirection: 'column',
+                    borderStyle: 'single',
+                    borderColor: 'gray',
+                    paddingX: 1,
+                    marginBottom: 0
+                },
+                    h(Box, { justifyContent: 'space-between' },
+                        h(Text, { color: 'gray', dimColor: true }, 'Commands'),
+                        h(Text, { color: 'gray', dimColor: true }, `${visibleSuggestions.current}/${visibleSuggestions.total}`)
+                    ),
+                    visibleSuggestions.visible.map((s, i) => {
+                        const actualIndex = visibleSuggestions.start + i;
+                        return h(Box, { key: s.cmd, flexDirection: 'row' },
+                            h(Text, {
+                                backgroundColor: actualIndex === selectedIndex ? 'green' : undefined,
+                                color: actualIndex === selectedIndex ? 'white' : 'greenBright'
+                            }, s.cmd.padEnd(12)),
+                            h(Text, { color: 'gray' }, ` ${s.desc}`)
+                        );
+                    })
+                ),
+
                 // Status Bar
                 h(Box, { justifyContent: 'space-between' },
                     h(Box, null,
@@ -1104,6 +1134,7 @@ module.exports = {
         formatDuration,
         splitDiffStatSegments,
         getNextApprovalChoice,
+        getVisibleSuggestions,
         parseUnifiedDiffPreview,
         isUnifiedDiffPreview,
         getDiffLineStyle,

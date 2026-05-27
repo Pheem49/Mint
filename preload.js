@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('api', {
     getWeather: (city) => ipcRenderer.invoke('get-weather', city),
     // Settings
     getSettings: () => ipcRenderer.invoke('get-settings'),
+    saveSettings: (config) => ipcRenderer.invoke('save-settings', config),
     // Listen for settings changes from other window
     onSettingsChanged: (callback) => ipcRenderer.on('settings-changed', (event, data) => callback(data)),
     // Vision

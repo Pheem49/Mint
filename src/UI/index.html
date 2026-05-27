@@ -9,12 +9,13 @@
 </head>
 
 <body>
-  <div class="app-container">
+  <div class="app-container is-loading">
     <header class="drag-region">
       <div class="header-content">
         <img class="app-logo" src="../../assets/icon.png" alt="Mint" draggable="false">
         <h1>Agent Mint</h1>
       </div>
+      <div class="titlebar-drag-space" aria-hidden="true"></div>
       <div class="window-controls" aria-label="Window controls">
         <button class="minimize-btn" id="minimize-btn" aria-label="Minimize" title="Minimize to Tray">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
@@ -73,11 +74,11 @@
           <span aria-hidden="true">+</span>
           <span>New Chat</span>
         </button>
-        <button class="sidebar-chat-btn sidebar-top-action is-active" id="sidebar-chat-btn" type="button">
+        <button class="sidebar-chat-btn sidebar-top-action is-active" id="sidebar-chat-btn" type="button" title="Chat">
           <span aria-hidden="true">▣</span>
           <span>Chat</span>
         </button>
-        <button class="sidebar-pictures-btn sidebar-top-action" id="sidebar-pictures-btn" type="button">
+        <button class="sidebar-pictures-btn sidebar-top-action" id="sidebar-pictures-btn" type="button" title="Pictures">
           <span aria-hidden="true">▧</span>
           <span>Pictures</span>
         </button>
@@ -133,15 +134,19 @@
         </div>
         <div class="sidebar-section">
           <div class="sidebar-section-title">Assistant</div>
-          <div class="sidebar-project active">
+          <div class="sidebar-project active" title="Mint">
             <span aria-hidden="true">▣</span>
             <span>Mint</span>
+            <span class="mint-status-pill" id="mint-status" data-state="idle" title="Mint is idle">
+              <span class="mint-status-dot" aria-hidden="true"></span>
+              <span class="mint-status-label" id="mint-status-label">Idle</span>
+            </span>
           </div>
-          <div class="sidebar-project">
+          <div class="sidebar-project" title="Live2D Model">
             <span aria-hidden="true">◇</span>
             <span>Live2D Model</span>
           </div>
-          <div class="sidebar-project">
+          <div class="sidebar-project" title="Smart Tools">
             <span aria-hidden="true">⌁</span>
             <span>Smart Tools</span>
           </div>
@@ -175,6 +180,60 @@
         <section class="model-stage" aria-label="Assistant model">
           <div class="model-shell" id="model-shell">
             <div class="model-glow"></div>
+            <div class="model-activity-badge" id="model-activity-badge" data-state="idle" title="Mint is idle">
+              <span class="mint-status-dot" aria-hidden="true"></span>
+              <span class="mint-status-label">Idle</span>
+            </div>
+            <div class="model-panel-controls" aria-label="Live2D controls">
+              <button class="model-panel-control" id="model-lock-btn" type="button" title="Lock model position" aria-label="Lock model position" aria-pressed="false">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="5" y="11" width="14" height="10" rx="2"></rect>
+                  <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
+                </svg>
+              </button>
+              <label class="model-scale-control" title="Model size">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M15 3h6v6"></path>
+                  <path d="M9 21H3v-6"></path>
+                  <path d="M21 3l-7 7"></path>
+                  <path d="M3 21l7-7"></path>
+                </svg>
+                <input id="model-scale-slider" type="range" min="78" max="128" value="100" aria-label="Model size">
+                <span class="model-scale-value" id="model-scale-value">1.00x</span>
+                <button class="model-scale-reset" id="model-scale-reset-btn" type="button" title="Reset size to 1.00x" aria-label="Reset model size">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 12a9 9 0 1 0 3-6.7"></path>
+                    <path d="M3 4v6h6"></path>
+                  </svg>
+                </button>
+              </label>
+              <button class="model-panel-control" id="model-bg-btn" type="button" title="Change model background" aria-label="Change model background">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                  <path d="M3 15l5-5 4 4 3-3 6 6"></path>
+                </svg>
+              </button>
+              <div class="layout-preset-group" aria-label="Layout presets">
+                <button class="layout-preset-btn" data-layout-preset="companion" type="button" title="Companion layout" aria-label="Companion layout">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="5" width="10" height="14" rx="1"></rect>
+                    <rect x="15" y="5" width="6" height="14" rx="1"></rect>
+                  </svg>
+                </button>
+                <button class="layout-preset-btn" data-layout-preset="chat" type="button" title="Chat focus layout" aria-label="Chat focus layout">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="3" y="5" width="6" height="14" rx="1"></rect>
+                    <rect x="11" y="5" width="10" height="14" rx="1"></rect>
+                  </svg>
+                </button>
+              </div>
+            </div>
             <div class="model-mount" id="model-mount">
               <img class="model-placeholder" src="../../assets/Agent_Mint.png" alt="Mint model placeholder" style="display: none; opacity: 0;">
             </div>
@@ -224,6 +283,7 @@
                   <circle cx="12" cy="12" r="3"></circle>
                 </svg>
               </button>
+              <select id="chat-provider-select" class="chat-provider-select" aria-label="AI provider" title="Change AI provider"></select>
               <input type="text" id="chat-input" placeholder="Ask anything, @ to mention, / for actions" autocomplete="off">
               <button type="button" id="mic-btn" aria-label="Microphone">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
