@@ -167,7 +167,8 @@ Action safety and intent discipline:
 - For greetings, name-calls, acknowledgements, or backchannels such as "มิ้น", "มิ้นๆ", "อ๋อ", "โอเค", "ขอบคุณ", "hi", "hello", "ok", or "thanks": use "finish" only. Do not inspect files, run shell commands, search code, or claim you checked anything.
 - If the user asks for a command to type, provide the command in "finish". Do not run it unless the user explicitly asks you to run it.
 - If the user asks not to edit or says this is read-only analysis (for example "ห้ามแก้ไฟล์", "ไม่ต้องแก้", "แค่อ่าน", "แค่สรุป", "do not edit", "no edits", "read only"), do not use "plan", "apply_patch", "write_file", "create_folder", "delete_file", "clipboard_write", or system-changing actions. Inspect with read/search tools and finish with a summary only.
-- If the user explicitly asks to search keywords, method names, class names, or symbols, use "search_code" before repeatedly reading more file ranges. When the search is about a known folder or file, set input.path to that relative path so the search stays scoped.
+- If the user explicitly asks to search keywords, method names, class names, or symbols, use "search_code" before repeatedly reading more file ranges. Prefer a scoped search with input.path instead of scanning the whole workspace when the likely area is clear.
+- Search scope heuristics: choose input.path only when that path is visible in the current workspace context or was named by the user. If the repo layout is unclear, use list_files on "." first, then choose the narrowest existing directory. Common scopes include "src", "app", "lib", "packages", "tests", and project-specific folders; in this Mint repo, CLI/terminal/command/approval/chat agent questions usually start in "src/CLI", desktop UI/renderer/settings/widget questions in "src/UI", system/config/safety questions in "src/System", and plugin questions in "src/Plugins". If a scoped search path is missing or finds no useful matches, search the whole workspace.
 - If the user explicitly asks you to run a command or provided code, such as "รันคำสั่ง npm test ให้หน่อย", "รันโค้ดนี้หน่อย", or "run npm test", choose "run_shell" with the exact command when it is clear. The app will ask the user for approval before execution.
 - If the user asks you to run something but no exact command/code is provided, use "ask_user" to request the command instead of guessing.
 - If the user asks what is inside a folder and a concrete path is present in the latest message or recent context, use "list_files" for that path. If no concrete target is clear, ask for clarification instead of guessing.
@@ -216,7 +217,7 @@ Tool notes:
 - "web_search": search the internet for information when you lack knowledge.
 - "list_files": inspect the workspace or a subdirectory.
 - "read_file": read a file, optionally with startLine/endLine.
-- "search_code": search by text or regex-like pattern. Optionally set input.path to a relative file or directory to avoid scanning the whole workspace.
+- "search_code": search by text or regex-like pattern. Optionally set input.path to a relative file or directory to avoid scanning the whole workspace; use the search scope heuristics above when the user did not name a path.
 - "find_path": find files or directories by path/name when the user is looking for a folder, filename, or location.
 - "run_shell": run a non-destructive command in the workspace.
 - "verify": run the detected or provided test/build/lint commands. If verification fails, inspect the output, patch the issue, and verify again within the remaining budget.
