@@ -45,6 +45,7 @@ const DEFAULT_CONFIG = {
     apiKey: '',
     geminiModel: 'gemini-2.5-flash',
     language: 'th-TH',
+    assistantMode: 'chat',
     automationBrowser: 'chromium',
     proactiveInterval: 60,   // seconds between screen captures
     proactiveCooldown: 120,   // seconds minimum between actual suggestions

@@ -1,3 +1,43 @@
+const safetyManager = require('./safety_manager');
+const { getSmartContext } = require('./smart_context');
+
+function buildApprovalRequest(action) {
+    const classification = safetyManager.classifyAction(action);
+    if (
+        classification.tier !== safetyManager.TIERS.APPROVAL &&
+        classification.tier !== safetyManager.TIERS.DANGEROUS
+    ) {
+        return null;
+    }
+
+    return {
+        required: true,
+        tier: classification.tier,
+        reason: classification.reason,
+        action
+    };
+}
+
+async function executeApprovedAction(executeAction, action, clipboard) {
+    const classification = safetyManager.classifyAction(action);
+    const options = {
+        clipboard,
+        source: 'user_approved_action',
+        allowApproval: classification.tier === safetyManager.TIERS.APPROVAL,
+        allowDangerous: classification.tier === safetyManager.TIERS.DANGEROUS
+    };
+    const result = await executeAction(action, options);
+    return {
+        success: true,
+        action,
+        tier: classification.tier,
+        result,
+        message: result && typeof result === 'string'
+            ? result
+            : 'Action completed.'
+    };
+}
+
 function registerIpcHandlers({
     app,
     ipcMain,
@@ -36,6 +76,12 @@ function registerIpcHandlers({
 
             if (aiResponse.action && aiResponse.action.type !== 'none') {
                 try {
+                    const approval = buildApprovalRequest(aiResponse.action);
+                    if (approval) {
+                        aiResponse.approval = approval;
+                        return aiResponse;
+                    }
+
                     const actionResult = await executeAction(aiResponse.action, { clipboard });
                     if (actionResult && typeof actionResult === 'string') {
                         aiResponse.response += `\n\n${actionResult}`;
@@ -50,6 +96,18 @@ function registerIpcHandlers({
         } catch (error) {
             console.error('Chat error:', error);
             return { response: 'Error communicating with Gemini API. Check your console and API key.', action: { type: 'none' } };
+        }
+    });
+
+    ipcMain.handle('execute-approved-action', async (event, action) => {
+        try {
+            if (!action || action.type === 'none') {
+                return { success: false, message: 'No action to execute.' };
+            }
+            return await executeApprovedAction(executeAction, action, clipboard);
+        } catch (err) {
+            console.error('[ApprovedAction] Error:', err);
+            return { success: false, message: err.message || 'Action failed.' };
         }
     });
 
@@ -167,6 +225,30 @@ function registerIpcHandlers({
         }
     });
 
+    ipcMain.handle('spotlight-action', async (event, action) => {
+        const spotlightWindow = windowManager.getSpotlightWindow();
+        if (spotlightWindow) spotlightWindow.hide();
+
+        if (!action || action.type === 'none') {
+            return { success: false, message: 'No Spotlight action to execute.' };
+        }
+
+        try {
+            const result = await executeAction(action, {
+                clipboard,
+                source: 'spotlight'
+            });
+            return {
+                success: true,
+                action,
+                message: result && typeof result === 'string' ? result : 'Spotlight action completed.'
+            };
+        } catch (err) {
+            console.error('[SpotlightAction] Error:', err);
+            return { success: false, message: err.message || 'Spotlight action failed.' };
+        }
+    });
+
     ipcMain.on('spotlight-resize', (event, width, height) => {
         const spotlightWindow = windowManager.getSpotlightWindow();
         if (spotlightWindow) spotlightWindow.setSize(width, height);
@@ -207,6 +289,8 @@ function registerIpcHandlers({
     ipcMain.on('vision-cancel', () => screenCapture.cancel());
     ipcMain.handle('capture-silent-screen', () => screenCapture.captureSilentScreen());
 
+    ipcMain.handle('get-smart-context', () => getSmartContext({ clipboard }));
+
     ipcMain.on('toggle-proactive', (event, isOn) => {
         if (isOn) {
             proactiveLoop.start();
@@ -245,4 +329,4 @@ function registerIpcHandlers({
     });
 }
 
-module.exports = { registerIpcHandlers };
+module.exports = { registerIpcHandlers, buildApprovalRequest, executeApprovedAction };

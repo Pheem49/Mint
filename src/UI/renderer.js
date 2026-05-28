@@ -22,6 +22,7 @@ const chatProviderSelect = document.getElementById('chat-provider-select');
 const imagePreviewContainer = document.getElementById('image-preview-container');
 const imagePreview = document.getElementById('image-preview');
 const removeImageBtn = document.getElementById('remove-image-btn');
+const agentModeToggle = document.getElementById('agent-mode-toggle');
 const modelMount = document.getElementById('model-mount');
 const modelShell = document.getElementById('model-shell');
 const modelStatus = document.getElementById('model-status');
@@ -71,6 +72,12 @@ function buildProviderPicker(settings = currentSettings) {
         chatProviderSelect.appendChild(option);
     });
     chatProviderSelect.value = settings.aiProvider || 'gemini';
+}
+
+function syncAgentModeToggle(settings = currentSettings) {
+    if (!agentModeToggle) return;
+    agentModeToggle.checked = settings.assistantMode === 'agent';
+    agentModeToggle.closest('.smart-context-control')?.classList.toggle('is-active', agentModeToggle.checked);
 }
 
 async function changeChatProvider(provider) {
@@ -222,9 +229,11 @@ async function loadTheme() {
         ttsSpeed = config.ttsSpeed !== undefined ? config.ttsSpeed : 1.0;
         ttsPitch = config.ttsPitch !== undefined ? config.ttsPitch : 1.0;
         buildProviderPicker(currentSettings);
+        syncAgentModeToggle(currentSettings);
     } catch (e) {
         applyTheme('dark', '#8b5cf6', '#f8fafc');
         buildProviderPicker(currentSettings);
+        syncAgentModeToggle(currentSettings);
     }
 }
 
@@ -248,10 +257,33 @@ window.api.onSettingsChanged((config) => {
     ttsSpeed = config.ttsSpeed !== undefined ? config.ttsSpeed : 1.0;
     ttsPitch = config.ttsPitch !== undefined ? config.ttsPitch : 1.0;
     buildProviderPicker(currentSettings);
+    syncAgentModeToggle(currentSettings);
 });
 
 chatProviderSelect?.addEventListener('change', (event) => {
     changeChatProvider(event.target.value);
+});
+
+agentModeToggle?.addEventListener('change', async () => {
+    const nextSettings = {
+        ...currentSettings,
+        assistantMode: agentModeToggle.checked ? 'agent' : 'chat'
+    };
+    agentModeToggle.disabled = true;
+    try {
+        const result = await window.api.saveSettings(nextSettings);
+        if (!result || result.success !== false) {
+            currentSettings = nextSettings;
+        } else {
+            throw new Error(result.message || 'Unable to save assistant mode');
+        }
+    } catch (error) {
+        console.error('Failed to change assistant mode:', error);
+        setMintActivity('error');
+    } finally {
+        syncAgentModeToggle(currentSettings);
+        agentModeToggle.disabled = false;
+    }
 });
 
 // --- Voice Input Setup ---
@@ -468,7 +500,9 @@ async function sendVoiceMessage(base64Audio) {
         await speakText(normalizeAiText(response.response), { onEnd: resumeSpeechIfNeeded });
         notifyAiIfNeeded();
 
-        if (response.action && response.action.type !== 'none') {
+        if (response.approval?.required) {
+            appendApprovalCard(msgDiv, response.approval);
+        } else if (response.action && response.action.type !== 'none') {
             appendActionCard(msgDiv, response.action);
         }
     } catch (error) {
@@ -797,6 +831,125 @@ function formatTime(isoString) {
     } catch (e) {
         return '';
     }
+}
+
+function compactSmartContext(context) {
+    if (!context || typeof context !== 'object') return null;
+    const activeWindow = context.activeWindow || {};
+    const currentApp = context.currentApp || {};
+    const browser = context.browser || null;
+    return {
+        capturedAt: context.capturedAt,
+        platform: context.platform,
+        currentApp: currentApp.name || activeWindow.appName || activeWindow.processName || '',
+        processName: currentApp.processName || activeWindow.processName || '',
+        pid: currentApp.pid || activeWindow.pid || null,
+        activeWindowTitle: activeWindow.title || '',
+        browser: browser ? {
+            title: browser.title || '',
+            url: browser.url || '',
+            urlUnavailableReason: browser.urlUnavailableReason || ''
+        } : null,
+        selectedText: context.selectedText || '',
+        clipboardText: context.clipboardText || ''
+    };
+}
+
+function appendSmartContextToMessage(message, context) {
+    const compact = compactSmartContext(context);
+    if (!compact) return message;
+    return [
+        message,
+        '',
+        '[SMART_CONTEXT]',
+        'Use this structured desktop context together with the attached screenshot. Do not mention it unless it helps answer the user.',
+        JSON.stringify(compact, null, 2),
+        '[/SMART_CONTEXT]'
+    ].join('\n');
+}
+
+function shouldShowAgentActivity(options = {}) {
+    return options.showAgentActivity !== false && currentSettings.assistantMode === 'agent';
+}
+
+function createAgentActivityCard() {
+    const messageDiv = document.createElement('div');
+    messageDiv.classList.add('message', 'ai-message', 'agent-activity-message');
+
+    const bubble = document.createElement('div');
+    bubble.classList.add('message-bubble', 'agent-activity-card');
+
+    const header = document.createElement('div');
+    header.className = 'agent-activity-header';
+    const title = document.createElement('span');
+    title.textContent = 'Agent Activity';
+    const status = document.createElement('span');
+    status.className = 'agent-activity-status';
+    status.textContent = 'Running';
+    header.appendChild(title);
+    header.appendChild(status);
+
+    const list = document.createElement('div');
+    list.className = 'agent-activity-list';
+
+    bubble.appendChild(header);
+    bubble.appendChild(list);
+    messageDiv.appendChild(bubble);
+    chatContainer.appendChild(messageDiv);
+    scrollToBottom();
+
+    return {
+        element: messageDiv,
+        list,
+        status,
+        add(label, state = 'running', detail = '') {
+            const item = document.createElement('div');
+            item.className = 'agent-activity-item';
+            item.dataset.state = state;
+
+            const dot = document.createElement('span');
+            dot.className = 'agent-activity-dot';
+
+            const content = document.createElement('span');
+            content.className = 'agent-activity-text';
+            content.textContent = detail ? `${label}: ${detail}` : label;
+
+            item.appendChild(dot);
+            item.appendChild(content);
+            list.appendChild(item);
+            scrollToBottom();
+            return item;
+        },
+        update(item, state, label, detail = '') {
+            if (!item) return;
+            item.dataset.state = state;
+            const content = item.querySelector('.agent-activity-text');
+            if (content && label) {
+                content.textContent = detail ? `${label}: ${detail}` : label;
+            }
+        },
+        finish(state = 'done', label = 'Done') {
+            status.textContent = label;
+            status.dataset.state = state;
+        }
+    };
+}
+
+function describeSmartContextActivity(context, hasScreenshot) {
+    const compact = compactSmartContext(context) || {};
+    const parts = [];
+    if (hasScreenshot) parts.push('screen');
+    if (compact.currentApp) parts.push(compact.currentApp);
+    if (compact.activeWindowTitle) parts.push(compact.activeWindowTitle);
+    if (compact.selectedText) parts.push('selected text');
+    if (compact.clipboardText) parts.push('clipboard');
+    return parts.slice(0, 3).join(' · ') || 'desktop context';
+}
+
+function describeActionActivity(action) {
+    if (!action || action.type === 'none') return 'No desktop action';
+    const meta = getActionCardMeta(action);
+    return meta.detail ? `${meta.title} · ${meta.detail}` : meta.title;
 }
 
 // Clear chat history
@@ -1143,29 +1296,193 @@ function autoChunkAiText(text) {
 }
 
 function appendActionCard(messageDiv, action) {
+    if (!messageDiv || !action || action.type === 'none') return;
+
+    const meta = getActionCardMeta(action);
     const card = document.createElement('div');
     card.classList.add('action-card');
+    card.dataset.actionType = action.type || 'unknown';
 
-    let icon = '⚡';
-    let text = '';
+    const icon = document.createElement('span');
+    icon.className = 'action-card-icon';
+    icon.textContent = meta.icon;
 
-    if (action.type === 'open_url') {
-        icon = '🌐';
-        text = `Opened URL: ${action.target}`;
-    } else if (action.type === 'open_app') {
-        icon = '🚀';
-        text = `Launched App: ${action.target}`;
-    } else if (action.type === 'search') {
-        icon = '🔍';
-        text = `Searched info: ${action.target}`;
-    } else {
-        return; // Do nothing if none or unknown
+    const content = document.createElement('div');
+    content.className = 'action-card-content';
+
+    const title = document.createElement('div');
+    title.className = 'action-card-title';
+    title.textContent = meta.title;
+    content.appendChild(title);
+
+    if (meta.detail) {
+        const detail = document.createElement('div');
+        detail.className = 'action-card-detail';
+        detail.textContent = meta.detail;
+        content.appendChild(detail);
     }
 
-    card.textContent = `${icon} ${text}`;
+    card.appendChild(icon);
+    card.appendChild(content);
+    messageDiv.querySelector('.message-bubble')?.appendChild(card);
+}
 
-    // Append after the bubble
-    messageDiv.querySelector('.message-bubble').appendChild(card);
+function getActionCardMeta(action) {
+    const target = formatActionTarget(action);
+    const type = action?.type || 'unknown';
+    const targetOrFallback = target || 'No target';
+
+    const map = {
+        open_url: ['🌐', 'Opened URL', target],
+        search: ['🔍', 'Searched the web', target],
+        open_app: ['🚀', 'Launched app', target],
+        web_automation: ['🧭', 'Ran browser automation', target],
+        create_folder: ['📁', 'Created folder', target],
+        open_file: ['📄', 'Opened file', target],
+        open_folder: ['📂', 'Opened folder', target],
+        delete_file: ['🗑️', 'Deleted file', target],
+        find_path: ['🔎', action.openAfter ? 'Found and opened path' : 'Found path', buildFindPathDetail(action)],
+        clipboard_write: ['📋', 'Updated clipboard', target],
+        learn_file: ['📚', 'Indexed file', target],
+        learn_folder: ['📚', 'Indexed folder', target],
+        system_info: ['💻', target ? 'Checked weather' : 'Checked system info', target],
+        plugin: ['🔌', 'Ran plugin', target],
+        mcp_tool: ['🧩', 'Called MCP tool', target],
+        mouse_move: ['↗', 'Moved pointer', target],
+        mouse_click: ['☝', 'Clicked screen', buildMouseDetail(action)],
+        type_text: ['⌨', 'Typed text', target],
+        key_tap: ['⌨', 'Pressed key', target],
+        system_automation: ['⚙', 'Changed system setting', target]
+    };
+
+    const [icon, title, detail] = map[type] || ['⚡', `Ran action: ${type}`, targetOrFallback];
+    return { icon, title, detail };
+}
+
+function buildFindPathDetail(action) {
+    const target = formatActionTarget(action);
+    const typeLabel = action.pathType && action.pathType !== 'any' ? ` (${action.pathType})` : '';
+    return target ? `${target}${typeLabel}` : typeLabel.trim();
+}
+
+function buildMouseDetail(action) {
+    const point = formatActionTarget(action);
+    const button = action.button ? `button ${action.button}` : 'left button';
+    return point ? `${point} · ${button}` : button;
+}
+
+function formatActionTarget(action) {
+    if (!action || typeof action !== 'object') return '';
+    if (action.server && action.target) return `${action.server}:${action.target}`;
+    if (action.pluginName) return `${action.pluginName} ${action.target || ''}`.trim();
+    if (action.target) return String(action.target);
+    if (Number.isFinite(action.x) && Number.isFinite(action.y)) return `${action.x}, ${action.y}`;
+    return '';
+}
+
+function getApprovalCopy(approval) {
+    const action = approval?.action || {};
+    const actionType = action.type || 'unknown';
+    const target = formatActionTarget(action);
+    const isDangerous = approval?.tier === 'dangerous';
+    return {
+        title: isDangerous ? 'Dangerous action requires approval' : 'Action requires approval',
+        body: target ? `${actionType}: ${target}` : actionType,
+        reason: approval?.reason || 'This action needs your permission before Mint can run it.',
+        approveLabel: isDangerous ? 'Allow Dangerous Action' : 'Allow Action'
+    };
+}
+
+function appendApprovalCard(messageDiv, approval, activity = null) {
+    if (!messageDiv || !approval?.action || !window.api?.executeApprovedAction) return;
+
+    const copy = getApprovalCopy(approval);
+    const card = document.createElement('div');
+    card.classList.add('action-card', 'approval-card');
+    card.dataset.tier = approval.tier || 'approval';
+
+    const content = document.createElement('div');
+    content.className = 'approval-card-content';
+
+    const title = document.createElement('div');
+    title.className = 'approval-card-title';
+    title.textContent = copy.title;
+
+    const body = document.createElement('div');
+    body.className = 'approval-card-body';
+    body.textContent = copy.body;
+
+    const reason = document.createElement('div');
+    reason.className = 'approval-card-reason';
+    reason.textContent = copy.reason;
+
+    content.appendChild(title);
+    content.appendChild(body);
+    content.appendChild(reason);
+
+    const actions = document.createElement('div');
+    actions.className = 'approval-card-actions';
+
+    const approveBtn = document.createElement('button');
+    approveBtn.type = 'button';
+    approveBtn.className = 'approval-btn approval-btn-approve';
+    approveBtn.textContent = copy.approveLabel;
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'approval-btn approval-btn-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const setDone = (message, state) => {
+        approveBtn.disabled = true;
+        cancelBtn.disabled = true;
+        card.dataset.state = state;
+        reason.textContent = message;
+    };
+
+    approveBtn.addEventListener('click', async () => {
+        approveBtn.disabled = true;
+        cancelBtn.disabled = true;
+        reason.textContent = 'Running approved action...';
+        const runStep = activity?.add('Running approved action', 'running', describeActionActivity(approval.action));
+        setMintActivity('thinking');
+
+        try {
+            const result = await window.api.executeApprovedAction(approval.action);
+            if (!result || result.success === false) {
+                setDone(result?.message || 'Action failed.', 'error');
+                activity?.update(runStep, 'error', 'Action failed', result?.message || '');
+                activity?.finish('error', 'Failed');
+                setMintActivity('error');
+                return;
+            }
+
+            setDone(result.message || 'Action completed.', 'approved');
+            activity?.update(runStep, 'done', 'Action completed', result.message || describeActionActivity(approval.action));
+            activity?.finish('done', 'Completed');
+            setMintActivity('idle');
+        } catch (error) {
+            console.error('[Approval] Failed to execute action:', error);
+            setDone(error.message || 'Action failed.', 'error');
+            activity?.update(runStep, 'error', 'Action failed', error.message || '');
+            activity?.finish('error', 'Failed');
+            setMintActivity('error');
+        }
+    });
+
+    cancelBtn.addEventListener('click', () => {
+        setDone('Cancelled by user.', 'cancelled');
+        activity?.add('Approval cancelled', 'cancelled');
+        activity?.finish('cancelled', 'Cancelled');
+        setMintActivity('idle');
+    });
+
+    actions.appendChild(approveBtn);
+    actions.appendChild(cancelBtn);
+    card.appendChild(content);
+    card.appendChild(actions);
+
+    messageDiv.querySelector('.message-bubble')?.appendChild(card);
 }
 
 function showTyping() {
@@ -1300,31 +1617,55 @@ async function sendTextMessage(text, options = {}) {
         rememberConversationLanguage(displayText || cleanText);
     }
 
+    const activity = shouldShowAgentActivity(options) ? createAgentActivityCard() : null;
+    const contextStep = activity?.add('Preparing desktop context', 'running');
+
     // Show typing early so user knows we are processing
     showTyping();
     setMintActivity('thinking');
+
+    let messageToSend = cleanText;
 
     // Check Smart Context Toggle
     const smartToggle = document.getElementById('smart-context-toggle');
     if (allowSmartContext && smartToggle && smartToggle.checked && !imageToSend) {
         try {
-            const silentCapture = await window.api.captureSilentScreen();
+            const [silentCapture, smartContext] = await Promise.all([
+                window.api.captureSilentScreen(),
+                window.api.getSmartContext ? window.api.getSmartContext() : Promise.resolve(null)
+            ]);
             if (silentCapture) {
                 // Set imageToSend so it gets sent to the API, but we already appended the chat bubble
                 imageToSend = silentCapture;
             }
+            if (smartContext) {
+                messageToSend = appendSmartContextToMessage(cleanText, smartContext);
+            }
+            if (activity && contextStep) {
+                activity.update(
+                    contextStep,
+                    'done',
+                    'Read Smart Context',
+                    describeSmartContextActivity(smartContext, Boolean(silentCapture))
+                );
+            }
         } catch (err) {
             console.error("Smart Context capture failed:", err);
+            activity?.update(contextStep, 'error', 'Smart Context unavailable', err.message || '');
         }
+    } else if (activity && contextStep) {
+        activity.update(contextStep, 'skipped', 'Smart Context skipped', imageToSend ? 'image already attached' : 'toggle is off');
     }
 
     // Hide proactive bar if user is actively typing a message
     hideProactiveBar();
+    const modelStep = activity?.add('Waiting for model response', 'running');
 
     try {
         // Send to main process (text, image, audio=null)
-        const response = await window.api.sendMessage(cleanText, imageToSend, null);
+        const response = await window.api.sendMessage(messageToSend, imageToSend, null);
         removeTyping();
+        activity?.update(modelStep, 'done', 'Model response received');
 
         if (typeof response.response !== 'string') {
             response.response = normalizeAiText(response.response);
@@ -1332,6 +1673,7 @@ async function sendTextMessage(text, options = {}) {
 
         // Handle system_info action: fetch data and append to AI message
         if (response.action && response.action.type === 'system_info') {
+            const infoStep = activity?.add('Running local info action', 'running', describeActionActivity(response.action));
             const city = (response.action.target || '').trim();
             // Only treat as weather if city looks like a real location name (not blank, not 'date', not 'time')
             const weatherKeywords = ['date', 'time', 'วัน', 'เวลา', 'today', 'now'];
@@ -1341,12 +1683,14 @@ async function sendTextMessage(text, options = {}) {
                 // Weather query
                 const weather = await window.api.getWeather(city);
                 response.response += `\n\n🌡️ ${weather.data}`;
+                activity?.update(infoStep, 'done', 'Weather info added', city);
             } else {
                 // General system info (date, time, RAM, CPU)
                 const info = await window.api.getSystemInfo();
                 const machine = info.machine && info.machine.display ? `\n🖥️ รุ่นเครื่อง: ${info.machine.display}` : '';
                 const distro = info.distro ? `\nระบบ: ${info.distro}` : '';
                 response.response += `\n\n📅 วันนี้: ${info.date}\n⏰ เวลา: ${info.time}${machine}${distro}\n💻 CPU: ${info.cpu.model} (${info.cpu.cores} คอร์)\n💻 RAM: ${info.ram.used} / ${info.ram.total} (${info.ram.percent})`;
+                activity?.update(infoStep, 'done', 'System info added');
             }
         }
 
@@ -1362,12 +1706,27 @@ async function sendTextMessage(text, options = {}) {
         notifyAiIfNeeded();
 
         // Append action card if applicable
-        if (response.action && response.action.type !== 'none' && response.action.type !== 'system_info') {
+        if (response.approval?.required) {
+            activity?.add('Selected action', 'approval', describeActionActivity(response.approval.action));
+            activity?.add('Waiting for approval', 'running', response.approval.reason || '');
+            activity?.finish('waiting', 'Waiting');
+            appendApprovalCard(msgDiv, response.approval, activity);
+        } else if (response.action && response.action.type !== 'none' && response.action.type !== 'system_info') {
+            activity?.add('Selected action', 'done', describeActionActivity(response.action));
             appendActionCard(msgDiv, response.action);
+            activity?.finish('done', 'Completed');
+        } else if (response.action && response.action.type === 'system_info') {
+            activity?.add('Selected action', 'done', describeActionActivity(response.action));
+            activity?.finish('done', 'Completed');
+        } else {
+            activity?.add('No desktop action selected', 'done');
+            activity?.finish('done', 'Completed');
         }
     } catch (error) {
         removeTyping();
         setMintActivity('error');
+        activity?.update(modelStep, 'error', 'Model request failed', error.message || '');
+        activity?.finish('error', 'Failed');
         appendMessage("Sorry, I encountered an error communicating with the main process.", 'ai');
         console.error(error);
         resumeSpeechIfNeeded();

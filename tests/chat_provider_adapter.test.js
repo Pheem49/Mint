@@ -107,4 +107,13 @@ describe('Gemini_API handleChat provider adapter integration', () => {
             expect.objectContaining({ role: 'model', providerInfo: expect.objectContaining({ provider: 'openai' }) })
         ]));
     });
+
+    test('keeps Chat Mode restrictive and Agent Mode action-oriented', () => {
+        const { _helpers } = require('../src/AI_Brain/Gemini_API');
+
+        expect(_helpers.buildActionModeInstruction({ assistantMode: 'chat' })).toContain('Chat Mode');
+        expect(_helpers.buildActionModeInstruction({ assistantMode: 'chat' })).toContain('only when the latest message explicitly asks');
+        expect(_helpers.buildActionModeInstruction({ assistantMode: 'agent' })).toContain('Desktop Agent Mode');
+        expect(_helpers.buildActionModeInstruction({ assistantMode: 'agent' })).toContain('Choose exactly one action');
+    });
 });

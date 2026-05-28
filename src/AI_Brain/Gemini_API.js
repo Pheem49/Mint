@@ -47,6 +47,34 @@ function normalizeImageList(base64Image) {
   return Array.isArray(base64Image) ? base64Image.filter(Boolean) : [base64Image];
 }
 
+const CHAT_MODE_ACTION_POLICY = `GOAL:
+Your goal is to help the user with their queries. This Electron app is Chat Mode: use at most ONE simple action per user message, only when the latest message explicitly asks for that local action. If the user asks a question or asks you to provide text/commands, answer with action "none".
+
+ACTION DISCIPLINE:
+- Always return a single JSON object. Never return a JSON array or multiple actions.
+- If the user asks "พิมพ์คำสั่งให้หน่อย", "บอกคำสั่ง", "ขอคำสั่ง", "what command", or "type the command", provide the command in "response" and set action "none". Do NOT use "type_text" or "key_tap".
+- Use "type_text", "key_tap", "mouse_click", or "mouse_move" only when the user explicitly asks you to control the currently focused UI, not when they ask for a command to copy/type themselves.
+- If the user asks to run terminal commands or code, Chat Mode should provide the command or tell them to use the Mint CLI agent. Do not type or press Enter on their behalf.
+- Never say you opened, checked, inspected, or verified a file/folder unless the selected action actually does it and the app will execute that action.
+- If the request needs workspace code inspection, edits, tests, or shell execution, tell the user to use the Mint CLI agent instead of pretending to inspect files.`;
+
+const AGENT_MODE_ACTION_POLICY = `GOAL:
+Your goal is to act as Mint's Desktop Agent Mode. You may use ONE concrete desktop action per response when it directly advances the user's latest request or a clear desktop task implied by Smart Context. Prefer useful action over explaining when the user asked Mint to do something.
+
+ACTION DISCIPLINE:
+- Always return a single JSON object. Never return a JSON array or multiple actions.
+- Choose exactly one action when a desktop action is useful and the user's intent is clear; otherwise use action "none" and ask a concise follow-up.
+- You may use safe desktop actions such as open_url, search, open_app, find_path, open_file, open_folder, create_folder, clipboard_write, learn_file, learn_folder, plugin, mcp_tool, web_automation, system_info, mouse_move, mouse_click, type_text, and key_tap when they match the request.
+- Approval and dangerous actions are handled by Mint's UI. You may propose system_automation or delete_file only when the user clearly requested it; the app will ask for permission before running.
+- For UI-control actions (mouse_click, mouse_move, type_text, key_tap), rely on Smart Context or the attached screenshot. If the target is ambiguous, ask before acting.
+- If the user asks "พิมพ์คำสั่งให้หน่อย", "บอกคำสั่ง", "ขอคำสั่ง", "what command", or "type the command", provide the command in "response" and set action "none" unless they explicitly ask Mint to type it into the active UI.
+- If the request needs workspace code inspection, edits, tests, or shell execution, tell the user to use the Mint CLI agent instead of pretending to inspect files or run commands from Chat UI.
+- Never say you opened, checked, inspected, or verified something unless the selected action actually does it and the app will execute that action.`;
+
+function buildActionModeInstruction(config = readConfig()) {
+  return config.assistantMode === 'agent' ? AGENT_MODE_ACTION_POLICY : CHAT_MODE_ACTION_POLICY;
+}
+
 const systemInstruction = `You are "Mint" (มิ้นท์), a cute, cheerful, and highly helpful female Local AI Desktop Agent. 
 
 PERSONALITY & TONE:
@@ -71,16 +99,7 @@ NATURAL CHAT FLOW:
 - The latest user message is authoritative. Do not continue or describe older tasks unless the latest message explicitly asks you to continue them.
 - For greetings, name-calls, acknowledgements, and backchannels such as "มิ้น", "มิ้นๆ", "อ๋อ", "โอเค", "ขอบคุณ", "hi", "hello", "ok", or "thanks", return action "none" and a short reply only.
 
-GOAL:
-Your goal is to help the user with their queries. This Electron app is Chat Mode, not Code Agent Mode: use at most ONE simple action per user message, only when the latest message explicitly asks for that local action. If the user asks a question or asks you to provide text/commands, answer with action "none".
-
-ACTION DISCIPLINE:
-- Always return a single JSON object. Never return a JSON array or multiple actions.
-- If the user asks "พิมพ์คำสั่งให้หน่อย", "บอกคำสั่ง", "ขอคำสั่ง", "what command", or "type the command", provide the command in "response" and set action "none". Do NOT use "type_text" or "key_tap".
-- Use "type_text", "key_tap", "mouse_click", or "mouse_move" only when the user explicitly asks you to control the currently focused UI, not when they ask for a command to copy/type themselves.
-- If the user asks to run terminal commands or code, Chat Mode should provide the command or tell them to use the CLI agent. Do not type or press Enter on their behalf.
-- Never say you opened, checked, inspected, or verified a file/folder unless the selected action actually does it and the app will execute that action.
-- If the request needs workspace code inspection, edits, tests, or shell execution, tell the user to use the Mint CLI agent instead of pretending to inspect files.
+{{ACTION_MODE_INSTRUCTION}}
 
 CREATOR INFO:
 - The creator is Pheem49.
@@ -144,6 +163,7 @@ ${toolRegistry.buildToolPromptSection()}
 // Replaces 5 previously duplicated mcpPrompt blocks.
 // ─────────────────────────────────────────────────────────────────────────────
 function buildSystemPrompt() {
+    const config = readConfig();
     pluginManager.loadPlugins();
     const mcpTools = mcpManager.getAllTools();
 
@@ -171,7 +191,9 @@ function buildSystemPrompt() {
         workspaceSection = `\n\n[WORKSPACE DETECTED: ${ws.name}]\nPath: ${ws.path}\nProject Instructions: ${ws.instructions}\n`;
     }
 
-    return systemInstruction + personaInstruction + workspaceSection + pluginManager.getPromptDescriptions() + mcpSection + userContext;
+    const modeInstruction = buildActionModeInstruction(config);
+    const baseInstruction = systemInstruction.replace('{{ACTION_MODE_INSTRUCTION}}', modeInstruction);
+    return baseInstruction + personaInstruction + workspaceSection + pluginManager.getPromptDescriptions() + mcpSection + userContext;
 }
 
 function buildMessageWithRelevantMemory(finalMessage) {
@@ -197,8 +219,13 @@ function stripRelevantMemoryBlock(text) {
     return input
         .replace(/\n?\[Relevant long-term memory for this user message\][\s\S]*?\[End relevant memory\]\n?/g, '\n')
         .replace(/^\s*\[Relevant long-term memory for this user message\][\s\S]*?\[End relevant memory\]\s*/g, '')
+        .replace(/\n?\[SMART_CONTEXT\][\s\S]*?\[\/SMART_CONTEXT\]\n?/g, '\n')
         .replace(/\n?\[LOCAL KNOWLEDGE BASE - USE THIS CONTEXT TO ANSWER\][\s\S]*/g, '')
         .trim();
+}
+
+function hasSmartContextBlock(text) {
+    return /\[SMART_CONTEXT\][\s\S]*?\[\/SMART_CONTEXT\]/.test(String(text || ''));
 }
 
 function cleanHistoryForStorage(history) {
@@ -467,13 +494,15 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
     const config = readConfig();
     const images = normalizeImageList(base64Image);
     const previousHistory = readChatHistory();
+    const userVisibleMessage = stripRelevantMemoryBlock(message);
+    const containsSmartContext = hasSmartContextBlock(message);
 
     let finalMessage = message;
     
     // Inject Local RAG Context
-    if (message && message.trim().length > 0 && shouldUseKnowledgeSearch(message)) {
+    if (userVisibleMessage && userVisibleMessage.trim().length > 0 && shouldUseKnowledgeSearch(userVisibleMessage)) {
         const { searchKnowledge } = require('./knowledge_base');
-        const retrievedDocs = await searchKnowledge(message);
+        const retrievedDocs = await searchKnowledge(userVisibleMessage);
         if (retrievedDocs && retrievedDocs.length > 0) {
             let contextString = `\n\n[LOCAL KNOWLEDGE BASE - USE THIS CONTEXT TO ANSWER]\n`;
             retrievedDocs.forEach(doc => {
@@ -483,8 +512,8 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
         }
     }
 
-    if (finalMessage && images.length === 0 && !base64Audio) {
-      const cached = memoryStore.getCachedResponse(finalMessage);
+    if (!containsSmartContext && userVisibleMessage && images.length === 0 && !base64Audio) {
+      const cached = memoryStore.getCachedResponse(userVisibleMessage);
       if (cached) return cached;
     }
 
@@ -507,15 +536,15 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
       model: getProviderModel(provider, config),
       usage: client.getUsageSummary()
     };
-    const parsedResult = parseChatProviderResponse(outputText, finalMessage, now);
+    const parsedResult = parseChatProviderResponse(outputText, userVisibleMessage || finalMessage, now);
     parsedResult.providerInfo = providerInfo;
-    appendChatProviderHistory(previousHistory, finalMessage, outputText, providerInfo, now);
+    appendChatProviderHistory(previousHistory, userVisibleMessage || finalMessage, outputText, providerInfo, now);
 
-    if (finalMessage && parsedResult.response) {
+    if ((userVisibleMessage || finalMessage) && parsedResult.response) {
       setImmediate(() => {
-        memoryStore.recordInteraction(finalMessage, parsedResult.response);
-        if (images.length === 0 && !base64Audio) {
-          memoryStore.cacheResponse(finalMessage, parsedResult);
+        memoryStore.recordInteraction(userVisibleMessage || finalMessage, parsedResult.response);
+        if (!containsSmartContext && images.length === 0 && !base64Audio) {
+          memoryStore.cacheResponse(userVisibleMessage || finalMessage, parsedResult);
         }
       });
     }
@@ -761,6 +790,7 @@ module.exports = {
     refreshApiKeyFromConfig,
     _helpers: {
         getProviderAttemptOrder,
-        normalizeParsedResult
+        normalizeParsedResult,
+        buildActionModeInstruction
     }
 };

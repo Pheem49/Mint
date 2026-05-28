@@ -8,6 +8,7 @@ const DEFAULT_CONFIG = {
     apiKey: '',
     geminiModel: 'gemini-2.5-flash',
     language: 'th-TH',
+    assistantMode: 'chat',
     proactiveInterval: 60,
     proactiveCooldown: 120,
     glassBlur: 'blur(16px)',

@@ -54,4 +54,19 @@ describe('file_operations findPath', () => {
         expect(result.matches.length).toBe(1);
         expect(result.matches[0].path).toBe(exactDir);
     });
+
+    test('resolves common home folders before recursive search', () => {
+        const homeDownloads = path.join(os.homedir(), 'Downloads');
+        if (!fs.existsSync(homeDownloads)) {
+            fs.mkdirSync(homeDownloads, { recursive: true });
+        }
+        const nestedDownloads = path.join(tempDir, 'prefix', 'Downloads');
+        fs.mkdirSync(nestedDownloads, { recursive: true });
+
+        const { findPath } = require('../src/Automation_Layer/file_operations');
+        const result = findPath('Downloads', { type: 'dir', maxResults: 10, roots: [tempDir, os.homedir()] });
+
+        expect(result.success).toBe(true);
+        expect(result.matches).toEqual([{ path: homeDownloads, type: 'dir' }]);
+    });
 });

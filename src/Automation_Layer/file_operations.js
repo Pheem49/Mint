@@ -18,6 +18,8 @@ const IGNORED_DIRECTORY_NAMES = new Set([
     'coverage'
 ]);
 
+const COMMON_HOME_FOLDERS = ['Downloads', 'Desktop', 'Documents', 'Videos', 'Pictures', 'Music', 'vscode', 'Games'];
+
 function getSearchRoots() {
     return Array.from(new Set([
         process.cwd(),
@@ -34,8 +36,6 @@ function resolveSmartPath(target) {
     if (!target) return target;
 
     const home = os.homedir();
-    const commonFolders = ['Downloads', 'Desktop', 'Documents', 'Videos', 'Pictures', 'Music', 'vscode', 'Games'];
-
     // 1. If it's already an absolute path and exists, use it
     if (path.isAbsolute(target) && fs.existsSync(target)) return target;
 
@@ -54,13 +54,13 @@ function resolveSmartPath(target) {
     // 4. Check if the target itself starts with a common folder (e.g., "Downloads/resume.pdf")
     const parts = target.split(/[/\\]/);
     const firstPart = parts[0];
-    if (commonFolders.includes(firstPart)) {
+    if (COMMON_HOME_FOLDERS.includes(firstPart)) {
         const potentialPath = path.join(home, target);
         if (fs.existsSync(potentialPath)) return potentialPath;
     }
 
     // 5. Try searching the filename in all common folders
-    for (const folder of commonFolders) {
+    for (const folder of COMMON_HOME_FOLDERS) {
         const potentialPath = path.join(home, folder, target);
         if (fs.existsSync(potentialPath)) return potentialPath;
     }
@@ -76,6 +76,18 @@ function findPath(target, options = {}) {
 
     const normalizedType = ['file', 'dir', 'any'].includes(options.type) ? options.type : 'any';
     const loweredQuery = target.trim().toLowerCase();
+    const directPath = resolveSmartPath(target.trim());
+    if (directPath && path.isAbsolute(directPath) && fs.existsSync(directPath)) {
+        const stat = fs.statSync(directPath);
+        const directType = stat.isDirectory() ? 'dir' : 'file';
+        if (normalizedType === 'any' || normalizedType === directType) {
+            return {
+                success: true,
+                matches: [{ path: directPath, type: directType }]
+            };
+        }
+    }
+
     const exactMatches = [];
     const partialMatches = [];
     const visited = new Set();
@@ -271,4 +283,4 @@ async function deleteFile(target) {
     }
 }
 
-module.exports = { createFolder, openFile, deleteFile, findPath };
+module.exports = { createFolder, openFile, deleteFile, findPath, resolveSmartPath };

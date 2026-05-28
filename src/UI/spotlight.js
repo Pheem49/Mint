@@ -57,7 +57,7 @@ spotlightInput.addEventListener('input', () => {
                 label: `Result: ${result}`,
                 desc: 'Calculation result (Press Enter to copy)',
                 icon: '🧮',
-                action: { type: 'copy', value: result.toString() }
+                action: { type: 'clipboard_write', target: result.toString() }
             }]);
             return;
         } catch {}
@@ -119,17 +119,21 @@ spotlightInput.addEventListener('keydown', (e) => {
     }
 });
 
-function handleAction(action) {
+async function handleAction(action) {
     if (action.type === 'chat') {
         window.spotlightAPI.submit(action.query);
-    } else if (action.type === 'open_url') {
-        window.spotlightAPI.submit(`เปิดเว็บ ${action.target}`);
-    } else if (action.type === 'open_app') {
-        window.spotlightAPI.submit(`เปิดโปรแกรม ${action.target}`);
-    } else if (action.type === 'copy') {
-        // We need a clipboard API in spotlight preload or just send as chat message that triggers copy
-        window.spotlightAPI.submit(`copy ${action.value}`);
+        return;
     }
+
+    if (window.spotlightAPI.executeAction) {
+        const result = await window.spotlightAPI.executeAction(action);
+        if (!result || result.success === false) {
+            window.spotlightAPI.submit(`Spotlight action failed: ${result?.message || 'Unknown error'}`);
+        }
+        return;
+    }
+
+    window.spotlightAPI.submit(action.target || action.value || '');
 }
 
 // Auto-focus on show
