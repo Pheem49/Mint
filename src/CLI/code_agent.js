@@ -441,7 +441,7 @@ async function searchCode(workspaceRoot, query, targetPath = '.') {
         if (error.code === 'ENOENT') {
             // Recursive fallback search for missing ripgrep
             const results = [];
-            const files = walkDirectory(workspaceRoot, workspaceRoot, [], 1000);
+            const files = walkDirectory(searchRoot, workspaceRoot, [], 1000);
             const lowerQuery = query.toLowerCase();
 
             for (const relPath of files) {
