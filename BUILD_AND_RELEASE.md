@@ -12,7 +12,7 @@ npm run build:linux
 ```
 
 เมื่อรันเสร็จ ไฟล์ตัวติดตั้งจะปรากฏในโฟลเดอร์ `dist/` เช่น:
-- `Mint-X.Y.Z.AppImage`
+- `Mint-X.Y.Z.tar.gz`
 - `mint_X.Y.Z_amd64.deb`
 
 ---
@@ -51,16 +51,16 @@ gh auth login
 
 ```bash
 # แบบระบุข้อความอธิบายเอง
-gh release create v1.5.3 dist/*.deb dist/*.AppImage --title "Mint v1.5.3" --notes-file RELEASE_NOTES.md
+gh release create v1.5.3 dist/*.deb dist/*.tar.gz --title "Mint v1.5.3" --notes-file RELEASE_NOTES.md
 
 
 # หรือแบบให้ GitHub สรุปสิ่งที่แก้ไขให้โดยอัตโนมัติ (แนะนำ)
-gh release create v1.4.1 dist/*.deb dist/*.AppImage --generate-notes
+gh release create v1.4.1 dist/*.deb dist/*.tar.gz --generate-notes
 ```
 
 **หากต้องการอัปโหลดไฟล์เพิ่มเข้าไปใน Release เดิม:**
 ```bash
-gh release upload v1.2.2 dist/*.deb dist/*.AppImage --clobber
+gh release upload v1.2.2 dist/*.deb dist/*.tar.gz --clobber
 ```
 
 ---

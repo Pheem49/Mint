@@ -85,7 +85,7 @@
       "icon": "assets/icon.png",
       "executableName": "mint-ai",
       "target": [
-        "AppImage",
+        "tar.gz",
         "deb"
       ],
       "category": "Utility"
