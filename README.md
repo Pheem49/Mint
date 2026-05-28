@@ -39,7 +39,23 @@ Mint is an AI assistant built to live in your desktop and terminal. It combines 
 
 ## Installation & Setup
 
-### Global Install
+### Quick Install (Recommended)
+
+The easiest way to install Mint CLI is using our installation script:
+
+**For macOS & Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/Pheem49/Mint/main/install.sh | bash
+```
+
+**For Windows (PowerShell or CMD):**
+```powershell
+powershell -Command "iwr -useb https://raw.githubusercontent.com/Pheem49/Mint/main/install.ps1 | iex"
+```
+
+### NPM Install
+
+If you prefer to install via NPM directly:
 
 ```bash
 npm install -g @pheem49/mint@latest
