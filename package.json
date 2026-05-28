@@ -47,7 +47,8 @@
     "mammoth": "^1.12.0",
     "pdf-parse": "^2.4.5",
     "react": "^19.2.5",
-    "read-excel-file": "^9.0.10"
+    "read-excel-file": "^9.0.10",
+    "zod": "^4.4.3"
   },
   "peerDependenciesOptional": {
     "puppeteer": ">=22.0.0",
