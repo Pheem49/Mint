@@ -32,11 +32,18 @@ fi
 # 3. Install Mint CLI via NPM
 echo "Downloading and installing @pheem49/mint (may require Admin/Root privileges)..."
 
-# Use sudo automatically if not root and not on Windows (Msys/Cygwin)
+# Determine if we need sudo
 if [ "$EUID" -ne 0 ] && command -v sudo &> /dev/null; then
-  sudo npm install -g @pheem49/mint@latest
+    # Check if npm global directory is writable by the current user (e.g., using NVM)
+    NPM_PREFIX=$(npm config get prefix 2>/dev/null || echo "/usr/local")
+    if [ -w "$NPM_PREFIX" ] || [ -w "$NPM_PREFIX/lib/node_modules" ]; then
+        npm install -g @pheem49/mint@latest
+    else
+        # Preserve user's PATH so sudo can find npm if it's installed via custom paths
+        sudo env "PATH=$PATH" npm install -g @pheem49/mint@latest
+    fi
 else
-  npm install -g @pheem49/mint@latest
+    npm install -g @pheem49/mint@latest
 fi
 
 echo ""
