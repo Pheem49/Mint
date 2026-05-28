@@ -72,6 +72,9 @@
     "react-dom": "^19.2.5",
     "vite": "^8.0.10"
   },
+  "overrides": {
+    "gh-pages": "^5.0.0"
+  },
   "build": {
     "appId": "com.pheem49.mint",
     "productName": "Mint",
