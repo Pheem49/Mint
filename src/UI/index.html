@@ -253,10 +253,30 @@
 
         <div class="conversation-panel">
           <main class="chat-container" id="chat-container">
-            <div class="message ai-message initial" style="display: none; opacity: 0;">
-              <div class="message-bubble">
-                Hello! I'm Mint, your personal AI assistant ✨ <br>
-                Is there anything I can help you with, Master? You can ask me to "open YouTube", "create a folder", or just chat with me! 💖
+            <div class="message ai-message initial" style="display: none; opacity: 0; width: 100%; max-width: 100%;">
+              <div class="bubble-wrapper" style="width: 100%; max-width: 100%;">
+                <div class="message-bubble welcome-bubble" style="margin-bottom: 20px; align-self: flex-start;">
+                  Hello! I'm Mint, your personal AI assistant ✨ <br>
+                  Is there anything I can help you with? You can ask me to write code, manage workspaces, or run commands!
+                </div>
+                <div class="initial-suggestions">
+                  <div class="suggestion-card" onclick="document.getElementById('chat-input').value = 'Create a simple React website'; document.getElementById('chat-input').focus();">
+                    <span class="suggestion-icon" aria-hidden="true">🚀</span>
+                    <span class="suggestion-text">Create React App</span>
+                  </div>
+                  <div class="suggestion-card" onclick="document.getElementById('chat-input').value = 'Get a summary of the current repository'; document.getElementById('chat-input').focus();">
+                    <span class="suggestion-icon" aria-hidden="true">📊</span>
+                    <span class="suggestion-text">Repo Summary</span>
+                  </div>
+                  <div class="suggestion-card" onclick="document.getElementById('chat-input').value = 'Search code for TODO'; document.getElementById('chat-input').focus();">
+                    <span class="suggestion-icon" aria-hidden="true">🔍</span>
+                    <span class="suggestion-text">Search Code</span>
+                  </div>
+                  <div class="suggestion-card" onclick="document.getElementById('chat-input').value = 'Show system statistics'; document.getElementById('chat-input').focus();">
+                    <span class="suggestion-icon" aria-hidden="true">⚡</span>
+                    <span class="suggestion-text">System Stats</span>
+                  </div>
+                </div>
               </div>
             </div>
           </main>

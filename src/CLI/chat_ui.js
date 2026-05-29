@@ -280,7 +280,7 @@ async function createChatUI(options) {
     const TextInput = (await import('ink-text-input')).default;
     const { useState, useImperativeHandle, forwardRef, createRef, useEffect, useMemo } = React;
 
-    const App = forwardRef(({ onSubmit, onExit, onPasteImage, initialHistory = [] }, ref) => {
+    const App = forwardRef(({ onSubmit, onExit, onCancel, onPasteImage, initialHistory = [] }, ref) => {
         const config = readConfig();
         const { exit } = useApp();
         const [input, setInput] = useState('');
@@ -694,7 +694,17 @@ async function createChatUI(options) {
                 return;
             }
 
-            if (key.escape || (key.ctrl && inputStr === 'c')) {
+            if (key.escape) {
+                if (thinking && typeof onCancel === 'function') {
+                    onCancel();
+                    return;
+                }
+                exit();
+                onExit();
+                return;
+            }
+
+            if (key.ctrl && inputStr === 'c') {
                 exit();
                 onExit();
                 return;
@@ -957,7 +967,10 @@ async function createChatUI(options) {
             h(Box, { flexDirection: 'column' },
                 thinking && h(Box, { flexDirection: 'column', marginBottom: 1 },
                     h(Text, { color: 'gray', dimColor: true }, `─ Working for ${formatDuration(workingSeconds)} ─────────────────────────────────────────────────────────`),
-                    h(Text, { color: 'yellow' }, '● Mint is thinking...')
+                    h(Box, { flexDirection: 'row', justifyContent: 'space-between' },
+                        h(Text, { color: 'yellow' }, '● Mint is thinking...'),
+                        h(Text, { color: 'gray', dimColor: true }, 'Press Esc to cancel')
+                    )
                 ),
 
                 pendingApproval && h(Box, {
@@ -1038,7 +1051,7 @@ async function createChatUI(options) {
                             value: input,
                             onChange: pendingApproval ? () => {} : handleInputChange,
                             onSubmit: pendingApproval ? () => {} : handleSubmit,
-                            placeholder: pendingApproval ? 'Approval pending...' : 'Ask anything...'
+                            placeholder: pendingApproval ? 'Approval pending...' : (thinking ? 'Agent is working... Press Esc to cancel' : 'Ask anything...')
                         })
                     )
                 ),

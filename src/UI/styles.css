@@ -2142,6 +2142,110 @@ input:checked + .slider:before {
   grid-template-columns: minmax(0, 0fr) minmax(0, 1fr);
   gap: 0;
   padding: 0;
+  position: relative;
+}
+
+/* Background glows when model is hidden */
+.assistant-workspace.model-hidden::before {
+  content: '';
+  position: absolute;
+  top: 15%;
+  left: 10%;
+  width: 450px;
+  height: 450px;
+  background: radial-gradient(circle, rgba(143, 108, 245, 0.12) 0%, transparent 70%);
+  filter: blur(90px);
+  pointer-events: none;
+  z-index: 0;
+  animation: floatGlowOne 25s infinite alternate ease-in-out;
+}
+
+.assistant-workspace.model-hidden::after {
+  content: '';
+  position: absolute;
+  bottom: 15%;
+  right: 10%;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(20, 184, 166, 0.08) 0%, transparent 70%);
+  filter: blur(100px);
+  pointer-events: none;
+  z-index: 0;
+  animation: floatGlowTwo 30s infinite alternate ease-in-out;
+}
+
+@keyframes floatGlowOne {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(80px, 50px) scale(1.15); }
+}
+
+@keyframes floatGlowTwo {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-60px, -70px) scale(0.9); }
+}
+
+/* Welcome Suggestions Styling */
+.welcome-bubble {
+  max-width: 100% !important;
+}
+
+.initial-suggestions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  width: 100%;
+  max-width: 760px;
+  margin-top: 12px;
+  z-index: 2;
+  pointer-events: auto;
+}
+
+@media (max-width: 640px) {
+  .initial-suggestions {
+    grid-template-columns: 1fr;
+  }
+}
+
+.suggestion-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.suggestion-card:hover {
+  background: rgba(143, 108, 245, 0.08);
+  border-color: var(--accent);
+  transform: translateY(-3px);
+  box-shadow: 0 10px 25px rgba(143, 108, 245, 0.15);
+}
+
+[data-theme="light"] .suggestion-card:hover {
+  background: rgba(143, 108, 245, 0.05);
+}
+
+.suggestion-icon {
+  font-size: 1.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.suggestion-text {
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--text-soft);
+  transition: color 0.25s ease;
+}
+
+.suggestion-card:hover .suggestion-text {
+  color: var(--text-main);
 }
 
 .model-stage {
@@ -2229,12 +2333,13 @@ input:checked + .slider:before {
   position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
-  width: min(640px, calc(100% - 48px));
+  width: min(840px, calc(100% - 64px));
   height: 100%;
   max-width: none;
   margin: 0 auto;
   padding: 56px 0 28px;
   grid-column: 1 / -1;
+  z-index: 1;
 }
 
 .assistant-workspace.model-hidden .chat-container {

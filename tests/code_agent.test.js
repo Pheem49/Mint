@@ -378,4 +378,12 @@ describe('code_agent helpers', () => {
         }
     });
 
+    test('executeCodeTask rejects immediately if aborted signal is provided', async () => {
+        const { executeCodeTask } = require('../src/CLI/code_agent');
+        const controller = new AbortController();
+        controller.abort();
+
+        await expect(executeCodeTask('test task', { signal: controller.signal })).rejects.toThrow('Task cancelled by user.');
+    });
+
 });

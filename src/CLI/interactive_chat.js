@@ -119,7 +119,7 @@ function buildExitSummary(stats) {
     const activeMs = stats.agentActiveMs + (stats.activeStartedAt ? Date.now() - stats.activeStartedAt : 0);
     const total = stats.toolCalls.total;
     return {
-        message: 'Agent powering down. Goodbye!',
+        message: 'Goodbye! See you again.',
         sessionId: stats.sessionId,
         toolCalls: {
             ...stats.toolCalls,
@@ -327,6 +327,7 @@ async function runAgentTask(text, { appendMessage, streamMessage, setThinking, r
             askUser,
             provider: preferredProvider,
             history:  contextualHistory,
+            signal:   sharedState.abortController?.signal,
             onProgress: (info) => {
                 if (info && info.phase === 'tool_call') {
                     sharedState.stats.toolCalls.total += 1;
@@ -381,6 +382,7 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
         lastResponseText:        '',
         recentImageContextText:  '',
         isBusy:                  false,
+        abortController:         null,
         stats:                   createSessionStats()
     };
 
@@ -396,12 +398,19 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
             }
         },
 
+        onCancel: () => {
+            if (sharedState.abortController) {
+                sharedState.abortController.abort();
+            }
+        },
+
         onSubmit: async (text, submitOptions = {}) => {
             if (sharedState.isBusy) {
                 ui.appendMessage('system', 'Mint is still working on the previous request. Please wait for it to finish before sending another command.');
                 return;
             }
             sharedState.isBusy = true;
+            sharedState.abortController = new AbortController();
 
             const {
                 appendMessage, streamMessage, setThinking, updateStatusModel,
@@ -574,6 +583,7 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
                 }, sharedState);
             } finally {
                 sharedState.isBusy = false;
+                sharedState.abortController = null;
             }
         },
 
@@ -625,10 +635,17 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
             return;
         }
 
-        await runAgentTask(initialMessage, {
-            appendMessage, streamMessage, setThinking,
-            requestApproval, askUser, setMode, appendCodeStep
-        }, sharedState);
+        sharedState.isBusy = true;
+        sharedState.abortController = new AbortController();
+        try {
+            await runAgentTask(initialMessage, {
+                appendMessage, streamMessage, setThinking,
+                requestApproval, askUser, setMode, appendCodeStep
+            }, sharedState);
+        } finally {
+            sharedState.isBusy = false;
+            sharedState.abortController = null;
+        }
     }
 }
 

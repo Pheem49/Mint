@@ -1095,6 +1095,34 @@ async function buildInitialObservation(task, workspaceRoot, history = []) {
 }
 
 async function executeCodeTask(task, options = {}) {
+    if (options.signal && options.signal.aborted) {
+        throw new Error('Task cancelled by user.');
+    }
+
+    let onAbort;
+    const abortPromise = new Promise((_, reject) => {
+        if (options.signal) {
+            onAbort = () => {
+                reject(new Error('Task cancelled by user.'));
+            };
+            options.signal.addEventListener('abort', onAbort);
+        }
+    });
+
+    try {
+        if (options.signal) {
+            return await Promise.race([_executeCodeTaskInternal(task, options), abortPromise]);
+        } else {
+            return await _executeCodeTaskInternal(task, options);
+        }
+    } finally {
+        if (options.signal && onAbort) {
+            options.signal.removeEventListener('abort', onAbort);
+        }
+    }
+}
+
+async function _executeCodeTaskInternal(task, options = {}) {
     const workspaceRoot = path.resolve(options.cwd || process.cwd());
     const history = options.history || [];
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
@@ -1162,9 +1190,15 @@ async function executeCodeTask(task, options = {}) {
     }
 
     for (let step = 1; step <= MAX_AGENT_STEPS; step++) {
+        if (options.signal && options.signal.aborted) {
+            throw new Error('Task cancelled by user.');
+        }
         executedSteps = step;
         onProgress({ step, phase: 'thinking', action: 'thinking' });
         const decision = await getAgentDecision(client, observation, { onProgress, step });
+        if (options.signal && options.signal.aborted) {
+            throw new Error('Task cancelled by user.');
+        }
         const action = decision.action;
         const input = decision.input || {};
         try {
