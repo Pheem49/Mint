@@ -13,6 +13,12 @@ const tsc = spawn('npx', ['tsc', '-p', 'tsconfig.node.json', '-w'], {
   shell: true
 });
 
+// 2b. Start TypeScript compiler in watch mode for the UI files
+const tscUI = spawn('npx', ['tsc', '-p', 'tsconfig.ui.json', '-w'], {
+  stdio: 'inherit',
+  shell: true
+});
+
 // 3. Launch Electron once the compilation completes initially
 let electronProcess = null;
 function startElectron() {
@@ -20,7 +26,7 @@ function startElectron() {
     electronProcess.kill();
   }
   
-  electronProcess = spawn('npx', ['electron', '.', '--no-sandbox'], {
+  electronProcess = spawn('npx', ['electron', '.', '--no-sandbox', '--ozone-platform=x11'], {
     stdio: 'inherit',
     shell: true,
     env: {
@@ -34,6 +40,7 @@ function startElectron() {
     console.log('Electron closed, exiting...');
     vite.kill('SIGTERM');
     tsc.kill('SIGTERM');
+    tscUI.kill('SIGTERM');
     setTimeout(() => process.exit(0), 500);
   });
 }
@@ -64,6 +71,10 @@ process.on('SIGINT', () => {
   try {
     process.kill(-tsc.pid, 'SIGTERM');
   } catch (e) {}
+
+  try {
+    process.kill(-tscUI.pid, 'SIGTERM');
+  } catch (e) {}
   
   if (electronProcess) {
     try {
@@ -81,5 +92,6 @@ process.on('SIGINT', () => {
 process.on('exit', () => {
   try { vite.kill('SIGKILL'); } catch (e) {}
   try { tsc.kill('SIGKILL'); } catch (e) {}
+  try { tscUI.kill('SIGKILL'); } catch (e) {}
   if (electronProcess) { try { electronProcess.kill('SIGKILL'); } catch (e) {} }
 });

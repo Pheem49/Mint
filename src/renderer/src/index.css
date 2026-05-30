@@ -2,7 +2,6 @@
 @import './css/settings.css';
 @import './css/spotlight.css';
 @import './css/widget.css';
-@import './css/floating.css';
 
 /* Fix for body styling in Electron */
 body, html {

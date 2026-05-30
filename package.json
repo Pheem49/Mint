@@ -5,9 +5,9 @@
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
-    "build": "tsc -p tsconfig.node.json && vite build",
+    "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.ui.json && vite build",
     "preview": "vite preview",
-    "start": "electron .",
+    "start": "electron . --ozone-platform=x11",
     "test": "jest --testPathPatterns=tests/",
     "test:watch": "jest --testPathPatterns=tests/ --watch",
     "build:linux": "npm run build && electron-builder --linux",
