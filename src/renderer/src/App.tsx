@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react'
-import ChatWindow from './components/ChatWindow'
 import SettingsWindow from './components/SettingsWindow'
 import SpotlightWindow from './components/SpotlightWindow'
 import WidgetWindow from './components/WidgetWindow'
@@ -36,5 +35,5 @@ export default function App() {
     return <ScreenPicker />
   }
 
-  return <ChatWindow />
+  return <SettingsWindow />
 }

@@ -8,6 +8,14 @@ dotenv.config()
 app.setName('Mint')
 if (process.platform === 'linux') {
     app.commandLine.appendSwitch('class', 'Mint')
+    // Disable DBus secrets service to avoid errors on systems without secretsd
+    app.commandLine.appendSwitch('password-store', 'basic')
+    // Disable native messaging to reduce errors
+    app.commandLine.appendSwitch('disable-native-messaging')
+    // Live2D/Pixi needs WebGL. Keep GPU acceleration enabled and let Chromium
+    // fall back to SwiftShader when native GPU drivers are unavailable.
+    app.commandLine.appendSwitch('ignore-gpu-blocklist')
+    app.commandLine.appendSwitch('enable-unsafe-swiftshader')
     if (typeof (app as any).setDesktopName === 'function') {
         (app as any).setDesktopName('mint-ai.desktop')
     }

@@ -35,12 +35,7 @@ export function createWindowManager(projectRoot: string) {
             show: false
         })
 
-        if (isDev && process.env['ELECTRON_RENDERER_URL']) {
-            mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-            // mainWindow.webContents.openDevTools()
-        } else {
-            mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
-        }
+        mainWindow.loadFile(path.join(projectRoot, 'src', 'UI', 'index.html'))
 
         mainWindow.on('ready-to-show', () => mainWindow?.show())
         mainWindow.on('close', (event) => {
