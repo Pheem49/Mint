@@ -1,9 +1,9 @@
-'use strict';
 
-const { requireOptional } = require('../System/optional_require');
-const { handleChat } = require('../AI_Brain/Gemini_API');
+import { requireOptional  } from '../System/optional_require'
+import { handleChat  } from '../AI_Brain/Gemini_API'
 
 class DiscordBridge {
+    [key: string]: any;
     constructor(token) {
         this.token = token;
         const { Client, GatewayIntentBits, Partials } = requireOptional(
@@ -63,4 +63,4 @@ class DiscordBridge {
     }
 }
 
-module.exports = DiscordBridge;
+export default DiscordBridge

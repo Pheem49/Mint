@@ -7,13 +7,13 @@ jest.mock('axios', () => ({
     get: jest.fn()
 }));
 
-jest.mock('../src/System/config_manager', () => ({
+jest.mock('../dist/src/System/config_manager', () => ({
     readConfig: jest.fn()
 }));
 
 const axios = require('axios');
-const { readConfig } = require('../src/System/config_manager');
-const gmail = require('../src/Plugins/gmail');
+const { readConfig } = require('../dist/src/System/config_manager');
+const gmail = require('../dist/src/Plugins/gmail');
 
 describe('gmail plugin', () => {
     beforeEach(() => {

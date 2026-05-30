@@ -206,9 +206,9 @@ function getTool(name) {
     return TOOL_REGISTRY[name] || null;
 }
 
-function listToolNames(filter = {}) {
+function listToolNames(filter: any = {}) {
     return Object.entries(TOOL_REGISTRY)
-        .filter(([, tool]) => {
+        .filter(([, tool]: [string, any]) => {
             if (filter.chatAction === true && tool.chatAction !== true) return false;
             if (filter.codeAgent === true && tool.chatAction === true && tool.codeAgentOnly !== true) return true;
             return true;
@@ -218,13 +218,13 @@ function listToolNames(filter = {}) {
 
 function listChatActionNames() {
     return Object.entries(TOOL_REGISTRY)
-        .filter(([, tool]) => tool.chatAction === true)
+        .filter(([, tool]: [string, any]) => tool.chatAction === true)
         .map(([name]) => name);
 }
 
 function listCodeAgentActionNames() {
     return Object.entries(TOOL_REGISTRY)
-        .filter(([, tool]) => tool.codeAgentOnly === true || tool.chatAction === true || tool.required)
+        .filter(([, tool]: [string, any]) => tool.codeAgentOnly === true || tool.chatAction === true || tool.required)
         .map(([name]) => name);
 }
 
@@ -236,8 +236,8 @@ function isEmptyToolValue(value) {
     return false;
 }
 
-function validateToolInput(action, input = {}) {
-    const tool = getTool(action);
+function validateToolInput(action, input: any = {}) {
+    const tool: any = getTool(action);
     if (!tool) {
         throw new Error(`Unsupported action: ${action}`);
     }
@@ -280,8 +280,7 @@ function buildToolPromptSection() {
     return lines.join('\n');
 }
 
-module.exports = {
-    TOOL_REGISTRY,
+export { TOOL_REGISTRY,
     getTool,
     listToolNames,
     listChatActionNames,
@@ -290,4 +289,4 @@ module.exports = {
     isImportantAction,
     buildChatActionTypeUnion,
     buildToolPromptSection
-};
+ }

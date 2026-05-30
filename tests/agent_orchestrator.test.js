@@ -2,7 +2,7 @@
  * Tests: agent_orchestrator.js
  */
 
-const orchestrator = require('../src/AI_Brain/agent_orchestrator');
+const orchestrator = require('../dist/src/AI_Brain/agent_orchestrator');
 
 describe('Agent Orchestrator', () => {
     beforeEach(() => {

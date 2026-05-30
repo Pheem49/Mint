@@ -2,7 +2,7 @@
  * Tests: system_monitor.js plugin
  */
 
-const systemMonitor = require('../src/Plugins/system_monitor');
+const systemMonitor = require('../dist/src/Plugins/system_monitor');
 const os = require('os');
 
 describe('System Monitor Plugin', () => {

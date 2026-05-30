@@ -1,12 +1,12 @@
-const { execFile } = require('child_process');
-const pkg = require('../../package.json');
+import { execFile  } from 'child_process'
+import pkg from '../../package.json'
 
 const NPM_COMMAND = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const DEFAULT_AUTO_UPDATE_INTERVAL_HOURS = 24;
 
-function execFilePromise(command, args, options = {}) {
+function execFilePromise(command: string, args: string[], options: any = {}): Promise<any> {
     return new Promise((resolve, reject) => {
-        execFile(command, args, options, (error, stdout, stderr) => {
+        execFile(command, args, options, (error: any, stdout, stderr) => {
             if (error) {
                 error.stdout = stdout;
                 error.stderr = stderr;
@@ -55,7 +55,7 @@ function normalizeNpmVersionOutput(output) {
     return trimmed.replace(/^['"]|['"]$/g, '');
 }
 
-function getAutoUpdateIntervalMs(config = {}) {
+function getAutoUpdateIntervalMs(config: any = {}) {
     const hours = Number(config.autoUpdateCheckIntervalHours);
     const safeHours = Number.isFinite(hours) && hours > 0
         ? hours
@@ -63,7 +63,7 @@ function getAutoUpdateIntervalMs(config = {}) {
     return safeHours * 60 * 60 * 1000;
 }
 
-function shouldRunAutoUpdate(config = {}, now = Date.now()) {
+function shouldRunAutoUpdate(config: any = {}, now = Date.now()) {
     if (config.enableAutoUpdate === false) return false;
 
     const lastCheck = Date.parse(config.lastUpdateCheckAt || '');
@@ -73,14 +73,14 @@ function shouldRunAutoUpdate(config = {}, now = Date.now()) {
 }
 
 async function getLatestVersion(packageName = pkg.name) {
-    const { stdout } = await execFilePromise(NPM_COMMAND, ['view', packageName, 'version', '--json'], {
+    const result = await execFilePromise(NPM_COMMAND, ['view', packageName, 'version', '--json'], {
         maxBuffer: 1024 * 1024,
         timeout: 30000
     });
-    return normalizeNpmVersionOutput(stdout);
+    return normalizeNpmVersionOutput(result.stdout);
 }
 
-async function installLatest(packageName = pkg.name, options = {}) {
+async function installLatest(packageName = pkg.name, options: any = {}) {
     const args = ['install', '-g', `${packageName}@latest`];
     if (options.dryRun) {
         args.push('--dry-run');
@@ -131,7 +131,7 @@ function formatUpdateCheckError(error) {
     return `Update check unavailable: ${detail || 'Unknown npm error'}`;
 }
 
-async function runUpdate(options = {}) {
+async function runUpdate(options: any = {}) {
     const currentVersion = pkg.version;
     let latestVersion = '';
 
@@ -194,7 +194,7 @@ async function runUpdate(options = {}) {
     }
 }
 
-async function runStartupAutoUpdate(config, writeConfig, options = {}) {
+async function runStartupAutoUpdate(config: any, writeConfig: any, options: any = {}) {
     const now = options.now || Date.now();
     if (!shouldRunAutoUpdate(config, now)) {
         return {
@@ -213,18 +213,19 @@ async function runStartupAutoUpdate(config, writeConfig, options = {}) {
     return result;
 }
 
-module.exports = {
-    compareVersions,
+const _private = {
+    parseVersion,
+    formatUpdateError,
+    formatUpdateCheckError,
+    getAutoUpdateIntervalMs
+};
+
+export { compareVersions,
     getLatestVersion,
     installLatest,
     normalizeNpmVersionOutput,
     runUpdate,
     runStartupAutoUpdate,
     shouldRunAutoUpdate,
-    _private: {
-        parseVersion,
-        formatUpdateError,
-        formatUpdateCheckError,
-        getAutoUpdateIntervalMs
-    }
+    _private
 };

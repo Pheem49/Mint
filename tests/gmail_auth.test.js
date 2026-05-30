@@ -6,13 +6,13 @@ jest.mock('axios', () => ({
     post: jest.fn()
 }));
 
-jest.mock('../src/System/config_manager', () => ({
+jest.mock('../dist/src/System/config_manager', () => ({
     readConfig: jest.fn(),
     writeConfig: jest.fn()
 }));
 
 const axios = require('axios');
-const gmailAuth = require('../src/CLI/gmail_auth');
+const gmailAuth = require('../dist/src/CLI/gmail_auth');
 
 describe('gmail_auth helper', () => {
     beforeEach(() => {

@@ -9,7 +9,7 @@ const {
     formatSemanticCodeIndex,
     formatSemanticCodeSearch,
     _helpers
-} = require('../src/CLI/semantic_code_search');
+} = require('../dist/src/CLI/semantic_code_search');
 
 function fakeEmbed(text) {
     const lower = String(text || '').toLowerCase();

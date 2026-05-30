@@ -3,7 +3,7 @@ const {
     normalizeNpmVersionOutput,
     shouldRunAutoUpdate,
     _private
-} = require('../src/CLI/updater');
+} = require('../dist/src/CLI/updater');
 
 describe('Mint updater', () => {
     test('compares semantic versions', () => {

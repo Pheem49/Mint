@@ -1,5 +1,5 @@
-const axios = require('axios');
-const { readConfig } = require('../System/config_manager');
+import axios from 'axios'
+import { readConfig  } from '../System/config_manager'
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1';
@@ -212,11 +212,11 @@ function helpText() {
     ].join('\n');
 }
 
-module.exports = {
+const plugin = {
     name: 'gmail',
-    description: 'Manage Gmail safely. Target can be JSON: {"action":"search","query":"in:inbox is:unread","limit":10}, {"action":"read","id":"MESSAGE_ID"}, or {"action":"draft","to":"person@example.com","subject":"Subject","body":"Body"}. This plugin creates drafts only and does not send email.',
+    description: 'Manage Gmail safely. Target can be JSON: {"action":"search","query":"in:inbox is:unread","limit":10 }, {"action":"read","id":"MESSAGE_ID"}, or {"action":"draft","to":"person@example.com","subject":"Subject","body":"Body"}. This plugin creates drafts only and does not send email.',
 
-    async execute(instruction) {
+    async execute(instruction: any) {
         const config = readConfig();
         const input = parseInstruction(instruction);
 
@@ -249,3 +249,5 @@ module.exports = {
         hasGmailConfig
     }
 };
+
+export = plugin;

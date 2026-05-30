@@ -1,5 +1,5 @@
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs'
+import * as path from 'path'
 
 function getNotesDir() {
     let base = process.env.HOME || process.env.USERPROFILE || process.cwd();
@@ -9,17 +9,17 @@ function getNotesDir() {
     return dir;
 }
 
-module.exports = {
+const plugin = {
     name: 'obsidian',
     description: 'Manage local Markdown notes (like Obsidian/Notion). Instruction MUST be one of: "list", "read: [filename]", "write: [filename] | [content]".',
     
-    async execute(instruction) {
+    async execute(instruction: any) {
         const dir = getNotesDir();
         
         if (instruction.startsWith('list')) {
             const files = fs.readdirSync(dir).filter(f => f.endsWith('.md'));
             if (files.length === 0) return "ยังไม่มีโน้ตอยู่ในระบบค่ะ 📝";
-            return `รายการโน้ตทั้งหมด:\n${files.join('\n')}`;
+            return `รายการโน้ตทั้งหมด:\n${files.join('\n') }`;
         }
         
         if (instruction.startsWith('read:')) {
@@ -52,3 +52,5 @@ module.exports = {
         return "คำสั่งโน้ตไม่ถูกต้องค่ะ ลองใช้ 'list', 'read: ชื่อไฟล์', หรือ 'write: ชื่อไฟล์ | เนื้อหา' นะคะ";
     }
 };
+
+export = plugin;

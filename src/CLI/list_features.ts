@@ -1,5 +1,5 @@
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs'
+import * as path from 'path'
 
 const colors = {
     reset: "\x1b[0m",
@@ -61,4 +61,4 @@ function displayFeatures() {
     console.log(`\n${colors.mint}${colors.bright}Type "mint" to start exploring!${colors.reset}\n`);
 }
 
-module.exports = { displayFeatures };
+export { displayFeatures  }

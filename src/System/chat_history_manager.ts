@@ -1,10 +1,10 @@
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
 
 let app;
 try {
-    const electron = require('electron');
+    const electron = require('electron')
     app = electron.app;
 } catch (e) {
     app = null;
@@ -75,9 +75,8 @@ function clearChatHistory() {
     return writeChatHistory([]);
 }
 
-module.exports = {
-    CHAT_HISTORY_PATH,
+export { CHAT_HISTORY_PATH,
     readChatHistory,
     writeChatHistory,
     clearChatHistory
-};
+ }

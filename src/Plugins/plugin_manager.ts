@@ -1,7 +1,8 @@
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs'
+import * as path from 'path'
 
 class PluginManager {
+    [key: string]: any;
     constructor() {
         this.plugins = new Map();
         this.pluginsDir = path.join(__dirname);
@@ -78,4 +79,4 @@ class PluginManager {
 
 // Export a singleton instance
 const pluginManager = new PluginManager();
-module.exports = pluginManager;
+export default pluginManager

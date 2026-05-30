@@ -1,17 +1,17 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const crypto = require('crypto');
-const { GoogleGenAI } = require('@google/genai');
-const { readConfig } = require('../System/config_manager');
-const { _helpers: symbolHelpers } = require('./symbol_indexer');
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
+import * as crypto from 'crypto'
+import { GoogleGenAI  } from '@google/genai'
+import { readConfig  } from '../System/config_manager'
+import { _helpers as symbolHelpers  } from './symbol_indexer'
 
 const DEFAULT_EMBEDDING_MODEL = 'gemini-embedding-001';
 const DEFAULT_MAX_CHARS = 1800;
 const DEFAULT_OVERLAP_LINES = 8;
 const DEFAULT_MAX_FILE_BYTES = 512 * 1024;
 
-function getStoreDir(options = {}) {
+function getStoreDir(options: any = {}) {
     const dir = path.join(os.homedir(), '.config', 'mint', 'semantic-code');
     if (options.create) {
         fs.mkdirSync(dir, { recursive: true });
@@ -19,7 +19,7 @@ function getStoreDir(options = {}) {
     return dir;
 }
 
-function getWorkspaceStorePath(root, options = {}) {
+function getWorkspaceStorePath(root: string, options: any = {}) {
     const hash = crypto.createHash('sha1').update(path.resolve(root)).digest('hex').slice(0, 16);
     return path.join(getStoreDir(options), `${hash}.json`);
 }
@@ -104,7 +104,7 @@ function chunkLines(lines, maxChars = DEFAULT_MAX_CHARS, overlapLines = DEFAULT_
     return chunks;
 }
 
-function createCodeChunks(targetPath = process.cwd(), options = {}) {
+function createCodeChunks(targetPath = process.cwd(), options: any = {}) {
     const root = path.resolve(targetPath);
     const stat = fs.statSync(root);
     if (!stat.isDirectory()) {
@@ -167,7 +167,7 @@ function writeJson(filePath, data) {
     fs.renameSync(tmpPath, filePath);
 }
 
-async function indexSemanticCode(targetPath = process.cwd(), options = {}) {
+async function indexSemanticCode(targetPath = process.cwd(), options: any = {}) {
     const root = path.resolve(targetPath);
     const embedText = options.embedText || defaultEmbedText;
     const model = options.model || DEFAULT_EMBEDDING_MODEL;
@@ -199,7 +199,7 @@ async function indexSemanticCode(targetPath = process.cwd(), options = {}) {
     return { ...payload, storePath };
 }
 
-function loadSemanticCodeIndex(targetPath = process.cwd(), options = {}) {
+function loadSemanticCodeIndex(targetPath = process.cwd(), options: any = {}) {
     const root = path.resolve(targetPath);
     const storePath = options.storePath || getWorkspaceStorePath(root);
     if (!fs.existsSync(storePath)) {
@@ -213,7 +213,7 @@ function loadSemanticCodeIndex(targetPath = process.cwd(), options = {}) {
     return { ...payload, storePath };
 }
 
-async function searchSemanticCode(query, targetPath = process.cwd(), options = {}) {
+async function searchSemanticCode(query: string, targetPath = process.cwd(), options: any = {}) {
     const trimmedQuery = String(query || '').trim();
     if (!trimmedQuery) {
         throw new Error('Semantic code search query is required.');
@@ -296,17 +296,18 @@ function formatSemanticCodeSearch(results) {
     return lines.join('\n');
 }
 
-module.exports = {
-    createCodeChunks,
+const _helpers = {
+    chunkLines,
+    cosineSimilarity,
+    getWorkspaceStorePath,
+    defaultEmbedText
+};
+
+export { createCodeChunks,
     indexSemanticCode,
     loadSemanticCodeIndex,
     searchSemanticCode,
     formatSemanticCodeIndex,
     formatSemanticCodeSearch,
-    _helpers: {
-        chunkLines,
-        cosineSimilarity,
-        getWorkspaceStorePath,
-        defaultEmbedText
-    }
+    _helpers
 };

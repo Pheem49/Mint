@@ -17,13 +17,13 @@ jest.mock('@google/genai', () => ({
     }))
 }));
 
-jest.mock('../src/System/chat_history_manager', () => ({
+jest.mock('../dist/src/System/chat_history_manager', () => ({
     readChatHistory: jest.fn(() => []),
     writeChatHistory: jest.fn(),
     clearChatHistory: jest.fn()
 }));
 
-jest.mock('../src/System/config_manager', () => ({
+jest.mock('../dist/src/System/config_manager', () => ({
     readConfig: jest.fn(() => ({
         aiProvider: 'openai',
         openaiApiKey: 'key',
@@ -32,16 +32,16 @@ jest.mock('../src/System/config_manager', () => ({
     getAvailableProviders: jest.fn(() => ['openai', 'gemini'])
 }));
 
-jest.mock('../src/Plugins/plugin_manager', () => ({
+jest.mock('../dist/src/Plugins/plugin_manager', () => ({
     loadPlugins: jest.fn(),
     getPromptDescriptions: jest.fn(() => '')
 }));
 
-jest.mock('../src/Plugins/mcp_manager', () => ({
+jest.mock('../dist/src/Plugins/mcp_manager', () => ({
     getAllTools: jest.fn(() => [])
 }));
 
-jest.mock('../src/AI_Brain/memory_store', () => ({
+jest.mock('../dist/src/AI_Brain/memory_store', () => ({
     getUserContext: jest.fn(() => ''),
     getCachedResponse: jest.fn(),
     recordInteraction: jest.fn(),
@@ -50,15 +50,15 @@ jest.mock('../src/AI_Brain/memory_store', () => ({
     searchInteractions: jest.fn(() => [])
 }));
 
-jest.mock('../src/AI_Brain/agent_orchestrator', () => ({
+jest.mock('../dist/src/AI_Brain/agent_orchestrator', () => ({
     getCurrentAgent: jest.fn(() => ({ name: 'Mint Default', instruction: 'default' }))
 }));
 
-jest.mock('../src/CLI/workspace_manager', () => ({
+jest.mock('../dist/src/CLI/workspace_manager', () => ({
     getWorkspaceByPath: jest.fn(() => null)
 }));
 
-jest.mock('../src/AI_Brain/provider_adapter', () => {
+jest.mock('../dist/src/AI_Brain/provider_adapter', () => {
     const AgentProviderClient = jest.fn();
     return {
         AgentProviderClient,
@@ -73,8 +73,8 @@ describe('Gemini_API handleChat provider adapter integration', () => {
     });
 
     test('routes chat through AgentProviderClient and persists provider metadata', async () => {
-        const providerAdapter = require('../src/AI_Brain/provider_adapter');
-        const chatHistory = require('../src/System/chat_history_manager');
+        const providerAdapter = require('../dist/src/AI_Brain/provider_adapter');
+        const chatHistory = require('../dist/src/System/chat_history_manager');
         const sendMessage = jest.fn(async () => JSON.stringify({
             response: 'adapter response',
             action: { type: 'none', target: '' }
@@ -87,7 +87,7 @@ describe('Gemini_API handleChat provider adapter integration', () => {
             this.getUsageSummary = jest.fn(() => [{ provider: 'openai', model: 'gpt-test', requests: 1 }]);
         });
 
-        const { handleChat } = require('../src/AI_Brain/Gemini_API');
+        const { handleChat } = require('../dist/src/AI_Brain/Gemini_API');
         const result = await handleChat('hello');
 
         expect(providerAdapter.AgentProviderClient).toHaveBeenCalledWith(expect.objectContaining({
@@ -109,7 +109,7 @@ describe('Gemini_API handleChat provider adapter integration', () => {
     });
 
     test('keeps Chat Mode restrictive and Agent Mode action-oriented', () => {
-        const { _helpers } = require('../src/AI_Brain/Gemini_API');
+        const { _helpers } = require('../dist/src/AI_Brain/Gemini_API');
 
         expect(_helpers.buildActionModeInstruction({ assistantMode: 'chat' })).toContain('Chat Mode');
         expect(_helpers.buildActionModeInstruction({ assistantMode: 'chat' })).toContain('only when the latest message explicitly asks');

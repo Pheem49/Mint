@@ -1,9 +1,9 @@
-'use strict';
 
-const { requireOptional } = require('../System/optional_require');
-const { handleChat } = require('../AI_Brain/Gemini_API');
+import { requireOptional  } from '../System/optional_require'
+import { handleChat  } from '../AI_Brain/Gemini_API'
 
 class TelegramBridge {
+    [key: string]: any;
     constructor(token) {
         this.token = token;
         const { Telegraf } = requireOptional('telegraf', 'npm install telegraf');
@@ -38,4 +38,4 @@ class TelegramBridge {
     }
 }
 
-module.exports = TelegramBridge;
+export default TelegramBridge

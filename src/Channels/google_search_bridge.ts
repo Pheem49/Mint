@@ -1,6 +1,7 @@
-const axios = require('axios');
+import axios from 'axios'
 
 class GoogleSearchBridge {
+    [key: string]: any;
     constructor(credentials) {
         this.apiKey = credentials.apiKey;
         this.cx = credentials.cx; // Custom Search Engine ID
@@ -35,4 +36,4 @@ class GoogleSearchBridge {
     }
 }
 
-module.exports = GoogleSearchBridge;
+export default GoogleSearchBridge

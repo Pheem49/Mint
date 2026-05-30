@@ -1,4 +1,4 @@
-const { buildApprovalRequest, executeApprovedAction } = require('../src/System/ipc_handlers');
+const { buildApprovalRequest, executeApprovedAction } = require('../dist/src/System/ipc_handlers');
 
 describe('IPC action approval flow', () => {
     test('does not request approval for safe actions', () => {

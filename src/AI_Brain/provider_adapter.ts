@@ -1,6 +1,6 @@
-const axios = require('axios');
-const { GoogleGenAI } = require('@google/genai');
-const { getAvailableProviders } = require('../System/config_manager');
+import axios from 'axios'
+import { GoogleGenAI  } from '@google/genai'
+import { getAvailableProviders  } from '../System/config_manager'
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 const ALL_PROVIDERS = ['anthropic', 'openai', 'gemini', 'local_openai', 'ollama', 'huggingface'];
@@ -23,7 +23,7 @@ function contentToText(content) {
 
 function contentToGeminiParts(content) {
     const text = contentToText(content);
-    const parts = text ? [{ text }] : [];
+    const parts: any[] = text ? [{ text }] : [];
     if (content && typeof content === 'object') {
         const images = Array.isArray(content.imageDataUris)
             ? content.imageDataUris
@@ -79,7 +79,7 @@ function contentToAnthropicContent(content) {
 
 function contentToOllamaMessage(content) {
     const text = contentToText(content) || 'Analyze this input.';
-    const message = { role: 'user', content: text };
+    const message: any = { role: 'user', content: text };
     if (content && typeof content === 'object') {
         const images = Array.isArray(content.imageDataUris)
             ? content.imageDataUris
@@ -87,19 +87,19 @@ function contentToOllamaMessage(content) {
         const imagePayloads = images
             .map(item => splitDataUri(item))
             .filter(Boolean)
-            .map(image => image.data);
+            .map(image => image!.data);
         if (imagePayloads.length > 0) message.images = imagePayloads;
     }
     return message;
 }
 
-function getProviderAttemptOrder(config = {}, options = {}) {
+function getProviderAttemptOrder(config: any = {}, options: any = {}) {
     const supported = options.supported || ALL_PROVIDERS;
     const available = (options.availableProviders || getAvailableProviders(config))
         .filter(provider => supported.includes(provider));
     const requested = options.requested || config.aiProvider || 'gemini';
     const priority = (options.priority || ALL_PROVIDERS).filter(provider => supported.includes(provider));
-    const ordered = [];
+    const ordered: any[] = [];
 
     if (supported.includes(requested) && available.includes(requested)) {
         ordered.push(requested);
@@ -114,7 +114,7 @@ function getProviderAttemptOrder(config = {}, options = {}) {
     return ordered.length > 0 ? ordered : ['gemini'];
 }
 
-function getProviderModel(provider, config = {}) {
+function getProviderModel(provider: any, config: any = {}) {
     switch (provider) {
         case 'anthropic':
             return config.anthropicModel || 'claude-3-5-sonnet-latest';
@@ -133,7 +133,8 @@ function getProviderModel(provider, config = {}) {
 }
 
 class AgentProviderClient {
-    constructor(options = {}) {
+    [key: string]: any;
+    constructor(options: any = {}) {
         this.provider = options.provider || 'gemini';
         this.providerOrder = options.providerOrder && options.providerOrder.length
             ? options.providerOrder
@@ -147,7 +148,7 @@ class AgentProviderClient {
         this.usageTotals = {};
     }
 
-    recordUsage(provider, model, usage = {}) {
+    recordUsage(provider, model, usage: any = {}) {
         const key = `${provider}:${model || ''}`;
         if (!this.usageTotals[key]) {
             this.usageTotals[key] = {
@@ -288,7 +289,7 @@ class AgentProviderClient {
             history
         });
 
-        const response = await chat.sendMessage({ message: contentToGeminiParts(lastEntry.content) });
+        const response: any = await chat.sendMessage({ message: contentToGeminiParts(lastEntry.content) });
         const usage = response.usageMetadata || {};
         this.recordUsage('gemini', model, {
             inputTokens: usage.promptTokenCount,
@@ -342,17 +343,18 @@ class AgentProviderClient {
     }
 }
 
-module.exports = {
-    DEFAULT_GEMINI_MODEL,
+const _helpers = {
+    splitDataUri,
+    contentToGeminiParts,
+    contentToOpenAIContent,
+    contentToAnthropicContent,
+    contentToOllamaMessage
+};
+
+export { DEFAULT_GEMINI_MODEL,
     ALL_PROVIDERS,
     AgentProviderClient,
     getProviderAttemptOrder,
     getProviderModel,
-    _helpers: {
-        splitDataUri,
-        contentToGeminiParts,
-        contentToOpenAIContent,
-        contentToAnthropicContent,
-        contentToOllamaMessage
-    }
+    _helpers
 };

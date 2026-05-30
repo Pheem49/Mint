@@ -1,4 +1,4 @@
-jest.mock('../src/System/safety_manager', () => ({
+jest.mock('../dist/src/System/safety_manager', () => ({
     getPolicy: jest.fn(() => ({
         enabled: true,
         sandboxMode: 'prefer',
@@ -13,7 +13,7 @@ jest.mock('../src/System/safety_manager', () => ({
 
 describe('sandbox_runner', () => {
     test('builds bubblewrap command with bash inside constrained mounts', () => {
-        const runner = require('../src/System/sandbox_runner');
+        const runner = require('../dist/src/System/sandbox_runner');
         const args = runner.buildBubblewrapArgs('echo ok', { cwd: process.cwd() });
 
         expect(args).toContain('--die-with-parent');

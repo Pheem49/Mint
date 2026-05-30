@@ -1,4 +1,3 @@
-'use strict';
 
 // ---------------------------------------------------------------------------
 // Repository Summary
@@ -170,12 +169,11 @@ function extractSemanticCodeQuery(text) {
         .trim();
 }
 
-module.exports = {
-    isRepoSummaryRequest,
+export { isRepoSummaryRequest,
     parseRepoSummaryArgs,
     isSymbolIndexRequest,
     parseSymbolIndexArgs,
     isSemanticCodeSearchRequest,
     parseSemanticCodeArgs,
     extractSemanticCodeQuery
-};
+ }

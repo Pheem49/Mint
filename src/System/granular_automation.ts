@@ -1,5 +1,5 @@
-const { execFile, spawnSync } = require('child_process');
-const { screen } = require('electron');
+import { execFile, spawnSync  } from 'child_process'
+import { screen  } from 'electron'
 
 function commandExists(command) {
     const lookup = process.platform === 'win32' ? 'where' : 'which';
@@ -44,6 +44,7 @@ function keyToMacKey(key) {
 }
 
 class GranularAutomation {
+    [key: string]: any;
     constructor() {
         this.screenWidth = 1920;
         this.screenHeight = 1080;
@@ -154,4 +155,4 @@ const windowsProvider = {
 const instance = new GranularAutomation();
 instance._providers = { linuxProvider, macProvider, windowsProvider, commandExists };
 
-module.exports = instance;
+export default instance

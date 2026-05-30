@@ -1,8 +1,9 @@
-'use strict';
 
-const { requireOptional } = require('../System/optional_require');
-const { GoogleGenAI } = require('@google/genai');
-const { readConfig } = require('../System/config_manager');
+import { requireOptional  } from '../System/optional_require'
+import { GoogleGenAI  } from '@google/genai'
+import { readConfig  } from '../System/config_manager'
+
+declare const document: any;
 
 
 
@@ -50,7 +51,7 @@ async function performWebAutomation(query) {
 
     let browser;
     try {
-        const launchOptions = {
+        const launchOptions: any = {
             headless: false,
             defaultViewport: null,
             args: ['--start-maximized']
@@ -118,13 +119,13 @@ async function performWebAutomation(query) {
                 if (action === 'goto') {
                     await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30000 });
                     const pageTitle = await page.title();
-                    currentObservation = `Successfully navigated to ${pageTitle}. ` + await page.evaluate(() => document.body.innerText.substring(0, 1500));
+                    currentObservation = `Successfully navigated to ${pageTitle}. ` + await page.evaluate(() => (document as any).body.innerText.substring(0, 1500));
                 } else if (action === 'click') {
                     await page.waitForSelector(target, { timeout: 5000 });
                     await page.click(target);
                     await new Promise(r => setTimeout(r, 2000));
                     const pageTitle = await page.title();
-                    currentObservation = `Clicked element. Current page: ${pageTitle}. ` + await page.evaluate(() => document.body.innerText.substring(0, 1500));
+                    currentObservation = `Clicked element. Current page: ${pageTitle}. ` + await page.evaluate(() => (document as any).body.innerText.substring(0, 1500));
                 } else if (action === 'eval') {
                     const evalResult = await page.evaluate(target);
                     currentObservation = `Eval result: ` + String(evalResult).substring(0, 1500);
@@ -146,4 +147,4 @@ async function performWebAutomation(query) {
     }
 }
 
-module.exports = { performWebAutomation };
+export { performWebAutomation  }

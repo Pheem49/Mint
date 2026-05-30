@@ -1,4 +1,4 @@
-function parseCommand(aiResponse) {
+export function parseCommand(aiResponse: any): any {
     let action = { type: 'none', target: '' };
     let responseText = '';
     let timestamp = null;
@@ -36,10 +36,9 @@ function parseCommand(aiResponse) {
         providerInfo = aiResponse.providerInfo || null;
     }
 
-    const parsedResponse = { response: responseText, action };
+    const parsedResponse: any = { response: responseText, action };
     if (timestamp) parsedResponse.timestamp = timestamp;
     if (providerInfo) parsedResponse.providerInfo = providerInfo;
     return parsedResponse;
 }
 
-module.exports = { parseCommand };

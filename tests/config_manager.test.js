@@ -34,7 +34,7 @@ afterEach(() => {
 
 // Helper — always gets a fresh, isolated instance of config_manager
 function getModule() {
-    return require('../src/System/config_manager');
+    return require('../dist/src/System/config_manager');
 }
 
 // ── readConfig ─────────────────────────────────────────────────────────────

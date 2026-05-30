@@ -1,18 +1,17 @@
-'use strict';
 
-const fs   = require('fs');
-const path = require('path');
+import * as fs from 'fs'
+import * as path from 'path'
 
-const { colors, exitWithGoodbye } = require('./cli_colors');
-const { formatMemoryInteractions } = require('./cli_formatters');
-const { learnSkillFile } = require('./skill_manager');
-const { loadImageAsDataUri, loadClipboardImageAsDataUri } = require('./image_input');
-const { runChatRoutedTask }  = require('./chat_router');
-const { getChatTranscript, resetChat } = require('../AI_Brain/Gemini_API');
-const memoryStore  = require('../AI_Brain/memory_store');
-const agentOrchestrator = require('../AI_Brain/agent_orchestrator');
-const { readConfig, writeConfig } = require('../System/config_manager');
-const pkg = require('../../package.json');
+import { colors, exitWithGoodbye  } from './cli_colors'
+import { formatMemoryInteractions  } from './cli_formatters'
+import { learnSkillFile  } from './skill_manager'
+import { loadImageAsDataUri, loadClipboardImageAsDataUri  } from './image_input'
+import { runChatRoutedTask  } from './chat_router'
+import { getChatTranscript, resetChat  } from '../AI_Brain/Gemini_API'
+import * as memoryStore from '../AI_Brain/memory_store'
+import * as agentOrchestrator from '../AI_Brain/agent_orchestrator'
+import { readConfig, writeConfig  } from '../System/config_manager'
+import pkg from '../../package.json'
 
 /**
  * Handles all slash commands entered inside the interactive TUI.
@@ -39,7 +38,7 @@ async function handleSlashCommandUI(
     setMode,
     appendCodeStep,
     updateWorkspace,
-    helpers = {}
+    helpers: any = {}
 ) {
     const parts   = input.split(' ');
     const command = parts[0].toLowerCase();
@@ -415,4 +414,4 @@ async function handleSlashCommandUI(
     }
 }
 
-module.exports = { handleSlashCommandUI };
+export { handleSlashCommandUI  }

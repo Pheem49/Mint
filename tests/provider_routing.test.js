@@ -17,13 +17,13 @@ jest.mock('@google/genai', () => ({
     }))
 }));
 
-jest.mock('../src/System/chat_history_manager', () => ({
+jest.mock('../dist/src/System/chat_history_manager', () => ({
     readChatHistory: jest.fn(() => []),
     writeChatHistory: jest.fn(),
     clearChatHistory: jest.fn()
 }));
 
-jest.mock('../src/System/config_manager', () => ({
+jest.mock('../dist/src/System/config_manager', () => ({
     readConfig: jest.fn(() => ({})),
     getAvailableProviders: jest.fn((config = {}) => {
         const providers = ['ollama', 'gemini'];
@@ -33,33 +33,33 @@ jest.mock('../src/System/config_manager', () => ({
     isPlaceholder: jest.fn((val) => !val || val.startsWith('your_') || val.includes('key_here') || val.trim() === '')
 }));
 
-jest.mock('../src/Plugins/plugin_manager', () => ({
+jest.mock('../dist/src/Plugins/plugin_manager', () => ({
     loadPlugins: jest.fn(),
     getPromptDescriptions: jest.fn(() => '')
 }));
 
-jest.mock('../src/Plugins/mcp_manager', () => ({
+jest.mock('../dist/src/Plugins/mcp_manager', () => ({
     getAllTools: jest.fn(() => [])
 }));
 
-jest.mock('../src/AI_Brain/memory_store', () => ({
+jest.mock('../dist/src/AI_Brain/memory_store', () => ({
     getUserContext: jest.fn(() => ''),
     getCachedResponse: jest.fn(),
     recordInteraction: jest.fn(),
     cacheResponse: jest.fn()
 }));
 
-jest.mock('../src/AI_Brain/agent_orchestrator', () => ({
+jest.mock('../dist/src/AI_Brain/agent_orchestrator', () => ({
     getCurrentAgent: jest.fn(() => ({ name: 'Mint Default', instruction: 'default' }))
 }));
 
-jest.mock('../src/CLI/workspace_manager', () => ({
+jest.mock('../dist/src/CLI/workspace_manager', () => ({
     getWorkspaceByPath: jest.fn(() => null)
 }));
 
 describe('Gemini_API provider routing helpers', () => {
     test('prioritizes configured provider, then falls back to available providers', () => {
-        const geminiApi = require('../src/AI_Brain/Gemini_API');
+        const geminiApi = require('../dist/src/AI_Brain/Gemini_API');
         const order = geminiApi._helpers.getProviderAttemptOrder({
             aiProvider: 'openai',
             openaiApiKey: 'key',
@@ -71,7 +71,7 @@ describe('Gemini_API provider routing helpers', () => {
     });
 
     test('skips configured provider when it is not available', () => {
-        const geminiApi = require('../src/AI_Brain/Gemini_API');
+        const geminiApi = require('../dist/src/AI_Brain/Gemini_API');
         const order = geminiApi._helpers.getProviderAttemptOrder({
             aiProvider: 'openai',
             openaiApiKey: ''
@@ -82,7 +82,7 @@ describe('Gemini_API provider routing helpers', () => {
     });
 
     test('normalizes accidental multi-action chat response to safe text', () => {
-        const geminiApi = require('../src/AI_Brain/Gemini_API');
+        const geminiApi = require('../dist/src/AI_Brain/Gemini_API');
         const result = geminiApi._helpers.normalizeParsedResult([
             {
                 response: 'จะพิมพ์ให้นะคะ',
@@ -101,7 +101,7 @@ describe('Gemini_API provider routing helpers', () => {
     });
 
     test('does not type command text when user asks for the command', () => {
-        const geminiApi = require('../src/AI_Brain/Gemini_API');
+        const geminiApi = require('../dist/src/AI_Brain/Gemini_API');
         const result = geminiApi._helpers.normalizeParsedResult({
             response: 'ส่งคำสั่งให้แล้วค่ะ',
             action: { type: 'type_text', target: 'npm start' }

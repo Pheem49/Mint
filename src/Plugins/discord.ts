@@ -1,10 +1,10 @@
-module.exports = {
+const plugin = {
     name: 'discord',
     description: 'Interacts with Discord. Valid targets are "mute", "unmute", "deafen", "undeafen". (Note: This is currently a placeholder plugin)',
     
-    async execute(target) {
+    async execute(target: any) {
         return new Promise((resolve) => {
-            console.log(`[Discord Plugin] Received command: ${target}`);
+            console.log(`[Discord Plugin] Received command: ${target }`);
             
             // In a real implementation, you might use Discord RPC or xdotool
             // For now, it just simulates success.
@@ -18,3 +18,5 @@ module.exports = {
         });
     }
 };
+
+export = plugin;

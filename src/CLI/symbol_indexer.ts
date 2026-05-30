@@ -1,5 +1,5 @@
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'fs'
+import * as path from 'path'
 
 const IGNORED_DIRS = new Set([
     '.git',
@@ -26,7 +26,7 @@ const LANGUAGE_BY_EXT = {
 
 const SOURCE_EXTENSIONS = new Set(Object.keys(LANGUAGE_BY_EXT));
 
-function walkSourceFiles(root, options = {}) {
+function walkSourceFiles(root: string, options: any = {}) {
     const maxFiles = options.maxFiles || 2500;
     const files = [];
 
@@ -160,7 +160,7 @@ function countBy(items, key) {
         .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
-function buildSymbolIndex(targetPath = process.cwd(), options = {}) {
+function buildSymbolIndex(targetPath = process.cwd(), options: any = {}) {
     const root = path.resolve(targetPath);
     const stat = fs.statSync(root);
     if (!stat.isDirectory()) {
@@ -181,7 +181,7 @@ function buildSymbolIndex(targetPath = process.cwd(), options = {}) {
     };
 }
 
-function formatSymbolIndex(index, options = {}) {
+function formatSymbolIndex(index: any, options: any = {}) {
     const limit = Number.isFinite(options.limit) ? options.limit : 80;
     const shown = index.symbols.slice(0, limit);
     const lines = [];
@@ -218,14 +218,15 @@ function formatSymbolIndex(index, options = {}) {
     return lines.join('\n');
 }
 
-module.exports = {
-    buildSymbolIndex,
+const _helpers = {
+    walkSourceFiles,
+    indexFileSymbols,
+    indexJavaScriptLike,
+    indexPython,
+    indexRust
+};
+
+export { buildSymbolIndex,
     formatSymbolIndex,
-    _helpers: {
-        walkSourceFiles,
-        indexFileSymbols,
-        indexJavaScriptLike,
-        indexPython,
-        indexRust
-    }
+    _helpers
 };

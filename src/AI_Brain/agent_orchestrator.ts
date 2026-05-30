@@ -64,10 +64,9 @@ function resetAgent() {
     currentAgentType = 'general';
 }
 
-module.exports = {
-    getAgent,
+export { getAgent,
     setAgent,
     getCurrentAgent,
     listAgents,
     resetAgent
-};
+ }

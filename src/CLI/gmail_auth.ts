@@ -1,8 +1,8 @@
-const http = require('http');
-const { execFile } = require('child_process');
-const crypto = require('crypto');
-const axios = require('axios');
-const { readConfig, writeConfig } = require('../System/config_manager');
+import * as http from 'http'
+import { execFile  } from 'child_process'
+import * as crypto from 'crypto'
+import axios from 'axios'
+import { readConfig, writeConfig  } from '../System/config_manager'
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -37,7 +37,7 @@ function openBrowser(url) {
             : 'xdg-open';
     const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
 
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
         execFile(command, args, (error) => {
             if (error) {
                 reject(error);
@@ -69,7 +69,7 @@ function waitForOAuthCode({ port = 0, state, timeoutMs = 180000 }) {
         let settled = false;
         let timer = null;
 
-        const finish = (error, value) => {
+        const finish = (error: any, value?: any) => {
             if (settled) return;
             settled = true;
             if (timer) clearTimeout(timer);
@@ -125,7 +125,7 @@ function waitForOAuthCode({ port = 0, state, timeoutMs = 180000 }) {
     });
 }
 
-async function runGmailAuth(options = {}) {
+async function runGmailAuth(options: any = {}) {
     const logger = options.logger || console;
     const config = options.readConfig ? options.readConfig() : readConfig();
     const clientId = (config.gmailClientId || '').trim();
@@ -188,23 +188,23 @@ async function runGmailAuth(options = {}) {
     };
 }
 
-function reserveLocalPort(port = 0) {
-    return new Promise((resolve, reject) => {
+function reserveLocalPort(port = 0): Promise<number> {
+    return new Promise<number>((resolve, reject) => {
         const server = http.createServer();
         server.on('error', reject);
         server.listen(port, '127.0.0.1', () => {
-            const actualPort = server.address().port;
+            const addr = server.address();
+            const actualPort = (addr && typeof addr === 'object') ? addr.port : 0;
             server.close(() => resolve(actualPort));
         });
     });
 }
 
-module.exports = {
-    DEFAULT_SCOPES,
+export { DEFAULT_SCOPES,
     buildRedirectUri,
     buildAuthUrl,
     exchangeCodeForToken,
     waitForOAuthCode,
     reserveLocalPort,
     runGmailAuth
-};
+ }

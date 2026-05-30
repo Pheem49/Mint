@@ -1,21 +1,21 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { execFile, execFileSync } = require('child_process');
-const { promisify } = require('util');
-const axios = require('axios');
-const cheerio = require('cheerio');
-const { readConfig, getAvailableProviders, CONFIG_DIR } = require('../System/config_manager');
-const safetyManager = require('../System/safety_manager');
-const memoryStore = require('../AI_Brain/memory_store');
-const { readWorkspaceSession, writeWorkspaceSession } = require('./code_session_memory');
-const { executeAction } = require('../System/action_executor');
-const toolRegistry = require('../System/tool_registry');
-const sandboxRunner = require('../System/sandbox_runner');
-const providerAdapter = require('../AI_Brain/provider_adapter');
-const taskManager = require('../System/task_manager');
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
+import { execFile, execFileSync  } from 'child_process'
+import { promisify  } from 'util'
+import axios from 'axios'
+import cheerio from 'cheerio'
+import { readConfig, getAvailableProviders, CONFIG_DIR  } from '../System/config_manager'
+import * as safetyManager from '../System/safety_manager'
+import * as memoryStore from '../AI_Brain/memory_store'
+import { readWorkspaceSession, writeWorkspaceSession  } from './code_session_memory'
+import { executeAction  } from '../System/action_executor'
+import * as toolRegistry from '../System/tool_registry'
+import * as sandboxRunner from '../System/sandbox_runner'
+import * as providerAdapter from '../AI_Brain/provider_adapter'
+import * as taskManager from '../System/task_manager'
 
-async function webSearch(query, onProgress = () => {}) {
+async function webSearch(query: string, onProgress: any = () => {}) {
     if (!query) throw new Error('Search query required.');
     const config = readConfig();
     const debug  = process.env.MINT_DEBUG === '1';
@@ -29,13 +29,13 @@ async function webSearch(query, onProgress = () => {}) {
     // 1. Google Custom Search API (requires googleSearchApiKey + googleSearchCx in config)
     if (config.googleSearchApiKey && config.googleSearchCx) {
         try {
-            const GoogleSearch = require('../Channels/google_search_bridge');
+            const GoogleSearch: any = (await import('../Channels/google_search_bridge')).default;
             const google = new GoogleSearch({ apiKey: config.googleSearchApiKey, cx: config.googleSearchCx });
             const results = await google.search(query);
             if (results.length > 0) {
                 return formatResults('Google Search API', results.map(r => `Title: ${r.title}\nSnippet: ${r.snippet}\nURL: ${r.link}`).join('\n\n'));
             }
-        } catch (e) {
+        } catch (e: any) {
             errors.push(`Google: ${e.message}`);
             if (debug) console.error('[webSearch] Google failed:', e.message);
         }
@@ -44,13 +44,13 @@ async function webSearch(query, onProgress = () => {}) {
     // 2. Brave Search API (requires braveSearchApiKey in config)
     if (config.braveSearchApiKey) {
         try {
-            const BraveSearch = require('../Channels/brave_search_bridge');
+            const BraveSearch: any = (await import('../Channels/brave_search_bridge')).default;
             const brave = new BraveSearch({ apiKey: config.braveSearchApiKey });
             const results = await brave.search(query);
             if (results.length > 0) {
                 return formatResults('Brave Search API', results.map(r => `Title: ${r.title}\nSnippet: ${r.snippet}\nURL: ${r.link}`).join('\n\n'));
             }
-        } catch (e) {
+        } catch (e: any) {
             errors.push(`Brave: ${e.message}`);
             if (debug) console.error('[webSearch] Brave failed:', e.message);
         }
@@ -58,7 +58,6 @@ async function webSearch(query, onProgress = () => {}) {
 
     // 3. Fallback: DuckDuckGo HTML (No key required, but might get blocked by Captcha)
     try {
-        const cheerio = require('cheerio');
         const ddgResponse = await axios.get(
             `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
             {
@@ -251,7 +250,7 @@ function extractJson(text) {
     }
 }
 
-function normalizeExecutorAction(action, input = {}) {
+function normalizeExecutorAction(action: string, input: any = {}) {
     return {
         type: action,
         target: input.target || input.path || input.query || '',
@@ -267,7 +266,7 @@ function normalizeExecutorAction(action, input = {}) {
     };
 }
 
-function formatActionPreview(action, input = {}) {
+function formatActionPreview(action: string, input: any = {}) {
     if (action === 'search_code') {
         const query = input.query || 'search';
         return input.path ? `${query} in ${input.path}` : query;
@@ -519,7 +518,7 @@ async function runShell(workspaceRoot, command) {
     return truncate([stdout, stderr].filter(Boolean).join('\n') || '(no output)');
 }
 
-async function runVerificationCommands(workspaceRoot, commands = [], options = {}) {
+async function runVerificationCommands(workspaceRoot: string, commands: string[] = [], options: any = {}) {
     const detected = detectTestCommands(workspaceRoot);
     const requested = Array.isArray(commands)
         ? commands.map(command => String(command || '').trim()).filter(Boolean)
@@ -757,7 +756,7 @@ function normalizePlanItemLanguage(item) {
     const hasBullet = text.startsWith('- ');
     if (hasBullet) text = text.slice(2).trim();
 
-    const replacements = [
+    const replacements: [RegExp, string][] = [
         [/^แก้\s+(.+)$/i, 'Update $1'],
         [/^แก้ไข\s+(.+)$/i, 'Update $1'],
         [/^อัปเดต\s+(.+)$/i, 'Update $1'],
@@ -779,7 +778,7 @@ function normalizePlanItemLanguage(item) {
     return hasBullet ? `- ${text}` : text;
 }
 
-function formatPlanPreview(input = {}) {
+function formatPlanPreview(input: any = {}) {
     const items = normalizePlanItems(input.plan);
     const files = Array.isArray(input.files)
         ? input.files.map(file => String(file || '').trim()).filter(Boolean)
@@ -798,7 +797,7 @@ function formatPlanPreview(input = {}) {
     return lines.join('\n');
 }
 
-function formatPlanApprovalSummary(input = {}) {
+function formatPlanApprovalSummary(input: any = {}) {
     const items = normalizePlanItems(input.plan);
     const files = Array.isArray(input.files)
         ? input.files.map(file => String(file || '').trim()).filter(Boolean)
@@ -809,7 +808,7 @@ function formatPlanApprovalSummary(input = {}) {
     return `${items.length || 1} planned change${(items.length || 1) === 1 ? '' : 's'} prepared.`;
 }
 
-function formatPlanMarkdown(input = {}, context = {}) {
+function formatPlanMarkdown(input: any = {}, context: any = {}) {
     const preview = formatPlanPreview(input);
     const files = Array.isArray(input.files)
         ? input.files.map(file => String(file || '').trim()).filter(Boolean)
@@ -851,7 +850,7 @@ function formatPlanMarkdown(input = {}, context = {}) {
     return lines.join('\n');
 }
 
-function writePlanFile(workspaceRoot, input = {}, context = {}) {
+function writePlanFile(workspaceRoot: string, input: any = {}, context: any = {}) {
     const planPath = context.planPath || PLAN_FILE_PATH;
     const content = formatPlanMarkdown(input, context);
     fs.mkdirSync(path.dirname(planPath), { recursive: true });
@@ -862,7 +861,7 @@ function writePlanFile(workspaceRoot, input = {}, context = {}) {
     };
 }
 
-function updatePlanApprovalStatus(planFile, input = {}, context = {}) {
+function updatePlanApprovalStatus(planFile: any, input: any = {}, context: any = {}) {
     const content = formatPlanMarkdown(input, context);
     fs.mkdirSync(path.dirname(planFile.path), { recursive: true });
     fs.writeFileSync(planFile.path, content, 'utf8');
@@ -872,7 +871,7 @@ function updatePlanApprovalStatus(planFile, input = {}, context = {}) {
     };
 }
 
-function getEditTargetPath(action, input = {}) {
+function getEditTargetPath(action: string, input: any = {}) {
     if (action === 'apply_patch') {
         return input.patch && input.patch.path ? String(input.patch.path) : '';
     }
@@ -882,7 +881,7 @@ function getEditTargetPath(action, input = {}) {
     return '';
 }
 
-function requiresMultiFilePlan(action, input = {}, editPlanState = {}) {
+function requiresMultiFilePlan(action: string, input: any = {}, editPlanState: any = {}) {
     const targetPath = getEditTargetPath(action, input);
     if (!targetPath || editPlanState.approved) {
         return false;
@@ -894,7 +893,7 @@ function requiresMultiFilePlan(action, input = {}, editPlanState = {}) {
     return touchedFiles.size > 0 && !touchedFiles.has(targetPath);
 }
 
-function getMissingPlanFiles(editPlanState = {}) {
+function getMissingPlanFiles(editPlanState: any = {}) {
     const expectedFiles = editPlanState.expectedFiles instanceof Set
         ? editPlanState.expectedFiles
         : new Set(editPlanState.expectedFiles || []);
@@ -998,7 +997,7 @@ function writeFile(workspaceRoot, targetPath, content) {
     return `Wrote ${targetPath}`;
 }
 
-async function getAgentDecision(client, observation, options = {}) {
+async function getAgentDecision(client: any, observation: any, options: any = {}) {
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
     const step = options.step || 0;
 
@@ -1094,7 +1093,7 @@ async function buildInitialObservation(task, workspaceRoot, history = []) {
     ].join('\n');
 }
 
-async function executeCodeTask(task, options = {}) {
+async function executeCodeTask(task: string, options: any = {}) {
     if (options.signal && options.signal.aborted) {
         throw new Error('Task cancelled by user.');
     }
@@ -1122,7 +1121,7 @@ async function executeCodeTask(task, options = {}) {
     }
 }
 
-async function _executeCodeTaskInternal(task, options = {}) {
+async function _executeCodeTaskInternal(task: string, options: any = {}) {
     const workspaceRoot = path.resolve(options.cwd || process.cwd());
     const history = options.history || [];
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
@@ -1633,35 +1632,34 @@ async function _executeCodeTaskInternal(task, options = {}) {
     };
 }
 
-module.exports = {
-    executeCodeTask,
-    _helpers: {
-        extractJson,
-        selectSupportedCodeProvider,
-        getSupportedCodeProviderOrder,
-        findPaths,
-        listFiles,
-        searchCode,
-        runVerificationCommands,
-        walkDirectory,
-        buildUnifiedDiffPreview,
-        buildFullFileDiffPreview,
-        buildApprovalWarnings,
-        validateEditExplanation,
-        formatPatchPreview,
-        formatWritePreview,
-        formatPlanPreview,
-        formatPlanApprovalSummary,
-        formatPlanMarkdown,
-        writePlanFile,
-        updatePlanApprovalStatus,
-        normalizePlanItems,
-        normalizePlanItemLanguage,
-        requiresMultiFilePlan,
-        getMissingPlanFiles,
-        isReadOnlyTask,
-        isWriteLikeAction,
-        getEditTargetPath,
-        PLAN_FILE_PATH
-    }
+const _helpers = {
+    extractJson,
+    selectSupportedCodeProvider,
+    getSupportedCodeProviderOrder,
+    findPaths,
+    listFiles,
+    searchCode,
+    runVerificationCommands,
+    walkDirectory,
+    buildUnifiedDiffPreview,
+    buildFullFileDiffPreview,
+    buildApprovalWarnings,
+    validateEditExplanation,
+    formatPatchPreview,
+    formatWritePreview,
+    formatPlanPreview,
+    formatPlanApprovalSummary,
+    formatPlanMarkdown,
+    writePlanFile,
+    updatePlanApprovalStatus,
+    normalizePlanItems,
+    normalizePlanItemLanguage,
+    requiresMultiFilePlan,
+    getMissingPlanFiles,
+    isReadOnlyTask,
+    isWriteLikeAction,
+    getEditTargetPath,
+    PLAN_FILE_PATH
 };
+
+export { executeCodeTask, _helpers };

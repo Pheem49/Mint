@@ -5,10 +5,10 @@
  * Uses standard Linux commands (uptime, free, df) for lightweight monitoring.
  */
 
-const { exec } = require('child_process');
-const { promisify } = require('util');
+import { exec  } from 'child_process'
+import { promisify  } from 'util'
 const execAsync = promisify(exec);
-const os = require('os');
+import * as os from 'os'
 
 async function getStats() {
     try {
@@ -45,11 +45,11 @@ async function getStats() {
     }
 }
 
-module.exports = {
+const plugin = {
     name: 'system_monitor',
     description: 'Provides system statistics like CPU load, memory usage, disk space, and uptime. Target can be "stats", "cpu", "memory", or "disk".',
 
-    async execute(target) {
+    async execute(target: any) {
         const cmd = (target || 'stats').toLowerCase().trim();
         
         switch (cmd) {
@@ -57,7 +57,7 @@ module.exports = {
             case 'health':
                 return await getStats();
             case 'cpu':
-                return `💻 **CPU Load (1m):** ${os.loadavg()[0].toFixed(2)}\nCores: ${os.cpus().length}\nModel: ${os.cpus()[0].model}`;
+                return `💻 **CPU Load (1m):** ${os.loadavg()[0].toFixed(2) }\nCores: ${os.cpus().length}\nModel: ${os.cpus()[0].model}`;
             case 'memory':
             case 'ram':
                 const { stdout: mem } = await execAsync('free -h');
@@ -70,3 +70,5 @@ module.exports = {
         }
     }
 };
+
+export = plugin;

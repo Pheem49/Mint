@@ -1,6 +1,6 @@
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
 
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'mint');
 const TASKS_FILE = path.join(CONFIG_DIR, 'tasks.json');
@@ -40,7 +40,7 @@ function readTasks() {
     }
 }
 
-function writeTasks(tasks) {
+function writeTasks(tasks: any) {
     try {
         fs.writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2));
     } catch (e) {
@@ -75,7 +75,7 @@ function getPendingTask() {
     return tasks.find(t => t.status === 'pending');
 }
 
-function updateTask(id, updates) {
+function updateTask(id, updates: any) {
     const tasks = readTasks();
     const idx = tasks.findIndex(t => t.id === id);
     if (idx !== -1) {
@@ -90,7 +90,7 @@ function getTask(id) {
     return readTasks().find(t => t.id === id) || null;
 }
 
-function normalizeTask(task) {
+function normalizeTask(task: any) {
     return {
         ...task,
         steps: Array.isArray(task.steps) ? task.steps : [],
@@ -102,7 +102,7 @@ function normalizeTask(task) {
     };
 }
 
-function mutateTask(id, mutator) {
+function mutateTask(id, mutator: any) {
     const tasks = readTasks();
     const idx = tasks.findIndex(t => t.id === id);
     if (idx === -1) return null;
@@ -114,7 +114,7 @@ function mutateTask(id, mutator) {
     return next;
 }
 
-function addSubtask(taskId, title, extra = {}) {
+function addSubtask(taskId, title, extra: any = {}) {
     return mutateTask(taskId, task => {
         task.subtasks.push({
             id: `${taskId}-${task.subtasks.length + 1}`,
@@ -127,7 +127,7 @@ function addSubtask(taskId, title, extra = {}) {
     });
 }
 
-function updateSubtask(taskId, subtaskId, updates = {}) {
+function updateSubtask(taskId, subtaskId, updates: any = {}) {
     return mutateTask(taskId, task => {
         const subtask = task.subtasks.find(item => item.id === subtaskId);
         if (!subtask) return;
@@ -135,7 +135,7 @@ function updateSubtask(taskId, subtaskId, updates = {}) {
     });
 }
 
-function addCheckpoint(taskId, checkpoint = {}) {
+function addCheckpoint(taskId, checkpoint: any = {}) {
     return mutateTask(taskId, task => {
         const entry = {
             id: `${taskId}-checkpoint-${task.checkpoints.length + 1}`,
@@ -148,7 +148,7 @@ function addCheckpoint(taskId, checkpoint = {}) {
     });
 }
 
-function addArtifact(taskId, artifact = {}) {
+function addArtifact(taskId, artifact: any = {}) {
     return mutateTask(taskId, task => {
         task.artifacts.push({
             id: `${taskId}-artifact-${task.artifacts.length + 1}`,
@@ -206,8 +206,7 @@ function clearCompletedTasks() {
     writeTasks(activeTasks);
 }
 
-module.exports = {
-    addTask,
+export { addTask,
     addArtifact,
     addCheckpoint,
     addSubtask,
@@ -219,4 +218,4 @@ module.exports = {
     updateSubtask,
     readTasks,
     clearCompletedTasks
-};
+ }

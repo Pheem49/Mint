@@ -1,7 +1,7 @@
-const { execFile } = require('child_process');
+import { execFile  } from 'child_process'
 
-function execFilePromise(command, args) {
-    return new Promise((resolve, reject) => {
+function execFilePromise(command: string, args: string[]): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
         execFile(command, args, (error) => {
             if (error) {
                 reject(error);
@@ -82,4 +82,4 @@ async function openApp(target) {
     ]);
 }
 
-module.exports = { openApp };
+export { openApp  }

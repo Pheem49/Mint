@@ -1,0 +1,80 @@
+:root {
+    --badge: #ff4d6d;
+    --badge-border: rgba(0, 0, 0, 0.5);
+    --ring: rgba(139, 92, 246, 0.5);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    width: 100vw;
+    height: 100vh;
+    background: transparent;
+    display: grid;
+    overflow: hidden;
+    place-items: center;
+    -webkit-app-region: drag;
+    font-family: system-ui, sans-serif;
+}
+
+body.dragging {
+    cursor: grabbing;
+}
+
+#floating-btn {
+    width: 64px;
+    height: 64px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(20, 16, 32, 0.85);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(255, 255, 255, 0.05) inset;
+    display: grid;
+    place-items: center;
+    position: relative;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+    transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+#floating-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 14px 28px rgba(0, 0, 0, 0.4), 0 0 0 2px rgba(255, 255, 255, 0.08) inset;
+}
+
+#floating-btn img {
+    width: 36px;
+    height: 36px;
+    -webkit-user-drag: none;
+    user-select: none;
+}
+
+.badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--badge);
+    color: white;
+    font-size: 12px;
+    line-height: 20px;
+    text-align: center;
+    border: 2px solid var(--badge-border);
+    display: none;
+}
+
+body.has-unread #floating-btn {
+    box-shadow: 0 0 0 3px var(--ring), 0 10px 24px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(255, 255, 255, 0.05) inset;
+    animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.03); }
+    100% { transform: scale(1); }
+}

@@ -1,6 +1,6 @@
-const fs = require('fs');
-const path = require('path');
-const { execFileSync } = require('child_process');
+import * as fs from 'fs'
+import * as path from 'path'
+import { execFileSync  } from 'child_process'
 
 const IMAGE_MIME_TYPES = {
     '.png': 'image/png',
@@ -79,12 +79,13 @@ function loadClipboardImageAsDataUri() {
     throw new Error('No clipboard image found. On Linux, install wl-clipboard or xclip, then copy an image and try Ctrl+V again.');
 }
 
-module.exports = {
-    loadImageAsDataUri,
+const _helpers = {
+    getImageMimeType,
+    resolveImagePath,
+    tryReadClipboardCommand
+};
+
+export { loadImageAsDataUri,
     loadClipboardImageAsDataUri,
-    _helpers: {
-        getImageMimeType,
-        resolveImagePath,
-        tryReadClipboardCommand
-    }
+    _helpers
 };

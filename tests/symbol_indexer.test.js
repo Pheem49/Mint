@@ -2,7 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { buildSymbolIndex, formatSymbolIndex } = require('../src/CLI/symbol_indexer');
+const { buildSymbolIndex, formatSymbolIndex } = require('../dist/src/CLI/symbol_indexer');
 
 describe('symbol_indexer', () => {
     let tempDir;

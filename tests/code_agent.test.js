@@ -8,12 +8,12 @@ jest.mock('@google/genai', () => ({
 
 jest.mock('axios', () => ({}));
 
-jest.mock('../src/System/config_manager', () => ({
+jest.mock('../dist/src/System/config_manager', () => ({
     readConfig: jest.fn(() => ({})),
     getAvailableProviders: jest.fn(() => ['ollama', 'gemini'])
 }));
 
-jest.mock('../src/CLI/code_session_memory', () => ({
+jest.mock('../dist/src/CLI/code_session_memory', () => ({
     readWorkspaceSession: jest.fn(() => ({
         summary: '',
         lastTask: '',
@@ -29,14 +29,14 @@ const os = require('os');
 
 describe('code_agent helpers', () => {
     test('extractJson recovers JSON embedded in surrounding text', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const parsed = _helpers.extractJson('note\n{"action":"finish","input":{"summary":"ok"}}\nthanks');
         expect(parsed.action).toBe('finish');
         expect(parsed.input.summary).toBe('ok');
     });
 
     test('selectSupportedCodeProvider falls back away from unsupported code providers', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const selected = _helpers.selectSupportedCodeProvider(
             { aiProvider: 'ollama' },
             ['ollama', 'openai', 'gemini']
@@ -45,7 +45,7 @@ describe('code_agent helpers', () => {
     });
 
     test('selectSupportedCodeProvider keeps configured supported provider when available', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const selected = _helpers.selectSupportedCodeProvider(
             { aiProvider: 'anthropic' },
             ['anthropic', 'gemini']
@@ -54,7 +54,7 @@ describe('code_agent helpers', () => {
     });
 
     test('findPaths can locate directories by partial name', async () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-'));
         const targetDir = path.join(tempDir, 'projects', 'xidaidai');
         fs.mkdirSync(targetDir, { recursive: true });
@@ -68,7 +68,7 @@ describe('code_agent helpers', () => {
     });
 
     test('buildUnifiedDiffPreview formats patch approval preview as unified diff', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-diff-'));
         const targetFile = path.join(tempDir, 'demo.js');
         fs.writeFileSync(targetFile, [
@@ -98,7 +98,7 @@ describe('code_agent helpers', () => {
     });
 
     test('buildUnifiedDiffPreview merges nearby hunks through git diff style output', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-merged-diff-'));
         const targetFile = path.join(tempDir, 'guide.md');
         fs.writeFileSync(targetFile, [
@@ -131,7 +131,7 @@ describe('code_agent helpers', () => {
     });
 
     test('formatPlanPreview displays a user-visible multi-file plan', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const preview = _helpers.formatPlanPreview({
             plan: [
                 'Update src/CLI/code_agent.js',
@@ -148,7 +148,7 @@ describe('code_agent helpers', () => {
     });
 
     test('formatPlanPreview normalizes common Thai plan verbs to English', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const preview = _helpers.formatPlanPreview({
             plan: [
                 'แก้ index.html',
@@ -167,7 +167,7 @@ describe('code_agent helpers', () => {
     });
 
     test('formatPlanMarkdown renders plan file content with task and files', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const markdown = _helpers.formatPlanMarkdown({
             plan: ['Update src/CLI/code_agent.js'],
             files: ['src/CLI/code_agent.js']
@@ -185,7 +185,7 @@ describe('code_agent helpers', () => {
     });
 
     test('formatPlanApprovalSummary summarizes planned file changes for compact UI', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         expect(_helpers.formatPlanApprovalSummary({
             plan: ['Update index.html', 'Create styles.css'],
             files: ['index.html', 'styles.css']
@@ -193,7 +193,7 @@ describe('code_agent helpers', () => {
     });
 
     test('writePlanFile writes mint_plan.md to the configured Mint directory', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-plan-'));
 
         try {
@@ -217,7 +217,7 @@ describe('code_agent helpers', () => {
     });
 
     test('updatePlanApprovalStatus rewrites plan file with approved state', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-plan-status-'));
 
         try {
@@ -249,7 +249,7 @@ describe('code_agent helpers', () => {
     });
 
     test('formatWritePreview renders full-file writes as unified diff', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-write-diff-'));
         const targetFile = path.join(tempDir, 'demo.txt');
         fs.writeFileSync(targetFile, 'old\n');
@@ -266,7 +266,7 @@ describe('code_agent helpers', () => {
     });
 
     test('buildApprovalWarnings flags scratch paths and mismatched bio guide content', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const warnings = _helpers.buildApprovalWarnings(
             'scratch/rag_test_folder/bio.txt',
             '# NPM Publishing Guide\nRun npm publish.'
@@ -277,7 +277,7 @@ describe('code_agent helpers', () => {
     });
 
     test('validateEditExplanation requires file and reason before edits', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         expect(_helpers.validateEditExplanation('write_file', {
             path: 'src/demo.js'
         }, 'I will edit src/demo.js because this file owns the demo behavior.')).toEqual({ ok: true });
@@ -296,7 +296,7 @@ describe('code_agent helpers', () => {
     });
 
     test('requiresMultiFilePlan blocks a second file edit without approved plan', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const editPlanState = {
             approved: false,
             touchedFiles: new Set(['src/CLI/code_agent.js'])
@@ -317,7 +317,7 @@ describe('code_agent helpers', () => {
     });
 
     test('getMissingPlanFiles reports approved plan files that were not touched', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const editPlanState = {
             approved: true,
             expectedFiles: new Set(['celebrate.html', 'celebrate.css', 'celebrate.js', 'script.js']),
@@ -331,7 +331,7 @@ describe('code_agent helpers', () => {
     });
 
     test('isReadOnlyTask detects no-edit analysis requests', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
 
         expect(_helpers.isReadOnlyTask('อ่านไฟล์นี้แล้วสรุปให้หน่อย ห้ามแก้ไฟล์')).toBe(true);
         expect(_helpers.isReadOnlyTask('Please inspect this file, do not edit anything.')).toBe(true);
@@ -339,7 +339,7 @@ describe('code_agent helpers', () => {
     });
 
     test('isWriteLikeAction identifies actions blocked for read-only tasks', () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
 
         expect(_helpers.isWriteLikeAction('plan')).toBe(true);
         expect(_helpers.isWriteLikeAction('apply_patch')).toBe(true);
@@ -349,7 +349,7 @@ describe('code_agent helpers', () => {
     });
 
     test('searchCode can be scoped to a relative workspace path', async () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-search-'));
 
         try {
@@ -368,7 +368,7 @@ describe('code_agent helpers', () => {
     });
 
     test('searchCode rejects paths outside the workspace', async () => {
-        const { _helpers } = require('../src/CLI/code_agent');
+        const { _helpers } = require('../dist/src/CLI/code_agent');
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-code-agent-search-safety-'));
 
         try {
@@ -379,7 +379,7 @@ describe('code_agent helpers', () => {
     });
 
     test('executeCodeTask rejects immediately if aborted signal is provided', async () => {
-        const { executeCodeTask } = require('../src/CLI/code_agent');
+        const { executeCodeTask } = require('../dist/src/CLI/code_agent');
         const controller = new AbortController();
         controller.abort();
 

@@ -2,7 +2,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 
-const safety = require('../src/System/safety_manager');
+const safety = require('../dist/src/System/safety_manager');
 
 describe('safety_manager', () => {
     test('blocks destructive shell commands deterministically', () => {

@@ -13,7 +13,7 @@ describe('task_manager persistent task engine', () => {
             ...jest.requireActual('os'),
             homedir: () => tempHome
         }));
-        taskManager = require('../src/System/task_manager');
+        taskManager = require('../dist/src/System/task_manager');
     });
 
     afterEach(() => {

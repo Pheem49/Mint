@@ -2,7 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { loadImageAsDataUri, _helpers } = require('../src/CLI/image_input');
+const { loadImageAsDataUri, _helpers } = require('../dist/src/CLI/image_input');
 
 describe('CLI image input helpers', () => {
     test('detects supported image mime types', () => {

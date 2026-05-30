@@ -1,5 +1,5 @@
-const { GoogleGenAI } = require('@google/genai');
-const { readConfig } = require('../System/config_manager');
+import { GoogleGenAI  } from '@google/genai'
+import { readConfig  } from '../System/config_manager'
 
 // ============================================================
 // Proactive Engine — Smart Suggestion Engine (Multi-Choice)
@@ -169,4 +169,4 @@ Rules: Only suggest if you see a clear opportunity. Return 2–4 relevant chips.
     }
 }
 
-module.exports = { analyzeAndSuggest };
+export { analyzeAndSuggest  }

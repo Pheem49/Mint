@@ -1,7 +1,7 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { readConfig } = require('./config_manager');
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
+import { readConfig  } from './config_manager'
 
 const TIERS = Object.freeze({
     SAFE: 'safe',
@@ -110,7 +110,7 @@ function isPathWithin(root, targetPath) {
     return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function resolveCapabilityPath(targetPath, options = {}) {
+function resolveCapabilityPath(targetPath, options: any = {}) {
     if (!targetPath) throw new Error('Target path is required.');
 
     const expanded = expandHome(targetPath);
@@ -126,7 +126,7 @@ function resolveCapabilityPath(targetPath, options = {}) {
     return path.resolve(base, expanded);
 }
 
-function assertPathCapability(targetPath, capability = 'read', options = {}) {
+function assertPathCapability(targetPath, capability = 'read', options: any = {}) {
     const policy = getPolicy(options.config);
     const resolved = resolveCapabilityPath(targetPath, options);
 
@@ -150,7 +150,7 @@ function assertPathCapability(targetPath, capability = 'read', options = {}) {
     return resolved;
 }
 
-function getAllowedRoots(capability = 'read', options = {}) {
+function getAllowedRoots(capability = 'read', options: any = {}) {
     const policy = getPolicy(options.config);
     return capability === 'write' ? policy.allowedWritePaths : policy.allowedReadPaths;
 }
@@ -178,7 +178,7 @@ function assertShellCommandAllowed(command) {
     return result;
 }
 
-function classifyAction(action = {}) {
+function classifyAction(action: any = {}) {
     const type = action.type || 'none';
     if (type === 'none') return { tier: TIERS.SAFE, reason: 'no-op action' };
 
@@ -201,8 +201,8 @@ function classifyAction(action = {}) {
     return { tier: TIERS.APPROVAL, reason: 'unknown action requires approval' };
 }
 
-function assertActionAllowed(action, options = {}) {
-    const classification = classifyAction(action);
+function assertActionAllowed(action, options: any = {}) {
+    const classification: any = classifyAction(action);
     const allowDangerous = options.allowDangerous === true;
     const allowApproval = options.allowApproval === true;
 
@@ -239,7 +239,7 @@ function resolveWithinRoot(root, targetPath) {
     return resolvedTarget;
 }
 
-function appendActionLog(entry, options = {}) {
+function appendActionLog(entry, options: any = {}) {
     const logPath = options.logPath || path.join(os.homedir(), '.config', 'mint', 'action-log.jsonl');
     const payload = {
         time: new Date().toISOString(),
@@ -258,8 +258,7 @@ function appendActionLog(entry, options = {}) {
     return payload;
 }
 
-module.exports = {
-    TIERS,
+export { TIERS,
     getPolicy,
     getAllowedRoots,
     classifyShellCommand,
@@ -270,4 +269,4 @@ module.exports = {
     resolveCapabilityPath,
     resolveWithinRoot,
     appendActionLog
-};
+ }

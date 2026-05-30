@@ -13,7 +13,7 @@ beforeEach(() => {
     jest.resetModules();
     ({ execFile } = require('child_process'));
     execFile.mockReset();
-    docker = require('../src/Plugins/docker');
+    docker = require('../dist/src/Plugins/docker');
 });
 
 describe('Docker Plugin', () => {

@@ -1,6 +1,6 @@
-const fs = require('fs');
-const path = require('path');
-const { execFileSync } = require('child_process');
+import * as fs from 'fs'
+import * as path from 'path'
+import { execFileSync  } from 'child_process'
 
 const IGNORED_DIRS = new Set([
     '.git',
@@ -54,7 +54,7 @@ function safeGit(root, args) {
     }
 }
 
-function walkFiles(root, options = {}) {
+function walkFiles(root: string, options: any = {}) {
     const maxFiles = options.maxFiles || 2500;
     const files = [];
 
@@ -161,7 +161,7 @@ function summarizeGit(root) {
     };
 }
 
-function summarizeRepository(targetPath = process.cwd(), options = {}) {
+function summarizeRepository(targetPath = process.cwd(), options: any = {}) {
     const root = path.resolve(targetPath);
     const stat = fs.statSync(root);
     if (!stat.isDirectory()) {
@@ -270,13 +270,14 @@ function formatRepoSummary(summary) {
     return lines.join('\n');
 }
 
-module.exports = {
-    summarizeRepository,
+const _helpers = {
+    walkFiles,
+    summarizeLanguages,
+    summarizeTopDirs,
+    findImportantFiles
+};
+
+export { summarizeRepository,
     formatRepoSummary,
-    _helpers: {
-        walkFiles,
-        summarizeLanguages,
-        summarizeTopDirs,
-        findImportantFiles
-    }
+    _helpers
 };

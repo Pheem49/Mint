@@ -1,11 +1,12 @@
-const { spawn } = require('child_process');
-const { readConfig } = require('../System/config_manager');
+import { spawn  } from 'child_process'
+import { readConfig  } from '../System/config_manager'
 
 /**
  * McpManager handles the lifecycle of multiple MCP servers.
  * Since MCP SDK is ESM and this project is CommonJS, we use dynamic imports.
  */
 class McpManager {
+    [key: string]: any;
     constructor() {
         this.clients = new Map(); // serverName -> { client, transport }
         this.tools = [];
@@ -13,7 +14,7 @@ class McpManager {
 
     async init() {
         const config = readConfig();
-        const mcpServers = config.mcpServers || {};
+        const mcpServers = (config.mcpServers || {}) as Record<string, any>;
 
         console.log(`[MCP] Initializing ${Object.keys(mcpServers).length} servers...`);
 
@@ -92,4 +93,4 @@ class McpManager {
 }
 
 const instance = new McpManager();
-module.exports = instance;
+export default instance

@@ -1,9 +1,9 @@
-'use strict';
 
-const { requireOptional } = require('../System/optional_require');
-const { handleChat } = require('../AI_Brain/Gemini_API');
+import { requireOptional  } from '../System/optional_require'
+import { handleChat  } from '../AI_Brain/Gemini_API'
 
 class SlackBridge {
+    [key: string]: any;
     constructor(credentials) {
         const { App } = requireOptional('@slack/bolt', 'npm install @slack/bolt');
         this.app = new App({
@@ -45,4 +45,4 @@ class SlackBridge {
     }
 }
 
-module.exports = SlackBridge;
+export default SlackBridge

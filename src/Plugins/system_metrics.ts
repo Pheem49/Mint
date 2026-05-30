@@ -1,22 +1,22 @@
-const os = require('os');
-const { getSystemInfo } = require('../System/system_info');
+import * as os from 'os'
+import { getSystemInfo  } from '../System/system_info'
 
 /**
  * System Metrics Plugin — Provides real-time hardware stats to Gemini
  */
-module.exports = {
+const plugin = {
     name: 'system_metrics',
     description: 'Get real-time system metrics like CPU usage, RAM, and uptime. Instruction can be "all", "ram", "cpu", or "uptime".',
     
-    async execute(instruction) {
-        const info = getSystemInfo();
+    async execute(instruction: any) {
+        const info: any = getSystemInfo();
         const uptimeMin = Math.floor(os.uptime() / 60);
         const uptimeHours = (uptimeMin / 60).toFixed(1);
         
         const inst = (instruction || 'all').toLowerCase();
 
         if (inst.includes('ram')) {
-            return `ความจำเครื่อง (RAM): ใช้ไป ${info.ram.used} จากทั้งหมด ${info.ram.total} (${info.ram.percent})`;
+            return `ความจำเครื่อง (RAM): ใช้ไป ${info.ram.used } จากทั้งหมด ${info.ram.total} (${info.ram.percent})`;
         } 
         if (inst.includes('cpu')) {
             return `หน่วยประมวลผล (CPU): ${info.cpu.model} มีทั้งหมด ${info.cpu.cores} คอร์`;
@@ -29,3 +29,5 @@ module.exports = {
         return `สรุปสถานะระบบ: RAM ใช้ไป ${info.ram.percent}, CPU ${info.cpu.cores} Cores, เปิดเครื่องมาแล้ว ${uptimeMin} นาทีค่ะ ✨`;
     }
 };
+
+export = plugin;

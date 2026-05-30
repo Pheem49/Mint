@@ -2,7 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { summarizeRepository, formatRepoSummary } = require('../src/CLI/repo_summarizer');
+const { summarizeRepository, formatRepoSummary } = require('../dist/src/CLI/repo_summarizer');
 
 describe('repo_summarizer', () => {
     let tempDir;

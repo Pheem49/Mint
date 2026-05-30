@@ -6,7 +6,7 @@ jest.mock('axios', () => ({
     post: jest.fn()
 }));
 
-jest.mock('../src/System/config_manager', () => ({
+jest.mock('../dist/src/System/config_manager', () => ({
     getAvailableProviders: jest.fn((config = {}) => {
         const providers = [];
         if (config.anthropicApiKey) providers.push('anthropic');
@@ -20,7 +20,7 @@ jest.mock('../src/System/config_manager', () => ({
 
 describe('provider_adapter', () => {
     test('builds a provider order from one shared policy', () => {
-        const adapter = require('../src/AI_Brain/provider_adapter');
+        const adapter = require('../dist/src/AI_Brain/provider_adapter');
         const order = adapter.getProviderAttemptOrder({
             aiProvider: 'openai',
             openaiApiKey: 'key',
@@ -36,14 +36,14 @@ describe('provider_adapter', () => {
     });
 
     test('uses common model resolution for every mode', () => {
-        const adapter = require('../src/AI_Brain/provider_adapter');
+        const adapter = require('../dist/src/AI_Brain/provider_adapter');
         expect(adapter.getProviderModel('anthropic', {})).toBe('claude-3-5-sonnet-latest');
         expect(adapter.getProviderModel('openai', { openaiModel: 'gpt-test' })).toBe('gpt-test');
         expect(adapter.getProviderModel('ollama', {})).toBe('llama3:latest');
     });
 
     test('normalizes multi-image and audio chat content for providers', () => {
-        const adapter = require('../src/AI_Brain/provider_adapter');
+        const adapter = require('../dist/src/AI_Brain/provider_adapter');
         const content = {
             text: 'analyze',
             imageDataUris: [

@@ -2,7 +2,7 @@ const {
     getBrowserContext,
     isBrowserProcess,
     truncateText
-} = require('../src/System/smart_context');
+} = require('../dist/src/System/smart_context');
 
 describe('smart context helpers', () => {
     test('detects common browser process names', () => {

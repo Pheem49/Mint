@@ -3,12 +3,14 @@
  * Runs Mint's background features (like Proactive Suggestions) without a GUI.
  */
 
-const { exec } = require('child_process');
-const { getSystemInfo } = require('../System/system_info');
-const { readConfig } = require('../System/config_manager');
-const systemEvents = require('../System/system_events');
-const taskManager = require('../System/task_manager');
-const { executeAutonomousTask } = require('./autonomous_brain');
+import { exec  } from 'child_process'
+import { getSystemInfo  } from '../System/system_info'
+import { readConfig  } from '../System/config_manager'
+import systemEvents from '../System/system_events'
+import * as taskManager from '../System/task_manager'
+import { executeAutonomousTask  } from './autonomous_brain'
+import bridgeManager from '../System/bridge_manager'
+import * as path from 'path'
 
 // ANSI Colors for console
 const colors = {
@@ -32,7 +34,6 @@ async function startAgent() {
     systemEvents.startMonitoring();
 
     // Initialize Messaging Bridges
-    const bridgeManager = require('../System/bridge_manager');
     bridgeManager.init().catch(err => console.error('[BridgeManager] Init Error:', err));
 
     // Listen for Battery Events
@@ -128,7 +129,7 @@ async function sendNotification(title, message) {
         return;
     }
 
-    const iconPath = require('path').join(__dirname, '../../assets/icon.png');
+    const iconPath = path.join(__dirname, '../../assets/icon.png');
     const cmd = `notify-send "${title}" "${message}" -i "${iconPath}" -a "Mint AI"`;
     
     exec(cmd, (err) => {
@@ -140,4 +141,4 @@ async function sendNotification(title, message) {
     });
 }
 
-module.exports = { startAgent };
+export { startAgent  }

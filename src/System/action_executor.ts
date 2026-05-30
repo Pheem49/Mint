@@ -6,21 +6,22 @@ try {
         writeText: () => {}
     };
 }
-const { openApp } = require('../Automation_Layer/open_app');
-const { openWebsite, openSearch } = require('../Automation_Layer/open_website');
-const { performWebAutomation } = require('../Automation_Layer/browser_automation');
-const { createFolder, openFile, deleteFile, findPath } = require('../Automation_Layer/file_operations');
-const { indexFile, indexFolder } = require('../AI_Brain/knowledge_base');
-const { getSystemInfo, getWeather } = require('./system_info');
-const pluginManager = require('../Plugins/plugin_manager');
-const mcpManager = require('../Plugins/mcp_manager');
-const SystemAutomation = require('./system_automation');
-const safetyManager = require('./safety_manager');
-const toolRegistry = require('./tool_registry');
-const os = require('os');
-const path = require('path');
+import { openApp  } from '../Automation_Layer/open_app'
+import { openWebsite, openSearch  } from '../Automation_Layer/open_website'
+import { performWebAutomation  } from '../Automation_Layer/browser_automation'
+import { createFolder, openFile, deleteFile, findPath  } from '../Automation_Layer/file_operations'
+import { indexFile, indexFolder  } from '../AI_Brain/knowledge_base'
+import { getSystemInfo, getWeather  } from './system_info'
+import pluginManager from '../Plugins/plugin_manager'
+import mcpManager from '../Plugins/mcp_manager'
+import SystemAutomation from './system_automation'
+import * as safetyManager from './safety_manager'
+import * as toolRegistry from './tool_registry'
+import granularAutomation from './granular_automation'
+import * as os from 'os'
+import * as path from 'path'
 
-async function executeAction(action, options = {}) {
+async function executeAction(action, options: any = {}) {
     if (process.env.MINT_DEBUG === '1') {
         console.log("Executing action:", action);
     }
@@ -88,19 +89,15 @@ async function executeAction(action, options = {}) {
             return JSON.stringify(mcpResult.content);
         }
         case 'mouse_move': {
-            const granularAutomation = require('./granular_automation');
             return await granularAutomation.mouseMove(action.x, action.y);
         }
         case 'mouse_click': {
-            const granularAutomation = require('./granular_automation');
             return await granularAutomation.mouseClick(action.x, action.y, action.button || 1);
         }
         case 'type_text': {
-            const granularAutomation = require('./granular_automation');
             return await granularAutomation.typeText(action.target);
         }
         case 'key_tap': {
-            const granularAutomation = require('./granular_automation');
             return await granularAutomation.keyTap(action.target);
         }
         case 'plugin':
@@ -175,4 +172,4 @@ async function handleSystemAutomation(target) {
     }
 }
 
-module.exports = { executeAction, handleSystemAutomation, handleSystemInfo };
+export { executeAction, handleSystemAutomation, handleSystemInfo  }

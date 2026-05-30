@@ -1,9 +1,9 @@
-'use strict';
 
-const { requireOptional } = require('../System/optional_require');
-const { handleChat } = require('../AI_Brain/Gemini_API');
+import { requireOptional  } from '../System/optional_require'
+import { handleChat  } from '../AI_Brain/Gemini_API'
 
 class LineBridge {
+    [key: string]: any;
     constructor(credentials) {
         this._line    = requireOptional('@line/bot-sdk', 'npm install @line/bot-sdk express');
         this._express = requireOptional('express',       'npm install @line/bot-sdk express');
@@ -57,4 +57,4 @@ class LineBridge {
     }
 }
 
-module.exports = LineBridge;
+export default LineBridge

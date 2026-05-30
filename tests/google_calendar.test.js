@@ -13,20 +13,20 @@ jest.mock('electron', () => ({
     }
 }));
 
-jest.mock('../src/System/config_manager', () => ({
+jest.mock('../dist/src/System/config_manager', () => ({
     readConfig: jest.fn()
 }));
 
 const axios = require('axios');
 const { shell } = require('electron');
-const { readConfig } = require('../src/System/config_manager');
+const { readConfig } = require('../dist/src/System/config_manager');
 
 describe('google_calendar plugin', () => {
     let plugin;
 
     beforeEach(() => {
         jest.clearAllMocks();
-        plugin = require('../src/Plugins/google_calendar');
+        plugin = require('../dist/src/Plugins/google_calendar');
     });
 
     test('has required plugin fields', () => {

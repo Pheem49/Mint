@@ -1,4 +1,4 @@
-const { execFile } = require('child_process');
+import { execFile  } from 'child_process'
 
 let shell;
 try {
@@ -35,4 +35,4 @@ function openSearch(query) {
     }
 }
 
-module.exports = { openWebsite, openSearch };
+export { openWebsite, openSearch  }

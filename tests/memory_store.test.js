@@ -22,7 +22,7 @@ beforeEach(() => {
     jest.spyOn(os, 'homedir').mockReturnValue(tempDir);
 
     // Require fresh instance (no cache)
-    memStore = require('../src/AI_Brain/memory_store');
+    memStore = require('../dist/src/AI_Brain/memory_store');
 });
 
 afterEach(() => {

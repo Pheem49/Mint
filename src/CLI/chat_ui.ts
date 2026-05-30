@@ -3,9 +3,9 @@
  * A modern, React-based terminal UI for a better chat experience.
  * Uses dynamic imports to handle ESM dependencies (Ink).
  */
-const React = require('react');
-const path = require('path');
-const { readConfig } = require('../System/config_manager');
+import React from 'react'
+import * as path from 'path'
+import { readConfig  } from '../System/config_manager'
 
 // Helper to make element creation less verbose
 const h = React.createElement;
@@ -40,7 +40,7 @@ function compactPathLabel(value) {
     return path.basename(text) || text;
 }
 
-function formatActivityStep(info = {}) {
+function formatActivityStep(info: any = {}) {
     if (!info || typeof info !== 'object') return null;
 
     const { action, phase, target, message } = info;
@@ -242,7 +242,7 @@ function isUnifiedDiffPreview(preview) {
     return parseUnifiedDiffPreview(preview).length > 0;
 }
 
-function getDiffLineStyle(line = {}) {
+function getDiffLineStyle(line: any = {}) {
     if (line.type === 'add') return { color: 'greenBright' };
     if (line.type === 'delete') return { color: 'redBright' };
     if (line.type === 'hunk') return { color: 'cyanBright' };
@@ -275,9 +275,9 @@ function removeAllImageTokens(value) {
  * We wrap everything in an async function to load ESM modules
  */
 async function createChatUI(options) {
-    // Dynamic imports for ESM modules
-    const { render, Box, Text, useInput, useApp, Static } = await import('ink');
-    const TextInput = (await import('ink-text-input')).default;
+    // Dynamic imports for ESM modules using Function constructor to bypass CommonJS require translation
+    const { render, Box, Text, useInput, useApp, Static } = await Function('return import("ink")')();
+    const TextInput = (await Function('return import("ink-text-input")')()).default;
     const { useState, useImperativeHandle, forwardRef, createRef, useEffect, useMemo } = React;
 
     const App = forwardRef(({ onSubmit, onExit, onCancel, onPasteImage, initialHistory = [] }, ref) => {
@@ -409,7 +409,7 @@ async function createChatUI(options) {
 
         // Export methods to the outside world via ref
         useImperativeHandle(ref, () => ({
-            appendMessage: (role, text, metadata = {}) => {
+            appendMessage: (role, text, metadata: any = {}) => {
                 if (!shouldAppendMessage(role, text)) return;
                 setHistory(prev => [...prev, { role, text, time: new Date(), ...metadata }]);
                 if (metadata.providerInfo) {
@@ -417,7 +417,7 @@ async function createChatUI(options) {
                     setModel(model ? `${provider} • ${model}` : provider);
                 }
             },
-            beginAssistantStream: (metadata = {}) => {
+            beginAssistantStream: (metadata: any = {}) => {
                 const msg = { role: 'assistant', text: '', time: new Date(), ...metadata };
                 liveAssistantRef.current = msg;
                 setLiveAssistant(msg);
@@ -571,7 +571,7 @@ async function createChatUI(options) {
                     time: new Date() 
                 }]);
             },
-            requestApproval: (request = {}) => {
+            requestApproval: (request: any = {}) => {
                 if (approvalSessionAutoApproveRef.current) {
                     return Promise.resolve(true);
                 }
@@ -1137,23 +1137,22 @@ async function createChatUI(options) {
     };
 }
 
-module.exports = {
-    createChatUI,
-    _helpers: {
-        cleanDisplayText,
-        stripInlineMarkdown,
-        compactPathLabel,
-        formatActivityStep,
-        formatDuration,
-        splitDiffStatSegments,
-        getNextApprovalChoice,
-        getVisibleSuggestions,
-        parseUnifiedDiffPreview,
-        isUnifiedDiffPreview,
-        getDiffLineStyle,
-        shouldAppendMessage,
-        appendInlineImageToken,
-        removeImageToken,
-        removeAllImageTokens
-    }
+const _helpers = {
+    cleanDisplayText,
+    stripInlineMarkdown,
+    compactPathLabel,
+    formatActivityStep,
+    formatDuration,
+    splitDiffStatSegments,
+    getNextApprovalChoice,
+    getVisibleSuggestions,
+    parseUnifiedDiffPreview,
+    isUnifiedDiffPreview,
+    getDiffLineStyle,
+    shouldAppendMessage,
+    appendInlineImageToken,
+    removeImageToken,
+    removeAllImageTokens
 };
+
+export { createChatUI, _helpers };

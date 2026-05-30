@@ -5,9 +5,9 @@
  * Stores data in ~/.config/mint/workspaces.json
  */
 
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
 
 function getWorkspaceFile() {
     return process.env.MINT_WORKSPACE_FILE || path.join(os.homedir(), '.config', 'mint', 'workspaces.json');
@@ -82,9 +82,8 @@ function listWorkspaces() {
     return loadWorkspaces();
 }
 
-module.exports = {
-    addWorkspace,
+export { addWorkspace,
     removeWorkspace,
     getWorkspaceByPath,
     listWorkspaces
-};
+ }

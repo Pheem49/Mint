@@ -31,7 +31,7 @@ let spotify;
 beforeEach(() => {
     jest.resetModules();
     jest.clearAllMocks();
-    spotify = require('../src/Plugins/spotify');
+    spotify = require('../dist/src/Plugins/spotify');
 });
 
 // ── Plugin interface tests ─────────────────────────────────────────────────

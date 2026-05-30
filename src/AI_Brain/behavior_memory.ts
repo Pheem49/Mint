@@ -1,11 +1,11 @@
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
 
 // Handle electron dependency safely
 let app;
 try {
-    const electron = require('electron');
+    const electron = require('electron')
     app = electron.app;
 } catch (e) {
     app = null;
@@ -107,7 +107,7 @@ function getBehaviorSummary() {
 
     // Top apps by frequency
     const topApps = Object.entries(memory.appFrequency)
-        .sort((a, b) => b[1] - a[1])
+        .sort((a: any, b: any) => b[1] - a[1])
         .slice(0, 5)
         .map(([app, count]) => `${app} (${count}x)`);
 
@@ -132,4 +132,4 @@ function getBehaviorSummary() {
     return parts.join('. ');
 }
 
-module.exports = { recordBehavior, getBehaviorSummary };
+export { recordBehavior, getBehaviorSummary  }

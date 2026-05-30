@@ -1,13 +1,13 @@
-const { execFile } = require('child_process');
+import { execFile, exec } from 'child_process'
 let shell;
 try {
     shell = require('electron').shell;
 } catch (e) {
     shell = null;
 }
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
 
 const IGNORED_DIRECTORY_NAMES = new Set([
     '.git',
@@ -69,7 +69,7 @@ function resolveSmartPath(target) {
     return target;
 }
 
-function findPath(target, options = {}) {
+function findPath(target: string, options: any = {}) {
     if (!target || !target.trim()) {
         return { success: false, message: 'No search query provided.', matches: [] };
     }
@@ -213,7 +213,7 @@ function createFolder(target) {
 /**
  * เปิดไฟล์หรือโฟลเดอร์ด้วย default app ของระบบ
  */
-async function openFile(target) {
+async function openFile(target: string) {
     if (!target) return;
     const resolvedPath = resolveSmartPath(target);
     
@@ -232,7 +232,6 @@ async function openFile(target) {
     } else {
         return new Promise((resolve) => {
             // บน Linux ลอง xdg-open แล้วค่อย gio open ถ้าอันแรกไม่ทำงาน
-            const { exec } = require('child_process');
             const platformCmd = process.platform === 'darwin' ? 'open' : (process.platform === 'win32' ? 'start' : 'xdg-open');
             
             // ใช้ exec เพื่อให้รันผ่าน shell และรองรับการทำ fallback
@@ -257,7 +256,7 @@ async function openFile(target) {
 /**
  * ลบไฟล์หรือโฟลเดอร์ (ย้ายไป Trash)
  */
-async function deleteFile(target) {
+async function deleteFile(target: string): Promise<{ success: boolean; message?: string }> {
     if (!target) return { success: false, message: 'No path provided.' };
     const resolvedPath = resolveSmartPath(target);
 
@@ -283,4 +282,4 @@ async function deleteFile(target) {
     }
 }
 
-module.exports = { createFolder, openFile, deleteFile, findPath, resolveSmartPath };
+export { createFolder, openFile, deleteFile, findPath, resolveSmartPath  }

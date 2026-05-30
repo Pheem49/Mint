@@ -1,17 +1,17 @@
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const crypto = require('crypto');
-const { GoogleGenAI } = require('@google/genai');
-const pdf = require('pdf-parse');
-const mammoth = require('mammoth');
-const readXlsxFile = require('read-excel-file/node');
-const { readConfig } = require('../System/config_manager');
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
+import * as crypto from 'crypto'
+import { GoogleGenAI  } from '@google/genai'
+const pdf = require('pdf-parse')
+import mammoth from 'mammoth'
+import readXlsxFile from 'read-excel-file/node'
+import { readConfig  } from '../System/config_manager'
 
 // Handle electron dependency safely
 let app;
 try {
-    const electron = require('electron');
+    const electron = require('electron')
     app = electron.app;
 } catch (e) {
     app = null;
@@ -346,4 +346,4 @@ async function searchKnowledge(query, topK = 3) {
 }
 
 
-module.exports = { indexFile, indexFolder, searchKnowledge };
+export { indexFile, indexFolder, searchKnowledge  }

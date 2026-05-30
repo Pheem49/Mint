@@ -1,6 +1,12 @@
-/**
- * Tests: file_operations helpers
- */
+let mockHomeDir = '';
+
+jest.mock('os', () => {
+    const originalOs = jest.requireActual('os');
+    return {
+        ...originalOs,
+        homedir: jest.fn(() => mockHomeDir || originalOs.tmpdir()),
+    };
+});
 
 const fs = require('fs');
 const path = require('path');
@@ -13,6 +19,7 @@ describe('file_operations findPath', () => {
     beforeEach(() => {
         jest.resetModules();
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mint-file-ops-'));
+        mockHomeDir = tempDir;
         originalCwd = process.cwd();
         process.chdir(tempDir);
     });
@@ -26,7 +33,7 @@ describe('file_operations findPath', () => {
         const targetDir = path.join(tempDir, 'nested', 'xidaidai');
         fs.mkdirSync(targetDir, { recursive: true });
 
-        const { findPath } = require('../src/Automation_Layer/file_operations');
+        const { findPath } = require('../dist/src/Automation_Layer/file_operations');
         const result = findPath('xidaidai', { type: 'dir', maxResults: 10, roots: [tempDir] });
 
         expect(result.success).toBe(true);
@@ -34,7 +41,7 @@ describe('file_operations findPath', () => {
     });
 
     test('returns not found message when no path matches', () => {
-        const { findPath } = require('../src/Automation_Layer/file_operations');
+        const { findPath } = require('../dist/src/Automation_Layer/file_operations');
         const result = findPath('does-not-exist', { type: 'dir', maxResults: 10, roots: [tempDir] });
 
         expect(result.success).toBe(false);
@@ -47,7 +54,7 @@ describe('file_operations findPath', () => {
         fs.mkdirSync(exactDir, { recursive: true });
         fs.mkdirSync(nestedPartial, { recursive: true });
 
-        const { findPath } = require('../src/Automation_Layer/file_operations');
+        const { findPath } = require('../dist/src/Automation_Layer/file_operations');
         const result = findPath('xidaidai', { type: 'dir', maxResults: 10, roots: [tempDir] });
 
         expect(result.success).toBe(true);
@@ -63,7 +70,7 @@ describe('file_operations findPath', () => {
         const nestedDownloads = path.join(tempDir, 'prefix', 'Downloads');
         fs.mkdirSync(nestedDownloads, { recursive: true });
 
-        const { findPath } = require('../src/Automation_Layer/file_operations');
+        const { findPath } = require('../dist/src/Automation_Layer/file_operations');
         const result = findPath('Downloads', { type: 'dir', maxResults: 10, roots: [tempDir, os.homedir()] });
 
         expect(result.success).toBe(true);

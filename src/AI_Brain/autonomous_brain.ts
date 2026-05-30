@@ -1,15 +1,15 @@
-const { readConfig } = require('../System/config_manager');
-const { performWebAutomation } = require('../Automation_Layer/browser_automation');
-const { createFolder, deleteFile } = require('../Automation_Layer/file_operations');
-const { searchKnowledge } = require('./knowledge_base');
-const safetyManager = require('../System/safety_manager');
-const providerAdapter = require('./provider_adapter');
-const taskManager = require('../System/task_manager');
-const fs = require('fs');
-const path = require('path');
+import { readConfig  } from '../System/config_manager'
+import { performWebAutomation  } from '../Automation_Layer/browser_automation'
+import { createFolder, deleteFile  } from '../Automation_Layer/file_operations'
+import { searchKnowledge  } from './knowledge_base'
+import * as safetyManager from '../System/safety_manager'
+import * as providerAdapter from './provider_adapter'
+import * as taskManager from '../System/task_manager'
+import * as fs from 'fs'
+import * as path from 'path'
 
-const os = require('os');
-const { sendNotification } = require('../System/notifications');
+import * as os from 'os'
+import { sendNotification  } from '../System/notifications'
 
 function expandHome(filePath) {
     if (filePath.startsWith('~/')) {
@@ -46,7 +46,7 @@ TOOL DETAILS:
 - "done": Target is the final summary of what was accomplished.
 `;
 
-async function executeAutonomousTask(taskDescription, notifyCallback, options = {}) {
+async function executeAutonomousTask(taskDescription, notifyCallback, options: any = {}) {
     const config = readConfig();
     const providerOrder = providerAdapter.getProviderAttemptOrder(config, {
         supported: ['gemini', 'anthropic', 'openai', 'local_openai'],
@@ -176,4 +176,4 @@ async function executeAutonomousTask(taskDescription, notifyCallback, options = 
     return result || "Task reached maximum steps without a final result.";
 }
 
-module.exports = { executeAutonomousTask };
+export { executeAutonomousTask  }

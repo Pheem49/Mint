@@ -1,8 +1,8 @@
-const fs = require('fs');
-const path = require('path');
-const { readConfig, writeConfig } = require('../System/config_manager');
-const { installDaemon } = require('../System/daemon_manager');
-const { runGmailAuth } = require('./gmail_auth');
+import * as fs from 'fs'
+import * as path from 'path'
+import { readConfig, writeConfig  } from '../System/config_manager'
+import { installDaemon  } from '../System/daemon_manager'
+import { runGmailAuth  } from './gmail_auth'
 
 const CUSTOM_MODEL_VALUE = '__custom_model__';
 const ANTHROPIC_MODEL_CHOICES = [
@@ -36,7 +36,7 @@ function resolveCustomModelSelection(answers, modelKey, customKey, fallbackModel
 /**
  * Onboarding Wizard for Mint CLI
  */
-async function runOnboarding(options = {}) {
+async function runOnboarding(options: any = {}) {
     // Dynamic import for ESM-only inquirer in CommonJS
     const inquirer = (await import('inquirer')).default;
     
@@ -413,4 +413,4 @@ async function runOnboarding(options = {}) {
     console.log('\nAll set! You can now use "mint chat" to start talking to me.\n');
 }
 
-module.exports = { runOnboarding };
+export { runOnboarding  }

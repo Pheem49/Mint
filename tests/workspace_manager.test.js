@@ -2,7 +2,7 @@
  * Tests: workspace_manager.js
  */
 
-const wsManager = require('../src/CLI/workspace_manager');
+const wsManager = require('../dist/src/CLI/workspace_manager');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');

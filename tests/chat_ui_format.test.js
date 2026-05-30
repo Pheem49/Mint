@@ -1,4 +1,4 @@
-const { _helpers } = require('../src/CLI/chat_ui');
+const { _helpers } = require('../dist/src/CLI/chat_ui');
 
 describe('CLI chat UI formatting', () => {
     test('cleans common markdown from assistant responses', () => {

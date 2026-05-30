@@ -1,18 +1,18 @@
-const { execFile } = require('child_process');
+import { execFile  } from 'child_process'
 
-module.exports = {
+const plugin = {
     name: 'docker',
     description: 'Interacts with local Docker engine. Valid targets include: "start <container>", "stop <container>", "restart <container>", "list".',
     
-    async execute(target) {
+    async execute(target: any) {
         return new Promise((resolve) => {
-            console.log(`[Docker Plugin] Executing command: ${target}`);
+            console.log(`[Docker Plugin] Executing command: ${target }`);
             
             const rawTarget = (target || '').trim();
             const [rawAction, ...args] = rawTarget.split(/\s+/);
             const action = (rawAction || '').toLowerCase();
             const containerName = args.join(' ');
-            let commandArgs = [];
+            let commandArgs: string[] = [];
             
             if (action === 'list') {
                 commandArgs = ['ps', '--format', '{{.Names}} ({{.Status}})'];
@@ -22,7 +22,7 @@ module.exports = {
                 return resolve(`Invalid docker command or missing container name: ${target}`);
             }
 
-            execFile('docker', commandArgs, (error, stdout, stderr) => {
+            execFile('docker', commandArgs, (error: any, stdout, stderr) => {
                 if (error) {
                     const stderrText = stderr || '';
                     if (error.code === 127 || stderrText.includes('not found') || error.code === 'ENOENT') {
@@ -45,3 +45,5 @@ module.exports = {
         });
     }
 };
+
+export = plugin;

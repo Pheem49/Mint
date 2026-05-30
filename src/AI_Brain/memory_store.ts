@@ -8,16 +8,16 @@
  * remembers who it's talking to even after restart.
  */
 
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const crypto = require('crypto');
-const { readConfig } = require('../System/config_manager');
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
+import * as crypto from 'crypto'
+import { readConfig  } from '../System/config_manager'
 
 // ── Electron-safe app path ──────────────────────────────────────────────────
 let app;
 try {
-    const electron = require('electron');
+    const electron = require('electron')
     app = electron.app;
 } catch (_) {
     app = null;
@@ -637,8 +637,7 @@ function clearResponseCache() {
     }
 }
 
-module.exports = {
-    recordInteraction,
+export { recordInteraction,
     saveSessionSummary,
     getUserContext,
     setProfile,
@@ -659,4 +658,4 @@ module.exports = {
     getCachedResponse,
     cacheResponse,
     clearResponseCache
-};
+ }

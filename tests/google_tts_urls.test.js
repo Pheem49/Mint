@@ -1,4 +1,4 @@
-const { getGoogleTtsUrls, splitTextForTts } = require('../src/System/google_tts_urls');
+const { getGoogleTtsUrls, splitTextForTts } = require('../dist/src/System/google_tts_urls');
 
 describe('google_tts_urls', () => {
     test('returns no URLs for empty text', () => {

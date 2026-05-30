@@ -1,9 +1,9 @@
-'use strict';
 
-const { requireOptional } = require('../System/optional_require');
-const { handleChat } = require('../AI_Brain/Gemini_API');
+import { requireOptional  } from '../System/optional_require'
+import { handleChat  } from '../AI_Brain/Gemini_API'
 
 class WhatsappBridge {
+    [key: string]: any;
     constructor() {
         // Dynamic require — only loads if user has installed whatsapp-web.js
         const { Client, LocalAuth } = requireOptional(
@@ -54,4 +54,4 @@ class WhatsappBridge {
     }
 }
 
-module.exports = WhatsappBridge;
+export default WhatsappBridge

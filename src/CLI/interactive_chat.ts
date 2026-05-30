@@ -1,35 +1,33 @@
-'use strict';
 
-const crypto = require('crypto');
-const { colors, exitWithGoodbye } = require('./cli_colors');
-const { splitResponseSentences }  = require('./cli_formatters');
-const {
-    isRepoSummaryRequest,
+import * as crypto from 'crypto'
+import { colors, exitWithGoodbye  } from './cli_colors'
+import { splitResponseSentences  } from './cli_formatters'
+import { isRepoSummaryRequest,
     parseRepoSummaryArgs,
     isSymbolIndexRequest,
     parseSymbolIndexArgs,
     isSemanticCodeSearchRequest,
     parseSemanticCodeArgs,
     extractSemanticCodeQuery
-} = require('./intent_detectors');
-const { handleSlashCommandUI }    = require('./slash_command_handler');
-const { createChatUI }            = require('./chat_ui');
-const { loadImageAsDataUri, loadClipboardImageAsDataUri } = require('./image_input');
-const { summarizeRepository, formatRepoSummary }  = require('./repo_summarizer');
-const { buildSymbolIndex, formatSymbolIndex }      = require('./symbol_indexer');
-const {
-    indexSemanticCode,
+ } from './intent_detectors'
+import { handleSlashCommandUI  } from './slash_command_handler'
+import { createChatUI  } from './chat_ui'
+import { loadImageAsDataUri, loadClipboardImageAsDataUri  } from './image_input'
+import { summarizeRepository, formatRepoSummary  } from './repo_summarizer'
+import { buildSymbolIndex, formatSymbolIndex  } from './symbol_indexer'
+import { indexSemanticCode,
     searchSemanticCode,
     formatSemanticCodeIndex,
     formatSemanticCodeSearch
-} = require('./semantic_code_search');
-const { handleChat, getChatTranscript } = require('../AI_Brain/Gemini_API');
-const agentOrchestrator = require('../AI_Brain/agent_orchestrator');
-const systemMonitor     = require('../Plugins/system_monitor');
-const workspaceManager  = require('./workspace_manager');
-const { executeCodeTask } = require('./code_agent');
-const { resetChat }       = require('../AI_Brain/Gemini_API');
-const { saveChatImages }  = require('../System/picture_store');
+ } from './semantic_code_search'
+import { handleChat, getChatTranscript  } from '../AI_Brain/Gemini_API'
+import * as agentOrchestrator from '../AI_Brain/agent_orchestrator'
+import systemMonitor from '../Plugins/system_monitor'
+import * as workspaceManager from './workspace_manager'
+import { executeCodeTask, _helpers as codeAgentHelpers  } from './code_agent'
+import { readConfig, getAvailableProviders } from '../System/config_manager'
+import { resetChat  } from '../AI_Brain/Gemini_API'
+import { saveChatImages  } from '../System/picture_store'
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -44,7 +42,7 @@ function createSessionStats() {
     };
 }
 
-function addUsageRow(stats, row = {}) {
+function addUsageRow(stats: any, row: any = {}) {
     const provider = row.provider || 'unknown';
     const model = row.model || 'unknown';
     const key = `${provider}:${model}`;
@@ -70,7 +68,7 @@ function addUsageRow(stats, row = {}) {
     target.totalTokens += Number(row.totalTokens) || 0;
 }
 
-function normalizeProviderUsage(providerInfo = {}) {
+function normalizeProviderUsage(providerInfo: any = {}) {
     const usage = providerInfo.usage;
     if (Array.isArray(usage)) return usage;
     if (!usage || typeof usage !== 'object') {
@@ -96,7 +94,7 @@ function normalizeProviderUsage(providerInfo = {}) {
     }];
 }
 
-function recordProviderInfo(stats, providerInfo) {
+function recordProviderInfo(stats: any, providerInfo: any) {
     if (!providerInfo) return;
     for (const row of normalizeProviderUsage(providerInfo)) {
         addUsageRow(stats, row);
@@ -257,7 +255,7 @@ function formatImageDisplayMessage(message = '', labels = '', imageCount = 0) {
     return hasAllImageLabels(message, imageCount) ? message : `${message}\n${labels}`;
 }
 
-async function sendImageMessage({ images, image, prompt, appendMessage, streamMessage, setThinking, appendCodeStep, stats }) {
+async function sendImageMessage({ images, image, prompt, appendMessage, streamMessage, setThinking, appendCodeStep, stats }: any) {
     const formatErr = (err) => err && err.message ? err.message : String(err || 'Unknown error');
     const imageList = images || (image ? [image] : []);
     const message   = prompt || 'Analyze this image.';
@@ -316,12 +314,12 @@ async function runAgentTask(text, { appendMessage, streamMessage, setThinking, r
     markAgentActive(sharedState.stats, true);
 
     try {
-        const config             = require('../System/config_manager').readConfig();
-        const availableProviders = require('../System/config_manager').getAvailableProviders(config);
-        const preferredProvider  = require('./code_agent')._helpers.selectSupportedCodeProvider(config, availableProviders);
+        const config = readConfig();
+        const availableProviders = getAvailableProviders(config);
+        const preferredProvider = codeAgentHelpers.selectSupportedCodeProvider(config, availableProviders);
         let streamedFinalSummary = false;
 
-        const result = await executeCodeTask(text, {
+        const result: any = await executeCodeTask(text, {
             cwd: process.cwd(),
             requestApproval,
             askUser,
@@ -374,7 +372,7 @@ async function runAgentTask(text, { appendMessage, streamMessage, setThinking, r
  * @param {string|null} initialMessage  Optional first message (from CLI arg).
  * @param {{ imagePath?: string }}  options
  */
-async function startInteractiveChat(initialMessage = null, options = {}) {
+async function startInteractiveChat(initialMessage = null, options: any = {}) {
     const formatErr = (err) => err && err.message ? err.message : String(err || 'Unknown error');
 
     // Shared mutable state between onSubmit closures
@@ -404,7 +402,7 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
             }
         },
 
-        onSubmit: async (text, submitOptions = {}) => {
+        onSubmit: async (text, submitOptions: any = {}) => {
             if (sharedState.isBusy) {
                 ui.appendMessage('system', 'Mint is still working on the previous request. Please wait for it to finish before sending another command.');
                 return;
@@ -649,10 +647,9 @@ async function startInteractiveChat(initialMessage = null, options = {}) {
     }
 }
 
-module.exports = {
-    startInteractiveChat,
-    _helpers: {
-        hasAllImageLabels,
-        formatImageDisplayMessage
-    }
+const _helpers = {
+    hasAllImageLabels,
+    formatImageDisplayMessage
 };
+
+export { startInteractiveChat, _helpers };

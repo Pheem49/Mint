@@ -1,6 +1,7 @@
-const axios = require('axios');
+import axios from 'axios'
 
 class BraveSearchBridge {
+    [key: string]: any;
     constructor(credentials) {
         this.apiKey = credentials.apiKey;
     }
@@ -32,4 +33,4 @@ class BraveSearchBridge {
     }
 }
 
-module.exports = BraveSearchBridge;
+export default BraveSearchBridge

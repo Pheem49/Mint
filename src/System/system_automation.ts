@@ -1,5 +1,5 @@
-const { execFile } = require('child_process');
-const fs = require('fs');
+import { execFile  } from 'child_process'
+import * as fs from 'fs'
 
 function execPromise(command, args = []) {
     return new Promise((resolve, reject) => {
@@ -159,4 +159,4 @@ const SystemAutomation = {
     }
 };
 
-module.exports = SystemAutomation;
+export default SystemAutomation

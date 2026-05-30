@@ -2,16 +2,20 @@
   "name": "@pheem49/mint",
   "version": "1.5.4",
   "description": "A powerful Electron-based AI desktop assistant powered by Google Gemini, featuring screen vision, web automation, and proactive suggestions.",
-  "main": "main.js",
+  "main": "out/main/index.js",
   "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "tsc -p tsconfig.node.json && vite build",
+    "preview": "vite preview",
     "start": "electron .",
     "test": "jest --testPathPatterns=tests/",
     "test:watch": "jest --testPathPatterns=tests/ --watch",
-    "build:linux": "electron-builder --linux",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "build:all": "electron-builder --linux --mac --win",
-    "cli": "node mint-cli.js",
+    "build:linux": "npm run build && electron-builder --linux",
+    "build:mac": "npm run build && electron-builder --mac",
+    "build:win": "npm run build && electron-builder --win",
+    "build:all": "npm run build && electron-builder --linux --mac --win",
+    "cli": "tsc -p tsconfig.cli.json && node dist/mint-cli.js",
+    "cli:dev": "ts-node mint-cli.ts",
     "install:desktop": "node scripts/install_linux_desktop_entry.js"
   },
   "jest": {
@@ -62,6 +66,7 @@
   },
   "devDependencies": {
     "@hazart-pkg/live2d-core": "^1.0.1",
+    "@modelcontextprotocol/sdk": "file:../../../.npm/_npx/a3241bba59c344f5/node_modules/@modelcontextprotocol/sdk",
     "@vitejs/plugin-react": "^6.0.1",
     "electron": "^40.7.0",
     "electron-builder": "^26.8.1",
@@ -71,6 +76,8 @@
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
     "react-dom": "^19.2.5",
+    "ts-node": "^10.9.2",
+    "typescript": "file:../../../.npm/_npx/1bf7c3c15bf47d04/node_modules/typescript",
     "vite": "^8.0.10"
   },
   "overrides": {
@@ -82,8 +89,11 @@
     "executableName": "mint-ai",
     "artifactName": "${productName}-${version}-${arch}.${ext}",
     "files": [
-      "**/*",
-      "!node_modules/.cache/**"
+      "out/**/*",
+      "dist/**/*",
+      "models/**/*",
+      "assets/**/*",
+      "package.json"
     ],
     "linux": {
       "icon": "assets/icon.png",

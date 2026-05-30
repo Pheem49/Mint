@@ -1,8 +1,8 @@
-const fs = require('fs');
-const path = require('path');
-const { GoogleGenAI } = require('@google/genai');
-const { executeCodeTask, _helpers: codeAgentHelpers } = require('./code_agent');
-const { readConfig, getAvailableProviders } = require('../System/config_manager');
+import * as fs from 'fs'
+import * as path from 'path'
+import { GoogleGenAI  } from '@google/genai'
+import { executeCodeTask, _helpers as codeAgentHelpers  } from './code_agent'
+import { readConfig, getAvailableProviders  } from '../System/config_manager'
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
@@ -135,7 +135,7 @@ async function detectCodeIntent(text, workspaceRoot = process.cwd(), history = [
     }
 
     try {
-        const response = await routerClient.ai.models.generateContent({
+        const response: any = await routerClient.ai.models.generateContent({
             model: routerClient.model,
             config: {
                 systemInstruction: ROUTER_PROMPT,
@@ -195,7 +195,7 @@ async function runChatRoutedTask(input, context) {
 
     try {
         let streamedFinalSummary = false;
-        const result = await executeCodeTask(text, {
+        const result: any = await executeCodeTask(text, {
             cwd: process.cwd(),
             requestApproval,
             askUser,
@@ -236,12 +236,13 @@ async function runChatRoutedTask(input, context) {
     }
 }
 
-module.exports = {
-    detectCodeIntent,
+const _helpers = {
+    detectCodeIntentHeuristic,
+    isDirectFilesystemActionRequest,
+    isLargeCodeTaskRequest
+};
+
+export { detectCodeIntent,
     runChatRoutedTask,
-    _helpers: {
-        detectCodeIntentHeuristic,
-        isDirectFilesystemActionRequest,
-        isLargeCodeTaskRequest
-    }
+    _helpers
 };

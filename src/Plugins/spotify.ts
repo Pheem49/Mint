@@ -9,8 +9,8 @@
  * Spotify must be running (Desktop app or Snap).
  */
 
-const { exec, execSync } = require('child_process');
-const { promisify } = require('util');
+import { exec, execSync  } from 'child_process'
+import { promisify  } from 'util'
 const execAsync = promisify(exec);
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -109,8 +109,7 @@ function searchSpotify(query) {
     const encoded = encodeURIComponent(query.trim());
     const url = `https://open.spotify.com/search/${encoded}`;
     try {
-        const { exec: execSync2 } = require('child_process');
-        execSync2(`xdg-open "${url}"`, { detached: true, stdio: 'ignore' });
+        exec(`xdg-open "${url}"`);
         return `🔍 เปิดค้นหา "${query}" ใน Spotify แล้วค่ะ 🎵`;
     } catch (_) {
         return `🔍 ค้นหา "${query}" ที่: ${url}`;
@@ -119,7 +118,7 @@ function searchSpotify(query) {
 
 // ── Main Plugin Export ─────────────────────────────────────────────────────
 
-module.exports = {
+const plugin = {
     name: 'spotify',
     description: [
         'Controls Spotify playback and gets now-playing info.',
@@ -131,7 +130,7 @@ module.exports = {
         '  "search <query>" — search Spotify (e.g. "search BTS Dynamite")',
     ].join(' '),
 
-    async execute(target) {
+    async execute(target: any) {
         const raw = (target || '').trim().toLowerCase();
 
         // ── Basic playback commands ───────────────────────────────────────
@@ -139,7 +138,7 @@ module.exports = {
             const result = await ACTION_MAP[raw]();
             if (!result.ok) return formatError(result.error);
             return ACTION_MESSAGES[raw];
-        }
+         }
 
         // ── Now Playing ───────────────────────────────────────────────────
         if (raw === 'now_playing' || raw === 'status' || raw === 'what\'s playing' || raw === 'current') {
@@ -171,3 +170,5 @@ module.exports = {
     // Expose helpers for testing
     _helpers: { runPlayerctl, getNowPlaying, setVolume, setShuffle, searchSpotify }
 };
+
+export = plugin;

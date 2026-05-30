@@ -1,13 +1,14 @@
-const { GoogleGenAI } = require('@google/genai');
-const { readChatHistory, writeChatHistory, clearChatHistory } = require('../System/chat_history_manager');
-const { readConfig, getAvailableProviders } = require('../System/config_manager');
-const pluginManager = require('../Plugins/plugin_manager');
-const mcpManager = require('../Plugins/mcp_manager');
-const memoryStore = require('./memory_store');
-const agentOrchestrator = require('./agent_orchestrator');
-const workspaceManager = require('../CLI/workspace_manager');
-const toolRegistry = require('../System/tool_registry');
-const providerAdapter = require('./provider_adapter');
+import { GoogleGenAI  } from '@google/genai'
+import { readChatHistory, writeChatHistory, clearChatHistory  } from '../System/chat_history_manager'
+import { readConfig, getAvailableProviders  } from '../System/config_manager'
+import pluginManager from '../Plugins/plugin_manager'
+import mcpManager from '../Plugins/mcp_manager'
+import * as memoryStore from './memory_store'
+import * as agentOrchestrator from './agent_orchestrator'
+import * as workspaceManager from '../CLI/workspace_manager'
+import * as toolRegistry from '../System/tool_registry'
+import * as providerAdapter from './provider_adapter'
+import { searchKnowledge } from './knowledge_base'
 
 let ai = null;
 let activeApiKey = '';
@@ -501,7 +502,6 @@ async function handleChat(message, base64Image = null, base64Audio = null) {
     
     // Inject Local RAG Context
     if (userVisibleMessage && userVisibleMessage.trim().length > 0 && shouldUseKnowledgeSearch(userVisibleMessage)) {
-        const { searchKnowledge } = require('./knowledge_base');
         const retrievedDocs = await searchKnowledge(userVisibleMessage);
         if (retrievedDocs && retrievedDocs.length > 0) {
             let contextString = `\n\n[LOCAL KNOWLEDGE BASE - USE THIS CONTEXT TO ANSWER]\n`;
@@ -781,16 +781,17 @@ async function translateImageContent(base64Image) {
     }
 }
 
-module.exports = {
-    handleChat,
+const _helpers = {
+    getProviderAttemptOrder,
+    normalizeParsedResult,
+    buildActionModeInstruction
+};
+
+export { handleChat,
     handleGeminiChatStream,
     resetChat,
     getChatTranscript,
     translateImageContent,
     refreshApiKeyFromConfig,
-    _helpers: {
-        getProviderAttemptOrder,
-        normalizeParsedResult,
-        buildActionModeInstruction
-    }
+    _helpers
 };

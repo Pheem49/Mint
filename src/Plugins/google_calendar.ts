@@ -1,5 +1,5 @@
-const axios = require('axios');
-const { readConfig } = require('../System/config_manager');
+import axios from 'axios'
+import { readConfig  } from '../System/config_manager'
 
 let shell = null;
 try {
@@ -107,13 +107,13 @@ function formatEventTime(event) {
     return `${startText} - ${endText}`;
 }
 
-function buildEventPayload(input) {
+function buildEventPayload(input: any) {
     const summary = (input.summary || input.title || input.name || '').trim();
     if (!summary) {
         throw new Error('Missing event summary/title.');
     }
 
-    const payload = {
+    const payload: any = {
         summary,
         description: input.description || undefined,
         location: input.location || undefined
@@ -214,11 +214,11 @@ function openCalendarFallback(input) {
     return `Google Calendar API is not configured, so I opened the event creation page for "${decodeURIComponent(title)}" instead. 📅`;
 }
 
-module.exports = {
+const plugin = {
     name: 'google_calendar',
-    description: 'Manage Google Calendar. Target can be JSON: {"action":"list","range":"today|upcoming","days":7} or {"action":"create","summary":"Meeting","start":"2026-05-15T10:00:00+07:00","end":"2026-05-15T11:00:00+07:00","description":"","location":""}. Plain text creates a new event title. Use action "open" to open Calendar.',
+    description: 'Manage Google Calendar. Target can be JSON: {"action":"list","range":"today|upcoming","days":7 } or {"action":"create","summary":"Meeting","start":"2026-05-15T10:00:00+07:00","end":"2026-05-15T11:00:00+07:00","description":"","location":""}. Plain text creates a new event title. Use action "open" to open Calendar.',
 
-    async execute(instruction) {
+    async execute(instruction: any) {
         const config = readConfig();
         const input = parseInstruction(instruction);
 
@@ -250,3 +250,5 @@ module.exports = {
         addDaysToIsoDate
     }
 };
+
+export = plugin;

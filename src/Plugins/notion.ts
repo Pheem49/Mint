@@ -1,5 +1,5 @@
-const axios = require('axios');
-const { readConfig } = require('../System/config_manager');
+import axios from 'axios'
+import { readConfig  } from '../System/config_manager'
 
 const NOTION_API_BASE = 'https://api.notion.com/v1';
 const NOTION_VERSION = '2022-06-28';
@@ -122,8 +122,8 @@ function buildDatabaseProperties(input, config) {
     return properties;
 }
 
-function formatNotionTitle(properties = {}) {
-    for (const property of Object.values(properties)) {
+function formatNotionTitle(properties: any = {}) {
+    for (const property of Object.values(properties) as any[]) {
         if (property && property.type === 'title' && Array.isArray(property.title)) {
             const title = property.title.map(part => part.plain_text || part.text?.content || '').join('');
             if (title) return title;
@@ -173,7 +173,7 @@ async function queryDatabase(config, input) {
         throw new Error('Missing Notion databaseId. Configure one in onboarding or pass it in the instruction JSON.');
     }
 
-    const payload = {
+    const payload: any = {
         page_size: Number(input.pageSize || input.limit || 10)
     };
 
@@ -221,11 +221,11 @@ function helpText() {
     ].join('\n');
 }
 
-module.exports = {
+const plugin = {
     name: 'notion',
-    description: 'Manage Notion. Target can be JSON: {"action":"create_page","title":"Note","content":"Body","databaseId":"optional","pageId":"optional"}, {"action":"query_database","databaseId":"optional","limit":10}, or {"action":"append_block","pageId":"optional","content":"Text"}. Plain text creates a note.',
+    description: 'Manage Notion. Target can be JSON: {"action":"create_page","title":"Note","content":"Body","databaseId":"optional","pageId":"optional" }, {"action":"query_database","databaseId":"optional","limit":10}, or {"action":"append_block","pageId":"optional","content":"Text"}. Plain text creates a note.',
 
-    async execute(instruction) {
+    async execute(instruction: any) {
         const config = readConfig();
         const input = parseInstruction(instruction);
 
@@ -254,3 +254,5 @@ module.exports = {
         hasNotionConfig
     }
 };
+
+export = plugin;

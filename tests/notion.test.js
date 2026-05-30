@@ -7,13 +7,13 @@ jest.mock('axios', () => ({
     patch: jest.fn()
 }));
 
-jest.mock('../src/System/config_manager', () => ({
+jest.mock('../dist/src/System/config_manager', () => ({
     readConfig: jest.fn()
 }));
 
 const axios = require('axios');
-const { readConfig } = require('../src/System/config_manager');
-const notion = require('../src/Plugins/notion');
+const { readConfig } = require('../dist/src/System/config_manager');
+const notion = require('../dist/src/Plugins/notion');
 
 describe('notion plugin', () => {
     beforeEach(() => {
