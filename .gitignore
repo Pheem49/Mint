@@ -24,7 +24,7 @@ BUILD_AND_RELEASE.md
 NPM_PUBLISH_GUIDE.md
 GUIDE_TH.md
 # ==========================
-# Electron Build Output
+# Generated Build Output
 # ==========================
 dist/
 out/
