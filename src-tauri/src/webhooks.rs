@@ -150,6 +150,8 @@ async fn answer(text: &str, system: &str) -> String {
         &ChatRequest {
             message: text.into(),
             system_instruction: system.into(),
+            image_data_uri: None,
+            audio_data_uri: None,
         },
     )
     .await

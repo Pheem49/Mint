@@ -15,7 +15,7 @@ use tauri::{
 
 use crate::integrations::call_mcp_tool;
 use crate::system::run_system_automation;
-use mint_core::{create_folder, find_paths};
+use mint_core::{KnowledgeStore, create_folder, find_paths};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -183,6 +183,11 @@ pub fn execute_action(
                 .map(|message| success(&message))
                 .map_err(|error| error.to_string())
         }
+        "learn_file" => KnowledgeStore::open_default()
+            .map_err(|error| error.to_string())?
+            .index_file(std::path::Path::new(&action.target), config)
+            .map(|chunks| success(&format!("indexed {chunks} knowledge chunks")))
+            .map_err(|error| error.to_string()),
         other => Err(format!(
             "desktop action '{other}' has not migrated to the allowlisted Rust executor"
         )),
@@ -289,7 +294,7 @@ pub fn integration_status(config: &mint_core::MintConfig) -> Value {
         .unwrap_or_default();
     json!({
         "automation": {
-            "supportedActions": ["open_url", "open_app", "search", "system_info", "system_automation", "find_path", "create_folder"],
+            "supportedActions": ["open_url", "open_app", "search", "system_info", "system_automation", "find_path", "create_folder", "learn_file"],
             "approvalRequired": true
         },
         "mcp": {

@@ -40,7 +40,24 @@ const DEFAULT_CONFIG = {
   anthropicApiKey: '',
   openaiApiKey: '',
   hfApiKey: '',
-  automationBrowser: 'chromium'
+  automationBrowser: 'chromium',
+  browserDebugUrl: 'http://127.0.0.1:9222/json/list',
+  enableHeadlessTaskQueue: false,
+  telegramBotToken: '',
+  enableTelegramBridge: false,
+  discordBotToken: '',
+  enableDiscordBridge: false,
+  slackBotToken: '',
+  slackAppToken: '',
+  enableSlackBridge: false,
+  lineChannelAccessToken: '',
+  lineChannelSecret: '',
+  enableLineBridge: false,
+  whatsappCloudAccessToken: '',
+  whatsappPhoneNumberId: '',
+  whatsappVerifyToken: '',
+  whatsappAppSecret: '',
+  enableWhatsappBridge: false
 }
 
 type TabType = 'sect-general' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts'
@@ -646,6 +663,34 @@ export default function SettingsWindow() {
                       <option value="/usr/bin/firefox">Firefox (System - Linux)</option>
                     </select>
                   </div>
+                  <div className="setting-row">
+                    <label>Chromium DevTools Endpoint</label>
+                    <input type="text" value={config.browserDebugUrl} onChange={(e) => updateField('browserDebugUrl', e.target.value)} />
+                    <p className="hint">Required for native tab reading and selector clicks.</p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="setting-section">
+                <div className="section-heading">
+                  <div>
+                    <p className="section-kicker">Background tasks</p>
+                    <h2 className="section-title">Native Headless Queue</h2>
+                  </div>
+                </div>
+                <div className="toggle-row">
+                  <div>
+                    <label>Process queued tasks automatically</label>
+                    <p className="hint">Allow the bounded Rust worker to process pending tasks every 15 seconds.</p>
+                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={config.enableHeadlessTaskQueue}
+                      onChange={(e) => updateField('enableHeadlessTaskQueue', e.target.checked)}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
                 </div>
               </section>
 
@@ -690,6 +735,33 @@ export default function SettingsWindow() {
                     </div>
                     <p className="hint">Minimum time between repeat suggestions.</p>
                   </div>
+                </div>
+              </section>
+
+              <section className="setting-section">
+                <div className="section-heading">
+                  <div>
+                    <p className="section-kicker">Messaging</p>
+                    <h2 className="section-title">Native Channel Bridges</h2>
+                  </div>
+                  <p className="section-description">Configure credentials used directly by the Rust channel workers.</p>
+                </div>
+                <div className="form-grid">
+                  <label className="toggle-row"><span>Telegram Bot API</span><input type="checkbox" checked={config.enableTelegramBridge} onChange={(e) => updateField('enableTelegramBridge', e.target.checked)} /></label>
+                  <input type="password" placeholder="Telegram bot token" value={config.telegramBotToken} onChange={(e) => updateField('telegramBotToken', e.target.value)} />
+                  <label className="toggle-row"><span>Discord Gateway</span><input type="checkbox" checked={config.enableDiscordBridge} onChange={(e) => updateField('enableDiscordBridge', e.target.checked)} /></label>
+                  <input type="password" placeholder="Discord bot token" value={config.discordBotToken} onChange={(e) => updateField('discordBotToken', e.target.value)} />
+                  <label className="toggle-row"><span>Slack Socket Mode</span><input type="checkbox" checked={config.enableSlackBridge} onChange={(e) => updateField('enableSlackBridge', e.target.checked)} /></label>
+                  <input type="password" placeholder="Slack bot token (xoxb-...)" value={config.slackBotToken} onChange={(e) => updateField('slackBotToken', e.target.value)} />
+                  <input type="password" placeholder="Slack app token (xapp-...)" value={config.slackAppToken} onChange={(e) => updateField('slackAppToken', e.target.value)} />
+                  <label className="toggle-row"><span>LINE Webhook</span><input type="checkbox" checked={config.enableLineBridge} onChange={(e) => updateField('enableLineBridge', e.target.checked)} /></label>
+                  <input type="password" placeholder="LINE channel access token" value={config.lineChannelAccessToken} onChange={(e) => updateField('lineChannelAccessToken', e.target.value)} />
+                  <input type="password" placeholder="LINE channel secret" value={config.lineChannelSecret} onChange={(e) => updateField('lineChannelSecret', e.target.value)} />
+                  <label className="toggle-row"><span>WhatsApp Cloud API</span><input type="checkbox" checked={config.enableWhatsappBridge} onChange={(e) => updateField('enableWhatsappBridge', e.target.checked)} /></label>
+                  <input type="password" placeholder="WhatsApp Cloud access token" value={config.whatsappCloudAccessToken} onChange={(e) => updateField('whatsappCloudAccessToken', e.target.value)} />
+                  <input type="text" placeholder="WhatsApp phone number ID" value={config.whatsappPhoneNumberId} onChange={(e) => updateField('whatsappPhoneNumberId', e.target.value)} />
+                  <input type="password" placeholder="WhatsApp verify token" value={config.whatsappVerifyToken} onChange={(e) => updateField('whatsappVerifyToken', e.target.value)} />
+                  <input type="password" placeholder="WhatsApp app secret (optional HMAC validation)" value={config.whatsappAppSecret} onChange={(e) => updateField('whatsappAppSecret', e.target.value)} />
                 </div>
               </section>
 

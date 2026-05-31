@@ -20,6 +20,9 @@ cargo run -p mint-cli -- status
 cargo run -p mint-cli -- task list
 cargo run -p mint-cli -- plugin list
 cargo run -p mint-cli -- files find Cargo.toml --root .
+cargo run -p mint-cli -- config doctor
+cargo run -p mint-cli -- knowledge add README.md
+cargo run -p mint-cli -- knowledge search Mint
 cargo run -p mint-cli -- chat "Hello"
 npm run build:web
 npm run tauri:dev
@@ -54,15 +57,16 @@ sudo apt-get install -y \
    live Gemini translation, workflow monitor, smart context, allowlisted desktop actions,
    system automation, transient MCP stdio tool calls, Telegram long-polling, Discord Gateway,
    Slack Socket Mode, LINE webhook, WhatsApp Cloud API webhook, selected HTTP plugins, local
-   plugins, safe Chromium DevTools automation, and proactive screen suggestions migrated.
+   plugins, safe Chromium DevTools automation, proactive screen suggestions, picture library,
+   Google TTS URL generation, multimodal Gemini chat, system event monitoring, opt-in headless
+   task processing, and text/Markdown local knowledge search migrated.
 6. Remove Electron runtime and the legacy JavaScript compatibility UI.
 
 ## Remaining Compatibility Work
 
-- Add UI onboarding fields for WhatsApp Cloud API credentials and webhook forwarding URLs.
+- Add webhook forwarding documentation for exposing local LINE and WhatsApp Cloud listeners.
 - Extend smart context with a browser extension fallback when Chromium remote debugging is unavailable.
-- Port advanced code-agent and headless-agent workflows that still live under `src/CLI` and
-  `src/AI_Brain`.
-- Replace the remaining Electron-only onboarding, updater, picture store, TTS, and system-event
-  adapters before deleting their TypeScript sources.
+- Port the remaining advanced code-agent workflow that still lives under `src/CLI`.
+- Add native PDF, DOCX, and XLSX extraction plus embedding search parity for local knowledge.
+- Replace the legacy npm updater with a signed Tauri desktop update channel.
 - Remove Electron dependencies only after the replacement workflows are exercised interactively.

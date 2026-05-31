@@ -3,9 +3,9 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use mint_core::{
-    Capability, ChatRequest, MemoryStore, TaskStore, assert_path_capability,
+    Capability, ChatRequest, KnowledgeStore, MemoryStore, TaskStore, assert_path_capability,
     classify_shell_command, config_path, create_folder, execute_native_plugin, find_paths,
-    load_config, native_plugins, orchestrate_chat, set_config_value,
+    initialize_config, load_config, native_plugins, orchestrate_chat, set_config_value,
 };
 
 #[derive(Debug, Parser)]
@@ -52,6 +52,11 @@ enum Command {
         #[command(subcommand)]
         command: PluginCommand,
     },
+    /// Index and search native local text knowledge.
+    Knowledge {
+        #[command(subcommand)]
+        command: KnowledgeCommand,
+    },
     /// Inspect native safety policy decisions.
     Safety {
         #[command(subcommand)]
@@ -61,19 +66,35 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
+    /// Create the native config file and fill missing runtime defaults.
+    Init,
     /// Print the config file path.
     Path,
     /// Print the config as JSON.
     Show,
     /// Set one JSON-compatible config value.
     Set { key: String, value: String },
+    /// Show configured native providers and integrations.
+    Doctor,
 }
 
 #[derive(Debug, Subcommand)]
 enum TaskCommand {
-    Add { description: String },
+    Add {
+        description: String,
+    },
     List,
-    Show { id: String },
+    Show {
+        id: String,
+    },
+    Pending,
+    Resume,
+    Update {
+        id: String,
+        status: String,
+        #[arg(long)]
+        result: Option<String>,
+    },
     ClearCompleted,
 }
 
@@ -95,6 +116,19 @@ enum FilesCommand {
 enum PluginCommand {
     List,
     Run { name: String, instruction: String },
+}
+
+#[derive(Debug, Subcommand)]
+enum KnowledgeCommand {
+    Add {
+        path: PathBuf,
+    },
+    List,
+    Search {
+        query: String,
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -136,6 +170,10 @@ async fn main() -> Result<()> {
             println!("config: {}", config_path()?.display());
         }
         Command::Config { command } => match command {
+            ConfigCommand::Init => {
+                initialize_config()?;
+                println!("{}", config_path()?.display());
+            }
             ConfigCommand::Path => println!("{}", config_path()?.display()),
             ConfigCommand::Show => println!("{}", serde_json::to_string_pretty(&load_config()?)?),
             ConfigCommand::Set { key, value } => {
@@ -144,6 +182,30 @@ async fn main() -> Result<()> {
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&set_config_value(&key, value)?)?
+                );
+            }
+            ConfigCommand::Doctor => {
+                let config = load_config()?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "configPath": config_path()?,
+                        "activeProvider": config.ai_provider,
+                        "availableProviders": config.available_providers(),
+                        "headlessTaskQueue": config.extra["enableHeadlessTaskQueue"],
+                        "channels": {
+                            "telegram": configured(&config, &["telegramBotToken"]),
+                            "discord": configured(&config, &["discordBotToken"]),
+                            "slack": configured(&config, &["slackBotToken", "slackAppToken"]),
+                            "line": configured(&config, &["lineChannelAccessToken", "lineChannelSecret"]),
+                            "whatsappCloud": configured(&config, &["whatsappCloudAccessToken", "whatsappPhoneNumberId", "whatsappVerifyToken"]),
+                        },
+                        "plugins": {
+                            "gmail": configured(&config, &["gmailClientId", "gmailClientSecret", "gmailRefreshToken"]),
+                            "googleCalendar": configured(&config, &["googleCalendarClientId", "googleCalendarClientSecret", "googleCalendarRefreshToken"]),
+                            "notion": configured(&config, &["notionApiKey"]),
+                        }
+                    }))?
                 );
             }
         },
@@ -158,6 +220,8 @@ async fn main() -> Result<()> {
                 &ChatRequest {
                     message: message.clone(),
                     system_instruction: system,
+                    image_data_uri: None,
+                    audio_data_uri: None,
                 },
             )
             .await?;
@@ -213,6 +277,25 @@ async fn main() -> Result<()> {
                 TaskCommand::Show { id } => {
                     println!("{}", serde_json::to_string_pretty(&tasks.get(&id)?)?)
                 }
+                TaskCommand::Pending => {
+                    println!("{}", serde_json::to_string_pretty(&tasks.pending()?)?)
+                }
+                TaskCommand::Resume => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&tasks.resume_running()?)?
+                    )
+                }
+                TaskCommand::Update { id, status, result } => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&tasks.update_status(
+                            &id,
+                            &status,
+                            result.map(serde_json::Value::String)
+                        )?)?
+                    )
+                }
                 TaskCommand::ClearCompleted => println!("{}", tasks.clear_completed()?),
             }
         }
@@ -246,6 +329,23 @@ async fn main() -> Result<()> {
                 println!("{}", execute_native_plugin(&name, &instruction)?)
             }
         },
+        Command::Knowledge { command } => {
+            let store = KnowledgeStore::open_default()?;
+            match command {
+                KnowledgeCommand::Add { path } => {
+                    println!("{}", store.index_file(&path, &load_config()?)?)
+                }
+                KnowledgeCommand::List => {
+                    println!("{}", serde_json::to_string_pretty(&store.list_sources()?)?)
+                }
+                KnowledgeCommand::Search { query, limit } => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&store.search(&query, limit)?)?
+                    )
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -259,4 +359,14 @@ fn active_model<'a>(provider: &str, config: &'a mint_core::MintConfig) -> &'a st
         "ollama" => &config.ollama_model,
         _ => &config.gemini_model,
     }
+}
+
+fn configured(config: &mint_core::MintConfig, keys: &[&str]) -> bool {
+    keys.iter().all(|key| {
+        config
+            .extra
+            .get(*key)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    })
 }

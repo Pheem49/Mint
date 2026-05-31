@@ -1,10 +1,14 @@
 mod browser;
 mod channels;
 mod desktop;
+mod events;
+mod headless;
 mod integrations;
+mod pictures;
 mod plugins;
 mod proactive;
 mod system;
+mod tts;
 mod webhooks;
 mod workflows;
 
@@ -18,11 +22,14 @@ use desktop::{
     execute_action, hide_window, integration_status, open_desktop_window, position_widget,
     resize_window, translate_screen_region,
 };
+use events::start_system_events;
+use headless::{run_next_task, start_headless_queue};
 use integrations::{channel_inventory, configured_mcp_servers, list_plugins};
 use mint_core::{
     ChatRequest, ChatResponse, InteractionMemory, MemoryStore, MintConfig, classify_shell_command,
     config_path, load_config, orchestrate_chat, orchestrate_chat_stream, save_config,
 };
+use pictures::{PictureEntry, list_saved_pictures, save_chat_images};
 use plugins::execute_plugin;
 use proactive::{
     record_behavior, set_enabled as set_proactive_enabled, start_loop as start_proactive_loop,
@@ -38,6 +45,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tts::{TtsUrl, google_tts_urls};
 use webhooks::start_webhooks;
 use workflows::{load_workflows, start_monitor, workflows_path};
 
@@ -119,6 +127,26 @@ fn get_recent_interactions(limit: Option<usize>) -> Result<Vec<InteractionMemory
     MemoryStore::open_default()
         .and_then(|memory| memory.recent_interactions(limit.unwrap_or(5)))
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_pictures() -> Result<Vec<PictureEntry>, String> {
+    list_saved_pictures()
+}
+
+#[tauri::command]
+fn save_pictures(
+    images: Vec<String>,
+    source: Option<String>,
+    message: Option<String>,
+) -> Result<Vec<PictureEntry>, String> {
+    save_chat_images(images, source, message)
+}
+
+#[tauri::command]
+fn get_tts_urls(text: String) -> Result<Vec<TtsUrl>, String> {
+    let language = load_config().map_err(|error| error.to_string())?.language;
+    Ok(google_tts_urls(&text, &language))
 }
 
 #[tauri::command]
@@ -247,6 +275,11 @@ fn save_behavior_context(context: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn run_next_queued_task(app: AppHandle) -> Result<Option<mint_core::Task>, String> {
+    run_next_task(&app).await
+}
+
+#[tauri::command]
 fn exit_app(app: AppHandle) {
     app.exit(0);
 }
@@ -360,6 +393,8 @@ pub fn run() {
             install_tray(app.handle())?;
             install_shortcuts(app.handle())?;
             start_monitor(app.handle().clone());
+            start_system_events(app.handle().clone());
+            start_headless_queue(app.handle().clone());
             start_proactive_loop(app.handle().clone());
             start_channels();
             start_webhooks();
@@ -380,6 +415,9 @@ pub fn run() {
             send_chat_message,
             stream_chat_message,
             get_recent_interactions,
+            list_pictures,
+            save_pictures,
+            get_tts_urls,
             open_window,
             hide_desktop_window,
             close_desktop_window,
@@ -400,6 +438,7 @@ pub fn run() {
             set_ai_state,
             toggle_proactive,
             save_behavior_context,
+            run_next_queued_task,
             exit_app,
             open_workflows_file,
             reload_custom_workflows

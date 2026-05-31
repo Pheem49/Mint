@@ -119,15 +119,128 @@ impl TaskStore {
         Ok(self.list()?.into_iter().find(|task| task.id == id))
     }
 
+    pub fn pending(&self) -> Result<Option<Task>, TaskError> {
+        Ok(self
+            .list()?
+            .into_iter()
+            .find(|task| task.status == "pending"))
+    }
+
+    pub fn update_status(
+        &self,
+        id: &str,
+        status: &str,
+        result: Option<Value>,
+    ) -> Result<Option<Task>, TaskError> {
+        self.mutate(id, |task| {
+            task.status = status.into();
+            if result.is_some() {
+                task.result = result;
+            }
+        })
+    }
+
+    pub fn add_checkpoint(
+        &self,
+        id: &str,
+        mut checkpoint: Value,
+    ) -> Result<Option<Task>, TaskError> {
+        self.mutate(id, |task| {
+            let time = timestamp();
+            let checkpoint_id = format!("{id}-checkpoint-{}", task.checkpoints.len() + 1);
+            if let Some(value) = checkpoint.as_object_mut() {
+                value.entry("id").or_insert(Value::String(checkpoint_id));
+                value.entry("time").or_insert(Value::String(time.clone()));
+            }
+            task.last_checkpoint_at = Some(time);
+            task.steps.push(checkpoint.clone());
+            task.checkpoints.push(checkpoint);
+        })
+    }
+
+    pub fn add_artifact(&self, id: &str, mut artifact: Value) -> Result<Option<Task>, TaskError> {
+        self.mutate(id, |task| {
+            if let Some(value) = artifact.as_object_mut() {
+                value.entry("id").or_insert(Value::String(format!(
+                    "{id}-artifact-{}",
+                    task.artifacts.len() + 1
+                )));
+                value
+                    .entry("time")
+                    .or_insert_with(|| Value::String(timestamp()));
+            }
+            task.artifacts.push(artifact);
+        })
+    }
+
+    pub fn fail_with_retry(&self, id: &str, message: &str) -> Result<Option<Task>, TaskError> {
+        self.mutate(id, |task| {
+            task.retry_count += 1;
+            task.status = if task.retry_count <= task.max_retries {
+                "pending"
+            } else {
+                "failed"
+            }
+            .into();
+            task.result = Some(Value::String(message.into()));
+            let checkpoint = serde_json::json!({
+                "id": format!("{id}-checkpoint-{}", task.checkpoints.len() + 1),
+                "time": timestamp(),
+                "phase": if task.status == "pending" { "retry_scheduled" } else { "failed" },
+                "message": message,
+                "retryCount": task.retry_count,
+                "maxRetries": task.max_retries,
+            });
+            task.steps.push(checkpoint.clone());
+            task.checkpoints.push(checkpoint);
+        })
+    }
+
+    pub fn resume_running(&self) -> Result<Vec<Task>, TaskError> {
+        let mut tasks = self.list()?;
+        let mut resumed = Vec::new();
+        for task in &mut tasks {
+            if task.status != "running" {
+                continue;
+            }
+            task.status = "pending".into();
+            task.updated_at = timestamp();
+            let checkpoint = serde_json::json!({
+                "id": format!("{}-checkpoint-{}", task.id, task.checkpoints.len() + 1),
+                "time": timestamp(),
+                "phase": "resume_after_restart",
+                "message": "Task was running during shutdown and has been re-queued.",
+            });
+            task.steps.push(checkpoint.clone());
+            task.checkpoints.push(checkpoint);
+            resumed.push(task.clone());
+        }
+        self.write(&tasks)?;
+        Ok(resumed)
+    }
+
     pub fn clear_completed(&self) -> Result<usize, TaskError> {
         let tasks = self.list()?;
+        let count = tasks.len();
         let retained = tasks
             .into_iter()
             .filter(|task| matches!(task.status.as_str(), "pending" | "running"))
             .collect::<Vec<_>>();
-        let removed = self.list()?.len().saturating_sub(retained.len());
+        let removed = count.saturating_sub(retained.len());
         self.write(&retained)?;
         Ok(removed)
+    }
+
+    fn mutate(&self, id: &str, update: impl FnOnce(&mut Task)) -> Result<Option<Task>, TaskError> {
+        let mut tasks = self.list()?;
+        let Some(task) = tasks.iter_mut().find(|task| task.id == id) else {
+            return Ok(None);
+        };
+        update(task);
+        task.updated_at = timestamp();
+        let task = task.clone();
+        self.write(&tasks)?;
+        Ok(Some(task))
     }
 
     fn write(&self, tasks: &[Task]) -> Result<(), TaskError> {
@@ -202,6 +315,42 @@ mod tests {
             .unwrap();
         assert_eq!(store.clear_completed().unwrap(), 1);
         assert_eq!(store.list().unwrap().len(), 1);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn retries_failed_tasks_once_before_marking_them_failed() {
+        let path = test_path("retry");
+        let _ = fs::remove_file(&path);
+        let store = TaskStore::open(&path);
+        let task = store.add("retry task").unwrap();
+        assert_eq!(
+            store
+                .fail_with_retry(&task.id, "first")
+                .unwrap()
+                .unwrap()
+                .status,
+            "pending"
+        );
+        assert_eq!(
+            store
+                .fail_with_retry(&task.id, "second")
+                .unwrap()
+                .unwrap()
+                .status,
+            "failed"
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn resumes_interrupted_running_tasks() {
+        let path = test_path("resume");
+        let _ = fs::remove_file(&path);
+        let store = TaskStore::open(&path);
+        let task = store.add("resume task").unwrap();
+        store.update_status(&task.id, "running", None).unwrap();
+        assert_eq!(store.resume_running().unwrap()[0].status, "pending");
         let _ = fs::remove_file(path);
     }
 }

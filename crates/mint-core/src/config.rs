@@ -113,7 +113,7 @@ impl Default for MintConfig {
                 home.join(".mint/mint-config.json"),
             ],
             blocked_file_names: vec![".env".into(), "id_rsa".into(), "id_ed25519".into()],
-            extra: BTreeMap::new(),
+            extra: runtime_extra_defaults(),
         }
     }
 }
@@ -151,6 +151,12 @@ pub fn load_config() -> Result<MintConfig, ConfigError> {
     load_config_from(&config_path()?)
 }
 
+pub fn initialize_config() -> Result<MintConfig, ConfigError> {
+    let config = load_config()?;
+    save_config(&config)?;
+    Ok(config)
+}
+
 pub fn save_config(config: &MintConfig) -> Result<(), ConfigError> {
     save_config_to(&config_path()?, config)
 }
@@ -176,10 +182,15 @@ fn load_config_from(path: &Path) -> Result<MintConfig, ConfigError> {
         path: path.to_path_buf(),
         source,
     })?;
-    serde_json::from_str(&raw).map_err(|source| ConfigError::Parse {
-        path: path.to_path_buf(),
-        source,
-    })
+    let mut config: MintConfig =
+        serde_json::from_str(&raw).map_err(|source| ConfigError::Parse {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    for (key, value) in runtime_extra_defaults() {
+        config.extra.entry(key).or_insert(value);
+    }
+    Ok(config)
 }
 
 fn save_config_to(path: &Path, config: &MintConfig) -> Result<(), ConfigError> {
@@ -209,6 +220,58 @@ fn default_sandbox_command() -> &'static str {
     } else {
         ""
     }
+}
+
+fn runtime_extra_defaults() -> BTreeMap<String, Value> {
+    serde_json::from_value(serde_json::json!({
+        "automationBrowser": "chromium",
+        "browserDebugUrl": "http://127.0.0.1:9222/json/list",
+        "proactiveInterval": 60,
+        "proactiveCooldown": 120,
+        "enableHeadlessTaskQueue": false,
+        "enableVoiceReply": true,
+        "enableCustomWorkflows": true,
+        "ttsProvider": "google",
+        "ttsVolume": 1.0,
+        "ttsSpeed": 1.0,
+        "ttsPitch": 1.0,
+        "pluginCalendarEnabled": false,
+        "pluginGmailEnabled": false,
+        "pluginNotionEnabled": false,
+        "telegramBotToken": "",
+        "enableTelegramBridge": false,
+        "discordBotToken": "",
+        "enableDiscordBridge": false,
+        "slackBotToken": "",
+        "slackAppToken": "",
+        "enableSlackBridge": false,
+        "lineChannelAccessToken": "",
+        "lineChannelSecret": "",
+        "enableLineBridge": false,
+        "lineWebhookPort": 3000,
+        "whatsappCloudAccessToken": "",
+        "whatsappPhoneNumberId": "",
+        "whatsappVerifyToken": "",
+        "whatsappAppSecret": "",
+        "enableWhatsappBridge": false,
+        "googleSearchApiKey": "",
+        "googleSearchCx": "",
+        "braveSearchApiKey": "",
+        "googleCalendarClientId": "",
+        "googleCalendarClientSecret": "",
+        "googleCalendarRefreshToken": "",
+        "googleCalendarId": "primary",
+        "gmailClientId": "",
+        "gmailClientSecret": "",
+        "gmailRefreshToken": "",
+        "gmailUserId": "me",
+        "notionApiKey": "",
+        "notionDatabaseId": "",
+        "notionPageId": "",
+        "notionTitleProperty": "Name",
+        "mcpServers": {}
+    }))
+    .expect("runtime config defaults must be a JSON object")
 }
 
 #[cfg(test)]
@@ -251,5 +314,13 @@ mod tests {
             serde_json::from_str(r#"{"aiProvider":"gemini","pluginGmailEnabled":true}"#).unwrap();
         let json = serde_json::to_value(config).unwrap();
         assert_eq!(json["pluginGmailEnabled"], true);
+    }
+
+    #[test]
+    fn default_config_includes_native_runtime_flags() {
+        let config = MintConfig::default();
+        assert_eq!(config.extra["enableHeadlessTaskQueue"], false);
+        assert_eq!(config.extra["ttsProvider"], "google");
+        assert_eq!(config.extra["lineWebhookPort"], 3000);
     }
 }

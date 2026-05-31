@@ -12,6 +12,10 @@ pub struct ChatRequest {
     pub message: String,
     #[serde(default)]
     pub system_instruction: String,
+    #[serde(default)]
+    pub image_data_uri: Option<String>,
+    #[serde(default)]
+    pub audio_data_uri: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +36,10 @@ pub enum ChatError {
     Request(#[from] reqwest::Error),
     #[error("provider response did not include assistant text")]
     MissingResponseText,
+    #[error("provider '{0}' does not support Mint multimodal attachments yet")]
+    UnsupportedAttachments(String),
+    #[error("invalid multimodal data URI")]
+    InvalidAttachment,
 }
 
 pub async fn send_chat(
@@ -40,6 +48,7 @@ pub async fn send_chat(
 ) -> Result<ChatResponse, ChatError> {
     let client = Client::new();
     let provider = config.ai_provider.as_str();
+    require_supported_attachments(provider, request)?;
     let (model, text) = match provider {
         "gemini" => call_gemini(&client, config, request).await?,
         "openai" | "local_openai" => call_openai(&client, config, request).await?,
@@ -64,6 +73,7 @@ where
 {
     let client = Client::new();
     let provider = config.ai_provider.as_str();
+    require_supported_attachments(provider, request)?;
     let (model, text) = match provider {
         "gemini" => stream_gemini(&client, config, request, &mut on_chunk).await?,
         "openai" | "local_openai" => stream_openai(&client, config, request, &mut on_chunk).await?,
@@ -94,7 +104,7 @@ async fn call_gemini(
         .post(url)
         .json(&json!({
             "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
-            "contents": [{ "role": "user", "parts": [{ "text": request.message }] }]
+            "contents": [{ "role": "user", "parts": gemini_parts(request)? }]
         }))
         .send()
         .await?
@@ -239,7 +249,7 @@ where
         ))
         .json(&json!({
             "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
-            "contents": [{ "role": "user", "parts": [{ "text": request.message }] }]
+            "contents": [{ "role": "user", "parts": gemini_parts(request)? }]
         }))
         .send()
         .await?
@@ -431,6 +441,39 @@ fn provider_key(configured: &str, environment_variable: &str) -> String {
     }
 }
 
+fn require_supported_attachments(provider: &str, request: &ChatRequest) -> Result<(), ChatError> {
+    if provider != "gemini"
+        && (request.image_data_uri.is_some() || request.audio_data_uri.is_some())
+    {
+        return Err(ChatError::UnsupportedAttachments(provider.into()));
+    }
+    Ok(())
+}
+
+fn gemini_parts(request: &ChatRequest) -> Result<Vec<Value>, ChatError> {
+    let mut parts = vec![json!({ "text": request.message })];
+    for attachment in [&request.image_data_uri, &request.audio_data_uri]
+        .into_iter()
+        .flatten()
+    {
+        let payload = attachment
+            .strip_prefix("data:")
+            .and_then(|payload| payload.split_once(";base64,"))
+            .filter(|(mime_type, data)| {
+                (mime_type.starts_with("image/") || mime_type.starts_with("audio/"))
+                    && !data.is_empty()
+            })
+            .ok_or(ChatError::InvalidAttachment)?;
+        parts.push(json!({
+            "inlineData": {
+                "mimeType": payload.0,
+                "data": payload.1
+            }
+        }));
+    }
+    Ok(parts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,5 +506,18 @@ mod tests {
             .as_deref(),
             Some("hey")
         );
+    }
+
+    #[test]
+    fn builds_gemini_multimodal_parts() {
+        let parts = gemini_parts(&ChatRequest {
+            message: "describe".into(),
+            system_instruction: String::new(),
+            image_data_uri: Some("data:image/png;base64,aGk=".into()),
+            audio_data_uri: None,
+        })
+        .unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
     }
 }

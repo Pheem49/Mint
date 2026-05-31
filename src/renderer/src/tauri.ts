@@ -27,9 +27,20 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   return invoke<RuntimeStatus>('get_runtime_status')
 }
 
-export async function sendChatMessage(message: string): Promise<ChatResponse> {
+export async function sendChatMessage(
+  message: string,
+  imageDataUri?: string | null,
+  audioDataUri?: string | null,
+): Promise<ChatResponse> {
+  if (imageDataUri) {
+    await invoke('save_pictures', {
+      images: [imageDataUri],
+      source: 'chat',
+      message,
+    })
+  }
   return invoke<ChatResponse>('send_chat_message', {
-    request: { message, systemInstruction: '' },
+    request: { message, systemInstruction: '', imageDataUri, audioDataUri },
   })
 }
 
@@ -128,14 +139,14 @@ export function installTauriAdapters() {
   }
 
   window.api = {
-    sendMessage: (message) => sendChatMessage(message),
+    sendMessage: (message, imageDataUri, audioDataUri) => sendChatMessage(message, imageDataUri, audioDataUri),
     closeWindow: hide,
     minimizeWindow: () => void currentWindow.minimize(),
     quitApp: () => void invoke('exit_app'),
     maximizeWindow: () => void currentWindow.toggleMaximize(),
     resetChat: async () => undefined,
     getChatHistory: () => getRecentInteractions(50),
-    listSavedPictures: async () => [],
+    listSavedPictures: () => invoke('list_pictures'),
     openSettings: () => invoke('open_window', { kind: 'settings' }),
     readClipboard: () => navigator.clipboard.readText(),
     writeClipboard: (text) => navigator.clipboard.writeText(text),
@@ -165,7 +176,7 @@ export function installTauriAdapters() {
     },
     notifyAiResponse: () => {},
     clearAiNotifications: () => {},
-    getTtsUrls: async () => [],
+    getTtsUrls: (text) => invoke('get_tts_urls', { text }),
     setAiState: (state) => void invoke('set_ai_state', { state }),
   }
 }

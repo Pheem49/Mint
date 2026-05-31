@@ -74,6 +74,8 @@ mod tests {
         let request = ChatRequest {
             message: "hello".into(),
             system_instruction: "system".into(),
+            image_data_uri: None,
+            audio_data_uri: None,
         };
         assert_eq!(
             enrich_request(&store, &request).unwrap().system_instruction,
