@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 dirs.workspace = true
+futures-util.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 rusqlite.workspace = true

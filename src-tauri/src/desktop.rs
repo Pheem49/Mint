@@ -5,6 +5,8 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use image::ImageFormat;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::{
@@ -12,6 +14,8 @@ use tauri::{
 };
 
 use crate::integrations::call_mcp_tool;
+use crate::system::run_system_automation;
+use mint_core::{create_folder, find_paths};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +28,8 @@ pub struct DesktopAction {
     pub server: String,
     #[serde(default)]
     pub args: Value,
+    #[serde(default)]
+    pub approved: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -31,6 +37,14 @@ pub struct DesktopAction {
 pub struct ActionResult {
     pub success: bool,
     pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CaptureRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 pub fn open_desktop_window(app: &AppHandle, kind: &str) -> Result<(), String> {
@@ -115,6 +129,15 @@ pub fn execute_action(
             spawn_detached("xdg-open", &[&action.target])?;
             Ok(success("opened URL"))
         }
+        "search" => {
+            let query = action.target.trim();
+            if query.is_empty() {
+                return Err("search query is required".into());
+            }
+            let url = format!("https://www.google.com/search?q={}", encode_query(query));
+            spawn_detached("xdg-open", &[&url])?;
+            Ok(success("opened web search"))
+        }
         "open_app" => {
             let app = action.target.trim();
             if app.is_empty()
@@ -130,6 +153,36 @@ pub fn execute_action(
         "clipboard_write" => Err("clipboard actions are handled by the renderer".into()),
         "mcp_tool" => call_mcp_tool(config, &action.server, &action.target, action.args)
             .map(|result| success(&result.to_string())),
+        "system_automation" => {
+            run_system_automation(&action.target, action.approved).map(|message| success(&message))
+        }
+        "create_folder" => create_folder(std::path::Path::new(&action.target), config)
+            .map(|path| success(&format!("created {}", path.display())))
+            .map_err(|error| error.to_string()),
+        "find_path" => {
+            let roots = action.args["roots"]
+                .as_array()
+                .map(|roots| {
+                    roots
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(PathBuf::from)
+                        .collect::<Vec<_>>()
+                })
+                .filter(|roots| !roots.is_empty())
+                .unwrap_or_else(|| {
+                    let mut roots =
+                        vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))];
+                    if let Some(home) = dirs::home_dir() {
+                        roots.push(home);
+                    }
+                    roots
+                });
+            let limit = action.args["limit"].as_u64().unwrap_or(20).min(100) as usize;
+            serde_json::to_string(&find_paths(&action.target, &roots, limit, config))
+                .map(|message| success(&message))
+                .map_err(|error| error.to_string())
+        }
         other => Err(format!(
             "desktop action '{other}' has not migrated to the allowlisted Rust executor"
         )),
@@ -137,6 +190,62 @@ pub fn execute_action(
 }
 
 pub fn capture_screen() -> Result<String, String> {
+    capture_screen_bytes().map(|bytes| format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
+}
+
+pub async fn translate_screen_region(
+    config: &mint_core::MintConfig,
+    rect: CaptureRect,
+) -> Result<String, String> {
+    let bytes = capture_screen_bytes()?;
+    let image = image::load_from_memory(&bytes).map_err(|error| error.to_string())?;
+    if rect.width == 0 || rect.height == 0 || rect.x >= image.width() || rect.y >= image.height() {
+        return Err("screen capture rectangle is invalid".into());
+    }
+    let width = rect.width.min(image.width() - rect.x);
+    let height = rect.height.min(image.height() - rect.y);
+    let cropped = image.crop_imm(rect.x, rect.y, width, height);
+    let mut jpeg = std::io::Cursor::new(Vec::new());
+    cropped
+        .write_to(&mut jpeg, ImageFormat::Jpeg)
+        .map_err(|error| error.to_string())?;
+    let api_key = if config.api_key.trim().is_empty() {
+        std::env::var("GEMINI_API_KEY").unwrap_or_default()
+    } else {
+        config.api_key.clone()
+    };
+    if api_key.trim().is_empty() {
+        return Err("Gemini API key is required for live translation".into());
+    }
+    let value: Value = Client::new()
+        .post(format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={api_key}",
+            config.gemini_model
+        ))
+        .json(&json!({
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    { "text": "Translate visible text in this image into Thai. Return only the translated text. If there is no readable text, return an empty string." },
+                    { "inlineData": { "mimeType": "image/jpeg", "data": STANDARD.encode(jpeg.into_inner()) } }
+                ]
+            }]
+        }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?
+        .error_for_status()
+        .map_err(|error| error.to_string())?
+        .json()
+        .await
+        .map_err(|error| error.to_string())?;
+    value["candidates"][0]["content"]["parts"][0]["text"]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "Gemini translation response did not include text".into())
+}
+
+pub(crate) fn capture_screen_bytes() -> Result<Vec<u8>, String> {
     let path = std::env::temp_dir().join(format!("mint-screen-{}.png", std::process::id()));
     let commands = [
         ("grim", vec![path_string(&path)]),
@@ -162,7 +271,7 @@ pub fn capture_screen() -> Result<String, String> {
         if result.is_ok_and(|status| status.success()) && path.exists() {
             let bytes = fs::read(&path).map_err(|error| error.to_string())?;
             let _ = fs::remove_file(&path);
-            return Ok(format!("data:image/png;base64,{}", STANDARD.encode(bytes)));
+            return Ok(bytes);
         }
     }
     Err(format!(
@@ -180,7 +289,7 @@ pub fn integration_status(config: &mint_core::MintConfig) -> Value {
         .unwrap_or_default();
     json!({
         "automation": {
-            "supportedActions": ["open_url", "open_app"],
+            "supportedActions": ["open_url", "open_app", "search", "system_info", "system_automation", "find_path", "create_folder"],
             "approvalRequired": true
         },
         "mcp": {
@@ -188,8 +297,8 @@ pub fn integration_status(config: &mint_core::MintConfig) -> Value {
             "execution": "native-stdio"
         },
         "plugins": {
-            "migrated": ["desktop-actions"],
-            "legacyBridge": true
+            "migrated": ["desktop-actions", "dev_tools", "docker", "obsidian", "spotify", "system_metrics"],
+            "legacyBridge": false
         }
     })
 }
@@ -222,4 +331,28 @@ fn spawn_detached(program: &str, args: &[&str]) -> Result<(), String> {
 
 fn path_string(path: &PathBuf) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn encode_query(query: &str) -> String {
+    query
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            b' ' => "+".into(),
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encodes_search_queries_for_urls() {
+        assert_eq!(encode_query("mint cli"), "mint+cli");
+        assert_eq!(encode_query("a/b"), "a%2Fb");
+    }
 }

@@ -3,8 +3,9 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use mint_core::{
-    Capability, ChatRequest, MemoryStore, assert_path_capability, classify_shell_command,
-    config_path, load_config, send_chat,
+    Capability, ChatRequest, MemoryStore, TaskStore, assert_path_capability,
+    classify_shell_command, config_path, create_folder, execute_native_plugin, find_paths,
+    load_config, native_plugins, orchestrate_chat, set_config_value,
 };
 
 #[derive(Debug, Parser)]
@@ -36,6 +37,21 @@ enum Command {
         #[command(subcommand)]
         command: MemoryCommand,
     },
+    /// Manage durable native tasks.
+    Task {
+        #[command(subcommand)]
+        command: TaskCommand,
+    },
+    /// Search and create local folders through the native safety policy.
+    Files {
+        #[command(subcommand)]
+        command: FilesCommand,
+    },
+    /// Run built-in native plugins.
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommand,
+    },
     /// Inspect native safety policy decisions.
     Safety {
         #[command(subcommand)]
@@ -49,6 +65,36 @@ enum ConfigCommand {
     Path,
     /// Print the config as JSON.
     Show,
+    /// Set one JSON-compatible config value.
+    Set { key: String, value: String },
+}
+
+#[derive(Debug, Subcommand)]
+enum TaskCommand {
+    Add { description: String },
+    List,
+    Show { id: String },
+    ClearCompleted,
+}
+
+#[derive(Debug, Subcommand)]
+enum FilesCommand {
+    Find {
+        query: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        root: Vec<PathBuf>,
+    },
+    CreateFolder {
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PluginCommand {
+    List,
+    Run { name: String, instruction: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -92,6 +138,14 @@ async fn main() -> Result<()> {
         Command::Config { command } => match command {
             ConfigCommand::Path => println!("{}", config_path()?.display()),
             ConfigCommand::Show => println!("{}", serde_json::to_string_pretty(&load_config()?)?),
+            ConfigCommand::Set { key, value } => {
+                let value = serde_json::from_str(&value)
+                    .unwrap_or_else(|_| serde_json::Value::String(value));
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&set_config_value(&key, value)?)?
+                );
+            }
         },
         Command::Providers => {
             for provider in load_config()?.available_providers() {
@@ -99,7 +153,7 @@ async fn main() -> Result<()> {
             }
         }
         Command::Chat { message, system } => {
-            let response = send_chat(
+            let response = orchestrate_chat(
                 &load_config()?,
                 &ChatRequest {
                     message: message.clone(),
@@ -107,7 +161,6 @@ async fn main() -> Result<()> {
                 },
             )
             .await?;
-            MemoryStore::open_default()?.add_interaction(&message, &response.text)?;
             println!("{}", response.text);
         }
         Command::Memory { command } => {
@@ -145,6 +198,52 @@ async fn main() -> Result<()> {
                     "{}",
                     assert_path_capability(&path, capability, &load_config()?)?.display()
                 );
+            }
+        },
+        Command::Task { command } => {
+            let tasks = TaskStore::open_default()?;
+            match command {
+                TaskCommand::Add { description } => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&tasks.add(description)?)?
+                    );
+                }
+                TaskCommand::List => println!("{}", serde_json::to_string_pretty(&tasks.list()?)?),
+                TaskCommand::Show { id } => {
+                    println!("{}", serde_json::to_string_pretty(&tasks.get(&id)?)?)
+                }
+                TaskCommand::ClearCompleted => println!("{}", tasks.clear_completed()?),
+            }
+        }
+        Command::Files { command } => {
+            let config = load_config()?;
+            match command {
+                FilesCommand::Find {
+                    query,
+                    limit,
+                    mut root,
+                } => {
+                    if root.is_empty() {
+                        root.push(std::env::current_dir()?);
+                        if let Some(home) = dirs::home_dir() {
+                            root.push(home);
+                        }
+                    }
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&find_paths(&query, &root, limit, &config))?
+                    );
+                }
+                FilesCommand::CreateFolder { path } => {
+                    println!("{}", create_folder(&path, &config)?.display())
+                }
+            }
+        }
+        Command::Plugin { command } => match command {
+            PluginCommand::List => println!("{}", serde_json::to_string_pretty(&native_plugins())?),
+            PluginCommand::Run { name, instruction } => {
+                println!("{}", execute_native_plugin(&name, &instruction)?)
             }
         },
     }

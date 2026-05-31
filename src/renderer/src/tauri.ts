@@ -51,11 +51,15 @@ export async function getRecentInteractions(limit = 5): Promise<InteractionMemor
 
 export function installTauriAdapters() {
   const currentWindow = getCurrentWindow()
+  let translationTimer: ReturnType<typeof setInterval> | null = null
   const close = () => invoke('close_desktop_window', { label: currentWindow.label })
   const hide = () => invoke('hide_desktop_window', { label: currentWindow.label })
   const settingsChanged = (callback: (config: any) => void) => {
     void listen<any>('settings-changed', (event) => callback(event.payload))
   }
+  const executeAction = (action: any, approved = false) => action.type === 'plugin'
+    ? invoke('run_native_plugin', { name: action.pluginName, instruction: action.target || '' })
+    : invoke('run_desktop_action', { action: { ...action, approved } })
 
   window.settingsApi = {
     getSettings: () => invoke('get_config'),
@@ -98,9 +102,27 @@ export function installTauriAdapters() {
       void invoke<string>('capture_silent_screen').then(callback)
     },
     sendSelection: (image) => void invoke('submit_screen_selection', { image }),
-    startContinuousTranslation: () => {},
-    stopContinuousTranslation: () => {},
-    onTranslationResult: () => {},
+    startContinuousTranslation: (rect) => {
+      if (translationTimer) clearInterval(translationTimer)
+      const translate = () => {
+        void invoke<string>('translate_capture_region', { rect })
+          .then((text) => window.dispatchEvent(new CustomEvent('mint-translation', { detail: text })))
+          .catch((reason) => {
+            window.dispatchEvent(new CustomEvent('mint-translation', { detail: String(reason) }))
+          })
+      }
+      translate()
+      translationTimer = setInterval(translate, 3000)
+    },
+    stopContinuousTranslation: () => {
+      if (translationTimer) clearInterval(translationTimer)
+      translationTimer = null
+    },
+    onTranslationResult: (callback) => {
+      window.addEventListener('mint-translation', ((event: CustomEvent<string>) => {
+        callback(event.detail)
+      }) as EventListener)
+    },
     closePicker: close,
     setOverlayInteractable: () => {},
   }
@@ -127,17 +149,17 @@ export function installTauriAdapters() {
       void listen<string>('vision-ready', (event) => callback(event.payload))
     },
     captureSilentScreen: () => invoke('capture_silent_screen'),
-    getSmartContext: async () => null,
+    getSmartContext: () => invoke('get_smart_context'),
     onProactiveSuggestion: (callback) => {
       void listen<any>('proactive-suggestion', (event) => callback(event.payload))
     },
     onProactiveNotification: (callback) => {
       void listen<any>('proactive-notification', (event) => callback(event.payload))
     },
-    toggleProactive: () => {},
-    recordBehavior: () => {},
-    executeProactiveAction: (action) => invoke('run_desktop_action', { action }),
-    executeApprovedAction: (action) => invoke('run_desktop_action', { action }),
+    toggleProactive: (enabled) => void invoke('toggle_proactive', { enabled }),
+    recordBehavior: (context) => void invoke('save_behavior_context', { context }),
+    executeProactiveAction: (action) => executeAction(action),
+    executeApprovedAction: (action) => executeAction(action, true),
     onSpotlightToChat: (callback) => {
       void listen<string>('spotlight-to-chat', (event) => callback(event.payload))
     },

@@ -13,7 +13,16 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 base64.workspace = true
+dirs.workspace = true
+futures-util.workspace = true
+hmac.workspace = true
+image.workspace = true
 mint-core = { path = "../crates/mint-core" }
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tokio.workspace = true
+tokio-tungstenite.workspace = true

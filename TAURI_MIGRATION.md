@@ -17,7 +17,9 @@ replacement covers the required desktop and CLI workflows.
 npm install
 cargo test -p mint-core -p mint-cli
 cargo run -p mint-cli -- status
-cargo run -p mint-cli -- memory recent
+cargo run -p mint-cli -- task list
+cargo run -p mint-cli -- plugin list
+cargo run -p mint-cli -- files find Cargo.toml --root .
 cargo run -p mint-cli -- chat "Hello"
 npm run build:web
 npm run tauri:dev
@@ -45,17 +47,22 @@ sudo apt-get install -y \
 ## Migration Order
 
 1. Shared config and safety policy. Initial migration complete.
-2. Native CLI command parity. Status, provider, memory, safety, and basic chat commands migrated.
+2. Native CLI command parity. Status, provider, config, memory, task, safety, file, plugin, and chat commands migrated.
 3. Chat and settings UI. Rust-backed dashboard, event-stream delivery, and settings adapter migrated.
 4. AI providers and local memory. Provider calls, SQLite conversation context, and orchestration migrated.
-5. Desktop integrations. Native tray, widget, spotlight, screen selection capture, workflow monitor,
-   allowlisted desktop actions, and transient MCP stdio tool calls migrated.
+5. Desktop integrations. Native tray, global shortcuts, widget, spotlight, screen selection capture,
+   live Gemini translation, workflow monitor, smart context, allowlisted desktop actions,
+   system automation, transient MCP stdio tool calls, Telegram long-polling, Discord Gateway,
+   Slack Socket Mode, LINE webhook, WhatsApp Cloud API webhook, selected HTTP plugins, local
+   plugins, safe Chromium DevTools automation, and proactive screen suggestions migrated.
 6. Remove Electron runtime and the legacy JavaScript compatibility UI.
 
 ## Remaining Compatibility Work
 
-- Stream provider bytes directly instead of delivering chunks after a provider response completes.
-- Port multimodal image translation and continuous screen-region translation.
-- Port the remaining legacy desktop actions, OAuth-backed plugins, proactive context engine,
-  global shortcuts, and channel bridges.
+- Add UI onboarding fields for WhatsApp Cloud API credentials and webhook forwarding URLs.
+- Extend smart context with a browser extension fallback when Chromium remote debugging is unavailable.
+- Port advanced code-agent and headless-agent workflows that still live under `src/CLI` and
+  `src/AI_Brain`.
+- Replace the remaining Electron-only onboarding, updater, picture store, TTS, and system-event
+  adapters before deleting their TypeScript sources.
 - Remove Electron dependencies only after the replacement workflows are exercised interactively.

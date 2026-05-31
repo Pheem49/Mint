@@ -155,6 +155,16 @@ pub fn save_config(config: &MintConfig) -> Result<(), ConfigError> {
     save_config_to(&config_path()?, config)
 }
 
+pub fn set_config_value(key: &str, value: Value) -> Result<MintConfig, ConfigError> {
+    let mut raw = serde_json::to_value(load_config()?).map_err(ConfigError::Serialize)?;
+    raw.as_object_mut()
+        .expect("MintConfig always serializes to an object")
+        .insert(key.to_owned(), value);
+    let config = serde_json::from_value(raw).map_err(ConfigError::Serialize)?;
+    save_config(&config)?;
+    Ok(config)
+}
+
 fn load_config_from(path: &Path) -> Result<MintConfig, ConfigError> {
     if !path.exists() {
         let config = MintConfig::default();

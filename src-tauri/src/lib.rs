@@ -1,25 +1,44 @@
+mod browser;
+mod channels;
 mod desktop;
 mod integrations;
+mod plugins;
+mod proactive;
+mod system;
+mod webhooks;
 mod workflows;
 
-use desktop::{
-    ActionResult, DesktopAction, capture_screen, close_window, emit_to_main, execute_action,
-    hide_window, integration_status, open_desktop_window, position_widget, resize_window,
+use browser::{
+    BrowserTab, click as browser_click, list_tabs as browser_list_tabs,
+    navigate as browser_navigate, read_page_text,
 };
-use integrations::{configured_mcp_servers, list_plugins};
+use channels::start_channels;
+use desktop::{
+    ActionResult, CaptureRect, DesktopAction, capture_screen, close_window, emit_to_main,
+    execute_action, hide_window, integration_status, open_desktop_window, position_widget,
+    resize_window, translate_screen_region,
+};
+use integrations::{channel_inventory, configured_mcp_servers, list_plugins};
 use mint_core::{
     ChatRequest, ChatResponse, InteractionMemory, MemoryStore, MintConfig, classify_shell_command,
-    config_path, load_config, orchestrate_chat, save_config, stream_chunks,
+    config_path, load_config, orchestrate_chat, orchestrate_chat_stream, save_config,
+};
+use plugins::execute_plugin;
+use proactive::{
+    record_behavior, set_enabled as set_proactive_enabled, start_loop as start_proactive_loop,
 };
 use serde::Serialize;
 use serde_json::Value;
 use std::process::Command;
+use system::{SmartContext, smart_context};
 use tauri::{
     AppHandle, Emitter, Manager,
     ipc::Channel,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use webhooks::start_webhooks;
 use workflows::{load_workflows, start_monitor, workflows_path};
 
 #[derive(Debug, Serialize)]
@@ -87,11 +106,12 @@ async fn stream_chat_message(
     request: ChatRequest,
     on_event: Channel<String>,
 ) -> Result<ChatResponse, String> {
-    let response = send_chat_message(request).await?;
-    for chunk in stream_chunks(&response.text) {
-        on_event.send(chunk).map_err(|error| error.to_string())?;
-    }
-    Ok(response)
+    let config = load_config().map_err(|error| error.to_string())?;
+    orchestrate_chat_stream(&config, &request, |chunk| {
+        let _ = on_event.send(chunk);
+    })
+    .await
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -141,13 +161,55 @@ fn get_integration_inventory() -> Result<Value, String> {
     let config = load_config().map_err(|error| error.to_string())?;
     Ok(serde_json::json!({
         "mcpServers": configured_mcp_servers(&config)?.keys().collect::<Vec<_>>(),
-        "plugins": list_plugins()
+        "plugins": list_plugins(&config),
+        "channels": channel_inventory(&config)
     }))
+}
+
+#[tauri::command]
+async fn run_native_plugin(name: String, instruction: String) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    execute_plugin(&config, &name, &instruction).await
 }
 
 #[tauri::command]
 fn capture_silent_screen() -> Result<String, String> {
     capture_screen()
+}
+
+#[tauri::command]
+async fn translate_capture_region(rect: CaptureRect) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    translate_screen_region(&config, rect).await
+}
+
+#[tauri::command]
+async fn get_smart_context() -> SmartContext {
+    smart_context().await
+}
+
+#[tauri::command]
+async fn get_browser_tabs() -> Result<Vec<BrowserTab>, String> {
+    browser_list_tabs(&load_config().map_err(|error| error.to_string())?).await
+}
+
+#[tauri::command]
+async fn navigate_browser(url: String) -> Result<String, String> {
+    browser_navigate(&load_config().map_err(|error| error.to_string())?, &url).await
+}
+
+#[tauri::command]
+async fn read_browser_page() -> Result<String, String> {
+    read_page_text(&load_config().map_err(|error| error.to_string())?).await
+}
+
+#[tauri::command]
+async fn click_browser_selector(selector: String) -> Result<String, String> {
+    browser_click(
+        &load_config().map_err(|error| error.to_string())?,
+        &selector,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -172,6 +234,16 @@ fn set_ai_state(app: AppHandle, state: String) {
     if let Some(widget) = app.get_webview_window("widget") {
         let _ = widget.emit("widget-state", state);
     }
+}
+
+#[tauri::command]
+fn toggle_proactive(enabled: bool) {
+    set_proactive_enabled(enabled);
+}
+
+#[tauri::command]
+fn save_behavior_context(context: String) -> Result<(), String> {
+    record_behavior(&context)
 }
 
 #[tauri::command]
@@ -251,12 +323,46 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+fn install_shortcuts(app: &AppHandle) -> tauri::Result<()> {
+    let main_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
+    let spotlight_shortcut = Shortcut::new(Some(Modifiers::ALT), Code::Space);
+    let main_handler = main_shortcut.clone();
+    let spotlight_handler = spotlight_shortcut.clone();
+    app.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(move |app, shortcut, event| {
+                if event.state() != ShortcutState::Pressed {
+                    return;
+                }
+                if shortcut == &main_handler {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = if window.is_visible().unwrap_or(false) {
+                            window.hide()
+                        } else {
+                            window.show()
+                        };
+                    }
+                } else if shortcut == &spotlight_handler {
+                    let _ = open_desktop_window(app, "spotlight");
+                }
+            })
+            .build(),
+    )?;
+    let _ = app.global_shortcut().register(main_shortcut);
+    let _ = app.global_shortcut().register(spotlight_shortcut);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             install_tray(app.handle())?;
+            install_shortcuts(app.handle())?;
             start_monitor(app.handle().clone());
+            start_proactive_loop(app.handle().clone());
+            start_channels();
+            start_webhooks();
             if load_config()
                 .map(|config| config.show_desktop_widget)
                 .unwrap_or(false)
@@ -280,11 +386,20 @@ pub fn run() {
             resize_desktop_window,
             run_desktop_action,
             get_integration_inventory,
+            run_native_plugin,
             capture_silent_screen,
+            translate_capture_region,
+            get_smart_context,
+            get_browser_tabs,
+            navigate_browser,
+            read_browser_page,
+            click_browser_selector,
             start_screen_capture,
             submit_screen_selection,
             submit_spotlight,
             set_ai_state,
+            toggle_proactive,
+            save_behavior_context,
             exit_app,
             open_workflows_file,
             reload_custom_workflows
