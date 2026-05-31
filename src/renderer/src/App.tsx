@@ -4,6 +4,7 @@ import SpotlightWindow from './components/SpotlightWindow'
 import WidgetWindow from './components/WidgetWindow'
 import ProactiveGlow from './components/ProactiveGlow'
 import ScreenPicker from './components/ScreenPicker'
+import MintDashboard from './components/MintDashboard'
 
 export default function App() {
   const [hash, setHash] = useState(window.location.hash || '#/')
@@ -35,5 +36,5 @@ export default function App() {
     return <ScreenPicker />
   }
 
-  return <SettingsWindow />
+  return <MintDashboard />
 }

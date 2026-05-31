@@ -1,3 +1,5 @@
+declare module '*.css';
+
 interface Window {
   api: {
     sendMessage: (message: string, base64Image?: string | null, base64Audio?: string | null) => Promise<any>;
@@ -101,5 +103,4 @@ interface SpeechRecognitionAlternative {
   readonly transcript: string;
   readonly confidence: number;
 }
-
 

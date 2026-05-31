@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { evaluateArithmetic } from '../calculator'
 
 const COMMANDS = [
     { label: 'Open YouTube', desc: 'เปิดเว็บไซต์ YouTube', icon: '📺', action: { type: 'open_url', target: 'https://youtube.com' } },
@@ -76,7 +77,7 @@ export default function SpotlightWindow() {
     // Try math evaluation
     if (/^[0-9+\-*/().\s]+$/.test(trimmed) && /[0-9]/.test(trimmed)) {
       try {
-        const mathVal = eval(trimmed)
+        const mathVal = evaluateArithmetic(trimmed)
         const mathResult = [{
           label: `Result: ${mathVal}`,
           desc: 'Calculation result (Press Enter to copy)',

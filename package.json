@@ -4,6 +4,13 @@
   "description": "A powerful Electron-based AI desktop assistant powered by Google Gemini, featuring screen vision, web automation, and proactive suggestions.",
   "main": "out/main/index.js",
   "scripts": {
+    "dev:web": "vite",
+    "build:web": "vite build",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "rust:cli": "cargo run -p mint-cli --",
+    "rust:test": "cargo test -p mint-core -p mint-cli",
     "dev": "node scripts/dev.js",
     "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.ui.json && vite build",
     "preview": "vite preview",
@@ -24,13 +31,13 @@
       "**/tests/**/*.test.js"
     ],
     "collectCoverageFrom": [
-      "src/AI_Brain/memory_store.js",
-      "src/AI_Brain/knowledge_base.js",
-      "src/System/config_manager.js"
+      "dist/src/AI_Brain/memory_store.js",
+      "dist/src/AI_Brain/knowledge_base.js",
+      "dist/src/System/config_manager.js"
     ]
   },
   "bin": {
-    "mint": "mint-cli.js"
+    "mint": "dist/mint-cli.js"
   },
   "keywords": [],
   "author": {
@@ -40,6 +47,7 @@
   "license": "AGPL-3.0-only",
   "type": "commonjs",
   "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
     "@google/genai": "^1.44.0",
     "@inkjs/ui": "^2.0.0",
     "axios": "^1.13.6",
@@ -65,6 +73,7 @@
     "express": ">=4.0.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
     "@hazart-pkg/live2d-core": "^1.0.1",
     "@modelcontextprotocol/sdk": "file:../../../.npm/_npx/a3241bba59c344f5/node_modules/@modelcontextprotocol/sdk",
     "@vitejs/plugin-react": "^6.0.1",
@@ -91,6 +100,7 @@
     "files": [
       "out/**/*",
       "dist/**/*",
+      "src/UI/**/*",
       "models/**/*",
       "assets/**/*",
       "package.json"

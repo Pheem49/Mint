@@ -229,7 +229,7 @@ mint mcp add google-search npx --args -y @modelcontextprotocol/server-google-sea
 <details>
 <summary>Show details</summary>
 
-Mint includes a central safety layer in `src/System/safety_manager.js`.
+Mint includes a central safety layer in `src/System/safety_manager.ts`.
 
 - **Permission Tiers:** `safe`, `approval`, `dangerous`, and `blocked`.
 - **Deterministic Command Blocking:** Blocks known dangerous shell commands regardless of what the AI requests.
@@ -372,10 +372,10 @@ npm run build:linux
 
 ```text
 Mint/
-├── main.js                         # Electron bootstrap and wiring
-├── mint-cli.js                     # CLI entry point
-├── mint-cli-logic.js               # CLI action executor bridge
+├── mint-cli.ts                     # CLI entry point
+├── mint-cli-logic.ts               # CLI action executor bridge
 ├── src/
+│   ├── main/index.ts               # Electron bootstrap and wiring
 │   ├── AI_Brain/                   # Providers, memory, RAG, autonomous/headless agents
 │   ├── Automation_Layer/           # File, app, website, and browser automation
 │   ├── Channels/                   # Messaging and search bridges
@@ -396,7 +396,7 @@ Mint/
 <details>
 <summary>Show details</summary>
 
-- Mint is currently a **Node.js + CommonJS** project, not TypeScript.
+- Mint uses TypeScript for its Electron, CLI, system, and React renderer source.
 - API keys are stored locally in Mint config or environment variables.
 - Google OAuth refresh tokens for Gmail and Calendar are stored locally in Mint config.
 - Desktop chat images sent by the user are stored locally in `~/.config/mint/Pictures`, with metadata in `~/.config/mint/Pictures/pictures.json`.

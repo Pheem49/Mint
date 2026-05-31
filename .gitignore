@@ -28,6 +28,8 @@ GUIDE_TH.md
 # ==========================
 dist/
 out/
+coverage/
+target/
 release/
 build/
 

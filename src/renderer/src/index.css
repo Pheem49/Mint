@@ -3,7 +3,82 @@
 @import './css/spotlight.css';
 @import './css/widget.css';
 
-/* Fix for body styling in Electron */
+.mint-dashboard {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  color: #f8fafc;
+  background: radial-gradient(circle at top, #312e81, #0f172a 64%);
+}
+
+.mint-dashboard__panel {
+  width: min(760px, 100%);
+  padding: 32px;
+  border: 1px solid rgb(148 163 184 / 24%);
+  border-radius: 20px;
+  background: rgb(15 23 42 / 76%);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 32%);
+}
+
+.mint-dashboard__eyebrow,
+.mint-dashboard__status dt {
+  color: #a78bfa;
+  font-weight: 600;
+}
+
+.mint-dashboard__status {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 10px 18px;
+}
+
+.mint-dashboard__status dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mint-dashboard__chat {
+  display: flex;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.mint-dashboard__chat input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+}
+
+.mint-dashboard__chat button {
+  padding: 12px 18px;
+}
+
+.mint-dashboard__reply,
+.mint-dashboard__interactions li {
+  padding: 12px;
+  border-radius: 10px;
+  background: rgb(30 41 59 / 78%);
+}
+
+.mint-dashboard__error {
+  color: #fda4af;
+}
+
+.mint-dashboard__interactions {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.mint-dashboard__interactions span {
+  display: block;
+  margin-top: 6px;
+  color: #cbd5e1;
+}
+
+/* Keep the transparent desktop canvas for the Tauri webview. */
 body, html {
   margin: 0;
   padding: 0;

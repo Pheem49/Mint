@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import dotenv from 'dotenv'
+import pkg from './package.json'
 dotenv.config({ quiet: true })
 
 // Suppress experimental SQLite warning
@@ -40,7 +41,6 @@ import {
 } from './src/CLI/semantic_code_search'
 
 const memoryStore = require('./src/AI_Brain/memory_store')
-const pkg = require('./package.json')
 
 // ── Startup banner ───────────────────────────────────────────────────────────
 const startupConfig   = readConfig()
