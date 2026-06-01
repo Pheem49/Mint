@@ -28,6 +28,8 @@ pub struct InteractionMemory {
     pub id: i64,
     pub user_text: String,
     pub ai_text: String,
+    pub provider: String,
+    pub model: String,
     pub created_at: String,
 }
 
@@ -84,11 +86,21 @@ impl MemoryStore {
     }
 
     pub fn add_interaction(&self, user_text: &str, ai_text: &str) -> Result<i64, MemoryError> {
+        self.add_interaction_with_metadata(user_text, ai_text, "", "")
+    }
+
+    pub fn add_interaction_with_metadata(
+        &self,
+        user_text: &str,
+        ai_text: &str,
+        provider: &str,
+        model: &str,
+    ) -> Result<i64, MemoryError> {
         let connection = self.connection()?;
         connection.execute(
-            "INSERT INTO interaction_memories (user_text, ai_text)
-             VALUES (?1, ?2)",
-            params![user_text, ai_text],
+            "INSERT INTO interaction_memories (user_text, ai_text, provider, model)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![user_text, ai_text, provider, model],
         )?;
         Ok(connection.last_insert_rowid())
     }
@@ -96,7 +108,7 @@ impl MemoryStore {
     pub fn recent_interactions(&self, limit: usize) -> Result<Vec<InteractionMemory>, MemoryError> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT id, user_text, ai_text, created_at
+            "SELECT id, user_text, ai_text, provider, model, created_at
              FROM interaction_memories
              ORDER BY id DESC
              LIMIT ?1",
@@ -106,7 +118,9 @@ impl MemoryStore {
                 id: row.get(0)?,
                 user_text: row.get(1)?,
                 ai_text: row.get(2)?,
-                created_at: row.get(3)?,
+                provider: row.get(3)?,
+                model: row.get(4)?,
+                created_at: row.get(5)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -345,6 +359,8 @@ fn initialize(connection: &Connection) -> Result<(), rusqlite::Error> {
            id INTEGER PRIMARY KEY AUTOINCREMENT,
            user_text TEXT NOT NULL,
            ai_text TEXT NOT NULL,
+           provider TEXT NOT NULL DEFAULT '',
+           model TEXT NOT NULL DEFAULT '',
            keywords TEXT DEFAULT '',
            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
          );
@@ -363,7 +379,39 @@ fn initialize(connection: &Connection) -> Result<(), rusqlite::Error> {
            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
          );",
     )?;
+    ensure_column(
+        connection,
+        "interaction_memories",
+        "provider",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        connection,
+        "interaction_memories",
+        "model",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
     migrate_json_history(connection)?;
+    Ok(())
+}
+
+fn ensure_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), rusqlite::Error> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(());
+        }
+    }
+    connection.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+        [],
+    )?;
     Ok(())
 }
 
@@ -397,10 +445,32 @@ mod tests {
     #[test]
     fn stores_recent_interactions() {
         let store = store("interactions");
-        store.add_interaction("hello", "hi").unwrap();
+        store
+            .add_interaction_with_metadata("hello", "hi", "gemini", "gemini-test")
+            .unwrap();
         let interactions = store.recent_interactions(1).unwrap();
         assert_eq!(interactions[0].user_text, "hello");
         assert_eq!(interactions[0].ai_text, "hi");
+        assert_eq!(interactions[0].provider, "gemini");
+        assert_eq!(interactions[0].model, "gemini-test");
+    }
+
+    #[test]
+    fn preserves_chat_history_when_store_is_reopened() {
+        let path = std::env::temp_dir().join(format!(
+            "mint-core-reopen-history-{}.sqlite",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let first = MemoryStore::open(&path);
+        first
+            .add_interaction_with_metadata("persist me", "still here", "openai", "gpt-test")
+            .unwrap();
+        drop(first);
+        let interactions = MemoryStore::open(&path).recent_interactions(10).unwrap();
+        assert_eq!(interactions[0].user_text, "persist me");
+        assert_eq!(interactions[0].provider, "openai");
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

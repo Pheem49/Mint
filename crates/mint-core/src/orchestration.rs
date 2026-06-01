@@ -1,10 +1,10 @@
 use thiserror::Error;
 
+use crate::chat::{send_chat_with_fallback, stream_chat_with_fallback};
 use crate::{
     ChatError, ChatRequest, ChatResponse, MemoryError, MemoryStore, MintConfig, send_chat,
     stream_chat,
 };
-use crate::chat::{send_chat_with_fallback, stream_chat_with_fallback};
 
 const CONTEXT_LIMIT: usize = 6;
 
@@ -16,7 +16,6 @@ pub enum OrchestrationError {
     Memory(#[from] MemoryError),
 }
 
-
 pub async fn orchestrate_chat(
     config: &MintConfig,
     request: &ChatRequest,
@@ -24,7 +23,12 @@ pub async fn orchestrate_chat(
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let response = send_chat(config, &enriched).await?;
-    memory.add_interaction(&request.message, &response.text)?;
+    memory.add_interaction_with_metadata(
+        &request.message,
+        &response.text,
+        &response.provider,
+        &response.model,
+    )?;
     Ok(response)
 }
 
@@ -39,7 +43,12 @@ where
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let response = stream_chat(config, &enriched, on_chunk).await?;
-    memory.add_interaction(&request.message, &response.text)?;
+    memory.add_interaction_with_metadata(
+        &request.message,
+        &response.text,
+        &response.provider,
+        &response.model,
+    )?;
     Ok(response)
 }
 
@@ -50,7 +59,12 @@ pub async fn orchestrate_chat_with_fallback(
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let (response, fallback) = send_chat_with_fallback(config, &enriched).await?;
-    memory.add_interaction(&request.message, &response.text)?;
+    memory.add_interaction_with_metadata(
+        &request.message,
+        &response.text,
+        &response.provider,
+        &response.model,
+    )?;
     Ok((response, fallback))
 }
 
@@ -65,7 +79,12 @@ where
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let (response, fallback) = stream_chat_with_fallback(config, &enriched, on_chunk).await?;
-    memory.add_interaction(&request.message, &response.text)?;
+    memory.add_interaction_with_metadata(
+        &request.message,
+        &response.text,
+        &response.provider,
+        &response.model,
+    )?;
     Ok((response, fallback))
 }
 
@@ -89,7 +108,6 @@ fn enrich_request(memory: &MemoryStore, request: &ChatRequest) -> Result<ChatReq
     }
     Ok(enriched)
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -29,8 +29,8 @@ use mint_core::{
     AppliedCodeEdit, ChatRequest, ChatResponse, CodeEdit, CodeEditProposal, InteractionMemory,
     MemoryStore, MintConfig, PictureEntry, TtsUrl, WeatherReport, apply_code_edits,
     classify_shell_command, config_path, google_tts_urls, list_saved_pictures, load_config,
-    load_workflows, orchestrate_chat, orchestrate_chat_stream, propose_code_edits,
-    save_chat_images, save_config, weather, workflows_path,
+    load_workflows, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    propose_code_edits, save_chat_images, save_config, weather, workflows_path,
 };
 use plugins::execute_plugin;
 use proactive::{
@@ -131,8 +131,9 @@ fn inspect_shell_command(command: String) -> mint_core::ShellClassification {
 #[tauri::command]
 async fn send_chat_message(request: ChatRequest) -> Result<ChatResponse, String> {
     let config = load_config().map_err(|error| error.to_string())?;
-    orchestrate_chat(&config, &request)
+    orchestrate_chat_with_fallback(&config, &request)
         .await
+        .map(|(response, _)| response)
         .map_err(|error| error.to_string())
 }
 
@@ -142,10 +143,11 @@ async fn stream_chat_message(
     on_event: Channel<String>,
 ) -> Result<ChatResponse, String> {
     let config = load_config().map_err(|error| error.to_string())?;
-    orchestrate_chat_stream(&config, &request, |chunk| {
+    orchestrate_chat_stream_with_fallback(&config, &request, |chunk| {
         let _ = on_event.send(chunk);
     })
     .await
+    .map(|(response, _)| response)
     .map_err(|error| error.to_string())
 }
 
@@ -153,6 +155,13 @@ async fn stream_chat_message(
 fn get_recent_interactions(limit: Option<usize>) -> Result<Vec<InteractionMemory>, String> {
     MemoryStore::open_default()
         .and_then(|memory| memory.recent_interactions(limit.unwrap_or(5)))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_chat_history() -> Result<usize, String> {
+    MemoryStore::open_default()
+        .and_then(|memory| memory.clear_interactions())
         .map_err(|error| error.to_string())
 }
 
@@ -482,6 +491,7 @@ pub fn run() {
             send_chat_message,
             stream_chat_message,
             get_recent_interactions,
+            clear_chat_history,
             list_pictures,
             save_pictures,
             get_tts_urls,

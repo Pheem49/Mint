@@ -20,7 +20,20 @@ export interface InteractionMemory {
   id: number
   userText: string
   aiText: string
+  provider: string
+  model: string
   createdAt: string
+}
+
+export interface PictureEntry {
+  id: string
+  filename: string
+  path: string
+  mimeType: string
+  createdAt: string
+  source: string
+  message: string
+  url?: string
 }
 
 export interface CodeEdit {
@@ -43,32 +56,57 @@ export async function sendChatMessage(
   imageDataUri?: string | null,
   audioDataUri?: string | null,
 ): Promise<ChatResponse> {
+  const outgoingMessage = withImagePlaceholder(message, imageDataUri)
+  const response = await invoke<ChatResponse>('send_chat_message', {
+    request: { message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri },
+  })
   if (imageDataUri) {
     await invoke('save_pictures', {
       images: [imageDataUri],
       source: 'chat',
-      message,
+      message: outgoingMessage,
     })
   }
-  return invoke<ChatResponse>('send_chat_message', {
-    request: { message, systemInstruction: '', imageDataUri, audioDataUri },
-  })
+  return response
 }
 
 export async function streamChatMessage(
   message: string,
   onChunk: (chunk: string) => void,
+  imageDataUri?: string | null,
+  audioDataUri?: string | null,
 ): Promise<ChatResponse> {
+  const outgoingMessage = withImagePlaceholder(message, imageDataUri)
   const onEvent = new Channel<string>()
   onEvent.onmessage = onChunk
-  return invoke<ChatResponse>('stream_chat_message', {
-    request: { message, systemInstruction: '' },
+  const response = await invoke<ChatResponse>('stream_chat_message', {
+    request: { message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri },
     onEvent,
   })
+  if (imageDataUri) {
+    await invoke('save_pictures', {
+      images: [imageDataUri],
+      source: 'chat',
+      message: outgoingMessage,
+    })
+  }
+  return response
 }
 
-export async function getRecentInteractions(limit = 5): Promise<InteractionMemory[]> {
+function withImagePlaceholder(message: string, imageDataUri?: string | null) {
+  return imageDataUri && !message.includes('[Image #1]') ? `${message} [Image #1]` : message
+}
+
+export async function getRecentInteractions(limit = 50): Promise<InteractionMemory[]> {
   return invoke<InteractionMemory[]>('get_recent_interactions', { limit })
+}
+
+export async function clearChatHistory(): Promise<number> {
+  return invoke<number>('clear_chat_history')
+}
+
+export async function listSavedPictures(): Promise<PictureEntry[]> {
+  return invoke<PictureEntry[]>('list_pictures')
 }
 
 export async function proposeCodeEdits(root: string, edits: CodeEdit[]): Promise<CodeEditProposal> {
@@ -166,9 +204,9 @@ export function installTauriAdapters() {
     minimizeWindow: () => void currentWindow.minimize(),
     quitApp: () => void invoke('exit_app'),
     maximizeWindow: () => void currentWindow.toggleMaximize(),
-    resetChat: async () => undefined,
+    resetChat: clearChatHistory,
     getChatHistory: () => getRecentInteractions(50),
-    listSavedPictures: () => invoke('list_pictures'),
+    listSavedPictures,
     openSettings: () => invoke('open_window', { kind: 'settings' }),
     readClipboard: () => navigator.clipboard.readText(),
     writeClipboard: (text) => navigator.clipboard.writeText(text),
