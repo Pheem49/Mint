@@ -48,7 +48,8 @@ pub use memory::{
     InteractionMemory, LearnedSkill, MemoryError, MemoryStore, WorkspaceSession, memory_path,
 };
 pub use orchestration::{
-    OrchestrationError, orchestrate_chat, orchestrate_chat_stream,
+    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, OrchestrationError,
+    orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
     orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
 };
 pub use pictures::{

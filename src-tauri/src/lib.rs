@@ -24,15 +24,27 @@ use desktop::{
 };
 use events::start_system_events;
 use headless::{run_next_task, start_headless_queue};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::sync::oneshot;
+
 use integrations::{channel_inventory, list_plugins};
 use mint_core::{
-    AppliedCodeEdit, ChatRequest, ChatResponse, CodeEdit, CodeEditProposal, InteractionMemory,
-    MemoryStore, MintConfig, PictureEntry, TtsUrl, WeatherReport, apply_code_edits,
-    classify_shell_command, config_path, google_tts_urls, list_saved_pictures, load_config,
-    load_workflows, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    propose_code_edits, save_chat_images, save_config, weather, workflows_path,
+    AgentApproval, AppliedCodeEdit, ApprovalOutcome, ChatRequest,
+    ChatResponse, CodeEdit, CodeEditProposal, InteractionMemory, MemoryStore, MintConfig,
+    PictureEntry, TtsUrl, WeatherReport, apply_code_edits, classify_shell_command, config_path,
+    google_tts_urls, list_saved_pictures, load_config, load_workflows, orchestrate_agent_loop,
+    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, propose_code_edits,
+    save_chat_images, save_config, weather, workflows_path,
 };
 use plugins::execute_plugin;
+
+pub struct ApprovalsState {
+    pub pending: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+}
+
+static COUNTER: AtomicU64 = AtomicU64::new(1);
 use proactive::{
     record_behavior, set_enabled as set_proactive_enabled, start_loop as start_proactive_loop,
 };
@@ -129,26 +141,152 @@ fn inspect_shell_command(command: String) -> mint_core::ShellClassification {
 }
 
 #[tauri::command]
-async fn send_chat_message(request: ChatRequest) -> Result<ChatResponse, String> {
+async fn send_chat_message(
+    app: AppHandle,
+    request: ChatRequest,
+) -> Result<ChatResponse, String> {
     let config = load_config().map_err(|error| error.to_string())?;
-    orchestrate_chat_with_fallback(&config, &request)
-        .await
-        .map(|(response, _)| response)
-        .map_err(|error| error.to_string())
+    
+    if request.message.starts_with("/chat ") {
+        let mut clean_request = request.clone();
+        clean_request.message = request.message.strip_prefix("/chat ").unwrap().to_owned();
+        
+        let (response, _) = orchestrate_chat_with_fallback(&config, &clean_request)
+            .await
+            .map_err(|error| error.to_string())?;
+        return Ok(response);
+    }
+    
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let fast_mode = config.extra.get("enableFastMode").and_then(Value::as_bool).unwrap_or(false);
+    
+    let app_clone = app.clone();
+    let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+        let (tx, rx) = oneshot::channel();
+        let token = format!("tok-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
+        
+        let state = app_clone.state::<ApprovalsState>();
+        state.pending.lock().unwrap().insert(token.clone(), tx);
+        
+        app_clone.emit("tool-approval-requested", serde_json::json!({
+            "token": token,
+            "approval": approval
+        })).map_err(|e| e.to_string())?;
+        
+        let approved = tokio::task::block_in_place(move || {
+            tokio::runtime::Handle::current().block_on(rx)
+        }).unwrap_or(false);
+
+        if approved {
+            Ok(ApprovalOutcome::Approved)
+        } else {
+            Ok(ApprovalOutcome::Denied)
+        }
+    };
+    
+    let progress_cb = |_| {};
+    let on_chunk = |_| {};
+    
+    let res = orchestrate_agent_loop(
+        &config,
+        &request.message,
+        &root,
+        request.image_data_uri.clone(),
+        fast_mode,
+        approve_cb,
+        progress_cb,
+        on_chunk,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    
+    Ok(ChatResponse {
+        provider: res.provider,
+        model: res.model,
+        text: res.summary,
+    })
 }
 
 #[tauri::command]
 async fn stream_chat_message(
+    app: AppHandle,
     request: ChatRequest,
     on_event: Channel<String>,
 ) -> Result<ChatResponse, String> {
     let config = load_config().map_err(|error| error.to_string())?;
-    orchestrate_chat_stream_with_fallback(&config, &request, |chunk| {
-        let _ = on_event.send(chunk);
-    })
+    
+    if request.message.starts_with("/chat ") {
+        let mut clean_request = request.clone();
+        clean_request.message = request.message.strip_prefix("/chat ").unwrap().to_owned();
+        
+        let (response, _) = orchestrate_chat_stream_with_fallback(&config, &clean_request, |chunk| {
+            let _ = on_event.send(chunk);
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+        return Ok(response);
+    }
+    
+    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let fast_mode = config.extra.get("enableFastMode").and_then(Value::as_bool).unwrap_or(false);
+    
+    let app_clone = app.clone();
+    let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+        let (tx, rx) = oneshot::channel();
+        let token = format!("tok-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
+        
+        let state = app_clone.state::<ApprovalsState>();
+        state.pending.lock().unwrap().insert(token.clone(), tx);
+        
+        app_clone.emit("tool-approval-requested", serde_json::json!({
+            "token": token,
+            "approval": approval
+        })).map_err(|e| e.to_string())?;
+        
+        let approved = tokio::task::block_in_place(move || {
+            tokio::runtime::Handle::current().block_on(rx)
+        }).unwrap_or(false);
+
+        if approved {
+            Ok(ApprovalOutcome::Approved)
+        } else {
+            Ok(ApprovalOutcome::Denied)
+        }
+    };
+    
+    let progress_cb = |_| {};
+    
+    let on_event_clone = on_event.clone();
+    let on_chunk = move |summary: String| {
+        let chars: Vec<char> = summary.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            let end = (i + 4).min(chars.len());
+            let chunk: String = chars[i..end].iter().collect();
+            let _ = on_event_clone.send(chunk);
+            i = end;
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+    };
+    
+    let res = orchestrate_agent_loop(
+        &config,
+        &request.message,
+        &root,
+        request.image_data_uri.clone(),
+        fast_mode,
+        approve_cb,
+        progress_cb,
+        on_chunk,
+    )
     .await
-    .map(|(response, _)| response)
-    .map_err(|error| error.to_string())
+    .map_err(|e| e.to_string())?;
+    
+    Ok(ChatResponse {
+        provider: res.provider,
+        model: res.model,
+        text: res.summary,
+    })
 }
 
 #[tauri::command]
@@ -163,6 +301,21 @@ fn clear_chat_history() -> Result<usize, String> {
     MemoryStore::open_default()
         .and_then(|memory| memory.clear_interactions())
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn submit_tool_approval(
+    state: tauri::State<'_, ApprovalsState>,
+    token: String,
+    approved: bool,
+) -> Result<(), String> {
+    let mut pending = state.pending.lock().map_err(|error| error.to_string())?;
+    if let Some(tx) = pending.remove(&token) {
+        let _ = tx.send(approved);
+        Ok(())
+    } else {
+        Err("No pending approval found for this token".into())
+    }
 }
 
 #[tauri::command]
@@ -462,6 +615,9 @@ fn install_shortcuts(app: &AppHandle) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(ApprovalsState {
+            pending: Mutex::new(HashMap::new()),
+        })
         .setup(|app| {
             install_tray(app.handle())?;
             install_shortcuts(app.handle())?;
@@ -490,6 +646,7 @@ pub fn run() {
             inspect_shell_command,
             send_chat_message,
             stream_chat_message,
+            submit_tool_approval,
             get_recent_interactions,
             clear_chat_history,
             list_pictures,

@@ -109,6 +109,10 @@ export async function listSavedPictures(): Promise<PictureEntry[]> {
   return invoke<PictureEntry[]>('list_pictures')
 }
 
+export async function submitToolApproval(token: string, approved: boolean): Promise<void> {
+  return invoke('submit_tool_approval', { token, approved })
+}
+
 export async function proposeCodeEdits(root: string, edits: CodeEdit[]): Promise<CodeEditProposal> {
   return invoke<CodeEditProposal>('propose_desktop_code_edits', { root, edits })
 }
