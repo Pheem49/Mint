@@ -55,14 +55,19 @@ where
             return Ok((r, Some(provider.to_owned())));
         }
     }
-    stream_chat(config, request, &mut on_chunk).await.map(|r| (r, None))
+    stream_chat(config, request, &mut on_chunk)
+        .await
+        .map(|r| (r, None))
 }
 
 /// Whether an error warrants trying another provider.
 fn is_recoverable(e: &ChatError) -> bool {
     matches!(
         e,
-        ChatError::MissingApiKey(_) | ChatError::Request(_) | ChatError::MissingResponseText
+        ChatError::MissingApiKey(_)
+            | ChatError::Request(_)
+            | ChatError::MissingResponseText
+            | ChatError::UnsupportedAttachments(_)
     )
 }
 

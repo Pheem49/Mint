@@ -5,13 +5,10 @@ mod discord_rpc;
 mod events;
 mod headless;
 mod integrations;
-mod pictures;
 mod plugins;
 mod proactive;
 mod system;
-mod tts;
 mod updater;
-mod weather;
 mod webhooks;
 mod workflows;
 
@@ -27,13 +24,14 @@ use desktop::{
 };
 use events::start_system_events;
 use headless::{run_next_task, start_headless_queue};
-use integrations::{channel_inventory, configured_mcp_servers, list_plugins};
+use integrations::{channel_inventory, list_plugins};
 use mint_core::{
     AppliedCodeEdit, ChatRequest, ChatResponse, CodeEdit, CodeEditProposal, InteractionMemory,
-    MemoryStore, MintConfig, apply_code_edits, classify_shell_command, config_path, load_config,
-    orchestrate_chat, orchestrate_chat_stream, propose_code_edits, save_config,
+    MemoryStore, MintConfig, PictureEntry, TtsUrl, WeatherReport, apply_code_edits,
+    classify_shell_command, config_path, google_tts_urls, list_saved_pictures, load_config,
+    load_workflows, orchestrate_chat, orchestrate_chat_stream, propose_code_edits,
+    save_chat_images, save_config, weather, workflows_path,
 };
-use pictures::{PictureEntry, list_saved_pictures, save_chat_images};
 use plugins::execute_plugin;
 use proactive::{
     record_behavior, set_enabled as set_proactive_enabled, start_loop as start_proactive_loop,
@@ -49,14 +47,12 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
-use tts::{TtsUrl, google_tts_urls};
 use updater::{
     AvailableUpdate, UpdateChannelStatus, check as check_update, install as install_update,
     status as updater_status,
 };
-use weather::{WeatherReport, weather};
 use webhooks::start_webhooks;
-use workflows::{load_workflows, start_monitor, workflows_path};
+use workflows::start_monitor;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -162,7 +158,7 @@ fn get_recent_interactions(limit: Option<usize>) -> Result<Vec<InteractionMemory
 
 #[tauri::command]
 fn list_pictures() -> Result<Vec<PictureEntry>, String> {
-    list_saved_pictures()
+    list_saved_pictures().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -171,7 +167,7 @@ fn save_pictures(
     source: Option<String>,
     message: Option<String>,
 ) -> Result<Vec<PictureEntry>, String> {
-    save_chat_images(images, source, message)
+    save_chat_images(images, source, message).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -182,7 +178,7 @@ fn get_tts_urls(text: String) -> Result<Vec<TtsUrl>, String> {
 
 #[tauri::command]
 async fn get_weather(city: String) -> Result<WeatherReport, String> {
-    weather(&city).await
+    weather(&city).await.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -252,7 +248,10 @@ fn run_desktop_action(action: DesktopAction) -> Result<ActionResult, String> {
 fn get_integration_inventory() -> Result<Value, String> {
     let config = load_config().map_err(|error| error.to_string())?;
     Ok(serde_json::json!({
-        "mcpServers": configured_mcp_servers(&config)?.keys().collect::<Vec<_>>(),
+        "mcpServers": mint_core::configured_mcp_servers(&config)
+            .map_err(|error| error.to_string())?
+            .keys()
+            .collect::<Vec<_>>(),
         "plugins": list_plugins(&config),
         "channels": channel_inventory(&config)
     }))
@@ -350,8 +349,8 @@ fn exit_app(app: AppHandle) {
 
 #[tauri::command]
 fn open_workflows_file() -> Result<ActionResult, String> {
-    load_workflows()?;
-    let path = workflows_path()?;
+    load_workflows().map_err(|error| error.to_string())?;
+    let path = workflows_path().map_err(|error| error.to_string())?;
     Command::new("xdg-open")
         .arg(path)
         .spawn()
@@ -364,7 +363,7 @@ fn open_workflows_file() -> Result<ActionResult, String> {
 
 #[tauri::command]
 fn reload_custom_workflows() -> Result<Value, String> {
-    let workflows = load_workflows()?;
+    let workflows = load_workflows().map_err(|error| error.to_string())?;
     Ok(serde_json::json!({
         "success": true,
         "count": workflows.len(),

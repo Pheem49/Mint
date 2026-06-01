@@ -1,6 +1,19 @@
 use reqwest::Client;
 use serde::Serialize;
 use serde_json::Value;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum WeatherError {
+    #[error("weather city is required")]
+    MissingCity,
+    #[error("weather request failed: {0}")]
+    Request(#[from] reqwest::Error),
+    #[error("weather location was not found: {0}")]
+    LocationNotFound(String),
+    #[error("weather response did not include {0}")]
+    MissingValue(String),
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,27 +27,24 @@ pub struct WeatherReport {
     pub weather_code: i64,
 }
 
-pub async fn weather(city: &str) -> Result<WeatherReport, String> {
+pub async fn weather(city: &str) -> Result<WeatherReport, WeatherError> {
     let city = city.trim();
     if city.is_empty() {
-        return Err("weather city is required".into());
+        return Err(WeatherError::MissingCity);
     }
     let client = Client::new();
     let geocode: Value = client
         .get("https://geocoding-api.open-meteo.com/v1/search")
         .query(&[("name", city), ("count", "1"), ("language", "en")])
         .send()
-        .await
-        .map_err(request_error)?
-        .error_for_status()
-        .map_err(request_error)?
+        .await?
+        .error_for_status()?
         .json()
-        .await
-        .map_err(request_error)?;
+        .await?;
     let place = geocode["results"]
         .as_array()
         .and_then(|results| results.first())
-        .ok_or_else(|| format!("weather location was not found: {city}"))?;
+        .ok_or_else(|| WeatherError::LocationNotFound(city.into()))?;
     let latitude = number(place, "latitude")?;
     let longitude = number(place, "longitude")?;
     let current: Value = client
@@ -48,13 +58,10 @@ pub async fn weather(city: &str) -> Result<WeatherReport, String> {
             ),
         ])
         .send()
-        .await
-        .map_err(request_error)?
-        .error_for_status()
-        .map_err(request_error)?
+        .await?
+        .error_for_status()?
         .json()
-        .await
-        .map_err(request_error)?;
+        .await?;
     let current = &current["current"];
     let temperature = number(current, "temperature_2m")?;
     let apparent = number(current, "apparent_temperature")?;
@@ -80,12 +87,8 @@ pub async fn weather(city: &str) -> Result<WeatherReport, String> {
     })
 }
 
-fn number(value: &Value, key: &str) -> Result<f64, String> {
+fn number(value: &Value, key: &str) -> Result<f64, WeatherError> {
     value[key]
         .as_f64()
-        .ok_or_else(|| format!("weather response did not include {key}"))
-}
-
-fn request_error(error: reqwest::Error) -> String {
-    format!("weather request failed: {error}")
+        .ok_or_else(|| WeatherError::MissingValue(key.into()))
 }

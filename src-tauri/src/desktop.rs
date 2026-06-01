@@ -13,7 +13,6 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
 };
 
-use crate::integrations::call_mcp_tool;
 use crate::system::run_system_automation;
 use mint_core::{KnowledgeStore, create_folder, find_paths};
 
@@ -151,8 +150,9 @@ pub fn execute_action(
             Ok(success("opened application"))
         }
         "clipboard_write" => Err("clipboard actions are handled by the renderer".into()),
-        "mcp_tool" => call_mcp_tool(config, &action.server, &action.target, action.args)
-            .map(|result| success(&result.to_string())),
+        "mcp_tool" => mint_core::call_mcp_tool(config, &action.server, &action.target, action.args)
+            .map(|result| success(&result.to_string()))
+            .map_err(|error| error.to_string()),
         "system_automation" => {
             run_system_automation(&action.target, action.approved).map(|message| success(&message))
         }

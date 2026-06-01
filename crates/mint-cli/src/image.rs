@@ -20,12 +20,10 @@ pub fn load_image_as_data_uri(path: &Path) -> Result<String> {
 
 /// Try to read an image from the system clipboard.
 /// Returns `None` if the clipboard contains no image or the required tool is unavailable.
-/// On Linux uses `xclip` (PNG) or `xsel`.
-/// On macOS uses `osascript` to read clipboard image.
+/// On Linux uses `xclip` or `wl-paste`. On macOS uses `osascript`.
 pub fn read_clipboard_image() -> Result<Option<String>> {
     #[cfg(target_os = "linux")]
     {
-        // Try xclip first (most common)
         if let Ok(output) = std::process::Command::new("xclip")
             .args(["-selection", "clipboard", "-t", "image/png", "-o"])
             .output()
@@ -36,7 +34,6 @@ pub fn read_clipboard_image() -> Result<Option<String>> {
             }
         }
 
-        // Try wl-paste (Wayland)
         if let Ok(output) = std::process::Command::new("wl-paste")
             .args(["--type", "image/png"])
             .output()
@@ -52,7 +49,6 @@ pub fn read_clipboard_image() -> Result<Option<String>> {
 
     #[cfg(target_os = "macos")]
     {
-        // macOS: use osascript to get clipboard image as PNG
         let script = r#"
             set png_data to (the clipboard as «class PNGf»)
             return png_data
@@ -75,8 +71,16 @@ pub fn read_clipboard_image() -> Result<Option<String>> {
     }
 }
 
+pub fn save_sent_image_after_send(data_uri: Option<&str>, message: &str) {
+    if let Some(data_uri) = data_uri {
+        match mint_core::save_sent_image(data_uri, message) {
+            Ok(entry) => println!("\x1b[90mSaved image: {}\x1b[0m", entry.path.display()),
+            Err(error) => eprintln!("\x1b[33mWarning: failed to save sent image: {error}\x1b[0m"),
+        }
+    }
+}
+
 fn detect_mime(bytes: &[u8], path: &Path) -> &'static str {
-    // Check magic bytes first
     if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
         return "image/png";
     }
@@ -90,7 +94,6 @@ fn detect_mime(bytes: &[u8], path: &Path) -> &'static str {
         return "image/webp";
     }
 
-    // Fallback to extension
     match path
         .extension()
         .and_then(|e| e.to_str())
@@ -112,13 +115,19 @@ mod tests {
     #[test]
     fn detects_png_by_magic_bytes() {
         let png_magic = [0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-        assert_eq!(detect_mime(&png_magic, Path::new("test.unknown")), "image/png");
+        assert_eq!(
+            detect_mime(&png_magic, Path::new("test.unknown")),
+            "image/png"
+        );
     }
 
     #[test]
     fn detects_jpeg_by_magic_bytes() {
         let jpeg_magic = [0xFF, 0xD8, 0xFF, 0xE0];
-        assert_eq!(detect_mime(&jpeg_magic, Path::new("photo.jpg")), "image/jpeg");
+        assert_eq!(
+            detect_mime(&jpeg_magic, Path::new("photo.jpg")),
+            "image/jpeg"
+        );
     }
 
     #[test]

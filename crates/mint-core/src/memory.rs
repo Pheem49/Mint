@@ -41,6 +41,15 @@ pub struct LearnedSkill {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSession {
+    pub workspace_path: String,
+    pub summary: String,
+    pub verification: String,
+    pub updated_at: String,
+}
+
 impl MemoryStore {
     pub fn open_default() -> Result<Self, MemoryError> {
         Ok(Self::open(memory_path()?))
@@ -101,6 +110,52 @@ impl MemoryStore {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn clear_interactions(&self) -> Result<usize, MemoryError> {
+        let connection = self.connection()?;
+        Ok(connection.execute("DELETE FROM interaction_memories", [])?)
+    }
+
+    pub fn save_workspace_session(
+        &self,
+        workspace_path: &str,
+        summary: &str,
+        verification: &str,
+    ) -> Result<(), MemoryError> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO workspace_sessions (workspace_path, summary, verification, updated_at)
+             VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP)
+             ON CONFLICT(workspace_path) DO UPDATE SET
+               summary = excluded.summary,
+               verification = excluded.verification,
+               updated_at = CURRENT_TIMESTAMP",
+            params![workspace_path, summary, verification],
+        )?;
+        Ok(())
+    }
+
+    pub fn workspace_session(
+        &self,
+        workspace_path: &str,
+    ) -> Result<Option<WorkspaceSession>, MemoryError> {
+        let connection = self.connection()?;
+        Ok(connection
+            .query_row(
+                "SELECT workspace_path, summary, verification, updated_at
+                 FROM workspace_sessions WHERE workspace_path = ?1",
+                params![workspace_path],
+                |row| {
+                    Ok(WorkspaceSession {
+                        workspace_path: row.get(0)?,
+                        summary: row.get(1)?,
+                        verification: row.get(2)?,
+                        updated_at: row.get(3)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     pub fn add_learned_skill(
@@ -204,29 +259,31 @@ fn migrate_json_history(connection: &Connection) -> Result<(), rusqlite::Error> 
     while i < messages.len() {
         let msg = &messages[i];
         let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
-        
+
         if role == "user" {
-            let user_text = msg.get("parts")
+            let user_text = msg
+                .get("parts")
                 .and_then(|p| p.as_array())
                 .and_then(|arr| arr.first())
                 .and_then(|first| first.get("text"))
                 .and_then(|t| t.as_str())
                 .unwrap_or("");
-                
+
             let mut ai_text = "";
             let ai_text_buf;
-            
+
             if i + 1 < messages.len() {
                 let next_msg = &messages[i + 1];
                 let next_role = next_msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
                 if next_role == "model" {
-                    let raw_ai_text = next_msg.get("parts")
+                    let raw_ai_text = next_msg
+                        .get("parts")
                         .and_then(|p| p.as_array())
                         .and_then(|arr| arr.first())
                         .and_then(|first| first.get("text"))
                         .and_then(|t| t.as_str())
                         .unwrap_or("");
-                    
+
                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw_ai_text) {
                         if let Some(resp) = parsed.get("response").and_then(|r| r.as_str()) {
                             ai_text_buf = resp.to_string();
@@ -298,6 +355,12 @@ fn initialize(connection: &Connection) -> Result<(), rusqlite::Error> {
            content TEXT NOT NULL,
            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+         );
+         CREATE TABLE IF NOT EXISTS workspace_sessions (
+           workspace_path TEXT PRIMARY KEY,
+           summary TEXT NOT NULL,
+           verification TEXT NOT NULL DEFAULT '',
+           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
          );",
     )?;
     migrate_json_history(connection)?;
@@ -338,6 +401,25 @@ mod tests {
         let interactions = store.recent_interactions(1).unwrap();
         assert_eq!(interactions[0].user_text, "hello");
         assert_eq!(interactions[0].ai_text, "hi");
+    }
+
+    #[test]
+    fn clears_interactions() {
+        let store = store("clear-interactions");
+        store.add_interaction("hello", "hi").unwrap();
+        assert_eq!(store.clear_interactions().unwrap(), 1);
+        assert!(store.recent_interactions(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn stores_workspace_session_summary() {
+        let store = store("workspace-session");
+        store
+            .save_workspace_session("/tmp/project", "implemented", "cargo test")
+            .unwrap();
+        let session = store.workspace_session("/tmp/project").unwrap().unwrap();
+        assert_eq!(session.summary, "implemented");
+        assert_eq!(session.verification, "cargo test");
     }
 
     #[test]

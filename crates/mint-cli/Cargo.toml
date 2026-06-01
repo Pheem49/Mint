@@ -20,4 +20,4 @@ serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 crossterm = "0.28"
-chrono = "0.4"
+chrono.workspace = true

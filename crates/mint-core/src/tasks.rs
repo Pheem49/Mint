@@ -64,6 +64,7 @@ pub struct Task {
     pub extra: serde_json::Map<String, Value>,
 }
 
+#[derive(Clone)]
 pub struct TaskStore {
     path: PathBuf,
 }
@@ -351,6 +352,34 @@ mod tests {
         let task = store.add("resume task").unwrap();
         store.update_status(&task.id, "running", None).unwrap();
         assert_eq!(store.resume_running().unwrap()[0].status, "pending");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn records_headless_task_lifecycle() {
+        let path = test_path("lifecycle");
+        let _ = fs::remove_file(&path);
+        let store = TaskStore::open(&path);
+        let task = store.add("background audit").unwrap();
+        store.update_status(&task.id, "running", None).unwrap();
+        store
+            .add_checkpoint(&task.id, serde_json::json!({ "phase": "started" }))
+            .unwrap();
+        store
+            .add_artifact(&task.id, serde_json::json!({ "type": "proposal" }))
+            .unwrap();
+        let completed = store
+            .update_status(
+                &task.id,
+                "completed",
+                Some(serde_json::json!({ "summary": "done" })),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(completed.status, "completed");
+        assert_eq!(completed.checkpoints.len(), 1);
+        assert_eq!(completed.artifacts.len(), 1);
+        assert_eq!(completed.result.unwrap()["summary"], "done");
         let _ = fs::remove_file(path);
     }
 }

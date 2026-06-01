@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 base64.workspace = true
+chrono.workspace = true
 dirs.workspace = true
 futures-util.workspace = true
 quick-xml.workspace = true

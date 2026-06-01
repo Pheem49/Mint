@@ -1,8 +1,8 @@
 use std::{path::Path, time::Duration};
 
 use mint_core::{
-    ChatRequest, CodeEdit, KnowledgeStore, MintConfig, Task, TaskStore, load_config,
-    propose_code_edits, send_chat,
+    CodeEdit, KnowledgeStore, MintConfig, Task, TaskStore, load_config, parse_agent_json,
+    propose_code_edits, run_agent_loop,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -90,41 +90,46 @@ pub async fn run_next_task(app: &AppHandle) -> Result<Option<Task>, String> {
 
 async fn execute_task(store: &TaskStore, task: &Task) -> Result<String, String> {
     let config = load_config().map_err(|error| error.to_string())?;
-    let mut observation = format!("Task: {}\nChoose the first action.", task.description);
-    for step in 1..=MAX_STEPS {
-        let response = send_chat(
-            &config,
-            &ChatRequest {
-                message: observation,
-                system_instruction: SYSTEM_PROMPT.into(),
-                image_data_uri: None,
-                audio_data_uri: None,
-            },
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-        let action: AgentAction = parse_action(&response.text)?;
-        store
-            .add_checkpoint(
-                &task.id,
-                json!({
-                    "phase": "native_agent_step",
-                    "step": step,
-                    "thought": action.thought,
-                    "action": action.action,
-                    "target": action.target,
-                }),
-            )
-            .map_err(|error| error.to_string())?;
-        if action.action == "done" {
-            return Ok(action.target);
-        }
-        observation = execute_action(&config, store, task, step, &action).await?;
-        checkpoint(store, &task.id, "observation", &observation)?;
-    }
-    Err(format!(
-        "task reached the native agent limit of {MAX_STEPS} steps"
-    ))
+    let observer_store = store.clone();
+    let observer_task = task.clone();
+    let executor_store = store.clone();
+    let executor_task = task.clone();
+    let executor_config = config.clone();
+    run_agent_loop(
+        &config,
+        SYSTEM_PROMPT,
+        format!("Task: {}\nChoose the first action.", task.description),
+        MAX_STEPS,
+        |raw| parse_agent_json(raw).map_err(|error| error.to_string()),
+        |action: &AgentAction| (action.action == "done").then(|| action.target.clone()),
+        move |step, action| {
+            let store = executor_store.clone();
+            let task = executor_task.clone();
+            let config = executor_config.clone();
+            Box::pin(async move {
+                let observation = execute_action(&config, &store, &task, step, &action).await?;
+                checkpoint(&store, &task.id, "observation", &observation)?;
+                Ok(observation)
+            })
+        },
+        move |step, action| {
+            observer_store
+                .add_checkpoint(
+                    &observer_task.id,
+                    json!({
+                        "phase": "native_agent_step",
+                        "step": step,
+                        "thought": action.thought,
+                        "action": action.action,
+                        "target": action.target,
+                    }),
+                )
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        },
+    )
+    .await
+    .map_err(|error| error.to_string())
 }
 
 async fn execute_action(
@@ -194,20 +199,6 @@ fn checkpoint(store: &TaskStore, id: &str, phase: &str, message: &str) -> Result
         .map_err(|error| error.to_string())
 }
 
-fn parse_action(raw: &str) -> Result<AgentAction, String> {
-    serde_json::from_str(raw)
-        .or_else(|_| {
-            let start = raw
-                .find('{')
-                .ok_or_else(|| "missing JSON object".to_string())?;
-            let end = raw
-                .rfind('}')
-                .ok_or_else(|| "missing JSON object".to_string())?;
-            serde_json::from_str(&raw[start..=end]).map_err(|error| error.to_string())
-        })
-        .map_err(|error| format!("provider did not return a valid agent action: {error}"))
-}
-
 fn emit(app: &AppHandle, message: &str, kind: &str) {
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.emit(
@@ -223,7 +214,8 @@ mod tests {
 
     #[test]
     fn parses_json_wrapped_in_provider_text() {
-        let action = parse_action("```json\n{\"action\":\"done\",\"target\":\"ok\"}\n```").unwrap();
+        let action: AgentAction =
+            parse_agent_json("```json\n{\"action\":\"done\",\"target\":\"ok\"}\n```").unwrap();
         assert_eq!(action.action, "done");
         assert_eq!(action.target, "ok");
     }

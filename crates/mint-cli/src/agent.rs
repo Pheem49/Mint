@@ -1,17 +1,18 @@
 use std::{
     io::{self, Write},
     path::{Path, PathBuf},
+    process::Command,
     time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use mint_core::{
-    ChatRequest, CodeEdit, CodePatchHunk, KnowledgeStore, MintConfig,
-    apply_code_edits, build_code_patch, build_symbol_index, index_semantic_code, list_code_files,
-    propose_code_edits, read_code_file, run_shell_command, search_code, search_semantic_code,
-    send_chat, execute_native_plugin,
-};
 use mint_core::web_search as ws;
+use mint_core::{
+    ChatRequest, CodeEdit, CodePatchHunk, KnowledgeStore, MintConfig, apply_code_edits,
+    build_code_patch, build_symbol_index, execute_native_plugin, index_semantic_code,
+    list_code_files, propose_code_edits, read_code_file, run_shell_command, search_code,
+    search_semantic_code, send_chat_with_fallback,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -119,13 +120,40 @@ pub struct AgentResult {
     pub verification: String,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AgentOptions {
+    pub fast_mode: bool,
+}
+
 pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Result<AgentResult> {
+    run_code_agent_with_image(task, root, config, None).await
+}
+
+pub async fn run_code_agent_with_image(
+    task: &str,
+    root: &Path,
+    config: &MintConfig,
+    image_data_uri: Option<String>,
+) -> Result<AgentResult> {
+    run_code_agent_with_options(task, root, config, image_data_uri, AgentOptions::default()).await
+}
+
+pub async fn run_code_agent_with_options(
+    task: &str,
+    root: &Path,
+    config: &MintConfig,
+    image_data_uri: Option<String>,
+    options: AgentOptions,
+) -> Result<AgentResult> {
     let started_at = Instant::now();
     let root = root
         .canonicalize()
         .with_context(|| format!("unable to resolve workspace root {}", root.display()))?;
     let skills = crate::skills::context()?;
     let mut observation = initial_observation(task, &root, &skills);
+    let sent_image = image_data_uri.clone();
+    let mut pending_image = image_data_uri;
+    let mut image_saved = false;
 
     let mut system_prompt = SYSTEM_PROMPT.to_string();
     if let Ok(memory) = mint_core::MemoryStore::open_default() {
@@ -152,12 +180,17 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
             &ChatRequest {
                 message: observation.clone(),
                 system_instruction: system_prompt.clone(),
-                image_data_uri: None,
+                image_data_uri: pending_image.take(),
                 audio_data_uri: None,
             },
             started_at,
+            options,
         )
         .await?;
+        if !image_saved {
+            crate::image::save_sent_image_after_send(sent_image.as_deref(), task);
+            image_saved = true;
+        }
         let decision = match parse_decision_or_finish(&response.text) {
             Ok(decision) => decision,
             Err(error) => {
@@ -175,19 +208,24 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
                         audio_data_uri: None,
                     },
                     started_at,
+                    options,
                 )
                 .await?;
                 parse_decision_or_finish(&repaired.text)
                     .with_context(|| format!("unable to repair invalid agent response: {error}"))?
             }
         };
-        if decision.action != "finish" && !decision.thought.trim().is_empty() {
+        if !options.fast_mode && decision.action != "finish" && !decision.thought.trim().is_empty()
+        {
             println!("\n\x1b[96m• Thinking:\x1b[0m {}", decision.thought.trim());
         }
         if decision.action == "finish" {
             let mut summary = decision.input.summary.trim().to_owned();
             let is_thai_task = task.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
-            if let Some(err_line) = observation.lines().find(|l| l.contains("Web search error:")) {
+            if let Some(err_line) = observation
+                .lines()
+                .find(|l| l.contains("Web search error:"))
+            {
                 let clean_err = err_line
                     .replace("Web search error: ", "")
                     .replace("Web search is currently unavailable.", "")
@@ -195,27 +233,54 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
                     .to_string();
                 if summary.is_empty() {
                     if is_thai_task {
-                        summary = format!("การค้นหาข้อมูลจากเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {}\nมิ้นท์ขออภัยด้วยนะคะที่ไม่สามารถค้นหาข้อมูลเรียลไทม์ให้ได้ในขณะนี้ค่ะ", clean_err);
+                        summary = format!(
+                            "การค้นหาข้อมูลจากเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {}\nมิ้นท์ขออภัยด้วยนะคะที่ไม่สามารถค้นหาข้อมูลเรียลไทม์ให้ได้ในขณะนี้ค่ะ",
+                            clean_err
+                        );
                     } else {
-                        summary = format!("Web search failed due to error: {}\nI apologize, but I cannot retrieve real-time information at the moment.", clean_err);
+                        summary = format!(
+                            "Web search failed due to error: {}\nI apologize, but I cannot retrieve real-time information at the moment.",
+                            clean_err
+                        );
                     }
                 } else {
                     let err_lower = clean_err.to_lowercase();
                     let summary_lower = summary.to_lowercase();
                     let already_mentions_error = if is_thai_task {
-                        summary_lower.contains("ล้มเหลว") || summary_lower.contains("ข้อผิดพลาด") || summary_lower.contains(&err_lower)
+                        summary_lower.contains("ล้มเหลว")
+                            || summary_lower.contains("ข้อผิดพลาด")
+                            || summary_lower.contains(&err_lower)
                     } else {
-                        summary_lower.contains("fail") || summary_lower.contains("error") || summary_lower.contains(&err_lower)
+                        summary_lower.contains("fail")
+                            || summary_lower.contains("error")
+                            || summary_lower.contains(&err_lower)
                     };
                     if !already_mentions_error {
                         if is_thai_task {
-                            summary.push_str(&format!("\n\n(การค้นหาเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {})", clean_err));
+                            summary.push_str(&format!(
+                                "\n\n(การค้นหาเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {})",
+                                clean_err
+                            ));
                         } else {
-                            summary.push_str(&format!("\n\n(Web search failed due to error: {})", clean_err));
+                            summary.push_str(&format!(
+                                "\n\n(Web search failed due to error: {})",
+                                clean_err
+                            ));
                         }
                     }
                 }
             } else {
+                if summary.is_empty() {
+                    observation = format!(
+                        "Task: {task}\nWorkspace: {}\nStep {step} completed.\nPrevious action: {}\n\
+                         Observation:\nError: Your finish action summary was empty. \
+                         You MUST provide a final answer, explanation, or response to the user's query \
+                         in the 'summary' field of the 'finish' action input. Do not leave it empty.",
+                        root.display(),
+                        decision.action
+                    );
+                    continue;
+                }
                 let mut provider_used = None;
                 for line in observation.lines() {
                     if line.contains("Web search succeeded using Google Search") {
@@ -228,18 +293,24 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
                     let summary_lower = summary.to_lowercase();
                     if !summary_lower.contains("google") && !summary_lower.contains("brave") {
                         if is_thai_task {
-                            summary.push_str(&format!("\n\n(มิ้นท์หาข้อมูลนี้มาจาก {} Search นะคะ 💖)", prov));
+                            summary.push_str(&format!(
+                                "\n\n(มิ้นท์หาข้อมูลนี้มาจาก {} Search นะคะ 💖)",
+                                prov
+                            ));
                         } else {
-                            summary.push_str(&format!("\n\n(Information retrieved via {} Search 💖)", prov));
+                            summary.push_str(&format!(
+                                "\n\n(Information retrieved via {} Search 💖)",
+                                prov
+                            ));
                         }
                     }
                 }
-                if summary.is_empty() {
-                    summary = "Task complete.".to_string();
-                }
             }
             let verification = meaningful_verification(&decision.input.verification).to_owned();
-            println!("\n\x1b[32mMint:\x1b[0m {summary}");
+            let formatted_summary = format_markdown_bold(&summary);
+            print!("\n\x1b[32mMint:\x1b[0m ");
+            render_live_summary(&formatted_summary);
+            println!();
             if !verification.is_empty() {
                 println!("Verification: {verification}");
             }
@@ -247,7 +318,9 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
                 "\x1b[90m─ Worked for {}\x1b[0m",
                 format_elapsed(started_at.elapsed())
             );
-            mint_core::MemoryStore::open_default()?.add_interaction(task, &summary)?;
+            let memory = mint_core::MemoryStore::open_default()?;
+            memory.add_interaction(task, &summary)?;
+            memory.save_workspace_session(&root.to_string_lossy(), &summary, &verification)?;
             return Ok(AgentResult {
                 summary,
                 verification,
@@ -276,18 +349,21 @@ async fn send_chat_with_status(
     config: &MintConfig,
     request: &ChatRequest,
     started_at: Instant,
+    options: AgentOptions,
 ) -> Result<mint_core::ChatResponse> {
-    let response = send_chat(config, request);
+    let response = send_chat_with_fallback(config, request);
     tokio::pin!(response);
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
 
     loop {
         tokio::select! {
             response = &mut response => {
-                clear_working_status();
-                return Ok(response?);
+                if !options.fast_mode {
+                    clear_working_status();
+                }
+                return Ok(response?.0);
             }
-            _ = ticker.tick() => {
+            _ = ticker.tick(), if !options.fast_mode => {
                 print!(
                     "\r\x1b[2K\x1b[90m• Thinking ({} • Ctrl+C to interrupt)\x1b[0m",
                     format_elapsed(started_at.elapsed())
@@ -332,9 +408,83 @@ fn initial_observation(task: &str, root: &Path, skills: &str) -> String {
         if let Ok(Some(name)) = memory.get_profile("name") {
             observation.push_str(&format!("User Name: {name}\n"));
         }
+        if let Ok(Some(session)) = memory.workspace_session(&root.to_string_lossy()) {
+            observation.push_str(&format!(
+                "Previous workspace session ({}):\nSummary: {}\nVerification: {}\n",
+                session.updated_at,
+                session.summary,
+                if session.verification.trim().is_empty() {
+                    "(none)"
+                } else {
+                    &session.verification
+                }
+            ));
+        }
     }
+    observation.push_str(&workspace_context(root));
     observation.push_str("Choose the first action. Finish immediately for casual conversation.");
     observation
+}
+
+fn workspace_context(root: &Path) -> String {
+    let mut context = String::from("Automatic workspace context:\n");
+    context.push_str(&format!(
+        "Git status:\n{}\n",
+        command_output(root, "git", &["status", "--short"])
+    ));
+    context.push_str(&format!(
+        "Diff summary:\n{}\n",
+        command_output(root, "git", &["diff", "--stat"])
+    ));
+    context.push_str(&format!("Package scripts:\n{}\n", package_scripts(root)));
+    context
+}
+
+fn command_output(root: &Path, program: &str, args: &[&str]) -> String {
+    match Command::new(program).args(args).current_dir(root).output() {
+        Ok(output) if output.status.success() => {
+            let value = String::from_utf8_lossy(&output.stdout);
+            if value.trim().is_empty() {
+                "(none)".into()
+            } else {
+                truncate(&value).trim().into()
+            }
+        }
+        _ => "(unavailable)".into(),
+    }
+}
+
+fn package_scripts(root: &Path) -> String {
+    let Ok(raw) = std::fs::read_to_string(root.join("package.json")) else {
+        return "(none)".into();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return "(invalid package.json)".into();
+    };
+    let Some(scripts) = value.get("scripts").and_then(Value::as_object) else {
+        return "(none)".into();
+    };
+    scripts
+        .iter()
+        .map(|(name, command)| format!("{name}: {}", command.as_str().unwrap_or_default()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_live_summary(summary: &str) {
+    let mut chunk = String::new();
+    for character in summary.chars() {
+        chunk.push(character);
+        if chunk.chars().count() >= 96 {
+            print!("{chunk}");
+            let _ = io::stdout().flush();
+            chunk.clear();
+        }
+    }
+    if !chunk.is_empty() {
+        print!("{chunk}");
+        let _ = io::stdout().flush();
+    }
 }
 
 async fn execute_tool(
@@ -446,14 +596,12 @@ async fn execute_tool(
                         ))
                     }
                 }
-                Err(e) => {
-                    Ok(format!(
-                        "Web search error: {e}. Web search is currently unavailable. \
+                Err(e) => Ok(format!(
+                    "Web search error: {e}. Web search is currently unavailable. \
                          Do not try to search again. You MUST now proceed by calling the 'finish' action. \
                          In your finish summary, explain to the user in Thai that the web search failed (mentioning the search error: {e}), \
                          and then answer their query using your own pre-existing knowledge/database."
-                    ))
-                }
+                )),
             }
         }
         "memory_recall" => {
@@ -537,8 +685,9 @@ async fn execute_tool(
             if !confirm("Approve writing this note? [y/N] ")? {
                 return Ok(format!("User denied note write: {file_name}"));
             }
-            std::fs::create_dir_all(&notes_dir)
-                .with_context(|| format!("cannot create notes directory: {}", notes_dir.display()))?;
+            std::fs::create_dir_all(&notes_dir).with_context(|| {
+                format!("cannot create notes directory: {}", notes_dir.display())
+            })?;
             std::fs::write(&note_path, &input.content)
                 .with_context(|| format!("cannot write note: {}", note_path.display()))?;
             println!("  Note saved: {}", note_path.display());
@@ -620,22 +769,22 @@ fn run_shell(root: &Path, config: &MintConfig, command: &str) -> Result<String> 
     let status_str = output
         .status
         .map_or_else(|| "unknown".into(), |status| status.to_string());
-    
+
     let mut hint = "";
     let cmd_lower = command.to_lowercase();
     if output.success {
-        if cmd_lower.contains("open") || cmd_lower.contains("launch") || cmd_lower.contains("chrome") || cmd_lower.contains("firefox") {
+        if cmd_lower.contains("open")
+            || cmd_lower.contains("launch")
+            || cmd_lower.contains("chrome")
+            || cmd_lower.contains("firefox")
+        {
             hint = "\nNote: Opening URLs, files, folders, or launching applications are background processes. Even if there are warnings or stdout/stderr outputs, since the command exited successfully with status 0, the operation has succeeded and you should now use the 'finish' action to inform the user.";
         }
     }
 
     Ok(format!(
         "exit: {}\nsandboxed: {}\nstdout:\n{}\nstderr:\n{}{}",
-        status_str,
-        output.sandboxed,
-        output.stdout,
-        output.stderr,
-        hint
+        status_str, output.sandboxed, output.stdout, output.stderr, hint
     ))
 }
 
@@ -654,24 +803,14 @@ fn propose_and_apply(root: &Path, config: &MintConfig, edit: CodeEdit) -> Result
 }
 
 fn parse_decision(raw: &str) -> Result<AgentDecision> {
-    if let Ok(decision) = serde_json::from_str(raw) {
+    if let Ok(decision) = mint_core::parse_agent_json(raw) {
         return Ok(decision);
     }
-    let start = raw
-        .find('{')
-        .ok_or_else(|| anyhow!("missing JSON object"))?;
-    let end = raw
-        .rfind('}')
-        .ok_or_else(|| anyhow!("missing JSON object"))?;
-    let object = &raw[start..=end];
-    if let Ok(decision) = serde_json::from_str(object) {
-        return Ok(decision);
-    }
-    parse_shorthand_finish(object).context("provider did not return a valid code-agent action")
+    parse_shorthand_finish(raw).context("provider did not return a valid code-agent action")
 }
 
 fn parse_shorthand_finish(raw: &str) -> Result<AgentDecision> {
-    let value: Value = serde_json::from_str(raw)?;
+    let value: Value = mint_core::parse_agent_json(raw)?;
     let finish = value
         .get("finish")
         .ok_or_else(|| anyhow!("missing action"))?;
@@ -759,16 +898,29 @@ fn truncate(value: &str) -> String {
     }
 }
 
-fn fallback<'a>(value: &'a str, default: &'a str) -> &'a str {
-    if value.trim().is_empty() {
-        default
-    } else {
-        value.trim()
-    }
-}
-
 fn confirm(prompt: &str) -> Result<bool> {
     crate::confirm(prompt)
+}
+
+fn format_markdown_bold(text: &str) -> String {
+    let count = text.matches("**").count();
+    let pair_limit = (count / 2) * 2;
+    let mut result = String::with_capacity(text.len());
+    let parts = text.split("**");
+    let mut is_bold = false;
+    let mut processed_markers = 0;
+    for part in parts {
+        if is_bold && processed_markers < pair_limit {
+            result.push_str("\x1b[96m");
+            result.push_str(part);
+            result.push_str("\x1b[0m");
+        } else {
+            result.push_str(part);
+        }
+        processed_markers += 1;
+        is_bold = !is_bold;
+    }
+    result
 }
 
 #[cfg(test)]
@@ -783,6 +935,22 @@ mod tests {
         .unwrap();
         assert_eq!(action.action, "list_files");
         assert_eq!(action.input.path, ".");
+    }
+
+    #[test]
+    fn formats_markdown_bold_to_cyan_ansi_codes() {
+        assert_eq!(
+            format_markdown_bold("Hello **world** check"),
+            "Hello \x1b[96mworld\x1b[0m check"
+        );
+        assert_eq!(
+            format_markdown_bold("No bold text here"),
+            "No bold text here"
+        );
+        assert_eq!(
+            format_markdown_bold("Unmatched **bold text"),
+            "Unmatched bold text"
+        );
     }
 
     #[test]
@@ -841,5 +1009,23 @@ mod tests {
         let value = "ก".repeat(MAX_OBSERVATION_BYTES);
         let truncated = truncate(&value);
         assert!(truncated.ends_with("...<truncated>"));
+    }
+
+    #[test]
+    fn reads_package_scripts_for_workspace_context() {
+        let root = std::env::temp_dir().join(format!(
+            "mint-cli-agent-package-scripts-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"scripts":{"test":"cargo test","build":"npm run build"}}"#,
+        )
+        .unwrap();
+        let scripts = package_scripts(&root);
+        assert!(scripts.contains("test: cargo test"));
+        assert!(scripts.contains("build: npm run build"));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

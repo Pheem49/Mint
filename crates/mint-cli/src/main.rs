@@ -11,18 +11,18 @@ use mint_core::{
     TaskStore, apply_code_edits, assert_path_capability, build_code_patch, build_symbol_index,
     classify_shell_command, config_path, create_folder, execute_native_plugin, find_paths,
     index_semantic_code, initialize_config, inspect_code_plan, list_code_files, load_config,
-    native_plugins, orchestrate_chat,
-    orchestrate_chat_stream_with_fallback, propose_code_edits, read_code_file,
-    repository_summary, run_shell_command, search_code, search_semantic_code, set_config_value,
+    native_plugins, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    propose_code_edits, read_code_file, repository_summary, run_shell_command, search_code,
+    search_semantic_code, set_config_value,
 };
 
 mod agent;
 mod gmail;
 mod image;
 mod mcp;
+mod onboard;
 mod skills;
 mod updater;
-mod onboard;
 
 #[derive(Debug, Parser)]
 #[command(name = "mint", version, about = "Mint native CLI")]
@@ -47,6 +47,8 @@ enum Command {
         message: String,
         #[arg(long, default_value = "")]
         system: String,
+        #[arg(long)]
+        image: Option<PathBuf>,
     },
     /// Inspect or update local long-term memory.
     Memory {
@@ -542,21 +544,36 @@ async fn main() -> Result<()> {
                     )?
                 ),
             },
-            Command::Chat { message, system } => {
+            Command::Chat {
+                message,
+                system,
+                image,
+            } => {
+                let image_data_uri = image
+                    .as_deref()
+                    .map(image::load_image_as_data_uri)
+                    .transpose()?;
+                let sent_image = image_data_uri.clone();
                 if system.trim().is_empty() {
-                    agent::run_code_agent(&message, &std::env::current_dir()?, &load_config()?)
-                        .await?;
+                    agent::run_code_agent_with_image(
+                        &message,
+                        &std::env::current_dir()?,
+                        &load_config()?,
+                        image_data_uri,
+                    )
+                    .await?;
                 } else {
-                    let response = orchestrate_chat(
+                    let (response, _) = orchestrate_chat_with_fallback(
                         &load_config()?,
                         &ChatRequest {
                             message: message.clone(),
                             system_instruction: system,
-                            image_data_uri: None,
+                            image_data_uri,
                             audio_data_uri: None,
                         },
                     )
                     .await?;
+                    image::save_sent_image_after_send(sent_image.as_deref(), &message);
                     println!("{}", response.text);
                 }
             }
@@ -681,7 +698,10 @@ async fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&native_plugins())?)
                 }
                 PluginCommand::Run { name, instruction } => {
-                    println!("{}", execute_native_plugin(&load_config()?, &name, &instruction).await?)
+                    println!(
+                        "{}",
+                        execute_native_plugin(&load_config()?, &name, &instruction).await?
+                    )
                 }
             },
             Command::Knowledge { command } => {
@@ -1018,6 +1038,10 @@ struct InteractiveSession {
     pending_image: Option<String>, // base64 data URI
 }
 
+struct InteractiveInput {
+    text: String,
+    pasted_image: Option<String>,
+}
 
 /// What the slash-command router wants the loop to do next.
 enum SlashResult {
@@ -1058,6 +1082,8 @@ async fn handle_slash_command(
                 ("/cd <path>", "Change workspace directory"),
                 ("/image <path> [prompt]", "Attach image from file"),
                 ("/paste [prompt]", "Attach image from clipboard"),
+                ("Ctrl+V", "Paste clipboard image as [Image #1]"),
+                ("/learn <path>", "Import a persistent .md or .txt skill"),
                 ("/memory list", "Show recent interactions"),
                 ("/memory clear", "Clear all interactions"),
                 ("/memory get <key>", "Read a profile value"),
@@ -1076,7 +1102,8 @@ async fn handle_slash_command(
         "/fast" => {
             session.fast_mode = match rest {
                 "off" => false,
-                "on" | "" => !session.fast_mode,
+                "on" => true,
+                "" => !session.fast_mode,
                 _ => {
                     println!("\x1b[33m/fast usage: /fast [on|off]\x1b[0m");
                     return Some(SlashResult::Handled);
@@ -1116,8 +1143,10 @@ async fn handle_slash_command(
             println!("Clear conversation history? [y/N] ");
             if let Ok(true) = confirm("Clear conversation history? [y/N] ") {
                 if let Ok(memory) = MemoryStore::open_default() {
-                    // We don't have a full clear API, so we just note it
-                    let _ = memory.set_profile("_cleared_at", &chrono::Local::now().to_rfc3339());
+                    match memory.clear_interactions() {
+                        Ok(count) => println!("\x1b[90mCleared {count} interactions.\x1b[0m"),
+                        Err(error) => println!("\x1b[31mMemory error: {error}\x1b[0m"),
+                    }
                 }
                 println!("\x1b[90mConversation context cleared.\x1b[0m\n");
             }
@@ -1156,7 +1185,9 @@ async fn handle_slash_command(
                 Ok(uri) => {
                     session.pending_image = Some(uri);
                     if prompt.is_empty() {
-                        println!("\x1b[90mImage attached — type your prompt and press Enter\x1b[0m\n");
+                        println!(
+                            "\x1b[90mImage attached — type your prompt and press Enter\x1b[0m\n"
+                        );
                         Some(SlashResult::Handled)
                     } else {
                         Some(SlashResult::ForwardToAgent(prompt.to_owned()))
@@ -1169,26 +1200,47 @@ async fn handle_slash_command(
             }
         }
 
-        "/paste" => {
-            match image::read_clipboard_image() {
-                Ok(Some(uri)) => {
-                    session.pending_image = Some(uri);
-                    if rest.is_empty() {
-                        println!("\x1b[90mClipboard image attached — type your prompt and press Enter\x1b[0m\n");
-                        Some(SlashResult::Handled)
-                    } else {
-                        Some(SlashResult::ForwardToAgent(rest.to_owned()))
-                    }
-                }
-                Ok(None) => {
-                    println!("\x1b[33mNo image found in clipboard.\x1b[0m\n");
+        "/paste" => match image::read_clipboard_image() {
+            Ok(Some(uri)) => {
+                session.pending_image = Some(uri);
+                if rest.is_empty() {
+                    println!(
+                        "\x1b[90mClipboard image attached — type your prompt and press Enter\x1b[0m\n"
+                    );
                     Some(SlashResult::Handled)
-                }
-                Err(e) => {
-                    println!("\x1b[31mClipboard error: {e}\x1b[0m\n");
-                    Some(SlashResult::Handled)
+                } else {
+                    Some(SlashResult::ForwardToAgent(rest.to_owned()))
                 }
             }
+            Ok(None) => {
+                println!("\x1b[33mNo image found in clipboard.\x1b[0m\n");
+                Some(SlashResult::Handled)
+            }
+            Err(e) => {
+                println!("\x1b[31mClipboard error: {e}\x1b[0m\n");
+                Some(SlashResult::Handled)
+            }
+        },
+
+        "/learn" => {
+            if rest.is_empty() {
+                println!("\x1b[33m/learn usage: /learn <path>\x1b[0m\n");
+            } else {
+                let path = PathBuf::from(rest);
+                let path = if path.is_absolute() {
+                    path
+                } else {
+                    session.current_dir.join(path)
+                };
+                match skills::learn(&path) {
+                    Ok(skill) => println!(
+                        "\x1b[90mLearned skill: {} ({})\x1b[0m\n",
+                        skill.name, skill.source_path
+                    ),
+                    Err(error) => println!("\x1b[31mLearn error: {error}\x1b[0m\n"),
+                }
+            }
+            Some(SlashResult::Handled)
         }
 
         "/memory" => {
@@ -1204,30 +1256,28 @@ async fn handle_slash_command(
                 .map(|(c, a)| (c, a.trim()))
                 .unwrap_or((rest, ""));
             match subcmd {
-                "list" | "" => {
-                    match memory.recent_interactions(10) {
-                        Ok(items) => {
-                            if items.is_empty() {
-                                println!("\x1b[90mNo interactions yet.\x1b[0m\n");
-                            } else {
-                                println!("\n\x1b[36mRecent interactions:\x1b[0m");
-                                for item in items.iter().rev() {
-                                    println!(
-                                        "  \x1b[90m[{}]\x1b[0m \x1b[36mYou:\x1b[0m {}",
-                                        &item.created_at[..16.min(item.created_at.len())],
-                                        if item.user_text.len() > 80 {
-                                            format!("{}…", &item.user_text[..80])
-                                        } else {
-                                            item.user_text.clone()
-                                        }
-                                    );
-                                }
-                                println!();
+                "list" | "" => match memory.recent_interactions(10) {
+                    Ok(items) => {
+                        if items.is_empty() {
+                            println!("\x1b[90mNo interactions yet.\x1b[0m\n");
+                        } else {
+                            println!("\n\x1b[36mRecent interactions:\x1b[0m");
+                            for item in items.iter().rev() {
+                                println!(
+                                    "  \x1b[90m[{}]\x1b[0m \x1b[36mYou:\x1b[0m {}",
+                                    &item.created_at[..16.min(item.created_at.len())],
+                                    if item.user_text.len() > 80 {
+                                        format!("{}…", &item.user_text[..80])
+                                    } else {
+                                        item.user_text.clone()
+                                    }
+                                );
                             }
+                            println!();
                         }
-                        Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
                     }
-                }
+                    Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                },
                 "get" => {
                     if args.is_empty() {
                         println!("\x1b[33m/memory get <key>\x1b[0m\n");
@@ -1253,24 +1303,26 @@ async fn handle_slash_command(
                         }
                     }
                 }
-                "skills" => {
-                    match memory.learned_skills(20) {
-                        Ok(skills) => {
-                            if skills.is_empty() {
-                                println!("\x1b[90mNo learned skills.\x1b[0m\n");
-                            } else {
-                                println!("\n\x1b[36mLearned skills:\x1b[0m");
-                                for s in &skills {
-                                    println!("  [{}] {} — {}", s.id, s.name, s.source_path);
-                                }
-                                println!();
+                "skills" => match memory.learned_skills(20) {
+                    Ok(skills) => {
+                        if skills.is_empty() {
+                            println!("\x1b[90mNo learned skills.\x1b[0m\n");
+                        } else {
+                            println!("\n\x1b[36mLearned skills:\x1b[0m");
+                            for s in &skills {
+                                println!("  [{}] {} — {}", s.id, s.name, s.source_path);
                             }
+                            println!();
                         }
-                        Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
                     }
-                }
+                    Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                },
+                "clear" => match memory.clear_interactions() {
+                    Ok(count) => println!("\x1b[90mCleared {count} interactions.\x1b[0m\n"),
+                    Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                },
                 _ => println!(
-                    "\x1b[33m/memory usage: list | get <key> | set <key> <val> | skills\x1b[0m\n"
+                    "\x1b[33m/memory usage: list | clear | get <key> | set <key> <val> | skills\x1b[0m\n"
                 ),
             }
             Some(SlashResult::Handled)
@@ -1290,7 +1342,10 @@ async fn handle_slash_command(
                 "  Workspace: {}",
                 format_path_with_tilde(&session.current_dir)
             );
-            println!("  Fast mode: {}", if session.fast_mode { "on" } else { "off" });
+            println!(
+                "  Fast mode: {}",
+                if session.fast_mode { "on" } else { "off" }
+            );
             println!("  Memory   : {interactions} interactions");
             if session.pending_image.is_some() {
                 println!("  Image    : \x1b[33mattached\x1b[0m");
@@ -1390,7 +1445,7 @@ async fn run_interactive_chat() -> Result<()> {
         println!("\x1b[32m| |\\/| | | '_ \\|  _| (__| |__ | | \x1b[0m");
         println!("\x1b[32m|_|  |_|_|_| |_|\\__|\\___|\\___|___|\\x1b[0m");
     }
-    println!("Type naturally or /help for commands. Ctrl+D to exit.\n");
+    println!("Type naturally or /help for commands. Ctrl+V pastes images. Ctrl+D exits.\n");
 
     let mut session = InteractiveSession {
         config,
@@ -1403,8 +1458,13 @@ async fn run_interactive_chat() -> Result<()> {
         let path_str = format_path_with_tilde(&session.current_dir);
         let model_str = active_model(&session.config.ai_provider, &session.config).to_owned();
 
-        if let Some(query) = read_line_interactive(&session.config.ai_provider, &model_str, &path_str)? {
-            let query_str = query.trim().to_owned();
+        if let Some(input) =
+            read_line_interactive(&session.config.ai_provider, &model_str, &path_str)?
+        {
+            if input.pasted_image.is_some() {
+                session.pending_image = input.pasted_image;
+            }
+            let query_str = input.text.trim().to_owned();
             if query_str.is_empty() {
                 continue;
             }
@@ -1419,8 +1479,16 @@ async fn run_interactive_chat() -> Result<()> {
                 Some(SlashResult::ForwardToAgent(task)) => {
                     // Force code agent for /code forwarded tasks
                     println!();
-                    if let Err(error) =
-                        agent::run_code_agent(&task, &session.current_dir, &session.config).await
+                    if let Err(error) = agent::run_code_agent_with_options(
+                        &task,
+                        &session.current_dir,
+                        &session.config,
+                        session.pending_image.take(),
+                        agent::AgentOptions {
+                            fast_mode: session.fast_mode,
+                        },
+                    )
+                    .await
                     {
                         println!("\x1b[31mError:\x1b[0m {error}\n");
                     }
@@ -1432,8 +1500,16 @@ async fn run_interactive_chat() -> Result<()> {
             // Check if it's a /code or regular agent request
             if let Some(task) = query_str.strip_prefix("/code ") {
                 println!();
-                if let Err(error) =
-                    agent::run_code_agent(task.trim(), &session.current_dir, &session.config).await
+                if let Err(error) = agent::run_code_agent_with_options(
+                    task.trim(),
+                    &session.current_dir,
+                    &session.config,
+                    session.pending_image.take(),
+                    agent::AgentOptions {
+                        fast_mode: session.fast_mode,
+                    },
+                )
+                .await
                 {
                     println!("\x1b[31mError:\x1b[0m {error}\n");
                 }
@@ -1442,10 +1518,14 @@ async fn run_interactive_chat() -> Result<()> {
 
             // Regular agent loop (handles both chat and coding)
             if !query_str.starts_with("/chat ") {
-                if let Err(error) = agent::run_code_agent(
+                if let Err(error) = agent::run_code_agent_with_options(
                     query_str.trim_start_matches("/chat "),
                     &session.current_dir,
                     &session.config,
+                    session.pending_image.take(),
+                    agent::AgentOptions {
+                        fast_mode: session.fast_mode,
+                    },
                 )
                 .await
                 {
@@ -1488,6 +1568,7 @@ async fn run_interactive_chat() -> Result<()> {
             }
 
             let image_uri = session.pending_image.take();
+            let sent_image = image_uri.clone();
             let mut first_chunk = true;
             let mut filter = ActionStreamFilter::new();
 
@@ -1519,6 +1600,7 @@ async fn run_interactive_chat() -> Result<()> {
 
             match stream_result {
                 Ok((response, fallback)) => {
+                    image::save_sent_image_after_send(sent_image.as_deref(), &message);
                     if first_chunk {
                         print!("\r\x1b[2K");
                         let _ = io::stdout().flush();
@@ -1536,10 +1618,7 @@ async fn run_interactive_chat() -> Result<()> {
                                 response.model
                             )
                         } else {
-                            format!(
-                                "\x1b[90m{} • {}\x1b[0m",
-                                response.provider, response.model
-                            )
+                            format!("\x1b[90m{} • {}\x1b[0m", response.provider, response.model)
                         };
                         println!("{badge}");
                         println!("\x1b[90m{}\x1b[0m\n", "─".repeat(width));
@@ -1646,7 +1725,7 @@ fn read_line_interactive(
     _provider: &str,
     model: &str,
     path_str: &str,
-) -> io::Result<Option<String>> {
+) -> io::Result<Option<InteractiveInput>> {
     use crossterm::event::{self, Event, KeyCode};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
@@ -1654,6 +1733,7 @@ fn read_line_interactive(
     let mut cursor_pos = 0;
     let placeholder = "Ask anything...";
     let mut ctrl_d_pressed = false;
+    let mut pasted_image = None;
 
     draw_input_box("", placeholder, model, path_str);
     position_input_cursor(&input_chars, cursor_pos);
@@ -1697,6 +1777,26 @@ fn read_line_interactive(
                                 );
                                 print!("\x1b[{}G", input_cursor_column(&input_chars, cursor_pos));
                                 let _ = io::stdout().flush();
+                                enable_raw_mode()?;
+                            }
+                        }
+                        KeyCode::Char('v')
+                            if key_event
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                        {
+                            if let Ok(Some(uri)) = image::read_clipboard_image() {
+                                pasted_image = Some(uri);
+                                insert_image_placeholder(&mut input_chars, &mut cursor_pos);
+
+                                disable_raw_mode()?;
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                );
                                 enable_raw_mode()?;
                             }
                         }
@@ -1779,7 +1879,10 @@ fn read_line_interactive(
                             let input_str: String = input_chars.iter().collect();
                             println!("\x1b[36mYou ›\x1b[0m {}", input_str);
                             let _ = io::stdout().flush();
-                            break Some(input_str);
+                            break Some(InteractiveInput {
+                                text: input_str,
+                                pasted_image,
+                            });
                         }
                         KeyCode::Esc => {
                             disable_raw_mode()?;
@@ -1795,6 +1898,17 @@ fn read_line_interactive(
     };
 
     Ok(result)
+}
+
+fn insert_image_placeholder(input_chars: &mut Vec<char>, cursor_pos: &mut usize) {
+    const PLACEHOLDER: &str = "[Image #1]";
+    let input: String = input_chars.iter().collect();
+    if input.contains(PLACEHOLDER) {
+        return;
+    }
+    let placeholder_chars = PLACEHOLDER.chars().collect::<Vec<_>>();
+    input_chars.splice(*cursor_pos..*cursor_pos, placeholder_chars.iter().copied());
+    *cursor_pos += placeholder_chars.len();
 }
 
 fn format_path_with_tilde(path: &std::path::Path) -> String {
@@ -1951,7 +2065,8 @@ fn read_folder_content(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-pub static SESSION_APPROVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static SESSION_APPROVED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 pub fn confirm(prompt: &str) -> Result<bool> {
     let clean_prompt = prompt
@@ -1983,11 +2098,7 @@ pub fn confirm(prompt: &str) -> Result<bool> {
     let _ = disable_raw_mode();
     println!("{}", clean_prompt);
 
-    let options = [
-        "Approve",
-        "Approve this session",
-        "No",
-    ];
+    let options = ["Approve", "Approve this session", "No"];
     let mut selected = 0;
 
     let print_choices = |selected: usize| -> Result<()> {
@@ -2008,77 +2119,75 @@ pub fn confirm(prompt: &str) -> Result<bool> {
 
     let choice = loop {
         match event::poll(std::time::Duration::from_millis(100)) {
-            Ok(true) => {
-                match event::read() {
-                    Ok(Event::Key(key_event)) => {
-                        if key_event.kind == event::KeyEventKind::Press {
-                            let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
-                                && key_event
-                                    .modifiers
-                                    .contains(crossterm::event::KeyModifiers::CONTROL);
-                            if is_ctrl_c {
+            Ok(true) => match event::read() {
+                Ok(Event::Key(key_event)) => {
+                    if key_event.kind == event::KeyEventKind::Press {
+                        let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                            && key_event
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL);
+                        if is_ctrl_c {
+                            break 2;
+                        }
+
+                        match key_event.code {
+                            KeyCode::Up => {
+                                if selected > 0 {
+                                    selected -= 1;
+                                } else {
+                                    selected = options.len() - 1;
+                                }
+                                let _ = disable_raw_mode();
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                let _ = print_choices(selected);
+                                let _ = enable_raw_mode();
+                            }
+                            KeyCode::Down => {
+                                if selected < options.len() - 1 {
+                                    selected += 1;
+                                } else {
+                                    selected = 0;
+                                }
+                                let _ = disable_raw_mode();
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                let _ = print_choices(selected);
+                                let _ = enable_raw_mode();
+                            }
+                            KeyCode::Tab => {
+                                if selected < options.len() - 1 {
+                                    selected += 1;
+                                } else {
+                                    selected = 0;
+                                }
+                                let _ = disable_raw_mode();
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                let _ = print_choices(selected);
+                                let _ = enable_raw_mode();
+                            }
+                            KeyCode::Char('1') | KeyCode::Char('a') | KeyCode::Char('y') => {
+                                break 0;
+                            }
+                            KeyCode::Char('2') | KeyCode::Char('s') => {
+                                break 1;
+                            }
+                            KeyCode::Char('3') | KeyCode::Char('n') | KeyCode::Char('c') => {
                                 break 2;
                             }
-
-                            match key_event.code {
-                                KeyCode::Up => {
-                                    if selected > 0 {
-                                        selected -= 1;
-                                    } else {
-                                        selected = options.len() - 1;
-                                    }
-                                    let _ = disable_raw_mode();
-                                    print!("\x1b[{}A\x1b[J", options.len());
-                                    let _ = print_choices(selected);
-                                    let _ = enable_raw_mode();
-                                }
-                                KeyCode::Down => {
-                                    if selected < options.len() - 1 {
-                                        selected += 1;
-                                    } else {
-                                        selected = 0;
-                                    }
-                                    let _ = disable_raw_mode();
-                                    print!("\x1b[{}A\x1b[J", options.len());
-                                    let _ = print_choices(selected);
-                                    let _ = enable_raw_mode();
-                                }
-                                KeyCode::Tab => {
-                                    if selected < options.len() - 1 {
-                                        selected += 1;
-                                    } else {
-                                        selected = 0;
-                                    }
-                                    let _ = disable_raw_mode();
-                                    print!("\x1b[{}A\x1b[J", options.len());
-                                    let _ = print_choices(selected);
-                                    let _ = enable_raw_mode();
-                                }
-                                KeyCode::Char('1') | KeyCode::Char('a') | KeyCode::Char('y') => {
-                                    break 0;
-                                }
-                                KeyCode::Char('2') | KeyCode::Char('s') => {
-                                    break 1;
-                                }
-                                KeyCode::Char('3') | KeyCode::Char('n') | KeyCode::Char('c') => {
-                                    break 2;
-                                }
-                                KeyCode::Enter => {
-                                    break selected;
-                                }
-                                KeyCode::Esc => {
-                                    break 2;
-                                }
-                                _ => {}
+                            KeyCode::Enter => {
+                                break selected;
                             }
+                            KeyCode::Esc => {
+                                break 2;
+                            }
+                            _ => {}
                         }
                     }
-                    Ok(_) => {}
-                    Err(_) => {
-                        break 2;
-                    }
                 }
-            }
+                Ok(_) => {}
+                Err(_) => {
+                    break 2;
+                }
+            },
             Ok(false) => {}
             Err(_) => {
                 break 2;
@@ -2128,4 +2237,21 @@ fn print_shell_output(output: &mint_core::ShellOutput) {
             .map_or_else(|| "unknown".into(), |status| status.to_string()),
         output.sandboxed
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inserts_one_image_placeholder_at_cursor() {
+        let mut chars = "ask ".chars().collect::<Vec<_>>();
+        let mut cursor = chars.len();
+
+        insert_image_placeholder(&mut chars, &mut cursor);
+        insert_image_placeholder(&mut chars, &mut cursor);
+
+        assert_eq!(chars.iter().collect::<String>(), "ask [Image #1]");
+        assert_eq!(cursor, "ask [Image #1]".chars().count());
+    }
 }
