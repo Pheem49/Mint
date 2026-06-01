@@ -1,6 +1,7 @@
 use std::{
     io::{self, Write},
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -15,6 +16,7 @@ use serde_json::Value;
 const MAX_STEPS: usize = 16;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
 const SYSTEM_PROMPT: &str = r#"You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.
+You are also Mint: a cute, warm, and helpful Thai assistant. Speak politely, naturally, and sweetly in Thai when the user writes in Thai. Refer to yourself as "มิ้น" and use polite particles such as "ค่ะ" and "นะคะ" where appropriate. Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision.
 Follow an inspect -> act -> verify loop. Return exactly one JSON object per response, with no markdown:
 {"thought":"short user-visible progress note","action":"list_files|read_file|search_code|symbols|semantic_index|semantic_search|knowledge_search|mcp_tool|run_shell|verify|apply_patch|write_file|finish","input":{...}}
 
@@ -100,6 +102,7 @@ pub struct AgentResult {
 }
 
 pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Result<AgentResult> {
+    let started_at = Instant::now();
     let root = root
         .canonicalize()
         .with_context(|| format!("unable to resolve workspace root {}", root.display()))?;
@@ -107,7 +110,7 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
     let mut observation = initial_observation(task, &root, &skills);
 
     for step in 1..=MAX_STEPS {
-        let response = send_chat(
+        let response = send_chat_with_status(
             config,
             &ChatRequest {
                 message: observation,
@@ -115,20 +118,47 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
                 image_data_uri: None,
                 audio_data_uri: None,
             },
+            started_at,
         )
         .await?;
-        let decision = parse_decision(&response.text)?;
-        if !decision.thought.trim().is_empty() {
-            println!("\n{}", decision.thought.trim());
+        let decision = match parse_decision_or_finish(&response.text) {
+            Ok(decision) => decision,
+            Err(error) => {
+                let repaired = send_chat_with_status(
+                    config,
+                    &ChatRequest {
+                        message: format!(
+                            "Your previous response was not valid Mint agent JSON.\n\
+                             Return exactly one corrected JSON object with an action and input. \
+                             Do not use markdown.\n\nPrevious response:\n{}",
+                            truncate(&response.text)
+                        ),
+                        system_instruction: SYSTEM_PROMPT.into(),
+                        image_data_uri: None,
+                        audio_data_uri: None,
+                    },
+                    started_at,
+                )
+                .await?;
+                parse_decision_or_finish(&repaired.text)
+                    .with_context(|| format!("unable to repair invalid agent response: {error}"))?
+            }
+        };
+        if decision.action != "finish" && !decision.thought.trim().is_empty() {
+            println!("\n\x1b[96m• Thinking:\x1b[0m {}", decision.thought.trim());
         }
 
         if decision.action == "finish" {
             let summary = fallback(&decision.input.summary, "Task complete.").to_owned();
-            let verification = decision.input.verification.trim().to_owned();
-            println!("\n{summary}");
-            if !decision.input.verification.trim().is_empty() {
+            let verification = meaningful_verification(&decision.input.verification).to_owned();
+            println!("\n\x1b[32mMint:\x1b[0m {summary}");
+            if !verification.is_empty() {
                 println!("Verification: {verification}");
             }
+            println!(
+                "\x1b[90m─ Worked for {}\x1b[0m",
+                format_elapsed(started_at.elapsed())
+            );
             mint_core::MemoryStore::open_default()?.add_interaction(task, &summary)?;
             return Ok(AgentResult {
                 summary,
@@ -154,6 +184,52 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
     bail!("code agent reached the limit of {MAX_STEPS} steps")
 }
 
+async fn send_chat_with_status(
+    config: &MintConfig,
+    request: &ChatRequest,
+    started_at: Instant,
+) -> Result<mint_core::ChatResponse> {
+    let response = send_chat(config, request);
+    tokio::pin!(response);
+    let mut ticker = tokio::time::interval(Duration::from_secs(1));
+
+    loop {
+        tokio::select! {
+            response = &mut response => {
+                clear_working_status();
+                return Ok(response?);
+            }
+            _ = ticker.tick() => {
+                print!(
+                    "\r\x1b[2K\x1b[90m• Thinking ({} • Ctrl+C to interrupt)\x1b[0m",
+                    format_elapsed(started_at.elapsed())
+                );
+                let _ = io::stdout().flush();
+            }
+        }
+    }
+}
+
+fn clear_working_status() {
+    print!("\r\x1b[2K");
+    let _ = io::stdout().flush();
+}
+
+fn print_explored() {
+    println!("  \x1b[96m• Explored\x1b[0m");
+}
+
+fn format_elapsed(duration: Duration) -> String {
+    let total_seconds = duration.as_secs();
+    let minutes = total_seconds / 60;
+    let seconds = total_seconds % 60;
+    if minutes == 0 {
+        format!("{seconds}s")
+    } else {
+        format!("{minutes}m {seconds:02}s")
+    }
+}
+
 fn initial_observation(task: &str, root: &Path, skills: &str) -> String {
     format!(
         "Task: {task}\nWorkspace: {}\nLearned skills:\n{}\nChoose the first action. Finish immediately for casual conversation.",
@@ -175,14 +251,14 @@ async fn execute_tool(
     match decision.action.as_str() {
         "list_files" => {
             let path = workspace_path(root, &input.path)?;
-            println!("  Explored");
+            print_explored();
             println!("    List {}", relative_label(root, &path));
             let files = list_code_files(&path, input.limit.unwrap_or(100), config)?;
             Ok(serde_json::to_string_pretty(&files)?)
         }
         "read_file" => {
             let path = workspace_path(root, required(&input.path, "path")?)?;
-            println!("  Explored");
+            print_explored();
             println!("    Read {}", relative_label(root, &path));
             Ok(read_code_file(
                 &path,
@@ -193,7 +269,7 @@ async fn execute_tool(
         }
         "search_code" => {
             let path = workspace_path(root, &input.path)?;
-            println!("  Explored");
+            print_explored();
             println!(
                 "    Search {} in {}",
                 required(&input.query, "query")?,
@@ -208,7 +284,7 @@ async fn execute_tool(
         }
         "symbols" => {
             let path = workspace_path(root, &input.path)?;
-            println!("  Explored");
+            print_explored();
             println!("    Symbols {}", relative_label(root, &path));
             Ok(serde_json::to_string_pretty(&build_symbol_index(
                 &path,
@@ -218,7 +294,7 @@ async fn execute_tool(
         }
         "semantic_index" => {
             let path = workspace_path(root, &input.path)?;
-            println!("  Explored");
+            print_explored();
             println!("    Semantic index {}", relative_label(root, &path));
             Ok(serde_json::to_string_pretty(
                 &index_semantic_code(&path, config).await?,
@@ -226,7 +302,7 @@ async fn execute_tool(
         }
         "semantic_search" => {
             let path = workspace_path(root, &input.path)?;
-            println!("  Explored");
+            print_explored();
             println!("    Semantic search {}", required(&input.query, "query")?);
             Ok(serde_json::to_string_pretty(
                 &search_semantic_code(
@@ -239,7 +315,7 @@ async fn execute_tool(
             )?)
         }
         "knowledge_search" => {
-            println!("  Explored");
+            print_explored();
             println!("    Knowledge search {}", required(&input.query, "query")?);
             Ok(serde_json::to_string_pretty(
                 &KnowledgeStore::open_default()?
@@ -296,13 +372,17 @@ async fn execute_tool(
 }
 
 fn run_shell(root: &Path, config: &MintConfig, command: &str) -> Result<String> {
-    println!("  Proposed command");
+    println!("  \x1b[96m• Proposed command\x1b[0m");
     println!("    {command}");
     if !confirm("Approve local shell execution? [y/N] ")? {
         return Ok(format!("User denied shell command: {command}"));
     }
-    println!("  Ran `{command}`");
     let output = run_shell_command(command, root, true, config)?;
+    if output.success {
+        println!("  \x1b[32m• Ran\x1b[0m `{command}`");
+    } else {
+        println!("  \x1b[31m• Failed\x1b[0m `{command}`");
+    }
     Ok(format!(
         "exit: {}\nsandboxed: {}\nstdout:\n{}\nstderr:\n{}",
         output
@@ -338,8 +418,61 @@ fn parse_decision(raw: &str) -> Result<AgentDecision> {
     let end = raw
         .rfind('}')
         .ok_or_else(|| anyhow!("missing JSON object"))?;
-    serde_json::from_str(&raw[start..=end])
-        .context("provider did not return a valid code-agent action")
+    let object = &raw[start..=end];
+    if let Ok(decision) = serde_json::from_str(object) {
+        return Ok(decision);
+    }
+    parse_shorthand_finish(object).context("provider did not return a valid code-agent action")
+}
+
+fn parse_shorthand_finish(raw: &str) -> Result<AgentDecision> {
+    let value: Value = serde_json::from_str(raw)?;
+    let finish = value
+        .get("finish")
+        .ok_or_else(|| anyhow!("missing action"))?;
+    Ok(AgentDecision {
+        thought: value
+            .get("thought")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .into(),
+        action: "finish".into(),
+        input: serde_json::from_value(finish.clone())?,
+    })
+}
+
+fn parse_decision_or_finish(raw: &str) -> Result<AgentDecision> {
+    match parse_decision(raw) {
+        Ok(decision) => Ok(decision),
+        Err(_) if !raw.trim().is_empty() && !raw.contains("\"action\"") => Ok(AgentDecision {
+            thought: String::new(),
+            action: "finish".into(),
+            input: AgentInput {
+                summary: raw.trim().into(),
+                ..AgentInput::default()
+            },
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+fn meaningful_verification(value: &str) -> &str {
+    let value = value.trim();
+    if matches!(
+        value.to_ascii_lowercase().as_str(),
+        "" | "not run"
+            | "not run."
+            | "no checks run"
+            | "no checks run."
+            | "not_required"
+            | "not required"
+            | "none"
+            | "n/a"
+    ) {
+        ""
+    } else {
+        value
+    }
 }
 
 fn workspace_path(root: &Path, value: &str) -> Result<PathBuf> {
@@ -412,6 +545,49 @@ mod tests {
         .unwrap();
         assert_eq!(action.action, "list_files");
         assert_eq!(action.input.path, ".");
+    }
+
+    #[test]
+    fn treats_plain_provider_text_as_a_final_answer() {
+        let action = parse_decision_or_finish("สวัสดีค่ะ มิ้นอยู่นี่นะคะ").unwrap();
+        assert_eq!(action.action, "finish");
+        assert_eq!(action.input.summary, "สวัสดีค่ะ มิ้นอยู่นี่นะคะ");
+    }
+
+    #[test]
+    fn rejects_malformed_json_instead_of_treating_it_as_a_final_answer() {
+        assert!(parse_decision_or_finish("{\"action\":\"finish\"").is_err());
+    }
+
+    #[test]
+    fn treats_casual_text_with_braces_as_a_final_answer() {
+        let action = parse_decision_or_finish("ใช้รูปแบบ {ชื่อ} ได้ครับ").unwrap();
+        assert_eq!(action.action, "finish");
+        assert_eq!(action.input.summary, "ใช้รูปแบบ {ชื่อ} ได้ครับ");
+    }
+
+    #[test]
+    fn parses_shorthand_finish_action() {
+        let action = parse_decision_or_finish(
+            r#"{"thought":"greet","finish":{"summary":"hello","verification":"not_required"}}"#,
+        )
+        .unwrap();
+        assert_eq!(action.action, "finish");
+        assert_eq!(action.input.summary, "hello");
+        assert_eq!(meaningful_verification(&action.input.verification), "");
+    }
+
+    #[test]
+    fn hides_empty_verification_placeholders() {
+        assert_eq!(meaningful_verification("not run"), "");
+        assert_eq!(meaningful_verification("no checks run"), "");
+        assert_eq!(meaningful_verification(" cargo test "), "cargo test");
+    }
+
+    #[test]
+    fn formats_elapsed_agent_time() {
+        assert_eq!(format_elapsed(Duration::from_secs(20)), "20s");
+        assert_eq!(format_elapsed(Duration::from_secs(64)), "1m 04s");
     }
 
     #[test]

@@ -98,12 +98,11 @@ async fn call_gemini(
     let api_key = provider_key(&config.api_key, "GEMINI_API_KEY");
     required_key("gemini", &api_key)?;
     let model = config.gemini_model.clone();
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={}",
-        api_key
-    );
+    let url =
+        format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent");
     let response: Value = client
         .post(url)
+        .header("x-goog-api-key", api_key)
         .json(&json!({
             "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
             "contents": [{ "role": "user", "parts": gemini_parts(request)? }]
@@ -279,8 +278,9 @@ where
     let model = config.gemini_model.clone();
     let response = client
         .post(format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={api_key}"
+            "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
         ))
+        .header("x-goog-api-key", api_key)
         .json(&json!({
             "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
             "contents": [{ "role": "user", "parts": gemini_parts(request)? }]

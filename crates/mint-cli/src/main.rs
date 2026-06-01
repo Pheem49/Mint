@@ -1094,7 +1094,6 @@ async fn run_interactive_chat() -> Result<()> {
             if let Some(message) = query.strip_prefix("/chat ") {
                 query = message.trim();
             } else {
-                println!("\n\x1b[90mRouting to Unified CLI Agent.\x1b[0m");
                 if let Err(error) =
                     agent::run_code_agent(query, &std::env::current_dir()?, &config).await
                 {
@@ -1186,16 +1185,12 @@ async fn run_interactive_chat() -> Result<()> {
 fn draw_input_box(input: &str, placeholder: &str, model: &str, path_str: &str) {
     let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let width = term_width as usize;
-
-    let border_content_width = width.saturating_sub(3);
-
-    println!(" ╭{}╮", "─".repeat(border_content_width));
-
     let prefix = "› ";
-    let content_max_len = border_content_width.saturating_sub(4);
+    let input_width = width.saturating_sub(2);
+    let content_max_len = input_width.saturating_sub(prefix.chars().count());
 
     let display_str = if input.is_empty() {
-        format!("\x1b[90m{}\x1b[0m", placeholder)
+        format!("\x1b[90m{}\x1b[39m", placeholder)
     } else {
         input.to_string()
     };
@@ -1208,12 +1203,16 @@ fn draw_input_box(input: &str, placeholder: &str, model: &str, path_str: &str) {
 
     let pad_len = content_max_len.saturating_sub(visible_len);
     let padding = " ".repeat(pad_len);
+    let blank_line = " ".repeat(input_width);
 
-    println!(" │ {}{}{} │", prefix, display_str, padding);
+    println!(" \x1b[48;2;65;69;77m{}\x1b[0m", blank_line);
+    println!(
+        " \x1b[48;2;65;69;77m{}{}{}\x1b[0m",
+        prefix, display_str, padding
+    );
+    println!(" \x1b[48;2;65;69;77m{}\x1b[0m", blank_line);
 
-    println!(" ╰{}╯", "─".repeat(border_content_width));
-
-    let agent_str = format!(" [Agent] \x1b[35m{}\x1b[0m", model);
+    let agent_str = format!(" [Agent] \x1b[33m{}\x1b[0m", model);
     let path_label = format!("path: {}", path_str);
     let agent_visible_len = " [Agent] ".len() + model.chars().count();
     let path_visible_len = path_label.chars().count();
@@ -1222,6 +1221,40 @@ fn draw_input_box(input: &str, placeholder: &str, model: &str, path_str: &str) {
     let status_padding = " ".repeat(status_pad_len);
 
     print!("{}{}{}", agent_str, status_padding, path_label);
+    let _ = io::stdout().flush();
+}
+
+fn input_cursor_column(input_chars: &[char], cursor_pos: usize) -> usize {
+    let visual_cursor_pos: usize = input_chars[..cursor_pos]
+        .iter()
+        .copied()
+        .map(char_visual_width)
+        .sum();
+    4 + visual_cursor_pos
+}
+
+fn position_input_cursor(input_chars: &[char], cursor_pos: usize) {
+    print!(
+        "\x1b[2A\x1b[{}G",
+        input_cursor_column(input_chars, cursor_pos)
+    );
+}
+
+fn clear_input_box() {
+    print!("\r\x1b[1A\x1b[J");
+}
+
+fn redraw_input_box(
+    input_chars: &[char],
+    cursor_pos: usize,
+    placeholder: &str,
+    model: &str,
+    path_str: &str,
+) {
+    clear_input_box();
+    let input: String = input_chars.iter().collect();
+    draw_input_box(&input, placeholder, model, path_str);
+    position_input_cursor(input_chars, cursor_pos);
     let _ = io::stdout().flush();
 }
 
@@ -1239,7 +1272,7 @@ fn read_line_interactive(
     let mut ctrl_d_pressed = false;
 
     draw_input_box("", placeholder, model, path_str);
-    print!("\x1b[2A\x1b[6G");
+    position_input_cursor(&input_chars, cursor_pos);
     let _ = io::stdout().flush();
 
     enable_raw_mode()?;
@@ -1255,12 +1288,8 @@ fn read_line_interactive(
                     if ctrl_d_pressed && !is_ctrl_d {
                         ctrl_d_pressed = false;
                         disable_raw_mode()?;
-                        let visual_cursor_pos: usize = input_chars[..cursor_pos]
-                            .iter()
-                            .copied()
-                            .map(char_visual_width)
-                            .sum();
-                        print!("\r\x1b[3B\r\x1b[2K\x1b[3A\x1b[{}G", 6 + visual_cursor_pos);
+                        print!("\r\x1b[3B\r\x1b[2K\x1b[3A");
+                        print!("\x1b[{}G", input_cursor_column(&input_chars, cursor_pos));
                         let _ = io::stdout().flush();
                         enable_raw_mode()?;
                     }
@@ -1273,28 +1302,23 @@ fn read_line_interactive(
                         {
                             if ctrl_d_pressed {
                                 disable_raw_mode()?;
-                                print!("\r\x1b[1A\x1b[J");
+                                clear_input_box();
                                 let _ = io::stdout().flush();
                                 break None;
                             } else {
                                 ctrl_d_pressed = true;
                                 disable_raw_mode()?;
-                                let visual_cursor_pos: usize = input_chars[..cursor_pos]
-                                    .iter()
-                                    .copied()
-                                    .map(char_visual_width)
-                                    .sum();
                                 print!(
-                                    "\r\x1b[3B\r\x1b[2K\x1b[33mPress Ctrl+D again to exit\x1b[0m\x1b[3A\x1b[{}G",
-                                    6 + visual_cursor_pos
+                                    "\r\x1b[3B\r\x1b[2K\x1b[33mPress Ctrl+D again to exit\x1b[0m\x1b[3A"
                                 );
+                                print!("\x1b[{}G", input_cursor_column(&input_chars, cursor_pos));
                                 let _ = io::stdout().flush();
                                 enable_raw_mode()?;
                             }
                         }
                         KeyCode::Char(c) => {
                             let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
-                            let max_width = (term_width as usize).saturating_sub(6);
+                            let max_width = (term_width as usize).saturating_sub(4);
                             let current_visual_width: usize =
                                 input_chars.iter().copied().map(char_visual_width).sum();
 
@@ -1303,16 +1327,13 @@ fn read_line_interactive(
                                 cursor_pos += 1;
 
                                 disable_raw_mode()?;
-                                print!("\r\x1b[1A\x1b[J");
-                                let input_str: String = input_chars.iter().collect();
-                                draw_input_box(&input_str, placeholder, model, path_str);
-                                let visual_cursor_pos: usize = input_chars[..cursor_pos]
-                                    .iter()
-                                    .copied()
-                                    .map(char_visual_width)
-                                    .sum();
-                                print!("\x1b[2A\x1b[{}G", 6 + visual_cursor_pos);
-                                let _ = io::stdout().flush();
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                );
                                 enable_raw_mode()?;
                             }
                         }
@@ -1322,16 +1343,13 @@ fn read_line_interactive(
                                 input_chars.remove(cursor_pos);
 
                                 disable_raw_mode()?;
-                                print!("\r\x1b[1A\x1b[J");
-                                let input_str: String = input_chars.iter().collect();
-                                draw_input_box(&input_str, placeholder, model, path_str);
-                                let visual_cursor_pos: usize = input_chars[..cursor_pos]
-                                    .iter()
-                                    .copied()
-                                    .map(char_visual_width)
-                                    .sum();
-                                print!("\x1b[2A\x1b[{}G", 6 + visual_cursor_pos);
-                                let _ = io::stdout().flush();
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                );
                                 enable_raw_mode()?;
                             }
                         }
@@ -1348,7 +1366,7 @@ fn read_line_interactive(
                                 .copied()
                                 .map(char_visual_width)
                                 .sum();
-                            print!("\x1b[2A\x1b[{}G", 6 + visual_cursor_pos);
+                            print!("\x1b[{}G", 4 + visual_cursor_pos);
                             let _ = io::stdout().flush();
                             enable_raw_mode()?;
                         }
@@ -1367,13 +1385,13 @@ fn read_line_interactive(
                                 .copied()
                                 .map(char_visual_width)
                                 .sum();
-                            print!("\x1b[2A\x1b[{}G", 6 + visual_cursor_pos);
+                            print!("\x1b[{}G", 4 + visual_cursor_pos);
                             let _ = io::stdout().flush();
                             enable_raw_mode()?;
                         }
                         KeyCode::Enter => {
                             disable_raw_mode()?;
-                            print!("\r\x1b[1A\x1b[J");
+                            clear_input_box();
                             let input_str: String = input_chars.iter().collect();
                             println!("\x1b[36mYou ›\x1b[0m {}", input_str);
                             let _ = io::stdout().flush();
@@ -1381,7 +1399,7 @@ fn read_line_interactive(
                         }
                         KeyCode::Esc => {
                             disable_raw_mode()?;
-                            print!("\r\x1b[1A\x1b[J");
+                            clear_input_box();
                             let _ = io::stdout().flush();
                             break None;
                         }
