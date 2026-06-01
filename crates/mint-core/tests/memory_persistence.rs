@@ -1,0 +1,88 @@
+use std::{
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use mint_core::MemoryStore;
+
+fn store(name: &str) -> MemoryStore {
+    let path = test_path(name, "sqlite");
+    let _ = std::fs::remove_file(&path);
+    MemoryStore::open(path)
+}
+
+fn test_path(name: &str, extension: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "mint-core-integration-{name}-{}-{nanos}.{extension}",
+        std::process::id(),
+    ))
+}
+
+#[test]
+fn stores_and_reads_profile_values() {
+    let store = store("profile");
+    store.set_profile("name", "Mint").unwrap();
+    assert_eq!(store.get_profile("name").unwrap().as_deref(), Some("Mint"));
+}
+
+#[test]
+fn stores_recent_interactions_with_provider_metadata() {
+    let store = store("interactions");
+    store
+        .add_interaction_with_metadata("hello", "hi", "gemini", "gemini-test")
+        .unwrap();
+    let interactions = store.recent_interactions(1).unwrap();
+    assert_eq!(interactions[0].user_text, "hello");
+    assert_eq!(interactions[0].ai_text, "hi");
+    assert_eq!(interactions[0].provider, "gemini");
+    assert_eq!(interactions[0].model, "gemini-test");
+}
+
+#[test]
+fn preserves_chat_history_when_store_is_reopened() {
+    let path = test_path("reopen-history", "sqlite");
+    let _ = std::fs::remove_file(&path);
+    let first = MemoryStore::open(&path);
+    first
+        .add_interaction_with_metadata("persist me", "still here", "openai", "gpt-test")
+        .unwrap();
+    drop(first);
+    let interactions = MemoryStore::open(&path).recent_interactions(10).unwrap();
+    assert_eq!(interactions[0].user_text, "persist me");
+    assert_eq!(interactions[0].provider, "openai");
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn clears_interactions() {
+    let store = store("clear-interactions");
+    store.add_interaction("hello", "hi").unwrap();
+    assert_eq!(store.clear_interactions().unwrap(), 1);
+    assert!(store.recent_interactions(10).unwrap().is_empty());
+}
+
+#[test]
+fn stores_workspace_session_summary() {
+    let store = store("workspace-session");
+    store
+        .save_workspace_session("/tmp/project", "implemented", "cargo test")
+        .unwrap();
+    let session = store.workspace_session("/tmp/project").unwrap().unwrap();
+    assert_eq!(session.summary, "implemented");
+    assert_eq!(session.verification, "cargo test");
+}
+
+#[test]
+fn stores_lists_and_deletes_learned_skills() {
+    let store = store("skills");
+    store
+        .add_learned_skill("guide", "/tmp/guide.md", "Use focused patches.")
+        .unwrap();
+    assert_eq!(store.learned_skills(10).unwrap()[0].name, "guide");
+    assert_eq!(store.delete_learned_skill("guide").unwrap(), 1);
+    assert!(store.learned_skills(10).unwrap().is_empty());
+}

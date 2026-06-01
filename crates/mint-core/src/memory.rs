@@ -223,7 +223,10 @@ impl MemoryStore {
             })?;
         }
         let connection = Connection::open(&self.path)?;
-        initialize(&connection)?;
+        initialize(
+            &connection,
+            memory_path().is_ok_and(|default_path| default_path == self.path),
+        )?;
         Ok(connection)
     }
 }
@@ -346,7 +349,10 @@ fn migrate_json_history(connection: &Connection) -> Result<(), rusqlite::Error> 
     Ok(())
 }
 
-fn initialize(connection: &Connection) -> Result<(), rusqlite::Error> {
+fn initialize(
+    connection: &Connection,
+    migrate_legacy_history: bool,
+) -> Result<(), rusqlite::Error> {
     connection.execute_batch(
         "PRAGMA journal_mode = WAL;
          PRAGMA synchronous = NORMAL;
@@ -391,7 +397,9 @@ fn initialize(connection: &Connection) -> Result<(), rusqlite::Error> {
         "model",
         "TEXT NOT NULL DEFAULT ''",
     )?;
-    migrate_json_history(connection)?;
+    if migrate_legacy_history {
+        migrate_json_history(connection)?;
+    }
     Ok(())
 }
 
@@ -423,83 +431,4 @@ fn learned_skill_row(row: &rusqlite::Row<'_>) -> Result<LearnedSkill, rusqlite::
         content: row.get(3)?,
         created_at: row.get(4)?,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn store(name: &str) -> MemoryStore {
-        MemoryStore::open(
-            std::env::temp_dir().join(format!("mint-core-{name}-{}.sqlite", std::process::id())),
-        )
-    }
-
-    #[test]
-    fn stores_and_reads_profile_values() {
-        let store = store("profile");
-        store.set_profile("name", "Mint").unwrap();
-        assert_eq!(store.get_profile("name").unwrap().as_deref(), Some("Mint"));
-    }
-
-    #[test]
-    fn stores_recent_interactions() {
-        let store = store("interactions");
-        store
-            .add_interaction_with_metadata("hello", "hi", "gemini", "gemini-test")
-            .unwrap();
-        let interactions = store.recent_interactions(1).unwrap();
-        assert_eq!(interactions[0].user_text, "hello");
-        assert_eq!(interactions[0].ai_text, "hi");
-        assert_eq!(interactions[0].provider, "gemini");
-        assert_eq!(interactions[0].model, "gemini-test");
-    }
-
-    #[test]
-    fn preserves_chat_history_when_store_is_reopened() {
-        let path = std::env::temp_dir().join(format!(
-            "mint-core-reopen-history-{}.sqlite",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&path);
-        let first = MemoryStore::open(&path);
-        first
-            .add_interaction_with_metadata("persist me", "still here", "openai", "gpt-test")
-            .unwrap();
-        drop(first);
-        let interactions = MemoryStore::open(&path).recent_interactions(10).unwrap();
-        assert_eq!(interactions[0].user_text, "persist me");
-        assert_eq!(interactions[0].provider, "openai");
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn clears_interactions() {
-        let store = store("clear-interactions");
-        store.add_interaction("hello", "hi").unwrap();
-        assert_eq!(store.clear_interactions().unwrap(), 1);
-        assert!(store.recent_interactions(10).unwrap().is_empty());
-    }
-
-    #[test]
-    fn stores_workspace_session_summary() {
-        let store = store("workspace-session");
-        store
-            .save_workspace_session("/tmp/project", "implemented", "cargo test")
-            .unwrap();
-        let session = store.workspace_session("/tmp/project").unwrap().unwrap();
-        assert_eq!(session.summary, "implemented");
-        assert_eq!(session.verification, "cargo test");
-    }
-
-    #[test]
-    fn stores_lists_and_deletes_learned_skills() {
-        let store = store("skills");
-        store
-            .add_learned_skill("guide", "/tmp/guide.md", "Use focused patches.")
-            .unwrap();
-        assert_eq!(store.learned_skills(10).unwrap()[0].name, "guide");
-        assert_eq!(store.delete_learned_skill("guide").unwrap(), 1);
-        assert!(store.learned_skills(10).unwrap().is_empty());
-    }
 }
