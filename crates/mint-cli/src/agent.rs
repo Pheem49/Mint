@@ -53,7 +53,8 @@ Rules:
 8. Use memory_recall to search past interactions before asking the user to repeat context.
 9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.
 10. Use run_plugin to interact with Google Workspace (Gmail, Calendar), Notion, Docker, Obsidian, Spotify, or System Metrics.
-11. Keep thought short and concrete. Use Thai for the final summary when the task is written in Thai."#;
+11. Keep thought short and concrete. Use Thai for the final summary when the task is written in Thai.
+12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately."#;
 
 #[derive(Debug, Deserialize)]
 struct AgentDecision {
@@ -149,7 +150,7 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
         let response = send_chat_with_status(
             config,
             &ChatRequest {
-                message: observation,
+                message: observation.clone(),
                 system_instruction: system_prompt.clone(),
                 image_data_uri: None,
                 audio_data_uri: None,
@@ -183,9 +184,40 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
         if decision.action != "finish" && !decision.thought.trim().is_empty() {
             println!("\n\x1b[96m• Thinking:\x1b[0m {}", decision.thought.trim());
         }
-
         if decision.action == "finish" {
-            let summary = fallback(&decision.input.summary, "Task complete.").to_owned();
+            let mut summary = decision.input.summary.trim().to_owned();
+            if let Some(err_line) = observation.lines().find(|l| l.contains("Web search error:")) {
+                let clean_err = err_line
+                    .replace("Web search error: ", "")
+                    .replace("Web search is currently unavailable.", "")
+                    .trim()
+                    .to_string();
+                let is_thai_task = task.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
+                if summary.is_empty() {
+                    if is_thai_task {
+                        summary = format!("การค้นหาข้อมูลจากเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {}\nมิ้นท์ขออภัยด้วยนะคะที่ไม่สามารถค้นหาข้อมูลเรียลไทม์ให้ได้ในขณะนี้ค่ะ", clean_err);
+                    } else {
+                        summary = format!("Web search failed due to error: {}\nI apologize, but I cannot retrieve real-time information at the moment.", clean_err);
+                    }
+                } else {
+                    let err_lower = clean_err.to_lowercase();
+                    let summary_lower = summary.to_lowercase();
+                    let already_mentions_error = if is_thai_task {
+                        summary_lower.contains("ล้มเหลว") || summary_lower.contains("ข้อผิดพลาด") || summary_lower.contains(&err_lower)
+                    } else {
+                        summary_lower.contains("fail") || summary_lower.contains("error") || summary_lower.contains(&err_lower)
+                    };
+                    if !already_mentions_error {
+                        if is_thai_task {
+                            summary.push_str(&format!("\n\n(การค้นหาเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {})", clean_err));
+                        } else {
+                            summary.push_str(&format!("\n\n(Web search failed due to error: {})", clean_err));
+                        }
+                    }
+                }
+            } else if summary.is_empty() {
+                summary = "Task complete.".to_string();
+            }
             let verification = meaningful_verification(&decision.input.verification).to_owned();
             println!("\n\x1b[32mMint:\x1b[0m {summary}");
             if !verification.is_empty() {
@@ -389,12 +421,17 @@ async fn execute_tool(
                             })
                             .collect::<Vec<_>>()
                             .join("\n");
-                        Ok(formatted)
+                        Ok(format!(
+                            "{formatted}\n\nNote: Web search succeeded. In your finish summary, you MUST state that you found this information using the search API key."
+                        ))
                     }
                 }
                 Err(e) => {
                     Ok(format!(
-                        "Web search error: {e}. Web search is currently unavailable (either because no API keys are configured or because the network is offline). Do not try to search again. Instead, use the 'finish' action to explain to the user that you cannot search the web at the moment, and answer using your pre-existing knowledge if possible."
+                        "Web search error: {e}. Web search is currently unavailable. \
+                         Do not try to search again. You MUST now proceed by calling the 'finish' action. \
+                         In your finish summary, explain to the user in Thai that the web search failed (mentioning the search error: {e}), \
+                         and then answer their query using your own pre-existing knowledge/database."
                     ))
                 }
             }
@@ -560,14 +597,25 @@ fn run_shell(root: &Path, config: &MintConfig, command: &str) -> Result<String> 
     } else {
         println!("  \x1b[31m• Failed\x1b[0m `{command}`");
     }
+    let status_str = output
+        .status
+        .map_or_else(|| "unknown".into(), |status| status.to_string());
+    
+    let mut hint = "";
+    let cmd_lower = command.to_lowercase();
+    if output.success {
+        if cmd_lower.contains("open") || cmd_lower.contains("launch") || cmd_lower.contains("chrome") || cmd_lower.contains("firefox") {
+            hint = "\nNote: Opening URLs, files, folders, or launching applications are background processes. Even if there are warnings or stdout/stderr outputs, since the command exited successfully with status 0, the operation has succeeded and you should now use the 'finish' action to inform the user.";
+        }
+    }
+
     Ok(format!(
-        "exit: {}\nsandboxed: {}\nstdout:\n{}\nstderr:\n{}",
-        output
-            .status
-            .map_or_else(|| "unknown".into(), |status| status.to_string()),
+        "exit: {}\nsandboxed: {}\nstdout:\n{}\nstderr:\n{}{}",
+        status_str,
         output.sandboxed,
         output.stdout,
-        output.stderr
+        output.stderr,
+        hint
     ))
 }
 

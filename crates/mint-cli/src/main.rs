@@ -1368,7 +1368,7 @@ async fn run_interactive_chat() -> Result<()> {
             " ".repeat(content_width - len2)
         );
         println!(
-            "\x1b[32m|_|  |_|_|_| |_|\\__|\\___|\\___|___|\\x1b[0m   \x1b[37m╰{}╯\x1b[0m",
+            "\x1b[32m|_|  |_|_|_| |_|\\__|\\___|\\___|___|\x1b[0m   \x1b[37m╰{}╯\x1b[0m",
             "─".repeat(border_len)
         );
     } else {

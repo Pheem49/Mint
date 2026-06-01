@@ -9,9 +9,34 @@ pub enum WebSearchError {
     #[error("no web search API key configured (set googleSearchApiKey or braveSearchApiKey)")]
     NoApiKey,
     #[error("web search request failed: {0}")]
-    Request(#[from] reqwest::Error),
+    Request(String),
     #[error("web search response was empty or unparseable")]
     EmptyResponse,
+}
+
+fn sanitize_reqwest_error(err: reqwest::Error) -> WebSearchError {
+    let mut msg = err.to_string();
+    if let Some(pos) = msg.find("https://www.googleapis.com") {
+        let mut end_pos = msg.len();
+        for (idx, ch) in msg[pos..].char_indices() {
+            if ch == ' ' || ch == ')' || ch == '"' || ch == '\'' || ch == ']' || ch == '}' || ch == '>' {
+                end_pos = pos + idx;
+                break;
+            }
+        }
+        msg.replace_range(pos..end_pos, "https://www.googleapis.com/customsearch/v1");
+    }
+    if let Some(pos) = msg.find("https://api.search.brave.com") {
+        let mut end_pos = msg.len();
+        for (idx, ch) in msg[pos..].char_indices() {
+            if ch == ' ' || ch == ')' || ch == '"' || ch == '\'' || ch == ']' || ch == '}' || ch == '>' {
+                end_pos = pos + idx;
+                break;
+            }
+        }
+        msg.replace_range(pos..end_pos, "https://api.search.brave.com/res/v1/web/search");
+    }
+    WebSearchError::Request(msg)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,19 +74,33 @@ pub async fn search(
         .trim()
         .to_owned();
 
+    let mut last_err = None;
+
     if !google_key.is_empty() && !google_cx.is_empty() {
-        if let Ok(hits) = google_search(query, limit, &google_key, &google_cx).await {
-            if !hits.is_empty() {
-                return Ok(hits);
+        match google_search(query, limit, &google_key, &google_cx).await {
+            Ok(hits) => {
+                if !hits.is_empty() {
+                    return Ok(hits);
+                }
+            }
+            Err(e) => {
+                last_err = Some(e);
             }
         }
     }
 
     if !brave_key.is_empty() {
-        return brave_search(query, limit, &brave_key).await;
+        match brave_search(query, limit, &brave_key).await {
+            Ok(hits) => {
+                return Ok(hits);
+            }
+            Err(e) => {
+                last_err = Some(e);
+            }
+        }
     }
 
-    Err(WebSearchError::NoApiKey)
+    Err(last_err.unwrap_or(WebSearchError::NoApiKey))
 }
 
 async fn google_search(
@@ -81,10 +120,13 @@ async fn google_search(
             ("num", num_str.as_str()),
         ])
         .send()
-        .await?
-        .error_for_status()?
+        .await
+        .map_err(sanitize_reqwest_error)?
+        .error_for_status()
+        .map_err(sanitize_reqwest_error)?
         .json()
-        .await?;
+        .await
+        .map_err(sanitize_reqwest_error)?;
 
     let items = response["items"]
         .as_array()
@@ -116,10 +158,13 @@ async fn brave_search(
         .header("X-Subscription-Token", api_key)
         .query(&[("q", query), ("count", &limit.to_string())])
         .send()
-        .await?
-        .error_for_status()?
+        .await
+        .map_err(sanitize_reqwest_error)?
+        .error_for_status()
+        .map_err(sanitize_reqwest_error)?
         .json()
-        .await?;
+        .await
+        .map_err(sanitize_reqwest_error)?;
 
     let results = response["web"]["results"]
         .as_array()
