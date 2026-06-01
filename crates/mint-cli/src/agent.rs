@@ -109,12 +109,31 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
     let skills = crate::skills::context()?;
     let mut observation = initial_observation(task, &root, &skills);
 
+    let mut system_prompt = SYSTEM_PROMPT.to_string();
+    if let Ok(memory) = mint_core::MemoryStore::open_default() {
+        if let Ok(mut interactions) = memory.recent_interactions(6) {
+            interactions.reverse();
+            let transcript = interactions
+                .into_iter()
+                .map(|item| format!("User: {}\nAssistant: {}", item.user_text, item.ai_text))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            if !transcript.is_empty() {
+                system_prompt = format!(
+                    "{}\n\nRecent conversation context:\n{}",
+                    system_prompt.trim(),
+                    transcript
+                );
+            }
+        }
+    }
+
     for step in 1..=MAX_STEPS {
         let response = send_chat_with_status(
             config,
             &ChatRequest {
                 message: observation,
-                system_instruction: SYSTEM_PROMPT.into(),
+                system_instruction: system_prompt.clone(),
                 image_data_uri: None,
                 audio_data_uri: None,
             },
@@ -133,7 +152,7 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
                              Do not use markdown.\n\nPrevious response:\n{}",
                             truncate(&response.text)
                         ),
-                        system_instruction: SYSTEM_PROMPT.into(),
+                        system_instruction: system_prompt.clone(),
                         image_data_uri: None,
                         audio_data_uri: None,
                     },
@@ -231,15 +250,22 @@ fn format_elapsed(duration: Duration) -> String {
 }
 
 fn initial_observation(task: &str, root: &Path, skills: &str) -> String {
-    format!(
-        "Task: {task}\nWorkspace: {}\nLearned skills:\n{}\nChoose the first action. Finish immediately for casual conversation.",
+    let mut observation = format!(
+        "Task: {task}\nWorkspace: {}\nLearned skills:\n{}\n",
         root.display(),
         if skills.trim().is_empty() {
             "(none)"
         } else {
             skills
         }
-    )
+    );
+    if let Ok(memory) = mint_core::MemoryStore::open_default() {
+        if let Ok(Some(name)) = memory.get_profile("name") {
+            observation.push_str(&format!("User Name: {name}\n"));
+        }
+    }
+    observation.push_str("Choose the first action. Finish immediately for casual conversation.");
+    observation
 }
 
 async fn execute_tool(
@@ -523,14 +549,7 @@ fn fallback<'a>(value: &'a str, default: &'a str) -> &'a str {
 }
 
 fn confirm(prompt: &str) -> Result<bool> {
-    print!("{prompt}");
-    io::stdout().flush()?;
-    let mut answer = String::new();
-    io::stdin().read_line(&mut answer)?;
-    Ok(matches!(
-        answer.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
+    crate::confirm(prompt)
 }
 
 #[cfg(test)]

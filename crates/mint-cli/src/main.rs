@@ -1106,7 +1106,7 @@ async fn run_interactive_chat() -> Result<()> {
             print!("\x1b[32mMint:\x1b[0m \x1b[90mThinking...\x1b[0m");
             let _ = io::stdout().flush();
 
-            let system_instruction = format!(
+            let mut system_instruction = format!(
                 "You are Mint, a cute and helpful AI assistant. You speak in a polite, friendly, and sweet Thai tone (using \"คุณ\", \"ค่ะ\", \"นะคะ\"). \
                 You are running inside the Mint CLI interactive chat. \
                 You have access to native system actions to help the user! If the user asks you to open a website, launch an app, read a file, list a folder, run code, run tests, or execute a local shell command, you can execute these actions by writing a special block at the very end of your response: \
@@ -1120,6 +1120,11 @@ async fn run_interactive_chat() -> Result<()> {
                 When you output this action tag, the CLI client will intercept it and execute it automatically! So tell the user that you are opening/doing it for them, e.g., 'เดี๋ยวมิ้นท์เปิดให้เลยนะคะ!' \
                 Write the action block on a single line at the very end of your response, starting with `[ACTION:` and ending with `]`."
             );
+            if let Ok(memory) = MemoryStore::open_default() {
+                if let Ok(Some(name)) = memory.get_profile("name") {
+                    system_instruction.push_str(&format!("\nThe user's name is {}. Refer to them by their name when appropriate.", name));
+                }
+            }
 
             let mut first_chunk = true;
             let mut filter = ActionStreamFilter::new();
@@ -1567,15 +1572,164 @@ fn read_folder_content(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+pub static SESSION_APPROVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn confirm(prompt: &str) -> Result<bool> {
+    let clean_prompt = prompt
+        .replace(" [y/N] ", "")
+        .replace(" [y/N]", "")
+        .trim()
+        .to_string();
+
+    if SESSION_APPROVED.load(std::sync::atomic::Ordering::Relaxed) {
+        println!("{} \x1b[32mApprove (session-wide)\x1b[0m", clean_prompt);
+        return Ok(true);
+    }
+
+    use crossterm::event::{self, Event, KeyCode};
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+    use crossterm::tty::IsTty;
+
+    if !io::stdout().is_tty() || enable_raw_mode().is_err() {
+        print!("{} [y/N] ", clean_prompt);
+        let _ = io::stdout().flush();
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer)?;
+        return Ok(matches!(
+            answer.trim().to_ascii_lowercase().as_str(),
+            "y" | "yes"
+        ));
+    }
+
+    let _ = disable_raw_mode();
+    println!("{}", clean_prompt);
+
+    let options = [
+        "Approve",
+        "Approve this session",
+        "No",
+    ];
+    let mut selected = 0;
+
+    let print_choices = |selected: usize| -> Result<()> {
+        for (i, opt) in options.iter().enumerate() {
+            if i == selected {
+                println!("  \x1b[36m❯ {}. {}\x1b[0m", i + 1, opt);
+            } else {
+                println!("    {}. {}", i + 1, opt);
+            }
+        }
+        io::stdout().flush()?;
+        Ok(())
+    };
+
+    print_choices(selected)?;
+
+    let _ = enable_raw_mode();
+
+    let choice = loop {
+        match event::poll(std::time::Duration::from_millis(100)) {
+            Ok(true) => {
+                match event::read() {
+                    Ok(Event::Key(key_event)) => {
+                        if key_event.kind == event::KeyEventKind::Press {
+                            let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                                && key_event
+                                    .modifiers
+                                    .contains(crossterm::event::KeyModifiers::CONTROL);
+                            if is_ctrl_c {
+                                break 2;
+                            }
+
+                            match key_event.code {
+                                KeyCode::Up => {
+                                    if selected > 0 {
+                                        selected -= 1;
+                                    } else {
+                                        selected = options.len() - 1;
+                                    }
+                                    let _ = disable_raw_mode();
+                                    print!("\x1b[{}A\x1b[J", options.len());
+                                    let _ = print_choices(selected);
+                                    let _ = enable_raw_mode();
+                                }
+                                KeyCode::Down => {
+                                    if selected < options.len() - 1 {
+                                        selected += 1;
+                                    } else {
+                                        selected = 0;
+                                    }
+                                    let _ = disable_raw_mode();
+                                    print!("\x1b[{}A\x1b[J", options.len());
+                                    let _ = print_choices(selected);
+                                    let _ = enable_raw_mode();
+                                }
+                                KeyCode::Tab => {
+                                    if selected < options.len() - 1 {
+                                        selected += 1;
+                                    } else {
+                                        selected = 0;
+                                    }
+                                    let _ = disable_raw_mode();
+                                    print!("\x1b[{}A\x1b[J", options.len());
+                                    let _ = print_choices(selected);
+                                    let _ = enable_raw_mode();
+                                }
+                                KeyCode::Char('1') | KeyCode::Char('a') | KeyCode::Char('y') => {
+                                    break 0;
+                                }
+                                KeyCode::Char('2') | KeyCode::Char('s') => {
+                                    break 1;
+                                }
+                                KeyCode::Char('3') | KeyCode::Char('n') | KeyCode::Char('c') => {
+                                    break 2;
+                                }
+                                KeyCode::Enter => {
+                                    break selected;
+                                }
+                                KeyCode::Esc => {
+                                    break 2;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(_) => {
+                        break 2;
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(_) => {
+                break 2;
+            }
+        }
+    };
+
+    let _ = disable_raw_mode();
+    print!("\x1b[{}A\x1b[J", options.len() + 1);
+
+    let result_str = match choice {
+        0 => "\x1b[32mApprove\x1b[0m",
+        1 => "\x1b[32mApprove this session\x1b[0m",
+        _ => "\x1b[31mNo\x1b[0m",
+    };
+    println!("{} {}", clean_prompt, result_str);
+    let _ = io::stdout().flush();
+
+    match choice {
+        0 => Ok(true),
+        1 => {
+            SESSION_APPROVED.store(true, std::sync::atomic::Ordering::Relaxed);
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
 fn confirm_shell_execution() -> Result<bool> {
-    print!("Approve local shell execution? [y/N] ");
-    io::stdout().flush()?;
-    let mut answer = String::new();
-    io::stdin().read_line(&mut answer)?;
-    Ok(matches!(
-        answer.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
+    confirm("Approve local shell execution? [y/N]")
 }
 
 fn print_shell_output(output: &mint_core::ShellOutput) {

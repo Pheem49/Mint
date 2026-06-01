@@ -165,6 +165,113 @@ pub fn memory_path() -> Result<PathBuf, MemoryError> {
         .ok_or(MemoryError::ConfigDirectoryUnavailable)
 }
 
+fn migrate_json_history(connection: &Connection) -> Result<(), rusqlite::Error> {
+    let config_dir = match dirs::config_dir() {
+        Some(dir) => dir,
+        None => return Ok(()),
+    };
+    let json_path = config_dir.join("mint").join("mint-chat-history.json");
+    if !json_path.exists() {
+        return Ok(());
+    }
+
+    let already_migrated: bool = connection
+        .query_row(
+            "SELECT 1 FROM user_profile WHERE key = 'json_history_migrated'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
+    if already_migrated {
+        return Ok(());
+    }
+
+    let file_content = match std::fs::read_to_string(&json_path) {
+        Ok(content) => content,
+        Err(_) => return Ok(()),
+    };
+
+    let messages: Vec<serde_json::Value> = match serde_json::from_str(&file_content) {
+        Ok(msgs) => msgs,
+        Err(_) => return Ok(()),
+    };
+
+    let mut i = 0;
+    while i < messages.len() {
+        let msg = &messages[i];
+        let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        
+        if role == "user" {
+            let user_text = msg.get("parts")
+                .and_then(|p| p.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|first| first.get("text"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("");
+                
+            let mut ai_text = "";
+            let ai_text_buf;
+            
+            if i + 1 < messages.len() {
+                let next_msg = &messages[i + 1];
+                let next_role = next_msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
+                if next_role == "model" {
+                    let raw_ai_text = next_msg.get("parts")
+                        .and_then(|p| p.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|first| first.get("text"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("");
+                    
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw_ai_text) {
+                        if let Some(resp) = parsed.get("response").and_then(|r| r.as_str()) {
+                            ai_text_buf = resp.to_string();
+                            ai_text = &ai_text_buf;
+                        } else {
+                            ai_text = raw_ai_text;
+                        }
+                    } else {
+                        ai_text = raw_ai_text;
+                    }
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            } else {
+                i += 1;
+            }
+
+            if !user_text.trim().is_empty() {
+                let created_at = msg.get("timestamp").and_then(|t| t.as_str()).unwrap_or("");
+                if !created_at.is_empty() {
+                    let _ = connection.execute(
+                        "INSERT INTO interaction_memories (user_text, ai_text, created_at)
+                         VALUES (?1, ?2, ?3)",
+                        params![user_text, ai_text, created_at],
+                    );
+                } else {
+                    let _ = connection.execute(
+                        "INSERT INTO interaction_memories (user_text, ai_text)
+                         VALUES (?1, ?2)",
+                        params![user_text, ai_text],
+                    );
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    let _ = connection.execute(
+        "INSERT OR REPLACE INTO user_profile (key, value, updated_at)
+         VALUES ('json_history_migrated', 'true', CURRENT_TIMESTAMP)",
+        [],
+    );
+
+    Ok(())
+}
+
 fn initialize(connection: &Connection) -> Result<(), rusqlite::Error> {
     connection.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -189,7 +296,9 @@ fn initialize(connection: &Connection) -> Result<(), rusqlite::Error> {
            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
          );",
-    )
+    )?;
+    migrate_json_history(connection)?;
+    Ok(())
 }
 
 fn learned_skill_row(row: &rusqlite::Row<'_>) -> Result<LearnedSkill, rusqlite::Error> {
