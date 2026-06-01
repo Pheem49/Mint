@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+base64.workspace = true
 dirs.workspace = true
 futures-util.workspace = true
 quick-xml.workspace = true
@@ -15,3 +16,4 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+tokio.workspace = true

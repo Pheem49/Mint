@@ -11,7 +11,7 @@ use mint_core::{
     TaskStore, apply_code_edits, assert_path_capability, build_code_patch, build_symbol_index,
     classify_shell_command, config_path, create_folder, execute_native_plugin, find_paths,
     index_semantic_code, initialize_config, inspect_code_plan, list_code_files, load_config,
-    native_plugins, orchestrate_chat, orchestrate_chat_stream,
+    native_plugins, orchestrate_chat,
     orchestrate_chat_stream_with_fallback, propose_code_edits, read_code_file,
     repository_summary, run_shell_command, search_code, search_semantic_code, set_config_value,
 };
@@ -22,6 +22,7 @@ mod image;
 mod mcp;
 mod skills;
 mod updater;
+mod onboard;
 
 #[derive(Debug, Parser)]
 #[command(name = "mint", version, about = "Mint native CLI")]
@@ -143,6 +144,8 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Configure Mint for first use.
+    Onboard,
 }
 
 #[derive(Debug, Subcommand)]
@@ -678,7 +681,7 @@ async fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&native_plugins())?)
                 }
                 PluginCommand::Run { name, instruction } => {
-                    println!("{}", execute_native_plugin(&name, &instruction)?)
+                    println!("{}", execute_native_plugin(&load_config()?, &name, &instruction).await?)
                 }
             },
             Command::Knowledge { command } => {
@@ -831,6 +834,9 @@ async fn main() -> Result<()> {
             }
             Command::ReadFolder { path } => {
                 read_folder_content(&path)?;
+            }
+            Command::Onboard => {
+                onboard::run().await?;
             }
         },
     }
@@ -1315,7 +1321,6 @@ async fn run_interactive_chat() -> Result<()> {
     let config = load_config()?;
 
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let path_str = format_path_with_tilde(&current_dir);
 
     let provider = &config.ai_provider.clone();
     let model = active_model(provider, &config).to_owned();

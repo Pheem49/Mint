@@ -6,10 +6,10 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use mint_core::{
-    ChatRequest, CodeEdit, CodePatchHunk, KnowledgeStore, MintConfig, MemoryStore,
+    ChatRequest, CodeEdit, CodePatchHunk, KnowledgeStore, MintConfig,
     apply_code_edits, build_code_patch, build_symbol_index, index_semantic_code, list_code_files,
     propose_code_edits, read_code_file, run_shell_command, search_code, search_semantic_code,
-    send_chat,
+    send_chat, execute_native_plugin,
 };
 use mint_core::web_search as ws;
 use serde::Deserialize;
@@ -20,7 +20,7 @@ const MAX_OBSERVATION_BYTES: usize = 16_000;
 const SYSTEM_PROMPT: &str = r#"You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.
 You are also Mint: a cute, warm, and helpful Thai assistant. Speak politely, naturally, and sweetly in Thai when the user writes in Thai. Refer to yourself as "มิ้น" and use polite particles such as "ค่ะ" and "นะคะ" where appropriate. Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision.
 Follow an inspect -> act -> verify loop. Return exactly one JSON object per response, with no markdown:
-{"thought":"short user-visible progress note","action":"list_files|read_file|search_code|symbols|semantic_index|semantic_search|knowledge_search|web_search|memory_recall|note_write|mcp_tool|run_shell|verify|apply_patch|write_file|finish","input":{...}}
+{"thought":"short user-visible progress note","action":"list_files|read_file|search_code|symbols|semantic_index|semantic_search|knowledge_search|web_search|memory_recall|note_write|run_plugin|mcp_tool|run_shell|verify|apply_patch|write_file|finish","input":{...}}
 
 Input formats:
 - list_files: {"path":".","limit":100}
@@ -33,6 +33,7 @@ Input formats:
 - web_search: {"query":"search terms","limit":5}
 - memory_recall: {"query":"what did user say about X"}
 - note_write: {"path":"filename.md","content":"note content"}
+- run_plugin: {"name":"gmail|google_calendar|notion|docker|spotify|obsidian|system_metrics","instruction":"instruction string"}
 - mcp_tool: {"server":"configured-server","tool":"tool-name","arguments":{}}
 - run_shell: {"command":"non-destructive command"}
 - verify: {"commands":["cargo test","npm test"]}
@@ -51,7 +52,8 @@ Rules:
 7. Use web_search when the user asks to look something up online or needs current information.
 8. Use memory_recall to search past interactions before asking the user to repeat context.
 9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.
-10. Keep thought short and concrete. Use Thai for the final summary when the task is written in Thai."#;
+10. Use run_plugin to interact with Google Workspace (Gmail, Calendar), Notion, Docker, Obsidian, Spotify, or System Metrics.
+11. Keep thought short and concrete. Use Thai for the final summary when the task is written in Thai."#;
 
 #[derive(Debug, Deserialize)]
 struct AgentDecision {
@@ -96,6 +98,10 @@ struct AgentInput {
     // note_write destination (relative to ~/.config/mint/notes/)
     #[serde(default)]
     note_path: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    instruction: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -386,7 +392,11 @@ async fn execute_tool(
                         Ok(formatted)
                     }
                 }
-                Err(e) => Ok(format!("Web search error: {e}")),
+                Err(e) => {
+                    Ok(format!(
+                        "Web search error: {e}. Web search is currently unavailable (either because no API keys are configured or because the network is offline). Do not try to search again. Instead, use the 'finish' action to explain to the user that you cannot search the web at the moment, and answer using your pre-existing knowledge if possible."
+                    ))
+                }
             }
         }
         "memory_recall" => {
@@ -476,6 +486,17 @@ async fn execute_tool(
                 .with_context(|| format!("cannot write note: {}", note_path.display()))?;
             println!("  Note saved: {}", note_path.display());
             Ok(format!("Note saved to {}", note_path.display()))
+        }
+
+        "run_plugin" => {
+            let name = required(&input.name, "name")?;
+            let instruction = required(&input.instruction, "instruction")?;
+            print_explored();
+            println!("    Run plugin {name}: {instruction}");
+            if !confirm(&format!("Approve running plugin '{name}'? [y/N] "))? {
+                return Ok(format!("User denied plugin execution: {name}"));
+            }
+            Ok(execute_native_plugin(config, name, instruction).await?)
         }
 
         "mcp_tool" => {
