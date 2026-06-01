@@ -3,6 +3,8 @@ use mint_core::MintConfig;
 use reqwest::Client;
 use serde_json::{Value, json};
 
+use crate::discord_rpc;
+
 pub async fn execute_plugin(
     config: &MintConfig,
     name: &str,
@@ -12,8 +14,10 @@ pub async fn execute_plugin(
         "gmail" => gmail(config, instruction).await,
         "google_calendar" => calendar(config, instruction).await,
         "notion" => notion(config, instruction).await,
-        "discord" => Err("Discord desktop RPC plugin has not been implemented; the legacy plugin only simulated success".into()),
-        other => mint_core::execute_native_plugin(other, instruction).map_err(|error| error.to_string()),
+        "discord" => discord_rpc::set_activity(config, instruction),
+        other => {
+            mint_core::execute_native_plugin(other, instruction).map_err(|error| error.to_string())
+        }
     }
 }
 

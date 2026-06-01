@@ -3,9 +3,11 @@ use std::{
     fs,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    process::Command,
 };
 
-use rusqlite::{Connection, params};
+use quick_xml::{Reader, events::Event};
+use rusqlite::{Connection, params, types::Type};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -32,6 +34,8 @@ pub enum KnowledgeError {
     TooLarge(PathBuf),
     #[error("native text indexing does not support this file type yet: {0}")]
     UnsupportedFileType(PathBuf),
+    #[error("unable to extract text from {path}: {message}")]
+    Extract { path: PathBuf, message: String },
     #[error("knowledge file does not contain readable text: {0}")]
     Empty(PathBuf),
 }
@@ -55,6 +59,7 @@ pub struct KnowledgeSource {
 pub struct KnowledgeHit {
     pub source: String,
     pub text: String,
+    pub score: f32,
 }
 
 impl KnowledgeStore {
@@ -80,10 +85,7 @@ impl KnowledgeStore {
         if !supported(&path) {
             return Err(KnowledgeError::UnsupportedFileType(path));
         }
-        let content = fs::read_to_string(&path).map_err(|source| KnowledgeError::Read {
-            path: path.clone(),
-            source,
-        })?;
+        let content = extract_text(&path)?;
         if content.trim().is_empty() {
             return Err(KnowledgeError::Empty(path));
         }
@@ -115,8 +117,8 @@ impl KnowledgeStore {
         )?;
         for chunk in &chunks {
             connection.execute(
-                "INSERT INTO chunks (source_id, text, embedding) VALUES (?1, ?2, NULL)",
-                params![source_id, chunk],
+                "INSERT INTO chunks (source_id, text, embedding) VALUES (?1, ?2, ?3)",
+                params![source_id, chunk, encode_embedding(&embedding(chunk))],
             )?;
         }
         Ok(chunks.len())
@@ -142,26 +144,33 @@ impl KnowledgeStore {
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<KnowledgeHit>, KnowledgeError> {
         let connection = self.connection()?;
+        let query_embedding = embedding(query);
         let mut statement = connection.prepare(
-            "SELECT sources.name, chunks.text
-             FROM chunks
-             JOIN sources ON sources.id = chunks.source_id
-             WHERE chunks.text LIKE ?1
-             ORDER BY chunks.id DESC
-             LIMIT ?2",
+            "SELECT sources.name, chunks.text, chunks.embedding
+             FROM chunks JOIN sources ON sources.id = chunks.source_id",
         )?;
-        statement
-            .query_map(
-                params![format!("%{}%", query.trim()), limit as i64],
-                |row| {
-                    Ok(KnowledgeHit {
-                        source: row.get(0)?,
-                        text: row.get(1)?,
+        let mut hits = statement
+            .query_map([], |row| {
+                let text: String = row.get(1)?;
+                let vector = row
+                    .get::<_, Option<Vec<u8>>>(2)?
+                    .map(|raw| {
+                        decode_embedding(&raw).map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(2, Type::Blob, error.into())
+                        })
                     })
-                },
-            )?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Into::into)
+                    .transpose()?
+                    .unwrap_or_else(|| embedding(&text));
+                Ok(KnowledgeHit {
+                    source: row.get(0)?,
+                    text,
+                    score: cosine_similarity(&query_embedding, &vector),
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        hits.sort_by(|left, right| right.score.total_cmp(&left.score));
+        hits.truncate(limit);
+        Ok(hits)
     }
 
     fn connection(&self) -> Result<Connection, KnowledgeError> {
@@ -203,6 +212,9 @@ fn supported(path: &Path) -> bool {
                 extension.to_ascii_lowercase().as_str(),
                 "txt"
                     | "md"
+                    | "pdf"
+                    | "docx"
+                    | "xlsx"
                     | "json"
                     | "toml"
                     | "yaml"
@@ -217,6 +229,114 @@ fn supported(path: &Path) -> bool {
                     | "css"
             )
         })
+}
+
+fn extract_text(path: &Path) -> Result<String, KnowledgeError> {
+    match extension(path).as_str() {
+        "pdf" => command_text(path, "pdftotext", &["-layout"], Some("-")),
+        "docx" => {
+            let xml = command_text(path, "unzip", &["-p"], Some("word/document.xml"))?;
+            xml_text(&xml, &["w:t", "w:tab", "w:br", "w:p"])
+        }
+        "xlsx" => extract_xlsx(path),
+        _ => fs::read_to_string(path).map_err(|source| KnowledgeError::Read {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn extract_xlsx(path: &Path) -> Result<String, KnowledgeError> {
+    let files = command_text(path, "unzip", &["-Z1"], None)?;
+    let mut text = String::new();
+    for entry in files.lines().filter(|entry| {
+        *entry == "xl/sharedStrings.xml"
+            || (entry.starts_with("xl/worksheets/") && entry.ends_with(".xml"))
+    }) {
+        let xml = command_text(path, "unzip", &["-p"], Some(entry))?;
+        let extracted = xml_text(&xml, &["t", "v", "row"])?;
+        if !extracted.trim().is_empty() {
+            text.push_str(&format!("\nSheet XML: {entry}\n{extracted}\n"));
+        }
+    }
+    Ok(text)
+}
+
+fn command_text(
+    path: &Path,
+    program: &'static str,
+    prefix: &[&str],
+    suffix: Option<&str>,
+) -> Result<String, KnowledgeError> {
+    let mut command = Command::new(program);
+    command.args(prefix).arg(path);
+    if let Some(suffix) = suffix {
+        command.arg(suffix);
+    }
+    let output = command.output().map_err(|error| KnowledgeError::Extract {
+        path: path.to_path_buf(),
+        message: format!("unable to run {program}: {error}"),
+    })?;
+    if !output.status.success() {
+        return Err(KnowledgeError::Extract {
+            path: path.to_path_buf(),
+            message: format!(
+                "{program} exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn xml_text(xml: &str, text_elements: &[&str]) -> Result<String, KnowledgeError> {
+    let mut reader = Reader::from_str(xml);
+    let mut active = false;
+    let mut output = String::new();
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(element)) => {
+                let name = String::from_utf8_lossy(element.name().as_ref()).into_owned();
+                active = text_elements.contains(&name.as_str());
+                if matches!(name.as_str(), "w:p" | "row") {
+                    output.push('\n');
+                }
+            }
+            Ok(Event::Empty(element)) => {
+                let name = String::from_utf8_lossy(element.name().as_ref()).into_owned();
+                if matches!(name.as_str(), "w:tab") {
+                    output.push('\t');
+                } else if matches!(name.as_str(), "w:br") {
+                    output.push('\n');
+                }
+            }
+            Ok(Event::Text(text)) if active => {
+                output.push_str(&text.decode().map_err(|error| KnowledgeError::Extract {
+                    path: PathBuf::from("<xml>"),
+                    message: error.to_string(),
+                })?);
+                output.push(' ');
+            }
+            Ok(Event::End(_)) => active = false,
+            Ok(Event::Eof) => break,
+            Err(error) => {
+                return Err(KnowledgeError::Extract {
+                    path: PathBuf::from("<xml>"),
+                    message: error.to_string(),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(output)
+}
+
+fn extension(path: &Path) -> String {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
 }
 
 fn chunks(text: &str) -> Vec<String> {
@@ -240,6 +360,51 @@ fn content_hash(content: &str) -> String {
     format!("{:016x}", hasher.finish())
 }
 
+const EMBEDDING_DIMENSIONS: usize = 256;
+
+fn embedding(text: &str) -> Vec<f32> {
+    let mut vector = vec![0.0; EMBEDDING_DIMENSIONS];
+    for token in text
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+    {
+        let mut hasher = DefaultHasher::new();
+        token.to_lowercase().hash(&mut hasher);
+        let hash = hasher.finish();
+        let index = hash as usize % EMBEDDING_DIMENSIONS;
+        vector[index] += if hash & 1 == 0 { 1.0 } else { -1.0 };
+    }
+    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        vector.iter_mut().for_each(|value| *value /= norm);
+    }
+    vector
+}
+
+fn encode_embedding(vector: &[f32]) -> Vec<u8> {
+    vector
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect()
+}
+
+fn decode_embedding(raw: &[u8]) -> Result<Vec<f32>, &'static str> {
+    if !raw.len().is_multiple_of(4) {
+        return Err("embedding blob length is invalid");
+    }
+    Ok(raw
+        .chunks_exact(4)
+        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect())
+}
+
+fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| left * right)
+        .sum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +426,66 @@ mod tests {
             store.search("native knowledge", 5).unwrap()[0].source,
             "notes.md"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extracts_docx_xml_text() {
+        assert_eq!(
+            xml_text(
+                "<w:p><w:r><w:t>Hello</w:t></w:r><w:r><w:t>Mint</w:t></w:r></w:p>",
+                &["w:t", "w:p"]
+            )
+            .unwrap()
+            .trim(),
+            "Hello Mint"
+        );
+    }
+
+    #[test]
+    fn embedding_search_ranks_related_chunk_first() {
+        let root = std::env::temp_dir().join("mint-knowledge-embedding");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let store = KnowledgeStore::open(root.join("knowledge.sqlite"));
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            blocked_paths: vec![],
+            ..MintConfig::default()
+        };
+        let rust = root.join("rust.md");
+        let cooking = root.join("cooking.md");
+        fs::write(&rust, "Rust backend ownership borrowing cargo").unwrap();
+        fs::write(&cooking, "Pasta tomato basil kitchen recipe").unwrap();
+        store.index_file(&rust, &config).unwrap();
+        store.index_file(&cooking, &config).unwrap();
+        assert_eq!(
+            store.search("cargo rust backend", 1).unwrap()[0].source,
+            "rust.md"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn searches_legacy_chunks_without_stored_embeddings() {
+        let root = std::env::temp_dir().join("mint-knowledge-legacy-embedding");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let store = KnowledgeStore::open(root.join("knowledge.sqlite"));
+        let connection = store.connection().unwrap();
+        connection
+            .execute(
+                "INSERT INTO sources (path, name, hash) VALUES ('legacy', 'legacy.md', 'hash')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO chunks (source_id, text, embedding) VALUES (1, 'legacy rust backend', NULL)",
+                [],
+            )
+            .unwrap();
+        assert_eq!(store.search("rust", 1).unwrap()[0].source, "legacy.md");
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -54,6 +54,7 @@ pub async fn send_chat(
         "openai" | "local_openai" => call_openai(&client, config, request).await?,
         "ollama" => call_ollama(&client, config, request).await?,
         "anthropic" => call_anthropic(&client, config, request).await?,
+        "huggingface" => call_huggingface(&client, config, request).await?,
         other => return Err(ChatError::UnsupportedProvider(other.into())),
     };
     Ok(ChatResponse {
@@ -79,6 +80,7 @@ where
         "openai" | "local_openai" => stream_openai(&client, config, request, &mut on_chunk).await?,
         "ollama" => stream_ollama(&client, config, request, &mut on_chunk).await?,
         "anthropic" => stream_anthropic(&client, config, request, &mut on_chunk).await?,
+        "huggingface" => stream_huggingface(&client, config, request, &mut on_chunk).await?,
         other => return Err(ChatError::UnsupportedProvider(other.into())),
     };
     Ok(ChatResponse {
@@ -231,6 +233,38 @@ async fn call_anthropic(
     ))
 }
 
+async fn call_huggingface(
+    client: &Client,
+    config: &MintConfig,
+    request: &ChatRequest,
+) -> Result<(String, String), ChatError> {
+    let api_key = provider_key(&config.hf_api_key, "HF_TOKEN");
+    required_key("huggingface", &api_key)?;
+    let model = config.hf_model.clone();
+    let response: Value = client
+        .post("https://router.huggingface.co/v1/chat/completions")
+        .bearer_auth(api_key)
+        .json(&json!({
+            "model": model,
+            "messages": [
+                { "role": "system", "content": request.system_instruction },
+                { "role": "user", "content": request.message }
+            ]
+        }))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok((
+        model,
+        response["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or(ChatError::MissingResponseText)?
+            .into(),
+    ))
+}
+
 async fn stream_gemini<F>(
     client: &Client,
     config: &MintConfig,
@@ -362,6 +396,37 @@ where
         .await?
         .error_for_status()?;
     collect_stream(response, StreamFormat::Anthropic, on_chunk)
+        .await
+        .map(|text| (model, text))
+}
+
+async fn stream_huggingface<F>(
+    client: &Client,
+    config: &MintConfig,
+    request: &ChatRequest,
+    on_chunk: &mut F,
+) -> Result<(String, String), ChatError>
+where
+    F: FnMut(String),
+{
+    let api_key = provider_key(&config.hf_api_key, "HF_TOKEN");
+    required_key("huggingface", &api_key)?;
+    let model = config.hf_model.clone();
+    let response = client
+        .post("https://router.huggingface.co/v1/chat/completions")
+        .bearer_auth(api_key)
+        .json(&json!({
+            "model": model,
+            "stream": true,
+            "messages": [
+                { "role": "system", "content": request.system_instruction },
+                { "role": "user", "content": request.message }
+            ]
+        }))
+        .send()
+        .await?
+        .error_for_status()?;
+    collect_stream(response, StreamFormat::OpenAi, on_chunk)
         .await
         .map(|text| (model, text))
 }

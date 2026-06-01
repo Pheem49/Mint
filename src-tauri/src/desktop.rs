@@ -302,8 +302,7 @@ pub fn integration_status(config: &mint_core::MintConfig) -> Value {
             "execution": "native-stdio"
         },
         "plugins": {
-            "migrated": ["desktop-actions", "dev_tools", "docker", "obsidian", "spotify", "system_metrics"],
-            "legacyBridge": false
+            "migrated": ["desktop-actions", "dev_tools", "docker", "obsidian", "spotify", "system_metrics"]
         }
     })
 }

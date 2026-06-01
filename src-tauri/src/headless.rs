@@ -1,8 +1,8 @@
-use std::{fs, path::Path, time::Duration};
+use std::{path::Path, time::Duration};
 
 use mint_core::{
-    Capability, ChatRequest, KnowledgeStore, MintConfig, Task, TaskStore, assert_path_capability,
-    create_folder, load_config, send_chat,
+    ChatRequest, CodeEdit, KnowledgeStore, MintConfig, Task, TaskStore, load_config,
+    propose_code_edits, send_chat,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -12,8 +12,8 @@ use crate::browser::{click, navigate, read_page_text};
 
 const MAX_STEPS: usize = 10;
 const SYSTEM_PROMPT: &str = r#"You are Mint's native background task agent. Return only JSON:
-{"thought":"short progress note","action":"done|create_folder|write_file|open_url|browser_read|browser_click|knowledge_search|propose_bash","target":"path, URL, selector, query, command, or final result","data":"optional file content"}
-Use only one action per response. Never request destructive file actions. Never claim an action succeeded until its observation confirms success. Use propose_bash for shell commands; Mint will show the command but will not execute it."#;
+{"thought":"short progress note","action":"done|propose_folder|propose_write_file|open_url|browser_read|browser_click|knowledge_search|propose_bash","target":"path, URL, selector, query, command, or final result","data":"optional file content"}
+Use only one action per response. Background tasks never mutate the filesystem or execute shell commands. Use propose_folder, propose_write_file, and propose_bash so Mint can record a proposal for explicit user approval."#;
 
 #[derive(Debug, Deserialize)]
 struct AgentAction {
@@ -135,23 +135,39 @@ async fn execute_action(
     action: &AgentAction,
 ) -> Result<String, String> {
     match action.action.as_str() {
-        "create_folder" => create_folder(Path::new(&action.target), config)
-            .map(|path| format!("folder created at {}", path.display()))
-            .map_err(|error| error.to_string()),
-        "write_file" => {
-            let path = assert_path_capability(Path::new(&action.target), Capability::Write, config)
-                .map_err(|error| error.to_string())?;
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-            }
-            fs::write(&path, &action.data).map_err(|error| error.to_string())?;
+        "propose_folder" => {
             store
                 .add_artifact(
                     &task.id,
-                    json!({ "type": "file", "path": path, "description": format!("Written by native task step {step}") }),
+                    json!({ "type": "folder_proposal", "path": action.target, "description": format!("Proposed by native task step {step}; explicit approval required") }),
                 )
                 .map_err(|error| error.to_string())?;
-            Ok(format!("file written to {}", path.display()))
+            Ok(format!(
+                "folder proposal recorded but not applied: {}",
+                action.target
+            ))
+        }
+        "propose_write_file" => {
+            let root = std::env::current_dir().map_err(|error| error.to_string())?;
+            let proposal = propose_code_edits(
+                &root,
+                &[CodeEdit {
+                    path: Path::new(&action.target).to_path_buf(),
+                    content: action.data.clone(),
+                }],
+                config,
+            )
+            .map_err(|error| error.to_string())?;
+            store
+                .add_artifact(
+                    &task.id,
+                    json!({ "type": "file_edit_proposal", "proposal": proposal, "description": format!("Proposed by native task step {step}; explicit approval required") }),
+                )
+                .map_err(|error| error.to_string())?;
+            Ok(format!(
+                "file edit proposal recorded but not applied: {}",
+                action.target
+            ))
         }
         "open_url" => navigate(config, &action.target).await,
         "browser_read" => read_page_text(config).await,

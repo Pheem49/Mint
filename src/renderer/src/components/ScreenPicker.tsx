@@ -51,8 +51,8 @@ export default function ScreenPicker() {
       }
     }
 
-    if (window.electronPicker) {
-      window.electronPicker.onScreenshot((base64Data) => {
+    if (window.screenPickerApi) {
+      window.screenPickerApi.onScreenshot((base64Data) => {
         const img = new Image()
         img.onload = () => {
           setBaseImage(img)
@@ -68,7 +68,7 @@ export default function ScreenPicker() {
         img.src = base64Data
       })
 
-      window.electronPicker.onTranslationResult((thaiText) => {
+      window.screenPickerApi.onTranslationResult((thaiText) => {
         setTranslationText(thaiText)
       })
     }
@@ -137,14 +137,14 @@ export default function ScreenPicker() {
   const setOverlayInteractable = (isInteractable: boolean) => {
     if (isOverlayInteractableRef.current === isInteractable) return
     isOverlayInteractableRef.current = isInteractable
-    window.electronPicker?.setOverlayInteractable(isInteractable)
+    window.screenPickerApi?.setOverlayInteractable(isInteractable)
   }
 
   const stopTranslationMode = () => {
     setIsContinuousTranslateActive(false)
     const overlay = overlayCanvasRef.current
     if (overlay) overlay.style.pointerEvents = 'auto'
-    window.electronPicker?.stopContinuousTranslation()
+    window.screenPickerApi?.stopContinuousTranslation()
     setOverlayInteractable(true)
 
     const bg = bgCanvasRef.current
@@ -203,9 +203,9 @@ export default function ScreenPicker() {
       setTranslationBoxPosition(normRect)
       setOverlayInteractable(false)
 
-      window.electronPicker?.startContinuousTranslation(normRect)
+      window.screenPickerApi?.startContinuousTranslation(normRect)
     } else {
-      window.electronPicker?.sendSelection(croppedBase64)
+      window.screenPickerApi?.sendSelection(croppedBase64)
     }
   }
 
@@ -217,7 +217,7 @@ export default function ScreenPicker() {
           e.preventDefault()
           stopTranslationMode()
         } else {
-          window.electronPicker?.closePicker()
+          window.screenPickerApi?.closePicker()
         }
       }
     }
@@ -302,12 +302,12 @@ export default function ScreenPicker() {
 
   const handleFullscreen = () => {
     if (baseImage && !isTranslateMode) {
-      window.electronPicker?.sendSelection(baseImage.src)
+      window.screenPickerApi?.sendSelection(baseImage.src)
     }
   }
 
   const handleCancel = () => {
-    window.electronPicker?.closePicker()
+    window.screenPickerApi?.closePicker()
   }
 
   return (

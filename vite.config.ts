@@ -4,7 +4,7 @@ import { resolve } from 'path'
 
 export default defineConfig({
   root: resolve(__dirname, 'src/renderer'),
-  base: './', // Crucial for Electron to load assets via relative file:// paths
+  base: './', // Tauri loads bundled webview assets from relative paths.
   build: {
     outDir: resolve(__dirname, 'out/renderer'),
     emptyOutDir: true,

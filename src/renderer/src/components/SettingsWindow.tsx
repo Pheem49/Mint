@@ -42,10 +42,15 @@ const DEFAULT_CONFIG = {
   hfApiKey: '',
   automationBrowser: 'chromium',
   browserDebugUrl: 'http://127.0.0.1:9222/json/list',
+  browserExtensionContextUrl: 'http://127.0.0.1:3212/context',
   enableHeadlessTaskQueue: false,
+  enableAutoUpdate: false,
+  updaterEndpoint: '',
+  updaterPublicKey: '',
   telegramBotToken: '',
   enableTelegramBridge: false,
   discordBotToken: '',
+  discordApplicationId: '',
   enableDiscordBridge: false,
   slackBotToken: '',
   slackAppToken: '',
@@ -76,6 +81,8 @@ export default function SettingsWindow() {
   const [mcpCmd, setMcpCmd] = useState('')
   const [mcpArgs, setMcpArgs] = useState('')
   const [mcpEnv, setMcpEnv] = useState('')
+  const [updateMessage, setUpdateMessage] = useState('')
+  const [updateAvailable, setUpdateAvailable] = useState(false)
 
   // Load settings on mount
   useEffect(() => {
@@ -262,9 +269,37 @@ export default function SettingsWindow() {
     })
   }
 
-  const handleConnectPlugin = (plugin: string) => {
-    // Basic handler mimicking settings.js connects
-    alert(`Connecting to ${plugin}... Check desktop environment integrations.`)
+  const handleConnectPlugin = async (plugin: string) => {
+    if (plugin === 'discord') {
+      try {
+        await window.api.executeProactiveAction({ type: 'plugin', pluginName: 'discord', target: '' })
+        alert('Discord Rich Presence updated.')
+      } catch (reason) {
+        alert(String(reason))
+      }
+      return
+    }
+    alert(`Configure ${plugin} credentials, then invoke the plugin from Mint chat.`)
+  }
+
+  const handleCheckUpdates = async () => {
+    try {
+      const update = await window.settingsApi.checkForUpdates()
+      setUpdateAvailable(Boolean(update.available))
+      setUpdateMessage(update.available ? `Mint ${update.version} is available.` : 'Mint is up to date.')
+    } catch (reason) {
+      setUpdateMessage(String(reason))
+    }
+  }
+
+  const handleInstallUpdate = async () => {
+    if (!confirm('Install the signed Mint update now?')) return
+    try {
+      setUpdateMessage(await window.settingsApi.installAvailableUpdate())
+      setUpdateAvailable(false)
+    } catch (reason) {
+      setUpdateMessage(String(reason))
+    }
   }
 
   const updateField = (field: keyof typeof DEFAULT_CONFIG, value: any) => {
@@ -463,6 +498,45 @@ export default function SettingsWindow() {
                     </div>
                   )}
                 </div>
+              </section>
+
+              <section className="setting-section">
+                <div className="section-heading">
+                  <div>
+                    <p className="section-kicker">Desktop updates</p>
+                    <h2 className="section-title">Signed Tauri Channel</h2>
+                  </div>
+                  <p className="section-description">Check and explicitly install signed Tauri releases from your configured update channel.</p>
+                </div>
+                <div className="toggle-row">
+                  <div>
+                    <label>Check signed update channel</label>
+                    <p className="hint">This flag does not install updates automatically.</p>
+                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={config.enableAutoUpdate}
+                      onChange={(e) => updateField('enableAutoUpdate', e.target.checked)}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                </div>
+                <div className="form-grid single">
+                  <div className="setting-row">
+                    <label>Updater Endpoint</label>
+                    <input type="text" value={config.updaterEndpoint} onChange={(e) => updateField('updaterEndpoint', e.target.value)} placeholder="https://updates.example.com/latest.json" />
+                  </div>
+                  <div className="setting-row">
+                    <label>Updater Public Key</label>
+                    <textarea value={config.updaterPublicKey} onChange={(e) => updateField('updaterPublicKey', e.target.value)} placeholder="Minisign public key" />
+                  </div>
+                </div>
+                <div className="setting-actions">
+                  <button type="button" className="btn-connect" onClick={handleCheckUpdates}>Check for updates</button>
+                  {updateAvailable && <button type="button" className="btn-primary" onClick={handleInstallUpdate}>Install signed update</button>}
+                </div>
+                {updateMessage && <p className="hint">{updateMessage}</p>}
               </section>
 
               <section className="setting-section">
@@ -668,6 +742,11 @@ export default function SettingsWindow() {
                     <input type="text" value={config.browserDebugUrl} onChange={(e) => updateField('browserDebugUrl', e.target.value)} />
                     <p className="hint">Required for native tab reading and selector clicks.</p>
                   </div>
+                  <div className="setting-row">
+                    <label>Browser Extension Context Endpoint</label>
+                    <input type="text" value={config.browserExtensionContextUrl} onChange={(e) => updateField('browserExtensionContextUrl', e.target.value)} />
+                    <p className="hint">Fallback endpoint used when Chromium remote debugging is unavailable.</p>
+                  </div>
                 </div>
               </section>
 
@@ -751,6 +830,7 @@ export default function SettingsWindow() {
                   <input type="password" placeholder="Telegram bot token" value={config.telegramBotToken} onChange={(e) => updateField('telegramBotToken', e.target.value)} />
                   <label className="toggle-row"><span>Discord Gateway</span><input type="checkbox" checked={config.enableDiscordBridge} onChange={(e) => updateField('enableDiscordBridge', e.target.checked)} /></label>
                   <input type="password" placeholder="Discord bot token" value={config.discordBotToken} onChange={(e) => updateField('discordBotToken', e.target.value)} />
+                  <input type="text" placeholder="Discord application ID for Rich Presence" value={config.discordApplicationId} onChange={(e) => updateField('discordApplicationId', e.target.value)} />
                   <label className="toggle-row"><span>Slack Socket Mode</span><input type="checkbox" checked={config.enableSlackBridge} onChange={(e) => updateField('enableSlackBridge', e.target.checked)} /></label>
                   <input type="password" placeholder="Slack bot token (xoxb-...)" value={config.slackBotToken} onChange={(e) => updateField('slackBotToken', e.target.value)} />
                   <input type="password" placeholder="Slack app token (xapp-...)" value={config.slackAppToken} onChange={(e) => updateField('slackAppToken', e.target.value)} />

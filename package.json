@@ -2,7 +2,6 @@
   "name": "@pheem49/mint",
   "version": "1.5.4",
   "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
-  "main": "out/main/index.js",
   "scripts": {
     "dev:web": "vite",
     "build:web": "vite build",
@@ -16,33 +15,7 @@
     "preview": "vite preview",
     "start": "tauri dev",
     "test": "cargo test -p mint-core -p mint-cli",
-    "cli": "cargo run -p mint-cli --",
-    "legacy:dev": "node scripts/dev.js",
-    "legacy:build": "tsc -p tsconfig.node.json && tsc -p tsconfig.ui.json && vite build",
-    "legacy:start": "electron . --ozone-platform=x11",
-    "legacy:test": "jest --testPathPatterns=tests/",
-    "legacy:test:watch": "jest --testPathPatterns=tests/ --watch",
-    "legacy:build:linux": "npm run legacy:build && electron-builder --linux",
-    "legacy:build:mac": "npm run legacy:build && electron-builder --mac",
-    "legacy:build:win": "npm run legacy:build && electron-builder --win",
-    "legacy:build:all": "npm run legacy:build && electron-builder --linux --mac --win",
-    "legacy:cli": "tsc -p tsconfig.cli.json && node dist/mint-cli.js",
-    "legacy:cli:dev": "ts-node mint-cli.ts",
-    "install:desktop": "node scripts/install_linux_desktop_entry.js"
-  },
-  "jest": {
-    "testEnvironment": "node",
-    "testMatch": [
-      "**/tests/**/*.test.js"
-    ],
-    "collectCoverageFrom": [
-      "dist/src/AI_Brain/memory_store.js",
-      "dist/src/AI_Brain/knowledge_base.js",
-      "dist/src/System/config_manager.js"
-    ]
-  },
-  "bin": {
-    "mint": "dist/mint-cli.js"
+    "cli": "cargo run -p mint-cli --"
   },
   "keywords": [],
   "author": {
@@ -53,94 +26,16 @@
   "type": "commonjs",
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
-    "@google/genai": "^1.44.0",
-    "@inkjs/ui": "^2.0.0",
-    "axios": "^1.13.6",
-    "cheerio": "^1.2.0",
-    "commander": "^14.0.3",
-    "dotenv": "^17.3.1",
-    "ink": "^7.0.1",
-    "ink-text-input": "^6.0.0",
-    "mammoth": "^1.12.0",
-    "pdf-parse": "^2.4.5",
-    "react": "^19.2.5",
-    "read-excel-file": "^9.0.10",
-    "zod": "^4.4.3"
-  },
-  "peerDependenciesOptional": {
-    "puppeteer": ">=22.0.0",
-    "whatsapp-web.js": ">=1.0.0",
-    "qrcode-terminal": ">=0.12.0",
-    "discord.js": ">=14.0.0",
-    "@slack/bolt": ">=4.0.0",
-    "telegraf": ">=4.0.0",
-    "@line/bot-sdk": ">=11.0.0",
-    "express": ">=4.0.0"
+    "react": "^19.2.5"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
-    "@hazart-pkg/live2d-core": "^1.0.1",
-    "@modelcontextprotocol/sdk": "file:../../../.npm/_npx/a3241bba59c344f5/node_modules/@modelcontextprotocol/sdk",
     "@vitejs/plugin-react": "^6.0.1",
-    "electron": "^40.7.0",
-    "electron-builder": "^26.8.1",
-    "framer-motion": "^12.38.0",
-    "jest": "^30.4.0",
-    "lucide-react": "^1.9.0",
-    "pixi-live2d-display": "^0.4.0",
-    "pixi.js": "^6.5.10",
     "react-dom": "^19.2.5",
-    "ts-node": "^10.9.2",
-    "typescript": "file:../../../.npm/_npx/1bf7c3c15bf47d04/node_modules/typescript",
+    "typescript": "^6.0.3",
     "vite": "^8.0.10"
   },
   "overrides": {
     "gh-pages": "^5.0.0"
-  },
-  "build": {
-    "appId": "com.pheem49.mint",
-    "productName": "Mint",
-    "executableName": "mint-ai",
-    "artifactName": "${productName}-${version}-${arch}.${ext}",
-    "files": [
-      "out/**/*",
-      "dist/**/*",
-      "src/UI/**/*",
-      "models/**/*",
-      "assets/**/*",
-      "package.json"
-    ],
-    "linux": {
-      "icon": "assets/icon.png",
-      "executableName": "mint-ai",
-      "target": [
-        "tar.gz",
-        "deb"
-      ],
-      "category": "Utility"
-    },
-    "mac": {
-      "icon": "assets/icon.png",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "category": "public.app-category.productivity"
-    },
-    "win": {
-      "icon": "assets/icon.png",
-      "target": [
-        "nsis",
-        "portable"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    },
-    "deb": {
-      "packageName": "mint-ai",
-      "artifactName": "mint-ai_${version}_${arch}.${ext}"
-    }
   }
 }

@@ -36,6 +36,9 @@ interface Window {
   };
   settingsApi: {
     getSettings: () => Promise<any>;
+    getUpdaterStatus: () => Promise<any>;
+    checkForUpdates: () => Promise<any>;
+    installAvailableUpdate: () => Promise<any>;
     saveSettings: (config: any) => Promise<any>;
     closeSettings: () => void;
     quitApp: () => void;
@@ -52,7 +55,7 @@ interface Window {
     getSettings: () => Promise<any>;
     onSettingsChanged: (callback: (config: any) => void) => void;
   };
-  electronPicker: {
+  screenPickerApi: {
     onScreenshot: (callback: (data: string) => void) => void;
     sendSelection: (base64Image: string) => void;
     startContinuousTranslation: (rect: any) => void;
@@ -64,8 +67,6 @@ interface Window {
   widgetAPI: {
     onStateChange: (callback: (state: any) => void) => void;
   };
-  PIXI: any;
-  Live2DManager: any;
 }
 
 interface SpeechRecognition extends EventTarget {
@@ -103,4 +104,3 @@ interface SpeechRecognitionAlternative {
   readonly transcript: string;
   readonly confidence: number;
 }
-

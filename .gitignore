@@ -17,12 +17,6 @@ mint-config.json
 workflows.json
 mint-chat-history.json
 
-# Documentation
-# (Moved out of ignore)
-RELEASE_NOTES.md
-BUILD_AND_RELEASE.md
-NPM_PUBLISH_GUIDE.md
-GUIDE_TH.md
 # ==========================
 # Generated Build Output
 # ==========================

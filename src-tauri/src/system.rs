@@ -38,15 +38,22 @@ pub async fn smart_context() -> SmartContext {
 }
 
 async fn browser_context(active_window: &Option<Value>) -> Option<Value> {
-    let name = active_window.as_ref()?["appName"]
-        .as_str()?
-        .to_ascii_lowercase();
-    if !["chrome", "chromium", "brave", "edge"]
-        .iter()
-        .any(|browser| name.contains(browser))
-    {
-        return None;
+    let is_chromium = active_window
+        .as_ref()
+        .and_then(|window| window["appName"].as_str())
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|name| {
+            ["chrome", "chromium", "brave", "edge"]
+                .iter()
+                .any(|browser| name.contains(browser))
+        });
+    if is_chromium && let Some(context) = chromium_context().await {
+        return Some(context);
     }
+    browser_extension_context().await
+}
+
+async fn chromium_context() -> Option<Value> {
     let endpoint = load_config()
         .ok()
         .and_then(|config| {
@@ -76,6 +83,35 @@ async fn browser_context(active_window: &Option<Value>) -> Option<Value> {
                 "source": "chromium-remote-debug"
             })
         })
+}
+
+async fn browser_extension_context() -> Option<Value> {
+    let endpoint = load_config()
+        .ok()
+        .and_then(|config| {
+            config
+                .extra
+                .get("browserExtensionContextUrl")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "http://127.0.0.1:3212/context".into());
+    if !(endpoint.starts_with("http://127.0.0.1:") || endpoint.starts_with("http://localhost:")) {
+        return None;
+    }
+    let context: Value = Client::new()
+        .get(endpoint)
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    Some(json!({
+        "title": context["title"],
+        "url": context["url"],
+        "source": "browser-extension"
+    }))
 }
 
 pub fn run_system_automation(target: &str, approved: bool) -> Result<String, String> {

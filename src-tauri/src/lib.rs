@@ -1,6 +1,7 @@
 mod browser;
 mod channels;
 mod desktop;
+mod discord_rpc;
 mod events;
 mod headless;
 mod integrations;
@@ -9,6 +10,8 @@ mod plugins;
 mod proactive;
 mod system;
 mod tts;
+mod updater;
+mod weather;
 mod webhooks;
 mod workflows;
 
@@ -26,8 +29,9 @@ use events::start_system_events;
 use headless::{run_next_task, start_headless_queue};
 use integrations::{channel_inventory, configured_mcp_servers, list_plugins};
 use mint_core::{
-    ChatRequest, ChatResponse, InteractionMemory, MemoryStore, MintConfig, classify_shell_command,
-    config_path, load_config, orchestrate_chat, orchestrate_chat_stream, save_config,
+    AppliedCodeEdit, ChatRequest, ChatResponse, CodeEdit, CodeEditProposal, InteractionMemory,
+    MemoryStore, MintConfig, apply_code_edits, classify_shell_command, config_path, load_config,
+    orchestrate_chat, orchestrate_chat_stream, propose_code_edits, save_config,
 };
 use pictures::{PictureEntry, list_saved_pictures, save_chat_images};
 use plugins::execute_plugin;
@@ -46,6 +50,11 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tts::{TtsUrl, google_tts_urls};
+use updater::{
+    AvailableUpdate, UpdateChannelStatus, check as check_update, install as install_update,
+    status as updater_status,
+};
+use weather::{WeatherReport, weather};
 use webhooks::start_webhooks;
 use workflows::{load_workflows, start_monitor, workflows_path};
 
@@ -81,6 +90,28 @@ fn get_runtime_status() -> Result<RuntimeStatus, String> {
 #[tauri::command]
 fn get_config() -> Result<MintConfig, String> {
     load_config().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_updater_status() -> Result<UpdateChannelStatus, String> {
+    Ok(updater_status(
+        &load_config().map_err(|error| error.to_string())?,
+    ))
+}
+
+#[tauri::command]
+async fn check_for_updates(app: AppHandle) -> Result<AvailableUpdate, String> {
+    check_update(&app, &load_config().map_err(|error| error.to_string())?).await
+}
+
+#[tauri::command]
+async fn install_available_update(app: AppHandle, approved: bool) -> Result<String, String> {
+    install_update(
+        &app,
+        &load_config().map_err(|error| error.to_string())?,
+        approved,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -147,6 +178,39 @@ fn save_pictures(
 fn get_tts_urls(text: String) -> Result<Vec<TtsUrl>, String> {
     let language = load_config().map_err(|error| error.to_string())?.language;
     Ok(google_tts_urls(&text, &language))
+}
+
+#[tauri::command]
+async fn get_weather(city: String) -> Result<WeatherReport, String> {
+    weather(&city).await
+}
+
+#[tauri::command]
+fn propose_desktop_code_edits(
+    root: String,
+    edits: Vec<CodeEdit>,
+) -> Result<CodeEditProposal, String> {
+    propose_code_edits(
+        std::path::Path::new(&root),
+        &edits,
+        &load_config().map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn apply_desktop_code_edits(
+    root: String,
+    edits: Vec<CodeEdit>,
+    approval_token: String,
+) -> Result<Vec<AppliedCodeEdit>, String> {
+    apply_code_edits(
+        std::path::Path::new(&root),
+        &edits,
+        &approval_token,
+        &load_config().map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -389,6 +453,7 @@ fn install_shortcuts(app: &AppHandle) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             install_tray(app.handle())?;
             install_shortcuts(app.handle())?;
@@ -410,6 +475,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
             get_config,
+            get_updater_status,
+            check_for_updates,
+            install_available_update,
             update_config,
             inspect_shell_command,
             send_chat_message,
@@ -418,6 +486,9 @@ pub fn run() {
             list_pictures,
             save_pictures,
             get_tts_urls,
+            get_weather,
+            propose_desktop_code_edits,
+            apply_desktop_code_edits,
             open_window,
             hide_desktop_window,
             close_desktop_window,

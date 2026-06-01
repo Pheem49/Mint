@@ -1,8 +1,8 @@
 # Mint Tauri Migration
 
-Mint 2 is being rewritten alongside the existing Electron application. The
-Electron code remains available as a behavioral reference until the Tauri
-replacement covers the required desktop and CLI workflows.
+Mint 2 now runs on Tauri v2 with a Rust backend and a React TypeScript webview.
+The historical desktop and Node CLI runtime has been removed after the native
+replacement covered the required desktop and CLI workflows.
 
 ## New Architecture
 
@@ -44,6 +44,8 @@ sudo apt-get install -y \
   libwebkit2gtk-4.1-dev \
   libayatana-appindicator3-dev \
   librsvg2-dev \
+  poppler-utils \
+  unzip \
   patchelf
 ```
 
@@ -59,14 +61,48 @@ sudo apt-get install -y \
    Slack Socket Mode, LINE webhook, WhatsApp Cloud API webhook, selected HTTP plugins, local
    plugins, safe Chromium DevTools automation, proactive screen suggestions, picture library,
    Google TTS URL generation, multimodal Gemini chat, system event monitoring, opt-in headless
-   task processing, and text/Markdown local knowledge search migrated.
-6. Remove Electron runtime and the legacy JavaScript compatibility UI.
+   task processing, PDF/DOCX/XLSX local knowledge extraction, and read-only native code workspace
+   inspection migrated. Signed Tauri update check and explicitly approved installation are
+   available after a release endpoint and signing key are configured.
+6. Historical desktop runtime, legacy npm scripts, compatibility sources, and Node-only
+   dependencies removed.
 
 ## Remaining Compatibility Work
 
-- Add webhook forwarding documentation for exposing local LINE and WhatsApp Cloud listeners.
-- Extend smart context with a browser extension fallback when Chromium remote debugging is unavailable.
-- Port the remaining advanced code-agent workflow that still lives under `src/CLI`.
-- Add native PDF, DOCX, and XLSX extraction plus embedding search parity for local knowledge.
-- Replace the legacy npm updater with a signed Tauri desktop update channel.
-- Remove Electron dependencies only after the replacement workflows are exercised interactively.
+- Exercise signed updater installation against a published release endpoint and public key.
+- Package a browser extension that serves the optional smart-context fallback endpoint.
+
+## Webhook Forwarding
+
+Mint binds webhook listeners to localhost so the desktop backend is not directly exposed to the
+network. Use a TLS forwarding service such as Cloudflare Tunnel or ngrok and keep signature
+verification enabled. See [`docs/WEBHOOK_FORWARDING.md`](docs/WEBHOOK_FORWARDING.md) for the
+standalone setup guide.
+
+LINE listens on `http://127.0.0.1:3000/callback`:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:3000
+```
+
+Register the resulting HTTPS URL with `/callback` appended in the LINE Developers Console.
+Configure `lineChannelAccessToken`, `lineChannelSecret`, and `enableLineBridge` in Mint settings.
+
+WhatsApp Cloud listens on `http://127.0.0.1:3001/`:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:3001
+```
+
+Register the resulting HTTPS URL in Meta Webhooks. Configure `whatsappCloudAccessToken`,
+`whatsappPhoneNumberId`, `whatsappVerifyToken`, `whatsappAppSecret`, and
+`enableWhatsappBridge`. The verify token must match Meta's subscription request.
+
+## Browser Extension Context Fallback
+
+When Chromium remote debugging is unavailable, Mint attempts to read the active tab from
+`http://127.0.0.1:3212/context`. A browser extension helper may serve JSON in this format:
+
+```json
+{ "title": "Active page", "url": "https://example.com/" }
+```

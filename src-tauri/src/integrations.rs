@@ -91,9 +91,9 @@ pub fn list_plugins(config: &MintConfig) -> Vec<PluginInfo> {
         },
         PluginInfo {
             name: "discord",
-            description: "Legacy implementation simulated success; native implementation intentionally unavailable",
-            migrated: false,
-            configured: false,
+            description: "Discord Rich Presence over native desktop IPC",
+            migrated: true,
+            configured: has_values(config, &["discordApplicationId"]),
         },
     ];
     plugins.extend(

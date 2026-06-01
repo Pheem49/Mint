@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 pub mod chat;
+pub mod code_tools;
 pub mod config;
 pub mod files;
 pub mod knowledge;
@@ -8,20 +9,35 @@ pub mod memory;
 pub mod orchestration;
 pub mod plugins;
 pub mod safety;
+pub mod semantic;
+pub mod shell;
+pub mod symbols;
 pub mod tasks;
 
 pub use chat::{ChatError, ChatRequest, ChatResponse, send_chat, stream_chat};
+pub use code_tools::{
+    AppliedCodeEdit, CodeEdit, CodeEditPreview, CodeEditProposal, CodeFile, CodeInspectionError,
+    CodePatchHunk, CodePlan, CodeSearchHit, RepositorySummary, apply_code_edits, build_code_patch,
+    inspect_code_plan, list_code_files, propose_code_edits, read_code_file, repository_summary,
+    search_code,
+};
 pub use config::{
     ConfigError, MintConfig, config_path, initialize_config, load_config, save_config,
     set_config_value,
 };
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
 pub use knowledge::{KnowledgeError, KnowledgeHit, KnowledgeSource, KnowledgeStore};
-pub use memory::{InteractionMemory, MemoryError, MemoryStore, memory_path};
+pub use memory::{InteractionMemory, LearnedSkill, MemoryError, MemoryStore, memory_path};
 pub use orchestration::{OrchestrationError, orchestrate_chat, orchestrate_chat_stream};
 pub use plugins::{NativePlugin, PluginError, execute_native_plugin, native_plugins};
 pub use safety::{
     Capability, SafetyError, SafetyTier, ShellClassification, assert_path_capability,
     classify_shell_command,
 };
+pub use semantic::{
+    SemanticChunk, SemanticError, SemanticHit, SemanticIndex, index_semantic_code,
+    search_semantic_code,
+};
+pub use shell::{ShellError, ShellOutput, run_shell_command};
+pub use symbols::{CodeSymbol, SymbolError, SymbolIndex, build_symbol_index};
 pub use tasks::{Task, TaskError, TaskStore, tasks_path};

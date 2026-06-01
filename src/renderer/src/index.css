@@ -44,6 +44,38 @@
   margin-top: 24px;
 }
 
+.mint-dashboard__edit {
+  display: grid;
+  gap: 10px;
+}
+
+.mint-dashboard__edit input,
+.mint-dashboard__edit textarea {
+  padding: 10px;
+}
+
+.mint-dashboard__edit textarea {
+  min-height: 120px;
+}
+
+.mint-dashboard__approval {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  background: rgb(120 53 15 / 25%);
+}
+
+.mint-dashboard__approval pre {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.mint-dashboard__approval button {
+  margin-right: 8px;
+}
+
 .mint-dashboard__chat input {
   flex: 1;
   min-width: 0;

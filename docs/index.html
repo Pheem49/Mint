@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mint | Experience the Future of Desktop Assistance</title>
-    <meta name="description" content="A powerful Electron-based AI desktop assistant powered by Google Gemini, featuring screen vision, web automation, and proactive suggestions.">
+    <meta name="description" content="A native Tauri desktop AI assistant with a Rust backend, React UI, screen vision, web automation, and proactive suggestions.">
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <link rel="icon" type="image/png" href="assets/icon.png">
@@ -24,7 +24,7 @@
         <div class="nav-links">
             <a href="#features">Features</a>
             <a href="guide.html">Documentation</a>
-            <a href="https://www.npmjs.com/package/@pheem49/mint">Resources</a>
+            <a href="https://github.com/Pheem49/Mint/releases">Resources</a>
             <a href="https://github.com/Pheem49/Mint" class="github-link">GitHub</a>
         </div>
     </nav>
@@ -35,7 +35,7 @@
         
         <div class="install-container" id="install-cmd">
             <span>$</span>
-            <code>npm install -g @pheem49/mint@latest</code>
+            <code>npm run tauri:build</code>
             <button class="copy-btn" title="Copy to clipboard" onclick="copyCommand()">
                 <i class="ph ph-copy"></i>
             </button>
@@ -120,7 +120,7 @@
 
     <script>
         function copyCommand() {
-            const cmd = "npm install -g @pheem49/mint@latest";
+            const cmd = "npm run tauri:build";
             navigator.clipboard.writeText(cmd);
             const icon = document.querySelector('.copy-btn i');
             icon.classList.replace('ph-copy', 'ph-check');

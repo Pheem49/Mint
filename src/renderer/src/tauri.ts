@@ -23,6 +23,17 @@ export interface InteractionMemory {
   createdAt: string
 }
 
+export interface CodeEdit {
+  path: string
+  content: string
+}
+
+export interface CodeEditProposal {
+  approvalRequired: boolean
+  approvalToken: string
+  edits: Array<{ path: string; existed: boolean; diff: string }>
+}
+
 export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   return invoke<RuntimeStatus>('get_runtime_status')
 }
@@ -60,6 +71,14 @@ export async function getRecentInteractions(limit = 5): Promise<InteractionMemor
   return invoke<InteractionMemory[]>('get_recent_interactions', { limit })
 }
 
+export async function proposeCodeEdits(root: string, edits: CodeEdit[]): Promise<CodeEditProposal> {
+  return invoke<CodeEditProposal>('propose_desktop_code_edits', { root, edits })
+}
+
+export async function applyCodeEdits(root: string, edits: CodeEdit[], approvalToken: string) {
+  return invoke('apply_desktop_code_edits', { root, edits, approvalToken })
+}
+
 export function installTauriAdapters() {
   const currentWindow = getCurrentWindow()
   let translationTimer: ReturnType<typeof setInterval> | null = null
@@ -74,6 +93,9 @@ export function installTauriAdapters() {
 
   window.settingsApi = {
     getSettings: () => invoke('get_config'),
+    getUpdaterStatus: () => invoke('get_updater_status'),
+    checkForUpdates: () => invoke('check_for_updates'),
+    installAvailableUpdate: () => invoke('install_available_update', { approved: true }),
     saveSettings: (config) => invoke('update_config', { config }),
     closeSettings: close,
     quitApp: () => void invoke('exit_app'),
@@ -108,7 +130,7 @@ export function installTauriAdapters() {
     },
   }
 
-  window.electronPicker = {
+  window.screenPickerApi = {
     onScreenshot: (callback) => {
       void invoke<string>('capture_silent_screen').then(callback)
     },
@@ -151,7 +173,7 @@ export function installTauriAdapters() {
     readClipboard: () => navigator.clipboard.readText(),
     writeClipboard: (text) => navigator.clipboard.writeText(text),
     getSystemInfo: async () => ({ backend: 'rust' }),
-    getWeather: async () => ({ error: 'weather bridge has not migrated yet' }),
+    getWeather: (city) => invoke('get_weather', { city }),
     getSettings: () => invoke('get_config'),
     saveSettings: (config) => invoke('update_config', { config }),
     onSettingsChanged: settingsChanged,

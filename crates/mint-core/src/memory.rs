@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -28,6 +28,16 @@ pub struct InteractionMemory {
     pub id: i64,
     pub user_text: String,
     pub ai_text: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LearnedSkill {
+    pub id: i64,
+    pub name: String,
+    pub source_path: String,
+    pub content: String,
     pub created_at: String,
 }
 
@@ -93,6 +103,49 @@ impl MemoryStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    pub fn add_learned_skill(
+        &self,
+        name: &str,
+        source_path: &str,
+        content: &str,
+    ) -> Result<LearnedSkill, MemoryError> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT INTO learned_skills (name, source_path, content, updated_at)
+             VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP)
+             ON CONFLICT(source_path) DO UPDATE SET
+               name = excluded.name,
+               content = excluded.content,
+               updated_at = CURRENT_TIMESTAMP",
+            params![name, source_path, content],
+        )?;
+        Ok(connection.query_row(
+            "SELECT id, name, source_path, content, created_at
+             FROM learned_skills WHERE source_path = ?1",
+            params![source_path],
+            learned_skill_row,
+        )?)
+    }
+
+    pub fn learned_skills(&self, limit: usize) -> Result<Vec<LearnedSkill>, MemoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, name, source_path, content, created_at
+             FROM learned_skills ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit as i64], learned_skill_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn delete_learned_skill(&self, identifier: &str) -> Result<usize, MemoryError> {
+        let connection = self.connection()?;
+        Ok(connection.execute(
+            "DELETE FROM learned_skills
+             WHERE CAST(id AS TEXT) = ?1 OR source_path = ?1 OR name = ?1",
+            params![identifier],
+        )?)
+    }
+
     fn connection(&self) -> Result<Connection, MemoryError> {
         if let Some(directory) = self.path.parent() {
             std::fs::create_dir_all(directory).map_err(|source| MemoryError::CreateDirectory {
@@ -127,8 +180,26 @@ fn initialize(connection: &Connection) -> Result<(), rusqlite::Error> {
            ai_text TEXT NOT NULL,
            keywords TEXT DEFAULT '',
            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+         );
+         CREATE TABLE IF NOT EXISTS learned_skills (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           name TEXT NOT NULL,
+           source_path TEXT NOT NULL UNIQUE,
+           content TEXT NOT NULL,
+           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
          );",
     )
+}
+
+fn learned_skill_row(row: &rusqlite::Row<'_>) -> Result<LearnedSkill, rusqlite::Error> {
+    Ok(LearnedSkill {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        source_path: row.get(2)?,
+        content: row.get(3)?,
+        created_at: row.get(4)?,
+    })
 }
 
 #[cfg(test)]
@@ -155,5 +226,16 @@ mod tests {
         let interactions = store.recent_interactions(1).unwrap();
         assert_eq!(interactions[0].user_text, "hello");
         assert_eq!(interactions[0].ai_text, "hi");
+    }
+
+    #[test]
+    fn stores_lists_and_deletes_learned_skills() {
+        let store = store("skills");
+        store
+            .add_learned_skill("guide", "/tmp/guide.md", "Use focused patches.")
+            .unwrap();
+        assert_eq!(store.learned_skills(10).unwrap()[0].name, "guide");
+        assert_eq!(store.delete_learned_skill("guide").unwrap(), 1);
+        assert!(store.learned_skills(10).unwrap().is_empty());
     }
 }

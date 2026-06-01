@@ -740,11 +740,6 @@ h1 {
   color: var(--text-main);
 }
 
-.model-shell.is-live2d-ready .model-placeholder {
-  opacity: 0 !important;
-  pointer-events: none;
-}
-
 .model-status {
   position: absolute;
   left: 50%;
@@ -791,10 +786,6 @@ h1 {
 @keyframes dot-pulse {
   0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
   40% { transform: scale(1.0); opacity: 1; }
-}
-
-.model-shell.is-live2d-ready .model-status {
-  display: none;
 }
 
 .model-shadow {

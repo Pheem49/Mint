@@ -2,7 +2,10 @@ import { type FormEvent, useEffect, useState } from 'react'
 import {
   getRecentInteractions,
   getRuntimeStatus,
+  applyCodeEdits,
+  proposeCodeEdits,
   streamChatMessage,
+  type CodeEditProposal,
   type InteractionMemory,
   type RuntimeStatus,
 } from '../tauri'
@@ -14,6 +17,11 @@ export default function MintDashboard() {
   const [reply, setReply] = useState('')
   const [interactions, setInteractions] = useState<InteractionMemory[]>([])
   const [sending, setSending] = useState(false)
+  const [editRoot, setEditRoot] = useState('')
+  const [editPath, setEditPath] = useState('')
+  const [editContent, setEditContent] = useState('')
+  const [editProposal, setEditProposal] = useState<CodeEditProposal | null>(null)
+  const [editResult, setEditResult] = useState('')
 
   useEffect(() => {
     getRuntimeStatus()
@@ -41,6 +49,33 @@ export default function MintDashboard() {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setSending(false)
+    }
+  }
+
+  async function previewEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    setEditResult('')
+    try {
+      setEditProposal(await proposeCodeEdits(editRoot || '.', [{ path: editPath, content: editContent }]))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  async function approveEdit() {
+    if (!editProposal) return
+    setError('')
+    try {
+      const result = await applyCodeEdits(
+        editRoot || '.',
+        [{ path: editPath, content: editContent }],
+        editProposal.approvalToken,
+      )
+      setEditResult(JSON.stringify(result, null, 2))
+      setEditProposal(null)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
     }
   }
 
@@ -72,6 +107,24 @@ export default function MintDashboard() {
             </form>
             {reply && <p className="mint-dashboard__reply">{reply}</p>}
             {error && <p className="mint-dashboard__error">{error}</p>}
+            <h2>Native code edit approval</h2>
+            <form className="mint-dashboard__edit" onSubmit={previewEdit}>
+              <input value={editRoot} onChange={(event) => setEditRoot(event.target.value)} placeholder="Workspace root, e.g. /home/me/project" />
+              <input required value={editPath} onChange={(event) => setEditPath(event.target.value)} placeholder="Relative target path" />
+              <textarea required value={editContent} onChange={(event) => setEditContent(event.target.value)} placeholder="Replacement file content" />
+              <button type="submit">Preview diff</button>
+            </form>
+            {editProposal && (
+              <section className="mint-dashboard__approval">
+                <strong>Approval required before writing</strong>
+                <pre>{editProposal.edits.map((edit) => edit.diff).join('\n\n')}</pre>
+                <div>
+                  <button type="button" onClick={approveEdit}>Approve and apply</button>
+                  <button type="button" onClick={() => setEditProposal(null)}>Cancel</button>
+                </div>
+              </section>
+            )}
+            {editResult && <pre className="mint-dashboard__reply">{editResult}</pre>}
             <h2>Recent native interactions</h2>
             <ul className="mint-dashboard__interactions">
               {interactions.map((interaction) => (
