@@ -6,6 +6,74 @@ use thiserror::Error;
 
 use crate::MintConfig;
 
+/// Send a chat request, automatically falling back to other configured providers
+/// if the primary one returns a recoverable error.
+/// Returns `(response, Option<fallback_provider>)`.
+pub async fn send_chat_with_fallback(
+    config: &MintConfig,
+    request: &ChatRequest,
+) -> Result<(ChatResponse, Option<String>), ChatError> {
+    match send_chat(config, request).await {
+        Ok(r) => return Ok((r, None)),
+        Err(e) if !is_recoverable(&e) => return Err(e),
+        Err(_) => {}
+    }
+    for provider in config.available_providers() {
+        if provider == config.ai_provider.as_str() {
+            continue;
+        }
+        let alt = config_for_provider(config, provider);
+        if let Ok(r) = send_chat(&alt, request).await {
+            return Ok((r, Some(provider.to_owned())));
+        }
+    }
+    // all fallbacks failed — retry primary to surface original error
+    send_chat(config, request).await.map(|r| (r, None))
+}
+
+/// Stream a chat request with automatic provider fallback.
+/// Returns `(response, Option<fallback_provider>)`.
+pub async fn stream_chat_with_fallback<F>(
+    config: &MintConfig,
+    request: &ChatRequest,
+    mut on_chunk: F,
+) -> Result<(ChatResponse, Option<String>), ChatError>
+where
+    F: FnMut(String),
+{
+    match stream_chat(config, request, &mut on_chunk).await {
+        Ok(r) => return Ok((r, None)),
+        Err(e) if !is_recoverable(&e) => return Err(e),
+        Err(_) => {}
+    }
+    for provider in config.available_providers() {
+        if provider == config.ai_provider.as_str() {
+            continue;
+        }
+        let alt = config_for_provider(config, provider);
+        if let Ok(r) = stream_chat(&alt, request, &mut on_chunk).await {
+            return Ok((r, Some(provider.to_owned())));
+        }
+    }
+    stream_chat(config, request, &mut on_chunk).await.map(|r| (r, None))
+}
+
+/// Whether an error warrants trying another provider.
+fn is_recoverable(e: &ChatError) -> bool {
+    matches!(
+        e,
+        ChatError::MissingApiKey(_) | ChatError::Request(_) | ChatError::MissingResponseText
+    )
+}
+
+/// Clone the config with a different active provider.
+fn config_for_provider(config: &MintConfig, provider: &str) -> MintConfig {
+    MintConfig {
+        ai_provider: provider.to_owned(),
+        ..config.clone()
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatRequest {

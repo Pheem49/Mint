@@ -6,10 +6,12 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use mint_core::{
-    ChatRequest, CodeEdit, CodePatchHunk, KnowledgeStore, MintConfig, apply_code_edits,
-    build_code_patch, build_symbol_index, index_semantic_code, list_code_files, propose_code_edits,
-    read_code_file, run_shell_command, search_code, search_semantic_code, send_chat,
+    ChatRequest, CodeEdit, CodePatchHunk, KnowledgeStore, MintConfig, MemoryStore,
+    apply_code_edits, build_code_patch, build_symbol_index, index_semantic_code, list_code_files,
+    propose_code_edits, read_code_file, run_shell_command, search_code, search_semantic_code,
+    send_chat,
 };
+use mint_core::web_search as ws;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -18,7 +20,7 @@ const MAX_OBSERVATION_BYTES: usize = 16_000;
 const SYSTEM_PROMPT: &str = r#"You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.
 You are also Mint: a cute, warm, and helpful Thai assistant. Speak politely, naturally, and sweetly in Thai when the user writes in Thai. Refer to yourself as "มิ้น" and use polite particles such as "ค่ะ" and "นะคะ" where appropriate. Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision.
 Follow an inspect -> act -> verify loop. Return exactly one JSON object per response, with no markdown:
-{"thought":"short user-visible progress note","action":"list_files|read_file|search_code|symbols|semantic_index|semantic_search|knowledge_search|mcp_tool|run_shell|verify|apply_patch|write_file|finish","input":{...}}
+{"thought":"short user-visible progress note","action":"list_files|read_file|search_code|symbols|semantic_index|semantic_search|knowledge_search|web_search|memory_recall|note_write|mcp_tool|run_shell|verify|apply_patch|write_file|finish","input":{...}}
 
 Input formats:
 - list_files: {"path":".","limit":100}
@@ -28,6 +30,9 @@ Input formats:
 - semantic_index: {"path":"."}
 - semantic_search: {"query":"behavior description","path":".","limit":5}
 - knowledge_search: {"query":"local knowledge query","limit":5}
+- web_search: {"query":"search terms","limit":5}
+- memory_recall: {"query":"what did user say about X"}
+- note_write: {"path":"filename.md","content":"note content"}
 - mcp_tool: {"server":"configured-server","tool":"tool-name","arguments":{}}
 - run_shell: {"command":"non-destructive command"}
 - verify: {"commands":["cargo test","npm test"]}
@@ -43,7 +48,10 @@ Rules:
 4. Shell commands and file edits require user approval. Mint handles approval after you request the tool.
 5. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.
 6. Verify code changes when possible.
-7. Keep thought short and concrete. Use Thai for the final summary when the task is written in Thai."#;
+7. Use web_search when the user asks to look something up online or needs current information.
+8. Use memory_recall to search past interactions before asking the user to repeat context.
+9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.
+10. Keep thought short and concrete. Use Thai for the final summary when the task is written in Thai."#;
 
 #[derive(Debug, Deserialize)]
 struct AgentDecision {
@@ -85,6 +93,9 @@ struct AgentInput {
     tool: String,
     #[serde(default)]
     arguments: Value,
+    // note_write destination (relative to ~/.config/mint/notes/)
+    #[serde(default)]
+    note_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -348,6 +359,125 @@ async fn execute_tool(
                     .search(required(&input.query, "query")?, input.limit.unwrap_or(5))?,
             )?)
         }
+        "web_search" => {
+            let query = required(&input.query, "query")?;
+            print_explored();
+            println!("    Web search: {query}");
+            let limit = input.limit.unwrap_or(5);
+            match ws::search(query, limit, config).await {
+                Ok(hits) => {
+                    if hits.is_empty() {
+                        Ok("No web search results found.".to_owned())
+                    } else {
+                        let formatted: String = hits
+                            .iter()
+                            .enumerate()
+                            .map(|(i, h)| {
+                                format!(
+                                    "{}. {}\n   URL: {}\n   {}\n",
+                                    i + 1,
+                                    h.title,
+                                    h.url,
+                                    h.snippet
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        Ok(formatted)
+                    }
+                }
+                Err(e) => Ok(format!("Web search error: {e}")),
+            }
+        }
+        "memory_recall" => {
+            let query = required(&input.query, "query")?;
+            print_explored();
+            println!("    Memory recall: {query}");
+            let query_lower = query.to_ascii_lowercase();
+            let mut results = Vec::new();
+
+            if let Ok(memory) = mint_core::MemoryStore::open_default() {
+                // Search recent interactions
+                if let Ok(interactions) = memory.recent_interactions(50) {
+                    for item in interactions.iter().rev() {
+                        if item.user_text.to_ascii_lowercase().contains(&query_lower)
+                            || item.ai_text.to_ascii_lowercase().contains(&query_lower)
+                        {
+                            results.push(format!(
+                                "[{}] You: {}\nMint: {}",
+                                &item.created_at[..16.min(item.created_at.len())],
+                                if item.user_text.len() > 200 {
+                                    format!("{}…", &item.user_text[..200])
+                                } else {
+                                    item.user_text.clone()
+                                },
+                                if item.ai_text.len() > 200 {
+                                    format!("{}…", &item.ai_text[..200])
+                                } else {
+                                    item.ai_text.clone()
+                                },
+                            ));
+                            if results.len() >= 5 {
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Search learned skills
+                if let Ok(skills) = memory.learned_skills(20) {
+                    for skill in &skills {
+                        if skill.content.to_ascii_lowercase().contains(&query_lower)
+                            || skill.name.to_ascii_lowercase().contains(&query_lower)
+                        {
+                            results.push(format!(
+                                "[Skill: {}]\n{}",
+                                skill.name,
+                                if skill.content.len() > 300 {
+                                    format!("{}…", &skill.content[..300])
+                                } else {
+                                    skill.content.clone()
+                                }
+                            ));
+                        }
+                    }
+                }
+            }
+
+            if results.is_empty() {
+                Ok(format!("No memory found matching: {query}"))
+            } else {
+                Ok(results.join("\n\n"))
+            }
+        }
+        "note_write" => {
+            let file_name = if !input.note_path.is_empty() {
+                input.note_path.as_str()
+            } else {
+                required(&input.path, "path")?
+            };
+            // Sanitize: only allow simple filenames, no path traversal
+            if file_name.contains("..") || file_name.contains('/') {
+                bail!("note_write path must be a simple filename (no directories or ..)");
+            }
+            let notes_dir = dirs::config_dir()
+                .ok_or_else(|| anyhow!("cannot determine config directory"))?
+                .join("mint")
+                .join("notes");
+            let note_path = notes_dir.join(file_name);
+            println!("  \x1b[96m• Proposed note write\x1b[0m");
+            println!("    {}", note_path.display());
+            if !confirm("Approve writing this note? [y/N] ")? {
+                return Ok(format!("User denied note write: {file_name}"));
+            }
+            std::fs::create_dir_all(&notes_dir)
+                .with_context(|| format!("cannot create notes directory: {}", notes_dir.display()))?;
+            std::fs::write(&note_path, &input.content)
+                .with_context(|| format!("cannot write note: {}", note_path.display()))?;
+            println!("  Note saved: {}", note_path.display());
+            Ok(format!("Note saved to {}", note_path.display()))
+        }
+
         "mcp_tool" => {
             println!("  Called MCP tool");
             println!("    {} {}", input.server, input.tool);

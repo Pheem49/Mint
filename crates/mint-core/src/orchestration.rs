@@ -4,6 +4,7 @@ use crate::{
     ChatError, ChatRequest, ChatResponse, MemoryError, MemoryStore, MintConfig, send_chat,
     stream_chat,
 };
+use crate::chat::{send_chat_with_fallback, stream_chat_with_fallback};
 
 const CONTEXT_LIMIT: usize = 6;
 
@@ -14,6 +15,7 @@ pub enum OrchestrationError {
     #[error(transparent)]
     Memory(#[from] MemoryError),
 }
+
 
 pub async fn orchestrate_chat(
     config: &MintConfig,
@@ -41,6 +43,32 @@ where
     Ok(response)
 }
 
+pub async fn orchestrate_chat_with_fallback(
+    config: &MintConfig,
+    request: &ChatRequest,
+) -> Result<(ChatResponse, Option<String>), OrchestrationError> {
+    let memory = MemoryStore::open_default()?;
+    let enriched = enrich_request(&memory, request)?;
+    let (response, fallback) = send_chat_with_fallback(config, &enriched).await?;
+    memory.add_interaction(&request.message, &response.text)?;
+    Ok((response, fallback))
+}
+
+pub async fn orchestrate_chat_stream_with_fallback<F>(
+    config: &MintConfig,
+    request: &ChatRequest,
+    on_chunk: F,
+) -> Result<(ChatResponse, Option<String>), OrchestrationError>
+where
+    F: FnMut(String),
+{
+    let memory = MemoryStore::open_default()?;
+    let enriched = enrich_request(&memory, request)?;
+    let (response, fallback) = stream_chat_with_fallback(config, &enriched, on_chunk).await?;
+    memory.add_interaction(&request.message, &response.text)?;
+    Ok((response, fallback))
+}
+
 fn enrich_request(memory: &MemoryStore, request: &ChatRequest) -> Result<ChatRequest, MemoryError> {
     let mut interactions = memory.recent_interactions(CONTEXT_LIMIT)?;
     interactions.reverse();
@@ -61,6 +89,7 @@ fn enrich_request(memory: &MemoryStore, request: &ChatRequest) -> Result<ChatReq
     }
     Ok(enriched)
 }
+
 
 #[cfg(test)]
 mod tests {

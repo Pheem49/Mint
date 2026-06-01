@@ -166,6 +166,9 @@ pub fn memory_path() -> Result<PathBuf, MemoryError> {
 }
 
 fn migrate_json_history(connection: &Connection) -> Result<(), rusqlite::Error> {
+    if cfg!(test) {
+        return Ok(());
+    }
     let config_dir = match dirs::config_dir() {
         Some(dir) => dir,
         None => return Ok(()),

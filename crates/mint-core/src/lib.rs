@@ -13,8 +13,13 @@ pub mod semantic;
 pub mod shell;
 pub mod symbols;
 pub mod tasks;
+pub mod web_search;
 
-pub use chat::{ChatError, ChatRequest, ChatResponse, send_chat, stream_chat};
+pub use chat::{
+    ChatError, ChatRequest, ChatResponse, send_chat, send_chat_with_fallback, stream_chat,
+    stream_chat_with_fallback,
+};
+
 pub use code_tools::{
     AppliedCodeEdit, CodeEdit, CodeEditPreview, CodeEditProposal, CodeFile, CodeInspectionError,
     CodePatchHunk, CodePlan, CodeSearchHit, RepositorySummary, apply_code_edits, build_code_patch,
@@ -28,7 +33,10 @@ pub use config::{
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
 pub use knowledge::{KnowledgeError, KnowledgeHit, KnowledgeSource, KnowledgeStore};
 pub use memory::{InteractionMemory, LearnedSkill, MemoryError, MemoryStore, memory_path};
-pub use orchestration::{OrchestrationError, orchestrate_chat, orchestrate_chat_stream};
+pub use orchestration::{
+    OrchestrationError, orchestrate_chat, orchestrate_chat_stream,
+    orchestrate_chat_with_fallback, orchestrate_chat_stream_with_fallback,
+};
 pub use plugins::{NativePlugin, PluginError, execute_native_plugin, native_plugins};
 pub use safety::{
     Capability, SafetyError, SafetyTier, ShellClassification, assert_path_capability,

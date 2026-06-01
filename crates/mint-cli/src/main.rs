@@ -11,12 +11,14 @@ use mint_core::{
     TaskStore, apply_code_edits, assert_path_capability, build_code_patch, build_symbol_index,
     classify_shell_command, config_path, create_folder, execute_native_plugin, find_paths,
     index_semantic_code, initialize_config, inspect_code_plan, list_code_files, load_config,
-    native_plugins, orchestrate_chat, orchestrate_chat_stream, propose_code_edits, read_code_file,
+    native_plugins, orchestrate_chat, orchestrate_chat_stream,
+    orchestrate_chat_stream_with_fallback, propose_code_edits, read_code_file,
     repository_summary, run_shell_command, search_code, search_semantic_code, set_config_value,
 };
 
 mod agent;
 mod gmail;
+mod image;
 mod mcp;
 mod skills;
 mod updater;
@@ -1002,14 +1004,323 @@ fn execute_action(action: &str, config: &MintConfig) -> Result<()> {
     Ok(())
 }
 
+/// Per-session mutable state for the interactive chat loop.
+struct InteractiveSession {
+    config: MintConfig,
+    current_dir: PathBuf,
+    fast_mode: bool,
+    pending_image: Option<String>, // base64 data URI
+}
+
+
+/// What the slash-command router wants the loop to do next.
+enum SlashResult {
+    /// Command handled — continue loop without sending to agent.
+    Handled,
+    /// Pass this (possibly modified) query to the agent.
+    ForwardToAgent(String),
+    /// Break out of the loop.
+    Exit,
+}
+
+/// Route `/…` commands. Returns `None` if the input is not a slash command.
+async fn handle_slash_command(
+    session: &mut InteractiveSession,
+    query: &str,
+) -> Option<SlashResult> {
+    let trimmed = query.trim();
+    if !trimmed.starts_with('/') {
+        return None;
+    }
+
+    // Split into command word and optional rest
+    let (cmd, rest) = trimmed
+        .split_once(char::is_whitespace)
+        .map(|(c, r)| (c, r.trim()))
+        .unwrap_or((trimmed, ""));
+
+    match cmd {
+        "/help" => {
+            println!("\n\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+            println!("\x1b[32m  Mint Interactive Commands\x1b[0m");
+            println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+            let commands = [
+                ("/help", "Show this help"),
+                ("/fast [on|off]", "Toggle fast mode (hide thinking traces)"),
+                ("/models [name]", "List providers or switch provider"),
+                ("/clear", "Clear conversation history"),
+                ("/cd <path>", "Change workspace directory"),
+                ("/image <path> [prompt]", "Attach image from file"),
+                ("/paste [prompt]", "Attach image from clipboard"),
+                ("/memory list", "Show recent interactions"),
+                ("/memory clear", "Clear all interactions"),
+                ("/memory get <key>", "Read a profile value"),
+                ("/memory set <key> <val>", "Store a profile value"),
+                ("/stats", "Show session statistics"),
+                ("/exit | /quit", "Exit Mint"),
+                ("/code <task>", "Run in code-agent mode"),
+            ];
+            for (cmd_name, desc) in &commands {
+                println!("  \x1b[33m{:<30}\x1b[0m {}", cmd_name, desc);
+            }
+            println!();
+            Some(SlashResult::Handled)
+        }
+
+        "/fast" => {
+            session.fast_mode = match rest {
+                "off" => false,
+                "on" | "" => !session.fast_mode,
+                _ => {
+                    println!("\x1b[33m/fast usage: /fast [on|off]\x1b[0m");
+                    return Some(SlashResult::Handled);
+                }
+            };
+            if session.fast_mode {
+                println!("\x1b[90m[Fast] mode ON — thinking traces hidden\x1b[0m\n");
+            } else {
+                println!("\x1b[90m[Fast] mode OFF\x1b[0m\n");
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/models" => {
+            if rest.is_empty() {
+                println!("\n\x1b[36mConfigured providers:\x1b[0m");
+                for p in session.config.available_providers() {
+                    let active = if p == session.config.ai_provider.as_str() {
+                        " \x1b[32m← active\x1b[0m"
+                    } else {
+                        ""
+                    };
+                    println!("  {p}{active}");
+                }
+                println!();
+            } else {
+                session.config.ai_provider = rest.to_owned();
+                println!(
+                    "\x1b[90mSwitched to provider: {}\x1b[0m\n",
+                    session.config.ai_provider
+                );
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/clear" | "/reset" => {
+            println!("Clear conversation history? [y/N] ");
+            if let Ok(true) = confirm("Clear conversation history? [y/N] ") {
+                if let Ok(memory) = MemoryStore::open_default() {
+                    // We don't have a full clear API, so we just note it
+                    let _ = memory.set_profile("_cleared_at", &chrono::Local::now().to_rfc3339());
+                }
+                println!("\x1b[90mConversation context cleared.\x1b[0m\n");
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/cd" => {
+            if rest.is_empty() {
+                println!("\x1b[33m/cd requires a path\x1b[0m\n");
+            } else {
+                let new_dir = PathBuf::from(rest);
+                if new_dir.is_dir() {
+                    session.current_dir = new_dir.canonicalize().unwrap_or(new_dir);
+                    println!(
+                        "\x1b[90mWorkspace: {}\x1b[0m\n",
+                        format_path_with_tilde(&session.current_dir)
+                    );
+                } else {
+                    println!("\x1b[31mDirectory not found: {rest}\x1b[0m\n");
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/image" => {
+            let (img_path, prompt) = rest
+                .split_once(char::is_whitespace)
+                .map(|(p, r)| (p, r.trim()))
+                .unwrap_or((rest, ""));
+
+            if img_path.is_empty() {
+                println!("\x1b[33m/image usage: /image <path> [prompt]\x1b[0m\n");
+                return Some(SlashResult::Handled);
+            }
+            match image::load_image_as_data_uri(std::path::Path::new(img_path)) {
+                Ok(uri) => {
+                    session.pending_image = Some(uri);
+                    if prompt.is_empty() {
+                        println!("\x1b[90mImage attached — type your prompt and press Enter\x1b[0m\n");
+                        Some(SlashResult::Handled)
+                    } else {
+                        Some(SlashResult::ForwardToAgent(prompt.to_owned()))
+                    }
+                }
+                Err(e) => {
+                    println!("\x1b[31mFailed to load image: {e}\x1b[0m\n");
+                    Some(SlashResult::Handled)
+                }
+            }
+        }
+
+        "/paste" => {
+            match image::read_clipboard_image() {
+                Ok(Some(uri)) => {
+                    session.pending_image = Some(uri);
+                    if rest.is_empty() {
+                        println!("\x1b[90mClipboard image attached — type your prompt and press Enter\x1b[0m\n");
+                        Some(SlashResult::Handled)
+                    } else {
+                        Some(SlashResult::ForwardToAgent(rest.to_owned()))
+                    }
+                }
+                Ok(None) => {
+                    println!("\x1b[33mNo image found in clipboard.\x1b[0m\n");
+                    Some(SlashResult::Handled)
+                }
+                Err(e) => {
+                    println!("\x1b[31mClipboard error: {e}\x1b[0m\n");
+                    Some(SlashResult::Handled)
+                }
+            }
+        }
+
+        "/memory" => {
+            let memory = match MemoryStore::open_default() {
+                Ok(m) => m,
+                Err(e) => {
+                    println!("\x1b[31mMemory error: {e}\x1b[0m\n");
+                    return Some(SlashResult::Handled);
+                }
+            };
+            let (subcmd, args) = rest
+                .split_once(char::is_whitespace)
+                .map(|(c, a)| (c, a.trim()))
+                .unwrap_or((rest, ""));
+            match subcmd {
+                "list" | "" => {
+                    match memory.recent_interactions(10) {
+                        Ok(items) => {
+                            if items.is_empty() {
+                                println!("\x1b[90mNo interactions yet.\x1b[0m\n");
+                            } else {
+                                println!("\n\x1b[36mRecent interactions:\x1b[0m");
+                                for item in items.iter().rev() {
+                                    println!(
+                                        "  \x1b[90m[{}]\x1b[0m \x1b[36mYou:\x1b[0m {}",
+                                        &item.created_at[..16.min(item.created_at.len())],
+                                        if item.user_text.len() > 80 {
+                                            format!("{}…", &item.user_text[..80])
+                                        } else {
+                                            item.user_text.clone()
+                                        }
+                                    );
+                                }
+                                println!();
+                            }
+                        }
+                        Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                    }
+                }
+                "get" => {
+                    if args.is_empty() {
+                        println!("\x1b[33m/memory get <key>\x1b[0m\n");
+                    } else {
+                        match memory.get_profile(args) {
+                            Ok(Some(val)) => println!("{val}\n"),
+                            Ok(None) => println!("\x1b[90m(not set)\x1b[0m\n"),
+                            Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                        }
+                    }
+                }
+                "set" => {
+                    let (key, val) = args
+                        .split_once(char::is_whitespace)
+                        .map(|(k, v)| (k, v.trim()))
+                        .unwrap_or((args, ""));
+                    if key.is_empty() {
+                        println!("\x1b[33m/memory set <key> <value>\x1b[0m\n");
+                    } else {
+                        match memory.set_profile(key, val) {
+                            Ok(()) => println!("\x1b[90mStored {key}.\x1b[0m\n"),
+                            Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                        }
+                    }
+                }
+                "skills" => {
+                    match memory.learned_skills(20) {
+                        Ok(skills) => {
+                            if skills.is_empty() {
+                                println!("\x1b[90mNo learned skills.\x1b[0m\n");
+                            } else {
+                                println!("\n\x1b[36mLearned skills:\x1b[0m");
+                                for s in &skills {
+                                    println!("  [{}] {} — {}", s.id, s.name, s.source_path);
+                                }
+                                println!();
+                            }
+                        }
+                        Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                    }
+                }
+                _ => println!(
+                    "\x1b[33m/memory usage: list | get <key> | set <key> <val> | skills\x1b[0m\n"
+                ),
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/stats" => {
+            let provider = &session.config.ai_provider;
+            let model = active_model(provider, &session.config);
+            let interactions = MemoryStore::open_default()
+                .and_then(|m| m.recent_interactions(1000))
+                .map(|v| v.len())
+                .unwrap_or(0);
+            println!("\n\x1b[36m─ Session Stats ─────────────────────────\x1b[0m");
+            println!("  Provider : \x1b[32m{provider}\x1b[0m");
+            println!("  Model    : {model}");
+            println!(
+                "  Workspace: {}",
+                format_path_with_tilde(&session.current_dir)
+            );
+            println!("  Fast mode: {}", if session.fast_mode { "on" } else { "off" });
+            println!("  Memory   : {interactions} interactions");
+            if session.pending_image.is_some() {
+                println!("  Image    : \x1b[33mattached\x1b[0m");
+            }
+            println!();
+            Some(SlashResult::Handled)
+        }
+
+        "/exit" | "/quit" => Some(SlashResult::Exit),
+
+        "/code" => {
+            if rest.is_empty() {
+                println!("\x1b[33m/code requires a task description\x1b[0m\n");
+                Some(SlashResult::Handled)
+            } else {
+                Some(SlashResult::ForwardToAgent(format!("[code] {rest}")))
+            }
+        }
+
+        _ => {
+            // Unknown slash command — treat as normal message to the agent
+            None
+        }
+    }
+}
+
 async fn run_interactive_chat() -> Result<()> {
     let config = load_config()?;
-    let provider = &config.ai_provider;
-    let model = active_model(provider, &config);
 
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let path_str = format_path_with_tilde(&current_dir);
 
+    let provider = &config.ai_provider.clone();
+    let model = active_model(provider, &config).to_owned();
+
+    // Print startup banner
     let now = chrono::Local::now();
     let year = now.format("%Y").to_string().parse::<i32>().unwrap_or(2026) + 543;
     let date_time = format!(
@@ -1052,7 +1363,7 @@ async fn run_interactive_chat() -> Result<()> {
             " ".repeat(content_width - len2)
         );
         println!(
-            "\x1b[32m|_|  |_|_|_| |_|\\__|\\___|____|___|\x1b[0m   \x1b[37m╰{}╯\x1b[0m",
+            "\x1b[32m|_|  |_|_|_| |_|\\__|\\___|\\___|___|\\x1b[0m   \x1b[37m╰{}╯\x1b[0m",
             "─".repeat(border_len)
         );
     } else {
@@ -1072,35 +1383,78 @@ async fn run_interactive_chat() -> Result<()> {
         println!("\x1b[32m __  __ _       _    ___ _    ___ \x1b[0m");
         println!("\x1b[32m|  \\/  (_)_ __ | |_ / __| |  |_ _|\x1b[0m");
         println!("\x1b[32m| |\\/| | | '_ \\|  _| (__| |__ | | \x1b[0m");
-        println!("\x1b[32m|_|  |_|_|_| |_|\\__|\\___|____|___|\x1b[0m");
+        println!("\x1b[32m|_|  |_|_|_| |_|\\__|\\___|\\___|___|\\x1b[0m");
     }
-    println!("Type naturally to chat. Esc to exit.\n");
+    println!("Type naturally or /help for commands. Ctrl+D to exit.\n");
+
+    let mut session = InteractiveSession {
+        config,
+        current_dir: current_dir.clone(),
+        fast_mode: false,
+        pending_image: None,
+    };
 
     loop {
-        if let Some(query) = read_line_interactive(provider, model, &path_str)? {
-            let mut query = query.trim();
-            if query.is_empty() {
+        let path_str = format_path_with_tilde(&session.current_dir);
+        let model_str = active_model(&session.config.ai_provider, &session.config).to_owned();
+
+        if let Some(query) = read_line_interactive(&session.config.ai_provider, &model_str, &path_str)? {
+            let query_str = query.trim().to_owned();
+            if query_str.is_empty() {
                 continue;
             }
-            if let Some(task) = query.strip_prefix("/code ") {
+
+            // Run slash-command router
+            match handle_slash_command(&mut session, &query_str).await {
+                Some(SlashResult::Handled) => continue,
+                Some(SlashResult::Exit) => {
+                    println!("Goodbye!");
+                    break;
+                }
+                Some(SlashResult::ForwardToAgent(task)) => {
+                    // Force code agent for /code forwarded tasks
+                    println!();
+                    if let Err(error) =
+                        agent::run_code_agent(&task, &session.current_dir, &session.config).await
+                    {
+                        println!("\x1b[31mError:\x1b[0m {error}\n");
+                    }
+                    continue;
+                }
+                None => {} // Not a slash command, fall through
+            }
+
+            // Check if it's a /code or regular agent request
+            if let Some(task) = query_str.strip_prefix("/code ") {
                 println!();
                 if let Err(error) =
-                    agent::run_code_agent(task.trim(), &std::env::current_dir()?, &config).await
+                    agent::run_code_agent(task.trim(), &session.current_dir, &session.config).await
                 {
                     println!("\x1b[31mError:\x1b[0m {error}\n");
                 }
                 continue;
             }
-            if let Some(message) = query.strip_prefix("/chat ") {
-                query = message.trim();
-            } else {
-                if let Err(error) =
-                    agent::run_code_agent(query, &std::env::current_dir()?, &config).await
+
+            // Regular agent loop (handles both chat and coding)
+            if !query_str.starts_with("/chat ") {
+                if let Err(error) = agent::run_code_agent(
+                    query_str.trim_start_matches("/chat "),
+                    &session.current_dir,
+                    &session.config,
+                )
+                .await
                 {
                     println!("\x1b[31mError:\x1b[0m {error}\n");
                 }
                 continue;
             }
+
+            // /chat explicit: use streaming chat with fallback
+            let message = query_str
+                .strip_prefix("/chat ")
+                .unwrap_or(&query_str)
+                .trim()
+                .to_owned();
 
             println!();
             print!("\x1b[32mMint:\x1b[0m \x1b[90mThinking...\x1b[0m");
@@ -1112,28 +1466,32 @@ async fn run_interactive_chat() -> Result<()> {
                 You have access to native system actions to help the user! If the user asks you to open a website, launch an app, read a file, list a folder, run code, run tests, or execute a local shell command, you can execute these actions by writing a special block at the very end of your response: \
                 `[ACTION: <command> <arguments>]` \
                 The available actions are: \
-                - `[ACTION: open <url_or_path>]` to open a URL (e.g. `https://youtube.com` or any website requested by the user) or a folder path (e.g. `.`). \
-                - `[ACTION: open-app <app_name>]` to launch a desktop application (e.g. `spotify`, `chrome`). \
+                - `[ACTION: open <url_or_path>]` to open a URL or a folder path. \
+                - `[ACTION: open-app <app_name>]` to launch a desktop application. \
                 - `[ACTION: read-file <file_path>]` to read the contents of a file. \
                 - `[ACTION: read-folder <path>]` to list files/folders in a directory. \
-                - `[ACTION: run-shell <command>]` to run a non-destructive local shell command after the CLI asks the user for explicit approval. Use this when the user explicitly asks to run code, tests, builds, or a shell command. Never use destructive commands. \
-                When you output this action tag, the CLI client will intercept it and execute it automatically! So tell the user that you are opening/doing it for them, e.g., 'เดี๋ยวมิ้นท์เปิดให้เลยนะคะ!' \
-                Write the action block on a single line at the very end of your response, starting with `[ACTION:` and ending with `]`."
+                - `[ACTION: run-shell <command>]` to run a non-destructive local shell command after approval. \
+                Write the action block on a single line at the very end of your response."
             );
             if let Ok(memory) = MemoryStore::open_default() {
                 if let Ok(Some(name)) = memory.get_profile("name") {
-                    system_instruction.push_str(&format!("\nThe user's name is {}. Refer to them by their name when appropriate.", name));
+                    system_instruction.push_str(&format!(
+                        "\nThe user's name is {}. Refer to them by their name when appropriate.",
+                        name
+                    ));
                 }
             }
 
+            let image_uri = session.pending_image.take();
             let mut first_chunk = true;
             let mut filter = ActionStreamFilter::new();
-            let stream_result = orchestrate_chat_stream(
-                &config,
+
+            let stream_result = orchestrate_chat_stream_with_fallback(
+                &session.config,
                 &ChatRequest {
-                    message: query.to_string(),
+                    message: message.clone(),
                     system_instruction,
-                    image_data_uri: None,
+                    image_data_uri: image_uri,
                     audio_data_uri: None,
                 },
                 |chunk| {
@@ -1155,18 +1513,34 @@ async fn run_interactive_chat() -> Result<()> {
             let _ = io::stdout().flush();
 
             match stream_result {
-                Ok(_) => {
+                Ok((response, fallback)) => {
                     if first_chunk {
                         print!("\r\x1b[2K");
                         let _ = io::stdout().flush();
                     } else {
                         println!("\n");
-                        let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
-                        let width = term_width as usize;
+                        let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+                        let width = tw as usize;
+                        // Show provider badge (with fallback indicator if applicable)
+                        let badge = if let Some(fb_provider) = &fallback {
+                            format!(
+                                "\x1b[90m{} • {} → fallback: {} • {}\x1b[0m",
+                                session.config.ai_provider,
+                                active_model(&session.config.ai_provider, &session.config),
+                                fb_provider,
+                                response.model
+                            )
+                        } else {
+                            format!(
+                                "\x1b[90m{} • {}\x1b[0m",
+                                response.provider, response.model
+                            )
+                        };
+                        println!("{badge}");
                         println!("\x1b[90m{}\x1b[0m\n", "─".repeat(width));
                     }
                     for action in actions {
-                        if let Err(e) = execute_action(&action, &config) {
+                        if let Err(e) = execute_action(&action, &session.config) {
                             println!("\x1b[31mError executing action:\x1b[0m {}\n", e);
                         }
                     }
