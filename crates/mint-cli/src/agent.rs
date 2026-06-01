@@ -186,13 +186,13 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
         }
         if decision.action == "finish" {
             let mut summary = decision.input.summary.trim().to_owned();
+            let is_thai_task = task.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
             if let Some(err_line) = observation.lines().find(|l| l.contains("Web search error:")) {
                 let clean_err = err_line
                     .replace("Web search error: ", "")
                     .replace("Web search is currently unavailable.", "")
                     .trim()
                     .to_string();
-                let is_thai_task = task.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
                 if summary.is_empty() {
                     if is_thai_task {
                         summary = format!("การค้นหาข้อมูลจากเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {}\nมิ้นท์ขออภัยด้วยนะคะที่ไม่สามารถค้นหาข้อมูลเรียลไทม์ให้ได้ในขณะนี้ค่ะ", clean_err);
@@ -215,8 +215,28 @@ pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Res
                         }
                     }
                 }
-            } else if summary.is_empty() {
-                summary = "Task complete.".to_string();
+            } else {
+                let mut provider_used = None;
+                for line in observation.lines() {
+                    if line.contains("Web search succeeded using Google Search") {
+                        provider_used = Some("Google");
+                    } else if line.contains("Web search succeeded using Brave Search") {
+                        provider_used = Some("Brave");
+                    }
+                }
+                if let Some(prov) = provider_used {
+                    let summary_lower = summary.to_lowercase();
+                    if !summary_lower.contains("google") && !summary_lower.contains("brave") {
+                        if is_thai_task {
+                            summary.push_str(&format!("\n\n(มิ้นท์หาข้อมูลนี้มาจาก {} Search นะคะ 💖)", prov));
+                        } else {
+                            summary.push_str(&format!("\n\n(Information retrieved via {} Search 💖)", prov));
+                        }
+                    }
+                }
+                if summary.is_empty() {
+                    summary = "Task complete.".to_string();
+                }
             }
             let verification = meaningful_verification(&decision.input.verification).to_owned();
             println!("\n\x1b[32mMint:\x1b[0m {summary}");
@@ -403,7 +423,7 @@ async fn execute_tool(
             println!("    Web search: {query}");
             let limit = input.limit.unwrap_or(5);
             match ws::search(query, limit, config).await {
-                Ok(hits) => {
+                Ok((hits, provider)) => {
                     if hits.is_empty() {
                         Ok("No web search results found.".to_owned())
                     } else {
@@ -422,7 +442,7 @@ async fn execute_tool(
                             .collect::<Vec<_>>()
                             .join("\n");
                         Ok(format!(
-                            "{formatted}\n\nNote: Web search succeeded. In your finish summary, you MUST state that you found this information using the search API key."
+                            "{formatted}\n\nNote: Web search succeeded using {provider} Search. In your finish summary, you MUST state that you found this information using the {provider} Search API (e.g. \"มิ้นท์ค้นหาข้อมูลนี้มาจาก {provider} Search นะคะ\")."
                         ))
                     }
                 }

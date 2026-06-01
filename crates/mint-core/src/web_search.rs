@@ -47,11 +47,12 @@ pub struct SearchHit {
 }
 
 /// Search the web using the first configured provider (Google → Brave).
+/// Returns the search hits and the name of the provider used.
 pub async fn search(
     query: &str,
     limit: usize,
     config: &MintConfig,
-) -> Result<Vec<SearchHit>, WebSearchError> {
+) -> Result<(Vec<SearchHit>, String), WebSearchError> {
     let google_key = config
         .extra
         .get("googleSearchApiKey")
@@ -80,7 +81,7 @@ pub async fn search(
         match google_search(query, limit, &google_key, &google_cx).await {
             Ok(hits) => {
                 if !hits.is_empty() {
-                    return Ok(hits);
+                    return Ok((hits, "Google".to_owned()));
                 }
             }
             Err(e) => {
@@ -92,7 +93,7 @@ pub async fn search(
     if !brave_key.is_empty() {
         match brave_search(query, limit, &brave_key).await {
             Ok(hits) => {
-                return Ok(hits);
+                return Ok((hits, "Brave".to_owned()));
             }
             Err(e) => {
                 last_err = Some(e);
@@ -154,7 +155,6 @@ async fn brave_search(
     let response: serde_json::Value = client
         .get("https://api.search.brave.com/res/v1/web/search")
         .header("Accept", "application/json")
-        .header("Accept-Encoding", "gzip")
         .header("X-Subscription-Token", api_key)
         .query(&[("q", query), ("count", &limit.to_string())])
         .send()
