@@ -414,13 +414,25 @@ export default function MintDashboard() {
 
       {/* Main App Body */}
       <div className={`app-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''}`}>
-        {/* Sidebar Toggle Button */}
-        <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>
-          <span className="sidebar-toggle-icon">&lt;</span>
-        </button>
 
         {/* Sidebar Panel */}
         <aside className="workspace-sidebar">
+          <div
+            className="sidebar-brand clickable"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? "ขยายแถบด้านข้าง" : "ยุบแถบด้านข้าง"}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                setSidebarCollapsed(!sidebarCollapsed)
+              }
+            }}
+          >
+            <img src="./assets/icon.png" alt="Agent Mint Logo" className="sidebar-logo" />
+            <span className="sidebar-brand-name">Agent Mint</span>
+          </div>
+
           <button className="sidebar-new-chat" onClick={() => clearHistory('New chat')}>
             <span aria-hidden="true">+</span>
             <span>New Chat</span>

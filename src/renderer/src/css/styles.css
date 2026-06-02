@@ -1612,36 +1612,7 @@ input:checked + .slider:before {
 }
 
 .sidebar-toggle {
-  position: absolute;
-  top: 10px;
-  left: 214px;
-  z-index: 12;
-  width: 40px;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border-light);
-  border-radius: 6px;
-  background: var(--panel-raised);
-  color: var(--text-soft);
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-  transition: left 0.22s ease, background 0.16s ease, color 0.16s ease, border-color 0.16s ease;
-}
-
-.sidebar-toggle:hover {
-  background: var(--surface-strong);
-  color: var(--text-main);
-  border-color: rgba(255, 255, 255, 0.16);
-}
-
-.app-body.sidebar-collapsed .sidebar-toggle {
-  left: 8px;
-}
-
-.app-body.sidebar-collapsed .sidebar-toggle-icon {
-  transform: rotate(180deg);
+  display: none !important;
 }
 
 .workspace-sidebar {
@@ -1652,7 +1623,7 @@ input:checked + .slider:before {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 56px 10px 12px 14px;
+  padding: 20px 10px 12px 14px;
   background: var(--chrome-bg);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -1662,9 +1633,69 @@ input:checked + .slider:before {
   transition: width 0.22s ease, padding 0.22s ease, opacity 0.18s ease, transform 0.22s ease;
 }
 
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 16px 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 14px;
+  overflow: hidden;
+  transition: all 0.22s ease;
+}
+
+.sidebar-brand.clickable {
+  cursor: pointer;
+  user-select: none;
+  -webkit-app-region: no-drag;
+  outline: none;
+}
+
+.sidebar-brand.clickable:hover .sidebar-brand-name {
+  color: var(--accent-hover);
+}
+
+.sidebar-brand.clickable:hover .sidebar-logo {
+  filter: brightness(1.15);
+  transform: scale(1.05);
+}
+
+.sidebar-logo {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: 6px;
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+.sidebar-brand-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 0.15s ease;
+}
+
+/* Collapsed state styling */
+.app-body.sidebar-collapsed .sidebar-brand {
+  padding: 0 0 12px 0;
+  justify-content: center;
+  gap: 0;
+  border-bottom-color: transparent;
+}
+
+.app-body.sidebar-collapsed .sidebar-brand-name {
+  opacity: 0;
+  width: 0;
+  pointer-events: none;
+  display: none;
+}
+
 .app-body.sidebar-collapsed .workspace-sidebar {
   width: 56px;
-  padding: 56px 8px 12px;
+  padding: 20px 8px 12px;
   opacity: 1;
   pointer-events: auto;
   transform: translateX(0);
