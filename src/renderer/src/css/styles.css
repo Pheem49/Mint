@@ -258,7 +258,7 @@ h1 {
 
 .startup-loading {
   position: absolute;
-  inset: 34px 0 0;
+  inset: 0;
   z-index: 100;
   display: grid;
   place-items: center;
@@ -324,14 +324,14 @@ h1 {
 }
 
 .toggle-model-btn:hover {
-  background: rgba(139, 92, 246, 0.15);
-  border-color: rgba(139, 92, 246, 0.2);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--accent);
 }
 
 .toggle-model-btn.active {
-  background: rgba(139, 92, 246, 0.26);
-  border-color: rgba(139, 92, 246, 0.42);
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
   color: white;
 }
 
@@ -397,8 +397,8 @@ h1 {
 }
 
 .settings-btn:hover {
-  background: rgba(139, 92, 246, 0.15);
-  border-color: rgba(139, 92, 246, 0.2);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
   color: var(--accent);
 }
 
@@ -459,7 +459,7 @@ h1 {
   width: 85%;
   aspect-ratio: 1;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.12), rgba(139, 92, 246, 0.02) 48%, transparent 72%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 12%, transparent), color-mix(in srgb, var(--accent) 2%, transparent) 48%, transparent 72%);
   filter: blur(20px);
   transform: translateY(2%);
 }
@@ -1030,10 +1030,10 @@ h1 {
 }
 
 .user-message .message-bubble {
-  background: linear-gradient(135deg, var(--accent) 0%, #6d28d9 100%);
+  background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 70%, #000000) 100%);
   color: white;
   border-bottom-right-radius: 4px;
-  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.25), inset 1px 1px 0 rgba(255, 255, 255, 0.2);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 25%, transparent), inset 1px 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .ai-message {
@@ -1049,7 +1049,7 @@ h1 {
   border-left: 1px solid var(--border-light);
   border-bottom-left-radius: 4px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
-  color: #f8fafc; /* Stable text color for AI messages */
+  color: var(--text-main);
 }
 
 /* Typing Indicator */
@@ -1098,7 +1098,7 @@ h1 {
 /* Input Area */
 .input-area {
   padding: 16px 20px;
-  background: rgba(15, 23, 42, 0.5);
+  background: color-mix(in srgb, var(--panel-bg) 60%, transparent);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border-top: 1px solid var(--border);
@@ -1119,7 +1119,7 @@ h1 {
 
 #chat-form:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2), inset 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent), inset 0 2px 4px rgba(0, 0, 0, 0.1);
   transform: translateY(-1px);
 }
 
@@ -1182,9 +1182,9 @@ h1 {
 }
 
 #vision-btn:hover {
-  background: rgba(139, 92, 246, 0.15);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
-  border-color: rgba(139, 92, 246, 0.4);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 @keyframes pulse-mic {
@@ -1207,8 +1207,8 @@ h1 {
 .action-card {
   margin-top: 8px;
   padding: 10px;
-  background: rgba(139, 92, 246, 0.1);
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-radius: 8px;
   font-size: 0.85rem;
   display: flex;
@@ -1331,7 +1331,7 @@ h1 {
 }
 
 .agent-activity-status {
-  border: 1px solid rgba(139, 92, 246, 0.28);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   border-radius: 999px;
   color: var(--accent);
   font-size: 0.68rem;
@@ -1477,11 +1477,11 @@ input:checked + .slider:before {
 
 .proactive-bar {
   animation: proactiveSlideDown 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(109, 40, 217, 0.05));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 15%, transparent), color-mix(in srgb, var(--accent) 5%, transparent));
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  border-bottom: 1px solid rgba(139, 92, 246, 0.3);
-  border-top: 1px solid rgba(139, 92, 246, 0.2);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   padding: 12px 16px 14px;
   position: relative;
   z-index: 5;
@@ -1494,7 +1494,7 @@ input:checked + .slider:before {
   inset: 0;
   border-left: 3px solid var(--accent);
   pointer-events: none;
-  box-shadow: 3px 0 12px rgba(139, 92, 246, 0.25) inset;
+  box-shadow: 3px 0 12px color-mix(in srgb, var(--accent) 25%, transparent) inset;
 }
 
 @keyframes proactiveSlideDown {
@@ -1517,8 +1517,8 @@ input:checked + .slider:before {
 }
 
 @keyframes proactiveGlow {
-  from { filter: drop-shadow(0 0 3px rgba(139, 92, 246, 0.5)); }
-  to   { filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.9)); }
+  from { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 50%, transparent)); }
+  to   { filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent-hover, var(--accent)) 90%, transparent)); }
 }
 
 .proactive-message {
@@ -1556,8 +1556,8 @@ input:checked + .slider:before {
 
 .suggestion-chip {
   -webkit-app-region: no-drag;
-  background: rgba(139, 92, 246, 0.15);
-  border: 1px solid rgba(139, 92, 246, 0.4);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-radius: 20px;
   color: var(--text-main);
   cursor: pointer;
@@ -1577,10 +1577,10 @@ input:checked + .slider:before {
 }
 
 .suggestion-chip:hover {
-  background: linear-gradient(135deg, var(--accent), #6d28d9);
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #000000));
   border-color: rgba(255, 255, 255, 0.3);
   color: white;
-  box-shadow: 0 6px 15px rgba(139, 92, 246, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  box-shadow: 0 6px 15px color-mix(in srgb, var(--accent) 40%, transparent), inset 0 1px 1px rgba(255, 255, 255, 0.2);
   transform: translateY(-3px) scale(1.05);
 }
 
@@ -1642,7 +1642,7 @@ input:checked + .slider:before {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 52px 10px 12px 14px;
+  padding: 12px 10px 12px 14px;
   background: var(--chrome-bg);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -1654,7 +1654,7 @@ input:checked + .slider:before {
 
 .app-body.sidebar-collapsed .workspace-sidebar {
   width: 56px;
-  padding: 52px 8px 12px;
+  padding: 12px 8px 12px;
   opacity: 1;
   pointer-events: auto;
   transform: translateX(0);
@@ -2591,6 +2591,22 @@ input:checked + .slider:before {
 .close-btn:hover {
   background: #3a2020;
   color: #ff8a8a;
+}
+
+.assistant-workspace.layout-horizontal {
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 12px;
+}
+
+.assistant-workspace.layout-horizontal .model-stage {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.assistant-workspace.layout-horizontal .conversation-panel {
+  min-width: 0;
+  max-width: 100%;
 }
 
 @media (max-width: 760px) {

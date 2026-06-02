@@ -64,7 +64,7 @@ pub fn open_desktop_window(app: &AppHandle, kind: &str) -> Result<(), String> {
     let mut builder = WebviewWindowBuilder::new(app, label, url)
         .title(format!("Mint {kind}"))
         .inner_size(width, height)
-        .decorations(false)
+        .decorations(kind == "settings")
         .transparent(true)
         .always_on_top(always_on_top)
         .skip_taskbar(skip_taskbar);
@@ -121,8 +121,8 @@ pub fn execute_action(
             std::env::consts::FAMILY
         ))),
         "open_url" => {
-            if !(action.target.starts_with("https://") || action.target.starts_with("http://")) {
-                return Err("only http and https URLs may be opened".into());
+            if !(action.target.starts_with("https://") || action.target.starts_with("http://") || action.target.starts_with("file://")) {
+                return Err("only http, https, and file URLs may be opened".into());
             }
             spawn_detached("xdg-open", &[&action.target])?;
             Ok(success("opened URL"))

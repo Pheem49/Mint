@@ -19,12 +19,16 @@
         "minWidth": 960,
         "minHeight": 640,
         "transparent": true,
-        "decorations": false
+        "decorations": true
       }
     ],
     "security": {
       "csp": null,
-      "capabilities": ["main"]
+      "capabilities": ["main"],
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$HOME/.config/mint/**/*"]
+      }
     }
   },
   "bundle": {

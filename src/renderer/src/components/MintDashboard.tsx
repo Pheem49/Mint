@@ -1,6 +1,6 @@
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import {
   clearChatHistory,
   getRecentInteractions,
@@ -110,6 +110,84 @@ function renderApprovalDetails(approval: any): ApprovalDetails {
   }
 }
 
+const DEFAULT_CONFIG = {
+  theme: 'dark',
+  accentColor: '#4f83e6',
+  systemTextColor: '#f8fafc',
+  customBgStart: '#0f172a',
+  customBgEnd: '#1e1b4b',
+  customPanelBg: '#1e293b',
+  glassBlur: 'blur(16px)',
+  fontFamily: "'Outfit', sans-serif",
+  fontSize: '15px',
+}
+
+const lightenColor = (hex: string, amount: number) => {
+  const clean = hex.replace('#', '')
+  if (clean.length !== 6) return hex
+  const num = parseInt(clean, 16)
+  const r = Math.min(255, (num >> 16) + amount)
+  const g = Math.min(255, ((num >> 8) & 0x00FF) + amount)
+  const b = Math.min(255, (num & 0x0000FF) + amount)
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
+}
+
+const hexToRgb = (hex: string) => {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+  } : { r: 15, g: 23, b: 42 }
+}
+
+const applyThemeStyles = (cfg: any) => {
+  const theme = cfg.theme || 'dark'
+  const accentColor = cfg.accentColor || '#4f83e6'
+  const systemTextColor = cfg.systemTextColor || '#f8fafc'
+  const glassBlur = cfg.glassBlur || 'blur(16px)'
+  const fontFamily = cfg.fontFamily || "'Outfit', sans-serif"
+  const fontSize = cfg.fontSize || '15px'
+
+  document.documentElement.setAttribute('data-theme', theme)
+  document.documentElement.style.setProperty('--accent', accentColor)
+  document.documentElement.style.setProperty('--accent-hover', lightenColor(accentColor, 20))
+  document.documentElement.style.setProperty('--text-main', systemTextColor)
+  document.documentElement.style.setProperty('--glass-blur', glassBlur)
+  document.body.style.fontFamily = fontFamily
+  document.documentElement.style.fontSize = fontSize
+
+  if (theme === 'custom') {
+    if (cfg.customBgStart && cfg.customBgEnd) {
+      const gradient = `linear-gradient(135deg, ${cfg.customBgStart} 0%, ${cfg.customBgEnd} 100%)`
+      document.documentElement.style.setProperty('--bg-color', cfg.customBgStart)
+      document.documentElement.style.setProperty('--bg-gradient', gradient)
+    }
+    if (cfg.customPanelBg) {
+      const rgb = hexToRgb(cfg.customPanelBg)
+      document.documentElement.style.setProperty('--panel-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.75)`)
+      document.documentElement.style.setProperty('--panel-raised', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.82)`)
+      document.documentElement.style.setProperty('--panel-soft', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.46)`)
+      document.documentElement.style.setProperty('--chrome-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.88)`)
+      document.documentElement.style.setProperty('--surface-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.62)`)
+      document.documentElement.style.setProperty('--surface-strong', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.86)`)
+      document.documentElement.style.setProperty('--input-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.72)`)
+    }
+  } else {
+    [
+      '--bg-color',
+      '--bg-gradient',
+      '--panel-bg',
+      '--panel-raised',
+      '--panel-soft',
+      '--chrome-bg',
+      '--surface-bg',
+      '--surface-strong',
+      '--input-bg'
+    ].forEach(name => document.documentElement.style.removeProperty(name))
+  }
+}
+
 export default function MintDashboard() {
   const [view, setView] = useState<DashboardView>('chat')
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
@@ -132,7 +210,44 @@ export default function MintDashboard() {
   const [scale, setScale] = useState(1.00)
   const [showInteractionGuide, setShowInteractionGuide] = useState(true)
   const [isLocked, setIsLocked] = useState(false)
+  const [layoutPreset, setLayoutPreset] = useState<'vertical' | 'horizontal'>(
+    () => (window.localStorage.getItem('mint:layout-preset') as 'vertical' | 'horizontal') || 'vertical',
+  )
+  const [toastMessage, setToastMessage] = useState('')
+  const [expressionIndex, setExpressionIndex] = useState(0)
+  const [accessoryIndex, setAccessoryIndex] = useState(0)
   const chatEnd = useRef<HTMLDivElement | null>(null)
+
+  const EXPRESSIONS = [
+    "ปกติ (Default)",
+    "呆猫 (Dumb Cat)",
+    "呆猫眼珠摇晃 (Dumb Cat Eye Roll)",
+    "拍照 (Take Photo)",
+    "拿笔 (Hold Pen)",
+    "点一下 (Poke)",
+    "猫咪滤镜 (Cat Filter)",
+    "眼鏡 (Glasses)"
+  ]
+
+  const ACCESSORIES = [
+    "ปกติ (None)",
+    "ผ้ากันเปื้อน (Apron)",
+    "ปืนประจำตัว Shiroko (Signature Rifle)"
+  ]
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg)
+    // Clear toast after 3 seconds
+    const timer = setTimeout(() => {
+      setToastMessage((curr) => curr === msg ? '' : curr)
+    }, 3000)
+    return () => clearTimeout(timer)
+  }
+
+  const changeLayoutPreset = (preset: 'vertical' | 'horizontal') => {
+    window.localStorage.setItem('mint:layout-preset', preset)
+    setLayoutPreset(preset)
+  }
 
   const mockWelcomeInteraction = {
     id: -1,
@@ -159,6 +274,21 @@ export default function MintDashboard() {
       setView('chat')
       setMessage(query)
     })
+
+    // Load and apply settings
+    if (window.settingsApi) {
+      window.settingsApi.getSettings().then((loaded: any) => {
+        const merged = { ...DEFAULT_CONFIG, ...loaded }
+        applyThemeStyles(merged)
+      }).catch((err: unknown) => console.error("Error loading theme settings in dashboard:", err))
+    }
+
+    // Listen for settings changed event
+    if (window.api && typeof window.api.onSettingsChanged === 'function') {
+      window.api.onSettingsChanged((updatedConfig: any) => {
+        applyThemeStyles(updatedConfig)
+      })
+    }
 
     const unlistenPromise = listen<any>('tool-approval-requested', (event) => {
       setPendingApproval(event.payload)
@@ -276,19 +406,6 @@ export default function MintDashboard() {
 
   return (
     <div className="app-container">
-      {/* Drag Region / Titlebar Header */}
-      <header className="drag-region">
-        <div className="header-content">
-          <img src="/assets/icon.png" className="app-logo" alt="logo" />
-          <h1>Agent Mint</h1>
-        </div>
-        <div className="titlebar-drag-space" />
-        <div className="window-controls">
-          <button className="minimize-btn" onClick={() => window.api.minimizeWindow()}>−</button>
-          <button className="maximize-btn" onClick={() => window.api.maximizeWindow()}>⬜</button>
-          <button className="close-btn" onClick={() => window.api.closeWindow()}>✕</button>
-        </div>
-      </header>
 
       {/* Main App Body */}
       <div className={`app-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''}`}>
@@ -317,22 +434,47 @@ export default function MintDashboard() {
           <div className="sidebar-section">
             <div className="sidebar-section-title">Model</div>
             <div className="sidebar-model-controls">
-              <button className="change-expression-btn">
+              <button
+                className="change-expression-btn"
+                onClick={() => {
+                  const nextExpr = (expressionIndex + 1) % EXPRESSIONS.length
+                  setExpressionIndex(nextExpr)
+                  showToast(`สลับสีหน้าของ Shiroko เป็น: ${EXPRESSIONS[nextExpr]}`)
+                }}
+              >
                 <span aria-hidden="true">⭐</span>
                 <span>Expression</span>
               </button>
-              <button className="accessory-cycle-btn">
+              <button
+                className="accessory-cycle-btn"
+                onClick={() => {
+                  const nextAcc = (accessoryIndex + 1) % ACCESSORIES.length
+                  setAccessoryIndex(nextAcc)
+                  showToast(`สลับเครื่องประดับของ Shiroko เป็น: ${ACCESSORIES[nextAcc]}`)
+                }}
+              >
                 <span aria-hidden="true">♾️</span>
                 <span>Accessory</span>
               </button>
               <button
                 className={`toggle-interaction-btn ${showInteractionGuide ? 'active' : ''}`}
-                onClick={() => setShowInteractionGuide(!showInteractionGuide)}
+                onClick={() => {
+                  const next = !showInteractionGuide
+                  setShowInteractionGuide(next)
+                  showToast(next ? "เปิดการแสดงจุดสัมผัส (Interaction Zones) 🎯" : "ปิดการแสดงจุดสัมผัส 🎯")
+                }}
               >
                 <span aria-hidden="true">🎯</span>
                 <span className="mint-status-label">Interact</span>
               </button>
-              <button className="interaction-guide-btn" onClick={() => setShowInteractionGuide(!showInteractionGuide)}>
+              <button
+                className="interaction-guide-btn"
+                onClick={() => {
+                  const next = !showInteractionGuide
+                  setShowInteractionGuide(next)
+                  showToast(next ? "เปิดการแสดงจุดสัมผัส (Interaction Zones) 🎯" : "ปิดการแสดงจุดสัมผัส 🎯")
+                }}
+              >
                 <span aria-hidden="true">✛</span>
                 <span>Areas</span>
               </button>
@@ -357,7 +499,10 @@ export default function MintDashboard() {
               <span aria-hidden="true">💠</span>
               <span>Live2D Model</span>
             </button>
-            <button className="sidebar-project">
+            <button
+              className="sidebar-project"
+              onClick={() => showToast("เปิดใช้งาน Smart Tools: พร้อมช่วยสแกนและวิเคราะห์แล้วค่ะ! 🛠️")}
+            >
               <span aria-hidden="true">⚙️</span>
               <span>Smart Tools</span>
             </button>
@@ -377,7 +522,7 @@ export default function MintDashboard() {
         </aside>
 
         {/* Assistant Workspace (Center and Right columns) */}
-        <main className={`assistant-workspace layout-chat ${modelVisible ? '' : 'model-hidden'}`}>
+        <main className={`assistant-workspace ${layoutPreset === 'vertical' ? 'layout-chat' : 'layout-horizontal'} ${modelVisible ? '' : 'model-hidden'}`}>
           {/* Left Column: Live2D Stage */}
           <section className="model-stage">
             <div className={`model-shell ${showInteractionGuide ? 'show-interaction-guide' : ''} model-bg-stage`}>
@@ -386,10 +531,17 @@ export default function MintDashboard() {
                 <button
                   className={`model-panel-control ${isLocked ? 'is-active' : ''}`}
                   onClick={() => setIsLocked(!isLocked)}
+                  title={isLocked ? 'Unlock stage interactions' : 'Lock stage interactions'}
                 >
                   {isLocked ? '🔒' : '🔓'}
                 </button>
-                <button className="model-panel-control">⤢</button>
+                <button
+                  className="model-panel-control"
+                  onClick={() => window.api.maximizeWindow()}
+                  title="Maximize Window"
+                >
+                  ⤢
+                </button>
                 <div className="model-scale-control">
                   <input
                     type="range"
@@ -398,14 +550,34 @@ export default function MintDashboard() {
                     step="0.05"
                     value={scale}
                     onChange={(e) => setScale(parseFloat(e.target.value))}
+                    disabled={isLocked}
                   />
                   <span className="model-scale-value">{scale.toFixed(2)}x</span>
-                  <button className="model-scale-reset" onClick={() => setScale(1.00)}>⟲</button>
+                  <button
+                    className="model-scale-reset"
+                    onClick={() => setScale(1.00)}
+                    disabled={isLocked}
+                    title="Reset Scale"
+                  >
+                    ⟲
+                  </button>
                 </div>
-                <button className="model-panel-control" onClick={() => setView('pictures')}>🖼️</button>
+                <button className="model-panel-control" onClick={() => setView('pictures')} title="Saved Pictures">🖼️</button>
                 <div className="layout-preset-group">
-                  <button className="layout-preset-btn is-active">◫</button>
-                  <button className="layout-preset-btn">⊟</button>
+                  <button
+                    className={`layout-preset-btn ${layoutPreset === 'vertical' ? 'is-active' : ''}`}
+                    onClick={() => changeLayoutPreset('vertical')}
+                    title="Vertical Split Layout"
+                  >
+                    ◫
+                  </button>
+                  <button
+                    className={`layout-preset-btn ${layoutPreset === 'horizontal' ? 'is-active' : ''}`}
+                    onClick={() => changeLayoutPreset('horizontal')}
+                    title="Horizontal Split Layout"
+                  >
+                    ⊟
+                  </button>
                 </div>
               </div>
 
@@ -416,7 +588,15 @@ export default function MintDashboard() {
               </div>
 
               {/* Model Mount & Display */}
-              <div className="model-mount" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div
+                className="model-mount"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  pointerEvents: isLocked ? 'none' : 'auto'
+                }}
+              >
                 <img
                   src="/live2d_mint_placeholder.png"
                   onError={(e) => {
@@ -733,8 +913,20 @@ export default function MintDashboard() {
           ) : (
             <div className="pictures-grid">
               {pictures.map((picture) => (
-                <a className="picture-card" href={picture.url} target="_blank" rel="noreferrer" key={picture.id}>
-                  <img src={picture.url} alt={picture.message || picture.filename} />
+                <a
+                  className="picture-card"
+                  href={picture.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  key={picture.id}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    if (window.settingsApi) {
+                      window.settingsApi.openExternal(picture.url || '')
+                    }
+                  }}
+                >
+                  <img src={convertFileSrc(picture.path)} alt={picture.message || picture.filename} />
                   <div className="picture-card-meta">
                     {picture.message || picture.filename}
                   </div>
@@ -761,6 +953,38 @@ export default function MintDashboard() {
           <button
             onClick={() => setError('')}
             style={{ marginLeft: '12px', background: 'transparent', border: 0, color: 'white', cursor: 'pointer' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {toastMessage && (
+        <div
+          className="mint-notification"
+          style={{
+            position: 'absolute',
+            bottom: error ? '80px' : '20px',
+            right: '20px',
+            zIndex: 100,
+            margin: 0,
+            padding: '9px 14px',
+            borderRadius: '8px',
+            background: 'rgba(124, 58, 237, 0.95)',
+            border: '1px solid rgba(167, 139, 250, 0.4)',
+            color: '#f8fafc',
+            fontSize: '0.82rem',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            transition: 'all 0.22s ease'
+          }}
+        >
+          <span>{toastMessage}</span>
+          <button
+            onClick={() => setToastMessage('')}
+            style={{ background: 'transparent', border: 0, color: 'white', cursor: 'pointer', fontSize: '0.9rem' }}
           >
             ✕
           </button>
