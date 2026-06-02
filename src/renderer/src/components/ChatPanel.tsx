@@ -198,8 +198,10 @@ interface PicturesLibraryProps {
 }
 
 export function PicturesLibrary({ view, pictures, onSetView }: PicturesLibraryProps) {
+  if (view !== 'pictures') return null
+
   return (
-    <section className="pictures-library" hidden={view !== 'pictures'}>
+    <section className="pictures-library">
       <header className="pictures-header">
         <div><span className="pictures-kicker">Gallery</span><h2>Saved Pictures</h2></div>
         <button className="pictures-close-btn" onClick={() => onSetView('chat')}>Close Gallery</button>
@@ -218,7 +220,7 @@ export function PicturesLibrary({ view, pictures, onSetView }: PicturesLibraryPr
         <div className="pictures-grid">
           {pictures.map((picture) => (
             <a className="picture-card" href={picture.url} target="_blank" rel="noreferrer" key={picture.id} onClick={(event) => { event.preventDefault(); window.settingsApi?.openExternal(picture.url || '') }}>
-              <img src={convertFileSrc(picture.path)} alt={picture.message || picture.filename} />
+              <img src={convertFileSrc(picture.path)} alt={picture.message || picture.filename} loading="lazy" decoding="async" />
               <div className="picture-card-meta">{picture.message || picture.filename}</div>
             </a>
           ))}

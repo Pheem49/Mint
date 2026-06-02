@@ -8,6 +8,7 @@ interface ModelPanelProps {
   expressionIndex: number
   accessoryIndex: number
   isLocked: boolean
+  isActive: boolean
   layoutPreset: LayoutPreset
   sending: boolean
   showInteractionGuide: boolean
@@ -25,6 +26,7 @@ export default function ModelPanel({
   expressionIndex,
   accessoryIndex,
   isLocked,
+  isActive,
   layoutPreset,
   sending,
   showInteractionGuide,
@@ -107,7 +109,7 @@ export default function ModelPanel({
         </div>
 
         <div className="model-mount" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: isLocked ? 'none' : 'auto' }}>
-          <Live2DStage scale={scale} expressionIndex={expressionIndex} accessoryIndex={accessoryIndex} isLocked={isLocked} />
+          <Live2DStage scale={scale} expressionIndex={expressionIndex} accessoryIndex={accessoryIndex} isLocked={isLocked} isActive={isActive} />
           <div className="interaction-guide">
             <div className="interaction-zone zone-head" onClick={() => alert("Poked head!")}><span>Head</span></div>
             <div className="interaction-zone zone-face" onClick={onPokeCheek}><span>Cheek</span></div>

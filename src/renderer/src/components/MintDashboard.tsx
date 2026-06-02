@@ -331,6 +331,7 @@ export default function MintDashboard() {
             expressionIndex={expressionIndex}
             accessoryIndex={accessoryIndex}
             isLocked={isLocked}
+            isActive={view !== 'pictures'}
             layoutPreset={layoutPreset}
             sending={sending}
             showInteractionGuide={showInteractionGuide}

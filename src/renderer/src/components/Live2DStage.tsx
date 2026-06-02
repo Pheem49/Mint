@@ -9,6 +9,7 @@ interface Live2DStageProps {
   expressionIndex: number
   accessoryIndex: number
   isLocked: boolean
+  isActive?: boolean
 }
 
 // Map Expression Index to Live2D Expression Name
@@ -41,7 +42,7 @@ const clampToUnitCircle = (x: number, y: number) => {
   }
 }
 
-export default function Live2DStage({ scale, expressionIndex, accessoryIndex, isLocked }: Live2DStageProps) {
+export default function Live2DStage({ scale, expressionIndex, accessoryIndex, isLocked, isActive = true }: Live2DStageProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const modelRef = useRef<any>(null)
@@ -203,6 +204,14 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     model.x = stageWidth / 2
     model.y = stageHeight / 2 + stageHeight * 0.55
   }, [scale])
+
+  useEffect(() => {
+    if (isActive) {
+      appRef.current?.start()
+    } else {
+      appRef.current?.stop()
+    }
+  }, [isActive])
 
   // Follow the pointer across the whole window and smoothly return to center when tracking stops.
   useEffect(() => {
