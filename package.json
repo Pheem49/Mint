@@ -26,6 +26,8 @@
   "type": "commonjs",
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "^7.4.3",
     "react": "^19.2.5"
   },
   "devDependencies": {

@@ -333,16 +333,16 @@ export default function SettingsWindow() {
             <span>⚙</span><strong>General</strong>
           </button>
           <button className={`tab-btn ${activeTab === 'sect-audio' ? 'active' : ''}`} onClick={() => setActiveTab('sect-audio')}>
-            <span>🔊</span><strong>Audio & Voice</strong>
+            <span>🕪</span><strong>Audio & Voice</strong>
           </button>
           <button className={`tab-btn ${activeTab === 'sect-automation' ? 'active' : ''}`} onClick={() => setActiveTab('sect-automation')}>
-            <span>🤖</span><strong>Automation</strong>
+            <span>🗲</span><strong>Automation</strong>
           </button>
           <button className={`tab-btn ${activeTab === 'sect-theme' ? 'active' : ''}`} onClick={() => setActiveTab('sect-theme')}>
-            <span>🎨</span><strong>Theme & UI</strong>
+            <span>☼</span><strong>Theme & UI</strong>
           </button>
           <button className={`tab-btn ${activeTab === 'sect-plugins' ? 'active' : ''}`} onClick={() => setActiveTab('sect-plugins')}>
-            <span>🧩</span><strong>Plugins</strong>
+            <span>❖</span><strong>Plugins</strong>
           </button>
           <button className={`tab-btn ${activeTab === 'sect-shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('sect-shortcuts')}>
             <span>⌨</span><strong>Shortcuts</strong>

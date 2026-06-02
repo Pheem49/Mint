@@ -388,6 +388,17 @@ textarea {
 
 select {
     cursor: pointer;
+    background-color: var(--bg-color) !important;
+    color: var(--text-main) !important;
+}
+
+select:focus {
+    background-color: var(--bg-color) !important;
+}
+
+select option {
+    background-color: var(--bg-color) !important;
+    color: var(--text-main) !important;
 }
 
 textarea {
@@ -975,6 +986,11 @@ kbd {
     .tab-btn {
         justify-content: center;
         padding: 10px;
+    }
+
+    .tab-btn span {
+        display: inline-block;
+        font-size: 1.15rem;
     }
 
     .tab-btn strong {

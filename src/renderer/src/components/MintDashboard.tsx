@@ -13,6 +13,7 @@ import {
   type PictureEntry,
   type RuntimeStatus,
 } from '../tauri'
+import Live2DStage from './Live2DStage'
 
 type DashboardView = 'chat' | 'pictures' | 'model'
 
@@ -205,8 +206,12 @@ export default function MintDashboard() {
     () => window.localStorage.getItem('mint:model-visible') !== 'false',
   )
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [smartContext, setSmartContext] = useState(true)
-  const [agentMode, setAgentMode] = useState(true)
+  const [smartContext, setSmartContext] = useState(
+    () => window.localStorage.getItem('mint:smart-context') !== 'false',
+  )
+  const [agentMode, setAgentMode] = useState(
+    () => window.localStorage.getItem('mint:agent-mode') !== 'false',
+  )
   const [scale, setScale] = useState(1.00)
   const [showInteractionGuide, setShowInteractionGuide] = useState(true)
   const [isLocked, setIsLocked] = useState(false)
@@ -422,17 +427,23 @@ export default function MintDashboard() {
           </button>
 
           <button className={`sidebar-top-action ${view === 'chat' ? 'is-active' : ''}`} onClick={() => setView('chat')}>
-            <span aria-hidden="true">💬</span>
+            <span aria-hidden="true">🗏</span>
             <span>Chat</span>
           </button>
           <button className={`sidebar-top-action ${view === 'pictures' ? 'is-active' : ''}`} onClick={() => setView('pictures')}>
-            <span aria-hidden="true">🖼️</span>
+            <span aria-hidden="true">▨</span>
             <span>Pictures</span>
           </button>
 
           {/* Model Section */}
           <div className="sidebar-section">
-            <div className="sidebar-section-title">Model</div>
+            <div
+              className="sidebar-section-title clickable"
+              onClick={toggleModel}
+              title="เปิด/ปิดการแสดง Live2D Model"
+            >
+              ☰ Model
+            </div>
             <div className="sidebar-model-controls">
               <button
                 className="change-expression-btn"
@@ -442,7 +453,7 @@ export default function MintDashboard() {
                   showToast(`สลับสีหน้าของ Shiroko เป็น: ${EXPRESSIONS[nextExpr]}`)
                 }}
               >
-                <span aria-hidden="true">⭐</span>
+                <span aria-hidden="true">☆</span>
                 <span>Expression</span>
               </button>
               <button
@@ -453,7 +464,7 @@ export default function MintDashboard() {
                   showToast(`สลับเครื่องประดับของ Shiroko เป็น: ${ACCESSORIES[nextAcc]}`)
                 }}
               >
-                <span aria-hidden="true">♾️</span>
+                <span aria-hidden="true">∞</span>
                 <span>Accessory</span>
               </button>
               <button
@@ -461,10 +472,10 @@ export default function MintDashboard() {
                 onClick={() => {
                   const next = !showInteractionGuide
                   setShowInteractionGuide(next)
-                  showToast(next ? "เปิดการแสดงจุดสัมผัส (Interaction Zones) 🎯" : "ปิดการแสดงจุดสัมผัส 🎯")
+                  showToast(next ? "เปิดการแสดงจุดสัมผัส (Interaction Zones) ⦸" : "ปิดการแสดงจุดสัมผัส ⦸")
                 }}
               >
-                <span aria-hidden="true">🎯</span>
+                <span aria-hidden="true">⦸</span>
                 <span className="mint-status-label">Interact</span>
               </button>
               <button
@@ -472,10 +483,10 @@ export default function MintDashboard() {
                 onClick={() => {
                   const next = !showInteractionGuide
                   setShowInteractionGuide(next)
-                  showToast(next ? "เปิดการแสดงจุดสัมผัส (Interaction Zones) 🎯" : "ปิดการแสดงจุดสัมผัส 🎯")
+                  showToast(next ? "เปิดการแสดงจุดสัมผัส (Interaction Zones) ⊹" : "ปิดการแสดงจุดสัมผัส ⊹")
                 }}
               >
-                <span aria-hidden="true">✛</span>
+                <span aria-hidden="true">⊹</span>
                 <span>Areas</span>
               </button>
             </div>
@@ -485,7 +496,7 @@ export default function MintDashboard() {
           <div className="sidebar-section">
             <div className="sidebar-section-title">Assistant</div>
             <button className="sidebar-project active">
-              <span aria-hidden="true">🟢</span>
+              <span aria-hidden="true">🗏</span>
               <span>Mint</span>
               <span className="mint-status-pill" data-state={sending ? "thinking" : "idle"}>
                 <span className="mint-status-dot" />
@@ -496,14 +507,14 @@ export default function MintDashboard() {
               className={`sidebar-project ${modelVisible ? 'is-active' : ''}`}
               onClick={toggleModel}
             >
-              <span aria-hidden="true">💠</span>
+              <span aria-hidden="true">♢</span>
               <span>Live2D Model</span>
             </button>
             <button
               className="sidebar-project"
-              onClick={() => showToast("เปิดใช้งาน Smart Tools: พร้อมช่วยสแกนและวิเคราะห์แล้วค่ะ! 🛠️")}
+              onClick={() => showToast("เปิดใช้งาน Smart Tools: พร้อมช่วยสแกนและวิเคราะห์แล้วค่ะ! ∽")}
             >
-              <span aria-hidden="true">⚙️</span>
+              <span aria-hidden="true">∽</span>
               <span>Smart Tools</span>
             </button>
           </div>
@@ -511,11 +522,11 @@ export default function MintDashboard() {
           {/* Sidebar Footer Actions */}
           <div className="sidebar-bottom-actions">
             <button className="clear-btn" onClick={() => clearHistory('Clear history')}>
-              <span aria-hidden="true">🗑️</span>
+              <span aria-hidden="true">🗑</span>
               <span>Clear</span>
             </button>
             <button className="settings-btn" onClick={() => window.api.openSettings()}>
-              <span aria-hidden="true">⚙️</span>
+              <span aria-hidden="true">⚙</span>
               <span>Settings</span>
             </button>
           </div>
@@ -533,7 +544,17 @@ export default function MintDashboard() {
                   onClick={() => setIsLocked(!isLocked)}
                   title={isLocked ? 'Unlock stage interactions' : 'Lock stage interactions'}
                 >
-                  {isLocked ? '🔒' : '🔓'}
+                  {isLocked ? (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                      <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
+                    </svg>
+                  )}
                 </button>
                 <button
                   className="model-panel-control"
@@ -562,7 +583,13 @@ export default function MintDashboard() {
                     ⟲
                   </button>
                 </div>
-                <button className="model-panel-control" onClick={() => setView('pictures')} title="Saved Pictures">🖼️</button>
+                <button className="model-panel-control" onClick={() => setView('pictures')} title="Saved Pictures">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                  </svg>
+                </button>
                 <div className="layout-preset-group">
                   <button
                     className={`layout-preset-btn ${layoutPreset === 'vertical' ? 'is-active' : ''}`}
@@ -597,20 +624,11 @@ export default function MintDashboard() {
                   pointerEvents: isLocked ? 'none' : 'auto'
                 }}
               >
-                <img
-                  src="/live2d_mint_placeholder.png"
-                  onError={(e) => {
-                    // Fallback if public asset is not found/copied yet
-                    e.currentTarget.src = "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=600&auto=format&fit=crop"
-                  }}
-                  className="model-placeholder"
-                  style={{
-                    maxHeight: '85%',
-                    transform: `scale(${scale})`,
-                    transition: 'transform 0.15s ease-out',
-                    borderRadius: '12px'
-                  }}
-                  alt="Mint Live2D"
+                <Live2DStage
+                  scale={scale}
+                  expressionIndex={expressionIndex}
+                  accessoryIndex={accessoryIndex}
+                  isLocked={isLocked}
                 />
 
                 {/* Interaction Guide Zones */}
@@ -783,7 +801,10 @@ export default function MintDashboard() {
                     <input
                       type="checkbox"
                       checked={smartContext}
-                      onChange={(e) => setSmartContext(e.target.checked)}
+                      onChange={(e) => {
+                        setSmartContext(e.target.checked)
+                        window.localStorage.setItem('mint:smart-context', String(e.target.checked))
+                      }}
                     />
                     <span className="slider round" />
                   </label>
@@ -794,7 +815,10 @@ export default function MintDashboard() {
                     <input
                       type="checkbox"
                       checked={agentMode}
-                      onChange={(e) => setAgentMode(e.target.checked)}
+                      onChange={(e) => {
+                        setAgentMode(e.target.checked)
+                        window.localStorage.setItem('mint:agent-mode', String(e.target.checked))
+                      }}
                     />
                     <span className="slider round" />
                   </label>
@@ -906,7 +930,13 @@ export default function MintDashboard() {
           </header>
           {pictures.length === 0 ? (
             <div className="pictures-empty">
-              <div className="pictures-empty-icon">🖼️</div>
+              <div className="pictures-empty-icon" style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px', opacity: 0.3 }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                  <polyline points="21 15 16 10 5 21"></polyline>
+                </svg>
+              </div>
               <p>No saved pictures yet</p>
               <span>Images appear here after a message with an attachment is sent successfully.</span>
             </div>

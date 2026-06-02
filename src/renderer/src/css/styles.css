@@ -1642,7 +1642,7 @@ input:checked + .slider:before {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 12px 10px 12px 14px;
+  padding: 56px 10px 12px 14px;
   background: var(--chrome-bg);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -1654,7 +1654,7 @@ input:checked + .slider:before {
 
 .app-body.sidebar-collapsed .workspace-sidebar {
   width: 56px;
-  padding: 12px 8px 12px;
+  padding: 56px 8px 12px;
   opacity: 1;
   pointer-events: auto;
   transform: translateX(0);
@@ -1662,6 +1662,7 @@ input:checked + .slider:before {
 
 .workspace-sidebar button {
   font: inherit;
+  font-size: 0.9rem;
   -webkit-app-region: no-drag;
 }
 
@@ -1740,7 +1741,6 @@ input:checked + .slider:before {
   justify-content: flex-start;
   padding: 0 10px;
   color: var(--text-soft);
-  font-size: 1rem;
   font-weight: 400;
   gap: 9px;
 }
@@ -1768,20 +1768,29 @@ input:checked + .slider:before {
 }
 
 .sidebar-section-title {
-  padding: 0 8px 12px;
+  padding: 0 10px 12px;
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.9rem;
+}
+
+.sidebar-section-title.clickable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.16s ease;
+}
+
+.sidebar-section-title.clickable:hover {
+  color: var(--text-main);
 }
 
 .sidebar-project {
   height: 32px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 8px;
+  gap: 9px;
+  padding: 0 10px;
   color: var(--text-muted);
   border-radius: 6px;
-  font-size: 0.84rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2533,6 +2542,11 @@ input:checked + .slider:before {
 .chat-provider-select:disabled {
   cursor: wait;
   opacity: 0.65;
+}
+
+.chat-provider-select option {
+  background: var(--bg-color, #1a1a1a);
+  color: var(--text-main);
 }
 
 #mic-btn {
