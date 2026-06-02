@@ -228,16 +228,15 @@ export default function MintDashboard() {
     "呆猫 (Dumb Cat)",
     "呆猫眼珠摇晃 (Dumb Cat Eye Roll)",
     "拍照 (Take Photo)",
-    "拿笔 (Hold Pen)",
     "点一下 (Poke)",
-    "猫咪滤镜 (Cat Filter)",
-    "眼鏡 (Glasses)"
+    "猫咪滤镜 (Cat Filter)"
   ]
 
   const ACCESSORIES = [
     "ปกติ (None)",
     "ผ้ากันเปื้อน (Apron)",
-    "ปืนประจำตัว Shiroko (Signature Rifle)"
+    "แว่นตา (Glasses)",
+    "ท่าถือปากกา (Hold Pen)"
   ]
 
   const showToast = (msg: string) => {
@@ -462,6 +461,7 @@ export default function MintDashboard() {
                 onClick={() => {
                   const nextExpr = (expressionIndex + 1) % EXPRESSIONS.length
                   setExpressionIndex(nextExpr)
+                  setAccessoryIndex(0)
                   showToast(`Expression: ${EXPRESSIONS[nextExpr]}`)
                 }}
               >
@@ -473,6 +473,7 @@ export default function MintDashboard() {
                 onClick={() => {
                   const nextAcc = (accessoryIndex + 1) % ACCESSORIES.length
                   setAccessoryIndex(nextAcc)
+                  setExpressionIndex(0)
                   showToast(`Accessory: ${ACCESSORIES[nextAcc]}`)
                 }}
               >

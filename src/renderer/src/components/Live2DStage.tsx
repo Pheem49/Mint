@@ -17,17 +17,28 @@ const EXPRESSION_MAP: Record<number, string | null> = {
   1: 'Dazed',       // 呆猫 (Dumb Cat)
   2: 'DazedEyes',   // 呆猫眼珠摇晃 (Dumb Cat Eye Roll)
   3: 'Photo',       // 拍照 (Take Photo)
-  4: 'Pen',         // 拿笔 (Hold Pen)
-  5: 'Click',       // 点一下 (Poke)
-  6: 'CatFilter',   // 猫咪滤镜 (Cat Filter)
-  7: 'Glasses',     // 眼鏡 (Glasses)
+  4: 'Click',       // 点一下 (Poke)
+  5: 'CatFilter',   // 猫咪滤镜 (Cat Filter)
 }
 
 // Map Accessory Index to Live2D Expression Name
 const ACCESSORY_MAP: Record<number, string | null> = {
   0: null,          // Default (none)
   1: 'Apron',       // ผ้ากันเปื้อน (Apron)
-  2: null,          // (Signature Rifle - not in expressions)
+  2: 'Glasses',     // 眼鏡 (Glasses)
+  3: 'Pen',         // 拿笔 (Hold Pen)
+}
+
+const TRACKING_SPEED = 1.25
+
+const clampToUnitCircle = (x: number, y: number) => {
+  const distance = Math.hypot(x, y)
+  if (distance <= 1) return { x, y }
+
+  return {
+    x: x / distance,
+    y: y / distance,
+  }
 }
 
 export default function Live2DStage({ scale, expressionIndex, accessoryIndex, isLocked }: Live2DStageProps) {
@@ -131,6 +142,21 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
         // Enable mouse tracking interactions
         model.interactive = true
 
+        const focusController = model.internalModel.focusController
+        const updateFocus = focusController.update.bind(focusController)
+        focusController.update = (deltaMs: number) => updateFocus(deltaMs * TRACKING_SPEED)
+
+        // Match the extra mouse-driven parameters configured by the original VTube Studio model.
+        model.internalModel.on('beforeModelUpdate', () => {
+          const focus = model.internalModel.focusController
+          const coreModel = model.internalModel.coreModel
+
+          coreModel.setParameterValueById('Param77', focus.x * 10)
+          coreModel.setParameterValueById('Param78', focus.y)
+          coreModel.setParameterValueById('Param83', focus.x)
+          coreModel.setParameterValueById('Param86', focus.y)
+        })
+
         applyExpressionAndAccessory(model, expressionIndex, accessoryIndex)
         setLoading(false)
       } catch (err) {
@@ -176,6 +202,38 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     model.y = stageHeight / 2 + stageHeight * 0.55
   }, [scale])
 
+  // Follow the pointer across the whole window and smoothly return to center when tracking stops.
+  useEffect(() => {
+    const focus = (x: number, y: number) => {
+      modelRef.current?.internalModel?.focusController?.focus(x, y)
+    }
+
+    const centerFocus = () => focus(0, 0)
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (isLocked || !containerRef.current) return
+
+      const rect = containerRef.current.getBoundingClientRect()
+      if (!rect.width || !rect.height) return
+
+      const x = (event.clientX - (rect.left + rect.width / 2)) / (rect.width / 2)
+      const y = ((rect.top + rect.height / 2) - event.clientY) / (rect.height / 2)
+      const normalized = clampToUnitCircle(x, y)
+
+      focus(normalized.x, normalized.y)
+    }
+
+    if (isLocked) centerFocus()
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('blur', centerFocus)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('blur', centerFocus)
+    }
+  }, [isLocked])
+
   // Update expressions & accessories dynamically
   useEffect(() => {
     if (!modelRef.current) return
@@ -190,7 +248,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     const accName = ACCESSORY_MAP[accIdx]
 
     if (!exprName && !accName) {
-      model.expression('')
+      expManager.resetExpression()
       return
     }
 
