@@ -119,7 +119,7 @@ pub async fn send_chat(
     config: &MintConfig,
     request: &ChatRequest,
 ) -> Result<ChatResponse, ChatError> {
-    let client = Client::new();
+    let client = crate::HTTP_CLIENT.clone();
     let provider = config.ai_provider.as_str();
     require_supported_attachments(provider, request)?;
     let (model, text) = match provider {
@@ -145,7 +145,7 @@ pub async fn stream_chat<F>(
 where
     F: FnMut(String),
 {
-    let client = Client::new();
+    let client = crate::HTTP_CLIENT.clone();
     let provider = config.ai_provider.as_str();
     require_supported_attachments(provider, request)?;
     let (model, text) = match provider {

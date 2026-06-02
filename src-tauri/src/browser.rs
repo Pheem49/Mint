@@ -1,6 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
 use mint_core::MintConfig;
-use reqwest::Client;
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -117,7 +116,7 @@ async fn fetch_pages(config: &MintConfig) -> Result<Vec<Value>, String> {
         .get("browserDebugUrl")
         .and_then(Value::as_str)
         .unwrap_or("http://127.0.0.1:9222/json/list");
-    let value: Value = Client::new()
+    let value: Value = mint_core::HTTP_CLIENT.clone()
         .get(endpoint)
         .send()
         .await

@@ -6,7 +6,6 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use image::ImageFormat;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::{
@@ -222,7 +221,7 @@ pub async fn translate_screen_region(
     if api_key.trim().is_empty() {
         return Err("Gemini API key is required for live translation".into());
     }
-    let value: Value = Client::new()
+    let value: Value = mint_core::HTTP_CLIENT.clone()
         .post(format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={api_key}",
             config.gemini_model

@@ -181,25 +181,36 @@ impl KnowledgeStore {
             })?;
         }
         let connection = Connection::open(&self.path)?;
-        connection.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             CREATE TABLE IF NOT EXISTS sources (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               path TEXT UNIQUE,
-               name TEXT,
-               hash TEXT,
-               last_indexed DATETIME DEFAULT CURRENT_TIMESTAMP
-             );
-             CREATE TABLE IF NOT EXISTS chunks (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-               source_id INTEGER,
-               text TEXT,
-               embedding BLOB,
-               FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
-             );
-             CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source_id);",
-        )?;
+        
+        static INITIALIZED_DATABASES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+            std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+        let needs_init = {
+            let mut set = INITIALIZED_DATABASES.lock().unwrap();
+            set.insert(self.path.clone())
+        };
+
+        if needs_init {
+            connection.execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA synchronous = NORMAL;
+                 CREATE TABLE IF NOT EXISTS sources (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   path TEXT UNIQUE,
+                   name TEXT,
+                   hash TEXT,
+                   last_indexed DATETIME DEFAULT CURRENT_TIMESTAMP
+                 );
+                 CREATE TABLE IF NOT EXISTS chunks (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   source_id INTEGER,
+                   text TEXT,
+                   embedding BLOB,
+                   FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_chunks_source ON chunks(source_id);",
+            )?;
+        }
         Ok(connection)
     }
 }
@@ -369,7 +380,26 @@ fn embedding(text: &str) -> Vec<f32> {
         .filter(|token| !token.is_empty())
     {
         let mut hasher = DefaultHasher::new();
-        token.to_lowercase().hash(&mut hasher);
+        let has_upper = token.chars().any(|c| c.is_uppercase());
+        if has_upper {
+            use std::cell::RefCell;
+            thread_local! {
+                static LOWERCASE_BUF: RefCell<String> = RefCell::new(String::with_capacity(64));
+            }
+            LOWERCASE_BUF.with(|buf| {
+                let mut buf = buf.borrow_mut();
+                buf.clear();
+                for c in token.chars() {
+                    for lc in c.to_lowercase() {
+                        buf.push(lc);
+                    }
+                }
+                use std::hash::Hash;
+                buf.hash(&mut hasher);
+            });
+        } else {
+            token.hash(&mut hasher);
+        }
         let hash = hasher.finish();
         let index = hash as usize % EMBEDDING_DIMENSIONS;
         vector[index] += if hash & 1 == 0 { 1.0 } else { -1.0 };

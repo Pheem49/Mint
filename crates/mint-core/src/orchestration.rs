@@ -157,7 +157,7 @@ Rules:
 3. Prefer apply_patch over write_file for existing files.
 4. Shell commands and file edits require user approval. Mint handles approval after you request the tool.
 5. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.
-6. Verify code changes when possible.
+6. Verify code changes when possible. If compile or test commands fail (exit status is not 0), analyze the stdout/stderr to locate the bug, edit the code to fix it, and verify again. Do not stop or give up until the errors are resolved.
 7. Use web_search when the user asks to look something up online or needs current information.
 8. Use memory_recall to search past interactions before asking the user to repeat context.
 9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.
@@ -486,11 +486,33 @@ where
             result: result.clone(),
         });
 
+        let mut final_result = truncate(&result);
+        if decision.action == "run_shell" || decision.action == "verify" {
+            let mut failed = false;
+            for line in result.lines() {
+                if line.starts_with("exit: ") {
+                    let exit_code = line.replace("exit: ", "").trim().to_string();
+                    if exit_code != "0" && exit_code != "unknown" {
+                        failed = true;
+                    }
+                    break;
+                }
+            }
+            if failed {
+                final_result.push_str(
+                    "\n\n[System Tip: The command failed with a non-zero exit code. \
+                     Analyze the stdout/stderr above to locate the error, read the offending files, \
+                     apply corrected edits (using apply_patch), and run the verification command again. \
+                     Do not finish or stop until the compilation or test errors are resolved!]"
+                );
+            }
+        }
+
         observation = format!(
             "Task: {task}\nWorkspace: {}\nStep {step} completed.\nPrevious action: {}\nObservation:\n{}",
             root.display(),
             decision.action,
-            truncate(&result)
+            final_result
         );
     }
 

@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
 use mint_core::{ChatRequest, load_config, orchestrate_chat};
-use reqwest::Client;
 use serde_json::{Value, json};
 use sha2::Sha256;
 use tokio::{
@@ -80,7 +79,7 @@ async fn handle_line(request: HttpRequest) -> Result<(&'static str, String), Str
             continue;
         };
         let answer = answer(text, "Reply concisely for a LINE chat.").await;
-        let _ = Client::new().post("https://api.line.me/v2/bot/message/reply").bearer_auth(&token)
+        let _ = mint_core::HTTP_CLIENT.clone().post("https://api.line.me/v2/bot/message/reply").bearer_auth(&token)
             .json(&json!({ "replyToken": reply_token, "messages": [{ "type": "text", "text": answer }] })).send().await;
     }
     Ok(("200 OK", "ok".into()))
@@ -135,7 +134,7 @@ async fn handle_whatsapp(request: HttpRequest) -> Result<(&'static str, String),
             continue;
         };
         let answer = answer(text, "Reply concisely for a WhatsApp chat.").await;
-        let _ = Client::new().post(format!("https://graph.facebook.com/v23.0/{phone_id}/messages")).bearer_auth(&access_token)
+        let _ = mint_core::HTTP_CLIENT.clone().post(format!("https://graph.facebook.com/v23.0/{phone_id}/messages")).bearer_auth(&access_token)
             .json(&json!({ "messaging_product": "whatsapp", "to": to, "type": "text", "text": { "body": answer } })).send().await;
     }
     Ok(("200 OK", "ok".into()))

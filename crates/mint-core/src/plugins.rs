@@ -6,7 +6,6 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use reqwest::Client;
 use serde::Serialize;
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -320,7 +319,7 @@ async fn gmail(config: &MintConfig, instruction: &str) -> Result<String, PluginE
 
 async fn gmail_search(token: &str, user: &str, input: &Value) -> Result<String, PluginError> {
     let query = input["query"].as_str().unwrap_or("in:inbox");
-    let value: Value = Client::new()
+    let value: Value = crate::HTTP_CLIENT.clone()
         .get(format!(
             "https://gmail.googleapis.com/gmail/v1/users/{user}/messages"
         ))
@@ -355,7 +354,7 @@ async fn gmail_read(token: &str, user: &str, input: &Value) -> Result<String, Pl
         plugin: "gmail",
         message: "missing Gmail message id".into(),
     })?;
-    let value: Value = Client::new()
+    let value: Value = crate::HTTP_CLIENT.clone()
         .get(format!(
             "https://gmail.googleapis.com/gmail/v1/users/{user}/messages/{id}"
         ))
@@ -386,7 +385,7 @@ async fn gmail_draft(token: &str, user: &str, input: &Value) -> Result<String, P
         "To: {}\r\nSubject: {}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=\"UTF-8\"\r\n\r\n{}",
         sanitize_header(to), sanitize_header(subject), body
     ));
-    let value: Value = Client::new()
+    let value: Value = crate::HTTP_CLIENT.clone()
         .post(format!(
             "https://gmail.googleapis.com/gmail/v1/users/{user}/drafts"
         ))
@@ -422,7 +421,7 @@ async fn calendar(config: &MintConfig, instruction: &str) -> Result<String, Plug
     if input["action"].as_str() == Some("create") {
         return calendar_create(&token, id, &input).await;
     }
-    let value: Value = Client::new()
+    let value: Value = crate::HTTP_CLIENT.clone()
         .get(format!(
             "https://www.googleapis.com/calendar/v3/calendars/{id}/events"
         ))
@@ -462,7 +461,7 @@ async fn calendar_create(token: &str, id: &str, input: &Value) -> Result<String,
         message: "missing Calendar event start".into(),
     })?;
     let end = input["end"].as_str().unwrap_or(start);
-    let value: Value = Client::new()
+    let value: Value = crate::HTTP_CLIENT.clone()
         .post(format!(
             "https://www.googleapis.com/calendar/v3/calendars/{id}/events"
         ))
@@ -512,7 +511,7 @@ async fn notion_create(
         .unwrap_or("Mint Note")
         .trim();
     let content = input["content"].as_str().unwrap_or(instruction);
-    let value: Value = Client::new()
+    let value: Value = crate::HTTP_CLIENT.clone()
         .post("https://api.notion.com/v1/pages")
         .bearer_auth(key)
         .header("Notion-Version", "2022-06-28")
@@ -541,7 +540,7 @@ async fn notion_create(
 }
 
 async fn notion_query(key: &str, database: &str) -> Result<String, PluginError> {
-    let value: Value = Client::new()
+    let value: Value = crate::HTTP_CLIENT.clone()
         .post(format!(
             "https://api.notion.com/v1/databases/{database}/query"
         ))
@@ -578,7 +577,7 @@ async fn notion_append(key: &str, input: &Value) -> Result<String, PluginError> 
         plugin: "notion",
         message: "missing Notion append content".into(),
     })?;
-    Client::new()
+    crate::HTTP_CLIENT.clone()
         .patch(format!("https://api.notion.com/v1/blocks/{page}/children"))
         .bearer_auth(key)
         .header("Notion-Version", "2022-06-28")
@@ -600,7 +599,7 @@ async fn google_access_token(
     secret: &str,
     refresh: &str,
 ) -> Result<String, PluginError> {
-    let value: Value = Client::new()
+    let value: Value = crate::HTTP_CLIENT.clone()
         .post("https://oauth2.googleapis.com/token")
         .form(&[
             ("client_id", client_id),

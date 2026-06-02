@@ -1,4 +1,3 @@
-use reqwest::Client;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
@@ -32,7 +31,7 @@ pub async fn weather(city: &str) -> Result<WeatherReport, WeatherError> {
     if city.is_empty() {
         return Err(WeatherError::MissingCity);
     }
-    let client = Client::new();
+    let client = crate::HTTP_CLIENT.clone();
     let geocode: Value = client
         .get("https://geocoding-api.open-meteo.com/v1/search")
         .query(&[("name", city), ("count", "1"), ("language", "en")])

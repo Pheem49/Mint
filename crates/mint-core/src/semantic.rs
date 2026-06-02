@@ -4,7 +4,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -189,7 +188,7 @@ async fn embed_text(config: &MintConfig, text: &str) -> Result<Vec<f64>, Semanti
     if key.trim().is_empty() {
         return Err(SemanticError::MissingApiKey);
     }
-    let value: Value = Client::new()
+    let value: Value = crate::HTTP_CLIENT.clone()
         .post(format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{EMBEDDING_MODEL}:embedContent?key={key}"
         ))

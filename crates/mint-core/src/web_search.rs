@@ -1,4 +1,3 @@
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -110,7 +109,7 @@ async fn google_search(
     api_key: &str,
     cx: &str,
 ) -> Result<Vec<SearchHit>, WebSearchError> {
-    let client = Client::new();
+    let client = crate::HTTP_CLIENT.clone();
     let num_str = limit.min(10).to_string();
     let response: serde_json::Value = client
         .get("https://www.googleapis.com/customsearch/v1")
@@ -151,7 +150,7 @@ async fn brave_search(
     limit: usize,
     api_key: &str,
 ) -> Result<Vec<SearchHit>, WebSearchError> {
-    let client = Client::new();
+    let client = crate::HTTP_CLIENT.clone();
     let response: serde_json::Value = client
         .get("https://api.search.brave.com/res/v1/web/search")
         .header("Accept", "application/json")

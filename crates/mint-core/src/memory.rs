@@ -223,10 +223,21 @@ impl MemoryStore {
             })?;
         }
         let connection = Connection::open(&self.path)?;
-        initialize(
-            &connection,
-            memory_path().is_ok_and(|default_path| default_path == self.path),
-        )?;
+        
+        static INITIALIZED_DATABASES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+            std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+        let needs_init = {
+            let mut set = INITIALIZED_DATABASES.lock().unwrap();
+            set.insert(self.path.clone())
+        };
+
+        if needs_init {
+            initialize(
+                &connection,
+                memory_path().is_ok_and(|default_path| default_path == self.path),
+            )?;
+        }
         Ok(connection)
     }
 }

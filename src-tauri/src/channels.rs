@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use mint_core::{ChatRequest, MintConfig, load_config, orchestrate_chat};
-use reqwest::Client;
 use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -25,7 +24,7 @@ where
 }
 
 async fn telegram_loop() -> Result<(), String> {
-    let client = Client::new();
+    let client = mint_core::HTTP_CLIENT.clone();
     let mut offset = 0_i64;
     loop {
         let Some(token) = enabled_value("enableTelegramBridge", "telegramBotToken") else {
@@ -105,7 +104,7 @@ async fn discord_loop() -> Result<(), String> {
                     });
                     if !direct_message && !mentioned { continue }
                     let reply = answer(text, "Reply concisely for a Discord chat.").await;
-                    let _ = Client::new().post(format!("https://discord.com/api/v10/channels/{channel}/messages"))
+                    let _ = mint_core::HTTP_CLIENT.clone().post(format!("https://discord.com/api/v10/channels/{channel}/messages"))
                         .header("Authorization", format!("Bot {token}")).json(&json!({ "content": reply })).send().await;
                 }
             }
@@ -119,7 +118,7 @@ async fn slack_loop() -> Result<(), String> {
         return Ok(());
     };
     let bot_token = config_value("slackBotToken").ok_or("missing slackBotToken")?;
-    let value: Value = Client::new()
+    let value: Value = mint_core::HTTP_CLIENT.clone()
         .post("https://slack.com/api/apps.connections.open")
         .bearer_auth(&app_token)
         .send()
@@ -156,7 +155,7 @@ async fn slack_loop() -> Result<(), String> {
             continue;
         };
         let reply = answer(text, "Reply concisely for a Slack chat.").await;
-        let _ = Client::new()
+        let _ = mint_core::HTTP_CLIENT.clone()
             .post("https://slack.com/api/chat.postMessage")
             .bearer_auth(&bot_token)
             .json(&json!({ "channel": channel, "text": reply }))

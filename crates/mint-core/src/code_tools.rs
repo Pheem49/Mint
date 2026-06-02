@@ -167,17 +167,27 @@ pub fn search_code(
     config: &MintConfig,
 ) -> Result<Vec<CodeSearchHit>, CodeInspectionError> {
     let files = list_code_files(root, usize::MAX, config)?;
-    let query = query.to_lowercase();
     let mut hits = Vec::new();
     if query.trim().is_empty() {
         return Ok(hits);
     }
+    let escaped = regex::escape(query);
+    let re = match regex::RegexBuilder::new(&escaped)
+        .case_insensitive(true)
+        .build()
+    {
+        Ok(re) => re,
+        Err(_) => return Ok(hits),
+    };
     for file in files {
         let Ok(raw) = fs::read_to_string(&file.path) else {
             continue;
         };
+        if !re.is_match(&raw) {
+            continue;
+        }
         for (index, line) in raw.lines().enumerate() {
-            if line.to_lowercase().contains(&query) {
+            if re.is_match(line) {
                 hits.push(CodeSearchHit {
                     path: file.path.clone(),
                     line: index + 1,

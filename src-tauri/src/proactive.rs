@@ -11,7 +11,6 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use mint_core::{MintConfig, config_path, load_config};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
@@ -121,7 +120,7 @@ async fn analyze(config: &MintConfig) -> Result<Option<Value>, String> {
         return Ok(None);
     }
     let image = capture_screen_bytes()?;
-    let response: Value = Client::new()
+    let response: Value = mint_core::HTTP_CLIENT.clone()
         .post(format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={key}",
             config.gemini_model

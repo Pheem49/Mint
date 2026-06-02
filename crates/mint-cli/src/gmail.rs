@@ -10,7 +10,6 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use mint_core::{MintConfig, load_config, save_config};
-use reqwest::Client;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -40,7 +39,7 @@ pub async fn auth(no_open: bool, port: u16) -> Result<()> {
     }
     println!("Waiting for Gmail OAuth callback on {redirect} ...");
     let code = wait_for_code(listener, &state)?;
-    let token: Value = Client::new()
+    let token: Value = mint_core::HTTP_CLIENT.clone()
         .post(TOKEN_URL)
         .form(&[
             ("client_id", client_id.as_str()),
