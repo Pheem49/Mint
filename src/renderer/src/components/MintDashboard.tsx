@@ -462,7 +462,7 @@ export default function MintDashboard() {
                 onClick={() => {
                   const nextExpr = (expressionIndex + 1) % EXPRESSIONS.length
                   setExpressionIndex(nextExpr)
-                  showToast(`สลับสีหน้าของ Shiroko เป็น: ${EXPRESSIONS[nextExpr]}`)
+                  showToast(`Expression: ${EXPRESSIONS[nextExpr]}`)
                 }}
               >
                 <span aria-hidden="true">☆</span>
@@ -473,7 +473,7 @@ export default function MintDashboard() {
                 onClick={() => {
                   const nextAcc = (accessoryIndex + 1) % ACCESSORIES.length
                   setAccessoryIndex(nextAcc)
-                  showToast(`สลับเครื่องประดับของ Shiroko เป็น: ${ACCESSORIES[nextAcc]}`)
+                  showToast(`Accessory: ${ACCESSORIES[nextAcc]}`)
                 }}
               >
                 <span aria-hidden="true">∞</span>
@@ -578,8 +578,8 @@ export default function MintDashboard() {
                 <div className="model-scale-control">
                   <input
                     type="range"
-                    min="1.0"
-                    max="2.5"
+                    min="0.5"
+                    max="2.0"
                     step="0.05"
                     value={scale}
                     onChange={(e) => setScale(parseFloat(e.target.value))}
@@ -625,6 +625,39 @@ export default function MintDashboard() {
                   </button>
                 </div>
               </div>
+
+              {toastMessage && (
+                <div
+                  className="mint-notification"
+                  style={{
+                    position: 'absolute',
+                    left: '14px',
+                    top: '62px',
+                    zIndex: 10,
+                    margin: 0,
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    background: 'rgba(18, 18, 22, 0.85)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    backdropFilter: 'blur(12px)',
+                    color: '#f8fafc',
+                    fontSize: '0.82rem',
+                    boxShadow: '0 8px 22px rgba(0,0,0,0.2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    transition: 'all 0.22s ease'
+                  }}
+                >
+                  <span>{toastMessage}</span>
+                  <button
+                    onClick={() => setToastMessage('')}
+                    style={{ background: 'transparent', border: 0, color: 'white', cursor: 'pointer', fontSize: '0.9rem' }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
 
               {/* Status Badge */}
               <div className="model-activity-badge" data-state={sending ? "thinking" : "idle"}>
@@ -1007,37 +1040,6 @@ export default function MintDashboard() {
         </div>
       )}
 
-      {toastMessage && (
-        <div
-          className="mint-notification"
-          style={{
-            position: 'absolute',
-            bottom: error ? '80px' : '20px',
-            right: '20px',
-            zIndex: 100,
-            margin: 0,
-            padding: '9px 14px',
-            borderRadius: '8px',
-            background: 'rgba(124, 58, 237, 0.95)',
-            border: '1px solid rgba(167, 139, 250, 0.4)',
-            color: '#f8fafc',
-            fontSize: '0.82rem',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
-            transition: 'all 0.22s ease'
-          }}
-        >
-          <span>{toastMessage}</span>
-          <button
-            onClick={() => setToastMessage('')}
-            style={{ background: 'transparent', border: 0, color: 'white', cursor: 'pointer', fontSize: '0.9rem' }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
     </div>
   )
 }
