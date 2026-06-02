@@ -388,17 +388,27 @@ textarea {
 
 select {
     cursor: pointer;
-    background-color: var(--bg-color) !important;
+    background-color: var(--input-bg) !important;
     color: var(--text-main) !important;
+    color-scheme: dark;
 }
 
 select:focus {
-    background-color: var(--bg-color) !important;
+    background-color: var(--input-focus-bg) !important;
 }
 
 select option {
-    background-color: var(--bg-color) !important;
+    background-color: var(--input-bg) !important;
     color: var(--text-main) !important;
+}
+
+select option:checked {
+    background: linear-gradient(var(--accent), var(--accent)) !important;
+    color: #ffffff !important;
+}
+
+[data-theme="light"] select {
+    color-scheme: light;
 }
 
 textarea {
@@ -414,7 +424,7 @@ select:focus,
 textarea:focus {
     background: var(--input-focus-bg);
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.13);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 input::placeholder,

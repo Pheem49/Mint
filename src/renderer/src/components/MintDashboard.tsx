@@ -152,7 +152,11 @@ export default function MintDashboard() {
   const [toastMessage, setToastMessage] = useState('')
   const [expressionIndex, setExpressionIndex] = useState(0)
   const [accessoryIndex, setAccessoryIndex] = useState(0)
+  const [dashboardDataReady, setDashboardDataReady] = useState(false)
+  const [modelReady, setModelReady] = useState(false)
+  const [startupTimedOut, setStartupTimedOut] = useState(false)
   const chatEnd = useRef<HTMLDivElement | null>(null)
+  const startupReady = (dashboardDataReady && modelReady) || startupTimedOut
 
   async function refreshHistory() {
     const history = await getRecentInteractions()
@@ -164,21 +168,31 @@ export default function MintDashboard() {
   }
 
   useEffect(() => {
-    getRuntimeStatus().then(setStatus).catch((reason: unknown) => setError(errorMessage(reason)))
-    refreshHistory().catch((reason: unknown) => setError(errorMessage(reason)))
+    Promise.allSettled([
+      getRuntimeStatus().then(setStatus),
+      refreshHistory(),
+      window.settingsApi?.getSettings()
+        .then((loaded: any) => applyThemeStyles({ ...DEFAULT_CONFIG, ...loaded })),
+    ]).then((results) => {
+      const failure = results.find((result) => result.status === 'rejected')
+      if (failure?.status === 'rejected') setError(errorMessage(failure.reason))
+      setDashboardDataReady(true)
+    })
     window.api.onSpotlightToChat((query) => {
       setView('chat')
       setMessage(query)
     })
-    window.settingsApi?.getSettings()
-      .then((loaded: any) => applyThemeStyles({ ...DEFAULT_CONFIG, ...loaded }))
-      .catch((reason: unknown) => console.error("Error loading theme settings in dashboard:", reason))
     window.api?.onSettingsChanged?.(applyThemeStyles)
 
     const unlistenPromise = listen<any>('tool-approval-requested', (event) => setPendingApproval(event.payload))
     return () => {
       unlistenPromise.then((unlisten) => unlisten())
     }
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setStartupTimedOut(true), 10000)
+    return () => window.clearTimeout(timer)
   }, [])
 
   useEffect(() => {
@@ -304,7 +318,7 @@ export default function MintDashboard() {
   }
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${startupReady ? '' : 'is-loading'}`}>
       <div className={`app-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''}`}>
         <DashboardSidebar
           view={view}
@@ -342,6 +356,7 @@ export default function MintDashboard() {
             onChangeLayoutPreset={changeLayoutPreset}
             onDismissToast={() => setToastMessage('')}
             onPokeCheek={handlePokeCheek}
+            onModelLoadComplete={() => setModelReady(true)}
           />
           <ChatPanel
             interactions={interactions}
@@ -368,6 +383,12 @@ export default function MintDashboard() {
           />
         </main>
         <PicturesLibrary view={view} pictures={pictures} onSetView={setView} />
+      </div>
+      <div className={`startup-loading ${startupReady ? 'is-hidden' : ''}`} aria-live="polite" aria-busy={!startupReady}>
+        <div className="startup-loading-content">
+          <div className="startup-loading-dots" aria-hidden="true"><span /><span /><span /></div>
+          <div className="startup-loading-text">Loading Agent Mint</div>
+        </div>
       </div>
       {error && (
         <div className="mint-error" style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 100, margin: 0, boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>

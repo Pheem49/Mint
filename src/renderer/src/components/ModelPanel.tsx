@@ -19,6 +19,7 @@ interface ModelPanelProps {
   onChangeLayoutPreset: (preset: LayoutPreset) => void
   onDismissToast: () => void
   onPokeCheek: () => void
+  onModelLoadComplete: () => void
 }
 
 export default function ModelPanel({
@@ -37,6 +38,7 @@ export default function ModelPanel({
   onChangeLayoutPreset,
   onDismissToast,
   onPokeCheek,
+  onModelLoadComplete,
 }: ModelPanelProps) {
   return (
     <section className="model-stage">
@@ -109,7 +111,7 @@ export default function ModelPanel({
         </div>
 
         <div className="model-mount" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: isLocked ? 'none' : 'auto' }}>
-          <Live2DStage scale={scale} expressionIndex={expressionIndex} accessoryIndex={accessoryIndex} isLocked={isLocked} isActive={isActive} />
+          <Live2DStage scale={scale} expressionIndex={expressionIndex} accessoryIndex={accessoryIndex} isLocked={isLocked} isActive={isActive} onLoadComplete={onModelLoadComplete} />
           <div className="interaction-guide">
             <div className="interaction-zone zone-head" onClick={() => alert("Poked head!")}><span>Head</span></div>
             <div className="interaction-zone zone-face" onClick={onPokeCheek}><span>Cheek</span></div>

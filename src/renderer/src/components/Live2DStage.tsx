@@ -10,6 +10,7 @@ interface Live2DStageProps {
   accessoryIndex: number
   isLocked: boolean
   isActive?: boolean
+  onLoadComplete?: () => void
 }
 
 // Map Expression Index to Live2D Expression Name
@@ -42,7 +43,7 @@ const clampToUnitCircle = (x: number, y: number) => {
   }
 }
 
-export default function Live2DStage({ scale, expressionIndex, accessoryIndex, isLocked, isActive = true }: Live2DStageProps) {
+export default function Live2DStage({ scale, expressionIndex, accessoryIndex, isLocked, isActive = true, onLoadComplete }: Live2DStageProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const modelRef = useRef<any>(null)
@@ -162,9 +163,11 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
 
         applyExpressionAndAccessory(model, expressionIndex, accessoryIndex)
         setLoading(false)
+        onLoadComplete?.()
       } catch (err) {
         console.error('Failed to load Live2D model:', err)
         setLoading(false)
+        onLoadComplete?.()
       }
     }
 

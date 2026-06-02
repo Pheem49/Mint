@@ -2593,8 +2593,13 @@ input:checked + .slider:before {
 }
 
 .chat-provider-select option {
-  background: var(--bg-color, #1a1a1a);
+  background: var(--input-bg, #1a1a1a);
   color: var(--text-main);
+}
+
+.chat-provider-select option:checked {
+  background: linear-gradient(var(--accent), var(--accent));
+  color: #ffffff;
 }
 
 #mic-btn {
@@ -2748,4 +2753,3 @@ input:checked + .slider:before {
     max-height: none;
   }
 }
-
