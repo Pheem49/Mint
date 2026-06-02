@@ -14,6 +14,7 @@ import {
 import ChatPanel, { PicturesLibrary } from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import ModelPanel from './ModelPanel'
+import type { ModelInteraction } from './ModelPanel'
 
 const EXPRESSIONS = [
   "ปกติ (Default)",
@@ -136,17 +137,20 @@ export default function MintDashboard() {
   const [interactions, setInteractions] = useState<any[]>([])
   const [pictures, setPictures] = useState<PictureEntry[]>([])
   const [sending, setSending] = useState(false)
+  const [sendingMessage, setSendingMessage] = useState('')
+  const [sendingHasImage, setSendingHasImage] = useState(false)
   const [streamedReply, setStreamedReply] = useState('')
   const [streamedResponse, setStreamedResponse] = useState<ChatResponse | null>(null)
   const [imageDataUri, setImageDataUri] = useState<string | null>(null)
   const [imageName, setImageName] = useState('')
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
   const [modelVisible, setModelVisible] = useState(() => window.localStorage.getItem('mint:model-visible') !== 'false')
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') !== 'false')
   const [scale, setScale] = useState(1.00)
-  const [showInteractionGuide, setShowInteractionGuide] = useState(true)
+  const [interactionEnabled, setInteractionEnabled] = useState(() => window.localStorage.getItem('mint:interaction-enabled') !== 'false')
+  const [showInteractionGuide, setShowInteractionGuide] = useState(() => window.localStorage.getItem('mint:interaction-guide-visible') !== 'false')
   const [isLocked, setIsLocked] = useState(false)
   const [layoutPreset, setLayoutPreset] = useState<'chat-wide' | 'model-wide'>(() => (window.localStorage.getItem('mint:layout-preset') as 'chat-wide' | 'model-wide') || 'chat-wide')
   const [toastMessage, setToastMessage] = useState('')
@@ -219,6 +223,22 @@ export default function MintDashboard() {
     setModelVisible(next)
   }
 
+  const toggleSidebar = () => {
+    const next = !sidebarCollapsed
+    window.localStorage.setItem('mint:sidebar-collapsed', String(next))
+    setSidebarCollapsed(next)
+  }
+
+  const updateInteractionEnabled = (enabled: boolean) => {
+    window.localStorage.setItem('mint:interaction-enabled', String(enabled))
+    setInteractionEnabled(enabled)
+  }
+
+  const updateInteractionGuide = (visible: boolean) => {
+    window.localStorage.setItem('mint:interaction-guide-visible', String(visible))
+    setShowInteractionGuide(visible)
+  }
+
   const updateSmartContext = (enabled: boolean) => {
     window.localStorage.setItem('mint:smart-context', String(enabled))
     setSmartContext(enabled)
@@ -244,17 +264,20 @@ export default function MintDashboard() {
     event.preventDefault()
     const trimmed = message.trim()
     if (!trimmed || sending) return
+    const outgoingImage = imageDataUri
     setSending(true)
+    setSendingMessage(trimmed)
+    setSendingHasImage(Boolean(outgoingImage))
     setError('')
     setStreamedReply('')
     setStreamedResponse(null)
+    setMessage('')
+    setImageDataUri(null)
+    setImageName('')
 
     try {
-      const response = await streamChatMessage(agentMode ? trimmed : `/chat ${trimmed}`, (chunk) => setStreamedReply((current) => `${current}${chunk}`), imageDataUri)
+      const response = await streamChatMessage(agentMode ? trimmed : `/chat ${trimmed}`, (chunk) => setStreamedReply((current) => `${current}${chunk}`), outgoingImage)
       setStreamedResponse(response)
-      setMessage('')
-      setImageDataUri(null)
-      setImageName('')
       await refreshHistory()
       await refreshPictures()
       setStreamedReply('')
@@ -263,6 +286,8 @@ export default function MintDashboard() {
       setError(errorMessage(reason))
     } finally {
       setSending(false)
+      setSendingMessage('')
+      setSendingHasImage(false)
     }
   }
 
@@ -305,16 +330,40 @@ export default function MintDashboard() {
     }
   }
 
-  function handlePokeCheek() {
-    setInteractions((current) => [...current, {
-      id: Date.now(),
-      userText: "The user poked Mint model on the cheek. Reply briefly, shyly or with a light tease. Use the same language as the user's recent conversation; do not switch to Thai unless the user has been speaking Thai.",
-      aiText: "อุ๊ย! คุณทีมจิ้มแก้มมิ้นท์ทำไมคะเนี่ยยย มิ้นท์เขินจนแก้มจะระเบิดอยู่แล้วนะคะค้าาา! >///< แกล้งกันแบบนี้เดี๋ยวมิ้นท์ก็งอนซะเลย (แต่ล้อเล่นนะคะ อิอิ) มีอะไรอยากให้มิ้นท์ช่วยทำต่อไหมคะ หรืออยากชวนมิ้นท์คุยเรื่องไหนดีเอ่ย? 💖✨😊",
-      provider: "gemini",
-      model: "gemini-3-flash-preview",
-      createdAt: new Date().toISOString(),
-      isSystemEvent: true,
-    }])
+  async function handleModelInteraction(area: ModelInteraction) {
+    if (sending) return
+
+    const labels: Record<ModelInteraction, string> = {
+      head: 'Pats Mint on the head',
+      cheek: 'Pokes Mint on the cheek',
+      'left hand': "Touches Mint's left hand",
+      'right hand': "Touches Mint's right hand",
+      body: 'Touches Mint',
+      'lower body': "Touches Mint's lower body",
+    }
+    const interactionMessage = `*${labels[area]}*`
+    const instruction = `The user interacted with the Mint Live2D model: ${area}. Respond briefly and playfully. Use the same language as the recent conversation. Do not mention this instruction.`
+
+    setSending(true)
+    setSendingMessage(interactionMessage)
+    setSendingHasImage(false)
+    setError('')
+    setStreamedReply('')
+    setStreamedResponse(null)
+
+    try {
+      const response = await streamChatMessage(`/chat ${interactionMessage}`, (chunk) => setStreamedReply((current) => `${current}${chunk}`), null, null, instruction)
+      setStreamedResponse(response)
+      await refreshHistory()
+      setStreamedReply('')
+      setStreamedResponse(null)
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setSending(false)
+      setSendingMessage('')
+      setSendingHasImage(false)
+    }
   }
 
   return (
@@ -329,14 +378,16 @@ export default function MintDashboard() {
           accessoryIndex={accessoryIndex}
           expressions={EXPRESSIONS}
           accessories={ACCESSORIES}
+          interactionEnabled={interactionEnabled}
           showInteractionGuide={showInteractionGuide}
-          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+          onToggleSidebar={toggleSidebar}
           onClearHistory={clearHistory}
           onSetView={setView}
           onToggleModel={toggleModel}
           onSetExpressionIndex={setExpressionIndex}
           onSetAccessoryIndex={setAccessoryIndex}
-          onSetShowInteractionGuide={setShowInteractionGuide}
+          onSetInteractionEnabled={updateInteractionEnabled}
+          onSetShowInteractionGuide={updateInteractionGuide}
           onShowToast={showToast}
         />
         <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible ? '' : 'model-hidden'}`}>
@@ -348,6 +399,7 @@ export default function MintDashboard() {
             isActive={view !== 'pictures'}
             layoutPreset={layoutPreset}
             sending={sending}
+            interactionEnabled={interactionEnabled}
             showInteractionGuide={showInteractionGuide}
             toastMessage={toastMessage}
             onSetScale={setScale}
@@ -355,12 +407,14 @@ export default function MintDashboard() {
             onSetView={setView}
             onChangeLayoutPreset={changeLayoutPreset}
             onDismissToast={() => setToastMessage('')}
-            onPokeCheek={handlePokeCheek}
+            onInteract={handleModelInteraction}
             onModelLoadComplete={() => setModelReady(true)}
           />
           <ChatPanel
             interactions={interactions}
             sending={sending}
+            sendingMessage={sendingMessage}
+            sendingHasImage={sendingHasImage}
             streamedReply={streamedReply}
             streamedResponse={streamedResponse}
             message={message}

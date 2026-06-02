@@ -2,6 +2,7 @@ import Live2DStage from './Live2DStage'
 import type { DashboardView } from './DashboardSidebar'
 
 type LayoutPreset = 'chat-wide' | 'model-wide'
+export type ModelInteraction = 'head' | 'cheek' | 'left hand' | 'right hand' | 'body' | 'lower body'
 
 interface ModelPanelProps {
   scale: number
@@ -11,6 +12,7 @@ interface ModelPanelProps {
   isActive: boolean
   layoutPreset: LayoutPreset
   sending: boolean
+  interactionEnabled: boolean
   showInteractionGuide: boolean
   toastMessage: string
   onSetScale: (scale: number) => void
@@ -18,7 +20,7 @@ interface ModelPanelProps {
   onSetView: (view: DashboardView) => void
   onChangeLayoutPreset: (preset: LayoutPreset) => void
   onDismissToast: () => void
-  onPokeCheek: () => void
+  onInteract: (area: ModelInteraction) => void
   onModelLoadComplete: () => void
 }
 
@@ -30,6 +32,7 @@ export default function ModelPanel({
   isActive,
   layoutPreset,
   sending,
+  interactionEnabled,
   showInteractionGuide,
   toastMessage,
   onSetScale,
@@ -37,12 +40,12 @@ export default function ModelPanel({
   onSetView,
   onChangeLayoutPreset,
   onDismissToast,
-  onPokeCheek,
+  onInteract,
   onModelLoadComplete,
 }: ModelPanelProps) {
   return (
     <section className="model-stage">
-      <div className={`model-shell ${showInteractionGuide ? 'show-interaction-guide' : ''} model-bg-stage`}>
+      <div className={`model-shell ${interactionEnabled ? 'interaction-enabled' : ''} ${showInteractionGuide ? 'show-interaction-guide' : ''} model-bg-stage`}>
         <div className="model-panel-controls">
           <button
             className={`model-panel-control ${isLocked ? 'is-active' : ''}`}
@@ -113,12 +116,12 @@ export default function ModelPanel({
         <div className="model-mount" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: isLocked ? 'none' : 'auto' }}>
           <Live2DStage scale={scale} expressionIndex={expressionIndex} accessoryIndex={accessoryIndex} isLocked={isLocked} isActive={isActive} onLoadComplete={onModelLoadComplete} />
           <div className="interaction-guide">
-            <div className="interaction-zone zone-head" onClick={() => alert("Poked head!")}><span>Head</span></div>
-            <div className="interaction-zone zone-face" onClick={onPokeCheek}><span>Cheek</span></div>
-            <div className="interaction-zone zone-left-hand" onClick={() => alert("Poked left hand!")}><span>Hand</span></div>
-            <div className="interaction-zone zone-right-hand" onClick={() => alert("Poked right hand!")}><span>Hand</span></div>
-            <div className="interaction-zone zone-body" onClick={() => alert("Poked body!")}><span>Body</span></div>
-            <div className="interaction-zone zone-lower" onClick={() => alert("Poked legs!")}><span>Lower</span></div>
+            <div className="interaction-zone zone-head" onClick={() => onInteract('head')}><span>Head</span></div>
+            <div className="interaction-zone zone-face" onClick={() => onInteract('cheek')}><span>Cheek</span></div>
+            <div className="interaction-zone zone-left-hand" onClick={() => onInteract('left hand')}><span>Hand</span></div>
+            <div className="interaction-zone zone-right-hand" onClick={() => onInteract('right hand')}><span>Hand</span></div>
+            <div className="interaction-zone zone-body" onClick={() => onInteract('body')}><span>Body</span></div>
+            <div className="interaction-zone zone-lower" onClick={() => onInteract('lower body')}><span>Lower</span></div>
           </div>
         </div>
       </div>

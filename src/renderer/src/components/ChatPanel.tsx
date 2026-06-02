@@ -1,5 +1,5 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
-import type { ChangeEvent, FormEvent, RefObject } from 'react'
+import type { ChangeEvent, FormEvent, KeyboardEvent, RefObject } from 'react'
 import type { ChatResponse, PictureEntry, RuntimeStatus } from '../tauri'
 import type { DashboardView } from './DashboardSidebar'
 
@@ -31,6 +31,8 @@ function renderApprovalDetails(approval: any): ApprovalDetails {
 interface ChatPanelProps {
   interactions: any[]
   sending: boolean
+  sendingMessage: string
+  sendingHasImage: boolean
   streamedReply: string
   streamedResponse: ChatResponse | null
   message: string
@@ -55,6 +57,8 @@ interface ChatPanelProps {
 export default function ChatPanel({
   interactions,
   sending,
+  sendingMessage,
+  sendingHasImage,
   streamedReply,
   streamedResponse,
   message,
@@ -75,6 +79,12 @@ export default function ChatPanel({
   onSetProvider,
   onApproval,
 }: ChatPanelProps) {
+  const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    event.currentTarget.form?.requestSubmit()
+  }
+
   return (
     <section className="conversation-panel">
       <div className="chat-container">
@@ -118,7 +128,7 @@ export default function ChatPanel({
 
         {sending && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-            <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{imageDataUri ? `${message} [Image #1]` : message}</div></div></div>
+            <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{sendingHasImage ? `${sendingMessage} [Image #1]` : sendingMessage}</div></div></div>
             <div className="message ai-message thinking-message">
               <div className="bubble-wrapper">
                 <div className="message-bubble"><span>{streamedReply || 'Thinking...'}</span></div>
@@ -177,7 +187,7 @@ export default function ChatPanel({
               <button type="button" onClick={onRemoveImage} style={{ background: 'transparent', border: 0, color: '#ef4444', cursor: 'pointer' }}>✕</button>
             </div>
           )}
-          <textarea id="chat-input" value={message} onChange={(event) => onSetMessage(event.target.value)} placeholder="Ask anything, @ to mention, / for actions" rows={2} />
+          <textarea id="chat-input" value={message} onChange={(event) => onSetMessage(event.target.value)} onKeyDown={submitOnEnter} placeholder="Ask anything, @ to mention, / for actions" rows={1} />
           <button id="vision-btn" type="button" onClick={() => document.getElementById('vision-file-input')?.click()}>👁</button>
           <input id="vision-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={onSelectImage} style={{ display: 'none' }} />
           <select className="chat-provider-select" value={status?.activeProvider ?? ''} onChange={(event) => onSetProvider(event.target.value)}>

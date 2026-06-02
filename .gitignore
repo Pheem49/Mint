@@ -6,6 +6,10 @@ node_modules/
 .pnp.js
 .antigravitycli
 .antigravitycli/
+.cargo_home/
+.rustup/
+.rustup_copy/
+.rustup_home/
 
 # ==========================
 # Environment & Secrets

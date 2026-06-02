@@ -75,12 +75,13 @@ export async function streamChatMessage(
   onChunk: (chunk: string) => void,
   imageDataUri?: string | null,
   audioDataUri?: string | null,
+  systemInstruction = '',
 ): Promise<ChatResponse> {
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
   const onEvent = new Channel<string>()
   onEvent.onmessage = onChunk
   const response = await invoke<ChatResponse>('stream_chat_message', {
-    request: { message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri },
+    request: { message: outgoingMessage, systemInstruction, imageDataUri, audioDataUri },
     onEvent,
   })
   if (imageDataUri) {

@@ -9,6 +9,7 @@ interface DashboardSidebarProps {
   accessoryIndex: number
   expressions: string[]
   accessories: string[]
+  interactionEnabled: boolean
   showInteractionGuide: boolean
   onToggleSidebar: () => void
   onClearHistory: (action: 'New chat' | 'Clear history') => void
@@ -16,6 +17,7 @@ interface DashboardSidebarProps {
   onToggleModel: () => void
   onSetExpressionIndex: (index: number) => void
   onSetAccessoryIndex: (index: number) => void
+  onSetInteractionEnabled: (enabled: boolean) => void
   onSetShowInteractionGuide: (visible: boolean) => void
   onShowToast: (message: string) => void
 }
@@ -29,6 +31,7 @@ export default function DashboardSidebar({
   accessoryIndex,
   expressions,
   accessories,
+  interactionEnabled,
   showInteractionGuide,
   onToggleSidebar,
   onClearHistory,
@@ -36,13 +39,20 @@ export default function DashboardSidebar({
   onToggleModel,
   onSetExpressionIndex,
   onSetAccessoryIndex,
+  onSetInteractionEnabled,
   onSetShowInteractionGuide,
   onShowToast,
 }: DashboardSidebarProps) {
-  const toggleInteractionGuide = (icon: string) => {
+  const toggleInteractionGuide = () => {
     const next = !showInteractionGuide
     onSetShowInteractionGuide(next)
-    onShowToast(next ? `เปิดการแสดงจุดสัมผัส (Interaction Zones) ${icon}` : `ปิดการแสดงจุดสัมผัส ${icon}`)
+    onShowToast(next ? 'เปิดการแสดงจุดสัมผัส (Interaction Zones) ⊹' : 'ปิดการแสดงจุดสัมผัส ⊹')
+  }
+
+  const toggleInteraction = () => {
+    const next = !interactionEnabled
+    onSetInteractionEnabled(next)
+    onShowToast(next ? 'เปิดการโต้ตอบกับโมเดล ⦸' : 'ปิดการโต้ตอบกับโมเดล ⦸')
   }
 
   return (
@@ -104,11 +114,11 @@ export default function DashboardSidebar({
             <span aria-hidden="true">∞</span>
             <span>Accessory</span>
           </button>
-          <button className={`toggle-interaction-btn ${showInteractionGuide ? 'active' : ''}`} onClick={() => toggleInteractionGuide('⦸')}>
+          <button className={`toggle-interaction-btn ${interactionEnabled ? 'active' : ''}`} onClick={toggleInteraction}>
             <span aria-hidden="true">⦸</span>
             <span className="mint-status-label">Interact</span>
           </button>
-          <button className="interaction-guide-btn" onClick={() => toggleInteractionGuide('⊹')}>
+          <button className={`interaction-guide-btn ${showInteractionGuide ? 'active' : ''}`} onClick={toggleInteractionGuide}>
             <span aria-hidden="true">⊹</span>
             <span>Areas</span>
           </button>

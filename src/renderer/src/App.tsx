@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react'
-import SettingsWindow from './components/SettingsWindow'
-import SpotlightWindow from './components/SpotlightWindow'
-import WidgetWindow from './components/WidgetWindow'
-import ProactiveGlow from './components/ProactiveGlow'
-import ScreenPicker from './components/ScreenPicker'
-import MintDashboard from './components/MintDashboard'
+import React, { lazy, Suspense, useEffect, useState } from 'react'
+
+const SettingsWindow = lazy(() => import('./components/SettingsWindow'))
+const SpotlightWindow = lazy(() => import('./components/SpotlightWindow'))
+const WidgetWindow = lazy(() => import('./components/WidgetWindow'))
+const ProactiveGlow = lazy(() => import('./components/ProactiveGlow'))
+const ScreenPicker = lazy(() => import('./components/ScreenPicker'))
+const MintDashboard = lazy(() => import('./components/MintDashboard'))
 
 export default function App() {
   const [hash, setHash] = useState(window.location.hash || '#/')
@@ -20,21 +21,13 @@ export default function App() {
   // Basic route parsing
   const route = hash.replace(/^#/, '')
 
-  if (route.startsWith('/settings')) {
-    return <SettingsWindow />
-  }
-  if (route.startsWith('/spotlight')) {
-    return <SpotlightWindow />
-  }
-  if (route.startsWith('/widget')) {
-    return <WidgetWindow />
-  }
-  if (route.startsWith('/proactive-glow')) {
-    return <ProactiveGlow />
-  }
-  if (route.startsWith('/screen-picker')) {
-    return <ScreenPicker />
-  }
+  let content = <MintDashboard />
 
-  return <MintDashboard />
+  if (route.startsWith('/settings')) content = <SettingsWindow />
+  if (route.startsWith('/spotlight')) content = <SpotlightWindow />
+  if (route.startsWith('/widget')) content = <WidgetWindow />
+  if (route.startsWith('/proactive-glow')) content = <ProactiveGlow />
+  if (route.startsWith('/screen-picker')) content = <ScreenPicker />
+
+  return <Suspense fallback={null}>{content}</Suspense>
 }
