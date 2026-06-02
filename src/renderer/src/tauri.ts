@@ -16,6 +16,16 @@ export interface ChatResponse {
   text: string
 }
 
+export type AgentProgress =
+  | { type: 'Thinking'; data: { elapsed_secs: number } }
+  | { type: 'Thought'; data: { thought: string } }
+  | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown> } }
+  | { type: 'ToolEnd'; data: { result: string } }
+
+type DesktopStreamEvent =
+  | { type: 'chunk'; chunk: string }
+  | { type: 'progress'; progress: AgentProgress }
+
 export interface InteractionMemory {
   id: number
   userText: string
@@ -76,10 +86,14 @@ export async function streamChatMessage(
   imageDataUri?: string | null,
   audioDataUri?: string | null,
   systemInstruction = '',
+  onProgress?: (progress: AgentProgress) => void,
 ): Promise<ChatResponse> {
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
-  const onEvent = new Channel<string>()
-  onEvent.onmessage = onChunk
+  const onEvent = new Channel<DesktopStreamEvent>()
+  onEvent.onmessage = (event) => {
+    if (event.type === 'chunk') onChunk(event.chunk)
+    else onProgress?.(event.progress)
+  }
   const response = await invoke<ChatResponse>('stream_chat_message', {
     request: { message: outgoingMessage, systemInstruction, imageDataUri, audioDataUri },
     onEvent,

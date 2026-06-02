@@ -1,6 +1,6 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { ChangeEvent, FormEvent, KeyboardEvent, RefObject } from 'react'
-import type { ChatResponse, PictureEntry, RuntimeStatus } from '../tauri'
+import type { AgentProgress, ChatResponse, PictureEntry, RuntimeStatus } from '../tauri'
 import type { DashboardView } from './DashboardSidebar'
 
 interface ApprovalDetails {
@@ -12,6 +12,59 @@ interface ApprovalDetails {
 
 function badge(provider: string, model: string) {
   return [provider, model].filter(Boolean).join(' / ')
+}
+
+interface AgentActivity {
+  text: string
+  state: 'active' | 'done' | 'error'
+}
+
+function activityDetail(input: Record<string, unknown>, key: string) {
+  const value = input[key]
+  return typeof value === 'string' && value.trim() ? value : ''
+}
+
+function describeTool(action: string, input: Record<string, unknown>) {
+  const path = activityDetail(input, 'path')
+  const query = activityDetail(input, 'query')
+  const command = activityDetail(input, 'command')
+  const labels: Record<string, string> = {
+    list_files: path ? `List ${path}` : 'List workspace files',
+    read_file: path ? `Read ${path}` : 'Read file',
+    search_code: query ? `Search code for "${query}"` : 'Search code',
+    symbols: path ? `Inspect symbols in ${path}` : 'Inspect symbols',
+    semantic_index: path ? `Index semantic code in ${path}` : 'Index semantic code',
+    semantic_search: query ? `Semantic search for "${query}"` : 'Semantic code search',
+    knowledge_search: query ? `Search knowledge for "${query}"` : 'Search local knowledge',
+    web_search: query ? `Search the web for "${query}"` : 'Search the web',
+    memory_recall: query ? `Recall memory for "${query}"` : 'Recall memory',
+    note_write: path ? `Write note ${path}` : 'Write note',
+    run_plugin: activityDetail(input, 'name') ? `Run plugin ${activityDetail(input, 'name')}` : 'Run plugin',
+    mcp_tool: activityDetail(input, 'tool') ? `Call MCP tool ${activityDetail(input, 'tool')}` : 'Call MCP tool',
+    run_shell: command ? `Run \`${command}\`` : 'Run shell command',
+    verify: command ? `Verify with \`${command}\`` : 'Verify changes',
+    apply_patch: path ? `Patch ${path}` : 'Apply code patch',
+    write_file: path ? `Write ${path}` : 'Write file',
+  }
+  return labels[action] ?? `Use ${action.replaceAll('_', ' ')}`
+}
+
+function activitiesFrom(progress: AgentProgress[]) {
+  const activities: AgentActivity[] = []
+  for (const event of progress) {
+    if (event.type === 'Thought' && event.data.thought.trim()) {
+      activities.push({ text: event.data.thought, state: 'done' })
+    } else if (event.type === 'ToolStart') {
+      activities.push({ text: describeTool(event.data.action, event.data.input), state: 'active' })
+    } else if (event.type === 'ToolEnd') {
+      for (let index = activities.length - 1; index >= 0; index -= 1) {
+        if (activities[index].state !== 'active') continue
+        activities[index].state = event.data.result.startsWith('Error:') ? 'error' : 'done'
+        break
+      }
+    }
+  }
+  return activities.slice(-8)
 }
 
 function renderApprovalDetails(approval: any): ApprovalDetails {
@@ -35,6 +88,7 @@ interface ChatPanelProps {
   sendingHasImage: boolean
   streamedReply: string
   streamedResponse: ChatResponse | null
+  agentProgress: AgentProgress[]
   message: string
   imageDataUri: string | null
   imageName: string
@@ -61,6 +115,7 @@ export default function ChatPanel({
   sendingHasImage,
   streamedReply,
   streamedResponse,
+  agentProgress,
   message,
   imageDataUri,
   imageName,
@@ -79,6 +134,7 @@ export default function ChatPanel({
   onSetProvider,
   onApproval,
 }: ChatPanelProps) {
+  const agentActivities = activitiesFrom(agentProgress)
   const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
     event.preventDefault()
@@ -129,6 +185,26 @@ export default function ChatPanel({
         {sending && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
             <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{sendingHasImage ? `${sendingMessage} [Image #1]` : sendingMessage}</div></div></div>
+            {agentMode && agentActivities.length > 0 && (
+              <div className="message ai-message agent-activity-message">
+                <div className="agent-activity-card">
+                  <div className="agent-activity-header">
+                    <span>Agent activity</span>
+                    <span className="agent-activity-status" data-state={pendingApproval ? 'approval' : 'active'}>
+                      {pendingApproval ? 'Waiting for approval' : 'Working'}
+                    </span>
+                  </div>
+                  <div className="agent-activity-list">
+                    {agentActivities.map((activity, index) => (
+                      <div className="agent-activity-item" data-state={activity.state} key={`${index}-${activity.text}`}>
+                        <span className="agent-activity-dot" />
+                        <span className="agent-activity-text">{activity.text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="message ai-message thinking-message">
               <div className="bubble-wrapper">
                 <div className="message-bubble"><span>{streamedReply || 'Thinking...'}</span></div>

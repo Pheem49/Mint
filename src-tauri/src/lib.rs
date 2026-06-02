@@ -31,7 +31,7 @@ use tokio::sync::oneshot;
 
 use integrations::{channel_inventory, list_plugins};
 use mint_core::{
-    AgentApproval, AppliedCodeEdit, ApprovalOutcome, ChatRequest,
+    AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, ChatRequest,
     ChatResponse, CodeEdit, CodeEditProposal, InteractionMemory, MemoryStore, MintConfig,
     PictureEntry, TtsUrl, WeatherReport, apply_code_edits, classify_shell_command, config_path,
     google_tts_urls, list_saved_pictures, load_config, load_workflows, orchestrate_agent_loop,
@@ -74,6 +74,13 @@ struct RuntimeStatus {
     active_provider: String,
     available_providers: Vec<String>,
     integrations: Value,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum DesktopStreamEvent {
+    Chunk { chunk: String },
+    Progress { progress: AgentProgress },
 }
 
 #[tauri::command]
@@ -211,7 +218,7 @@ async fn send_chat_message(
 async fn stream_chat_message(
     app: AppHandle,
     request: ChatRequest,
-    on_event: Channel<String>,
+    on_event: Channel<DesktopStreamEvent>,
 ) -> Result<ChatResponse, String> {
     let config = load_config().map_err(|error| error.to_string())?;
     
@@ -220,7 +227,7 @@ async fn stream_chat_message(
         clean_request.message = request.message.strip_prefix("/chat ").unwrap().to_owned();
         
         let (response, _) = orchestrate_chat_stream_with_fallback(&config, &clean_request, |chunk| {
-            let _ = on_event.send(chunk);
+            let _ = on_event.send(DesktopStreamEvent::Chunk { chunk });
         })
         .await
         .map_err(|error| error.to_string())?;
@@ -254,7 +261,10 @@ async fn stream_chat_message(
         }
     };
     
-    let progress_cb = |_| {};
+    let on_progress_event = on_event.clone();
+    let progress_cb = move |progress| {
+        let _ = on_progress_event.send(DesktopStreamEvent::Progress { progress });
+    };
     
     let on_event_clone = on_event.clone();
     let on_chunk = move |summary: String| {
@@ -263,7 +273,7 @@ async fn stream_chat_message(
         while i < chars.len() {
             let end = (i + 4).min(chars.len());
             let chunk: String = chars[i..end].iter().collect();
-            let _ = on_event_clone.send(chunk);
+            let _ = on_event_clone.send(DesktopStreamEvent::Chunk { chunk });
             i = end;
             std::thread::sleep(std::time::Duration::from_millis(15));
         }

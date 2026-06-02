@@ -1369,6 +1369,11 @@ h1 {
   color: var(--text-muted);
 }
 
+.agent-activity-status[data-state="approval"] {
+  border-color: rgba(245, 158, 11, 0.36);
+  color: #fbbf24;
+}
+
 .agent-activity-list {
   display: grid;
   gap: 6px;

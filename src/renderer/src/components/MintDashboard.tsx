@@ -7,6 +7,7 @@ import {
   listSavedPictures,
   streamChatMessage,
   submitToolApproval,
+  type AgentProgress,
   type ChatResponse,
   type PictureEntry,
   type RuntimeStatus,
@@ -141,6 +142,7 @@ export default function MintDashboard() {
   const [sendingHasImage, setSendingHasImage] = useState(false)
   const [streamedReply, setStreamedReply] = useState('')
   const [streamedResponse, setStreamedResponse] = useState<ChatResponse | null>(null)
+  const [agentProgress, setAgentProgress] = useState<AgentProgress[]>([])
   const [imageDataUri, setImageDataUri] = useState<string | null>(null)
   const [imageName, setImageName] = useState('')
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
@@ -271,12 +273,20 @@ export default function MintDashboard() {
     setError('')
     setStreamedReply('')
     setStreamedResponse(null)
+    setAgentProgress([])
     setMessage('')
     setImageDataUri(null)
     setImageName('')
 
     try {
-      const response = await streamChatMessage(agentMode ? trimmed : `/chat ${trimmed}`, (chunk) => setStreamedReply((current) => `${current}${chunk}`), outgoingImage)
+      const response = await streamChatMessage(
+        agentMode ? trimmed : `/chat ${trimmed}`,
+        (chunk) => setStreamedReply((current) => `${current}${chunk}`),
+        outgoingImage,
+        null,
+        '',
+        (progress) => setAgentProgress((current) => [...current, progress].slice(-24)),
+      )
       setStreamedResponse(response)
       await refreshHistory()
       await refreshPictures()
@@ -350,6 +360,7 @@ export default function MintDashboard() {
     setError('')
     setStreamedReply('')
     setStreamedResponse(null)
+    setAgentProgress([])
 
     try {
       const response = await streamChatMessage(`/chat ${interactionMessage}`, (chunk) => setStreamedReply((current) => `${current}${chunk}`), null, null, instruction)
@@ -417,6 +428,7 @@ export default function MintDashboard() {
             sendingHasImage={sendingHasImage}
             streamedReply={streamedReply}
             streamedResponse={streamedResponse}
+            agentProgress={agentProgress}
             message={message}
             imageDataUri={imageDataUri}
             imageName={imageName}
