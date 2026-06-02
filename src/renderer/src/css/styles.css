@@ -1052,6 +1052,16 @@ h1 {
   color: var(--text-main);
 }
 
+.message.ai-message.thinking-message .message-bubble {
+  background: color-mix(in srgb, var(--panel-bg) 75%, #000000) !important;
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border-light)) !important;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25) !important;
+  color: var(--text-muted) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+
 /* Typing Indicator */
 .typing-indicator {
   display: flex;
@@ -1969,9 +1979,14 @@ input:checked + .slider:before {
               transform 0.22s ease;
 }
 
-.assistant-workspace.layout-chat {
+.assistant-workspace.layout-chat-wide {
   grid-template-columns: minmax(280px, 0.72fr) minmax(460px, 1.18fr);
 }
+
+.assistant-workspace.layout-model-wide {
+  grid-template-columns: minmax(420px, 1.18fr) minmax(360px, 0.72fr);
+}
+
 
 .app-body.sidebar-collapsed .assistant-workspace {
   margin-left: calc(var(--sidebar-collapsed-width) + var(--sidebar-content-gap));
@@ -2700,3 +2715,5 @@ input:checked + .slider:before {
     max-height: none;
   }
 }
+
+

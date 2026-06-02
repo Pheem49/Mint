@@ -215,8 +215,8 @@ export default function MintDashboard() {
   const [scale, setScale] = useState(1.00)
   const [showInteractionGuide, setShowInteractionGuide] = useState(true)
   const [isLocked, setIsLocked] = useState(false)
-  const [layoutPreset, setLayoutPreset] = useState<'vertical' | 'horizontal'>(
-    () => (window.localStorage.getItem('mint:layout-preset') as 'vertical' | 'horizontal') || 'vertical',
+  const [layoutPreset, setLayoutPreset] = useState<'chat-wide' | 'model-wide'>(
+    () => (window.localStorage.getItem('mint:layout-preset') as 'chat-wide' | 'model-wide') || 'chat-wide',
   )
   const [toastMessage, setToastMessage] = useState('')
   const [expressionIndex, setExpressionIndex] = useState(0)
@@ -249,7 +249,7 @@ export default function MintDashboard() {
     return () => clearTimeout(timer)
   }
 
-  const changeLayoutPreset = (preset: 'vertical' | 'horizontal') => {
+  const changeLayoutPreset = (preset: 'chat-wide' | 'model-wide') => {
     window.localStorage.setItem('mint:layout-preset', preset)
     setLayoutPreset(preset)
   }
@@ -533,7 +533,7 @@ export default function MintDashboard() {
         </aside>
 
         {/* Assistant Workspace (Center and Right columns) */}
-        <main className={`assistant-workspace ${layoutPreset === 'vertical' ? 'layout-chat' : 'layout-horizontal'} ${modelVisible ? '' : 'model-hidden'}`}>
+        <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible ? '' : 'model-hidden'}`}>
           {/* Left Column: Live2D Stage */}
           <section className="model-stage">
             <div className={`model-shell ${showInteractionGuide ? 'show-interaction-guide' : ''} model-bg-stage`}>
@@ -592,18 +592,24 @@ export default function MintDashboard() {
                 </button>
                 <div className="layout-preset-group">
                   <button
-                    className={`layout-preset-btn ${layoutPreset === 'vertical' ? 'is-active' : ''}`}
-                    onClick={() => changeLayoutPreset('vertical')}
-                    title="Vertical Split Layout"
+                    className={`layout-preset-btn ${layoutPreset === 'chat-wide' ? 'is-active' : ''}`}
+                    onClick={() => changeLayoutPreset('chat-wide')}
+                    title="ขยายหน้าต่างแชท (ย่อโมเดล)"
                   >
-                    ◫
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <path d="M9 3v18" />
+                    </svg>
                   </button>
                   <button
-                    className={`layout-preset-btn ${layoutPreset === 'horizontal' ? 'is-active' : ''}`}
-                    onClick={() => changeLayoutPreset('horizontal')}
-                    title="Horizontal Split Layout"
+                    className={`layout-preset-btn ${layoutPreset === 'model-wide' ? 'is-active' : ''}`}
+                    onClick={() => changeLayoutPreset('model-wide')}
+                    title="ขยายหน้าต่างโมเดล (ย่อแชท)"
                   >
-                    ⊟
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <path d="M15 3v18" />
+                    </svg>
                   </button>
                 </div>
               </div>
@@ -732,7 +738,7 @@ export default function MintDashboard() {
                       </div>
                     </div>
                   </div>
-                  <div className="message ai-message">
+                  <div className="message ai-message thinking-message">
                     <div className="bubble-wrapper">
                       <div className="message-bubble">
                         <span>{streamedReply || 'Thinking...'}</span>

@@ -107,7 +107,7 @@ pub async fn run_code_agent_with_options(
             AgentProgress::Thought { thought } => {
                 if !options.fast_mode {
                     clear_working_status();
-                    println!("\n\x1b[96m• Thinking:\x1b[0m {}", thought);
+                    println!("\n\x1b[90m• Thinking: {}\x1b[0m", thought);
                 }
             }
             AgentProgress::ToolStart { .. } => {
