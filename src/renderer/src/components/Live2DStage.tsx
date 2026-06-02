@@ -36,6 +36,8 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
   const modelRef = useRef<any>(null)
   const appRef = useRef<PIXI.Application | null>(null)
   const [loading, setLoading] = useState(true)
+  const baseWidthRef = useRef<number | null>(null)
+  const baseHeightRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return
@@ -47,7 +49,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     const initLive2D = async () => {
       try {
         // Dynamically import to ensure window.PIXI exists first
-        const { Live2DModel } = await import('pixi-live2d-display')
+        const { Live2DModel } = await import('pixi-live2d-display/cubism4')
 
         // Register ticker
         try {
@@ -95,6 +97,8 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
         }
 
         modelRef.current = model
+        baseWidthRef.current = model.width || model.internalModel?.originalWidth || 1000
+        baseHeightRef.current = model.height || model.internalModel?.originalHeight || 1000
         appInstance.stage.addChild(model as any)
 
         // Fit model size and position relative to canvas
@@ -104,14 +108,19 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
           const stageHeight = appRef.current.renderer.height
           const stageWidth = appRef.current.renderer.width
           
-          // Fit height to 95% of canvas height
-          const ratio = (stageHeight * 0.95) / m.height
-          m.scale.set(ratio * scale)
+          const baseWidth = baseWidthRef.current || m.width || 1000
+          const baseHeight = baseHeightRef.current || m.height || 1000
           
-          // Bottom-center alignment
-          m.anchor.set(0.5, 1)
+          const widthScale = stageWidth / baseWidth
+          const heightScale = stageHeight / baseHeight
+          
+          const modelScale = Math.min(widthScale, heightScale) * 1.85 * scale
+          m.scale.set(modelScale)
+          
+          // Center-center alignment with 55% Y offset
+          m.anchor.set(0.5, 0.5)
           m.x = stageWidth / 2
-          m.y = stageHeight
+          m.y = stageHeight / 2 + stageHeight * 0.55
         }
 
         fitModel()
@@ -153,10 +162,18 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     const app = appRef.current
     const stageHeight = app.renderer.height
     const stageWidth = app.renderer.width
-    const ratio = (stageHeight * 0.95) / model.height
-    model.scale.set(ratio * scale)
+    const baseWidth = baseWidthRef.current || model.width || 1000
+    const baseHeight = baseHeightRef.current || model.height || 1000
+    
+    const widthScale = stageWidth / baseWidth
+    const heightScale = stageHeight / baseHeight
+    
+    const modelScale = Math.min(widthScale, heightScale) * 1.85 * scale
+    model.scale.set(modelScale)
+    
+    model.anchor.set(0.5, 0.5)
     model.x = stageWidth / 2
-    model.y = stageHeight
+    model.y = stageHeight / 2 + stageHeight * 0.55
   }, [scale])
 
   // Update expressions & accessories dynamically

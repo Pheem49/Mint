@@ -578,8 +578,8 @@ export default function MintDashboard() {
                 <div className="model-scale-control">
                   <input
                     type="range"
-                    min="0.5"
-                    max="2.0"
+                    min="1.0"
+                    max="2.5"
                     step="0.05"
                     value={scale}
                     onChange={(e) => setScale(parseFloat(e.target.value))}
