@@ -149,7 +149,9 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
         // Match the extra mouse-driven parameters configured by the original VTube Studio model.
         model.internalModel.on('beforeModelUpdate', () => {
           const focus = model.internalModel.focusController
-          const coreModel = model.internalModel.coreModel
+          const coreModel = model.internalModel.coreModel as {
+            setParameterValueById: (parameterId: string, value: number) => void
+          }
 
           coreModel.setParameterValueById('Param77', focus.x * 10)
           coreModel.setParameterValueById('Param78', focus.y)
