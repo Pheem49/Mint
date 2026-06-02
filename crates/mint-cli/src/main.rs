@@ -1645,7 +1645,30 @@ async fn run_interactive_chat() -> Result<()> {
     Ok(())
 }
 
-fn draw_input_box(input: &str, placeholder: &str, model: &str, path_str: &str) {
+const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
+    ("/help", "Show help menu"),
+    ("/fast", "Toggle fast mode (hide thinking traces)"),
+    ("/models", "List AI providers or switch active provider"),
+    ("/clear", "Clear conversation history"),
+    ("/cd", "Change active workspace directory"),
+    ("/image", "Attach image from disk"),
+    ("/paste", "Attach image from clipboard"),
+    ("/learn", "Import persistent skill/instruction"),
+    ("/memory", "Manage long-term memory store"),
+    ("/stats", "Show session statistics"),
+    ("/exit", "Exit Mint CLI"),
+    ("/quit", "Exit Mint CLI"),
+    ("/code", "Run in code-agent mode"),
+];
+
+fn draw_input_box(
+    input: &str,
+    placeholder: &str,
+    model: &str,
+    path_str: &str,
+    tab_base_input: Option<&str>,
+    tab_index: Option<usize>,
+) -> usize {
     let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let width = term_width as usize;
     let prefix = "› ";
@@ -1684,7 +1707,36 @@ fn draw_input_box(input: &str, placeholder: &str, model: &str, path_str: &str) {
     let status_padding = " ".repeat(status_pad_len);
 
     print!("{}{}{}", agent_str, status_padding, path_label);
+
+    // Compute and draw suggestions
+    let search_query = tab_base_input.unwrap_or(input);
+    let mut match_count = 0;
+    if search_query.starts_with('/') {
+        let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
+            .iter()
+            .filter(|(cmd, _)| cmd.starts_with(search_query))
+            .collect();
+
+        if !matches.is_empty() {
+            match_count = matches.len();
+            println!();
+            println!(" \x1b[36mSuggestions:\x1b[0m");
+            let highlight_idx = tab_index.map(|idx| idx % matches.len());
+            for (i, (cmd, desc)) in matches.iter().enumerate() {
+                if Some(i) == highlight_idx {
+                    println!(
+                        "  \x1b[32m▶\x1b[0m \x1b[1;33m{:<12}\x1b[0m \x1b[90m-\x1b[0m \x1b[1;37m{}\x1b[0m",
+                        cmd, desc
+                    );
+                } else {
+                    println!("    \x1b[33m{:<12}\x1b[0m \x1b[90m-\x1b[0m {}", cmd, desc);
+                }
+            }
+        }
+    }
+
     let _ = io::stdout().flush();
+    match_count
 }
 
 fn input_cursor_column(input_chars: &[char], cursor_pos: usize) -> usize {
@@ -1696,9 +1748,15 @@ fn input_cursor_column(input_chars: &[char], cursor_pos: usize) -> usize {
     4 + visual_cursor_pos
 }
 
-fn position_input_cursor(input_chars: &[char], cursor_pos: usize) {
+fn position_input_cursor(input_chars: &[char], cursor_pos: usize, match_count: usize) {
+    let up_lines = if match_count > 0 {
+        4 + match_count
+    } else {
+        2
+    };
     print!(
-        "\x1b[2A\x1b[{}G",
+        "\x1b[{}A\x1b[{}G",
+        up_lines,
         input_cursor_column(input_chars, cursor_pos)
     );
 }
@@ -1713,11 +1771,20 @@ fn redraw_input_box(
     placeholder: &str,
     model: &str,
     path_str: &str,
+    tab_base_input: Option<&str>,
+    tab_index: Option<usize>,
 ) {
     clear_input_box();
     let input: String = input_chars.iter().collect();
-    draw_input_box(&input, placeholder, model, path_str);
-    position_input_cursor(input_chars, cursor_pos);
+    let match_count = draw_input_box(
+        &input,
+        placeholder,
+        model,
+        path_str,
+        tab_base_input,
+        tab_index,
+    );
+    position_input_cursor(input_chars, cursor_pos, match_count);
     let _ = io::stdout().flush();
 }
 
@@ -1735,8 +1802,12 @@ fn read_line_interactive(
     let mut ctrl_d_pressed = false;
     let mut pasted_image = None;
 
-    draw_input_box("", placeholder, model, path_str);
-    position_input_cursor(&input_chars, cursor_pos);
+    // Track tab autocomplete state
+    let mut tab_base_input: Option<String> = None;
+    let mut tab_index: Option<usize> = None;
+
+    let match_count = draw_input_box("", placeholder, model, path_str, None, None);
+    position_input_cursor(&input_chars, cursor_pos, match_count);
     let _ = io::stdout().flush();
 
     enable_raw_mode()?;
@@ -1756,6 +1827,15 @@ fn read_line_interactive(
                         print!("\x1b[{}G", input_cursor_column(&input_chars, cursor_pos));
                         let _ = io::stdout().flush();
                         enable_raw_mode()?;
+                    }
+
+                    // Reset tab autocomplete state if any key other than Tab, Up, or Down is pressed
+                    if key_event.code != KeyCode::Tab
+                        && key_event.code != KeyCode::Up
+                        && key_event.code != KeyCode::Down
+                    {
+                        tab_base_input = None;
+                        tab_index = None;
                     }
 
                     match key_event.code {
@@ -1796,6 +1876,8 @@ fn read_line_interactive(
                                     placeholder,
                                     model,
                                     path_str,
+                                    None,
+                                    None,
                                 );
                                 enable_raw_mode()?;
                             }
@@ -1817,6 +1899,8 @@ fn read_line_interactive(
                                     placeholder,
                                     model,
                                     path_str,
+                                    None,
+                                    None,
                                 );
                                 enable_raw_mode()?;
                             }
@@ -1833,8 +1917,136 @@ fn read_line_interactive(
                                     placeholder,
                                     model,
                                     path_str,
+                                    None,
+                                    None,
                                 );
                                 enable_raw_mode()?;
+                            }
+                        }
+                        KeyCode::Tab => {
+                            let base = match &tab_base_input {
+                                Some(b) => b.clone(),
+                                None => {
+                                    let current_str: String = input_chars.iter().collect();
+                                    tab_base_input = Some(current_str.clone());
+                                    current_str
+                                }
+                            };
+
+                            if base.starts_with('/') {
+                                let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
+                                    .iter()
+                                    .filter(|(cmd, _)| cmd.starts_with(&base))
+                                    .collect();
+
+                                if !matches.is_empty() {
+                                    let idx = tab_index.unwrap_or(0) % matches.len();
+                                    let completed = format!("{} ", matches[idx].0);
+                                    input_chars = completed.chars().collect();
+                                    cursor_pos = input_chars.len();
+                                    
+                                    // Highlight currently completed item in suggestions
+                                    let current_highlight = Some(idx);
+                                    tab_index = Some(idx + 1);
+
+                                    disable_raw_mode()?;
+                                    redraw_input_box(
+                                        &input_chars,
+                                        cursor_pos,
+                                        placeholder,
+                                        model,
+                                        path_str,
+                                        Some(&base),
+                                        current_highlight,
+                                    );
+                                    enable_raw_mode()?;
+                                }
+                            }
+                        }
+                        KeyCode::Down => {
+                            let base = match &tab_base_input {
+                                Some(b) => b.clone(),
+                                None => {
+                                    let current_str: String = input_chars.iter().collect();
+                                    tab_base_input = Some(current_str.clone());
+                                    current_str
+                                }
+                            };
+
+                            if base.starts_with('/') {
+                                let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
+                                    .iter()
+                                    .filter(|(cmd, _)| cmd.starts_with(&base))
+                                    .collect();
+
+                                if !matches.is_empty() {
+                                    let new_idx = match tab_index {
+                                        Some(idx) => (idx + 1) % matches.len(),
+                                        None => 0,
+                                    };
+                                    tab_index = Some(new_idx);
+                                    let completed = format!("{} ", matches[new_idx].0);
+                                    input_chars = completed.chars().collect();
+                                    cursor_pos = input_chars.len();
+
+                                    disable_raw_mode()?;
+                                    redraw_input_box(
+                                        &input_chars,
+                                        cursor_pos,
+                                        placeholder,
+                                        model,
+                                        path_str,
+                                        Some(&base),
+                                        Some(new_idx),
+                                    );
+                                    enable_raw_mode()?;
+                                }
+                            }
+                        }
+                        KeyCode::Up => {
+                            let base = match &tab_base_input {
+                                Some(b) => b.clone(),
+                                None => {
+                                    let current_str: String = input_chars.iter().collect();
+                                    tab_base_input = Some(current_str.clone());
+                                    current_str
+                                }
+                            };
+
+                            if base.starts_with('/') {
+                                let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
+                                    .iter()
+                                    .filter(|(cmd, _)| cmd.starts_with(&base))
+                                    .collect();
+
+                                if !matches.is_empty() {
+                                    let new_idx = match tab_index {
+                                        Some(idx) => {
+                                            if idx == 0 {
+                                                matches.len() - 1
+                                            } else {
+                                                idx - 1
+                                            }
+                                        }
+                                        None => matches.len() - 1,
+                                    };
+                                    tab_index = Some(new_idx);
+                                    let completed = format!("{} ", matches[new_idx].0);
+                                    input_chars = completed.chars().collect();
+                                    cursor_pos = input_chars.len();
+
+                                    disable_raw_mode()?;
+                                    redraw_input_box(
+                                        &input_chars,
+                                        cursor_pos,
+                                        placeholder,
+                                        model,
+                                        path_str,
+                                        Some(&base),
+                                        Some(new_idx),
+                                    );
+                                    enable_raw_mode()?;
+                                }
                             }
                         }
                         KeyCode::Left => {
