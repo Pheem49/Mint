@@ -110,9 +110,24 @@ pub async fn run_code_agent_with_options(
                     println!("\n\x1b[90m• Thinking: {}\x1b[0m", thought);
                 }
             }
-            AgentProgress::ToolStart { .. } => {
+            AgentProgress::ToolStart { action, input } => {
                 if !options.fast_mode {
                     clear_working_status();
+                    let detail = match action.as_str() {
+                        "web_search" => input.get("query").and_then(|v| v.as_str()).map(|s| format!("Searching the web for \"{}\"...", s)),
+                        "run_shell" => input.get("command").and_then(|v| v.as_str()).map(|s| format!("Running command: `{}`...", s)),
+                        "read_file" => input.get("path").and_then(|v| v.as_str()).map(|s| format!("Reading file: {}...", s)),
+                        "write_file" => input.get("path").and_then(|v| v.as_str()).map(|s| format!("Writing file: {}...", s)),
+                        "apply_patch" => input.get("patch").and_then(|p| p.get("path")).and_then(|v| v.as_str()).map(|s| format!("Patching file: {}...", s)),
+                        "search_code" => input.get("query").and_then(|v| v.as_str()).map(|s| format!("Searching code: \"{}\"...", s)),
+                        "list_files" => input.get("path").and_then(|v| v.as_str()).map(|s| format!("Listing files in: {}...", s)),
+                        "run_plugin" => input.get("name").and_then(|v| v.as_str()).map(|s| format!("Running plugin: {}...", s)),
+                        "mcp_tool" => input.get("tool").and_then(|v| v.as_str()).map(|s| format!("Running MCP tool: {}...", s)),
+                        _ => Some(format!("Using tool: {}...", action)),
+                    };
+                    if let Some(msg) = detail {
+                        println!("\x1b[96m• {}\x1b[0m", msg);
+                    }
                 }
             }
             AgentProgress::ToolEnd { .. } => {
