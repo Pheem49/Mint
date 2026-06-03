@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use std::{
     fs,
     io::{self, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 use mint_core::{
@@ -23,6 +23,19 @@ mod mcp;
 mod onboard;
 mod skills;
 mod updater;
+
+async fn run_code_agent_with_saved_image(
+    task: &str,
+    current_dir: &Path,
+    config: &MintConfig,
+    image_data_uri: Option<String>,
+    options: agent::AgentOptions,
+) -> Result<()> {
+    let sent_image = image_data_uri.clone();
+    agent::run_code_agent_with_options(task, current_dir, config, image_data_uri, options).await?;
+    image::save_sent_image_after_send(sent_image.as_deref(), task);
+    Ok(())
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "mint", version, about = "Mint native CLI")]
@@ -555,11 +568,12 @@ async fn main() -> Result<()> {
                     .transpose()?;
                 let sent_image = image_data_uri.clone();
                 if system.trim().is_empty() {
-                    agent::run_code_agent_with_image(
+                    run_code_agent_with_saved_image(
                         &message,
                         &std::env::current_dir()?,
                         &load_config()?,
                         image_data_uri,
+                        agent::AgentOptions::default(),
                     )
                     .await?;
                 } else {
@@ -1479,7 +1493,7 @@ async fn run_interactive_chat() -> Result<()> {
                 Some(SlashResult::ForwardToAgent(task)) => {
                     // Force code agent for /code forwarded tasks
                     println!();
-                    if let Err(error) = agent::run_code_agent_with_options(
+                    if let Err(error) = run_code_agent_with_saved_image(
                         &task,
                         &session.current_dir,
                         &session.config,
@@ -1500,7 +1514,7 @@ async fn run_interactive_chat() -> Result<()> {
             // Check if it's a /code or regular agent request
             if let Some(task) = query_str.strip_prefix("/code ") {
                 println!();
-                if let Err(error) = agent::run_code_agent_with_options(
+                if let Err(error) = run_code_agent_with_saved_image(
                     task.trim(),
                     &session.current_dir,
                     &session.config,
@@ -1518,7 +1532,7 @@ async fn run_interactive_chat() -> Result<()> {
 
             // Regular agent loop (handles both chat and coding)
             if !query_str.starts_with("/chat ") {
-                if let Err(error) = agent::run_code_agent_with_options(
+                if let Err(error) = run_code_agent_with_saved_image(
                     query_str.trim_start_matches("/chat "),
                     &session.current_dir,
                     &session.config,
