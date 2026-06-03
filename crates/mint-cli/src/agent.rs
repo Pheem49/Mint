@@ -39,7 +39,7 @@ pub async fn run_code_agent_with_options(
         match approval {
             AgentApproval::WriteFile { diff, .. } => {
                 println!("  Proposed edit");
-                println!("{}", diff);
+                print_colored_diff(diff);
                 if confirm("Approve file edit? [y/N]") {
                     Ok(ApprovalOutcome::Approved)
                 } else {
@@ -48,7 +48,7 @@ pub async fn run_code_agent_with_options(
             }
             AgentApproval::ApplyPatch { diff, .. } => {
                 println!("  Proposed edit");
-                println!("{}", diff);
+                print_colored_diff(diff);
                 if confirm("Approve file edit? [y/N]") {
                     Ok(ApprovalOutcome::Approved)
                 } else {
@@ -93,32 +93,40 @@ pub async fn run_code_agent_with_options(
         }
     };
 
-    let explored_actions = Arc::new(Mutex::new(Vec::<ExploredAction>::new()));
-    let ran_commands = Arc::new(Mutex::new(Vec::<String>::new()));
-    let progress_explored_actions = Arc::clone(&explored_actions);
-    let progress_ran_commands = Arc::clone(&ran_commands);
+    let live_status = Arc::new(Mutex::new(LiveStatus::default()));
+    let progress_live_status = Arc::clone(&live_status);
     let progress_cb = |progress: AgentProgress| match progress {
         AgentProgress::Thinking { elapsed_secs } => {
             if !options.fast_mode {
-                print!(
-                    "\r\x1b[2K\x1b[90m• Thinking ({} • Ctrl+C to interrupt)\x1b[0m",
-                    format_elapsed(Duration::from_secs(elapsed_secs))
-                );
-                let _ = io::stdout().flush();
+                if let Ok(mut status) = progress_live_status.lock() {
+                    status.show_composer = true;
+                    status.thinking = Some(format!(
+                        "Thinking ({} • Ctrl+C to interrupt)",
+                        format_elapsed(Duration::from_secs(elapsed_secs))
+                    ));
+                    render_live_status(&mut status);
+                }
             }
         }
         AgentProgress::Thought { thought } => {
             if !options.fast_mode {
-                clear_working_status();
-                println!("\n\x1b[90m• Thinking: {}\x1b[0m", thought);
+                if let Ok(mut status) = progress_live_status.lock() {
+                    commit_activity_snapshot(&mut status);
+                    print_timeline_note(&thought);
+                    status.thinking = None;
+                    status.show_composer = true;
+                    render_live_status(&mut status);
+                }
             }
         }
         AgentProgress::ToolStart { action, input } => {
             if !options.fast_mode {
-                clear_working_status();
                 if let Some(label) = explored_action_label(&action, &input) {
-                    if let Ok(mut actions) = progress_explored_actions.lock() {
-                        actions.push(label);
+                    if let Ok(mut status) = progress_live_status.lock() {
+                        status.show_composer = true;
+                        status.thinking = None;
+                        status.explored.push(label);
+                        render_live_status(&mut status);
                     }
                     return;
                 }
@@ -163,6 +171,9 @@ pub async fn run_code_agent_with_options(
                     _ => Some(format!("Using tool: {}...", action)),
                 };
                 if let Some(msg) = detail {
+                    if let Ok(mut status) = progress_live_status.lock() {
+                        clear_live_status(&mut status);
+                    }
                     println!("\x1b[96m• {}\x1b[0m", msg);
                 }
             }
@@ -175,23 +186,24 @@ pub async fn run_code_agent_with_options(
             if !options.fast_mode
                 && command_was_run(&result)
                 && let Some(commands) = ran_command_labels(&action, &input)
-                && let Ok(mut ran) = progress_ran_commands.lock()
+                && let Ok(mut status) = progress_live_status.lock()
             {
-                ran.extend(commands);
+                status.show_composer = true;
+                status.thinking = None;
+                status.ran.extend(commands);
+                render_live_status(&mut status);
             }
         }
     };
 
-    let chunk_explored_actions = Arc::clone(&explored_actions);
-    let chunk_ran_commands = Arc::clone(&ran_commands);
+    let chunk_live_status = Arc::clone(&live_status);
     let on_chunk = |summary: String| {
-        clear_working_status();
         if !options.fast_mode {
-            if let Ok(actions) = chunk_explored_actions.lock() {
-                print_explored_actions(&actions);
-            }
-            if let Ok(commands) = chunk_ran_commands.lock() {
-                print_ran_commands(&commands);
+            if let Ok(mut status) = chunk_live_status.lock() {
+                status.thinking = None;
+                status.show_composer = false;
+                commit_activity_snapshot(&mut status);
+                clear_live_status(&mut status);
             }
         }
         let formatted_summary = format_markdown_bold(&summary);
@@ -212,16 +224,16 @@ pub async fn run_code_agent_with_options(
     )
     .await;
     if res.is_err() && !options.fast_mode {
-        if let Ok(actions) = explored_actions.lock() {
-            print_explored_actions(&actions);
-        }
-        if let Ok(commands) = ran_commands.lock() {
-            print_ran_commands(&commands);
+        if let Ok(mut status) = live_status.lock() {
+            status.thinking = None;
+            status.show_composer = false;
+            commit_activity_snapshot(&mut status);
+            clear_live_status(&mut status);
         }
     }
     let res = res.map_err(|e| anyhow!("{}", e))?;
 
-    if !res.verification.is_empty() {
+    if should_show_verification(&res.verification) {
         println!("Verification: {}", res.verification);
     }
     println!(
@@ -266,6 +278,54 @@ fn render_live_summary(summary: &str) {
         print!("{chunk}");
         let _ = io::stdout().flush();
     }
+}
+
+fn print_colored_diff(diff: &str) {
+    for line in diff.lines() {
+        if line.starts_with("@@") {
+            println!("\x1b[96m{line}\x1b[0m");
+        } else if line.starts_with("--- ") || line.starts_with("+++ ") {
+            println!("\x1b[90m{line}\x1b[0m");
+        } else if line.starts_with('-') {
+            println!("\x1b[31m{line}\x1b[0m");
+        } else if line.starts_with('+') {
+            println!("\x1b[32m{line}\x1b[0m");
+        } else {
+            println!("{line}");
+        }
+    }
+}
+
+fn should_show_verification(verification: &str) -> bool {
+    let normalized = verification.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+    !matches!(
+        normalized.as_str(),
+        "not run"
+            | "not run."
+            | "no checks run"
+            | "no checks run."
+            | "no technical task requested"
+            | "no technical task requested."
+            | "no technical task requested, just a greeting."
+            | "not required"
+            | "not required."
+            | "none"
+            | "n/a"
+    )
+}
+
+#[derive(Debug, Default)]
+struct LiveStatus {
+    thinking: Option<String>,
+    explored: Vec<ExploredAction>,
+    ran: Vec<String>,
+    committed_explored: usize,
+    committed_ran: usize,
+    show_composer: bool,
+    rendered_lines: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -326,23 +386,106 @@ fn display_tool_target(path: &str) -> String {
     }
 }
 
-fn print_explored_actions(actions: &[ExploredAction]) {
-    if actions.is_empty() {
+fn render_live_status(status: &mut LiveStatus) {
+    clear_live_status(status);
+    let mut lines = Vec::new();
+    lines.extend(explored_lines(
+        &status.explored[status.committed_explored..],
+    ));
+    lines.extend(ran_lines(&status.ran[status.committed_ran..]));
+    if let Some(thinking) = &status.thinking {
+        lines.push(format!("\x1b[90m• {thinking}\x1b[0m"));
+    }
+    if status.show_composer {
+        lines.extend(disabled_composer_lines());
+    }
+    if lines.is_empty() {
         return;
     }
-    println!("\n\x1b[90m• Explored\x1b[0m");
-    for (index, action) in grouped_explored_actions(actions)
-        .iter()
-        .enumerate()
-        .take(24)
-    {
+    for line in &lines {
+        println!("{line}");
+    }
+    status.rendered_lines = lines.len();
+    let _ = io::stdout().flush();
+}
+
+fn commit_activity_snapshot(status: &mut LiveStatus) {
+    clear_live_status(status);
+    let explored_start = status.committed_explored.min(status.explored.len());
+    let ran_start = status.committed_ran.min(status.ran.len());
+    let mut lines = explored_lines(&status.explored[explored_start..]);
+    lines.extend(ran_lines(&status.ran[ran_start..]));
+    if lines.is_empty() {
+        return;
+    }
+    for line in &lines {
+        println!("{line}");
+    }
+    print_timeline_separator();
+    status.committed_explored = status.explored.len();
+    status.committed_ran = status.ran.len();
+    let _ = io::stdout().flush();
+}
+
+fn print_timeline_note(thought: &str) {
+    let thought = thought.trim();
+    if thought.is_empty() {
+        return;
+    }
+    println!("\x1b[90m• {thought}\x1b[0m");
+}
+
+fn print_timeline_separator() {
+    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let width = term_width as usize;
+    println!("\n\x1b[90m{}\x1b[0m\n", "─".repeat(width));
+}
+
+fn disabled_composer_lines() -> Vec<String> {
+    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let width = term_width as usize;
+    let input_width = width.saturating_sub(2);
+    let prefix = "› ";
+    let placeholder = "Ask anything...";
+    let blank_line = " ".repeat(input_width);
+    let padding = " ".repeat(
+        input_width
+            .saturating_sub(prefix.chars().count())
+            .saturating_sub(placeholder.chars().count()),
+    );
+    vec![
+        format!(" \x1b[48;2;65;69;77m{blank_line}\x1b[0m"),
+        format!(" \x1b[48;2;65;69;77m{prefix}\x1b[90m{placeholder}\x1b[39m{padding}\x1b[0m"),
+        format!(" \x1b[48;2;65;69;77m{blank_line}\x1b[0m"),
+    ]
+}
+
+fn clear_live_status(status: &mut LiveStatus) {
+    if status.rendered_lines == 0 {
+        clear_working_status();
+        return;
+    }
+    for _ in 0..status.rendered_lines {
+        print!("\x1b[1A\r\x1b[2K");
+    }
+    status.rendered_lines = 0;
+    let _ = io::stdout().flush();
+}
+
+fn explored_lines(actions: &[ExploredAction]) -> Vec<String> {
+    if actions.is_empty() {
+        return Vec::new();
+    }
+    let grouped = grouped_explored_actions(actions);
+    let mut lines = vec!["\x1b[96m• Explored\x1b[0m".to_owned()];
+    lines.extend(grouped.iter().take(24).enumerate().map(|(index, action)| {
         let prefix = if index == 0 { "  └" } else { "   " };
-        println!("\x1b[90m{} {}\x1b[0m", prefix, action);
+        format!("\x1b[96m{prefix} {action}\x1b[0m")
+    }));
+    if grouped.len() > 24 {
+        lines.push(format!("\x1b[96m   ... {} more\x1b[0m", grouped.len() - 24));
     }
-    let grouped_len = grouped_explored_actions(actions).len();
-    if grouped_len > 24 {
-        println!("\x1b[90m   ... {} more\x1b[0m", grouped_len - 24);
-    }
+    lines
 }
 
 fn ran_command_labels(action: &str, input: &serde_json::Value) -> Option<Vec<String>> {
@@ -372,33 +515,42 @@ fn command_was_run(result: &str) -> bool {
     result.lines().any(|line| line.starts_with("exit: "))
 }
 
-fn print_ran_commands(commands: &[String]) {
+fn ran_lines(commands: &[String]) -> Vec<String> {
     if commands.is_empty() {
-        return;
+        return Vec::new();
     }
-    println!("\n\x1b[90m• Ran {}\x1b[0m", commands[0]);
-    for command in commands.iter().skip(1).take(24) {
-        println!("\x1b[90m  └ {}\x1b[0m", command);
-    }
+    let mut lines = vec![format!("\x1b[90m• Ran {}\x1b[0m", commands[0])];
+    lines.extend(
+        commands
+            .iter()
+            .skip(1)
+            .take(24)
+            .map(|command| format!("\x1b[90m  └ {command}\x1b[0m")),
+    );
     if commands.len() > 25 {
-        println!("\x1b[90m  └ ... {} more\x1b[0m", commands.len() - 25);
+        lines.push(format!(
+            "\x1b[90m  └ ... {} more\x1b[0m",
+            commands.len() - 25
+        ));
     }
+    lines
 }
 
 fn grouped_explored_actions(actions: &[ExploredAction]) -> Vec<String> {
-    let mut grouped = Vec::new();
-    let mut index = 0;
-    while index < actions.len() {
-        let current = &actions[index];
-        let mut targets = vec![current.target.as_str()];
-        index += 1;
-        while index < actions.len() && actions[index].kind == current.kind {
-            targets.push(actions[index].target.as_str());
-            index += 1;
+    let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
+    for action in actions {
+        if let Some((_, targets)) = groups.iter_mut().find(|(kind, _)| *kind == action.kind) {
+            if !targets.iter().any(|target| *target == action.target) {
+                targets.push(action.target.as_str());
+            }
+        } else {
+            groups.push((action.kind, vec![action.target.as_str()]));
         }
-        grouped.push(format!("{} {}", current.kind, targets.join(", ")));
     }
-    grouped
+    groups
+        .into_iter()
+        .map(|(kind, targets)| format!("{} {}", kind, targets.join(", ")))
+        .collect()
 }
 
 fn confirm(prompt: &str) -> bool {

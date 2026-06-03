@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use thiserror::Error;
@@ -339,6 +340,7 @@ where
     #[allow(unused_assignments)]
     let mut final_model = "".to_string();
     let mut final_fallback = None;
+    let mut action_counts = BTreeMap::<String, usize>::new();
 
     for step in 1..=MAX_STEPS {
         progress(AgentProgress::Thinking {
@@ -505,6 +507,13 @@ where
             input: input_val,
         });
 
+        let action_key = action_fingerprint(&decision);
+        let action_count = {
+            let count = action_counts.entry(action_key).or_insert(0);
+            *count += 1;
+            *count
+        };
+
         let result = match execute_tool(&root, config, &decision, &mut approve).await {
             Ok(result) => result,
             Err(error) => {
@@ -538,6 +547,21 @@ where
                      Do not finish or stop until the compilation or test errors are resolved!]"
                 );
             }
+        }
+        if decision.action == "apply_patch" || decision.action == "write_file" {
+            final_result.push_str(
+                "\n\n[System Tip: The file edit was approved and applied successfully. \
+                 If this satisfies the user's request, use the finish action now. \
+                 Do not broaden the scope, do not make additional unrelated edits, and do not reread \
+                 the same file unless you need one concise verification read.]",
+            );
+        }
+        if action_count >= 3 {
+            final_result.push_str(
+                "\n\n[System Tip: You repeated the same tool action three or more times. \
+                 Stop repeating it. If you already have enough information or the requested edit is done, \
+                 use the finish action now. Otherwise choose a different necessary action.]",
+            );
         }
 
         observation = format!(
@@ -935,6 +959,32 @@ fn run_shell(
         "exit: {}\nsandboxed: {}\nstdout:\n{}\nstderr:\n{}{}",
         status_str, output.sandboxed, output.stdout, output.stderr, hint
     ))
+}
+
+fn action_fingerprint(decision: &AgentDecision) -> String {
+    let input = &decision.input;
+    match decision.action.as_str() {
+        "list_files" | "read_file" | "symbols" => {
+            format!("{}:{}", decision.action, input.path.trim())
+        }
+        "search_code" | "semantic_search" | "web_search" | "knowledge_search" | "memory_recall" => {
+            format!(
+                "{}:{}:{}",
+                decision.action,
+                input.path.trim(),
+                input.query.trim()
+            )
+        }
+        "run_shell" => format!("run_shell:{}", input.command.trim()),
+        "verify" => format!("verify:{}", input.commands.join("\n")),
+        "apply_patch" => input
+            .patch
+            .as_ref()
+            .map(|patch| format!("apply_patch:{}", patch.path.display()))
+            .unwrap_or_else(|| "apply_patch:<missing>".to_owned()),
+        "write_file" => format!("write_file:{}", input.path.trim()),
+        other => other.to_owned(),
+    }
 }
 
 fn initial_observation(task: &str, root: &Path, skills: &str) -> String {
