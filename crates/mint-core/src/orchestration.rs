@@ -501,12 +501,6 @@ where
             });
         }
 
-        let input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
-        progress(AgentProgress::ToolStart {
-            action: decision.action.clone(),
-            input: input_val,
-        });
-
         let action_key = action_fingerprint(&decision);
         let action_count = {
             let count = action_counts.entry(action_key).or_insert(0);
@@ -514,10 +508,23 @@ where
             *count
         };
 
-        let result = match execute_tool(&root, config, &decision, &mut approve).await {
-            Ok(result) => result,
-            Err(error) => {
-                format!("Error: {}", error)
+        let result = if decision.action == "run_shell" && action_count > 1 {
+            format!(
+                "Skipped duplicate shell command: {}\n\n[System Tip: This exact shell command already ran once in this task. Do not run it again. Use the finish action now and tell the user the action was completed.]",
+                decision.input.command.trim()
+            )
+        } else {
+            let input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+            progress(AgentProgress::ToolStart {
+                action: decision.action.clone(),
+                input: input_val,
+            });
+
+            match execute_tool(&root, config, &decision, &mut approve).await {
+                Ok(result) => result,
+                Err(error) => {
+                    format!("Error: {}", error)
+                }
             }
         };
 

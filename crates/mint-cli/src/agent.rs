@@ -1,11 +1,15 @@
 use std::io::{self, Write};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use mint_core::{
-    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, MintConfig, orchestrate_agent_loop,
+    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, MintConfig, OrchestrationError,
+    orchestrate_agent_loop,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -34,13 +38,16 @@ pub async fn run_code_agent_with_options(
     options: AgentOptions,
 ) -> Result<AgentResult> {
     let started_at = Instant::now();
+    let approval_active = Arc::new(AtomicBool::new(false));
+    let agent_done = Arc::new(AtomicBool::new(false));
+    let approve_approval_active = Arc::clone(&approval_active);
 
     let approve_cb = |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         match approval {
             AgentApproval::WriteFile { diff, .. } => {
                 println!("  Proposed edit");
                 print_colored_diff(diff);
-                if confirm("Approve file edit? [y/N]") {
+                if confirm_pausing_interrupt("Approve file edit? [y/N]", &approve_approval_active) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
@@ -49,7 +56,7 @@ pub async fn run_code_agent_with_options(
             AgentApproval::ApplyPatch { diff, .. } => {
                 println!("  Proposed edit");
                 print_colored_diff(diff);
-                if confirm("Approve file edit? [y/N]") {
+                if confirm_pausing_interrupt("Approve file edit? [y/N]", &approve_approval_active) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
@@ -58,7 +65,10 @@ pub async fn run_code_agent_with_options(
             AgentApproval::RunShell { command } => {
                 println!("  \x1b[96m• Proposed command\x1b[0m");
                 println!("    {}", command);
-                if confirm("Approve local shell execution? [y/N]") {
+                if confirm_pausing_interrupt(
+                    "Approve local shell execution? [y/N]",
+                    &approve_approval_active,
+                ) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
@@ -67,7 +77,10 @@ pub async fn run_code_agent_with_options(
             AgentApproval::NoteWrite { path, .. } => {
                 println!("  \x1b[96m• Proposed note write\x1b[0m");
                 println!("    {}", path);
-                if confirm("Approve writing this note? [y/N]") {
+                if confirm_pausing_interrupt(
+                    "Approve writing this note? [y/N]",
+                    &approve_approval_active,
+                ) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
@@ -75,7 +88,10 @@ pub async fn run_code_agent_with_options(
             }
             AgentApproval::RunPlugin { name, instruction } => {
                 println!("    Run plugin {}: {}", name, instruction);
-                if confirm(&format!("Approve running plugin '{}'? [y/N]", name)) {
+                if confirm_pausing_interrupt(
+                    &format!("Approve running plugin '{}'? [y/N]", name),
+                    &approve_approval_active,
+                ) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
@@ -84,7 +100,10 @@ pub async fn run_code_agent_with_options(
             AgentApproval::McpTool { server, tool, .. } => {
                 println!("  Called MCP tool");
                 println!("    {} {}", server, tool);
-                if confirm("Approve MCP tool call? [y/N]") {
+                if confirm_pausing_interrupt(
+                    "Approve MCP tool call? [y/N]",
+                    &approve_approval_active,
+                ) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
@@ -94,6 +113,30 @@ pub async fn run_code_agent_with_options(
     };
 
     let live_status = Arc::new(Mutex::new(LiveStatus::default()));
+    let timer_live_status = Arc::clone(&live_status);
+    let timer_agent_done = Arc::clone(&agent_done);
+    let timer_approval_active = Arc::clone(&approval_active);
+    let timer_started_at = started_at;
+    if !options.fast_mode {
+        tokio::spawn(async move {
+            loop {
+                if timer_agent_done.load(Ordering::Relaxed) {
+                    break;
+                }
+                if !timer_approval_active.load(Ordering::Relaxed)
+                    && let Ok(mut status) = timer_live_status.lock()
+                {
+                    status.show_composer = true;
+                    status.thinking = Some(format!(
+                        "Thinking ({} • Esc to interrupt)",
+                        format_elapsed(timer_started_at.elapsed())
+                    ));
+                    render_live_status(&mut status);
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        });
+    }
     let progress_live_status = Arc::clone(&live_status);
     let progress_cb = |progress: AgentProgress| match progress {
         AgentProgress::Thinking { elapsed_secs } => {
@@ -101,7 +144,7 @@ pub async fn run_code_agent_with_options(
                 if let Ok(mut status) = progress_live_status.lock() {
                     status.show_composer = true;
                     status.thinking = Some(format!(
-                        "Thinking ({} • Ctrl+C to interrupt)",
+                        "Thinking ({} • Esc to interrupt)",
                         format_elapsed(Duration::from_secs(elapsed_secs))
                     ));
                     render_live_status(&mut status);
@@ -212,7 +255,7 @@ pub async fn run_code_agent_with_options(
         println!();
     };
 
-    let res = orchestrate_agent_loop(
+    let agent_loop = orchestrate_agent_loop(
         config,
         task,
         root,
@@ -221,8 +264,18 @@ pub async fn run_code_agent_with_options(
         approve_cb,
         progress_cb,
         on_chunk,
-    )
-    .await;
+    );
+    let res = if options.fast_mode {
+        agent_loop.await
+    } else {
+        tokio::select! {
+            res = agent_loop => res,
+            _ = wait_for_escape_interrupt(Arc::clone(&approval_active)) => {
+                Err(OrchestrationError::Agent("interrupted by Esc".into()))
+            }
+        }
+    };
+    agent_done.store(true, Ordering::Relaxed);
     if res.is_err() && !options.fast_mode {
         if let Ok(mut status) = live_status.lock() {
             status.thinking = None;
@@ -299,6 +352,14 @@ fn print_colored_diff(diff: &str) {
 fn should_show_verification(verification: &str) -> bool {
     let normalized = verification.trim().to_ascii_lowercase();
     if normalized.is_empty() {
+        return false;
+    }
+    if normalized.starts_with("information retrieved from web search")
+        || normalized.starts_with("successfully ran background command")
+        || normalized.starts_with("opened ")
+        || normalized.contains("background command to open")
+        || normalized.contains("web search results")
+    {
         return false;
     }
     !matches!(
@@ -553,8 +614,38 @@ fn grouped_explored_actions(actions: &[ExploredAction]) -> Vec<String> {
         .collect()
 }
 
-fn confirm(prompt: &str) -> bool {
-    crate::confirm(prompt).unwrap_or(false)
+async fn wait_for_escape_interrupt(approval_active: Arc<AtomicBool>) {
+    use crossterm::event::{self, Event, KeyCode};
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+    loop {
+        if approval_active.load(Ordering::Relaxed) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            continue;
+        }
+
+        let _ = enable_raw_mode();
+        let escaped = matches!(event::poll(Duration::from_millis(0)), Ok(true))
+            && matches!(
+                event::read(),
+                Ok(Event::Key(key_event))
+                    if key_event.kind == event::KeyEventKind::Press
+                        && key_event.code == KeyCode::Esc
+            );
+        let _ = disable_raw_mode();
+
+        if escaped {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(80)).await;
+    }
+}
+
+fn confirm_pausing_interrupt(prompt: &str, approval_active: &AtomicBool) -> bool {
+    approval_active.store(true, Ordering::Relaxed);
+    let approved = crate::confirm(prompt).unwrap_or(false);
+    approval_active.store(false, Ordering::Relaxed);
+    approved
 }
 
 fn format_markdown_bold(text: &str) -> String {
