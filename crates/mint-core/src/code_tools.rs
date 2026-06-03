@@ -128,7 +128,7 @@ pub fn list_code_files(
 ) -> Result<Vec<CodeFile>, CodeInspectionError> {
     let root = assert_path_capability(root, Capability::Read, config)?;
     let mut files = Vec::new();
-    collect_files(&root, &mut files, limit.max(1))?;
+    collect_files(&root, &mut files, limit.max(1), true)?;
     Ok(files)
 }
 
@@ -419,8 +419,9 @@ fn collect_files(
     directory: &Path,
     files: &mut Vec<CodeFile>,
     limit: usize,
+    is_root: bool,
 ) -> Result<(), CodeInspectionError> {
-    if files.len() >= limit || is_ignored_directory(directory) {
+    if files.len() >= limit || (!is_root && is_ignored_directory(directory)) {
         return Ok(());
     }
     let entries = fs::read_dir(directory).map_err(|source| CodeInspectionError::Read {
@@ -443,7 +444,7 @@ fn collect_files(
                 source,
             })?;
         if file_type.is_dir() {
-            collect_files(&path, files, limit)?;
+            collect_files(&path, files, limit, false)?;
         } else if file_type.is_file() {
             let size = entry
                 .metadata()
@@ -487,6 +488,26 @@ mod tests {
         let hits = search_code(&root, "mint_tool", 10, &config_for(&root)).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].line, 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn lists_explicitly_requested_build_directory() {
+        let root = std::env::temp_dir().join("mint-code-tools-explicit-out");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("out")).unwrap();
+        fs::write(root.join("out/index.html"), "<div>built</div>\n").unwrap();
+        fs::write(root.join("main.rs"), "fn main() {}\n").unwrap();
+
+        let config = config_for(&root);
+        let repo_files = list_code_files(&root, 10, &config).unwrap();
+        assert_eq!(repo_files.len(), 1);
+        assert_eq!(repo_files[0].path, root.join("main.rs"));
+
+        let out_files = list_code_files(&root.join("out"), 10, &config).unwrap();
+        assert_eq!(out_files.len(), 1);
+        assert_eq!(out_files[0].path, root.join("out/index.html"));
+
         let _ = fs::remove_dir_all(root);
     }
 

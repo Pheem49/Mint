@@ -1,23 +1,23 @@
-use std::path::{Path, PathBuf};
-use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 use thiserror::Error;
 
 use crate::chat::{send_chat_with_fallback, stream_chat_with_fallback};
-use crate::{
-    ChatError, ChatRequest, ChatResponse, MemoryError, MemoryStore, MintConfig, send_chat,
-    stream_chat,
-};
 use crate::code_tools::{
     CodeEdit, CodePatchHunk, apply_code_edits, build_code_patch, list_code_files,
     propose_code_edits, read_code_file, search_code,
 };
-use crate::symbols::build_symbol_index;
-use crate::semantic::{index_semantic_code, search_semantic_code};
-use crate::plugins::execute_native_plugin;
-use crate::shell::run_shell_command;
 use crate::knowledge::KnowledgeStore;
+use crate::plugins::execute_native_plugin;
+use crate::semantic::{index_semantic_code, search_semantic_code};
+use crate::shell::run_shell_command;
+use crate::symbols::build_symbol_index;
+use crate::{
+    ChatError, ChatRequest, ChatResponse, MemoryError, MemoryStore, MintConfig, send_chat,
+    stream_chat,
+};
 
 const CONTEXT_LIMIT: usize = 6;
 
@@ -177,10 +177,22 @@ pub enum AgentApproval {
         hunks: Vec<CodePatchHunk>,
         diff: String,
     },
-    RunShell { command: String },
-    NoteWrite { path: String, content: String },
-    RunPlugin { name: String, instruction: String },
-    McpTool { server: String, tool: String, arguments: Value },
+    RunShell {
+        command: String,
+    },
+    NoteWrite {
+        path: String,
+        content: String,
+    },
+    RunPlugin {
+        name: String,
+        instruction: String,
+    },
+    McpTool {
+        server: String,
+        tool: String,
+        arguments: Value,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -193,10 +205,21 @@ pub enum ApprovalOutcome {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum AgentProgress {
-    Thinking { elapsed_secs: u64 },
-    Thought { thought: String },
-    ToolStart { action: String, input: Value },
-    ToolEnd { result: String },
+    Thinking {
+        elapsed_secs: u64,
+    },
+    Thought {
+        thought: String,
+    },
+    ToolStart {
+        action: String,
+        input: Value,
+    },
+    ToolEnd {
+        action: String,
+        input: Value,
+        result: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,9 +304,13 @@ where
     Chunk: FnMut(String) + Send,
 {
     let started_at = Instant::now();
-    let root = root
-        .canonicalize()
-        .map_err(|e| OrchestrationError::Agent(format!("unable to resolve workspace root {}: {}", root.display(), e)))?;
+    let root = root.canonicalize().map_err(|e| {
+        OrchestrationError::Agent(format!(
+            "unable to resolve workspace root {}: {}",
+            root.display(),
+            e
+        ))
+    })?;
     let skills = crate::skills::learned_skills_context().unwrap_or_default();
     let mut observation = initial_observation(task, &root, &skills);
     let mut pending_image = image_data_uri;
@@ -354,7 +381,10 @@ where
                 )
                 .await?;
                 parse_decision_or_finish(&repaired.text).map_err(|e| {
-                    OrchestrationError::Agent(format!("unable to repair invalid agent response: {}", e))
+                    OrchestrationError::Agent(format!(
+                        "unable to repair invalid agent response: {}",
+                        e
+                    ))
                 })?
             }
         };
@@ -483,6 +513,8 @@ where
         };
 
         progress(AgentProgress::ToolEnd {
+            action: decision.action.clone(),
+            input: serde_json::to_value(&decision.input).unwrap_or(Value::Null),
             result: result.clone(),
         });
 
@@ -552,29 +584,30 @@ where
         }
         "search_code" => {
             let path = workspace_path(root, &input.path)?;
-            Ok(serde_json::to_string_pretty(&search_code(
-                &path,
-                required(&input.query, "query")?,
-                input.limit.unwrap_or(20),
-                config,
+            Ok(serde_json::to_string_pretty(
+                &search_code(
+                    &path,
+                    required(&input.query, "query")?,
+                    input.limit.unwrap_or(20),
+                    config,
+                )
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
             )
-            .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
             .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
         }
         "symbols" => {
             let path = workspace_path(root, &input.path)?;
-            Ok(serde_json::to_string_pretty(&build_symbol_index(
-                &path,
-                input.limit.unwrap_or(100),
-                config,
+            Ok(serde_json::to_string_pretty(
+                &build_symbol_index(&path, input.limit.unwrap_or(100), config)
+                    .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
             )
-            .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
             .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
         }
         "semantic_index" => {
             let path = workspace_path(root, &input.path)?;
             Ok(serde_json::to_string_pretty(
-                &index_semantic_code(&path, config).await
+                &index_semantic_code(&path, config)
+                    .await
                     .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
             )
             .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
@@ -593,15 +626,13 @@ where
             )
             .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
         }
-        "knowledge_search" => {
-            Ok(serde_json::to_string_pretty(
-                &KnowledgeStore::open_default()
-                    .map_err(|e| OrchestrationError::Agent(e.to_string()))?
-                    .search(required(&input.query, "query")?, input.limit.unwrap_or(5))
-                    .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
-            )
-            .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
-        }
+        "knowledge_search" => Ok(serde_json::to_string_pretty(
+            &KnowledgeStore::open_default()
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?
+                .search(required(&input.query, "query")?, input.limit.unwrap_or(5))
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
+        )
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
         "web_search" => {
             let query = required(&input.query, "query")?;
             let limit = input.limit.unwrap_or(5);
@@ -701,10 +732,14 @@ where
                 required(&input.path, "path")?
             };
             if file_name.contains("..") || file_name.contains('/') {
-                return Err(OrchestrationError::Agent("note_write path must be a simple filename".into()));
+                return Err(OrchestrationError::Agent(
+                    "note_write path must be a simple filename".into(),
+                ));
             }
             let notes_dir = dirs::config_dir()
-                .ok_or_else(|| OrchestrationError::Agent("cannot determine config directory".into()))?
+                .ok_or_else(|| {
+                    OrchestrationError::Agent("cannot determine config directory".into())
+                })?
                 .join("mint")
                 .join("notes");
             let note_path = notes_dir.join(file_name);
@@ -712,7 +747,8 @@ where
             let approved = approve_cb(&AgentApproval::NoteWrite {
                 path: file_name.to_owned(),
                 content: input.content.clone(),
-            }).map_err(|e| OrchestrationError::Agent(e))?;
+            })
+            .map_err(|e| OrchestrationError::Agent(e))?;
 
             match approved {
                 ApprovalOutcome::Approved => {
@@ -734,10 +770,12 @@ where
             let approved = approve_cb(&AgentApproval::RunPlugin {
                 name: name.to_owned(),
                 instruction: instruction.to_owned(),
-            }).map_err(|e| OrchestrationError::Agent(e))?;
+            })
+            .map_err(|e| OrchestrationError::Agent(e))?;
 
             match approved {
-                ApprovalOutcome::Approved => Ok(execute_native_plugin(config, name, instruction).await
+                ApprovalOutcome::Approved => Ok(execute_native_plugin(config, name, instruction)
+                    .await
                     .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
                 ApprovalOutcome::Denied => Ok(format!("User denied plugin execution: {}", name)),
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
@@ -750,19 +788,18 @@ where
                 server: server.to_owned(),
                 tool: tool.to_owned(),
                 arguments: input.arguments.clone(),
-            }).map_err(|e| OrchestrationError::Agent(e))?;
+            })
+            .map_err(|e| OrchestrationError::Agent(e))?;
 
             match approved {
-                ApprovalOutcome::Approved => {
-                    Ok(serde_json::to_string_pretty(&crate::mcp::call_mcp_tool(
-                        config,
-                        server,
-                        tool,
-                        input.arguments.clone(),
-                    ).map_err(|e| OrchestrationError::Agent(e.to_string()))?)
-                    .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+                ApprovalOutcome::Approved => Ok(serde_json::to_string_pretty(
+                    &crate::mcp::call_mcp_tool(config, server, tool, input.arguments.clone())
+                        .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
+                )
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
+                ApprovalOutcome::Denied => {
+                    Ok(format!("User denied MCP tool call: {} {}", server, tool))
                 }
-                ApprovalOutcome::Denied => Ok(format!("User denied MCP tool call: {} {}", server, tool)),
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
             }
         }
@@ -770,7 +807,8 @@ where
             let command = required(&input.command, "command")?;
             let approved = approve_cb(&AgentApproval::RunShell {
                 command: command.to_owned(),
-            }).map_err(|e| OrchestrationError::Agent(e))?;
+            })
+            .map_err(|e| OrchestrationError::Agent(e))?;
 
             match approved {
                 ApprovalOutcome::Approved => run_shell(root, config, command),
@@ -780,7 +818,9 @@ where
         }
         "verify" => {
             if input.commands.is_empty() {
-                return Err(OrchestrationError::Agent("verify requires at least one command".into()));
+                return Err(OrchestrationError::Agent(
+                    "verify requires at least one command".into(),
+                ));
             }
             let mut output = Vec::new();
             for command in &input.commands {
@@ -789,24 +829,31 @@ where
             Ok(output.join("\n\n"))
         }
         "apply_patch" => {
-            let patch = input
-                .patch
-                .as_ref()
-                .ok_or_else(|| OrchestrationError::Agent("apply_patch requires patch input".into()))?;
+            let patch = input.patch.as_ref().ok_or_else(|| {
+                OrchestrationError::Agent("apply_patch requires patch input".into())
+            })?;
             if patch.hunks.is_empty() {
-                return Err(OrchestrationError::Agent("apply_patch requires at least one hunk".into()));
+                return Err(OrchestrationError::Agent(
+                    "apply_patch requires at least one hunk".into(),
+                ));
             }
             let edit = build_code_patch(root, patch.path.clone(), &patch.hunks, config)
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
             let proposal = propose_code_edits(root, std::slice::from_ref(&edit), config)
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            let diff = proposal.edits.iter().map(|e| e.diff.clone()).collect::<Vec<_>>().join("\n");
+            let diff = proposal
+                .edits
+                .iter()
+                .map(|e| e.diff.clone())
+                .collect::<Vec<_>>()
+                .join("\n");
 
             let approved = approve_cb(&AgentApproval::ApplyPatch {
                 path: patch.path.to_string_lossy().into_owned(),
                 hunks: patch.hunks.clone(),
                 diff,
-            }).map_err(|e| OrchestrationError::Agent(e))?;
+            })
+            .map_err(|e| OrchestrationError::Agent(e))?;
 
             match approved {
                 ApprovalOutcome::Approved => {
@@ -815,7 +862,9 @@ where
                     Ok(serde_json::to_string_pretty(&applied)
                         .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
                 }
-                ApprovalOutcome::Denied => Ok(format!("User denied file edit: {}", edit.path.display())),
+                ApprovalOutcome::Denied => {
+                    Ok(format!("User denied file edit: {}", edit.path.display()))
+                }
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
             }
         }
@@ -827,13 +876,19 @@ where
             };
             let proposal = propose_code_edits(root, std::slice::from_ref(&edit), config)
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            let diff = proposal.edits.iter().map(|e| e.diff.clone()).collect::<Vec<_>>().join("\n");
+            let diff = proposal
+                .edits
+                .iter()
+                .map(|e| e.diff.clone())
+                .collect::<Vec<_>>()
+                .join("\n");
 
             let approved = approve_cb(&AgentApproval::WriteFile {
                 path: path_str.to_owned(),
                 content: input.content.clone(),
                 diff,
-            }).map_err(|e| OrchestrationError::Agent(e))?;
+            })
+            .map_err(|e| OrchestrationError::Agent(e))?;
 
             match approved {
                 ApprovalOutcome::Approved => {
@@ -846,11 +901,18 @@ where
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
             }
         }
-        other => Err(OrchestrationError::Agent(format!("unsupported code-agent action '{}'", other))),
+        other => Err(OrchestrationError::Agent(format!(
+            "unsupported code-agent action '{}'",
+            other
+        ))),
     }
 }
 
-fn run_shell(root: &Path, config: &MintConfig, command: &str) -> Result<String, OrchestrationError> {
+fn run_shell(
+    root: &Path,
+    config: &MintConfig,
+    command: &str,
+) -> Result<String, OrchestrationError> {
     let output = run_shell_command(command, root, true, config)
         .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
     let status_str = output
@@ -975,10 +1037,7 @@ fn parse_agent_json<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, Orch
 
 fn parse_shorthand_finish(raw: &str) -> Result<AgentDecision, serde_json::Error> {
     let value: Value = serde_json::from_str(raw)?;
-    let finish = value
-        .get("finish")
-        .cloned()
-        .unwrap_or(Value::Null);
+    let finish = value.get("finish").cloned().unwrap_or(Value::Null);
     Ok(AgentDecision {
         thought: value
             .get("thought")
@@ -1026,11 +1085,18 @@ fn meaningful_verification(value: &str) -> &str {
 
 fn workspace_path(root: &Path, value: &str) -> Result<PathBuf, OrchestrationError> {
     let path = root.join(if value.trim().is_empty() { "." } else { value });
-    let path = path
-        .canonicalize()
-        .map_err(|e| OrchestrationError::Agent(format!("unable to resolve workspace path {}: {}", path.display(), e)))?;
+    let path = path.canonicalize().map_err(|e| {
+        OrchestrationError::Agent(format!(
+            "unable to resolve workspace path {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
     if !path.starts_with(root) {
-        return Err(OrchestrationError::Agent(format!("path is outside workspace: {}", path.display())));
+        return Err(OrchestrationError::Agent(format!(
+            "path is outside workspace: {}",
+            path.display()
+        )));
     }
     Ok(path)
 }

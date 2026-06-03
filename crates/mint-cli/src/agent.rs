@@ -1,11 +1,11 @@
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use mint_core::{
-    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, MintConfig,
-    orchestrate_agent_loop,
+    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, MintConfig, orchestrate_agent_loop,
 };
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -93,51 +93,107 @@ pub async fn run_code_agent_with_options(
         }
     };
 
-    let progress_cb = |progress: AgentProgress| {
-        match progress {
-            AgentProgress::Thinking { elapsed_secs } => {
-                if !options.fast_mode {
-                    print!(
-                        "\r\x1b[2K\x1b[90m• Thinking ({} • Ctrl+C to interrupt)\x1b[0m",
-                        format_elapsed(Duration::from_secs(elapsed_secs))
-                    );
-                    let _ = io::stdout().flush();
-                }
+    let explored_actions = Arc::new(Mutex::new(Vec::<ExploredAction>::new()));
+    let ran_commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let progress_explored_actions = Arc::clone(&explored_actions);
+    let progress_ran_commands = Arc::clone(&ran_commands);
+    let progress_cb = |progress: AgentProgress| match progress {
+        AgentProgress::Thinking { elapsed_secs } => {
+            if !options.fast_mode {
+                print!(
+                    "\r\x1b[2K\x1b[90m• Thinking ({} • Ctrl+C to interrupt)\x1b[0m",
+                    format_elapsed(Duration::from_secs(elapsed_secs))
+                );
+                let _ = io::stdout().flush();
             }
-            AgentProgress::Thought { thought } => {
-                if !options.fast_mode {
-                    clear_working_status();
-                    println!("\n\x1b[90m• Thinking: {}\x1b[0m", thought);
-                }
+        }
+        AgentProgress::Thought { thought } => {
+            if !options.fast_mode {
+                clear_working_status();
+                println!("\n\x1b[90m• Thinking: {}\x1b[0m", thought);
             }
-            AgentProgress::ToolStart { action, input } => {
-                if !options.fast_mode {
-                    clear_working_status();
-                    let detail = match action.as_str() {
-                        "web_search" => input.get("query").and_then(|v| v.as_str()).map(|s| format!("Searching the web for \"{}\"...", s)),
-                        "run_shell" => input.get("command").and_then(|v| v.as_str()).map(|s| format!("Running command: `{}`...", s)),
-                        "read_file" => input.get("path").and_then(|v| v.as_str()).map(|s| format!("Reading file: {}...", s)),
-                        "write_file" => input.get("path").and_then(|v| v.as_str()).map(|s| format!("Writing file: {}...", s)),
-                        "apply_patch" => input.get("patch").and_then(|p| p.get("path")).and_then(|v| v.as_str()).map(|s| format!("Patching file: {}...", s)),
-                        "search_code" => input.get("query").and_then(|v| v.as_str()).map(|s| format!("Searching code: \"{}\"...", s)),
-                        "list_files" => input.get("path").and_then(|v| v.as_str()).map(|s| format!("Listing files in: {}...", s)),
-                        "run_plugin" => input.get("name").and_then(|v| v.as_str()).map(|s| format!("Running plugin: {}...", s)),
-                        "mcp_tool" => input.get("tool").and_then(|v| v.as_str()).map(|s| format!("Running MCP tool: {}...", s)),
-                        _ => Some(format!("Using tool: {}...", action)),
-                    };
-                    if let Some(msg) = detail {
-                        println!("\x1b[96m• {}\x1b[0m", msg);
+        }
+        AgentProgress::ToolStart { action, input } => {
+            if !options.fast_mode {
+                clear_working_status();
+                if let Some(label) = explored_action_label(&action, &input) {
+                    if let Ok(mut actions) = progress_explored_actions.lock() {
+                        actions.push(label);
                     }
+                    return;
+                }
+                let detail = match action.as_str() {
+                    "web_search" => input
+                        .get("query")
+                        .and_then(|v| v.as_str())
+                        .map(|s| format!("Searching the web for \"{}\"...", s)),
+                    "run_shell" => input
+                        .get("command")
+                        .and_then(|v| v.as_str())
+                        .map(|s| format!("Running command: `{}`...", s)),
+                    "read_file" => input
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .map(|s| format!("Reading file: {}...", s)),
+                    "write_file" => input
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .map(|s| format!("Writing file: {}...", s)),
+                    "apply_patch" => input
+                        .get("patch")
+                        .and_then(|p| p.get("path"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| format!("Patching file: {}...", s)),
+                    "search_code" => input
+                        .get("query")
+                        .and_then(|v| v.as_str())
+                        .map(|s| format!("Searching code: \"{}\"...", s)),
+                    "list_files" => input
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .map(|s| format!("Listing files in: {}...", s)),
+                    "run_plugin" => input
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(|s| format!("Running plugin: {}...", s)),
+                    "mcp_tool" => input
+                        .get("tool")
+                        .and_then(|v| v.as_str())
+                        .map(|s| format!("Running MCP tool: {}...", s)),
+                    _ => Some(format!("Using tool: {}...", action)),
+                };
+                if let Some(msg) = detail {
+                    println!("\x1b[96m• {}\x1b[0m", msg);
                 }
             }
-            AgentProgress::ToolEnd { .. } => {
-                // Tool completed
+        }
+        AgentProgress::ToolEnd {
+            action,
+            input,
+            result,
+        } => {
+            if !options.fast_mode
+                && command_was_run(&result)
+                && let Some(commands) = ran_command_labels(&action, &input)
+                && let Ok(mut ran) = progress_ran_commands.lock()
+            {
+                ran.extend(commands);
             }
         }
     };
 
+    let chunk_explored_actions = Arc::clone(&explored_actions);
+    let chunk_ran_commands = Arc::clone(&ran_commands);
     let on_chunk = |summary: String| {
         clear_working_status();
+        if !options.fast_mode {
+            if let Ok(actions) = chunk_explored_actions.lock() {
+                print_explored_actions(&actions);
+            }
+            if let Ok(commands) = chunk_ran_commands.lock() {
+                print_ran_commands(&commands);
+            }
+        }
         let formatted_summary = format_markdown_bold(&summary);
         print!("\n\x1b[32mMint:\x1b[0m ");
         render_live_summary(&formatted_summary);
@@ -154,8 +210,16 @@ pub async fn run_code_agent_with_options(
         progress_cb,
         on_chunk,
     )
-    .await
-    .map_err(|e| anyhow!("{}", e))?;
+    .await;
+    if res.is_err() && !options.fast_mode {
+        if let Ok(actions) = explored_actions.lock() {
+            print_explored_actions(&actions);
+        }
+        if let Ok(commands) = ran_commands.lock() {
+            print_ran_commands(&commands);
+        }
+    }
+    let res = res.map_err(|e| anyhow!("{}", e))?;
 
     if !res.verification.is_empty() {
         println!("Verification: {}", res.verification);
@@ -202,6 +266,139 @@ fn render_live_summary(summary: &str) {
         print!("{chunk}");
         let _ = io::stdout().flush();
     }
+}
+
+#[derive(Debug, Clone)]
+struct ExploredAction {
+    kind: &'static str,
+    target: String,
+}
+
+fn explored_action_label(action: &str, input: &serde_json::Value) -> Option<ExploredAction> {
+    match action {
+        "list_files" => input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|path| ExploredAction {
+                kind: "List",
+                target: display_tool_target(path),
+            }),
+        "read_file" => input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|path| ExploredAction {
+                kind: "Read",
+                target: display_tool_target(path),
+            }),
+        "search_code" => {
+            let query = input.get("query").and_then(|v| v.as_str())?;
+            let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+            let target = if path.trim().is_empty() || path == "." {
+                query.to_owned()
+            } else {
+                format!("{} in {}", query, display_tool_target(path))
+            };
+            Some(ExploredAction {
+                kind: "Search",
+                target,
+            })
+        }
+        "symbols" => input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|path| ExploredAction {
+                kind: "Index symbols",
+                target: display_tool_target(path),
+            }),
+        _ => None,
+    }
+}
+
+fn display_tool_target(path: &str) -> String {
+    if path.trim().is_empty() {
+        ".".into()
+    } else {
+        Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(path)
+            .into()
+    }
+}
+
+fn print_explored_actions(actions: &[ExploredAction]) {
+    if actions.is_empty() {
+        return;
+    }
+    println!("\n\x1b[90m• Explored\x1b[0m");
+    for (index, action) in grouped_explored_actions(actions)
+        .iter()
+        .enumerate()
+        .take(24)
+    {
+        let prefix = if index == 0 { "  └" } else { "   " };
+        println!("\x1b[90m{} {}\x1b[0m", prefix, action);
+    }
+    let grouped_len = grouped_explored_actions(actions).len();
+    if grouped_len > 24 {
+        println!("\x1b[90m   ... {} more\x1b[0m", grouped_len - 24);
+    }
+}
+
+fn ran_command_labels(action: &str, input: &serde_json::Value) -> Option<Vec<String>> {
+    match action {
+        "run_shell" => input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .filter(|command| !command.trim().is_empty())
+            .map(|command| vec![command.trim().to_owned()]),
+        "verify" => input
+            .get("commands")
+            .and_then(|v| v.as_array())
+            .map(|commands| {
+                commands
+                    .iter()
+                    .filter_map(|command| command.as_str())
+                    .map(str::trim)
+                    .filter(|command| !command.is_empty())
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            }),
+        _ => None,
+    }
+}
+
+fn command_was_run(result: &str) -> bool {
+    result.lines().any(|line| line.starts_with("exit: "))
+}
+
+fn print_ran_commands(commands: &[String]) {
+    if commands.is_empty() {
+        return;
+    }
+    println!("\n\x1b[90m• Ran {}\x1b[0m", commands[0]);
+    for command in commands.iter().skip(1).take(24) {
+        println!("\x1b[90m  └ {}\x1b[0m", command);
+    }
+    if commands.len() > 25 {
+        println!("\x1b[90m  └ ... {} more\x1b[0m", commands.len() - 25);
+    }
+}
+
+fn grouped_explored_actions(actions: &[ExploredAction]) -> Vec<String> {
+    let mut grouped = Vec::new();
+    let mut index = 0;
+    while index < actions.len() {
+        let current = &actions[index];
+        let mut targets = vec![current.target.as_str()];
+        index += 1;
+        while index < actions.len() && actions[index].kind == current.kind {
+            targets.push(actions[index].target.as_str());
+            index += 1;
+        }
+        grouped.push(format!("{} {}", current.kind, targets.join(", ")));
+    }
+    grouped
 }
 
 fn confirm(prompt: &str) -> bool {

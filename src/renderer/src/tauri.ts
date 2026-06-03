@@ -20,7 +20,7 @@ export type AgentProgress =
   | { type: 'Thinking'; data: { elapsed_secs: number } }
   | { type: 'Thought'; data: { thought: string } }
   | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown> } }
-  | { type: 'ToolEnd'; data: { result: string } }
+  | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string } }
 
 type DesktopStreamEvent =
   | { type: 'chunk'; chunk: string }
