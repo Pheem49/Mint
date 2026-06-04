@@ -407,7 +407,7 @@ export default function MintDashboard() {
             expressionIndex={expressionIndex}
             accessoryIndex={accessoryIndex}
             isLocked={isLocked}
-            isActive={view !== 'pictures'}
+            isActive={modelVisible && view !== 'pictures'}
             layoutPreset={layoutPreset}
             sending={sending}
             interactionEnabled={interactionEnabled}

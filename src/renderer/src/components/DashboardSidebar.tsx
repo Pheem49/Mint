@@ -84,11 +84,12 @@ export default function DashboardSidebar({
         <span aria-hidden="true">▨</span>
         <span>Pictures</span>
       </button>
+      <button className={`sidebar-top-action ${modelVisible ? 'is-active' : ''}`} onClick={onToggleModel}>
+        <span aria-hidden="true">♢</span>
+        <span>Live2D Model</span>
+      </button>
 
-      <div className="sidebar-section">
-        <div className="sidebar-section-title clickable" onClick={onToggleModel} title="เปิด/ปิดการแสดง Live2D Model">
-          ☰ Model
-        </div>
+      {modelVisible && (
         <div className="sidebar-model-controls">
           <button
             className="change-expression-btn"
@@ -123,7 +124,7 @@ export default function DashboardSidebar({
             <span>Areas</span>
           </button>
         </div>
-      </div>
+      )}
 
       <div className="sidebar-section">
         <div className="sidebar-section-title">Assistant</div>
@@ -134,10 +135,6 @@ export default function DashboardSidebar({
             <span className="mint-status-dot" />
             <span className="mint-status-label">{sending ? "Thinking" : "Idle"}</span>
           </span>
-        </button>
-        <button className={`sidebar-project ${modelVisible ? 'is-active' : ''}`} onClick={onToggleModel}>
-          <span aria-hidden="true">♢</span>
-          <span>Live2D Model</span>
         </button>
         <button className="sidebar-project" onClick={() => onShowToast("เปิดใช้งาน Smart Tools: พร้อมช่วยสแกนและวิเคราะห์แล้วค่ะ! ∽")}>
           <span aria-hidden="true">∽</span>

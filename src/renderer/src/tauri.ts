@@ -273,7 +273,9 @@ export function installTauriAdapters() {
           return {};
         }
       },
-      closeSettings: () => {},
+      closeSettings: () => {
+        window.location.hash = '#/';
+      },
       quitApp: () => {},
       openExternal: () => {},
       openCustomWorkflows: () => {},
@@ -359,7 +361,9 @@ export function installTauriAdapters() {
         }
       },
       listSavedPictures,
-      openSettings: () => {},
+      openSettings: () => {
+        window.location.hash = '#/settings';
+      },
       readClipboard: async () => '',
       writeClipboard: async () => {},
       getSystemInfo: async () => {

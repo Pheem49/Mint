@@ -34,6 +34,9 @@ const ACCESSORY_MAP: Record<number, string | null> = {
 const TRACKING_SPEED = 1.25
 
 const clampToUnitCircle = (x: number, y: number) => {
+  if (isNaN(x) || isNaN(y) || !isFinite(x) || !isFinite(y)) {
+    return { x: 0, y: 0 }
+  }
   const distance = Math.hypot(x, y)
   if (distance <= 1) return { x, y }
 
@@ -121,6 +124,8 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
           const stageHeight = appRef.current.renderer.height
           const stageWidth = appRef.current.renderer.width
           
+          if (stageWidth < 100 || stageHeight < 100) return
+          
           const baseWidth = baseWidthRef.current || m.width || 1000
           const baseHeight = baseHeightRef.current || m.height || 1000
           
@@ -192,6 +197,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     if (!containerRef.current) return
 
     const handleResize = () => {
+      if (!isActive) return
       if (!modelRef.current || !appRef.current) return
       const app = appRef.current
       app.resize()
@@ -199,6 +205,9 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
       const model = modelRef.current
       const stageHeight = app.renderer.height
       const stageWidth = app.renderer.width
+      
+      if (stageWidth < 100 || stageHeight < 100) return
+      
       const baseWidth = baseWidthRef.current || model.width || 1000
       const baseHeight = baseHeightRef.current || model.height || 1000
       
@@ -225,7 +234,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     return () => {
       resizeObserver.disconnect()
     }
-  }, [scale, loading])
+  }, [scale, loading, isActive])
 
   useEffect(() => {
     if (isActive) {
@@ -238,6 +247,10 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
   // Follow the pointer across the whole window and smoothly return to center when tracking stops.
   useEffect(() => {
     const focus = (x: number, y: number) => {
+      if (isNaN(x) || isNaN(y) || !isFinite(x) || !isFinite(y)) {
+        x = 0
+        y = 0
+      }
       modelRef.current?.internalModel?.focusController?.focus(x, y)
     }
 
