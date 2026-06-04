@@ -174,79 +174,10 @@ async fn call_gemini(
     let url =
         format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent");
 
-    let mut allowed_actions = vec![
-        "list_files", "read_file", "search_code", "symbols",
-        "semantic_index", "semantic_search", "knowledge_search",
-        "web_search", "memory_recall", "note_write", "run_plugin",
-        "mcp_tool", "run_shell", "verify", "apply_patch",
-        "write_file"
-    ];
-    allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
-    allowed_actions.push("finish");
-
     let response: Value = client
         .post(url)
         .header("x-goog-api-key", api_key)
-        .json(&json!({
-            "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
-            "contents": [{ "role": "user", "parts": gemini_parts(request)? }],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "responseSchema": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "thought": { "type": "STRING" },
-                        "action": {
-                            "type": "STRING",
-                            "enum": allowed_actions
-                        },
-                        "input": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "path": { "type": "STRING", "description": "The target file or directory path (required for list_files, read_file, write_file, apply_patch, symbols, semantic_index, semantic_search)" },
-                                "query": { "type": "STRING", "description": "The search query string (required for search_code, semantic_search, knowledge_search, web_search, memory_recall)" },
-                                "command": { "type": "STRING", "description": "The local shell command to run (required for run_shell)" },
-                                "commands": {
-                                    "type": "ARRAY",
-                                    "items": { "type": "STRING" },
-                                    "description": "List of verification commands (required for verify)"
-                                },
-                                "fileContent": { "type": "STRING", "description": "The complete new content of the file (required for write_file, note_write)" },
-                                "summary": { "type": "STRING", "description": "The final detailed answer, explanation, or response to the user's query (required for finish)" },
-                                "verification": { "type": "STRING", "description": "The description of checks to run before finishing" },
-                                "startLine": { "type": "INTEGER", "description": "First line to read (1-indexed, for read_file)" },
-                                "endLine": { "type": "INTEGER", "description": "Last line to read (for read_file)" },
-                                "limit": { "type": "INTEGER", "description": "Max number of items/lines/files to return" },
-                                "server": { "type": "STRING", "description": "MCP server name (for mcp_tool)" },
-                                "tool": { "type": "STRING", "description": "MCP tool name (for mcp_tool)" },
-                                "notePath": { "type": "STRING", "description": "The file path for note writing (for note_write)" },
-                                "name": { "type": "STRING", "description": "Plugin name (for run_plugin)" },
-                                "instruction": { "type": "STRING", "description": "Instruction to run the plugin (for run_plugin)" },
-                                "patch": {
-                                    "type": "OBJECT",
-                                    "properties": {
-                                        "path": { "type": "STRING", "description": "The target file path (required for apply_patch)" },
-                                        "hunks": {
-                                            "type": "ARRAY",
-                                            "items": {
-                                                "type": "OBJECT",
-                                                "properties": {
-                                                    "oldText": { "type": "STRING", "description": "The exact block of code to replace" },
-                                                    "newText": { "type": "STRING", "description": "The replacement block of code" }
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                                "arguments": { "type": "OBJECT", "description": "MCP tool arguments (for mcp_tool)" }
-                            },
-                            "required": ["path", "query", "command", "fileContent", "summary"]
-                        }
-                    },
-                    "required": ["thought", "action", "input"]
-                }
-            }
-        }))
+        .json(&gemini_chat_payload(config, request)?)
         .send()
         .await?
         .error_for_status()?
@@ -284,14 +215,7 @@ async fn call_openai(
     let response: Value = client
         .post(format!("{base_url}/chat/completions"))
         .bearer_auth(if local { "not-needed" } else { &api_key })
-        .json(&json!({
-            "model": model,
-            "response_format": { "type": "json_object" },
-            "messages": [
-                { "role": "system", "content": request.system_instruction },
-                { "role": "user", "content": request.message }
-            ]
-        }))
+        .json(&openai_chat_payload(&model, request, false))
         .send()
         .await?
         .error_for_status()?
@@ -418,81 +342,12 @@ where
     required_key("gemini", &api_key)?;
     let model = config.gemini_model.clone();
 
-    let mut allowed_actions = vec![
-        "list_files", "read_file", "search_code", "symbols",
-        "semantic_index", "semantic_search", "knowledge_search",
-        "web_search", "memory_recall", "note_write", "run_plugin",
-        "mcp_tool", "run_shell", "verify", "apply_patch",
-        "write_file"
-    ];
-    allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
-    allowed_actions.push("finish");
-
     let response = client
         .post(format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
         ))
         .header("x-goog-api-key", api_key)
-        .json(&json!({
-            "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
-            "contents": [{ "role": "user", "parts": gemini_parts(request)? }],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "responseSchema": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "thought": { "type": "STRING" },
-                        "action": {
-                            "type": "STRING",
-                            "enum": allowed_actions
-                        },
-                        "input": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "path": { "type": "STRING", "description": "The target file or directory path (required for list_files, read_file, write_file, apply_patch, symbols, semantic_index, semantic_search)" },
-                                "query": { "type": "STRING", "description": "The search query string (required for search_code, semantic_search, knowledge_search, web_search, memory_recall)" },
-                                "command": { "type": "STRING", "description": "The local shell command to run (required for run_shell)" },
-                                "commands": {
-                                    "type": "ARRAY",
-                                    "items": { "type": "STRING" },
-                                    "description": "List of verification commands (required for verify)"
-                                },
-                                "fileContent": { "type": "STRING", "description": "The complete new content of the file (required for write_file, note_write)" },
-                                "summary": { "type": "STRING", "description": "The final detailed answer, explanation, or response to the user's query (required for finish)" },
-                                "verification": { "type": "STRING", "description": "The description of checks to run before finishing" },
-                                "startLine": { "type": "INTEGER", "description": "First line to read (1-indexed, for read_file)" },
-                                "endLine": { "type": "INTEGER", "description": "Last line to read (for read_file)" },
-                                "limit": { "type": "INTEGER", "description": "Max number of items/lines/files to return" },
-                                "server": { "type": "STRING", "description": "MCP server name (for mcp_tool)" },
-                                "tool": { "type": "STRING", "description": "MCP tool name (for mcp_tool)" },
-                                "notePath": { "type": "STRING", "description": "The file path for note writing (for note_write)" },
-                                "name": { "type": "STRING", "description": "Plugin name (for run_plugin)" },
-                                "instruction": { "type": "STRING", "description": "Instruction to run the plugin (for run_plugin)" },
-                                "patch": {
-                                    "type": "OBJECT",
-                                    "properties": {
-                                        "path": { "type": "STRING", "description": "The target file path (required for apply_patch)" },
-                                        "hunks": {
-                                            "type": "ARRAY",
-                                            "items": {
-                                                "type": "OBJECT",
-                                                "properties": {
-                                                    "oldText": { "type": "STRING", "description": "The exact block of code to replace" },
-                                                    "newText": { "type": "STRING", "description": "The replacement block of code" }
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                                "arguments": { "type": "OBJECT", "description": "MCP tool arguments (for mcp_tool)" }
-                            },
-                            "required": ["path", "query", "command", "fileContent", "summary"]
-                        }
-                    },
-                    "required": ["thought", "action", "input"]
-                }
-            }
-        }))
+        .json(&gemini_chat_payload(config, request)?)
         .send()
         .await?
         .error_for_status()?;
@@ -528,15 +383,7 @@ where
     let response = client
         .post(format!("{base_url}/chat/completions"))
         .bearer_auth(if local { "not-needed" } else { &api_key })
-        .json(&json!({
-            "model": model,
-            "stream": true,
-            "response_format": { "type": "json_object" },
-            "messages": [
-                { "role": "system", "content": request.system_instruction },
-                { "role": "user", "content": request.message }
-            ]
-        }))
+        .json(&openai_chat_payload(&model, request, true))
         .send()
         .await?
         .error_for_status()?;
@@ -722,6 +569,120 @@ fn require_supported_attachments(provider: &str, request: &ChatRequest) -> Resul
         return Err(ChatError::UnsupportedAttachments(provider.into()));
     }
     Ok(())
+}
+
+fn wants_agent_json(request: &ChatRequest) -> bool {
+    let instruction = request.system_instruction.as_str();
+    instruction.contains("Return only JSON")
+        || (instruction.contains("Return exactly one JSON object per response")
+            && instruction.contains("Input formats:")
+            && instruction.contains("- finish:"))
+}
+
+fn gemini_chat_payload(config: &MintConfig, request: &ChatRequest) -> Result<Value, ChatError> {
+    let mut payload = json!({
+        "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
+        "contents": [{ "role": "user", "parts": gemini_parts(request)? }]
+    });
+    if wants_agent_json(request) {
+        payload["generationConfig"] = gemini_agent_generation_config(config);
+    }
+    Ok(payload)
+}
+
+fn gemini_agent_generation_config(config: &MintConfig) -> Value {
+    let mut allowed_actions = vec![
+        "list_files",
+        "read_file",
+        "search_code",
+        "symbols",
+        "semantic_index",
+        "semantic_search",
+        "knowledge_search",
+        "web_search",
+        "memory_recall",
+        "note_write",
+        "run_plugin",
+        "mcp_tool",
+        "run_shell",
+        "verify",
+        "apply_patch",
+        "write_file",
+    ];
+    allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
+    allowed_actions.push("finish");
+
+    json!({
+        "responseMimeType": "application/json",
+        "responseSchema": {
+            "type": "OBJECT",
+            "properties": {
+                "thought": { "type": "STRING" },
+                "action": {
+                    "type": "STRING",
+                    "enum": allowed_actions
+                },
+                "input": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "path": { "type": "STRING", "description": "The target file or directory path (required for list_files, read_file, write_file, apply_patch, symbols, semantic_index, semantic_search)" },
+                        "query": { "type": "STRING", "description": "The search query string (required for search_code, semantic_search, knowledge_search, web_search, memory_recall)" },
+                        "command": { "type": "STRING", "description": "The local shell command to run (required for run_shell)" },
+                        "commands": {
+                            "type": "ARRAY",
+                            "items": { "type": "STRING" },
+                            "description": "List of verification commands (required for verify)"
+                        },
+                        "fileContent": { "type": "STRING", "description": "The complete new content of the file (required for write_file, note_write)" },
+                        "summary": { "type": "STRING", "description": "The final detailed answer, explanation, or response to the user's query (required for finish)" },
+                        "verification": { "type": "STRING", "description": "The description of checks to run before finishing" },
+                        "startLine": { "type": "INTEGER", "description": "First line to read (1-indexed, for read_file)" },
+                        "endLine": { "type": "INTEGER", "description": "Last line to read (for read_file)" },
+                        "limit": { "type": "INTEGER", "description": "Max number of items/lines/files to return" },
+                        "server": { "type": "STRING", "description": "MCP server name (for mcp_tool)" },
+                        "tool": { "type": "STRING", "description": "MCP tool name (for mcp_tool)" },
+                        "notePath": { "type": "STRING", "description": "The file path for note writing (for note_write)" },
+                        "name": { "type": "STRING", "description": "Plugin name (for run_plugin)" },
+                        "instruction": { "type": "STRING", "description": "Instruction to run the plugin (for run_plugin)" },
+                        "patch": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "path": { "type": "STRING", "description": "The target file path (required for apply_patch)" },
+                                "hunks": {
+                                    "type": "ARRAY",
+                                    "items": {
+                                        "type": "OBJECT",
+                                        "properties": {
+                                            "oldText": { "type": "STRING", "description": "The exact block of code to replace" },
+                                            "newText": { "type": "STRING", "description": "The replacement block of code" }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "arguments": { "type": "OBJECT", "description": "MCP tool arguments (for mcp_tool)" }
+                    },
+                    "required": ["path", "query", "command", "fileContent", "summary"]
+                }
+            },
+            "required": ["thought", "action", "input"]
+        }
+    })
+}
+
+fn openai_chat_payload(model: &str, request: &ChatRequest, stream: bool) -> Value {
+    let mut payload = json!({
+        "model": model,
+        "stream": stream,
+        "messages": [
+            { "role": "system", "content": request.system_instruction },
+            { "role": "user", "content": request.message }
+        ]
+    });
+    if wants_agent_json(request) {
+        payload["response_format"] = json!({ "type": "json_object" });
+    }
+    payload
 }
 
 fn gemini_parts(request: &ChatRequest) -> Result<Vec<Value>, ChatError> {

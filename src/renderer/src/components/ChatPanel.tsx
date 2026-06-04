@@ -114,8 +114,9 @@ interface ChatPanelProps {
 }
 
 function renderFormattedMessage(text: string) {
-  if (!text) return null
-  const parts = text.split(/\*\*([\s\S]*?)\*\*/g)
+  const displayText = readableAssistantText(text)
+  if (!displayText) return null
+  const parts = displayText.split(/\*\*([\s\S]*?)\*\*/g)
   return parts.map((part, index) => {
     if (index % 2 === 1) {
       return (
@@ -126,6 +127,24 @@ function renderFormattedMessage(text: string) {
     }
     return part
   })
+}
+
+function readableAssistantText(text: string) {
+  if (typeof text !== 'string') return ''
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{')) return text
+  try {
+    const value = JSON.parse(trimmed)
+    if (value?.action === 'finish' && typeof value?.input?.summary === 'string' && value.input.summary.trim()) {
+      return value.input.summary
+    }
+    if (typeof value?.finish?.summary === 'string' && value.finish.summary.trim()) {
+      return value.finish.summary
+    }
+  } catch {
+    return text
+  }
+  return text
 }
 
 export default function ChatPanel({
