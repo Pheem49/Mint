@@ -101,6 +101,13 @@ enum Command {
     },
     /// Run one queued or supplied task through the native CLI agent.
     Agent { task: Option<String> },
+    /// Launch the web UI and local API server.
+    Web,
+    /// Start only the local API server.
+    Api {
+        #[arg(long, default_value_t = 3000)]
+        port: u16,
+    },
     /// Manage configured MCP stdio servers.
     Mcp {
         #[command(subcommand)]
@@ -480,6 +487,12 @@ async fn main() -> Result<()> {
             }
             Command::Agent { task } => {
                 run_cli_agent_task(task).await?;
+            }
+            Command::Web => {
+                launch_mint_target("web".into()).await?;
+            }
+            Command::Api { port } => {
+                mint_core::start_api_server(port).await?;
             }
             Command::Mcp { command } => match command {
                 McpCommand::Add {

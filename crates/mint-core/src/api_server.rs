@@ -1,10 +1,18 @@
-use std::net::SocketAddr;
-use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::{
+    net::SocketAddr,
+    path::PathBuf,
+    process::{Command, Stdio},
+};
+
 use serde::Deserialize;
+use serde_json::{Value, json};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+
 use crate::{
-    load_config, save_config, config_path, MintConfig, ChatRequest,
-    orchestrate_chat_with_fallback, MemoryStore
+    ApprovalOutcome, ChatRequest, ChatResponse, MemoryStore, MintConfig, config_path,
+    create_folder, find_paths, list_saved_pictures, load_config, orchestrate_agent_loop,
+    orchestrate_chat_with_fallback, save_chat_images, save_config, weather,
 };
 
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
@@ -48,9 +56,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             }
                         }
                     }
-                    if !headers_str.to_uppercase().contains("POST") {
-                        break;
-                    }
+                    break;
                 }
             }
 
@@ -90,7 +96,9 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                 return;
             }
 
-            match (method, path) {
+            let (route, query) = path.split_once('?').unwrap_or((path, ""));
+
+            match (method, route) {
                 ("GET", "/api/status") => {
                     let config = load_config().unwrap_or_default();
                     let path_str = config_path().map(|p| p.display().to_string()).unwrap_or_default();
@@ -105,9 +113,19 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     });
                     send_json_response(socket, "200 OK", &status_json.to_string()).await;
                 }
+                ("GET", "/api/system-info") => {
+                    send_json_response(socket, "200 OK", &system_info().to_string()).await;
+                }
+                ("GET", "/api/smart-context") => {
+                    send_json_response(socket, "200 OK", &smart_context().to_string()).await;
+                }
                 ("GET", "/api/interactions") => {
+                    let limit = query_param(query, "limit")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(50)
+                        .min(200);
                     if let Ok(memory) = MemoryStore::open_default() {
-                        let list = memory.recent_interactions(50).unwrap_or_default();
+                        let list = memory.recent_interactions(limit).unwrap_or_default();
                         if let Ok(json_str) = serde_json::to_string(&list) {
                             send_json_response(socket, "200 OK", &json_str).await;
                             return;
@@ -121,6 +139,28 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
                     } else {
                         send_json_response(socket, "500 Internal Server Error", "{\"status\":\"error\"}").await;
+                    }
+                }
+                ("GET", "/api/pictures") => {
+                    match list_saved_pictures() {
+                        Ok(mut pictures) => {
+                            for picture in &mut pictures {
+                                picture.url = Some(format!("/api/pictures/{}", picture.filename));
+                            }
+                            if let Ok(json_str) = serde_json::to_string(&pictures) {
+                                send_json_response(socket, "200 OK", &json_str).await;
+                            } else {
+                                send_json_response(socket, "500 Internal Server Error", "[]").await;
+                            }
+                        }
+                        Err(_) => send_json_response(socket, "500 Internal Server Error", "[]").await,
+                    }
+                }
+                ("GET", route) if route.starts_with("/api/pictures/") => {
+                    let filename = percent_decode(route.trim_start_matches("/api/pictures/"));
+                    match picture_bytes(&filename) {
+                        Ok((mime_type, bytes)) => send_binary_response(socket, "200 OK", &mime_type, &bytes).await,
+                        Err(_) => send_json_response(socket, "404 Not Found", "{\"error\":\"picture not found\"}").await,
                     }
                 }
                 ("GET", "/api/config") => {
@@ -140,6 +180,36 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     }
                     send_json_response(socket, "400 Bad Request", "{\"status\":\"invalid config json\"}").await;
                 }
+                ("GET", "/api/weather") => {
+                    let city = query_param(query, "city").unwrap_or_default();
+                    match weather(&city).await {
+                        Ok(report) => {
+                            if let Ok(json_str) = serde_json::to_string(&report) {
+                                send_json_response(socket, "200 OK", &json_str).await;
+                            } else {
+                                send_json_response(socket, "500 Internal Server Error", "{}").await;
+                            }
+                        }
+                        Err(error) => {
+                            let err_json = json!({ "error": error.to_string() });
+                            send_json_response(socket, "500 Internal Server Error", &err_json.to_string()).await;
+                        }
+                    }
+                }
+                ("POST", "/api/action") => {
+                    if let Ok(action) = serde_json::from_str::<ApiAction>(body) {
+                        let config = load_config().unwrap_or_default();
+                        match execute_api_action(&config, action) {
+                            Ok(value) => send_json_response(socket, "200 OK", &value.to_string()).await,
+                            Err(error) => {
+                                let err_json = json!({ "success": false, "message": error });
+                                send_json_response(socket, "400 Bad Request", &err_json.to_string()).await;
+                            }
+                        }
+                    } else {
+                        send_json_response(socket, "400 Bad Request", "{\"success\":false,\"message\":\"invalid action body\"}").await;
+                    }
+                }
                 ("POST", "/api/chat") => {
                     #[derive(Deserialize)]
                     #[serde(rename_all = "camelCase")]
@@ -152,15 +222,39 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
                     if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
                         let config = load_config().unwrap_or_default();
-                        let chat_req = ChatRequest {
+                        let mut chat_req = ChatRequest {
                             message: req.message,
                             system_instruction: req.system_instruction.unwrap_or_default(),
                             image_data_uri: req.image_data_uri,
                             audio_data_uri: req.audio_data_uri,
                         };
+                        let sent_image = chat_req.image_data_uri.clone();
+                        let sent_message = chat_req.message.clone();
 
-                        match orchestrate_chat_with_fallback(&config, &chat_req).await {
-                            Ok((resp, _)) => {
+                        let response = if let Some(clean_message) =
+                            chat_req.message.strip_prefix("/chat ").map(str::to_owned)
+                        {
+                            chat_req.message = clean_message;
+                            if chat_req.system_instruction.trim().is_empty() {
+                                chat_req.system_instruction = default_chat_system_instruction();
+                            }
+                            orchestrate_chat_with_fallback(&config, &chat_req)
+                                .await
+                                .map(|(response, _)| response)
+                                .map_err(|error| error.to_string())
+                        } else {
+                            run_web_agent_loop(&config, &chat_req).await
+                        };
+
+                        match response {
+                            Ok(resp) => {
+                                if let Some(image) = sent_image {
+                                    let _ = save_chat_images(
+                                        vec![image],
+                                        Some("web".into()),
+                                        Some(sent_message),
+                                    );
+                                }
                                 if let Ok(json_str) = serde_json::to_string(&resp) {
                                     send_json_response(socket, "200 OK", &json_str).await;
                                     return;
@@ -170,7 +264,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 let err_json = serde_json::json!({
                                     "provider": "error",
                                     "model": "error",
-                                    "text": format!("Error orchestrating chat: {}", e)
+                                    "text": format!("Error orchestrating chat: {e}")
                                 });
                                 send_json_response(socket, "500 Internal Server Error", &err_json.to_string()).await;
                                 return;
@@ -185,6 +279,268 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
             }
         });
     }
+}
+
+async fn run_web_agent_loop(
+    config: &MintConfig,
+    request: &ChatRequest,
+) -> Result<ChatResponse, String> {
+    let root = std::env::current_dir().map_err(|error| error.to_string())?;
+    let fast_mode = config
+        .extra
+        .get("enableFastMode")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let result = orchestrate_agent_loop(
+        config,
+        &request.message,
+        &root,
+        request.image_data_uri.clone(),
+        fast_mode,
+        |_| Ok(ApprovalOutcome::Denied),
+        |_| {},
+        |_| {},
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+
+    Ok(ChatResponse {
+        provider: result.provider,
+        model: result.model,
+        text: result.summary,
+    })
+}
+
+fn default_chat_system_instruction() -> String {
+    "You are Mint, a warm and helpful Thai assistant. Speak naturally and politely. \
+     If the user writes Thai, answer in Thai and refer to yourself as มิ้น."
+        .into()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiAction {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    target: String,
+    #[serde(default)]
+    args: Value,
+}
+
+fn execute_api_action(config: &MintConfig, action: ApiAction) -> Result<Value, String> {
+    match action.kind.as_str() {
+        "none" => Ok(success_json("no action requested")),
+        "system_info" => Ok(success_json(&system_info().to_string())),
+        "open_url" => {
+            if !(action.target.starts_with("https://")
+                || action.target.starts_with("http://")
+                || action.target.starts_with("file://"))
+            {
+                return Err("only http, https, and file URLs may be opened".into());
+            }
+            spawn_detached("xdg-open", &[&action.target])?;
+            Ok(success_json("opened URL"))
+        }
+        "search" => {
+            let query = action.target.trim();
+            if query.is_empty() {
+                return Err("search query is required".into());
+            }
+            let url = format!("https://www.google.com/search?q={}", encode_query(query));
+            spawn_detached("xdg-open", &[&url])?;
+            Ok(success_json("opened web search"))
+        }
+        "open_app" => {
+            let app = action.target.trim();
+            if app.is_empty()
+                || !app
+                    .chars()
+                    .all(|char| char.is_ascii_alphanumeric() || matches!(char, '-' | '_' | '.'))
+            {
+                return Err("application name contains unsupported characters".into());
+            }
+            spawn_detached(app, &[])?;
+            Ok(success_json("opened application"))
+        }
+        "find_path" => {
+            let roots = action.args["roots"]
+                .as_array()
+                .map(|roots| {
+                    roots
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(PathBuf::from)
+                        .collect::<Vec<_>>()
+                })
+                .filter(|roots| !roots.is_empty())
+                .unwrap_or_else(default_search_roots);
+            let limit = action.args["limit"].as_u64().unwrap_or(20).min(100) as usize;
+            serde_json::to_value(find_paths(&action.target, &roots, limit, config))
+                .map(|matches| json!({ "success": true, "message": matches.to_string(), "matches": matches }))
+                .map_err(|error| error.to_string())
+        }
+        "create_folder" => create_folder(std::path::Path::new(&action.target), config)
+            .map(|path| success_json(&format!("created {}", path.display())))
+            .map_err(|error| error.to_string()),
+        other => Err(format!("local API action '{other}' is not supported")),
+    }
+}
+
+fn system_info() -> Value {
+    json!({
+        "backend": "rust-api-server",
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+        "family": std::env::consts::FAMILY,
+        "host": hostname(),
+        "currentDir": std::env::current_dir().ok().map(|path| path.display().to_string()),
+        "configPath": config_path().ok().map(|path| path.display().to_string()),
+    })
+}
+
+fn smart_context() -> Value {
+    let active_window = active_window();
+    let current_app = active_window.as_ref().map(|window| {
+        json!({
+            "name": window["appName"],
+            "processName": window["processName"],
+            "pid": window["pid"]
+        })
+    });
+    json!({
+        "capturedAt": unix_timestamp().to_string(),
+        "platform": std::env::consts::OS,
+        "host": hostname(),
+        "activeWindow": active_window,
+        "currentApp": current_app,
+        "browser": Value::Null,
+        "selectedText": selected_text(),
+    })
+}
+
+fn active_window() -> Option<Value> {
+    let id = command_output("xdotool", &["getactivewindow"])?;
+    let title = command_output("xdotool", &["getwindowname", &id]).unwrap_or_default();
+    let pid = command_output("xdotool", &["getwindowpid", &id]).unwrap_or_default();
+    let process_name = command_output("ps", &["-p", &pid, "-o", "comm="]).unwrap_or_default();
+    Some(json!({
+        "id": id,
+        "title": title,
+        "appName": process_name,
+        "processName": process_name,
+        "pid": pid.parse::<u32>().ok(),
+        "platform": std::env::consts::OS
+    }))
+}
+
+fn selected_text() -> String {
+    [
+        ("wl-paste", vec!["--primary", "--no-newline"]),
+        ("xclip", vec!["-selection", "primary", "-out"]),
+        ("xsel", vec!["--primary", "--output"]),
+    ]
+    .into_iter()
+    .find_map(|(program, args)| command_output(program, &args))
+    .unwrap_or_default()
+    .chars()
+    .take(2000)
+    .collect()
+}
+
+fn picture_bytes(filename: &str) -> Result<(String, Vec<u8>), String> {
+    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+        return Err("invalid picture path".into());
+    }
+    let picture = list_saved_pictures()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|entry| entry.filename == filename)
+        .ok_or_else(|| "picture not found".to_string())?;
+    let bytes = std::fs::read(&picture.path).map_err(|error| error.to_string())?;
+    Ok((picture.mime_type, bytes))
+}
+
+fn query_param(query: &str, key: &str) -> Option<String> {
+    query.split('&').find_map(|pair| {
+        let (name, value) = pair.split_once('=')?;
+        (percent_decode(name) == key).then(|| percent_decode(value))
+    })
+}
+
+fn percent_decode(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(hex) = u8::from_str_radix(&raw[index + 1..index + 3], 16) {
+                output.push(hex);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(if bytes[index] == b'+' { b' ' } else { bytes[index] });
+        index += 1;
+    }
+    String::from_utf8_lossy(&output).into_owned()
+}
+
+fn default_search_roots() -> Vec<PathBuf> {
+    let mut roots = vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))];
+    if let Some(home) = dirs::home_dir() {
+        roots.push(home);
+    }
+    roots
+}
+
+fn success_json(message: &str) -> Value {
+    json!({ "success": true, "message": message })
+}
+
+fn spawn_detached(program: &str, args: &[&str]) -> Result<(), String> {
+    Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("unable to start '{program}': {error}"))
+}
+
+fn command_output(program: &str, args: &[&str]) -> Option<String> {
+    Command::new(program)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .filter(|output| !output.is_empty())
+}
+
+fn hostname() -> String {
+    command_output("hostname", &[]).unwrap_or_else(|| "unknown".into())
+}
+
+fn unix_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
+}
+
+fn encode_query(query: &str) -> String {
+    query
+        .bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                vec![byte as char]
+            }
+            b' ' => vec!['+'],
+            _ => format!("%{byte:02X}").chars().collect(),
+        })
+        .collect()
 }
 
 async fn send_json_response(mut socket: tokio::net::TcpStream, status: &str, body_json: &str) {
@@ -202,5 +558,28 @@ async fn send_json_response(mut socket: tokio::net::TcpStream, status: &str, bod
         body_json
     );
     let _ = socket.write_all(response.as_bytes()).await;
+    let _ = socket.flush().await;
+}
+
+async fn send_binary_response(
+    mut socket: tokio::net::TcpStream,
+    status: &str,
+    content_type: &str,
+    body: &[u8],
+) {
+    let response = format!(
+        "HTTP/1.1 {}\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Access-Control-Allow-Headers: Content-Type\r\n\
+         Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
+         Content-Type: {}\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\r\n",
+        status,
+        content_type,
+        body.len()
+    );
+    let _ = socket.write_all(response.as_bytes()).await;
+    let _ = socket.write_all(body).await;
     let _ = socket.flush().await;
 }

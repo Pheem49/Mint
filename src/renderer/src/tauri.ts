@@ -179,7 +179,20 @@ export async function clearChatHistory(): Promise<number> {
 
 export async function listSavedPictures(): Promise<PictureEntry[]> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    return [];
+    const API_BASE = "http://localhost:3000/api";
+    try {
+      const res = await fetch(`${API_BASE}/pictures`);
+      const pictures = await res.json();
+      return Array.isArray(pictures)
+        ? pictures.map((picture) => ({
+            ...picture,
+            path: picture.url ? `${API_BASE.replace('/api', '')}${picture.url}` : picture.path,
+          }))
+        : [];
+    } catch (e) {
+      console.error("Failed to fetch saved pictures from local server:", e);
+      return [];
+    }
   }
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<PictureEntry[]>('list_pictures')
@@ -269,7 +282,18 @@ export function installTauriAdapters() {
 
     (window as any).spotlightAPI = {
       submit: () => {},
-      executeAction: async () => ({ success: true }),
+      executeAction: async (action: any) => {
+        try {
+          const res = await fetch(`${API_BASE}/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(action)
+          });
+          return await res.json();
+        } catch (e) {
+          return { success: false, message: String(e) };
+        }
+      },
       close: () => {},
       hide: () => {},
       resize: () => {},
@@ -334,7 +358,7 @@ export function installTauriAdapters() {
           return [];
         }
       },
-      listSavedPictures: async () => [],
+      listSavedPictures,
       openSettings: () => {},
       readClipboard: async () => '',
       writeClipboard: async () => {},
@@ -346,7 +370,14 @@ export function installTauriAdapters() {
           return { backend: 'browser-fallback' };
         }
       },
-      getWeather: async () => ({}),
+      getWeather: async (city: string) => {
+        try {
+          const res = await fetch(`${API_BASE}/weather?city=${encodeURIComponent(city)}`);
+          return await res.json();
+        } catch (e) {
+          return { error: String(e) };
+        }
+      },
       getSettings: async () => {
         try {
           const res = await fetch(`${API_BASE}/config`);
@@ -371,13 +402,42 @@ export function installTauriAdapters() {
       startVision: () => {},
       onVisionReady: () => {},
       captureSilentScreen: async () => '',
-      getSmartContext: async () => ({}),
+      getSmartContext: async () => {
+        try {
+          const res = await fetch(`${API_BASE}/smart-context`);
+          return await res.json();
+        } catch (e) {
+          return {};
+        }
+      },
       onProactiveSuggestion: () => {},
       onProactiveNotification: () => {},
       toggleProactive: () => {},
       recordBehavior: () => {},
-      executeProactiveAction: () => {},
-      executeApprovedAction: () => {},
+      executeProactiveAction: async (action: any) => {
+        try {
+          const res = await fetch(`${API_BASE}/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(action)
+          });
+          return await res.json();
+        } catch (e) {
+          return { success: false, message: String(e) };
+        }
+      },
+      executeApprovedAction: async (action: any) => {
+        try {
+          const res = await fetch(`${API_BASE}/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(action)
+          });
+          return await res.json();
+        } catch (e) {
+          return { success: false, message: String(e) };
+        }
+      },
       onSpotlightToChat: () => {},
       notifyAiResponse: () => {},
       clearAiNotifications: () => {},
