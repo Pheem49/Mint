@@ -899,11 +899,17 @@ async fn launch_mint_target(target: String) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("Failed to run desktop app: {e}"))?;
         }
         "web" => {
-            println!("\x1b[32mLaunching Web App (vite)... \x1b[0m\n");
+            println!("\x1b[32mLaunching Web App (vite) in background... (Vite Dev UI at http://localhost:9000)\x1b[0m");
             std::process::Command::new("npm")
                 .args(&["run", "dev:web"])
-                .status()
-                .map_err(|e| anyhow::anyhow!("Failed to run web app: {e}"))?;
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| anyhow::anyhow!("Failed to launch web app: {e}"))?;
+
+            println!("\x1b[32mStarting local API server in foreground on port 3000...\x1b[0m\n");
+            println!("\x1b[36m👉 Please open \x1b[1;36mhttp://localhost:9000\x1b[0m\x1b[36m in your web browser to access the Mint Web UI!\x1b[0m\n");
+            mint_core::start_api_server(3000).await?;
         }
         _ => {}
     }

@@ -138,13 +138,35 @@ export async function applyCodeEdits(root: string, edits: CodeEdit[], approvalTo
 
 export function installTauriAdapters() {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    console.warn("Not running inside Tauri. Installing mock adapters for browser preview.");
+    console.warn("Not running inside Tauri. Connecting to local API server fallback at http://localhost:3000/api.");
+    const API_BASE = "http://localhost:3000/api";
+
     (window as any).settingsApi = {
-      getSettings: async () => ({}),
+      getSettings: async () => {
+        try {
+          const res = await fetch(`${API_BASE}/config`);
+          return await res.json();
+        } catch (e) {
+          console.error("Failed to fetch settings from local server:", e);
+          return {};
+        }
+      },
       getUpdaterStatus: async () => ({}),
       checkForUpdates: async () => ({}),
       installAvailableUpdate: async () => {},
-      saveSettings: async () => ({}),
+      saveSettings: async (config: any) => {
+        try {
+          const res = await fetch(`${API_BASE}/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+          });
+          return await res.json();
+        } catch (e) {
+          console.error("Failed to save settings to local server:", e);
+          return {};
+        }
+      },
       closeSettings: () => {},
       quitApp: () => {},
       openExternal: () => {},
@@ -158,7 +180,14 @@ export function installTauriAdapters() {
       close: () => {},
       hide: () => {},
       resize: () => {},
-      getSettings: async () => ({}),
+      getSettings: async () => {
+        try {
+          const res = await fetch(`${API_BASE}/config`);
+          return await res.json();
+        } catch (e) {
+          return {};
+        }
+      },
       onSettingsChanged: () => {},
     };
 
@@ -177,21 +206,74 @@ export function installTauriAdapters() {
     };
 
     (window as any).api = {
-      sendMessage: async () => ({ provider: 'mock', model: 'mock', text: 'Tauri environment not detected. This is a browser preview.' }),
+      sendMessage: async (message: string, imageDataUri?: string | null, audioDataUri?: string | null) => {
+        try {
+          const res = await fetch(`${API_BASE}/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message, imageDataUri, audioDataUri })
+          });
+          return await res.json();
+        } catch (e) {
+          console.error("Failed to send message to local server:", e);
+          return { provider: 'error', model: 'error', text: `Failed to connect to Local API Server: ${e}` };
+        }
+      },
       closeWindow: () => {},
       minimizeWindow: () => {},
       quitApp: () => {},
       maximizeWindow: () => {},
-      resetChat: async () => 0,
-      getChatHistory: async () => [],
+      resetChat: async () => {
+        try {
+          const res = await fetch(`${API_BASE}/interactions/clear`, { method: 'POST' });
+          const data = await res.json();
+          return data.status === 'ok' ? 1 : 0;
+        } catch (e) {
+          return 0;
+        }
+      },
+      getChatHistory: async () => {
+        try {
+          const res = await fetch(`${API_BASE}/interactions`);
+          return await res.json();
+        } catch (e) {
+          console.error("Failed to fetch chat history from local server:", e);
+          return [];
+        }
+      },
       listSavedPictures: async () => [],
       openSettings: () => {},
       readClipboard: async () => '',
       writeClipboard: async () => {},
-      getSystemInfo: async () => ({ backend: 'browser-mock' }),
+      getSystemInfo: async () => {
+        try {
+          const res = await fetch(`${API_BASE}/status`);
+          return await res.json();
+        } catch (e) {
+          return { backend: 'browser-fallback' };
+        }
+      },
       getWeather: async () => ({}),
-      getSettings: async () => ({}),
-      saveSettings: async () => ({}),
+      getSettings: async () => {
+        try {
+          const res = await fetch(`${API_BASE}/config`);
+          return await res.json();
+        } catch (e) {
+          return {};
+        }
+      },
+      saveSettings: async (config: any) => {
+        try {
+          const res = await fetch(`${API_BASE}/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+          });
+          return await res.json();
+        } catch (e) {
+          return {};
+        }
+      },
       onSettingsChanged: () => {},
       startVision: () => {},
       onVisionReady: () => {},
