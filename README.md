@@ -100,6 +100,7 @@ Run the CLI directly from the workspace:
 
 ```bash
 npm run cli -- status
+npm run cli -- setup
 npm run cli -- config doctor
 npm run cli -- chat "Hello"
 ```
@@ -129,6 +130,8 @@ npm run cli
 | `plugin list` | List local plugins |
 | `mcp list` | List configured MCP servers |
 | `update --check` | Check for an available update |
+| `onboard` | Configure Mint for first use |
+| `setup` | Interactively manage enabled agent tools |
 
 ### Code Agent
 

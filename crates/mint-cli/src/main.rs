@@ -21,6 +21,7 @@ mod gmail;
 mod image;
 mod mcp;
 mod onboard;
+mod setup;
 mod skills;
 mod updater;
 
@@ -161,6 +162,8 @@ enum Command {
     },
     /// Configure Mint for first use.
     Onboard,
+    /// Interactively manage enabled agent tools.
+    Setup,
 }
 
 #[derive(Debug, Subcommand)]
@@ -872,8 +875,39 @@ async fn main() -> Result<()> {
             Command::Onboard => {
                 onboard::run().await?;
             }
+            Command::Setup => {
+                if let Some(target) = setup::run().await? {
+                    launch_mint_target(target).await?;
+                }
+            }
         },
     }
+    Ok(())
+}
+
+async fn launch_mint_target(target: String) -> Result<()> {
+    match target.as_str() {
+        "cli" => {
+            println!("\x1b[32mStarting CLI Interactive Chat Assistant...\x1b[0m\n");
+            run_interactive_chat().await?;
+        }
+        "desktop" => {
+            println!("\x1b[32mLaunching Desktop App (npm run tauri:dev)... \x1b[0m\n");
+            std::process::Command::new("npm")
+                .args(&["run", "tauri:dev"])
+                .status()
+                .map_err(|e| anyhow::anyhow!("Failed to run desktop app: {e}"))?;
+        }
+        "web" => {
+            println!("\x1b[32mLaunching Web App (vite)... \x1b[0m\n");
+            std::process::Command::new("npm")
+                .args(&["run", "dev:web"])
+                .status()
+                .map_err(|e| anyhow::anyhow!("Failed to run web app: {e}"))?;
+        }
+        _ => {}
+    }
+
     Ok(())
 }
 

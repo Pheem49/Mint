@@ -64,6 +64,7 @@ pub struct MintConfig {
     pub allowed_write_paths: Vec<PathBuf>,
     pub blocked_paths: Vec<PathBuf>,
     pub blocked_file_names: Vec<String>,
+    pub disabled_tools: Vec<String>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -113,6 +114,7 @@ impl Default for MintConfig {
                 home.join(".mint/mint-config.json"),
             ],
             blocked_file_names: vec![".env".into(), "id_rsa".into(), "id_ed25519".into()],
+            disabled_tools: Vec::new(),
             extra: runtime_extra_defaults(),
         }
     }

@@ -127,44 +127,123 @@ fn enrich_request(memory: &MemoryStore, request: &ChatRequest) -> Result<ChatReq
 
 const MAX_STEPS: usize = 16;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
-const SYSTEM_PROMPT: &str = r#"You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.
-You are also Mint: a cute, warm, and helpful Thai assistant. Speak politely, naturally, and sweetly in Thai when the user writes in Thai. Refer to yourself as "มิ้น" and use polite particles such as "ค่ะ" and "นะคะ" where appropriate. Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision. Write the "thought" field in English at all times (never use Thai for the thought field).
-Follow an inspect -> act -> verify loop. Return exactly one JSON object per response, with no markdown:
-{"thought":"short user-visible progress note","action":"list_files|read_file|search_code|symbols|semantic_index|semantic_search|knowledge_search|web_search|memory_recall|note_write|run_plugin|mcp_tool|run_shell|verify|apply_patch|write_file|finish","input":{...}}
+pub fn build_system_prompt(config: &MintConfig) -> String {
+    let mut allowed_actions = vec![
+        "list_files", "read_file", "search_code", "symbols",
+        "semantic_index", "semantic_search", "knowledge_search",
+        "web_search", "memory_recall", "note_write", "run_plugin",
+        "mcp_tool", "run_shell", "verify", "apply_patch",
+        "write_file"
+    ];
+    allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
+    allowed_actions.push("finish");
 
-Input formats:
-- list_files: {"path":".","limit":100}
-- read_file: {"path":"relative/path","startLine":1,"endLine":240}
-- search_code: {"query":"text","path":".","limit":20}
-- symbols: {"path":".","limit":100}
-- semantic_index: {"path":"."}
-- semantic_search: {"query":"behavior description","path":".","limit":5}
-- knowledge_search: {"query":"local knowledge query","limit":5}
-- web_search: {"query":"search terms","limit":5}
-- memory_recall: {"query":"what did user say about X"}
-- note_write: {"path":"filename.md","fileContent":"note content"}
-- run_plugin: {"name":"gmail|google_calendar|notion|docker|spotify|obsidian|system_metrics","instruction":"instruction string"}
-- mcp_tool: {"server":"configured-server","tool":"tool-name","arguments":{}}
-- run_shell: {"command":"non-destructive command"}
-- verify: {"commands":["cargo test","npm test"]}
-- apply_patch: {"patch":{"path":"relative/path","hunks":[{"oldText":"exact text","newText":"replacement"}]}}
-- write_file: {"path":"relative/path","fileContent":"full file content"}
-- finish: {"summary":"concise final answer","verification":"checks run or not run"}
+    let actions_str = allowed_actions.join("|");
 
-Rules:
-0. For casual conversation or questions that need no local tool, use finish immediately.
-1. Inspect the workspace before editing.
-2. Use search_code before reading many files when searching for a symbol or behavior.
-3. Prefer apply_patch over write_file for existing files.
-4. Shell commands and file edits require user approval. Mint handles approval after you request the tool.
-5. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.
-6. Verify code changes when possible. If compile or test commands fail (exit status is not 0), analyze the stdout/stderr to locate the bug, edit the code to fix it, and verify again. Do not stop or give up until the errors are resolved.
-7. Use web_search when the user asks to look something up online or needs current information.
-8. Use memory_recall to search past interactions before asking the user to repeat context.
-9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.
-10. Use run_plugin to interact with Google Workspace (Gmail, Calendar), Notion, Docker, Obsidian, Spotify, or System Metrics.
-11. Keep thought short and concrete. Write the thought field in English at all times. Use Thai for the final summary when the task is written in Thai.
-12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately."#;
+    let mut input_formats = Vec::new();
+    if allowed_actions.contains(&"list_files") {
+        input_formats.push("- list_files: {\"path\":\".\",\"limit\":100}");
+    }
+    if allowed_actions.contains(&"read_file") {
+        input_formats.push("- read_file: {\"path\":\"relative/path\",\"startLine\":1,\"endLine\":240}");
+    }
+    if allowed_actions.contains(&"search_code") {
+        input_formats.push("- search_code: {\"query\":\"text\",\"path\":\".\",\"limit\":20}");
+    }
+    if allowed_actions.contains(&"symbols") {
+        input_formats.push("- symbols: {\"path\":\".\",\"limit\":100}");
+    }
+    if allowed_actions.contains(&"semantic_index") {
+        input_formats.push("- semantic_index: {\"path\":\".\"}");
+    }
+    if allowed_actions.contains(&"semantic_search") {
+        input_formats.push("- semantic_search: {\"query\":\"behavior description\",\"path\":\".\",\"limit\":5}");
+    }
+    if allowed_actions.contains(&"knowledge_search") {
+        input_formats.push("- knowledge_search: {\"query\":\"local knowledge query\",\"limit\":5}");
+    }
+    if allowed_actions.contains(&"web_search") {
+        input_formats.push("- web_search: {\"query\":\"search terms\",\"limit\":5}");
+    }
+    if allowed_actions.contains(&"memory_recall") {
+        input_formats.push("- memory_recall: {\"query\":\"what did user say about X\"}");
+    }
+    if allowed_actions.contains(&"note_write") {
+        input_formats.push("- note_write: {\"path\":\"filename.md\",\"fileContent\":\"note content\"}");
+    }
+    if allowed_actions.contains(&"run_plugin") {
+        input_formats.push("- run_plugin: {\"name\":\"gmail|google_calendar|notion|docker|spotify|obsidian|system_metrics\",\"instruction\":\"instruction string\"}");
+    }
+    if allowed_actions.contains(&"mcp_tool") {
+        input_formats.push("- mcp_tool: {\"server\":\"configured-server\",\"tool\":\"tool-name\",\"arguments\":{}}");
+    }
+    if allowed_actions.contains(&"run_shell") {
+        input_formats.push("- run_shell: {\"command\":\"non-destructive command\"}");
+    }
+    if allowed_actions.contains(&"verify") {
+        input_formats.push("- verify: {\"commands\":[\"cargo test\",\"npm test\"]}");
+    }
+    if allowed_actions.contains(&"apply_patch") {
+        input_formats.push("- apply_patch: {\"patch\":{\"path\":\"relative/path\",\"hunks\":[{\"oldText\":\"exact text\",\"newText\":\"replacement\"}]}}");
+    }
+    if allowed_actions.contains(&"write_file") {
+        input_formats.push("- write_file: {\"path\":\"relative/path\",\"fileContent\":\"full file content\"}");
+    }
+    input_formats.push("- finish: {\"summary\":\"concise final answer\",\"verification\":\"checks run or not run\"}");
+
+    let input_formats_str = input_formats.join("\n");
+
+    let mut rules = Vec::new();
+    rules.push("0. For casual conversation or questions that need no local tool, use finish immediately.");
+    if allowed_actions.contains(&"list_files") || allowed_actions.contains(&"read_file") {
+        rules.push("1. Inspect the workspace before editing.");
+    }
+    if allowed_actions.contains(&"search_code") {
+        rules.push("2. Use search_code before reading many files when searching for a symbol or behavior.");
+    }
+    if allowed_actions.contains(&"apply_patch") && allowed_actions.contains(&"write_file") {
+        rules.push("3. Prefer apply_patch over write_file for existing files.");
+    }
+    if allowed_actions.contains(&"run_shell") || allowed_actions.contains(&"write_file") || allowed_actions.contains(&"apply_patch") {
+        rules.push("4. Shell commands and file edits require user approval. Mint handles approval after you request the tool.");
+    }
+    if allowed_actions.contains(&"run_shell") {
+        rules.push("5. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.");
+    }
+    if allowed_actions.contains(&"verify") {
+        rules.push("6. Verify code changes when possible. If compile or test commands fail (exit status is not 0), analyze the stdout/stderr to locate the bug, edit the code to fix it, and verify again. Do not stop or give up until the errors are resolved.");
+    }
+    if allowed_actions.contains(&"web_search") {
+        rules.push("7. Use web_search when the user asks to look something up online or needs current information.");
+    }
+    if allowed_actions.contains(&"memory_recall") {
+        rules.push("8. Use memory_recall to search past interactions before asking the user to repeat context.");
+    }
+    if allowed_actions.contains(&"note_write") {
+        rules.push("9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.");
+    }
+    if allowed_actions.contains(&"run_plugin") {
+        rules.push("10. Use run_plugin to interact with Google Workspace (Gmail, Calendar), Notion, Docker, Obsidian, Spotify, or System Metrics.");
+    }
+    rules.push("11. Keep thought short and concrete. Write the thought field in English at all times. Use Thai for the final summary when the task is written in Thai.");
+    rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately.");
+
+    let rules_str = rules.join("\n");
+
+    format!(
+        "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
+         You are also Mint: a cute, warm, and helpful Thai assistant. Speak politely, naturally, and sweetly in Thai when the user writes in Thai. Refer to yourself as \"มิ้น\" and use polite particles such as \"ค่ะ\" and \"นะคะ\" where appropriate. Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision. Write the \"thought\" field in English at all times (never use Thai for the thought field).\n\
+         Follow an inspect -> act -> verify loop. Return exactly one JSON object per response, with no markdown:\n\
+         {{\"thought\":\"short user-visible progress note\",\"action\":\"{}\",\"input\":{{...}}}}\n\n\
+         Input formats:\n\
+         {}\n\n\
+         Rules:\n\
+         {}",
+        actions_str,
+        input_formats_str,
+        rules_str
+    )
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentApproval {
@@ -316,7 +395,7 @@ where
     let mut observation = initial_observation(task, &root, &skills);
     let mut pending_image = image_data_uri;
 
-    let mut system_prompt = SYSTEM_PROMPT.to_string();
+    let mut system_prompt = build_system_prompt(config);
     if let Ok(memory) = MemoryStore::open_default() {
         if let Ok(mut interactions) = memory.recent_interactions(6) {
             interactions.reverse();

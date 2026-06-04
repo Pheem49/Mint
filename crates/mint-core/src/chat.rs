@@ -173,6 +173,17 @@ async fn call_gemini(
     let model = config.gemini_model.clone();
     let url =
         format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent");
+
+    let mut allowed_actions = vec![
+        "list_files", "read_file", "search_code", "symbols",
+        "semantic_index", "semantic_search", "knowledge_search",
+        "web_search", "memory_recall", "note_write", "run_plugin",
+        "mcp_tool", "run_shell", "verify", "apply_patch",
+        "write_file"
+    ];
+    allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
+    allowed_actions.push("finish");
+
     let response: Value = client
         .post(url)
         .header("x-goog-api-key", api_key)
@@ -187,13 +198,7 @@ async fn call_gemini(
                         "thought": { "type": "STRING" },
                         "action": {
                             "type": "STRING",
-                            "enum": [
-                                "list_files", "read_file", "search_code", "symbols",
-                                "semantic_index", "semantic_search", "knowledge_search",
-                                "web_search", "memory_recall", "note_write", "run_plugin",
-                                "mcp_tool", "run_shell", "verify", "apply_patch",
-                                "write_file", "finish"
-                            ]
+                            "enum": allowed_actions
                         },
                         "input": {
                             "type": "OBJECT",
@@ -412,6 +417,17 @@ where
     let api_key = provider_key(&config.api_key, "GEMINI_API_KEY");
     required_key("gemini", &api_key)?;
     let model = config.gemini_model.clone();
+
+    let mut allowed_actions = vec![
+        "list_files", "read_file", "search_code", "symbols",
+        "semantic_index", "semantic_search", "knowledge_search",
+        "web_search", "memory_recall", "note_write", "run_plugin",
+        "mcp_tool", "run_shell", "verify", "apply_patch",
+        "write_file"
+    ];
+    allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
+    allowed_actions.push("finish");
+
     let response = client
         .post(format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
@@ -428,13 +444,7 @@ where
                         "thought": { "type": "STRING" },
                         "action": {
                             "type": "STRING",
-                            "enum": [
-                                "list_files", "read_file", "search_code", "symbols",
-                                "semantic_index", "semantic_search", "knowledge_search",
-                                "web_search", "memory_recall", "note_write", "run_plugin",
-                                "mcp_tool", "run_shell", "verify", "apply_patch",
-                                "write_file", "finish"
-                            ]
+                            "enum": allowed_actions
                         },
                         "input": {
                             "type": "OBJECT",

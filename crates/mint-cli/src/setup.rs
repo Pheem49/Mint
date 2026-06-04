@@ -1,0 +1,237 @@
+use anyhow::Result;
+use crossterm::event::{self, Event, KeyCode};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use mint_core::{load_config, save_config};
+use std::io::{self, Write};
+
+struct ToolOption {
+    name: &'static str,
+    key: &'static str,
+    enabled: bool,
+}
+
+pub async fn run() -> Result<Option<String>> {
+    let mut config = load_config()?;
+
+    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("\x1b[32m       Mint CLI Tool Manager Wizard\x1b[0m");
+    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("Configure which agent tools are enabled or disabled:");
+    println!("  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Space: Toggle | a: All | i: Invert | Enter: Confirm]\x1b[0m");
+    println!();
+
+    let mut options = vec![
+        ToolOption { name: "list_files (List Workspace Files)", key: "list_files", enabled: !config.disabled_tools.contains(&"list_files".to_string()) },
+        ToolOption { name: "read_file (Read File Content)", key: "read_file", enabled: !config.disabled_tools.contains(&"read_file".to_string()) },
+        ToolOption { name: "search_code (Search Code Text)", key: "search_code", enabled: !config.disabled_tools.contains(&"search_code".to_string()) },
+        ToolOption { name: "symbols (Index/Search Symbols)", key: "symbols", enabled: !config.disabled_tools.contains(&"symbols".to_string()) },
+        ToolOption { name: "semantic_index (Semantic Indexing)", key: "semantic_index", enabled: !config.disabled_tools.contains(&"semantic_index".to_string()) },
+        ToolOption { name: "semantic_search (Semantic Search)", key: "semantic_search", enabled: !config.disabled_tools.contains(&"semantic_search".to_string()) },
+        ToolOption { name: "knowledge_search (Search Local Knowledge)", key: "knowledge_search", enabled: !config.disabled_tools.contains(&"knowledge_search".to_string()) },
+        ToolOption { name: "web_search (Search Web)", key: "web_search", enabled: !config.disabled_tools.contains(&"web_search".to_string()) },
+        ToolOption { name: "memory_recall (Recall Long-term Memory)", key: "memory_recall", enabled: !config.disabled_tools.contains(&"memory_recall".to_string()) },
+        ToolOption { name: "note_write (Write Notes)", key: "note_write", enabled: !config.disabled_tools.contains(&"note_write".to_string()) },
+        ToolOption { name: "run_plugin (Run Native Plugins)", key: "run_plugin", enabled: !config.disabled_tools.contains(&"run_plugin".to_string()) },
+        ToolOption { name: "mcp_tool (Call MCP Tools)", key: "mcp_tool", enabled: !config.disabled_tools.contains(&"mcp_tool".to_string()) },
+        ToolOption { name: "run_shell (Run Shell Commands)", key: "run_shell", enabled: !config.disabled_tools.contains(&"run_shell".to_string()) },
+        ToolOption { name: "verify (Run Verification Checks)", key: "verify", enabled: !config.disabled_tools.contains(&"verify".to_string()) },
+        ToolOption { name: "apply_patch (Patch Files)", key: "apply_patch", enabled: !config.disabled_tools.contains(&"apply_patch".to_string()) },
+        ToolOption { name: "write_file (Write Files)", key: "write_file", enabled: !config.disabled_tools.contains(&"write_file".to_string()) },
+    ];
+
+    let mut cursor = 0;
+    print_options(&options, cursor);
+    enable_raw_mode()?;
+
+    loop {
+        match event::poll(std::time::Duration::from_millis(100)) {
+            Ok(true) => {
+                if let Event::Key(key_event) = event::read()? {
+                    if key_event.kind == event::KeyEventKind::Press {
+                        let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                            && key_event
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL);
+                        if is_ctrl_c {
+                            disable_raw_mode()?;
+                            println!("\n\x1b[31mSetup cancelled.\x1b[0m");
+                            return Ok(None);
+                        }
+
+                        match key_event.code {
+                            KeyCode::Up => {
+                                if cursor > 0 {
+                                    cursor -= 1;
+                                } else {
+                                    cursor = options.len() - 1;
+                                }
+                                disable_raw_mode()?;
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                print_options(&options, cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Down => {
+                                if cursor < options.len() - 1 {
+                                    cursor += 1;
+                                } else {
+                                    cursor = 0;
+                                }
+                                disable_raw_mode()?;
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                print_options(&options, cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Char(' ') => {
+                                options[cursor].enabled = !options[cursor].enabled;
+                                disable_raw_mode()?;
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                print_options(&options, cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Char('a') => {
+                                for opt in &mut options {
+                                    opt.enabled = true;
+                                }
+                                disable_raw_mode()?;
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                print_options(&options, cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Char('i') => {
+                                for opt in &mut options {
+                                    opt.enabled = !opt.enabled;
+                                }
+                                disable_raw_mode()?;
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                print_options(&options, cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Enter => {
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(_) => {
+                break;
+            }
+        }
+    }
+    disable_raw_mode()?;
+    println!();
+
+    let disabled: Vec<String> = options
+        .iter()
+        .filter(|o| !o.enabled)
+        .map(|o| o.key.to_string())
+        .collect();
+
+    config.disabled_tools = disabled;
+    save_config(&config)?;
+
+    println!("\x1b[32mSuccessfully updated tool configurations!\x1b[0m\n");
+
+    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("\x1b[32m       Choose where to run Mint AI Agent\x1b[0m");
+    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("Select the environment you want to launch:");
+    println!("  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Enter: Confirm]\x1b[0m");
+    println!();
+
+    let run_options = vec![
+        ToolOption { name: "1. CLI (Interactive Terminal Assistant)", key: "cli", enabled: false },
+        ToolOption { name: "2. Desktop App (Tauri Desktop Dashboard)", key: "desktop", enabled: false },
+        ToolOption { name: "3. Web (Vite Web App UI)", key: "web", enabled: false },
+    ];
+
+    let mut run_cursor = 0;
+    print_run_options(&run_options, run_cursor);
+    enable_raw_mode()?;
+
+    loop {
+        match event::poll(std::time::Duration::from_millis(100)) {
+            Ok(true) => {
+                if let Event::Key(key_event) = event::read()? {
+                    if key_event.kind == event::KeyEventKind::Press {
+                        let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                            && key_event
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL);
+                        if is_ctrl_c {
+                            disable_raw_mode()?;
+                            println!("\n\x1b[31mRun selection cancelled.\x1b[0m");
+                            return Ok(None);
+                        }
+
+                        match key_event.code {
+                            KeyCode::Up => {
+                                if run_cursor > 0 {
+                                    run_cursor -= 1;
+                                } else {
+                                    run_cursor = run_options.len() - 1;
+                                }
+                                disable_raw_mode()?;
+                                print!("\x1b[{}A\x1b[J", run_options.len());
+                                print_run_options(&run_options, run_cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Down => {
+                                if run_cursor < run_options.len() - 1 {
+                                    run_cursor += 1;
+                                } else {
+                                    run_cursor = 0;
+                                }
+                                disable_raw_mode()?;
+                                print!("\x1b[{}A\x1b[J", run_options.len());
+                                print_run_options(&run_options, run_cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Enter => {
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(_) => {
+                break;
+            }
+        }
+    }
+    disable_raw_mode()?;
+    println!();
+
+    Ok(Some(run_options[run_cursor].key.to_string()))
+}
+
+fn print_options(options: &[ToolOption], cursor: usize) {
+    for (i, opt) in options.iter().enumerate() {
+        let checkbox = if opt.enabled {
+            "\x1b[32m◉\x1b[0m"
+        } else {
+            "\x1b[90m○\x1b[0m"
+        };
+        if i == cursor {
+            println!("  \x1b[36m❯\x1b[0m {} \x1b[36m{}\x1b[0m", checkbox, opt.name);
+        } else {
+            println!("    {} {}", checkbox, opt.name);
+        }
+    }
+    let _ = io::stdout().flush();
+}
+
+fn print_run_options(options: &[ToolOption], cursor: usize) {
+    for (i, opt) in options.iter().enumerate() {
+        if i == cursor {
+            println!("  \x1b[36m❯\x1b[0m \x1b[36m{}\x1b[0m", opt.name);
+        } else {
+            println!("    {}", opt.name);
+        }
+    }
+    let _ = io::stdout().flush();
+}
