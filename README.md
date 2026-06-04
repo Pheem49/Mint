@@ -111,6 +111,21 @@ powershell -Command "iwr -useb https://raw.githubusercontent.com/Pheem49/Mint/ma
 ```
 
 ---
+### Quick Start
+```bash
+mint onboard
+mint setup
+mint 
+mint web
+mint chat "Hello"
+```
+
+Most integrations can be configured from:
+```bash
+mint onboard
+mint setup
+mint
+```
 
 ### Manual Installation
 
@@ -208,7 +223,7 @@ cargo build --release -p mint-cli
 # Copy it into your system binary directory
 sudo cp target/release/mint /usr/local/bin/
 ```
-Once copied, you can run `mint` globally from any folder in your terminal!
+Once copied, you can run `mint` globally from any folder in your terminal!mint chat "Hello"
 
 ---
 
@@ -229,10 +244,11 @@ This opens the Mint interactive shell, where you can type prompts naturally or u
 You can run individual subcommands by appending them after `mint`:
 
 ```bash
-mint status
+mint onboard
 mint setup
-mint config doctor
-mint chat "Hello"
+mint status
+mint web
+mint chat "<message>"
 ```
 
 ### Common Commands
@@ -240,6 +256,8 @@ mint chat "Hello"
 | Command | Purpose |
 | --- | --- |
 | `mint` | Start the interactive terminal chat assistant |
+| `mint onboard` | Configure Mint for first use |
+| `mint setup` | Interactively manage enabled agent tools |
 | `mint web` | Launch the web UI and local API server |
 | `mint status` | Show runtime status |
 | `mint config init` | Create the local configuration file |
@@ -256,8 +274,8 @@ mint chat "Hello"
 | `mint plugin list` | List local plugins |
 | `mint mcp list` | List configured MCP servers |
 | `mint update --check` | Check for an available update |
-| `mint onboard` | Configure Mint for first use |
-| `mint setup` | Interactively manage enabled agent tools |
+
+
 
 ### Code Agent
 
