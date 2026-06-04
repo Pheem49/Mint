@@ -137,6 +137,81 @@ export async function applyCodeEdits(root: string, edits: CodeEdit[], approvalTo
 }
 
 export function installTauriAdapters() {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    console.warn("Not running inside Tauri. Installing mock adapters for browser preview.");
+    (window as any).settingsApi = {
+      getSettings: async () => ({}),
+      getUpdaterStatus: async () => ({}),
+      checkForUpdates: async () => ({}),
+      installAvailableUpdate: async () => {},
+      saveSettings: async () => ({}),
+      closeSettings: () => {},
+      quitApp: () => {},
+      openExternal: () => {},
+      openCustomWorkflows: () => {},
+      reloadCustomWorkflows: () => {},
+    };
+
+    (window as any).spotlightAPI = {
+      submit: () => {},
+      executeAction: async () => ({ success: true }),
+      close: () => {},
+      hide: () => {},
+      resize: () => {},
+      getSettings: async () => ({}),
+      onSettingsChanged: () => {},
+    };
+
+    (window as any).widgetAPI = {
+      onStateChange: () => {},
+    };
+
+    (window as any).screenPickerApi = {
+      onScreenshot: () => {},
+      sendSelection: () => {},
+      startContinuousTranslation: () => {},
+      stopContinuousTranslation: () => {},
+      onTranslationResult: () => {},
+      closePicker: () => {},
+      setOverlayInteractable: () => {},
+    };
+
+    (window as any).api = {
+      sendMessage: async () => ({ provider: 'mock', model: 'mock', text: 'Tauri environment not detected. This is a browser preview.' }),
+      closeWindow: () => {},
+      minimizeWindow: () => {},
+      quitApp: () => {},
+      maximizeWindow: () => {},
+      resetChat: async () => 0,
+      getChatHistory: async () => [],
+      listSavedPictures: async () => [],
+      openSettings: () => {},
+      readClipboard: async () => '',
+      writeClipboard: async () => {},
+      getSystemInfo: async () => ({ backend: 'browser-mock' }),
+      getWeather: async () => ({}),
+      getSettings: async () => ({}),
+      saveSettings: async () => ({}),
+      onSettingsChanged: () => {},
+      startVision: () => {},
+      onVisionReady: () => {},
+      captureSilentScreen: async () => '',
+      getSmartContext: async () => ({}),
+      onProactiveSuggestion: () => {},
+      onProactiveNotification: () => {},
+      toggleProactive: () => {},
+      recordBehavior: () => {},
+      executeProactiveAction: () => {},
+      executeApprovedAction: () => {},
+      onSpotlightToChat: () => {},
+      notifyAiResponse: () => {},
+      clearAiNotifications: () => {},
+      getTtsUrls: async () => [],
+      setAiState: () => {},
+    };
+    return;
+  }
+
   const currentWindow = getCurrentWindow()
   let translationTimer: ReturnType<typeof setInterval> | null = null
   const close = () => invoke('close_desktop_window', { label: currentWindow.label })
