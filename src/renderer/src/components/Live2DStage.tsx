@@ -187,26 +187,45 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     }
   }, [])
 
-  // Update scale & position dynamically when scale changes
+  // Update scale & position dynamically when scale changes or container resizes
   useEffect(() => {
-    if (!modelRef.current || !appRef.current) return
-    const model = modelRef.current
-    const app = appRef.current
-    const stageHeight = app.renderer.height
-    const stageWidth = app.renderer.width
-    const baseWidth = baseWidthRef.current || model.width || 1000
-    const baseHeight = baseHeightRef.current || model.height || 1000
-    
-    const widthScale = stageWidth / baseWidth
-    const heightScale = stageHeight / baseHeight
-    
-    const modelScale = Math.min(widthScale, heightScale) * 1.85 * scale
-    model.scale.set(modelScale)
-    
-    model.anchor.set(0.5, 0.5)
-    model.x = stageWidth / 2
-    model.y = stageHeight / 2 + stageHeight * 0.55
-  }, [scale])
+    if (!containerRef.current) return
+
+    const handleResize = () => {
+      if (!modelRef.current || !appRef.current) return
+      const app = appRef.current
+      app.resize()
+      
+      const model = modelRef.current
+      const stageHeight = app.renderer.height
+      const stageWidth = app.renderer.width
+      const baseWidth = baseWidthRef.current || model.width || 1000
+      const baseHeight = baseHeightRef.current || model.height || 1000
+      
+      const widthScale = stageWidth / baseWidth
+      const heightScale = stageHeight / baseHeight
+      
+      const modelScale = Math.min(widthScale, heightScale) * 1.85 * scale
+      model.scale.set(modelScale)
+      
+      model.anchor.set(0.5, 0.5)
+      model.x = stageWidth / 2
+      model.y = stageHeight / 2 + stageHeight * 0.55
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize()
+    })
+
+    resizeObserver.observe(containerRef.current)
+
+    // Trigger immediate resize/reposition
+    handleResize()
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [scale, loading])
 
   useEffect(() => {
     if (isActive) {

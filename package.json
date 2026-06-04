@@ -4,6 +4,7 @@
   "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
   "scripts": {
     "dev:web": "vite",
+    "web": "cargo run -p mint-cli -- web",
     "build:web": "vite build",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
