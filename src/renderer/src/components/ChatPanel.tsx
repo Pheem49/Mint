@@ -1,6 +1,11 @@
-import { convertFileSrc } from '@tauri-apps/api/core'
 import type { ChangeEvent, FormEvent, KeyboardEvent, RefObject } from 'react'
-import type { AgentProgress, ChatResponse, PictureEntry, RuntimeStatus } from '../tauri'
+import {
+  type AgentProgress,
+  type ChatResponse,
+  type PictureEntry,
+  type RuntimeStatus,
+  convertFileSrc,
+} from '../tauri'
 import type { DashboardView } from './DashboardSidebar'
 
 interface ApprovalDetails {

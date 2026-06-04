@@ -1,5 +1,4 @@
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react'
-import { listen } from '@tauri-apps/api/event'
 import {
   clearChatHistory,
   getRecentInteractions,
@@ -7,6 +6,7 @@ import {
   listSavedPictures,
   streamChatMessage,
   submitToolApproval,
+  listen,
   type AgentProgress,
   type ChatResponse,
   type PictureEntry,

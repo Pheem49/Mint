@@ -1,7 +1,3 @@
-import { Channel, invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-
 export interface RuntimeStatus {
   backend: string
   configPath: string
@@ -58,6 +54,23 @@ export interface CodeEditProposal {
 }
 
 export async function getRuntimeStatus(): Promise<RuntimeStatus> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const API_BASE = "http://localhost:3000/api";
+    try {
+      const res = await fetch(`${API_BASE}/status`);
+      return await res.json();
+    } catch (e) {
+      console.error("Failed to fetch runtime status from local server:", e);
+      return {
+        backend: 'browser-fallback',
+        configPath: '',
+        activeProvider: '',
+        availableProviders: [],
+        integrations: {}
+      };
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
   return invoke<RuntimeStatus>('get_runtime_status')
 }
 
@@ -67,6 +80,21 @@ export async function sendChatMessage(
   audioDataUri?: string | null,
 ): Promise<ChatResponse> {
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const API_BASE = "http://localhost:3000/api";
+    try {
+      const res = await fetch(`${API_BASE}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri })
+      });
+      return await res.json();
+    } catch (e) {
+      console.error("Failed to send chat message to local server:", e);
+      return { provider: 'error', model: 'error', text: `Failed to connect to Local API Server: ${e}` };
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
   const response = await invoke<ChatResponse>('send_chat_message', {
     request: { message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri },
   })
@@ -88,6 +116,12 @@ export async function streamChatMessage(
   systemInstruction = '',
   onProgress?: (progress: AgentProgress) => void,
 ): Promise<ChatResponse> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const response = await sendChatMessage(message, imageDataUri, audioDataUri);
+    onChunk(response.text);
+    return response;
+  }
+  const { invoke, Channel } = await import('@tauri-apps/api/core')
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
   const onEvent = new Channel<DesktopStreamEvent>()
   onEvent.onmessage = (event) => {
@@ -113,27 +147,86 @@ function withImagePlaceholder(message: string, imageDataUri?: string | null) {
 }
 
 export async function getRecentInteractions(limit = 50): Promise<InteractionMemory[]> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const API_BASE = "http://localhost:3000/api";
+    try {
+      const res = await fetch(`${API_BASE}/interactions?limit=${limit}`);
+      return await res.json();
+    } catch (e) {
+      console.error("Failed to fetch chat history from local server:", e);
+      return [];
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
   return invoke<InteractionMemory[]>('get_recent_interactions', { limit })
 }
 
 export async function clearChatHistory(): Promise<number> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const API_BASE = "http://localhost:3000/api";
+    try {
+      const res = await fetch(`${API_BASE}/interactions/clear`, { method: 'POST' });
+      const data = await res.json();
+      return data.status === 'ok' ? 1 : 0;
+    } catch (e) {
+      console.error("Failed to clear chat history on local server:", e);
+      return 0;
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
   return invoke<number>('clear_chat_history')
 }
 
 export async function listSavedPictures(): Promise<PictureEntry[]> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    return [];
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
   return invoke<PictureEntry[]>('list_pictures')
 }
 
 export async function submitToolApproval(token: string, approved: boolean): Promise<void> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    return;
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
   return invoke('submit_tool_approval', { token, approved })
 }
 
 export async function proposeCodeEdits(root: string, edits: CodeEdit[]): Promise<CodeEditProposal> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    return { approvalRequired: false, approvalToken: '', edits: [] };
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
   return invoke<CodeEditProposal>('propose_desktop_code_edits', { root, edits })
 }
 
 export async function applyCodeEdits(root: string, edits: CodeEdit[], approvalToken: string) {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    return;
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
   return invoke('apply_desktop_code_edits', { root, edits, approvalToken })
+}
+
+export async function listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    return () => {};
+  }
+  const { listen: tauriListen } = await import('@tauri-apps/api/event');
+  return tauriListen<T>(event, handler);
+}
+
+export function convertFileSrc(filePath: string, protocol = 'asset'): string {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    return filePath;
+  }
+  const internals = (window as any).__TAURI_INTERNALS__;
+  if (internals && typeof internals.convertFileSrc === 'function') {
+    return internals.convertFileSrc(filePath, protocol);
+  }
+  const path = filePath.startsWith('\\\\?\\') ? filePath.substring(4) : filePath;
+  return `https://asset.localhost/${encodeURIComponent(path)}`;
 }
 
 export function installTauriAdapters() {
@@ -294,64 +387,120 @@ export function installTauriAdapters() {
     return;
   }
 
-  const currentWindow = getCurrentWindow()
-  let translationTimer: ReturnType<typeof setInterval> | null = null
-  const close = () => invoke('close_desktop_window', { label: currentWindow.label })
-  const hide = () => invoke('hide_desktop_window', { label: currentWindow.label })
-  const settingsChanged = (callback: (config: any) => void) => {
+  const settingsChanged = async (callback: (config: any) => void) => {
+    const { listen } = await import('@tauri-apps/api/event')
     void listen<any>('settings-changed', (event) => callback(event.payload))
   }
-  const executeAction = (action: any, approved = false) => action.type === 'plugin'
-    ? invoke('run_native_plugin', { name: action.pluginName, instruction: action.target || '' })
-    : invoke('run_desktop_action', { action: { ...action, approved } })
+  const executeAction = async (action: any, approved = false) => {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return action.type === 'plugin'
+      ? invoke('run_native_plugin', { name: action.pluginName, instruction: action.target || '' })
+      : invoke('run_desktop_action', { action: { ...action, approved } })
+  }
 
   window.settingsApi = {
-    getSettings: () => invoke('get_config'),
-    getUpdaterStatus: () => invoke('get_updater_status'),
-    checkForUpdates: () => invoke('check_for_updates'),
-    installAvailableUpdate: () => invoke('install_available_update', { approved: true }),
-    saveSettings: (config) => invoke('update_config', { config }),
-    closeSettings: close,
-    quitApp: () => void invoke('exit_app'),
-    openExternal: (url) => invoke('run_desktop_action', { action: { type: 'open_url', target: url } }),
-    openCustomWorkflows: () => invoke('open_workflows_file'),
-    reloadCustomWorkflows: () => invoke('reload_custom_workflows'),
+    getSettings: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('get_config')
+    },
+    getUpdaterStatus: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('get_updater_status')
+    },
+    checkForUpdates: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('check_for_updates')
+    },
+    installAvailableUpdate: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('install_available_update', { approved: true })
+    },
+    saveSettings: async (config) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('update_config', { config })
+    },
+    closeSettings: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      return invoke('close_desktop_window', { label: getCurrentWindow().label })
+    },
+    quitApp: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return void invoke('exit_app')
+    },
+    openExternal: async (url) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('run_desktop_action', { action: { type: 'open_url', target: url } })
+    },
+    openCustomWorkflows: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('open_workflows_file')
+    },
+    reloadCustomWorkflows: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('reload_custom_workflows')
+    },
   }
 
   window.spotlightAPI = {
-    submit: (query) => void invoke('submit_spotlight', { query }),
+    submit: async (query) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return void invoke('submit_spotlight', { query })
+    },
     executeAction: async (action) => {
+      const { invoke } = await import('@tauri-apps/api/core')
       if (action.type === 'clipboard_write') {
         await navigator.clipboard.writeText(action.target)
         return { success: true }
       }
       return invoke('run_desktop_action', { action })
     },
-    close,
-    hide,
-    resize: (width, height) => void invoke('resize_desktop_window', {
-      label: currentWindow.label,
-      width,
-      height,
-    }),
-    getSettings: () => invoke('get_config'),
+    close: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      return invoke('close_desktop_window', { label: getCurrentWindow().label })
+    },
+    hide: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      return invoke('hide_desktop_window', { label: getCurrentWindow().label })
+    },
+    resize: async (width, height) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      return void invoke('resize_desktop_window', {
+        label: getCurrentWindow().label,
+        width,
+        height,
+      })
+    },
+    getSettings: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('get_config')
+    },
     onSettingsChanged: settingsChanged,
   }
 
   window.widgetAPI = {
-    onStateChange: (callback) => {
+    onStateChange: async (callback) => {
+      const { listen } = await import('@tauri-apps/api/event')
       void listen<string>('widget-state', (event) => callback(event.payload))
     },
   }
 
   window.screenPickerApi = {
-    onScreenshot: (callback) => {
+    onScreenshot: async (callback) => {
+      const { invoke } = await import('@tauri-apps/api/core')
       void invoke<string>('capture_silent_screen').then(callback)
     },
-    sendSelection: (image) => void invoke('submit_screen_selection', { image }),
+    sendSelection: async (image) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return void invoke('submit_screen_selection', { image })
+    },
     startContinuousTranslation: (rect) => {
-      if (translationTimer) clearInterval(translationTimer)
-      const translate = () => {
+      let translationTimer: ReturnType<typeof setInterval> | null = null
+      const translate = async () => {
+        const { invoke } = await import('@tauri-apps/api/core')
         void invoke<string>('translate_capture_region', { rect })
           .then((text) => window.dispatchEvent(new CustomEvent('mint-translation', { detail: text })))
           .catch((reason) => {
@@ -360,59 +509,120 @@ export function installTauriAdapters() {
       }
       translate()
       translationTimer = setInterval(translate, 3000)
+      
+      // Clean up helper attached to window if needed
+      if ((window as any)._stopTranslate) (window as any)._stopTranslate()
+      ;(window as any)._stopTranslate = () => {
+        if (translationTimer) clearInterval(translationTimer)
+      }
     },
     stopContinuousTranslation: () => {
-      if (translationTimer) clearInterval(translationTimer)
-      translationTimer = null
+      if ((window as any)._stopTranslate) {
+        (window as any)._stopTranslate()
+      }
     },
     onTranslationResult: (callback) => {
       window.addEventListener('mint-translation', ((event: CustomEvent<string>) => {
         callback(event.detail)
       }) as EventListener)
     },
-    closePicker: close,
+    closePicker: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      return invoke('close_desktop_window', { label: getCurrentWindow().label })
+    },
     setOverlayInteractable: () => {},
   }
 
   window.api = {
     sendMessage: (message, imageDataUri, audioDataUri) => sendChatMessage(message, imageDataUri, audioDataUri),
-    closeWindow: hide,
-    minimizeWindow: () => void currentWindow.minimize(),
-    quitApp: () => void invoke('exit_app'),
-    maximizeWindow: () => void currentWindow.toggleMaximize(),
+    closeWindow: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      return invoke('hide_desktop_window', { label: getCurrentWindow().label })
+    },
+    minimizeWindow: async () => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      return void getCurrentWindow().minimize()
+    },
+    quitApp: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return void invoke('exit_app')
+    },
+    maximizeWindow: async () => {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      return void getCurrentWindow().toggleMaximize()
+    },
     resetChat: clearChatHistory,
     getChatHistory: () => getRecentInteractions(50),
     listSavedPictures,
-    openSettings: () => invoke('open_window', { kind: 'settings' }),
+    openSettings: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('open_window', { kind: 'settings' })
+    },
     readClipboard: () => navigator.clipboard.readText(),
     writeClipboard: (text) => navigator.clipboard.writeText(text),
     getSystemInfo: async () => ({ backend: 'rust' }),
-    getWeather: (city) => invoke('get_weather', { city }),
-    getSettings: () => invoke('get_config'),
-    saveSettings: (config) => invoke('update_config', { config }),
+    getWeather: async (city) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('get_weather', { city })
+    },
+    getSettings: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('get_config')
+    },
+    saveSettings: async (config) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('update_config', { config })
+    },
     onSettingsChanged: settingsChanged,
-    startVision: () => invoke('start_screen_capture'),
-    onVisionReady: (callback) => {
+    startVision: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('start_screen_capture')
+    },
+    onVisionReady: async (callback) => {
+      const { listen } = await import('@tauri-apps/api/event')
       void listen<string>('vision-ready', (event) => callback(event.payload))
     },
-    captureSilentScreen: () => invoke('capture_silent_screen'),
-    getSmartContext: () => invoke('get_smart_context'),
-    onProactiveSuggestion: (callback) => {
+    captureSilentScreen: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('capture_silent_screen')
+    },
+    getSmartContext: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('get_smart_context')
+    },
+    onProactiveSuggestion: async (callback) => {
+      const { listen } = await import('@tauri-apps/api/event')
       void listen<any>('proactive-suggestion', (event) => callback(event.payload))
     },
-    onProactiveNotification: (callback) => {
+    onProactiveNotification: async (callback) => {
+      const { listen } = await import('@tauri-apps/api/event')
       void listen<any>('proactive-notification', (event) => callback(event.payload))
     },
-    toggleProactive: (enabled) => void invoke('toggle_proactive', { enabled }),
-    recordBehavior: (context) => void invoke('save_behavior_context', { context }),
+    toggleProactive: async (enabled) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return void invoke('toggle_proactive', { enabled })
+    },
+    recordBehavior: async (context) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return void invoke('save_behavior_context', { context })
+    },
     executeProactiveAction: (action) => executeAction(action),
     executeApprovedAction: (action) => executeAction(action, true),
-    onSpotlightToChat: (callback) => {
+    onSpotlightToChat: async (callback) => {
+      const { listen } = await import('@tauri-apps/api/event')
       void listen<string>('spotlight-to-chat', (event) => callback(event.payload))
     },
     notifyAiResponse: () => {},
     clearAiNotifications: () => {},
-    getTtsUrls: (text) => invoke('get_tts_urls', { text }),
-    setAiState: (state) => void invoke('set_ai_state', { state }),
+    getTtsUrls: async (text) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('get_tts_urls', { text })
+    },
+    setAiState: async (state) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return void invoke('set_ai_state', { state })
+    },
   }
 }
