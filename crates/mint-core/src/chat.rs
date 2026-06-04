@@ -178,7 +178,69 @@ async fn call_gemini(
         .header("x-goog-api-key", api_key)
         .json(&json!({
             "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
-            "contents": [{ "role": "user", "parts": gemini_parts(request)? }]
+            "contents": [{ "role": "user", "parts": gemini_parts(request)? }],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseSchema": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "thought": { "type": "STRING" },
+                        "action": {
+                            "type": "STRING",
+                            "enum": [
+                                "list_files", "read_file", "search_code", "symbols",
+                                "semantic_index", "semantic_search", "knowledge_search",
+                                "web_search", "memory_recall", "note_write", "run_plugin",
+                                "mcp_tool", "run_shell", "verify", "apply_patch",
+                                "write_file", "finish"
+                            ]
+                        },
+                        "input": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "path": { "type": "STRING", "description": "The target file or directory path (required for list_files, read_file, write_file, apply_patch, symbols, semantic_index, semantic_search)" },
+                                "query": { "type": "STRING", "description": "The search query string (required for search_code, semantic_search, knowledge_search, web_search, memory_recall)" },
+                                "command": { "type": "STRING", "description": "The local shell command to run (required for run_shell)" },
+                                "commands": {
+                                    "type": "ARRAY",
+                                    "items": { "type": "STRING" },
+                                    "description": "List of verification commands (required for verify)"
+                                },
+                                "fileContent": { "type": "STRING", "description": "The complete new content of the file (required for write_file, note_write)" },
+                                "summary": { "type": "STRING", "description": "The final detailed answer, explanation, or response to the user's query (required for finish)" },
+                                "verification": { "type": "STRING", "description": "The description of checks to run before finishing" },
+                                "startLine": { "type": "INTEGER", "description": "First line to read (1-indexed, for read_file)" },
+                                "endLine": { "type": "INTEGER", "description": "Last line to read (for read_file)" },
+                                "limit": { "type": "INTEGER", "description": "Max number of items/lines/files to return" },
+                                "server": { "type": "STRING", "description": "MCP server name (for mcp_tool)" },
+                                "tool": { "type": "STRING", "description": "MCP tool name (for mcp_tool)" },
+                                "notePath": { "type": "STRING", "description": "The file path for note writing (for note_write)" },
+                                "name": { "type": "STRING", "description": "Plugin name (for run_plugin)" },
+                                "instruction": { "type": "STRING", "description": "Instruction to run the plugin (for run_plugin)" },
+                                "patch": {
+                                    "type": "OBJECT",
+                                    "properties": {
+                                        "path": { "type": "STRING", "description": "The target file path (required for apply_patch)" },
+                                        "hunks": {
+                                            "type": "ARRAY",
+                                            "items": {
+                                                "type": "OBJECT",
+                                                "properties": {
+                                                    "oldText": { "type": "STRING", "description": "The exact block of code to replace" },
+                                                    "newText": { "type": "STRING", "description": "The replacement block of code" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "arguments": { "type": "OBJECT", "description": "MCP tool arguments (for mcp_tool)" }
+                            },
+                            "required": ["path", "query", "command", "fileContent", "summary"]
+                        }
+                    },
+                    "required": ["thought", "action", "input"]
+                }
+            }
         }))
         .send()
         .await?
@@ -219,6 +281,7 @@ async fn call_openai(
         .bearer_auth(if local { "not-needed" } else { &api_key })
         .json(&json!({
             "model": model,
+            "response_format": { "type": "json_object" },
             "messages": [
                 { "role": "system", "content": request.system_instruction },
                 { "role": "user", "content": request.message }
@@ -356,7 +419,69 @@ where
         .header("x-goog-api-key", api_key)
         .json(&json!({
             "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
-            "contents": [{ "role": "user", "parts": gemini_parts(request)? }]
+            "contents": [{ "role": "user", "parts": gemini_parts(request)? }],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseSchema": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "thought": { "type": "STRING" },
+                        "action": {
+                            "type": "STRING",
+                            "enum": [
+                                "list_files", "read_file", "search_code", "symbols",
+                                "semantic_index", "semantic_search", "knowledge_search",
+                                "web_search", "memory_recall", "note_write", "run_plugin",
+                                "mcp_tool", "run_shell", "verify", "apply_patch",
+                                "write_file", "finish"
+                            ]
+                        },
+                        "input": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "path": { "type": "STRING", "description": "The target file or directory path (required for list_files, read_file, write_file, apply_patch, symbols, semantic_index, semantic_search)" },
+                                "query": { "type": "STRING", "description": "The search query string (required for search_code, semantic_search, knowledge_search, web_search, memory_recall)" },
+                                "command": { "type": "STRING", "description": "The local shell command to run (required for run_shell)" },
+                                "commands": {
+                                    "type": "ARRAY",
+                                    "items": { "type": "STRING" },
+                                    "description": "List of verification commands (required for verify)"
+                                },
+                                "fileContent": { "type": "STRING", "description": "The complete new content of the file (required for write_file, note_write)" },
+                                "summary": { "type": "STRING", "description": "The final detailed answer, explanation, or response to the user's query (required for finish)" },
+                                "verification": { "type": "STRING", "description": "The description of checks to run before finishing" },
+                                "startLine": { "type": "INTEGER", "description": "First line to read (1-indexed, for read_file)" },
+                                "endLine": { "type": "INTEGER", "description": "Last line to read (for read_file)" },
+                                "limit": { "type": "INTEGER", "description": "Max number of items/lines/files to return" },
+                                "server": { "type": "STRING", "description": "MCP server name (for mcp_tool)" },
+                                "tool": { "type": "STRING", "description": "MCP tool name (for mcp_tool)" },
+                                "notePath": { "type": "STRING", "description": "The file path for note writing (for note_write)" },
+                                "name": { "type": "STRING", "description": "Plugin name (for run_plugin)" },
+                                "instruction": { "type": "STRING", "description": "Instruction to run the plugin (for run_plugin)" },
+                                "patch": {
+                                    "type": "OBJECT",
+                                    "properties": {
+                                        "path": { "type": "STRING", "description": "The target file path (required for apply_patch)" },
+                                        "hunks": {
+                                            "type": "ARRAY",
+                                            "items": {
+                                                "type": "OBJECT",
+                                                "properties": {
+                                                    "oldText": { "type": "STRING", "description": "The exact block of code to replace" },
+                                                    "newText": { "type": "STRING", "description": "The replacement block of code" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "arguments": { "type": "OBJECT", "description": "MCP tool arguments (for mcp_tool)" }
+                            },
+                            "required": ["path", "query", "command", "fileContent", "summary"]
+                        }
+                    },
+                    "required": ["thought", "action", "input"]
+                }
+            }
         }))
         .send()
         .await?
@@ -396,6 +521,7 @@ where
         .json(&json!({
             "model": model,
             "stream": true,
+            "response_format": { "type": "json_object" },
             "messages": [
                 { "role": "system", "content": request.system_instruction },
                 { "role": "user", "content": request.message }

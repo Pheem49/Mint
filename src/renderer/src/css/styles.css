@@ -2768,3 +2768,17 @@ input:checked + .slider:before {
     max-height: none;
   }
 }
+
+/* Chat Bold Highlight styling */
+.chat-bold-highlight {
+  color: #38bdf8; /* Soft blue (sky-400) for default/dark theme */
+  font-weight: 600;
+}
+
+[data-theme="light"] .chat-bold-highlight {
+  color: #0284c7; /* Sky-600 for light theme */
+}
+
+[data-theme="midnight"] .chat-bold-highlight {
+  color: #38bdf8; /* Sky-400 for midnight theme */
+}

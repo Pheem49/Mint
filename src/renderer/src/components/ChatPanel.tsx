@@ -108,6 +108,21 @@ interface ChatPanelProps {
   onApproval: (approved: boolean) => void
 }
 
+function renderFormattedMessage(text: string) {
+  if (!text) return null
+  const parts = text.split(/\*\*([\s\S]*?)\*\*/g)
+  return parts.map((part, index) => {
+    if (index % 2 === 1) {
+      return (
+        <strong key={index} className="chat-bold-highlight">
+          {part}
+        </strong>
+      )
+    }
+    return part
+  })
+}
+
 export default function ChatPanel({
   interactions,
   sending,
@@ -147,7 +162,7 @@ export default function ChatPanel({
         {interactions.length === 0 && !sending && (
           <div className="message ai-message" style={{ marginBottom: '16px' }}>
             <div className="bubble-wrapper">
-              <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{welcomeInteraction.aiText}</div>
+              <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(welcomeInteraction.aiText)}</div>
               <div className="message-time">
                 <button className="provider-badge">{welcomeInteraction.provider} • {welcomeInteraction.model}</button>
                 <span>14:44</span>
@@ -165,14 +180,14 @@ export default function ChatPanel({
             ) : interaction.userText && (
               <div className="message user-message">
                 <div className="bubble-wrapper">
-                  <div className="message-bubble">{interaction.userText}</div>
+                  <div className="message-bubble">{renderFormattedMessage(interaction.userText)}</div>
                   <div className="message-time"><span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
                 </div>
               </div>
             )}
             <div className="message ai-message">
               <div className="bubble-wrapper">
-                <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{interaction.aiText}</div>
+                <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(interaction.aiText)}</div>
                 <div className="message-time">
                   <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
                   <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -184,7 +199,7 @@ export default function ChatPanel({
 
         {sending && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-            <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{sendingHasImage ? `${sendingMessage} [Image #1]` : sendingMessage}</div></div></div>
+            <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{sendingHasImage ? renderFormattedMessage(`${sendingMessage} [Image #1]`) : renderFormattedMessage(sendingMessage)}</div></div></div>
             {agentMode && agentActivities.length > 0 && (
               <div className="message ai-message agent-activity-message">
                 <div className="agent-activity-card">
@@ -207,7 +222,7 @@ export default function ChatPanel({
             )}
             <div className="message ai-message thinking-message">
               <div className="bubble-wrapper">
-                <div className="message-bubble"><span>{streamedReply || 'Thinking...'}</span></div>
+                <div className="message-bubble"><span>{streamedReply ? renderFormattedMessage(streamedReply) : 'Thinking...'}</span></div>
                 {streamedResponse && <div className="message-time"><button className="provider-badge">{badge(streamedResponse.provider, streamedResponse.model)}</button></div>}
               </div>
             </div>

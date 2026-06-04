@@ -40,9 +40,24 @@ pub async fn run_code_agent_with_options(
     let started_at = Instant::now();
     let approval_active = Arc::new(AtomicBool::new(false));
     let agent_done = Arc::new(AtomicBool::new(false));
+    let live_status = Arc::new(Mutex::new(LiveStatus::default()));
     let approve_approval_active = Arc::clone(&approval_active);
+    let approve_live_status = Arc::clone(&live_status);
 
     let approve_cb = |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+        approve_approval_active.store(true, Ordering::Relaxed);
+        if let Ok(mut status) = approve_live_status.lock() {
+            clear_live_status(&mut status);
+        }
+
+        struct ApprovalGuard(Arc<AtomicBool>);
+        impl Drop for ApprovalGuard {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Relaxed);
+            }
+        }
+        let _guard = ApprovalGuard(Arc::clone(&approve_approval_active));
+
         match approval {
             AgentApproval::WriteFile { diff, .. } => {
                 println!("  Proposed edit");
@@ -111,8 +126,6 @@ pub async fn run_code_agent_with_options(
             }
         }
     };
-
-    let live_status = Arc::new(Mutex::new(LiveStatus::default()));
     let timer_live_status = Arc::clone(&live_status);
     let timer_agent_done = Arc::clone(&agent_done);
     let timer_approval_active = Arc::clone(&approval_active);
@@ -173,51 +186,48 @@ pub async fn run_code_agent_with_options(
                     }
                     return;
                 }
-                let detail = match action.as_str() {
-                    "web_search" => input
-                        .get("query")
-                        .and_then(|v| v.as_str())
-                        .map(|s| format!("Searching the web for \"{}\"...", s)),
-                    "run_shell" => input
-                        .get("command")
-                        .and_then(|v| v.as_str())
-                        .map(|s| format!("Running command: `{}`...", s)),
-                    "read_file" => input
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .map(|s| format!("Reading file: {}...", s)),
-                    "write_file" => input
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .map(|s| format!("Writing file: {}...", s)),
-                    "apply_patch" => input
-                        .get("patch")
-                        .and_then(|p| p.get("path"))
-                        .and_then(|v| v.as_str())
-                        .map(|s| format!("Patching file: {}...", s)),
-                    "search_code" => input
-                        .get("query")
-                        .and_then(|v| v.as_str())
-                        .map(|s| format!("Searching code: \"{}\"...", s)),
-                    "list_files" => input
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .map(|s| format!("Listing files in: {}...", s)),
-                    "run_plugin" => input
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .map(|s| format!("Running plugin: {}...", s)),
-                    "mcp_tool" => input
-                        .get("tool")
-                        .and_then(|v| v.as_str())
-                        .map(|s| format!("Running MCP tool: {}...", s)),
-                    _ => Some(format!("Using tool: {}...", action)),
-                };
-                if let Some(msg) = detail {
-                    if let Ok(mut status) = progress_live_status.lock() {
-                        clear_live_status(&mut status);
+                
+                let (is_activity, label) = match action.as_str() {
+                    "web_search" => {
+                        let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                        (true, format!("[web_search] Searching the web for \"{}\"...", query))
                     }
-                    println!("\x1b[96m• {}\x1b[0m", msg);
+                    "run_shell" => {
+                        let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                        (false, format!("[run_shell] Running command: `{}`...", command))
+                    }
+                    "write_file" => {
+                        let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                        (false, format!("[write_file] Writing file: {}...", path))
+                    }
+                    "apply_patch" => {
+                        let path = input
+                            .get("patch")
+                            .and_then(|p| p.get("path"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        (false, format!("[apply_patch] Patching file: {}...", path))
+                    }
+                    "run_plugin" => {
+                        let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        (false, format!("[run_plugin] Running plugin: {}...", name))
+                    }
+                    "mcp_tool" => {
+                        let tool_name = input.get("tool").and_then(|v| v.as_str()).unwrap_or("");
+                        (false, format!("[mcp_tool] Running MCP tool: {}...", tool_name))
+                    }
+                    _ => (false, format!("[{}] Using tool...", action)),
+                };
+                
+                if let Ok(mut status) = progress_live_status.lock() {
+                    status.show_composer = true;
+                    status.thinking = None;
+                    if is_activity {
+                        status.activities.push(label);
+                    } else {
+                        status.tasks.push(label);
+                    }
+                    render_live_status(&mut status);
                 }
             }
         }
@@ -233,7 +243,9 @@ pub async fn run_code_agent_with_options(
             {
                 status.show_composer = true;
                 status.thinking = None;
-                status.ran.extend(commands);
+                for cmd in commands {
+                    status.tasks.push(format!("Finished command: `{}`", cmd));
+                }
                 render_live_status(&mut status);
             }
         }
@@ -382,9 +394,11 @@ fn should_show_verification(verification: &str) -> bool {
 struct LiveStatus {
     thinking: Option<String>,
     explored: Vec<ExploredAction>,
-    ran: Vec<String>,
+    activities: Vec<String>,
+    tasks: Vec<String>,
     committed_explored: usize,
-    committed_ran: usize,
+    committed_activities: usize,
+    committed_tasks: usize,
     show_composer: bool,
     rendered_lines: usize,
 }
@@ -401,14 +415,14 @@ fn explored_action_label(action: &str, input: &serde_json::Value) -> Option<Expl
             .get("path")
             .and_then(|v| v.as_str())
             .map(|path| ExploredAction {
-                kind: "List",
+                kind: "[list_files] List",
                 target: display_tool_target(path),
             }),
         "read_file" => input
             .get("path")
             .and_then(|v| v.as_str())
             .map(|path| ExploredAction {
-                kind: "Read",
+                kind: "[read_file] Read",
                 target: display_tool_target(path),
             }),
         "search_code" => {
@@ -420,7 +434,7 @@ fn explored_action_label(action: &str, input: &serde_json::Value) -> Option<Expl
                 format!("{} in {}", query, display_tool_target(path))
             };
             Some(ExploredAction {
-                kind: "Search",
+                kind: "[search_code] Search",
                 target,
             })
         }
@@ -428,7 +442,7 @@ fn explored_action_label(action: &str, input: &serde_json::Value) -> Option<Expl
             .get("path")
             .and_then(|v| v.as_str())
             .map(|path| ExploredAction {
-                kind: "Index symbols",
+                kind: "[symbols] Index symbols",
                 target: display_tool_target(path),
             }),
         _ => None,
@@ -450,10 +464,13 @@ fn display_tool_target(path: &str) -> String {
 fn render_live_status(status: &mut LiveStatus) {
     clear_live_status(status);
     let mut lines = Vec::new();
-    lines.extend(explored_lines(
-        &status.explored[status.committed_explored..],
-    ));
-    lines.extend(ran_lines(&status.ran[status.committed_ran..]));
+    let explored_start = status.committed_explored.min(status.explored.len());
+    let activities_start = status.committed_activities.min(status.activities.len());
+    let tasks_start = status.committed_tasks.min(status.tasks.len());
+    
+    lines.extend(tasks_lines(&status.tasks[tasks_start..]));
+    lines.extend(activities_lines(&status.activities[activities_start..]));
+    lines.extend(explored_lines(&status.explored[explored_start..]));
     if let Some(thinking) = &status.thinking {
         lines.push(format!("\x1b[90m• {thinking}\x1b[0m"));
     }
@@ -473,9 +490,12 @@ fn render_live_status(status: &mut LiveStatus) {
 fn commit_activity_snapshot(status: &mut LiveStatus) {
     clear_live_status(status);
     let explored_start = status.committed_explored.min(status.explored.len());
-    let ran_start = status.committed_ran.min(status.ran.len());
+    let activities_start = status.committed_activities.min(status.activities.len());
+    let tasks_start = status.committed_tasks.min(status.tasks.len());
+    
     let mut lines = explored_lines(&status.explored[explored_start..]);
-    lines.extend(ran_lines(&status.ran[ran_start..]));
+    lines.extend(activities_lines(&status.activities[activities_start..]));
+    lines.extend(tasks_lines(&status.tasks[tasks_start..]));
     if lines.is_empty() {
         return;
     }
@@ -484,7 +504,8 @@ fn commit_activity_snapshot(status: &mut LiveStatus) {
     }
     print_timeline_separator();
     status.committed_explored = status.explored.len();
-    status.committed_ran = status.ran.len();
+    status.committed_activities = status.activities.len();
+    status.committed_tasks = status.tasks.len();
     let _ = io::stdout().flush();
 }
 
@@ -576,23 +597,32 @@ fn command_was_run(result: &str) -> bool {
     result.lines().any(|line| line.starts_with("exit: "))
 }
 
-fn ran_lines(commands: &[String]) -> Vec<String> {
-    if commands.is_empty() {
+fn activities_lines(activities: &[String]) -> Vec<String> {
+    if activities.is_empty() {
         return Vec::new();
     }
-    let mut lines = vec![format!("\x1b[90m• Ran {}\x1b[0m", commands[0])];
-    lines.extend(
-        commands
-            .iter()
-            .skip(1)
-            .take(24)
-            .map(|command| format!("\x1b[90m  └ {command}\x1b[0m")),
-    );
-    if commands.len() > 25 {
-        lines.push(format!(
-            "\x1b[90m  └ ... {} more\x1b[0m",
-            commands.len() - 25
-        ));
+    let mut lines = vec!["\x1b[95m• Activity\x1b[0m".to_owned()];
+    lines.extend(activities.iter().take(24).enumerate().map(|(index, act)| {
+        let prefix = if index == 0 { "  └" } else { "   " };
+        format!("\x1b[95m{prefix} {act}\x1b[0m")
+    }));
+    if activities.len() > 24 {
+        lines.push(format!("\x1b[95m   ... {} more\x1b[0m", activities.len() - 24));
+    }
+    lines
+}
+
+fn tasks_lines(tasks: &[String]) -> Vec<String> {
+    if tasks.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec!["\x1b[92m• Tasks\x1b[0m".to_owned()];
+    lines.extend(tasks.iter().take(24).enumerate().map(|(index, task)| {
+        let prefix = if index == 0 { "  └" } else { "   " };
+        format!("\x1b[92m{prefix} {task}\x1b[0m")
+    }));
+    if tasks.len() > 24 {
+        lines.push(format!("\x1b[92m   ... {} more\x1b[0m", tasks.len() - 24));
     }
     lines
 }

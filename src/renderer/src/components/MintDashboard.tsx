@@ -207,7 +207,7 @@ export default function MintDashboard() {
 
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [interactions, streamedReply, pendingApproval])
+  }, [interactions, sending, streamedReply, pendingApproval, agentProgress])
 
   const showToast = (nextMessage: string) => {
     setToastMessage(nextMessage)

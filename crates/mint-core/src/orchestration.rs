@@ -142,13 +142,13 @@ Input formats:
 - knowledge_search: {"query":"local knowledge query","limit":5}
 - web_search: {"query":"search terms","limit":5}
 - memory_recall: {"query":"what did user say about X"}
-- note_write: {"path":"filename.md","content":"note content"}
+- note_write: {"path":"filename.md","fileContent":"note content"}
 - run_plugin: {"name":"gmail|google_calendar|notion|docker|spotify|obsidian|system_metrics","instruction":"instruction string"}
 - mcp_tool: {"server":"configured-server","tool":"tool-name","arguments":{}}
 - run_shell: {"command":"non-destructive command"}
 - verify: {"commands":["cargo test","npm test"]}
 - apply_patch: {"patch":{"path":"relative/path","hunks":[{"oldText":"exact text","newText":"replacement"}]}}
-- write_file: {"path":"relative/path","content":"full file content"}
+- write_file: {"path":"relative/path","fileContent":"full file content"}
 - finish: {"summary":"concise final answer","verification":"checks run or not run"}
 
 Rules:
@@ -254,7 +254,7 @@ struct AgentInput {
     #[serde(default)]
     commands: Vec<String>,
     #[serde(default)]
-    content: String,
+    file_content: String,
     #[serde(default)]
     summary: String,
     #[serde(default)]
@@ -341,6 +341,7 @@ where
     let mut final_model = "".to_string();
     let mut final_fallback = None;
     let mut action_counts = BTreeMap::<String, usize>::new();
+    let mut trajectory: Vec<String> = Vec::new();
 
     for step in 1..=MAX_STEPS {
         progress(AgentProgress::Thinking {
@@ -449,13 +450,20 @@ where
                 }
             } else {
                 if summary.is_empty() {
+                    let err_msg = "Error: Your finish action summary was empty. \
+                                   You MUST provide a final answer, explanation, or response to the user's query \
+                                   in the 'summary' field of the 'finish' action input. Do not leave it empty.";
+                    trajectory.push(format!(
+                        "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
+                        decision.thought.trim(),
+                        decision.action,
+                        err_msg
+                    ));
+                    let history_str = trajectory.join("\n\n");
                     observation = format!(
-                        "Task: {task}\nWorkspace: {}\nStep {step} completed.\nPrevious action: {}\n\
-                         Observation:\nError: Your finish action summary was empty. \
-                         You MUST provide a final answer, explanation, or response to the user's query \
-                         in the 'summary' field of the 'finish' action input. Do not leave it empty.",
+                        "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
                         root.display(),
-                        decision.action
+                        history_str
                     );
                     continue;
                 }
@@ -571,11 +579,18 @@ where
             );
         }
 
-        observation = format!(
-            "Task: {task}\nWorkspace: {}\nStep {step} completed.\nPrevious action: {}\nObservation:\n{}",
-            root.display(),
+        trajectory.push(format!(
+            "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
+            decision.thought.trim(),
             decision.action,
             final_result
+        ));
+
+        let history_str = trajectory.join("\n\n");
+        observation = format!(
+            "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
+            root.display(),
+            history_str
         );
     }
 
@@ -777,7 +792,7 @@ where
 
             let approved = approve_cb(&AgentApproval::NoteWrite {
                 path: file_name.to_owned(),
-                content: input.content.clone(),
+                content: input.file_content.clone(),
             })
             .map_err(|e| OrchestrationError::Agent(e))?;
 
@@ -786,7 +801,7 @@ where
                     std::fs::create_dir_all(&notes_dir).map_err(|e| {
                         OrchestrationError::Agent(format!("cannot create notes directory: {}", e))
                     })?;
-                    std::fs::write(&note_path, &input.content).map_err(|e| {
+                    std::fs::write(&note_path, &input.file_content).map_err(|e| {
                         OrchestrationError::Agent(format!("cannot write note: {}", e))
                     })?;
                     Ok(format!("Note saved to {}", note_path.display()))
@@ -903,7 +918,7 @@ where
             let path_str = required(&input.path, "path")?;
             let edit = CodeEdit {
                 path: PathBuf::from(path_str),
-                content: input.content.clone(),
+                content: input.file_content.clone(),
             };
             let proposal = propose_code_edits(root, std::slice::from_ref(&edit), config)
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
@@ -916,7 +931,7 @@ where
 
             let approved = approve_cb(&AgentApproval::WriteFile {
                 path: path_str.to_owned(),
-                content: input.content.clone(),
+                content: input.file_content.clone(),
                 diff,
             })
             .map_err(|e| OrchestrationError::Agent(e))?;
