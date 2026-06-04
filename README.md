@@ -16,6 +16,41 @@ The desktop application and native CLI share the same Rust domain layer, so chat
 memory, knowledge, tools, safety policies, and integrations behave consistently
 across both interfaces.
 
+## What Mint Can Do
+
+Mint is a local-first AI assistant running on your machine, capable of handling tasks via either the desktop application or the terminal interface (CLI):
+
+### 1. 🤖 AI Chat & Multi-Providers
+- Connect to **Gemini, OpenAI, Anthropic (Claude), Ollama (Local), Hugging Face**, and LM Studio.
+- Run private local LLMs inside your machine using Ollama or connect to leading cloud APIs.
+- Supports system instructions, temperature adjustments, voice replies, and image analysis (Multimodal).
+
+### 2. 🎨 Interactive Live2D Desktop Assistant
+- An interactive anime avatar (**Shiroko**) displayed right on your desktop with gaze tracking (eye/face follows your mouse pointer).
+- Toggle expression changes and cycle through character accessories dynamically.
+- Custom interaction zones (Head, Cheek, Hands, Body) that trigger unique animations and message toasts.
+
+### 3. 💻 Autonomous Code Agent
+- Run code agent loops via `/code <task>` or the terminal command `mint code agent "<task>"`.
+- Scan your project workspace, build multi-file implementation plans, fix test suite errors, and write edits automatically.
+- Run local tests, cargo checks, and shell commands. **Risky actions and file writes require your explicit terminal approval first.**
+
+### 4. 🧠 Long-Term Memory & Knowledge Base
+- Persistent conversation memory stored locally in SQLite. Manage user profile memory with `/memory set/get` or CLI commands.
+- Index local directories, text files, and documentation to build your private searchable knowledge base.
+
+### 5. 🔌 Tool & MCP Integrations
+- Support **Model Context Protocol (MCP)** to connect tools like Google/Brave Search, Filesystem servers, and GitHub context.
+- Local plugins for Spotify playback control, Google Calendar, Gmail drafts, and Notion workspace reading.
+
+### 6. 🌐 Messaging Bridges
+- Bridge your local AI assistant to messaging services: **Telegram, Discord Gateway, Discord RPC, Slack, LINE, and WhatsApp**.
+- Host local chatbot webhooks that relay chat traffic into your configured LLM.
+
+### 7. 📸 Screen Capture & Translation
+- Capture screen snapshots for instant visual analysis by the AI.
+- Real-time continuous overlay translation of specific screen regions.
+
 ## Highlights
 
 - Multi-provider chat with Gemini, OpenAI, Anthropic, Ollama, Hugging Face, and
@@ -60,23 +95,58 @@ sudo apt-get install -y \
 See the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/)
 for other platforms.
 
-## Run From Source
+## Installation
 
-Install the web dependencies and start the desktop application:
+### Quick Install (Recommended)
+The easiest way to install Mint CLI is using our installation script:
 
+**For macOS & Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/Pheem49/Mint/main/install.sh | bash
+```
+
+**For Windows (PowerShell):**
+```powershell
+powershell -Command "iwr -useb https://raw.githubusercontent.com/Pheem49/Mint/main/install.ps1 | iex"
+```
+
+---
+
+### Manual Installation
+
+### 1. Configure API Keys
+Copy the template and configure your LLM credentials (Gemini, OpenAI, Anthropic, etc.):
+```bash
+cp .env.example .env
+```
+Open the `.env` file and insert your API keys (e.g. `GEMINI_API_KEY=your_key_here`).
+
+### 2. Desktop Application
+Install the dependencies and start the application in development mode:
 ```bash
 npm install
 npm run tauri:dev
 ```
-
-Create a production desktop build:
-
+To compile and build a production standalone desktop package:
 ```bash
 npm run tauri:build
 ```
+*(The Vite renderer output is generated in `out/renderer` and can be manually built via `npm run build:web`)*
 
-The Vite renderer output is generated in `out/renderer`. It is build output and
-can be regenerated with `npm run build:web`.
+### 3. Native CLI
+To install the `mint` command-line tool globally:
+
+* **Option A (Release Build - Recommended for speed):**
+  ```bash
+  cargo build --release -p mint-cli
+  sudo cp target/release/mint /usr/local/bin/
+  ```
+* **Option B (Cargo Install):**
+  ```bash
+  cargo install --path crates/mint-cli
+  ```
+* **Option C (Development Shell Alias):**
+  If you are actively modifying code and want changes to reflect instantly, set up the alias under the [Setting up the mint Shortcut](#setting-up-the-mint-shortcut) section.
 
 ## Desktop Assistant
 
@@ -96,54 +166,110 @@ locally so the dashboard restores the previous UI state after restarting.
 
 ## Native CLI
 
-Run the CLI directly from the workspace:
+You can interact with Mint's Rust backend directly using the command line. If you set up the `mint` shortcut alias, you can run commands directly as `mint <command>`. Otherwise, you can fall back to running them through npm as `npm run cli -- <command>`.
 
+### Setting up the `mint` Shortcut
+
+You can choose one of the following methods to enable the global `mint` command:
+
+**Option 1: Using Shell Alias (For active development - updates instantly on code changes)**
+
+To run the commands using the prefix `mint` from anywhere in your workspace (automatically compiling your code updates on execution):
+
+*For Bash (`~/.bashrc`):*
 ```bash
-npm run cli -- status
-npm run cli -- setup
-npm run cli -- config doctor
-npm run cli -- chat "Hello"
+echo 'alias mint="cargo run --manifest-path /home/pheem49/vscode/Project/Mint-CLI/Cargo.toml -p mint-cli --"' >> ~/.bashrc
+source ~/.bashrc
 ```
 
-Start the interactive terminal assistant:
+*For Zsh (`~/.zshrc`):*
+```bash
+echo 'alias mint="cargo run --manifest-path /home/pheem49/vscode/Project/Mint-CLI/Cargo.toml -p mint-cli --"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**Option 2: Install via Cargo (For standard Rust installation)**
+
+This will compile the Rust CLI and install it inside your native Cargo binary directory:
 
 ```bash
-npm run cli
+cargo install --path crates/mint-cli
+```
+*Note: Make sure your `~/.cargo/bin` is added to your shell's `$PATH` variable.*
+
+**Option 3: Compile and Install Globally (For release binary - fastest run speed)**
+
+If you want to compile the project in release mode and install it directly to your system's global binaries directory (for the fastest startup time without cargo check overhead):
+
+```bash
+# Build the binary in release mode
+cargo build --release -p mint-cli
+
+# Copy it into your system binary directory
+sudo cp target/release/mint /usr/local/bin/
+```
+Once copied, you can run `mint` globally from any folder in your terminal!
+
+---
+
+### Start Interactive Chat Assistant
+
+To start the interactive terminal AI chatbot assistant, simply run:
+
+```bash
+mint
+# Or fallback: npm run cli
+```
+This opens the Mint interactive shell, where you can type prompts naturally or use `/commands` (like `/help`, `/cd`, `/clear`, `/exit`).
+
+---
+
+### CLI Subcommands
+
+You can run individual subcommands by appending them after `mint`:
+
+```bash
+mint status
+mint setup
+mint config doctor
+mint chat "Hello"
 ```
 
 ### Common Commands
 
 | Command | Purpose |
 | --- | --- |
-| `status` | Show runtime status |
-| `config init` | Create the local configuration file |
-| `config path` | Print the configuration file path |
-| `config show` | Print the current configuration |
-| `config set <key> <value>` | Update a configuration value |
-| `config doctor` | Validate the local setup |
-| `providers` | List configured AI providers |
-| `chat "<message>"` | Send one chat message |
-| `memory recent` | Show recent conversation memory |
-| `task pending` | List pending tasks |
-| `knowledge add <path>` | Index a local document |
-| `knowledge search "<query>"` | Search indexed knowledge |
-| `plugin list` | List local plugins |
-| `mcp list` | List configured MCP servers |
-| `update --check` | Check for an available update |
-| `onboard` | Configure Mint for first use |
-| `setup` | Interactively manage enabled agent tools |
+| `mint` | Start the interactive terminal chat assistant |
+| `mint web` | Launch the web UI and local API server |
+| `mint status` | Show runtime status |
+| `mint config init` | Create the local configuration file |
+| `mint config path` | Print the configuration file path |
+| `mint config show` | Print the current configuration |
+| `mint config set <key> <value>` | Update a configuration value |
+| `mint config doctor` | Validate the local setup |
+| `mint providers` | List configured AI providers |
+| `mint chat "<message>"` | Send one chat message |
+| `mint memory recent` | Show recent conversation memory |
+| `mint task pending` | List pending tasks |
+| `mint knowledge add <path>` | Index a local document |
+| `mint knowledge search "<query>"` | Search indexed knowledge |
+| `mint plugin list` | List local plugins |
+| `mint mcp list` | List configured MCP servers |
+| `mint update --check` | Check for an available update |
+| `mint onboard` | Configure Mint for first use |
+| `mint setup` | Interactively manage enabled agent tools |
 
 ### Code Agent
 
-Mint includes native workspace tools for code inspection and editing:
+Mint includes native workspace tools for code inspection, planning, editing, and execution:
 
 ```bash
-npm run cli -- code agent "inspect this repo and fix the failing tests"
-npm run cli -- code summary .
-npm run cli -- code search "shell approval flow" .
-npm run cli -- symbols .
-npm run cli -- semantic-code index .
-npm run cli -- semantic-code search "provider fallback"
+mint code agent "inspect this repo and fix the failing tests"
+mint code summary .
+mint code search "shell approval flow" .
+mint symbols .
+mint semantic-code index .
+mint semantic-code search "provider fallback"
 ```
 
 Inside interactive mode, use:
@@ -152,20 +278,18 @@ Inside interactive mode, use:
 /code <task>
 ```
 
-Code-related fixes, workspace inspection, and test requests are routed into the
-code-agent loop automatically. Shell commands and file edits require explicit
-terminal approval before Mint applies them.
+Code-related fixes, workspace inspection, and test requests are routed into the code-agent loop automatically. Shell commands and file edits require explicit terminal approval before Mint applies them.
 
 ### Tools And Automation
 
 ```bash
-npm run cli -- files find README
-npm run cli -- safety path README.md
-npm run cli -- safety shell cargo test -p mint-core
-npm run cli -- run --approve -- cargo test -p mint-core
-npm run cli -- open README.md
-npm run cli -- open-app code
-npm run cli -- learn ./skill.md
+mint files find README
+mint safety path README.md
+mint safety shell cargo test -p mint-core
+mint run --approve -- cargo test -p mint-core
+mint open README.md
+mint open-app code
+mint learn ./skill.md
 ```
 
 ### MCP Servers
@@ -173,13 +297,13 @@ npm run cli -- learn ./skill.md
 Add a local MCP server and call one of its tools:
 
 ```bash
-npm run cli -- mcp add filesystem npx \
+mint mcp add filesystem npx \
   --args -y \
   --args @modelcontextprotocol/server-filesystem \
   --args .
 
-npm run cli -- mcp list
-npm run cli -- mcp call filesystem list_directory \
+mint mcp list
+mint mcp call filesystem list_directory \
   --arguments '{"path":"."}'
 ```
 
