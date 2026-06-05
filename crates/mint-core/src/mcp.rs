@@ -33,6 +33,8 @@ pub enum McpError {
     InvalidEnvironment,
     #[error("MCP server '{0}' is not configured")]
     MissingServer(String),
+    #[error("MCP tool '{server}/{tool}' is not allowed by policy")]
+    NotAllowed { server: String, tool: String },
     #[error("unable to start MCP server '{command}': {source}")]
     Start {
         command: String,
@@ -104,6 +106,12 @@ pub fn call_mcp_tool(
     tool_name: &str,
     arguments: Value,
 ) -> Result<Value, McpError> {
+    if !mcp_tool_allowed(config, server_name, tool_name) {
+        return Err(McpError::NotAllowed {
+            server: server_name.into(),
+            tool: tool_name.into(),
+        });
+    }
     let servers = configured_mcp_servers(config)?;
     let server = servers
         .get(server_name)
@@ -120,6 +128,34 @@ pub fn call_mcp_tool(
     );
     let _ = process.kill();
     result
+}
+
+fn mcp_tool_allowed(config: &MintConfig, server_name: &str, tool_name: &str) -> bool {
+    config
+        .extra
+        .get("allowedMcpTools")
+        .and_then(|value| value.as_object())
+        .map(|servers| {
+            servers
+                .get("*")
+                .is_some_and(|tools| tool_allowed(tools, tool_name))
+                || servers
+                    .get(server_name)
+                    .is_some_and(|tools| tool_allowed(tools, tool_name))
+        })
+        .unwrap_or(false)
+}
+
+fn tool_allowed(tools: &Value, tool_name: &str) -> bool {
+    tools
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .any(|value| value == "*" || value == tool_name)
+        })
+        .unwrap_or(false)
 }
 
 pub fn call_configured_mcp_tool(
@@ -223,6 +259,15 @@ mod tests {
         assert!(matches!(
             parse_env(vec!["TOKEN".into()]),
             Err(McpError::InvalidEnvironment)
+        ));
+    }
+
+    #[test]
+    fn rejects_mcp_tool_not_in_allowlist() {
+        let config = MintConfig::default();
+        assert!(matches!(
+            call_mcp_tool(&config, "fake", "ping", json!({})),
+            Err(McpError::NotAllowed { .. })
         ));
     }
 }

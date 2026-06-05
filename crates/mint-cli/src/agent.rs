@@ -77,8 +77,9 @@ pub async fn run_code_agent_with_options(
                     Ok(ApprovalOutcome::Denied)
                 }
             }
-            AgentApproval::RunShell { command } => {
+            AgentApproval::RunShell { command, mode } => {
                 println!("  \x1b[96m• Proposed command\x1b[0m");
+                println!("    mode: {}", mode);
                 println!("    {}", command);
                 if confirm_pausing_interrupt(
                     "Approve local shell execution? [y/N]",
@@ -122,6 +123,32 @@ pub async fn run_code_agent_with_options(
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
+                }
+            }
+            AgentApproval::UserApproval { title, prompt } => {
+                println!("  \x1b[96m• Approval requested: {}\x1b[0m", title);
+                println!("    {}", prompt);
+                if confirm_pausing_interrupt(
+                    "Approve this request? [y/N]",
+                    &approve_approval_active,
+                ) {
+                    Ok(ApprovalOutcome::Approved)
+                } else {
+                    Ok(ApprovalOutcome::Denied)
+                }
+            }
+            AgentApproval::AskUser { question } => {
+                println!("  \x1b[96m• Question from agent\x1b[0m");
+                println!("    {}", question);
+                print!("Answer (leave empty to decline): ");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                let mut answer = String::new();
+                match std::io::stdin().read_line(&mut answer) {
+                    Ok(_) if !answer.trim().is_empty() => {
+                        Ok(ApprovalOutcome::Intercepted(answer.trim().to_owned()))
+                    }
+                    Ok(_) => Ok(ApprovalOutcome::Denied),
+                    Err(error) => Err(error.to_string()),
                 }
             }
         }
@@ -186,15 +213,43 @@ pub async fn run_code_agent_with_options(
                     }
                     return;
                 }
-                
+
                 let (is_activity, label) = match action.as_str() {
                     "web_search" => {
                         let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                        (true, format!("[web_search] Searching the web for \"{}\"...", query))
+                        (
+                            true,
+                            format!("[web_search] Searching the web for \"{}\"...", query),
+                        )
                     }
                     "run_shell" => {
                         let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
-                        (false, format!("[run_shell] Running command: `{}`...", command))
+                        (
+                            false,
+                            format!("[run_shell] Running command: `{}`...", command),
+                        )
+                    }
+                    "git_status" | "git_diff" | "git_log" | "git_branch" => {
+                        (false, format!("[{}] Reading repository state...", action))
+                    }
+                    "create_plan" | "update_plan" => {
+                        (false, format!("[{}] Updating task plan...", action))
+                    }
+                    "request_user_approval" => (
+                        false,
+                        "[request_user_approval] Waiting for approval...".into(),
+                    ),
+                    "ask_user" => (false, "[ask_user] Waiting for user answer...".into()),
+                    "detect_project" => {
+                        (false, "[detect_project] Detecting project type...".into())
+                    }
+                    "list_tests" => (false, "[list_tests] Listing tests...".into()),
+                    "read_diagnostics" => {
+                        (false, "[read_diagnostics] Reading diagnostics...".into())
+                    }
+                    "view_image" => {
+                        let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                        (false, format!("[view_image] Reading image: {}...", path))
                     }
                     "write_file" => {
                         let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -214,11 +269,14 @@ pub async fn run_code_agent_with_options(
                     }
                     "mcp_tool" => {
                         let tool_name = input.get("tool").and_then(|v| v.as_str()).unwrap_or("");
-                        (false, format!("[mcp_tool] Running MCP tool: {}...", tool_name))
+                        (
+                            false,
+                            format!("[mcp_tool] Running MCP tool: {}...", tool_name),
+                        )
                     }
                     _ => (false, format!("[{}] Using tool...", action)),
                 };
-                
+
                 if let Ok(mut status) = progress_live_status.lock() {
                     status.show_composer = true;
                     status.thinking = None;
@@ -302,7 +360,7 @@ pub async fn run_code_agent_with_options(
         println!("Verification: {}", res.verification);
     }
     println!(
-        "\x1b[90m─ Worked for {}\x1b[0m",
+        "\x1b[1;97m─ Worked for {}\x1b[0m",
         format_elapsed(started_at.elapsed())
     );
 
@@ -467,12 +525,12 @@ fn render_live_status(status: &mut LiveStatus) {
     let explored_start = status.committed_explored.min(status.explored.len());
     let activities_start = status.committed_activities.min(status.activities.len());
     let tasks_start = status.committed_tasks.min(status.tasks.len());
-    
+
     lines.extend(tasks_lines(&status.tasks[tasks_start..]));
     lines.extend(activities_lines(&status.activities[activities_start..]));
     lines.extend(explored_lines(&status.explored[explored_start..]));
     if let Some(thinking) = &status.thinking {
-        lines.push(format!("\x1b[90m• {thinking}\x1b[0m"));
+        lines.push(format!("\x1b[1;97m• {thinking}\x1b[0m"));
     }
     if status.show_composer {
         lines.extend(disabled_composer_lines());
@@ -492,7 +550,7 @@ fn commit_activity_snapshot(status: &mut LiveStatus) {
     let explored_start = status.committed_explored.min(status.explored.len());
     let activities_start = status.committed_activities.min(status.activities.len());
     let tasks_start = status.committed_tasks.min(status.tasks.len());
-    
+
     let mut lines = explored_lines(&status.explored[explored_start..]);
     lines.extend(activities_lines(&status.activities[activities_start..]));
     lines.extend(tasks_lines(&status.tasks[tasks_start..]));
@@ -607,7 +665,10 @@ fn activities_lines(activities: &[String]) -> Vec<String> {
         format!("\x1b[95m{prefix} {act}\x1b[0m")
     }));
     if activities.len() > 24 {
-        lines.push(format!("\x1b[95m   ... {} more\x1b[0m", activities.len() - 24));
+        lines.push(format!(
+            "\x1b[95m   ... {} more\x1b[0m",
+            activities.len() - 24
+        ));
     }
     lines
 }

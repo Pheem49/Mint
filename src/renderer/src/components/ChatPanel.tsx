@@ -43,6 +43,18 @@ function describeTool(action: string, input: Record<string, unknown>) {
     knowledge_search: query ? `Search knowledge for "${query}"` : 'Search local knowledge',
     web_search: query ? `Search the web for "${query}"` : 'Search the web',
     memory_recall: query ? `Recall memory for "${query}"` : 'Recall memory',
+    git_status: 'Read git status',
+    git_diff: path ? `Read git diff for ${path}` : 'Read git diff',
+    git_log: 'Read git log',
+    git_branch: 'Read git branch',
+    create_plan: 'Create plan',
+    update_plan: 'Update plan',
+    request_user_approval: 'Request approval',
+    ask_user: query ? `Ask: ${query}` : 'Ask user',
+    detect_project: path ? `Detect project in ${path}` : 'Detect project',
+    list_tests: path ? `List tests in ${path}` : 'List tests',
+    read_diagnostics: path ? `Read diagnostics in ${path}` : 'Read diagnostics',
+    view_image: path ? `View image ${path}` : 'View image',
     note_write: path ? `Write note ${path}` : 'Write note',
     run_plugin: activityDetail(input, 'name') ? `Run plugin ${activityDetail(input, 'name')}` : 'Run plugin',
     mcp_tool: activityDetail(input, 'tool') ? `Call MCP tool ${activityDetail(input, 'tool')}` : 'Call MCP tool',
@@ -83,6 +95,8 @@ function renderApprovalDetails(approval: any): ApprovalDetails {
     const { server, tool, arguments: args } = approval.McpTool
     return { title: `Run MCP Tool: ${server}/${tool}`, body: typeof args === 'string' ? args : JSON.stringify(args, null, 2), reason: 'Running external MCP tool.', isDangerous: false }
   }
+  if (approval.UserApproval) return { title: approval.UserApproval.title, body: approval.UserApproval.prompt, reason: 'The agent requested explicit approval.', isDangerous: false }
+  if (approval.AskUser) return { title: 'Question From Agent', body: approval.AskUser.question, reason: 'Approve to continue without a typed answer, or cancel to decline.', isDangerous: false }
   return { title: 'Unknown Action', body: JSON.stringify(approval, null, 2), reason: 'Requires approval to proceed.', isDangerous: false }
 }
 

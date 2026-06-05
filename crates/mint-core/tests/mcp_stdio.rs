@@ -35,6 +35,9 @@ fn calls_stdio_mcp_tool() {
             }
         }),
     );
+    config
+        .extra
+        .insert("allowedMcpTools".into(), json!({ "fake": ["ping"] }));
     assert_eq!(
         call_mcp_tool(&config, "fake", "ping", json!({})).unwrap(),
         json!({ "ok": true })

@@ -1,7 +1,9 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Instant;
 use thiserror::Error;
 
@@ -16,8 +18,8 @@ use crate::semantic::{index_semantic_code, search_semantic_code};
 use crate::shell::run_shell_command;
 use crate::symbols::build_symbol_index;
 use crate::{
-    ChatError, ChatRequest, ChatResponse, MemoryError, MemoryStore, MintConfig, send_chat,
-    stream_chat,
+    Capability, ChatError, ChatRequest, ChatResponse, MemoryError, MemoryStore, MintConfig,
+    assert_path_capability, classify_shell_command, send_chat, stream_chat,
 };
 
 const CONTEXT_LIMIT: usize = 6;
@@ -129,11 +131,34 @@ const MAX_STEPS: usize = 16;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
 pub fn build_system_prompt(config: &MintConfig) -> String {
     let mut allowed_actions = vec![
-        "list_files", "read_file", "search_code", "symbols",
-        "semantic_index", "semantic_search", "knowledge_search",
-        "web_search", "memory_recall", "note_write", "run_plugin",
-        "mcp_tool", "run_shell", "verify", "apply_patch",
-        "write_file"
+        "list_files",
+        "read_file",
+        "search_code",
+        "symbols",
+        "semantic_index",
+        "semantic_search",
+        "knowledge_search",
+        "web_search",
+        "memory_recall",
+        "git_status",
+        "git_diff",
+        "git_log",
+        "git_branch",
+        "create_plan",
+        "update_plan",
+        "request_user_approval",
+        "ask_user",
+        "detect_project",
+        "list_tests",
+        "read_diagnostics",
+        "view_image",
+        "note_write",
+        "run_plugin",
+        "mcp_tool",
+        "run_shell",
+        "verify",
+        "apply_patch",
+        "write_file",
     ];
     allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
     allowed_actions.push("finish");
@@ -145,7 +170,8 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         input_formats.push("- list_files: {\"path\":\".\",\"limit\":100}");
     }
     if allowed_actions.contains(&"read_file") {
-        input_formats.push("- read_file: {\"path\":\"relative/path\",\"startLine\":1,\"endLine\":240}");
+        input_formats
+            .push("- read_file: {\"path\":\"relative/path\",\"startLine\":1,\"endLine\":240}");
     }
     if allowed_actions.contains(&"search_code") {
         input_formats.push("- search_code: {\"query\":\"text\",\"path\":\".\",\"limit\":20}");
@@ -157,7 +183,9 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         input_formats.push("- semantic_index: {\"path\":\".\"}");
     }
     if allowed_actions.contains(&"semantic_search") {
-        input_formats.push("- semantic_search: {\"query\":\"behavior description\",\"path\":\".\",\"limit\":5}");
+        input_formats.push(
+            "- semantic_search: {\"query\":\"behavior description\",\"path\":\".\",\"limit\":5}",
+        );
     }
     if allowed_actions.contains(&"knowledge_search") {
         input_formats.push("- knowledge_search: {\"query\":\"local knowledge query\",\"limit\":5}");
@@ -168,8 +196,46 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
     if allowed_actions.contains(&"memory_recall") {
         input_formats.push("- memory_recall: {\"query\":\"what did user say about X\"}");
     }
+    if allowed_actions.contains(&"git_status") {
+        input_formats.push("- git_status: {}");
+    }
+    if allowed_actions.contains(&"git_diff") {
+        input_formats.push("- git_diff: {\"path\":\"optional/relative/path\"}");
+    }
+    if allowed_actions.contains(&"git_log") {
+        input_formats.push("- git_log: {\"limit\":5}");
+    }
+    if allowed_actions.contains(&"git_branch") {
+        input_formats.push("- git_branch: {}");
+    }
+    if allowed_actions.contains(&"create_plan") {
+        input_formats
+            .push("- create_plan: {\"summary\":\"objective\",\"steps\":[\"step 1\",\"step 2\"]}");
+    }
+    if allowed_actions.contains(&"update_plan") {
+        input_formats.push("- update_plan: {\"steps\":[\"done: step 1\",\"in_progress: step 2\"]}");
+    }
+    if allowed_actions.contains(&"request_user_approval") {
+        input_formats.push("- request_user_approval: {\"title\":\"short title\",\"summary\":\"what needs approval\"}");
+    }
+    if allowed_actions.contains(&"ask_user") {
+        input_formats.push("- ask_user: {\"query\":\"short question\"}");
+    }
+    if allowed_actions.contains(&"detect_project") {
+        input_formats.push("- detect_project: {\"path\":\".\"}");
+    }
+    if allowed_actions.contains(&"list_tests") {
+        input_formats.push("- list_tests: {\"path\":\".\"}");
+    }
+    if allowed_actions.contains(&"read_diagnostics") {
+        input_formats.push("- read_diagnostics: {\"path\":\".\"}");
+    }
+    if allowed_actions.contains(&"view_image") {
+        input_formats.push("- view_image: {\"path\":\"relative/image.png\"}");
+    }
     if allowed_actions.contains(&"note_write") {
-        input_formats.push("- note_write: {\"path\":\"filename.md\",\"fileContent\":\"note content\"}");
+        input_formats
+            .push("- note_write: {\"path\":\"filename.md\",\"fileContent\":\"note content\"}");
     }
     if allowed_actions.contains(&"run_plugin") {
         input_formats.push("- run_plugin: {\"name\":\"gmail|google_calendar|notion|docker|spotify|obsidian|system_metrics\",\"instruction\":\"instruction string\"}");
@@ -178,7 +244,9 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         input_formats.push("- mcp_tool: {\"server\":\"configured-server\",\"tool\":\"tool-name\",\"arguments\":{}}");
     }
     if allowed_actions.contains(&"run_shell") {
-        input_formats.push("- run_shell: {\"command\":\"non-destructive command\"}");
+        input_formats.push(
+            "- run_shell: {\"command\":\"read-only or test command allowed by shell policy\"}",
+        );
     }
     if allowed_actions.contains(&"verify") {
         input_formats.push("- verify: {\"commands\":[\"cargo test\",\"npm test\"]}");
@@ -187,28 +255,37 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         input_formats.push("- apply_patch: {\"patch\":{\"path\":\"relative/path\",\"hunks\":[{\"oldText\":\"exact text\",\"newText\":\"replacement\"}]}}");
     }
     if allowed_actions.contains(&"write_file") {
-        input_formats.push("- write_file: {\"path\":\"relative/path\",\"fileContent\":\"full file content\"}");
+        input_formats.push(
+            "- write_file: {\"path\":\"new/relative/path\",\"fileContent\":\"full file content\"}",
+        );
     }
     input_formats.push("- finish: {\"summary\":\"concise final answer\",\"verification\":\"checks run or not run\"}");
 
     let input_formats_str = input_formats.join("\n");
 
     let mut rules = Vec::new();
-    rules.push("0. For casual conversation or questions that need no local tool, use finish immediately.");
+    rules.push(
+        "0. For casual conversation or questions that need no local tool, use finish immediately.",
+    );
     if allowed_actions.contains(&"list_files") || allowed_actions.contains(&"read_file") {
         rules.push("1. Inspect the workspace before editing.");
     }
     if allowed_actions.contains(&"search_code") {
-        rules.push("2. Use search_code before reading many files when searching for a symbol or behavior.");
+        rules.push(
+            "2. Use search_code before reading many files when searching for a symbol or behavior.",
+        );
     }
     if allowed_actions.contains(&"apply_patch") && allowed_actions.contains(&"write_file") {
-        rules.push("3. Prefer apply_patch over write_file for existing files.");
+        rules.push("3. Use apply_patch for all edits to existing files. write_file is only for creating new files inside the workspace.");
     }
-    if allowed_actions.contains(&"run_shell") || allowed_actions.contains(&"write_file") || allowed_actions.contains(&"apply_patch") {
+    if allowed_actions.contains(&"run_shell")
+        || allowed_actions.contains(&"write_file")
+        || allowed_actions.contains(&"apply_patch")
+    {
         rules.push("4. Shell commands and file edits require user approval. Mint handles approval after you request the tool.");
     }
     if allowed_actions.contains(&"run_shell") {
-        rules.push("5. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.");
+        rules.push("5. Shell commands are classified as readOnly, test, network, or mutating. Only policy-allowed modes may run after approval. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.");
     }
     if allowed_actions.contains(&"verify") {
         rules.push("6. Verify code changes when possible. If compile or test commands fail (exit status is not 0), analyze the stdout/stderr to locate the bug, edit the code to fix it, and verify again. Do not stop or give up until the errors are resolved.");
@@ -219,11 +296,17 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
     if allowed_actions.contains(&"memory_recall") {
         rules.push("8. Use memory_recall to search past interactions before asking the user to repeat context.");
     }
+    if allowed_actions.contains(&"git_status") {
+        rules.push("8a. Use git_status and git_diff before summarizing local code changes.");
+    }
+    if allowed_actions.contains(&"create_plan") || allowed_actions.contains(&"update_plan") {
+        rules.push("8b. Use create_plan/update_plan for multi-step implementation work.");
+    }
     if allowed_actions.contains(&"note_write") {
         rules.push("9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.");
     }
     if allowed_actions.contains(&"run_plugin") {
-        rules.push("10. Use run_plugin to interact with Google Workspace (Gmail, Calendar), Notion, Docker, Obsidian, Spotify, or System Metrics.");
+        rules.push("10. Use run_plugin only when the requested native plugin is explicitly allowed by policy.");
     }
     rules.push("11. Keep thought short and concrete. Write the thought field in English at all times. Use Thai for the final summary when the task is written in Thai.");
     rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately.");
@@ -239,9 +322,7 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
          {}\n\n\
          Rules:\n\
          {}",
-        actions_str,
-        input_formats_str,
-        rules_str
+        actions_str, input_formats_str, rules_str
     )
 }
 
@@ -259,6 +340,7 @@ pub enum AgentApproval {
     },
     RunShell {
         command: String,
+        mode: String,
     },
     NoteWrite {
         path: String,
@@ -272,6 +354,13 @@ pub enum AgentApproval {
         server: String,
         tool: String,
         arguments: Value,
+    },
+    UserApproval {
+        title: String,
+        prompt: String,
+    },
+    AskUser {
+        question: String,
     },
 }
 
@@ -333,6 +422,8 @@ struct AgentInput {
     #[serde(default)]
     commands: Vec<String>,
     #[serde(default)]
+    steps: Vec<String>,
+    #[serde(default)]
     file_content: String,
     #[serde(default)]
     summary: String,
@@ -358,6 +449,10 @@ struct AgentInput {
     name: String,
     #[serde(default)]
     instruction: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    status: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -850,6 +945,79 @@ where
                 Ok(results.join("\n\n"))
             }
         }
+        "git_status" => run_git(root, &["status", "--short", "--branch"]),
+        "git_diff" => {
+            if input.path.trim().is_empty() {
+                run_git(root, &["diff", "--"])
+            } else {
+                let path = workspace_path(root, &input.path)?;
+                let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy();
+                run_git(root, &["diff", "--", relative.as_ref()])
+            }
+        }
+        "git_log" => {
+            let limit = input.limit.unwrap_or(5).clamp(1, 50).to_string();
+            run_git(root, &["log", "-n", &limit, "--oneline", "--decorate"])
+        }
+        "git_branch" => run_git(root, &["branch", "--show-current"]),
+        "create_plan" => Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "objective": input.summary,
+            "steps": input.steps,
+        }))
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
+        "update_plan" => Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "steps": input.steps,
+            "status": input.status,
+        }))
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
+        "request_user_approval" => {
+            let title = if input.title.trim().is_empty() {
+                "User approval"
+            } else {
+                input.title.trim()
+            };
+            let prompt = required(&input.summary, "summary")?;
+            let approved = approve_cb(&AgentApproval::UserApproval {
+                title: title.to_owned(),
+                prompt: prompt.to_owned(),
+            })
+            .map_err(OrchestrationError::Agent)?;
+            match approved {
+                ApprovalOutcome::Approved => Ok(format!("User approved: {title}")),
+                ApprovalOutcome::Denied => Ok(format!("User denied: {title}")),
+                ApprovalOutcome::Intercepted(obs) => Ok(obs),
+            }
+        }
+        "ask_user" => {
+            let question = required(&input.query, "query")?;
+            let approved = approve_cb(&AgentApproval::AskUser {
+                question: question.to_owned(),
+            })
+            .map_err(OrchestrationError::Agent)?;
+            match approved {
+                ApprovalOutcome::Approved => Ok("User approved the prompt.".into()),
+                ApprovalOutcome::Denied => Ok("User declined to answer.".into()),
+                ApprovalOutcome::Intercepted(answer) => Ok(format!("User answered: {answer}")),
+            }
+        }
+        "detect_project" => {
+            let path = workspace_path(root, &input.path)?;
+            Ok(serde_json::to_string_pretty(&detect_project(&path))
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+        }
+        "list_tests" => {
+            let path = workspace_path(root, &input.path)?;
+            Ok(serde_json::to_string_pretty(&list_tests(&path, config)?)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+        }
+        "read_diagnostics" => {
+            let path = workspace_path(root, &input.path)?;
+            read_diagnostics(&path, config)
+        }
+        "view_image" => {
+            let path = workspace_path(root, required(&input.path, "path")?)?;
+            view_image(&path, config)
+        }
         "note_write" => {
             let file_name = if !input.note_path.is_empty() {
                 input.note_path.as_str()
@@ -930,8 +1098,10 @@ where
         }
         "run_shell" => {
             let command = required(&input.command, "command")?;
+            let mode = classify_shell_command(command).mode.as_str().to_owned();
             let approved = approve_cb(&AgentApproval::RunShell {
                 command: command.to_owned(),
+                mode,
             })
             .map_err(|e| OrchestrationError::Agent(e))?;
 
@@ -995,6 +1165,7 @@ where
         }
         "write_file" => {
             let path_str = required(&input.path, "path")?;
+            validate_new_workspace_file(root, config, Path::new(path_str))?;
             let edit = CodeEdit {
                 path: PathBuf::from(path_str),
                 content: input.file_content.clone(),
@@ -1033,6 +1204,189 @@ where
     }
 }
 
+fn validate_new_workspace_file(
+    root: &Path,
+    config: &MintConfig,
+    path: &Path,
+) -> Result<(), OrchestrationError> {
+    let root = assert_path_capability(root, Capability::Write, config)
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+    let target = assert_path_capability(&root.join(path), Capability::Write, config)
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+    if !target.starts_with(&root) {
+        return Err(OrchestrationError::Agent(format!(
+            "write_file path escapes workspace root: {}",
+            target.display()
+        )));
+    }
+    if target.exists() {
+        return Err(OrchestrationError::Agent(format!(
+            "write_file can only create new files. Use apply_patch for existing file: {}",
+            target.display()
+        )));
+    }
+    Ok(())
+}
+
+fn run_git(root: &Path, args: &[&str]) -> Result<String, OrchestrationError> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .map_err(|e| OrchestrationError::Agent(format!("unable to run git: {e}")))?;
+    Ok(format!(
+        "exit: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
+fn detect_project(root: &Path) -> Value {
+    let mut languages = Vec::new();
+    let mut managers = Vec::new();
+    let mut diagnostics = Vec::new();
+    if root.join("Cargo.toml").exists() {
+        languages.push("rust");
+        managers.push("cargo");
+        diagnostics.push("cargo check");
+    }
+    if root.join("package.json").exists() {
+        languages.push("javascript/typescript");
+        managers.push(if root.join("pnpm-lock.yaml").exists() {
+            "pnpm"
+        } else if root.join("yarn.lock").exists() {
+            "yarn"
+        } else {
+            "npm"
+        });
+        diagnostics.push("npm run build or npm run typecheck");
+    }
+    if root.join("pyproject.toml").exists() || root.join("requirements.txt").exists() {
+        languages.push("python");
+        managers.push("pip/uv");
+        diagnostics.push("pytest or python -m compileall");
+    }
+    serde_json::json!({
+        "root": root,
+        "languages": languages,
+        "packageManagers": managers,
+        "diagnostics": diagnostics,
+    })
+}
+
+fn list_tests(root: &Path, config: &MintConfig) -> Result<Value, OrchestrationError> {
+    let files = list_code_files(root, usize::MAX, config)
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+    let test_files = files
+        .into_iter()
+        .filter(|file| {
+            let path = file.path.to_string_lossy();
+            path.contains("/tests/")
+                || path.ends_with("_test.rs")
+                || path.ends_with(".test.ts")
+                || path.ends_with(".test.tsx")
+                || path.ends_with(".spec.ts")
+                || path.ends_with(".spec.tsx")
+                || path.ends_with("_test.py")
+        })
+        .map(|file| file.path)
+        .collect::<Vec<_>>();
+    let package_scripts = package_test_scripts(root);
+    Ok(serde_json::json!({
+        "testFiles": test_files,
+        "packageScripts": package_scripts,
+        "cargo": root.join("Cargo.toml").exists(),
+    }))
+}
+
+fn package_test_scripts(root: &Path) -> BTreeMap<String, String> {
+    let path = root.join("package.json");
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return BTreeMap::new();
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return BTreeMap::new();
+    };
+    value
+        .get("scripts")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(name, _)| {
+            let lower = name.to_ascii_lowercase();
+            lower.contains("test")
+                || lower.contains("check")
+                || lower.contains("lint")
+                || lower.contains("build")
+                || lower.contains("type")
+        })
+        .filter_map(|(name, command)| Some((name.clone(), command.as_str()?.to_owned())))
+        .collect()
+}
+
+fn read_diagnostics(root: &Path, config: &MintConfig) -> Result<String, OrchestrationError> {
+    let command = if root.join("Cargo.toml").exists() {
+        Some("cargo check")
+    } else {
+        let scripts = package_test_scripts(root);
+        if scripts.contains_key("typecheck") {
+            Some("npm run -s typecheck")
+        } else if scripts.contains_key("check") {
+            Some("npm run -s check")
+        } else if scripts.contains_key("build") {
+            Some("npm run -s build")
+        } else {
+            None
+        }
+    };
+    match command {
+        Some(command) => run_shell(root, config, command),
+        None => Ok("No diagnostics command detected.".into()),
+    }
+}
+
+fn view_image(path: &Path, config: &MintConfig) -> Result<String, OrchestrationError> {
+    let path = assert_path_capability(path, Capability::Read, config)
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let mime = match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        _ => {
+            return Err(OrchestrationError::Agent(format!(
+                "unsupported image type: {}",
+                path.display()
+            )));
+        }
+    };
+    let metadata = std::fs::metadata(&path)
+        .map_err(|e| OrchestrationError::Agent(format!("cannot stat image: {e}")))?;
+    if metadata.len() > 2_000_000 {
+        return Ok(format!(
+            "Image exists but is too large to inline ({} bytes): {}",
+            metadata.len(),
+            path.display()
+        ));
+    }
+    let bytes = std::fs::read(&path)
+        .map_err(|e| OrchestrationError::Agent(format!("cannot read image: {e}")))?;
+    Ok(serde_json::to_string_pretty(&serde_json::json!({
+        "path": path,
+        "bytes": bytes.len(),
+        "mime": mime,
+        "dataUri": format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes)),
+    }))
+    .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+}
+
 fn run_shell(
     root: &Path,
     config: &MintConfig,
@@ -1057,8 +1411,8 @@ fn run_shell(
     }
 
     Ok(format!(
-        "exit: {}\nsandboxed: {}\nstdout:\n{}\nstderr:\n{}{}",
-        status_str, output.sandboxed, output.stdout, output.stderr, hint
+        "exit: {}\nmode: {}\nsandboxed: {}\nstdout:\n{}\nstderr:\n{}{}",
+        status_str, output.mode, output.sandboxed, output.stdout, output.stderr, hint
     ))
 }
 
@@ -1076,6 +1430,15 @@ fn action_fingerprint(decision: &AgentDecision) -> String {
                 input.query.trim()
             )
         }
+        "git_status" | "git_branch" | "detect_project" | "list_tests" | "read_diagnostics" => {
+            format!("{}:{}", decision.action, input.path.trim())
+        }
+        "git_diff" => format!("git_diff:{}", input.path.trim()),
+        "git_log" => format!("git_log:{}", input.limit.unwrap_or(5)),
+        "create_plan" | "update_plan" => format!("{}:{}", decision.action, input.steps.join("\n")),
+        "request_user_approval" => format!("request_user_approval:{}", input.summary.trim()),
+        "ask_user" => format!("ask_user:{}", input.query.trim()),
+        "view_image" => format!("view_image:{}", input.path.trim()),
         "run_shell" => format!("run_shell:{}", input.command.trim()),
         "verify" => format!("verify:{}", input.commands.join("\n")),
         "apply_patch" => input
@@ -1290,5 +1653,29 @@ mod tests {
             enrich_request(&store, &request).unwrap().system_instruction,
             "system"
         );
+    }
+
+    #[test]
+    fn write_file_policy_rejects_existing_workspace_file() {
+        let root =
+            std::env::temp_dir().join(format!("mint-write-file-policy-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("existing.txt");
+        std::fs::write(&target, "already here").unwrap();
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            allowed_write_paths: vec![root.clone()],
+            blocked_paths: vec![],
+            blocked_file_names: vec![],
+            ..MintConfig::default()
+        };
+
+        let result = validate_new_workspace_file(&root, &config, Path::new("existing.txt"));
+
+        assert!(
+            matches!(result, Err(OrchestrationError::Agent(message)) if message.contains("Use apply_patch"))
+        );
+        let _ = std::fs::remove_file(target);
+        let _ = std::fs::remove_dir(root);
     }
 }

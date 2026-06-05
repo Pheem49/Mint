@@ -7,7 +7,8 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::{
-    Capability, MintConfig, SafetyError, SafetyTier, assert_path_capability, classify_shell_command,
+    Capability, MintConfig, SafetyError, SafetyTier, assert_path_capability,
+    classify_shell_command, shell_mode_allowed,
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -15,6 +16,7 @@ use crate::{
 pub struct ShellOutput {
     pub command: String,
     pub cwd: PathBuf,
+    pub mode: String,
     pub status: Option<i32>,
     pub success: bool,
     pub sandboxed: bool,
@@ -28,6 +30,8 @@ pub enum ShellError {
     ApprovalRequired(String),
     #[error("blocked unsafe shell command ({reason}): {command}")]
     Blocked { command: String, reason: String },
+    #[error("shell command mode '{mode}' is not allowed by policy: {command}")]
+    ModeDenied { command: String, mode: String },
     #[error("shell working directory must be a directory: {0}")]
     InvalidWorkingDirectory(PathBuf),
     #[error(transparent)]
@@ -51,6 +55,12 @@ pub fn run_shell_command(
             reason: classification.reason,
         });
     }
+    if config.safety_enabled && !shell_mode_allowed(config, classification.mode) {
+        return Err(ShellError::ModeDenied {
+            command: command.into(),
+            mode: classification.mode.as_str().into(),
+        });
+    }
     if !approved {
         return Err(ShellError::ApprovalRequired(command.into()));
     }
@@ -63,7 +73,13 @@ pub fn run_shell_command(
     let sandbox_mode = config.sandbox_mode.trim().to_ascii_lowercase();
     if config.safety_enabled && sandbox_mode != "off" {
         if let Some(output) = run_in_sandbox(command, &cwd, config)? {
-            return Ok(shell_output(command, cwd, true, output));
+            return Ok(shell_output(
+                command,
+                cwd,
+                classification.mode.as_str(),
+                true,
+                output,
+            ));
         }
         if sandbox_mode == "enforce" {
             return Err(ShellError::SandboxUnavailable(
@@ -73,7 +89,13 @@ pub fn run_shell_command(
     }
 
     let output = shell_command(command).current_dir(&cwd).output()?;
-    Ok(shell_output(command, cwd, false, output))
+    Ok(shell_output(
+        command,
+        cwd,
+        classification.mode.as_str(),
+        false,
+        output,
+    ))
 }
 
 fn run_in_sandbox(
@@ -220,10 +242,17 @@ fn shell_command(command: &str) -> Command {
     }
 }
 
-fn shell_output(command: &str, cwd: PathBuf, sandboxed: bool, output: Output) -> ShellOutput {
+fn shell_output(
+    command: &str,
+    cwd: PathBuf,
+    mode: &str,
+    sandboxed: bool,
+    output: Output,
+) -> ShellOutput {
     ShellOutput {
         command: command.into(),
         cwd,
+        mode: mode.into(),
         status: output.status.code(),
         success: output.status.success(),
         sandboxed,

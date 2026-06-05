@@ -51,9 +51,30 @@ pub enum SafetyTier {
     Blocked,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ShellCommandMode {
+    ReadOnly,
+    Test,
+    Network,
+    Mutating,
+}
+
+impl ShellCommandMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "readOnly",
+            Self::Test => "test",
+            Self::Network => "network",
+            Self::Mutating => "mutating",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ShellClassification {
     pub tier: SafetyTier,
+    pub mode: ShellCommandMode,
     pub reason: String,
 }
 
@@ -98,6 +119,7 @@ pub fn classify_shell_command(command: &str) -> ShellClassification {
     if normalized.is_empty() {
         return ShellClassification {
             tier: SafetyTier::Blocked,
+            mode: ShellCommandMode::Mutating,
             reason: "empty shell command".into(),
         };
     }
@@ -105,14 +127,138 @@ pub fn classify_shell_command(command: &str) -> ShellClassification {
         if pattern.is_match(&normalized) {
             return ShellClassification {
                 tier: SafetyTier::Blocked,
+                mode: ShellCommandMode::Mutating,
                 reason: (*reason).into(),
             };
         }
     }
+    let mode = classify_shell_mode(&normalized);
     ShellClassification {
         tier: SafetyTier::Approval,
-        reason: "shell command requires approval".into(),
+        mode,
+        reason: format!("{} shell command requires approval", mode.as_str()),
     }
+}
+
+pub fn shell_mode_allowed(config: &MintConfig, mode: ShellCommandMode) -> bool {
+    config
+        .extra
+        .get("allowedShellModes")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .any(|value| value == "*" || value == mode.as_str())
+        })
+        .unwrap_or(false)
+}
+
+fn classify_shell_mode(command: &str) -> ShellCommandMode {
+    let lower = command.to_ascii_lowercase();
+    if contains_network_command(&lower) {
+        return ShellCommandMode::Network;
+    }
+    if is_test_command(&lower) {
+        return ShellCommandMode::Test;
+    }
+    if is_read_only_command(&lower) {
+        return ShellCommandMode::ReadOnly;
+    }
+    ShellCommandMode::Mutating
+}
+
+fn contains_network_command(command: &str) -> bool {
+    [
+        "curl ",
+        "wget ",
+        "git clone",
+        "npm install",
+        "npm ci",
+        "pnpm install",
+        "pnpm add",
+        "yarn add",
+        "pip install",
+        "cargo install",
+        "go install",
+        "docker pull",
+    ]
+    .iter()
+    .any(|needle| command.contains(needle))
+}
+
+fn is_test_command(command: &str) -> bool {
+    [
+        "cargo test",
+        "cargo check",
+        "cargo clippy",
+        "cargo fmt",
+        "npm test",
+        "npm run test",
+        "npm run -s test",
+        "npm run build",
+        "npm run -s build",
+        "npm run lint",
+        "npm run -s lint",
+        "npm run check",
+        "npm run -s check",
+        "npm run typecheck",
+        "npm run -s typecheck",
+        "pnpm test",
+        "pnpm run test",
+        "pnpm run build",
+        "yarn test",
+        "yarn build",
+        "pytest",
+        "go test",
+    ]
+    .iter()
+    .any(|prefix| command == *prefix || command.starts_with(&format!("{prefix} ")))
+}
+
+fn is_read_only_command(command: &str) -> bool {
+    if command.contains('>') || command.contains(" tee ") {
+        return false;
+    }
+    command
+        .split([';', '&', '|'])
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .all(|segment| {
+            let mut words = segment.split_whitespace();
+            matches!(
+                words.next(),
+                Some(
+                    "cat"
+                        | "cd"
+                        | "du"
+                        | "find"
+                        | "git"
+                        | "head"
+                        | "ls"
+                        | "nl"
+                        | "pwd"
+                        | "rg"
+                        | "sed"
+                        | "tail"
+                        | "tree"
+                        | "wc"
+                        | "which"
+                )
+            ) && !segment.starts_with("git ")
+                || is_read_only_git(segment)
+        })
+}
+
+fn is_read_only_git(segment: &str) -> bool {
+    let mut words = segment.split_whitespace();
+    if words.next() != Some("git") {
+        return false;
+    }
+    matches!(
+        words.next(),
+        Some("branch" | "diff" | "log" | "show" | "status")
+    )
 }
 
 pub fn assert_path_capability(
@@ -220,6 +366,27 @@ mod tests {
     fn shell_commands_require_approval_by_default() {
         let result = classify_shell_command("git status --short");
         assert_eq!(result.tier, SafetyTier::Approval);
+        assert_eq!(result.mode, ShellCommandMode::ReadOnly);
+    }
+
+    #[test]
+    fn classifies_test_and_network_shell_modes() {
+        assert_eq!(
+            classify_shell_command("cargo test -p mint-core").mode,
+            ShellCommandMode::Test
+        );
+        assert_eq!(
+            classify_shell_command("npm install").mode,
+            ShellCommandMode::Network
+        );
+    }
+
+    #[test]
+    fn shell_mode_policy_reads_config_allowlist() {
+        let config = MintConfig::default();
+        assert!(shell_mode_allowed(&config, ShellCommandMode::ReadOnly));
+        assert!(shell_mode_allowed(&config, ShellCommandMode::Test));
+        assert!(!shell_mode_allowed(&config, ShellCommandMode::Network));
     }
 
     #[test]

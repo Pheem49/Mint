@@ -276,6 +276,9 @@ fn runtime_extra_defaults() -> BTreeMap<String, Value> {
         "notionDatabaseId": "",
         "notionPageId": "",
         "notionTitleProperty": "Name",
+        "allowedShellModes": ["readOnly", "test"],
+        "allowedNativePlugins": ["dev_tools", "system_metrics"],
+        "allowedMcpTools": {},
         "mcpServers": {}
     }))
     .expect("runtime config defaults must be a JSON object")
@@ -329,5 +332,14 @@ mod tests {
         assert_eq!(config.extra["enableHeadlessTaskQueue"], false);
         assert_eq!(config.extra["ttsProvider"], "google");
         assert_eq!(config.extra["lineWebhookPort"], 3000);
+        assert_eq!(
+            config.extra["allowedShellModes"],
+            serde_json::json!(["readOnly", "test"])
+        );
+        assert_eq!(
+            config.extra["allowedNativePlugins"],
+            serde_json::json!(["dev_tools", "system_metrics"])
+        );
+        assert_eq!(config.extra["allowedMcpTools"], serde_json::json!({}));
     }
 }

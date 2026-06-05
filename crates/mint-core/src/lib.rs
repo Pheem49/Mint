@@ -58,8 +58,8 @@ pub use pictures::{
 };
 pub use plugins::{NativePlugin, PluginError, execute_native_plugin, native_plugins};
 pub use safety::{
-    Capability, SafetyError, SafetyTier, ShellClassification, assert_path_capability,
-    classify_shell_command,
+    Capability, SafetyError, SafetyTier, ShellClassification, ShellCommandMode,
+    assert_path_capability, classify_shell_command, shell_mode_allowed,
 };
 pub use semantic::{
     SemanticChunk, SemanticError, SemanticHit, SemanticIndex, index_semantic_code,
@@ -75,5 +75,5 @@ pub use workflows::{WorkflowError, load_workflows, workflows_path};
 pub mod api_server;
 pub use api_server::start_api_server;
 
-pub static HTTP_CLIENT: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(reqwest::Client::new);
-
+pub static HTTP_CLIENT: std::sync::LazyLock<reqwest::Client> =
+    std::sync::LazyLock::new(reqwest::Client::new);

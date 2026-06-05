@@ -16,6 +16,8 @@ use crate::MintConfig;
 pub enum PluginError {
     #[error("unknown native plugin: {0}")]
     UnknownPlugin(String),
+    #[error("native plugin '{0}' is not allowed by policy")]
+    NotAllowed(String),
     #[error("invalid instruction for {plugin}: {message}")]
     InvalidInstruction {
         plugin: &'static str,
@@ -37,13 +39,9 @@ pub enum PluginError {
         source: std::io::Error,
     },
     #[error("plugin request failed: {message}")]
-    RequestFailed {
-        message: String,
-    },
+    RequestFailed { message: String },
     #[error("missing configuration value: {message}")]
-    MissingConfig {
-        message: String,
-    },
+    MissingConfig { message: String },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -94,6 +92,9 @@ pub async fn execute_native_plugin(
     name: &str,
     instruction: &str,
 ) -> Result<String, PluginError> {
+    if !native_plugin_allowed(config, name) {
+        return Err(PluginError::NotAllowed(name.into()));
+    }
     match name {
         "dev_tools" => dev_tools(instruction),
         "docker" => docker(instruction),
@@ -105,6 +106,20 @@ pub async fn execute_native_plugin(
         "notion" => notion(config, instruction).await,
         _ => Err(PluginError::UnknownPlugin(name.into())),
     }
+}
+
+fn native_plugin_allowed(config: &MintConfig, name: &str) -> bool {
+    config
+        .extra
+        .get("allowedNativePlugins")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .any(|value| value == "*" || value == name)
+        })
+        .unwrap_or(false)
 }
 
 fn dev_tools(instruction: &str) -> Result<String, PluginError> {
@@ -319,7 +334,8 @@ async fn gmail(config: &MintConfig, instruction: &str) -> Result<String, PluginE
 
 async fn gmail_search(token: &str, user: &str, input: &Value) -> Result<String, PluginError> {
     let query = input["query"].as_str().unwrap_or("in:inbox");
-    let value: Value = crate::HTTP_CLIENT.clone()
+    let value: Value = crate::HTTP_CLIENT
+        .clone()
         .get(format!(
             "https://gmail.googleapis.com/gmail/v1/users/{user}/messages"
         ))
@@ -350,11 +366,14 @@ async fn gmail_search(token: &str, user: &str, input: &Value) -> Result<String, 
 }
 
 async fn gmail_read(token: &str, user: &str, input: &Value) -> Result<String, PluginError> {
-    let id = input["id"].as_str().ok_or_else(|| PluginError::InvalidInstruction {
-        plugin: "gmail",
-        message: "missing Gmail message id".into(),
-    })?;
-    let value: Value = crate::HTTP_CLIENT.clone()
+    let id = input["id"]
+        .as_str()
+        .ok_or_else(|| PluginError::InvalidInstruction {
+            plugin: "gmail",
+            message: "missing Gmail message id".into(),
+        })?;
+    let value: Value = crate::HTTP_CLIENT
+        .clone()
         .get(format!(
             "https://gmail.googleapis.com/gmail/v1/users/{user}/messages/{id}"
         ))
@@ -375,17 +394,20 @@ async fn gmail_read(token: &str, user: &str, input: &Value) -> Result<String, Pl
 }
 
 async fn gmail_draft(token: &str, user: &str, input: &Value) -> Result<String, PluginError> {
-    let to = input["to"].as_str().ok_or_else(|| PluginError::InvalidInstruction {
-        plugin: "gmail",
-        message: "missing Gmail draft recipient".into(),
-    })?;
+    let to = input["to"]
+        .as_str()
+        .ok_or_else(|| PluginError::InvalidInstruction {
+            plugin: "gmail",
+            message: "missing Gmail draft recipient".into(),
+        })?;
     let subject = input["subject"].as_str().unwrap_or("(No subject)");
     let body = input["body"].as_str().unwrap_or_default();
     let raw = URL_SAFE_NO_PAD.encode(format!(
         "To: {}\r\nSubject: {}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=\"UTF-8\"\r\n\r\n{}",
         sanitize_header(to), sanitize_header(subject), body
     ));
-    let value: Value = crate::HTTP_CLIENT.clone()
+    let value: Value = crate::HTTP_CLIENT
+        .clone()
         .post(format!(
             "https://gmail.googleapis.com/gmail/v1/users/{user}/drafts"
         ))
@@ -421,7 +443,8 @@ async fn calendar(config: &MintConfig, instruction: &str) -> Result<String, Plug
     if input["action"].as_str() == Some("create") {
         return calendar_create(&token, id, &input).await;
     }
-    let value: Value = crate::HTTP_CLIENT.clone()
+    let value: Value = crate::HTTP_CLIENT
+        .clone()
         .get(format!(
             "https://www.googleapis.com/calendar/v3/calendars/{id}/events"
         ))
@@ -452,16 +475,21 @@ async fn calendar(config: &MintConfig, instruction: &str) -> Result<String, Plug
 }
 
 async fn calendar_create(token: &str, id: &str, input: &Value) -> Result<String, PluginError> {
-    let summary = input["summary"].as_str().ok_or_else(|| PluginError::InvalidInstruction {
-        plugin: "google_calendar",
-        message: "missing Calendar event summary".into(),
-    })?;
-    let start = input["start"].as_str().ok_or_else(|| PluginError::InvalidInstruction {
-        plugin: "google_calendar",
-        message: "missing Calendar event start".into(),
-    })?;
+    let summary = input["summary"]
+        .as_str()
+        .ok_or_else(|| PluginError::InvalidInstruction {
+            plugin: "google_calendar",
+            message: "missing Calendar event summary".into(),
+        })?;
+    let start = input["start"]
+        .as_str()
+        .ok_or_else(|| PluginError::InvalidInstruction {
+            plugin: "google_calendar",
+            message: "missing Calendar event start".into(),
+        })?;
     let end = input["end"].as_str().unwrap_or(start);
-    let value: Value = crate::HTTP_CLIENT.clone()
+    let value: Value = crate::HTTP_CLIENT
+        .clone()
         .post(format!(
             "https://www.googleapis.com/calendar/v3/calendars/{id}/events"
         ))
@@ -511,7 +539,8 @@ async fn notion_create(
         .unwrap_or("Mint Note")
         .trim();
     let content = input["content"].as_str().unwrap_or(instruction);
-    let value: Value = crate::HTTP_CLIENT.clone()
+    let value: Value = crate::HTTP_CLIENT
+        .clone()
         .post("https://api.notion.com/v1/pages")
         .bearer_auth(key)
         .header("Notion-Version", "2022-06-28")
@@ -540,7 +569,8 @@ async fn notion_create(
 }
 
 async fn notion_query(key: &str, database: &str) -> Result<String, PluginError> {
-    let value: Value = crate::HTTP_CLIENT.clone()
+    let value: Value = crate::HTTP_CLIENT
+        .clone()
         .post(format!(
             "https://api.notion.com/v1/databases/{database}/query"
         ))
@@ -569,15 +599,20 @@ async fn notion_query(key: &str, database: &str) -> Result<String, PluginError> 
 }
 
 async fn notion_append(key: &str, input: &Value) -> Result<String, PluginError> {
-    let page = input["pageId"].as_str().ok_or_else(|| PluginError::InvalidInstruction {
-        plugin: "notion",
-        message: "missing Notion pageId".into(),
-    })?;
-    let content = input["content"].as_str().ok_or_else(|| PluginError::InvalidInstruction {
-        plugin: "notion",
-        message: "missing Notion append content".into(),
-    })?;
-    crate::HTTP_CLIENT.clone()
+    let page = input["pageId"]
+        .as_str()
+        .ok_or_else(|| PluginError::InvalidInstruction {
+            plugin: "notion",
+            message: "missing Notion pageId".into(),
+        })?;
+    let content = input["content"]
+        .as_str()
+        .ok_or_else(|| PluginError::InvalidInstruction {
+            plugin: "notion",
+            message: "missing Notion append content".into(),
+        })?;
+    crate::HTTP_CLIENT
+        .clone()
         .patch(format!("https://api.notion.com/v1/blocks/{page}/children"))
         .bearer_auth(key)
         .header("Notion-Version", "2022-06-28")
@@ -599,7 +634,8 @@ async fn google_access_token(
     secret: &str,
     refresh: &str,
 ) -> Result<String, PluginError> {
-    let value: Value = crate::HTTP_CLIENT.clone()
+    let value: Value = crate::HTTP_CLIENT
+        .clone()
         .post("https://oauth2.googleapis.com/token")
         .form(&[
             ("client_id", client_id),
@@ -669,7 +705,23 @@ mod tests {
         let config = MintConfig::default();
         assert!(matches!(
             execute_native_plugin(&config, "missing", "").await,
-            Err(PluginError::UnknownPlugin(_))
+            Err(PluginError::NotAllowed(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn rejects_native_plugin_not_in_allowlist() {
+        let config = MintConfig::default();
+        assert!(matches!(
+            execute_native_plugin(&config, "docker", "list").await,
+            Err(PluginError::NotAllowed(name)) if name == "docker"
+        ));
+    }
+
+    #[tokio::test]
+    async fn allows_default_read_only_native_plugin() {
+        let config = MintConfig::default();
+        let result = execute_native_plugin(&config, "dev_tools", "status").await;
+        assert!(result.is_ok());
     }
 }
