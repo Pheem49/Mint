@@ -58,6 +58,7 @@ where
                 system_instruction: system_instruction.into(),
                 image_data_uri: None,
                 audio_data_uri: None,
+                document_attachment: None,
             },
         )
         .await?;

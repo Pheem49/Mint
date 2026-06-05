@@ -121,7 +121,10 @@ pub fn execute_action(
             std::env::consts::FAMILY
         ))),
         "open_url" => {
-            if !(action.target.starts_with("https://") || action.target.starts_with("http://") || action.target.starts_with("file://")) {
+            if !(action.target.starts_with("https://")
+                || action.target.starts_with("http://")
+                || action.target.starts_with("file://"))
+            {
                 return Err("only http, https, and file URLs may be opened".into());
             }
             spawn_detached("xdg-open", &[&action.target])?;
@@ -195,6 +198,30 @@ pub fn execute_action(
 
 pub fn capture_screen() -> Result<String, String> {
     capture_screen_bytes().map(|bytes| format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
+}
+
+pub fn read_clipboard_image() -> Result<String, String> {
+    let output = Command::new("wl-paste")
+        .args(&["-t", "image/png"])
+        .output();
+
+    if let Ok(out) = output {
+        if out.status.success() && !out.stdout.is_empty() {
+            return Ok(format!("data:image/png;base64,{}", STANDARD.encode(&out.stdout)));
+        }
+    }
+
+    let output = Command::new("xclip")
+        .args(&["-selection", "clipboard", "-t", "image/png", "-o"])
+        .output();
+
+    if let Ok(out) = output {
+        if out.status.success() && !out.stdout.is_empty() {
+            return Ok(format!("data:image/png;base64,{}", STANDARD.encode(&out.stdout)));
+        }
+    }
+
+    Err("No image found in clipboard".into())
 }
 
 pub async fn translate_screen_region(

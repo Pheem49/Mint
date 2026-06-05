@@ -2,7 +2,7 @@ declare module '*.css';
 
 interface Window {
   api: {
-    sendMessage: (message: string, base64Image?: string | null, base64Audio?: string | null) => Promise<any>;
+    sendMessage: (message: string, base64Image?: string | null, base64Audio?: string | null, documentAttachment?: { filename: string; dataUri: string } | null) => Promise<any>;
     closeWindow: () => void;
     minimizeWindow: () => void;
     quitApp: () => void;

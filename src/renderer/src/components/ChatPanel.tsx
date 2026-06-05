@@ -1,4 +1,4 @@
-import type { ChangeEvent, FormEvent, KeyboardEvent, RefObject } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
 import {
   type AgentProgress,
   type ChatResponse,
@@ -109,8 +109,8 @@ interface ChatPanelProps {
   streamedResponse: ChatResponse | null
   agentProgress: AgentProgress[]
   message: string
-  imageDataUri: string | null
-  imageName: string
+  imageAttachments: Array<{ dataUri: string; name: string }>
+  documentName: string
   pendingApproval: any | null
   smartContext: boolean
   agentMode: boolean
@@ -119,8 +119,14 @@ interface ChatPanelProps {
   welcomeInteraction: any
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onSelectImage: (event: ChangeEvent<HTMLInputElement>) => void
+  onSelectDocument: (event: ChangeEvent<HTMLInputElement>) => void
+  onPasteImage: (clipboardData: DataTransfer) => boolean
+  onReadClipboardImage: () => Promise<boolean>
   onSetMessage: (message: string) => void
-  onRemoveImage: () => void
+  onRemoveImage: (idx: number) => void
+  onRemoveDocument: () => void
+  onStartWebSearch: () => void
+  onCaptureScreen: () => void
   onSetSmartContext: (enabled: boolean) => void
   onSetAgentMode: (enabled: boolean) => void
   onSetProvider: (provider: string) => void
@@ -170,8 +176,8 @@ export default function ChatPanel({
   streamedResponse,
   agentProgress,
   message,
-  imageDataUri,
-  imageName,
+  imageAttachments,
+  documentName,
   pendingApproval,
   smartContext,
   agentMode,
@@ -180,18 +186,81 @@ export default function ChatPanel({
   welcomeInteraction,
   onSubmit,
   onSelectImage,
+  onSelectDocument,
+  onPasteImage,
+  onReadClipboardImage,
   onSetMessage,
   onRemoveImage,
+  onRemoveDocument,
+  onStartWebSearch,
+  onCaptureScreen,
   onSetSmartContext,
   onSetAgentMode,
   onSetProvider,
   onApproval,
 }: ChatPanelProps) {
   const agentActivities = activitiesFrom(agentProgress)
+  const [toolMenuOpen, setToolMenuOpen] = useState(false)
+  const toolMenuRef = useRef<HTMLDivElement | null>(null)
   const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
     event.preventDefault()
     event.currentTarget.form?.requestSubmit()
+  }
+  const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    submitOnEnter(event)
+  }
+  const resizeInput = (element: HTMLTextAreaElement) => {
+    element.style.height = 'auto'
+    element.style.height = `${Math.min(element.scrollHeight, 72)}px`
+  }
+  useEffect(() => {
+    if (!toolMenuOpen) return
+    const closeMenu = (event: MouseEvent) => {
+      if (toolMenuRef.current?.contains(event.target as Node)) return
+      setToolMenuOpen(false)
+    }
+    window.addEventListener('mousedown', closeMenu)
+    return () => window.removeEventListener('mousedown', closeMenu)
+  }, [toolMenuOpen])
+  useEffect(() => {
+    const handleWindowPaste = (event: globalThis.ClipboardEvent) => {
+      if (!event.clipboardData) return
+      if (onPasteImage(event.clipboardData)) {
+        event.preventDefault()
+        event.stopPropagation()
+      } else {
+        window.setTimeout(() => void onReadClipboardImage(), 0)
+      }
+    }
+    window.addEventListener('paste', handleWindowPaste, true)
+    return () => window.removeEventListener('paste', handleWindowPaste, true)
+  }, [onPasteImage, onReadClipboardImage])
+  useEffect(() => {
+    const handleWindowKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'v') return
+      window.setTimeout(() => void onReadClipboardImage(), 0)
+    }
+    window.addEventListener('keydown', handleWindowKeyDown, true)
+    return () => window.removeEventListener('keydown', handleWindowKeyDown, true)
+  }, [onReadClipboardImage])
+  useEffect(() => {
+    if (message) return
+    const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
+    if (input) input.style.height = ''
+  }, [message])
+
+  const openImagePicker = () => {
+    setToolMenuOpen(false)
+    document.getElementById('vision-file-input')?.click()
+  }
+  const openDocumentPicker = () => {
+    setToolMenuOpen(false)
+    document.getElementById('document-file-input')?.click()
+  }
+  const startWebSearch = () => {
+    setToolMenuOpen(false)
+    onStartWebSearch()
   }
 
   return (
@@ -308,17 +377,65 @@ export default function ChatPanel({
           </div>
         </div>
 
-        <form id="chat-form" onSubmit={onSubmit}>
-          {imageDataUri && (
-            <div className="mint-attachment" style={{ gridColumn: '1 / -1', gridRow: '1', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <img src={imageDataUri} alt="" style={{ width: '32px', height: '32px', borderRadius: '4px' }} />
-              <span style={{ fontSize: '0.76rem', color: 'var(--text-soft)' }}>{imageName}</span>
-              <button type="button" onClick={onRemoveImage} style={{ background: 'transparent', border: 0, color: '#ef4444', cursor: 'pointer' }}>✕</button>
+        <form
+          id="chat-form"
+          onSubmit={onSubmit}
+          onPaste={(event: ClipboardEvent<HTMLElement>) => {
+            if (onPasteImage(event.clipboardData)) event.preventDefault()
+          }}
+        >
+          {(imageAttachments.length > 0 || documentName) && (
+            <div className="mint-attachment">
+              {imageAttachments.map((attachment, idx) => (
+                <div className="mint-image-attachment" key={idx}>
+                  <img className="mint-image-preview" src={attachment.dataUri} alt={attachment.name || 'Image attachment'} />
+                  <button className="mint-attachment-remove" type="button" onClick={() => onRemoveImage(idx)} aria-label="Remove image">×</button>
+                </div>
+              ))}
+              {documentName && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <span aria-hidden="true" style={{ fontSize: '1rem' }}>📄</span>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--text-soft)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>{documentName}</span>
+                  <button type="button" onClick={onRemoveDocument} style={{ background: 'transparent', border: 0, color: '#ef4444', cursor: 'pointer' }}>✕</button>
+                </div>
+              )}
             </div>
           )}
-          <textarea id="chat-input" value={message} onChange={(event) => onSetMessage(event.target.value)} onKeyDown={submitOnEnter} placeholder="Ask anything, @ to mention, / for actions" rows={1} />
-          <button id="vision-btn" type="button" onClick={() => document.getElementById('vision-file-input')?.click()}>👁</button>
+          <textarea
+            id="chat-input"
+            value={message}
+            onChange={(event) => {
+              resizeInput(event.currentTarget)
+              onSetMessage(event.target.value)
+            }}
+            onKeyDown={handleInputKeyDown}
+            placeholder="Ask anything, @ to mention, / for actions"
+            rows={1}
+          />
+          <div className="chat-tool-menu-wrap" ref={toolMenuRef}>
+            <button id="chat-tool-btn" type="button" aria-haspopup="menu" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((open) => !open)}>+</button>
+            {toolMenuOpen && (
+              <div className="chat-tool-menu" role="menu">
+                <button type="button" role="menuitem" onClick={openImagePicker}>
+                  <span aria-hidden="true">⌕</span>
+                  <span>Add image</span>
+                </button>
+                <button type="button" role="menuitem" onClick={openDocumentPicker}>
+                  <span aria-hidden="true">□</span>
+                  <span>Add file</span>
+                </button>
+                <button type="button" role="menuitem" onClick={startWebSearch}>
+                  <span aria-hidden="true">○</span>
+                  <span>Search web</span>
+                </button>
+              </div>
+            )}
+          </div>
           <input id="vision-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={onSelectImage} style={{ display: 'none' }} />
+          <input id="document-file-input" type="file" accept="application/pdf,.pdf" onChange={onSelectDocument} style={{ display: 'none' }} />
+          <button id="screen-capture-btn" type="button" onClick={onCaptureScreen} aria-label="Capture screen">
+            <span className="screen-capture-eye" aria-hidden="true" />
+          </button>
           <select className="chat-provider-select" value={status?.activeProvider ?? ''} onChange={(event) => onSetProvider(event.target.value)}>
             {status?.availableProviders.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
           </select>

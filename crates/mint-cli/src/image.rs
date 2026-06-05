@@ -73,9 +73,11 @@ pub fn read_clipboard_image() -> Result<Option<String>> {
 
 pub fn save_sent_image_after_send(data_uri: Option<&str>, message: &str) {
     if let Some(data_uri) = data_uri {
-        match mint_core::save_sent_image(data_uri, message) {
-            Ok(entry) => println!("\x1b[90mSaved image: {}\x1b[0m", entry.path.display()),
-            Err(error) => eprintln!("\x1b[33mWarning: failed to save sent image: {error}\x1b[0m"),
+        for img in data_uri.split_whitespace() {
+            match mint_core::save_sent_image(img, message) {
+                Ok(entry) => println!("\x1b[90mSaved image: {}\x1b[0m", entry.path.display()),
+                Err(error) => eprintln!("\x1b[33mWarning: failed to save sent image: {error}\x1b[0m"),
+            }
         }
     }
 }

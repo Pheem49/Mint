@@ -63,7 +63,8 @@ async fn chromium_context() -> Option<Value> {
                 .map(str::to_owned)
         })
         .unwrap_or_else(|| "http://127.0.0.1:9222/json/list".into());
-    let pages: Value = mint_core::HTTP_CLIENT.clone()
+    let pages: Value = mint_core::HTTP_CLIENT
+        .clone()
         .get(endpoint)
         .send()
         .await
@@ -98,7 +99,8 @@ async fn browser_extension_context() -> Option<Value> {
     if !(endpoint.starts_with("http://127.0.0.1:") || endpoint.starts_with("http://localhost:")) {
         return None;
     }
-    let context: Value = mint_core::HTTP_CLIENT.clone()
+    let context: Value = mint_core::HTTP_CLIENT
+        .clone()
         .get(endpoint)
         .send()
         .await

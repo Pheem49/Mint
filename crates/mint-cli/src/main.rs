@@ -600,6 +600,7 @@ async fn main() -> Result<()> {
                             system_instruction: system,
                             image_data_uri,
                             audio_data_uri: None,
+                            document_attachment: None,
                         },
                     )
                     .await?;
@@ -917,7 +918,9 @@ async fn launch_mint_target(target: String) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("Failed to run desktop app: {e}"))?;
         }
         "web" => {
-            println!("\x1b[32mLaunching Web App (vite) in background... (Vite Dev UI at http://localhost:9000)\x1b[0m");
+            println!(
+                "\x1b[32mLaunching Web App (vite) in background... (Vite Dev UI at http://localhost:9000)\x1b[0m"
+            );
             let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .parent()
                 .and_then(|p| p.parent())
@@ -931,7 +934,9 @@ async fn launch_mint_target(target: String) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("Failed to launch web app: {e}"))?;
 
             println!("\x1b[32mStarting local API server in foreground on port 3000...\x1b[0m\n");
-            println!("\x1b[36m👉 Please open \x1b[1;36mhttp://localhost:9000\x1b[0m\x1b[36m in your web browser to access the Mint Web UI!\x1b[0m\n");
+            println!(
+                "\x1b[36m👉 Please open \x1b[1;36mhttp://localhost:9000\x1b[0m\x1b[36m in your web browser to access the Mint Web UI!\x1b[0m\n"
+            );
             mint_core::start_api_server(3000).await?;
         }
         _ => {}
@@ -1260,7 +1265,12 @@ async fn handle_slash_command(
             }
             match image::load_image_as_data_uri(std::path::Path::new(img_path)) {
                 Ok(uri) => {
-                    session.pending_image = Some(uri);
+                    if let Some(ref mut current) = session.pending_image {
+                        current.push(' ');
+                        current.push_str(&uri);
+                    } else {
+                        session.pending_image = Some(uri);
+                    }
                     if prompt.is_empty() {
                         println!(
                             "\x1b[90mImage attached — type your prompt and press Enter\x1b[0m\n"
@@ -1279,7 +1289,12 @@ async fn handle_slash_command(
 
         "/paste" => match image::read_clipboard_image() {
             Ok(Some(uri)) => {
-                session.pending_image = Some(uri);
+                if let Some(ref mut current) = session.pending_image {
+                    current.push(' ');
+                    current.push_str(&uri);
+                } else {
+                    session.pending_image = Some(uri);
+                }
                 if rest.is_empty() {
                     println!(
                         "\x1b[90mClipboard image attached — type your prompt and press Enter\x1b[0m\n"
@@ -1424,8 +1439,13 @@ async fn handle_slash_command(
                 if session.fast_mode { "on" } else { "off" }
             );
             println!("  Memory   : {interactions} interactions");
-            if session.pending_image.is_some() {
-                println!("  Image    : \x1b[33mattached\x1b[0m");
+            if let Some(ref img_data) = session.pending_image {
+                let count = img_data.split_whitespace().count();
+                if count > 1 {
+                    println!("  Images   : \x1b[33m{} images attached\x1b[0m", count);
+                } else {
+                    println!("  Image    : \x1b[33mattached\x1b[0m");
+                }
             }
             println!();
             Some(SlashResult::Handled)
@@ -1538,8 +1558,13 @@ async fn run_interactive_chat() -> Result<()> {
         if let Some(input) =
             read_line_interactive(&session.config.ai_provider, &model_str, &path_str)?
         {
-            if input.pasted_image.is_some() {
-                session.pending_image = input.pasted_image;
+            if let Some(uri) = input.pasted_image {
+                if let Some(ref mut current) = session.pending_image {
+                    current.push(' ');
+                    current.push_str(&uri);
+                } else {
+                    session.pending_image = Some(uri);
+                }
             }
             let query_str = input.text.trim().to_owned();
             if query_str.is_empty() {
@@ -1656,6 +1681,7 @@ async fn run_interactive_chat() -> Result<()> {
                     system_instruction,
                     image_data_uri: image_uri,
                     audio_data_uri: None,
+                    document_attachment: None,
                 },
                 |chunk| {
                     if first_chunk {
@@ -1826,11 +1852,7 @@ fn input_cursor_column(input_chars: &[char], cursor_pos: usize) -> usize {
 }
 
 fn position_input_cursor(input_chars: &[char], cursor_pos: usize, match_count: usize) {
-    let up_lines = if match_count > 0 {
-        4 + match_count
-    } else {
-        2
-    };
+    let up_lines = if match_count > 0 { 4 + match_count } else { 2 };
     print!(
         "\x1b[{}A\x1b[{}G",
         up_lines,
@@ -1877,7 +1899,7 @@ fn read_line_interactive(
     let mut cursor_pos = 0;
     let placeholder = "Ask anything...";
     let mut ctrl_d_pressed = false;
-    let mut pasted_image = None;
+    let mut pasted_image: Option<String> = None;
 
     // Track tab autocomplete state
     let mut tab_base_input: Option<String> = None;
@@ -1943,7 +1965,12 @@ fn read_line_interactive(
                                 .contains(crossterm::event::KeyModifiers::CONTROL) =>
                         {
                             if let Ok(Some(uri)) = image::read_clipboard_image() {
-                                pasted_image = Some(uri);
+                                if let Some(ref mut current) = pasted_image {
+                                    current.push(' ');
+                                    current.push_str(&uri);
+                                } else {
+                                    pasted_image = Some(uri);
+                                }
                                 insert_image_placeholder(&mut input_chars, &mut cursor_pos);
 
                                 disable_raw_mode()?;
@@ -2021,7 +2048,7 @@ fn read_line_interactive(
                                     let completed = format!("{} ", matches[idx].0);
                                     input_chars = completed.chars().collect();
                                     cursor_pos = input_chars.len();
-                                    
+
                                     // Highlight currently completed item in suggestions
                                     let current_highlight = Some(idx);
                                     tab_index = Some(idx + 1);
@@ -2190,12 +2217,13 @@ fn read_line_interactive(
 }
 
 fn insert_image_placeholder(input_chars: &mut Vec<char>, cursor_pos: &mut usize) {
-    const PLACEHOLDER: &str = "[Image #1]";
     let input: String = input_chars.iter().collect();
-    if input.contains(PLACEHOLDER) {
-        return;
+    let mut idx = 1;
+    while input.contains(&format!("[Image #{}]", idx)) {
+        idx += 1;
     }
-    let placeholder_chars = PLACEHOLDER.chars().collect::<Vec<_>>();
+    let placeholder = format!("[Image #{}]", idx);
+    let placeholder_chars = placeholder.chars().collect::<Vec<_>>();
     input_chars.splice(*cursor_pos..*cursor_pos, placeholder_chars.iter().copied());
     *cursor_pos += placeholder_chars.len();
 }

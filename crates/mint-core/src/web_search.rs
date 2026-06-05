@@ -18,7 +18,14 @@ fn sanitize_reqwest_error(err: reqwest::Error) -> WebSearchError {
     if let Some(pos) = msg.find("https://www.googleapis.com") {
         let mut end_pos = msg.len();
         for (idx, ch) in msg[pos..].char_indices() {
-            if ch == ' ' || ch == ')' || ch == '"' || ch == '\'' || ch == ']' || ch == '}' || ch == '>' {
+            if ch == ' '
+                || ch == ')'
+                || ch == '"'
+                || ch == '\''
+                || ch == ']'
+                || ch == '}'
+                || ch == '>'
+            {
                 end_pos = pos + idx;
                 break;
             }
@@ -28,12 +35,22 @@ fn sanitize_reqwest_error(err: reqwest::Error) -> WebSearchError {
     if let Some(pos) = msg.find("https://api.search.brave.com") {
         let mut end_pos = msg.len();
         for (idx, ch) in msg[pos..].char_indices() {
-            if ch == ' ' || ch == ')' || ch == '"' || ch == '\'' || ch == ']' || ch == '}' || ch == '>' {
+            if ch == ' '
+                || ch == ')'
+                || ch == '"'
+                || ch == '\''
+                || ch == ']'
+                || ch == '}'
+                || ch == '>'
+            {
                 end_pos = pos + idx;
                 break;
             }
         }
-        msg.replace_range(pos..end_pos, "https://api.search.brave.com/res/v1/web/search");
+        msg.replace_range(
+            pos..end_pos,
+            "https://api.search.brave.com/res/v1/web/search",
+        );
     }
     WebSearchError::Request(msg)
 }

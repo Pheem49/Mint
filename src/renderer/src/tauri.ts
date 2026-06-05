@@ -12,6 +12,11 @@ export interface ChatResponse {
   text: string
 }
 
+export interface DocumentAttachment {
+  filename: string
+  dataUri: string
+}
+
 export type AgentProgress =
   | { type: 'Thinking'; data: { elapsed_secs: number } }
   | { type: 'Thought'; data: { thought: string } }
@@ -78,6 +83,7 @@ export async function sendChatMessage(
   message: string,
   imageDataUri?: string | null,
   audioDataUri?: string | null,
+  documentAttachment?: DocumentAttachment | null,
 ): Promise<ChatResponse> {
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
@@ -86,7 +92,7 @@ export async function sendChatMessage(
       const res = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri })
+        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri, documentAttachment })
       });
       return await res.json();
     } catch (e) {
@@ -96,11 +102,11 @@ export async function sendChatMessage(
   }
   const { invoke } = await import('@tauri-apps/api/core')
   const response = await invoke<ChatResponse>('send_chat_message', {
-    request: { message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri },
+    request: { message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri, documentAttachment },
   })
   if (imageDataUri) {
     await invoke('save_pictures', {
-      images: [imageDataUri],
+      images: imageDataUri.split(' '),
       source: 'chat',
       message: outgoingMessage,
     })
@@ -115,9 +121,10 @@ export async function streamChatMessage(
   audioDataUri?: string | null,
   systemInstruction = '',
   onProgress?: (progress: AgentProgress) => void,
+  documentAttachment?: DocumentAttachment | null,
 ): Promise<ChatResponse> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const response = await sendChatMessage(message, imageDataUri, audioDataUri);
+    const response = await sendChatMessage(message, imageDataUri, audioDataUri, documentAttachment);
     onChunk(response.text);
     return response;
   }
@@ -129,12 +136,12 @@ export async function streamChatMessage(
     else onProgress?.(event.progress)
   }
   const response = await invoke<ChatResponse>('stream_chat_message', {
-    request: { message: outgoingMessage, systemInstruction, imageDataUri, audioDataUri },
+    request: { message: outgoingMessage, systemInstruction, imageDataUri, audioDataUri, documentAttachment },
     onEvent,
   })
   if (imageDataUri) {
     await invoke('save_pictures', {
-      images: [imageDataUri],
+      images: imageDataUri.split(' '),
       source: 'chat',
       message: outgoingMessage,
     })
@@ -325,12 +332,12 @@ export function installTauriAdapters() {
     };
 
     (window as any).api = {
-      sendMessage: async (message: string, imageDataUri?: string | null, audioDataUri?: string | null) => {
+      sendMessage: async (message: string, imageDataUri?: string | null, audioDataUri?: string | null, documentAttachment?: DocumentAttachment | null) => {
         try {
           const res = await fetch(`${API_BASE}/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, imageDataUri, audioDataUri })
+            body: JSON.stringify({ message, imageDataUri, audioDataUri, documentAttachment })
           });
           return await res.json();
         } catch (e) {
@@ -555,7 +562,13 @@ export function installTauriAdapters() {
   window.screenPickerApi = {
     onScreenshot: async (callback) => {
       const { invoke } = await import('@tauri-apps/api/core')
-      void invoke<string>('capture_silent_screen').then(callback)
+      try {
+        const image = await captureSharedScreen()
+        callback(image)
+      } catch (reason) {
+        console.warn('Screen share capture failed, falling back to native capture:', reason)
+        void invoke<string>('capture_silent_screen').then(callback)
+      }
     },
     sendSelection: async (image) => {
       const { invoke } = await import('@tauri-apps/api/core')
@@ -599,7 +612,7 @@ export function installTauriAdapters() {
   }
 
   window.api = {
-    sendMessage: (message, imageDataUri, audioDataUri) => sendChatMessage(message, imageDataUri, audioDataUri),
+    sendMessage: (message, imageDataUri, audioDataUri, documentAttachment) => sendChatMessage(message, imageDataUri, audioDataUri, documentAttachment),
     closeWindow: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
       const { getCurrentWindow } = await import('@tauri-apps/api/window')
@@ -642,6 +655,14 @@ export function installTauriAdapters() {
     onSettingsChanged: settingsChanged,
     startVision: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
+      try {
+        const image = await captureSharedScreen()
+        window.sessionStorage.setItem('mint:pending-screen-capture', image)
+      } catch (reason) {
+        console.warn('Screen share capture failed before opening picker:', reason)
+        const image = await invoke<string>('capture_silent_screen')
+        window.sessionStorage.setItem('mint:pending-screen-capture', image)
+      }
       return invoke('start_screen_capture')
     },
     onVisionReady: async (callback) => {
@@ -688,5 +709,52 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       return void invoke('set_ai_state', { state })
     },
+  }
+}
+
+async function captureSharedScreen(): Promise<string> {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    throw new Error('getDisplayMedia is not available')
+  }
+
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video: true,
+    audio: false,
+  })
+  try {
+    const video = document.createElement('video')
+    video.srcObject = stream
+    video.muted = true
+    await video.play()
+    await new Promise<void>((resolve) => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        resolve()
+      } else {
+        video.onloadedmetadata = () => resolve()
+      }
+    })
+
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth || window.screen.width
+    canvas.height = video.videoHeight || window.screen.height
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Unable to create screen capture canvas')
+    context.drawImage(video, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/png')
+  } finally {
+    stream.getTracks().forEach((track) => track.stop())
+  }
+}
+
+export async function readClipboardImage(): Promise<string | null> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    return null
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  try {
+    return await invoke<string>('read_clipboard_image')
+  } catch (err) {
+    console.warn('Failed to read clipboard image via Tauri command:', err)
+    return null
   }
 }

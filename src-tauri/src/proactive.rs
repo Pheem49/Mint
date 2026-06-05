@@ -120,7 +120,8 @@ async fn analyze(config: &MintConfig) -> Result<Option<Value>, String> {
         return Ok(None);
     }
     let image = capture_screen_bytes()?;
-    let response: Value = mint_core::HTTP_CLIENT.clone()
+    let response: Value = mint_core::HTTP_CLIENT
+        .clone()
         .post(format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={key}",
             config.gemini_model

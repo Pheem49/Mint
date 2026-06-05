@@ -151,6 +151,7 @@ async fn answer(text: &str, system: &str) -> String {
             system_instruction: system.into(),
             image_data_uri: None,
             audio_data_uri: None,
+            document_attachment: None,
         },
     )
     .await

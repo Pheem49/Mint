@@ -154,7 +154,9 @@ pub async fn run() -> Result<()> {
     let mut cursor = 0;
     println!("\x1b[33mStep 2: QuickStart Provider Selection\x1b[0m");
     println!("Select which plugins or bridges you would like to configure:");
-    println!("  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Space: Toggle | a: All | i: Invert | Enter: Confirm]\x1b[0m");
+    println!(
+        "  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Space: Toggle | a: All | i: Invert | Enter: Confirm]\x1b[0m"
+    );
     println!();
 
     print_services(&services, cursor);
@@ -250,8 +252,7 @@ pub async fn run() -> Result<()> {
         println!("\n\x1b[36m--- Anthropic (Claude) API ---\x1b[0m");
         config.anthropic_api_key =
             prompt_sensitive("Anthropic API Key", &config.anthropic_api_key)?;
-        config.anthropic_model =
-            prompt_input("Anthropic Model", Some(&config.anthropic_model))?;
+        config.anthropic_model = prompt_input("Anthropic Model", Some(&config.anthropic_model))?;
     } else {
         config.anthropic_api_key = String::new();
     }
@@ -279,8 +280,7 @@ pub async fn run() -> Result<()> {
         println!("\n\x1b[36m--- Local OpenAI (e.g. LM Studio) ---\x1b[0m");
         config.local_api_base_url =
             prompt_input("Local OpenAI Base URL", Some(&config.local_api_base_url))?;
-        config.local_model_name =
-            prompt_input("Local Model Name", Some(&config.local_model_name))?;
+        config.local_model_name = prompt_input("Local Model Name", Some(&config.local_model_name))?;
     } else {
         config.local_api_base_url = String::new();
     }
@@ -361,13 +361,15 @@ pub async fn run() -> Result<()> {
             "telegramBotToken".to_string(),
             serde_json::Value::String(token),
         );
-        config
-            .extra
-            .insert("enableTelegramBridge".to_string(), serde_json::Value::Bool(true));
+        config.extra.insert(
+            "enableTelegramBridge".to_string(),
+            serde_json::Value::Bool(true),
+        );
     } else {
-        config
-            .extra
-            .insert("enableTelegramBridge".to_string(), serde_json::Value::Bool(false));
+        config.extra.insert(
+            "enableTelegramBridge".to_string(),
+            serde_json::Value::Bool(false),
+        );
     }
 
     // Discord Bot
@@ -393,13 +395,15 @@ pub async fn run() -> Result<()> {
             "discordApplicationId".to_string(),
             serde_json::Value::String(app_id),
         );
-        config
-            .extra
-            .insert("enableDiscordBridge".to_string(), serde_json::Value::Bool(true));
+        config.extra.insert(
+            "enableDiscordBridge".to_string(),
+            serde_json::Value::Bool(true),
+        );
     } else {
-        config
-            .extra
-            .insert("enableDiscordBridge".to_string(), serde_json::Value::Bool(false));
+        config.extra.insert(
+            "enableDiscordBridge".to_string(),
+            serde_json::Value::Bool(false),
+        );
     }
 
     // Slack Bot
@@ -425,13 +429,15 @@ pub async fn run() -> Result<()> {
             "slackAppToken".to_string(),
             serde_json::Value::String(app_token),
         );
-        config
-            .extra
-            .insert("enableSlackBridge".to_string(), serde_json::Value::Bool(true));
+        config.extra.insert(
+            "enableSlackBridge".to_string(),
+            serde_json::Value::Bool(true),
+        );
     } else {
-        config
-            .extra
-            .insert("enableSlackBridge".to_string(), serde_json::Value::Bool(false));
+        config.extra.insert(
+            "enableSlackBridge".to_string(),
+            serde_json::Value::Bool(false),
+        );
     }
 
     // LINE Bot
@@ -457,13 +463,15 @@ pub async fn run() -> Result<()> {
             "lineChannelSecret".to_string(),
             serde_json::Value::String(secret),
         );
-        config
-            .extra
-            .insert("enableLineBridge".to_string(), serde_json::Value::Bool(true));
+        config.extra.insert(
+            "enableLineBridge".to_string(),
+            serde_json::Value::Bool(true),
+        );
     } else {
-        config
-            .extra
-            .insert("enableLineBridge".to_string(), serde_json::Value::Bool(false));
+        config.extra.insert(
+            "enableLineBridge".to_string(),
+            serde_json::Value::Bool(false),
+        );
     }
 
     // WhatsApp Cloud
@@ -509,13 +517,15 @@ pub async fn run() -> Result<()> {
             "whatsappAppSecret".to_string(),
             serde_json::Value::String(secret),
         );
-        config
-            .extra
-            .insert("enableWhatsappBridge".to_string(), serde_json::Value::Bool(true));
+        config.extra.insert(
+            "enableWhatsappBridge".to_string(),
+            serde_json::Value::Bool(true),
+        );
     } else {
-        config
-            .extra
-            .insert("enableWhatsappBridge".to_string(), serde_json::Value::Bool(false));
+        config.extra.insert(
+            "enableWhatsappBridge".to_string(),
+            serde_json::Value::Bool(false),
+        );
     }
 
     // Gmail
@@ -561,13 +571,15 @@ pub async fn run() -> Result<()> {
             "gmailUserId".to_string(),
             serde_json::Value::String(user_id),
         );
-        config
-            .extra
-            .insert("pluginGmailEnabled".to_string(), serde_json::Value::Bool(true));
+        config.extra.insert(
+            "pluginGmailEnabled".to_string(),
+            serde_json::Value::Bool(true),
+        );
     } else {
-        config
-            .extra
-            .insert("pluginGmailEnabled".to_string(), serde_json::Value::Bool(false));
+        config.extra.insert(
+            "pluginGmailEnabled".to_string(),
+            serde_json::Value::Bool(false),
+        );
     }
 
     // Google Calendar
@@ -594,8 +606,10 @@ pub async fn run() -> Result<()> {
             .and_then(|v| v.as_str())
             .unwrap_or("primary");
         let client_id = prompt_input("Google Calendar Client ID", Some(current_client_id))?;
-        let client_secret = prompt_sensitive("Google Calendar Client Secret", current_client_secret)?;
-        let refresh_token = prompt_sensitive("Google Calendar Refresh Token", current_refresh_token)?;
+        let client_secret =
+            prompt_sensitive("Google Calendar Client Secret", current_client_secret)?;
+        let refresh_token =
+            prompt_sensitive("Google Calendar Refresh Token", current_refresh_token)?;
         let cal_id = prompt_input("Google Calendar ID", Some(current_cal_id))?;
         config.extra.insert(
             "googleCalendarClientId".to_string(),
@@ -613,13 +627,15 @@ pub async fn run() -> Result<()> {
             "googleCalendarId".to_string(),
             serde_json::Value::String(cal_id),
         );
-        config
-            .extra
-            .insert("pluginCalendarEnabled".to_string(), serde_json::Value::Bool(true));
+        config.extra.insert(
+            "pluginCalendarEnabled".to_string(),
+            serde_json::Value::Bool(true),
+        );
     } else {
-        config
-            .extra
-            .insert("pluginCalendarEnabled".to_string(), serde_json::Value::Bool(false));
+        config.extra.insert(
+            "pluginCalendarEnabled".to_string(),
+            serde_json::Value::Bool(false),
+        );
     }
 
     // Notion
@@ -665,13 +681,15 @@ pub async fn run() -> Result<()> {
             "notionTitleProperty".to_string(),
             serde_json::Value::String(title_prop),
         );
-        config
-            .extra
-            .insert("pluginNotionEnabled".to_string(), serde_json::Value::Bool(true));
+        config.extra.insert(
+            "pluginNotionEnabled".to_string(),
+            serde_json::Value::Bool(true),
+        );
     } else {
-        config
-            .extra
-            .insert("pluginNotionEnabled".to_string(), serde_json::Value::Bool(false));
+        config.extra.insert(
+            "pluginNotionEnabled".to_string(),
+            serde_json::Value::Bool(false),
+        );
     }
 
     println!();
@@ -692,7 +710,10 @@ fn print_services(services: &[OnboardService], cursor: usize) {
             "\x1b[90m○\x1b[0m"
         };
         if i == cursor {
-            println!("  \x1b[36m❯\x1b[0m {} \x1b[36m{}\x1b[0m", checkbox, svc.name);
+            println!(
+                "  \x1b[36m❯\x1b[0m {} \x1b[36m{}\x1b[0m",
+                checkbox, svc.name
+            );
         } else {
             println!("    {} {}", checkbox, svc.name);
         }
@@ -738,7 +759,11 @@ fn format_masked_key(key: &str) -> String {
 
 fn prompt_sensitive(label: &str, existing: &str) -> Result<String> {
     if !existing.is_empty() {
-        print!("{} [keep existing ({})]: ", label, format_masked_key(existing));
+        print!(
+            "{} [keep existing ({})]: ",
+            label,
+            format_masked_key(existing)
+        );
         io::stdout().flush()?;
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;

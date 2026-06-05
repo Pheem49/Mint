@@ -19,7 +19,10 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = TcpListener::bind(addr).await?;
     println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-    println!("\x1b[32m       Mint Local API Server running at http://{}\x1b[0m", addr);
+    println!(
+        "\x1b[32m       Mint Local API Server running at http://{}\x1b[0m",
+        addr
+    );
     println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
 
     loop {
@@ -31,7 +34,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
         tokio::spawn(async move {
             let mut buf = [0; 65536];
             let mut read_bytes = 0;
-            
+
             loop {
                 let n = match socket.read(&mut buf[read_bytes..]).await {
                     Ok(n) if n > 0 => n,
@@ -43,7 +46,9 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                 }
                 let headers_str = String::from_utf8_lossy(&buf[..read_bytes]);
                 if headers_str.contains("\r\n\r\n") {
-                    if let Some(content_length_pos) = headers_str.to_lowercase().find("content-length:") {
+                    if let Some(content_length_pos) =
+                        headers_str.to_lowercase().find("content-length:")
+                    {
                         let sub = &headers_str[content_length_pos..];
                         if let Some(line_end) = sub.find("\r\n") {
                             let len_str = sub["content-length:".len()..line_end].trim();
@@ -101,9 +106,15 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
             match (method, route) {
                 ("GET", "/api/status") => {
                     let config = load_config().unwrap_or_default();
-                    let path_str = config_path().map(|p| p.display().to_string()).unwrap_or_default();
+                    let path_str = config_path()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
                     let active = config.ai_provider.clone();
-                    let available: Vec<String> = config.available_providers().into_iter().map(|s| s.to_string()).collect();
+                    let available: Vec<String> = config
+                        .available_providers()
+                        .into_iter()
+                        .map(|s| s.to_string())
+                        .collect();
                     let status_json = serde_json::json!({
                         "backend": "rust-api-server",
                         "configPath": path_str,
@@ -138,29 +149,41 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         let _ = memory.clear_interactions();
                         send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
                     } else {
-                        send_json_response(socket, "500 Internal Server Error", "{\"status\":\"error\"}").await;
+                        send_json_response(
+                            socket,
+                            "500 Internal Server Error",
+                            "{\"status\":\"error\"}",
+                        )
+                        .await;
                     }
                 }
-                ("GET", "/api/pictures") => {
-                    match list_saved_pictures() {
-                        Ok(mut pictures) => {
-                            for picture in &mut pictures {
-                                picture.url = Some(format!("/api/pictures/{}", picture.filename));
-                            }
-                            if let Ok(json_str) = serde_json::to_string(&pictures) {
-                                send_json_response(socket, "200 OK", &json_str).await;
-                            } else {
-                                send_json_response(socket, "500 Internal Server Error", "[]").await;
-                            }
+                ("GET", "/api/pictures") => match list_saved_pictures() {
+                    Ok(mut pictures) => {
+                        for picture in &mut pictures {
+                            picture.url = Some(format!("/api/pictures/{}", picture.filename));
                         }
-                        Err(_) => send_json_response(socket, "500 Internal Server Error", "[]").await,
+                        if let Ok(json_str) = serde_json::to_string(&pictures) {
+                            send_json_response(socket, "200 OK", &json_str).await;
+                        } else {
+                            send_json_response(socket, "500 Internal Server Error", "[]").await;
+                        }
                     }
-                }
+                    Err(_) => send_json_response(socket, "500 Internal Server Error", "[]").await,
+                },
                 ("GET", route) if route.starts_with("/api/pictures/") => {
                     let filename = percent_decode(route.trim_start_matches("/api/pictures/"));
                     match picture_bytes(&filename) {
-                        Ok((mime_type, bytes)) => send_binary_response(socket, "200 OK", &mime_type, &bytes).await,
-                        Err(_) => send_json_response(socket, "404 Not Found", "{\"error\":\"picture not found\"}").await,
+                        Ok((mime_type, bytes)) => {
+                            send_binary_response(socket, "200 OK", &mime_type, &bytes).await
+                        }
+                        Err(_) => {
+                            send_json_response(
+                                socket,
+                                "404 Not Found",
+                                "{\"error\":\"picture not found\"}",
+                            )
+                            .await
+                        }
                     }
                 }
                 ("GET", "/api/config") => {
@@ -178,7 +201,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             return;
                         }
                     }
-                    send_json_response(socket, "400 Bad Request", "{\"status\":\"invalid config json\"}").await;
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        "{\"status\":\"invalid config json\"}",
+                    )
+                    .await;
                 }
                 ("GET", "/api/weather") => {
                     let city = query_param(query, "city").unwrap_or_default();
@@ -192,7 +220,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         }
                         Err(error) => {
                             let err_json = json!({ "error": error.to_string() });
-                            send_json_response(socket, "500 Internal Server Error", &err_json.to_string()).await;
+                            send_json_response(
+                                socket,
+                                "500 Internal Server Error",
+                                &err_json.to_string(),
+                            )
+                            .await;
                         }
                     }
                 }
@@ -200,14 +233,26 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     if let Ok(action) = serde_json::from_str::<ApiAction>(body) {
                         let config = load_config().unwrap_or_default();
                         match execute_api_action(&config, action) {
-                            Ok(value) => send_json_response(socket, "200 OK", &value.to_string()).await,
+                            Ok(value) => {
+                                send_json_response(socket, "200 OK", &value.to_string()).await
+                            }
                             Err(error) => {
                                 let err_json = json!({ "success": false, "message": error });
-                                send_json_response(socket, "400 Bad Request", &err_json.to_string()).await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    &err_json.to_string(),
+                                )
+                                .await;
                             }
                         }
                     } else {
-                        send_json_response(socket, "400 Bad Request", "{\"success\":false,\"message\":\"invalid action body\"}").await;
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"success\":false,\"message\":\"invalid action body\"}",
+                        )
+                        .await;
                     }
                 }
                 ("POST", "/api/chat") => {
@@ -227,6 +272,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             system_instruction: req.system_instruction.unwrap_or_default(),
                             image_data_uri: req.image_data_uri,
                             audio_data_uri: req.audio_data_uri,
+                            document_attachment: None,
                         };
                         let sent_image = chat_req.image_data_uri.clone();
                         let sent_message = chat_req.message.clone();
@@ -266,12 +312,22 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     "model": "error",
                                     "text": format!("Error orchestrating chat: {e}")
                                 });
-                                send_json_response(socket, "500 Internal Server Error", &err_json.to_string()).await;
+                                send_json_response(
+                                    socket,
+                                    "500 Internal Server Error",
+                                    &err_json.to_string(),
+                                )
+                                .await;
                                 return;
                             }
                         }
                     }
-                    send_json_response(socket, "400 Bad Request", "{\"status\":\"invalid chat request body\"}").await;
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        "{\"status\":\"invalid chat request body\"}",
+                    )
+                    .await;
                 }
                 _ => {
                     send_json_response(socket, "404 Not Found", "{\"error\":\"Not Found\"}").await;
@@ -480,7 +536,11 @@ fn percent_decode(raw: &str) -> String {
                 continue;
             }
         }
-        output.push(if bytes[index] == b'+' { b' ' } else { bytes[index] });
+        output.push(if bytes[index] == b'+' {
+            b' '
+        } else {
+            bytes[index]
+        });
         index += 1;
     }
     String::from_utf8_lossy(&output).into_owned()

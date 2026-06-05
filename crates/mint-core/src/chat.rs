@@ -89,6 +89,15 @@ pub struct ChatRequest {
     pub image_data_uri: Option<String>,
     #[serde(default)]
     pub audio_data_uri: Option<String>,
+    #[serde(default)]
+    pub document_attachment: Option<DocumentAttachment>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentAttachment {
+    pub filename: String,
+    pub data_uri: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -706,24 +715,39 @@ fn openai_chat_payload(model: &str, request: &ChatRequest, stream: bool) -> Valu
 
 fn gemini_parts(request: &ChatRequest) -> Result<Vec<Value>, ChatError> {
     let mut parts = vec![json!({ "text": request.message })];
-    for attachment in [&request.image_data_uri, &request.audio_data_uri]
-        .into_iter()
-        .flatten()
-    {
-        let payload = attachment
-            .strip_prefix("data:")
-            .and_then(|payload| payload.split_once(";base64,"))
-            .filter(|(mime_type, data)| {
-                (mime_type.starts_with("image/") || mime_type.starts_with("audio/"))
-                    && !data.is_empty()
-            })
-            .ok_or(ChatError::InvalidAttachment)?;
-        parts.push(json!({
-            "inlineData": {
-                "mimeType": payload.0,
-                "data": payload.1
-            }
-        }));
+    if let Some(ref image_data) = request.image_data_uri {
+        for img in image_data.split_whitespace() {
+            let payload = img
+                .strip_prefix("data:")
+                .and_then(|payload| payload.split_once(";base64,"))
+                .filter(|(mime_type, data)| {
+                    mime_type.starts_with("image/") && !data.is_empty()
+                })
+                .ok_or(ChatError::InvalidAttachment)?;
+            parts.push(json!({
+                "inlineData": {
+                    "mimeType": payload.0,
+                    "data": payload.1
+                }
+            }));
+        }
+    }
+    if let Some(ref audio_data) = request.audio_data_uri {
+        for aud in audio_data.split_whitespace() {
+            let payload = aud
+                .strip_prefix("data:")
+                .and_then(|payload| payload.split_once(";base64,"))
+                .filter(|(mime_type, data)| {
+                    mime_type.starts_with("audio/") && !data.is_empty()
+                })
+                .ok_or(ChatError::InvalidAttachment)?;
+            parts.push(json!({
+                "inlineData": {
+                    "mimeType": payload.0,
+                    "data": payload.1
+                }
+            }));
+        }
     }
     Ok(parts)
 }
@@ -767,11 +791,13 @@ mod tests {
         let parts = gemini_parts(&ChatRequest {
             message: "describe".into(),
             system_instruction: String::new(),
-            image_data_uri: Some("data:image/png;base64,aGk=".into()),
+            image_data_uri: Some("data:image/png;base64,aGk= data:image/jpeg;base64,Ynl5".into()),
             audio_data_uri: None,
+            document_attachment: None,
         })
         .unwrap();
-        assert_eq!(parts.len(), 2);
+        assert_eq!(parts.len(), 3);
         assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
+        assert_eq!(parts[2]["inlineData"]["mimeType"], "image/jpeg");
     }
 }

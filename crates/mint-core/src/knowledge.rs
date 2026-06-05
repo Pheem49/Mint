@@ -181,9 +181,10 @@ impl KnowledgeStore {
             })?;
         }
         let connection = Connection::open(&self.path)?;
-        
-        static INITIALIZED_DATABASES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
-            std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+
+        static INITIALIZED_DATABASES: std::sync::LazyLock<
+            std::sync::Mutex<std::collections::HashSet<PathBuf>>,
+        > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
 
         let needs_init = {
             let mut set = INITIALIZED_DATABASES.lock().unwrap();
@@ -213,6 +214,25 @@ impl KnowledgeStore {
         }
         Ok(connection)
     }
+}
+
+pub fn extract_document_text(path: &Path, config: &MintConfig) -> Result<String, KnowledgeError> {
+    let path = assert_path_capability(path, Capability::Read, config)?;
+    let metadata = fs::metadata(&path).map_err(|source| KnowledgeError::Read {
+        path: path.clone(),
+        source,
+    })?;
+    if metadata.len() > MAX_FILE_BYTES {
+        return Err(KnowledgeError::TooLarge(path));
+    }
+    if !supported(&path) {
+        return Err(KnowledgeError::UnsupportedFileType(path));
+    }
+    let content = extract_text(&path)?;
+    if content.trim().is_empty() {
+        return Err(KnowledgeError::Empty(path));
+    }
+    Ok(content)
 }
 
 fn supported(path: &Path) -> bool {

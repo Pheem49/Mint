@@ -7,8 +7,10 @@ import {
   streamChatMessage,
   submitToolApproval,
   listen,
+  readClipboardImage as readTauriClipboardImage,
   type AgentProgress,
   type ChatResponse,
+  type DocumentAttachment,
   type PictureEntry,
   type RuntimeStatus,
 } from '../tauri'
@@ -63,6 +65,15 @@ function readImage(file: File): Promise<string> {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result))
     reader.onerror = () => reject(reader.error ?? new Error('Unable to read image'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function readDocument(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error ?? new Error('Unable to read document'))
     reader.readAsDataURL(file)
   })
 }
@@ -143,8 +154,8 @@ export default function MintDashboard() {
   const [streamedReply, setStreamedReply] = useState('')
   const [streamedResponse, setStreamedResponse] = useState<ChatResponse | null>(null)
   const [agentProgress, setAgentProgress] = useState<AgentProgress[]>([])
-  const [imageDataUri, setImageDataUri] = useState<string | null>(null)
-  const [imageName, setImageName] = useState('')
+  const [imageAttachments, setImageAttachments] = useState<Array<{ dataUri: string; name: string }>>([])
+  const [documentAttachment, setDocumentAttachment] = useState<DocumentAttachment | null>(null)
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
   const [modelVisible, setModelVisible] = useState(() => window.localStorage.getItem('mint:model-visible') !== 'false')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
@@ -187,6 +198,9 @@ export default function MintDashboard() {
     window.api.onSpotlightToChat((query) => {
       setView('chat')
       setMessage(query)
+    })
+    window.api.onVisionReady((image) => {
+      setImageAttachments((current) => [...current, { dataUri: image, name: 'Screen capture' }])
     })
     window.api?.onSettingsChanged?.(applyThemeStyles)
 
@@ -266,26 +280,29 @@ export default function MintDashboard() {
     event.preventDefault()
     const trimmed = message.trim()
     if (!trimmed || sending) return
-    const outgoingImage = imageDataUri
+    const shouldUseAgentMode = agentMode || trimmed.toLowerCase().startsWith('search web:')
+    const outgoingImage = imageAttachments.map((img) => img.dataUri).join(' ')
+    const outgoingDocument = documentAttachment
     setSending(true)
     setSendingMessage(trimmed)
-    setSendingHasImage(Boolean(outgoingImage))
+    setSendingHasImage(imageAttachments.length > 0)
     setError('')
     setStreamedReply('')
     setStreamedResponse(null)
     setAgentProgress([])
     setMessage('')
-    setImageDataUri(null)
-    setImageName('')
+    setImageAttachments([])
+    setDocumentAttachment(null)
 
     try {
       const response = await streamChatMessage(
-        agentMode ? trimmed : `/chat ${trimmed}`,
+        shouldUseAgentMode ? trimmed : `/chat ${trimmed}`,
         (chunk) => setStreamedReply((current) => `${current}${chunk}`),
         outgoingImage,
         null,
         '',
         (progress) => setAgentProgress((current) => [...current, progress].slice(-24)),
+        outgoingDocument,
       )
       setStreamedResponse(response)
       await refreshHistory()
@@ -305,12 +322,110 @@ export default function MintDashboard() {
     const file = event.target.files?.[0]
     if (!file) return
     try {
-      setImageDataUri(await readImage(file))
-      setImageName(file.name)
+      const dataUri = await readImage(file)
+      setImageAttachments((current) => [...current, { dataUri, name: file.name }])
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
       event.target.value = ''
+    }
+  }
+
+  function pasteImage(clipboardData: DataTransfer) {
+    let file: File | null = null
+
+    if (clipboardData.files && clipboardData.files.length > 0) {
+      for (let i = 0; i < clipboardData.files.length; i++) {
+        const f = clipboardData.files[i]
+        if (f && f.type.startsWith('image/')) {
+          file = f
+          break
+        }
+      }
+    }
+
+    if (!file && clipboardData.items && clipboardData.items.length > 0) {
+      for (let i = 0; i < clipboardData.items.length; i++) {
+        const item = clipboardData.items[i]
+        if (item && item.type.startsWith('image/')) {
+          const f = item.getAsFile()
+          if (f) {
+            file = f
+            break
+          }
+        }
+      }
+    }
+
+    if (!file) return false
+
+    readImage(file)
+      .then((dataUri) => {
+        const name = file.name && file.name !== 'image.png' ? file.name : 'Pasted image'
+        setImageAttachments((current) => [...current, { dataUri, name }])
+      })
+      .catch((reason) => setError(errorMessage(reason)))
+    return true
+  }
+
+  async function readClipboardImage() {
+    try {
+      const dataUri = await readTauriClipboardImage()
+      if (dataUri) {
+        setImageAttachments((current) => [...current, { dataUri, name: 'Pasted image' }])
+        return true
+      }
+    } catch (err) {
+      console.warn('Tauri clipboard fallback error:', err)
+    }
+
+    try {
+      if (!navigator.clipboard?.read) return false
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        const imageType = item.types.find((type) => type.startsWith('image/'))
+        if (!imageType) continue
+        const blob = await item.getType(imageType)
+        const file = new File([blob], 'Pasted image', { type: imageType })
+        const dataUri = await readImage(file)
+        setImageAttachments((current) => [...current, { dataUri, name: 'Pasted image' }])
+        return true
+      }
+      return false
+    } catch {
+      // Some environments expose pasted images only through ClipboardEvent.
+      return false
+    }
+  }
+
+  async function selectDocument(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try {
+      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+        throw new Error('Only PDF files are supported')
+      }
+      setDocumentAttachment({
+        filename: file.name,
+        dataUri: await readDocument(file),
+      })
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  function startWebSearch() {
+    updateAgentMode(true)
+    setMessage((current) => current.trim() ? `Search web: ${current.trim()}` : 'Search web: ')
+  }
+
+  async function captureScreen() {
+    try {
+      await window.api.startVision()
+    } catch (reason) {
+      setError(errorMessage(reason))
     }
   }
 
@@ -322,8 +437,7 @@ export default function MintDashboard() {
       setStreamedReply('')
       setStreamedResponse(null)
       setMessage('')
-      setImageDataUri(null)
-      setImageName('')
+      setImageAttachments([])
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -430,8 +544,8 @@ export default function MintDashboard() {
             streamedResponse={streamedResponse}
             agentProgress={agentProgress}
             message={message}
-            imageDataUri={imageDataUri}
-            imageName={imageName}
+            imageAttachments={imageAttachments}
+            documentName={documentAttachment?.filename ?? ''}
             pendingApproval={pendingApproval}
             smartContext={smartContext}
             agentMode={agentMode}
@@ -440,8 +554,16 @@ export default function MintDashboard() {
             welcomeInteraction={MOCK_WELCOME_INTERACTION}
             onSubmit={handleSubmit}
             onSelectImage={selectImage}
+            onSelectDocument={selectDocument}
+            onPasteImage={pasteImage}
+            onReadClipboardImage={readClipboardImage}
             onSetMessage={setMessage}
-            onRemoveImage={() => { setImageDataUri(null); setImageName('') }}
+            onRemoveImage={(idx: number) => {
+              setImageAttachments((current) => current.filter((_, i) => i !== idx))
+            }}
+            onRemoveDocument={() => setDocumentAttachment(null)}
+            onStartWebSearch={startWebSearch}
+            onCaptureScreen={captureScreen}
             onSetSmartContext={updateSmartContext}
             onSetAgentMode={updateAgentMode}
             onSetProvider={changeProvider}

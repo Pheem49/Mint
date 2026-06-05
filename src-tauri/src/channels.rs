@@ -118,7 +118,8 @@ async fn slack_loop() -> Result<(), String> {
         return Ok(());
     };
     let bot_token = config_value("slackBotToken").ok_or("missing slackBotToken")?;
-    let value: Value = mint_core::HTTP_CLIENT.clone()
+    let value: Value = mint_core::HTTP_CLIENT
+        .clone()
         .post("https://slack.com/api/apps.connections.open")
         .bearer_auth(&app_token)
         .send()
@@ -155,7 +156,8 @@ async fn slack_loop() -> Result<(), String> {
             continue;
         };
         let reply = answer(text, "Reply concisely for a Slack chat.").await;
-        let _ = mint_core::HTTP_CLIENT.clone()
+        let _ = mint_core::HTTP_CLIENT
+            .clone()
             .post("https://slack.com/api/chat.postMessage")
             .bearer_auth(&bot_token)
             .json(&json!({ "channel": channel, "text": reply }))
@@ -176,6 +178,7 @@ async fn answer(text: &str, system_instruction: &str) -> String {
             system_instruction: system_instruction.into(),
             image_data_uri: None,
             audio_data_uri: None,
+            document_attachment: None,
         },
     )
     .await

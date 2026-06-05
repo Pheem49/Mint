@@ -529,6 +529,7 @@ where
                 system_instruction: system_prompt.clone(),
                 image_data_uri: pending_image.take(),
                 audio_data_uri: None,
+                document_attachment: None,
             },
         )
         .await?;
@@ -554,6 +555,7 @@ where
                         system_instruction: system_prompt.clone(),
                         image_data_uri: None,
                         audio_data_uri: None,
+                        document_attachment: None,
                     },
                 )
                 .await?;
@@ -1648,6 +1650,7 @@ mod tests {
             system_instruction: "system".into(),
             image_data_uri: None,
             audio_data_uri: None,
+            document_attachment: None,
         };
         assert_eq!(
             enrich_request(&store, &request).unwrap().system_instruction,

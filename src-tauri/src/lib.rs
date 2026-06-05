@@ -12,6 +12,7 @@ mod updater;
 mod webhooks;
 mod workflows;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use browser::{
     BrowserTab, click as browser_click, list_tabs as browser_list_tabs,
     navigate as browser_navigate, read_page_text,
@@ -31,9 +32,9 @@ use tokio::sync::oneshot;
 
 use integrations::{channel_inventory, list_plugins};
 use mint_core::{
-    AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, ChatRequest,
-    ChatResponse, CodeEdit, CodeEditProposal, InteractionMemory, MemoryStore, MintConfig,
-    PictureEntry, TtsUrl, WeatherReport, apply_code_edits, classify_shell_command, config_path,
+    AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, ChatRequest, ChatResponse,
+    CodeEdit, CodeEditProposal, InteractionMemory, MemoryStore, MintConfig, PictureEntry, TtsUrl,
+    WeatherReport, apply_code_edits, classify_shell_command, config_path, extract_document_text,
     google_tts_urls, list_saved_pictures, load_config, load_workflows, orchestrate_agent_loop,
     orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, propose_code_edits,
     save_chat_images, save_config, weather, workflows_path,
@@ -50,6 +51,7 @@ use proactive::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use std::fs;
 use std::process::Command;
 use system::{SmartContext, smart_context};
 use tauri::{
@@ -81,6 +83,88 @@ struct RuntimeStatus {
 enum DesktopStreamEvent {
     Chunk { chunk: String },
     Progress { progress: AgentProgress },
+}
+
+const MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
+const MAX_DOCUMENT_CONTEXT_CHARS: usize = 30_000;
+
+fn request_with_document_context(
+    config: &MintConfig,
+    request: &ChatRequest,
+) -> Result<ChatRequest, String> {
+    let Some(document) = &request.document_attachment else {
+        return Ok(request.clone());
+    };
+
+    let (mime_type, encoded) = document
+        .data_uri
+        .strip_prefix("data:")
+        .and_then(|payload| payload.split_once(";base64,"))
+        .ok_or_else(|| "invalid PDF attachment data URI".to_string())?;
+
+    if !mime_type.eq_ignore_ascii_case("application/pdf") {
+        return Err("only PDF document attachments are supported".into());
+    }
+
+    let bytes = BASE64_STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("invalid PDF attachment encoding: {error}"))?;
+    if bytes.len() > MAX_DOCUMENT_BYTES {
+        return Err("PDF attachment is too large (> 10 MiB)".into());
+    }
+
+    let directory = config_path()
+        .map_err(|error| error.to_string())?
+        .with_file_name("Attachments");
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    let path = directory.join(format!(
+        "mint-pdf-{}-{}.pdf",
+        COUNTER.fetch_add(1, Ordering::SeqCst),
+        sanitize_attachment_name(&document.filename)
+    ));
+    fs::write(&path, bytes).map_err(|error| error.to_string())?;
+
+    let extracted = extract_document_text(&path, config).map_err(|error| error.to_string());
+    let _ = fs::remove_file(&path);
+    let extracted = extracted?;
+    let context = truncate_document_context(&extracted);
+    let filename = document.filename.trim();
+    let filename = if filename.is_empty() {
+        "attached.pdf"
+    } else {
+        filename
+    };
+
+    let mut enriched = request.clone();
+    enriched.document_attachment = None;
+    enriched.message = format!(
+        "{}\n\nAttached PDF: {filename}\nUse the extracted PDF text below when answering. If the user asks for a summary, summarize this document.\n\n--- Extracted PDF text ---\n{context}\n--- End extracted PDF text ---",
+        request.message
+    );
+    Ok(enriched)
+}
+
+fn truncate_document_context(text: &str) -> String {
+    let mut output: String = text.chars().take(MAX_DOCUMENT_CONTEXT_CHARS).collect();
+    if text.chars().count() > MAX_DOCUMENT_CONTEXT_CHARS {
+        output.push_str("\n\n[PDF text truncated because it is long.]");
+    }
+    output
+}
+
+fn sanitize_attachment_name(filename: &str) -> String {
+    let sanitized: String = filename
+        .chars()
+        .filter(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
+        })
+        .take(80)
+        .collect();
+    if sanitized.is_empty() {
+        "document".into()
+    } else {
+        sanitized
+    }
 }
 
 #[tauri::command]
@@ -148,41 +232,48 @@ fn inspect_shell_command(command: String) -> mint_core::ShellClassification {
 }
 
 #[tauri::command]
-async fn send_chat_message(
-    app: AppHandle,
-    request: ChatRequest,
-) -> Result<ChatResponse, String> {
+async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatResponse, String> {
     let config = load_config().map_err(|error| error.to_string())?;
-    
+    let request = request_with_document_context(&config, &request)?;
+
     if request.message.starts_with("/chat ") {
         let mut clean_request = request.clone();
         clean_request.message = request.message.strip_prefix("/chat ").unwrap().to_owned();
-        
+
         let (response, _) = orchestrate_chat_with_fallback(&config, &clean_request)
             .await
             .map_err(|error| error.to_string())?;
         return Ok(response);
     }
-    
+
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
-    let fast_mode = config.extra.get("enableFastMode").and_then(Value::as_bool).unwrap_or(false);
-    
+    let fast_mode = config
+        .extra
+        .get("enableFastMode")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
     let app_clone = app.clone();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         let (tx, rx) = oneshot::channel();
         let token = format!("tok-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
-        
+
         let state = app_clone.state::<ApprovalsState>();
         state.pending.lock().unwrap().insert(token.clone(), tx);
-        
-        app_clone.emit("tool-approval-requested", serde_json::json!({
-            "token": token,
-            "approval": approval
-        })).map_err(|e| e.to_string())?;
-        
-        let approved = tokio::task::block_in_place(move || {
-            tokio::runtime::Handle::current().block_on(rx)
-        }).unwrap_or(false);
+
+        app_clone
+            .emit(
+                "tool-approval-requested",
+                serde_json::json!({
+                    "token": token,
+                    "approval": approval
+                }),
+            )
+            .map_err(|e| e.to_string())?;
+
+        let approved =
+            tokio::task::block_in_place(move || tokio::runtime::Handle::current().block_on(rx))
+                .unwrap_or(false);
 
         if approved {
             Ok(ApprovalOutcome::Approved)
@@ -190,10 +281,10 @@ async fn send_chat_message(
             Ok(ApprovalOutcome::Denied)
         }
     };
-    
+
     let progress_cb = |_| {};
     let on_chunk = |_| {};
-    
+
     let res = orchestrate_agent_loop(
         &config,
         &request.message,
@@ -206,7 +297,7 @@ async fn send_chat_message(
     )
     .await
     .map_err(|e| e.to_string())?;
-    
+
     Ok(ChatResponse {
         provider: res.provider,
         model: res.model,
@@ -221,38 +312,49 @@ async fn stream_chat_message(
     on_event: Channel<DesktopStreamEvent>,
 ) -> Result<ChatResponse, String> {
     let config = load_config().map_err(|error| error.to_string())?;
-    
+    let request = request_with_document_context(&config, &request)?;
+
     if request.message.starts_with("/chat ") {
         let mut clean_request = request.clone();
         clean_request.message = request.message.strip_prefix("/chat ").unwrap().to_owned();
-        
-        let (response, _) = orchestrate_chat_stream_with_fallback(&config, &clean_request, |chunk| {
-            let _ = on_event.send(DesktopStreamEvent::Chunk { chunk });
-        })
-        .await
-        .map_err(|error| error.to_string())?;
+
+        let (response, _) =
+            orchestrate_chat_stream_with_fallback(&config, &clean_request, |chunk| {
+                let _ = on_event.send(DesktopStreamEvent::Chunk { chunk });
+            })
+            .await
+            .map_err(|error| error.to_string())?;
         return Ok(response);
     }
-    
+
     let root = std::env::current_dir().map_err(|e| e.to_string())?;
-    let fast_mode = config.extra.get("enableFastMode").and_then(Value::as_bool).unwrap_or(false);
-    
+    let fast_mode = config
+        .extra
+        .get("enableFastMode")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
     let app_clone = app.clone();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         let (tx, rx) = oneshot::channel();
         let token = format!("tok-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
-        
+
         let state = app_clone.state::<ApprovalsState>();
         state.pending.lock().unwrap().insert(token.clone(), tx);
-        
-        app_clone.emit("tool-approval-requested", serde_json::json!({
-            "token": token,
-            "approval": approval
-        })).map_err(|e| e.to_string())?;
-        
-        let approved = tokio::task::block_in_place(move || {
-            tokio::runtime::Handle::current().block_on(rx)
-        }).unwrap_or(false);
+
+        app_clone
+            .emit(
+                "tool-approval-requested",
+                serde_json::json!({
+                    "token": token,
+                    "approval": approval
+                }),
+            )
+            .map_err(|e| e.to_string())?;
+
+        let approved =
+            tokio::task::block_in_place(move || tokio::runtime::Handle::current().block_on(rx))
+                .unwrap_or(false);
 
         if approved {
             Ok(ApprovalOutcome::Approved)
@@ -260,12 +362,12 @@ async fn stream_chat_message(
             Ok(ApprovalOutcome::Denied)
         }
     };
-    
+
     let on_progress_event = on_event.clone();
     let progress_cb = move |progress| {
         let _ = on_progress_event.send(DesktopStreamEvent::Progress { progress });
     };
-    
+
     let on_event_clone = on_event.clone();
     let on_chunk = move |summary: String| {
         let chars: Vec<char> = summary.chars().collect();
@@ -278,7 +380,7 @@ async fn stream_chat_message(
             std::thread::sleep(std::time::Duration::from_millis(15));
         }
     };
-    
+
     let res = orchestrate_agent_loop(
         &config,
         &request.message,
@@ -291,7 +393,7 @@ async fn stream_chat_message(
     )
     .await
     .map_err(|e| e.to_string())?;
-    
+
     Ok(ChatResponse {
         provider: res.provider,
         model: res.model,
@@ -438,6 +540,11 @@ async fn run_native_plugin(name: String, instruction: String) -> Result<String, 
 #[tauri::command]
 fn capture_silent_screen() -> Result<String, String> {
     capture_screen()
+}
+
+#[tauri::command]
+fn read_clipboard_image() -> Result<String, String> {
+    desktop::read_clipboard_image()
 }
 
 #[tauri::command]
@@ -673,6 +780,7 @@ pub fn run() {
             get_integration_inventory,
             run_native_plugin,
             capture_silent_screen,
+            read_clipboard_image,
             translate_capture_region,
             get_smart_context,
             get_browser_tabs,

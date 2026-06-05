@@ -116,7 +116,8 @@ async fn fetch_pages(config: &MintConfig) -> Result<Vec<Value>, String> {
         .get("browserDebugUrl")
         .and_then(Value::as_str)
         .unwrap_or("http://127.0.0.1:9222/json/list");
-    let value: Value = mint_core::HTTP_CLIENT.clone()
+    let value: Value = mint_core::HTTP_CLIENT
+        .clone()
         .get(endpoint)
         .send()
         .await

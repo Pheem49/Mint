@@ -39,7 +39,8 @@ pub async fn auth(no_open: bool, port: u16) -> Result<()> {
     }
     println!("Waiting for Gmail OAuth callback on {redirect} ...");
     let code = wait_for_code(listener, &state)?;
-    let token: Value = mint_core::HTTP_CLIENT.clone()
+    let token: Value = mint_core::HTTP_CLIENT
+        .clone()
         .post(TOKEN_URL)
         .form(&[
             ("client_id", client_id.as_str()),

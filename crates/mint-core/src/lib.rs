@@ -39,7 +39,9 @@ pub use config::{
     set_config_value,
 };
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
-pub use knowledge::{KnowledgeError, KnowledgeHit, KnowledgeSource, KnowledgeStore};
+pub use knowledge::{
+    KnowledgeError, KnowledgeHit, KnowledgeSource, KnowledgeStore, extract_document_text,
+};
 pub use mcp::{
     McpError, McpServer, add_mcp_server, call_configured_mcp_tool, call_mcp_tool,
     clear_mcp_servers, configured_mcp_servers, list_mcp_servers, remove_mcp_server,

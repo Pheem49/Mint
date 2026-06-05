@@ -31,10 +31,29 @@ export default function ScreenPicker() {
   const [translationText, setTranslationText] = useState('')
   const [translationPos, setTranslationPos] = useState({ left: 0, top: 0, maxWidth: 400 })
 
+  const baseImageRef = useRef<HTMLImageElement | null>(null)
   const isOverlayInteractableRef = useRef(true)
+  const screenshotRequestedRef = useRef(false)
 
   // Initialize canvases and listen to screenshots
   useEffect(() => {
+    const loadScreenshot = (base64Data: string) => {
+      const img = new Image()
+      img.onload = () => {
+        baseImageRef.current = img
+        setBaseImage(img)
+        const bg = bgCanvasRef.current
+        if (bg) {
+          bg.width = window.innerWidth
+          bg.height = window.innerHeight
+          const bgCtx = bg.getContext('2d')
+          bgCtx?.drawImage(img, 0, 0, bg.width, bg.height)
+          drawDarkOverlay()
+        }
+      }
+      img.src = base64Data
+    }
+
     const handleResize = () => {
       const bg = bgCanvasRef.current
       const overlay = overlayCanvasRef.current
@@ -43,30 +62,24 @@ export default function ScreenPicker() {
         bg.height = window.innerHeight
         overlay.width = window.innerWidth
         overlay.height = window.innerHeight
-        if (baseImage) {
+        if (baseImageRef.current) {
           const bgCtx = bg.getContext('2d')
-          bgCtx?.drawImage(baseImage, 0, 0, bg.width, bg.height)
+          bgCtx?.drawImage(baseImageRef.current, 0, 0, bg.width, bg.height)
         }
         drawDarkOverlay()
       }
     }
 
     if (window.screenPickerApi) {
-      window.screenPickerApi.onScreenshot((base64Data) => {
-        const img = new Image()
-        img.onload = () => {
-          setBaseImage(img)
-          const bg = bgCanvasRef.current
-          if (bg) {
-            bg.width = window.innerWidth
-            bg.height = window.innerHeight
-            const bgCtx = bg.getContext('2d')
-            bgCtx?.drawImage(img, 0, 0, bg.width, bg.height)
-            drawDarkOverlay()
-          }
-        }
-        img.src = base64Data
-      })
+      const pendingCapture = window.sessionStorage.getItem('mint:pending-screen-capture')
+      if (pendingCapture) {
+        window.sessionStorage.removeItem('mint:pending-screen-capture')
+        screenshotRequestedRef.current = true
+        loadScreenshot(pendingCapture)
+      } else if (!screenshotRequestedRef.current) {
+        screenshotRequestedRef.current = true
+        window.screenPickerApi.onScreenshot(loadScreenshot)
+      }
 
       window.screenPickerApi.onTranslationResult((thaiText) => {
         setTranslationText(thaiText)
@@ -79,7 +92,7 @@ export default function ScreenPicker() {
     return () => {
       window.removeEventListener('resize', handleResize)
     }
-  }, [baseImage])
+  }, [])
 
   const drawDarkOverlay = () => {
     const overlay = overlayCanvasRef.current
