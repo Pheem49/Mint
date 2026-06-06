@@ -71,9 +71,9 @@ export default function ScreenPicker() {
     }
 
     if (window.screenPickerApi) {
-      const pendingCapture = window.sessionStorage.getItem('mint:pending-screen-capture')
+      const pendingCapture = window.localStorage.getItem('mint:pending-screen-capture')
       if (pendingCapture) {
-        window.sessionStorage.removeItem('mint:pending-screen-capture')
+        window.localStorage.removeItem('mint:pending-screen-capture')
         screenshotRequestedRef.current = true
         loadScreenshot(pendingCapture)
       } else if (!screenshotRequestedRef.current) {
@@ -188,13 +188,24 @@ export default function ScreenPicker() {
     if (rect.width === 0 || rect.height === 0 || !baseImage) return
     const { x, y, width: w, height: h } = normalizeRect(rect)
 
+    const bg = bgCanvasRef.current
+    if (!bg) return
+
+    const scaleX = baseImage.width / bg.width
+    const scaleY = baseImage.height / bg.height
+
+    const cropX = x * scaleX
+    const cropY = y * scaleY
+    const cropW = w * scaleX
+    const cropH = h * scaleY
+
     const cropCanvas = document.createElement('canvas')
-    cropCanvas.width = w
-    cropCanvas.height = h
+    cropCanvas.width = cropW
+    cropCanvas.height = cropH
     const cropCtx = cropCanvas.getContext('2d')
     if (!cropCtx) return
 
-    cropCtx.drawImage(baseImage, x, y, w, h, 0, 0, w, h)
+    cropCtx.drawImage(baseImage, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
     const croppedBase64 = cropCanvas.toDataURL('image/png')
 
     if (isTranslateMode) {
@@ -324,25 +335,202 @@ export default function ScreenPicker() {
   }
 
   return (
-    <>
+    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', position: 'relative', background: 'transparent' }}>
+      <style>{`
+        .vision-glow {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          box-shadow: inset 0 0 100px rgba(139, 92, 246, 0.25);
+          z-index: 5;
+          animation: vision-glow-pulse 3s ease-in-out infinite alternate;
+        }
+
+        @keyframes vision-glow-pulse {
+          from { box-shadow: inset 0 0 60px rgba(139, 92, 246, 0.15); }
+          to { box-shadow: inset 0 0 140px rgba(139, 92, 246, 0.35); }
+        }
+
+        #toolbar {
+          position: absolute;
+          top: 24px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 10;
+          background: rgba(15, 23, 42, 0.85);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          padding: 8px 20px;
+          border-radius: 999px;
+          box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          color: #f8fafc;
+          font-family: 'Outfit', 'Inter', sans-serif;
+          animation: slide-down 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes slide-down {
+          from { transform: translate(-50%, -20px); opacity: 0; }
+          to { transform: translate(-50%, 0); opacity: 1; }
+        }
+
+        .hint {
+          font-size: 0.82rem;
+          color: #94a3b8;
+          margin-right: 12px;
+          font-weight: 400;
+        }
+
+        .screen-picker-btn {
+          font-family: inherit;
+          font-size: 0.8rem;
+          font-weight: 500;
+          padding: 8px 16px;
+          border-radius: 999px;
+          border: 1px solid transparent;
+          cursor: pointer;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .screen-picker-btn:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .screen-picker-btn:active {
+          transform: translateY(0);
+        }
+
+        .btn-translate {
+          background: rgba(139, 92, 246, 0.15);
+          color: #c4b5fd;
+          border-color: rgba(139, 92, 246, 0.3);
+        }
+
+        .btn-translate:hover {
+          background: rgba(139, 92, 246, 0.3);
+          color: #f5f3ff;
+        }
+
+        .btn-translate.active {
+          background: #8b5cf6;
+          color: #ffffff;
+          border-color: #7c3aed;
+          box-shadow: 0 0 15px rgba(139, 92, 246, 0.4);
+        }
+
+        .btn-primary {
+          background: rgba(16, 185, 129, 0.15);
+          color: #a7f3d0;
+          border-color: rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-primary:hover {
+          background: rgba(16, 185, 129, 0.3);
+          color: #ecfdf5;
+        }
+
+        .btn-danger {
+          background: rgba(239, 68, 68, 0.15);
+          color: #fecaca;
+          border-color: rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-danger:hover {
+          background: rgba(239, 68, 68, 0.3);
+          color: #fef2f2;
+        }
+
+        .loading-spinner {
+          display: inline-block;
+          width: 14px;
+          height: 14px;
+          border: 2px solid rgba(255, 255, 255, 0.2);
+          border-radius: 50%;
+          border-top-color: #8b5cf6;
+          animation: picker-spin 0.8s linear infinite;
+          margin-right: 8px;
+        }
+
+        @keyframes picker-spin {
+          to { transform: rotate(360deg); }
+        }
+
+        #translation-box {
+          position: absolute;
+          background: rgba(15, 23, 42, 0.9);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          color: #f8fafc;
+          padding: 14px 18px;
+          border-radius: 12px;
+          font-family: 'Inter', sans-serif;
+          font-size: 0.9rem;
+          line-height: 1.6;
+          box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+          z-index: 100;
+          animation: fade-in 0.2s ease-out;
+        }
+
+        @keyframes fade-in {
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
+        }
+
+        .close-translate-btn {
+          position: absolute;
+          top: -10px;
+          right: -10px;
+          background: #ef4444;
+          color: white;
+          border: 2px solid rgba(15, 23, 42, 0.95);
+          border-radius: 999px;
+          min-width: 38px;
+          height: 22px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          font-size: 0.7rem;
+          font-weight: 700;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+          transition: all 0.2s;
+        }
+
+        .close-translate-btn:hover {
+          background: #dc2626;
+          transform: scale(1.05);
+        }
+      `}</style>
+
       <div className="vision-glow"></div>
       {!isContinuousTranslateActive && (
-        <div id="toolbar" style={{ display: 'flex' }}>
+        <div id="toolbar">
           <span className="hint" id="hint-text">
             {isTranslateMode ? 'Drag over text to translate to Thai' : 'Click and drag to select a region'}
           </span>
           <button
-            className={`btn btn-translate ${isTranslateMode ? 'active' : ''}`}
+            className={`screen-picker-btn btn-translate ${isTranslateMode ? 'active' : ''}`}
             onClick={handleToggleTranslateMode}
           >
             {isTranslateMode ? 'Stop Translate' : '🌐 Live Translate'}
           </button>
           {!isTranslateMode && (
-            <button className="btn btn-primary" onClick={handleFullscreen}>
+            <button className="screen-picker-btn btn-primary" onClick={handleFullscreen}>
               Full Screen
             </button>
           )}
-          <button className="btn btn-danger" onClick={handleCancel}>
+          <button className="screen-picker-btn btn-danger" onClick={handleCancel}>
             Cancel
           </button>
         </div>
@@ -380,6 +568,6 @@ export default function ScreenPicker() {
           {translationText}
         </div>
       </div>
-    </>
+    </div>
   )
 }

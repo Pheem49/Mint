@@ -657,17 +657,17 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       try {
         const image = await captureSharedScreen()
-        window.sessionStorage.setItem('mint:pending-screen-capture', image)
+        window.localStorage.setItem('mint:pending-screen-capture', image)
       } catch (reason) {
         console.warn('Screen share capture failed before opening picker:', reason)
         const image = await invoke<string>('capture_silent_screen')
-        window.sessionStorage.setItem('mint:pending-screen-capture', image)
+        window.localStorage.setItem('mint:pending-screen-capture', image)
       }
       return invoke('start_screen_capture')
     },
     onVisionReady: async (callback) => {
       const { listen } = await import('@tauri-apps/api/event')
-      void listen<string>('vision-ready', (event) => callback(event.payload))
+      return listen<string>('vision-ready', (event) => callback(event.payload))
     },
     captureSilentScreen: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
@@ -679,11 +679,11 @@ export function installTauriAdapters() {
     },
     onProactiveSuggestion: async (callback) => {
       const { listen } = await import('@tauri-apps/api/event')
-      void listen<any>('proactive-suggestion', (event) => callback(event.payload))
+      return listen<any>('proactive-suggestion', (event) => callback(event.payload))
     },
     onProactiveNotification: async (callback) => {
       const { listen } = await import('@tauri-apps/api/event')
-      void listen<any>('proactive-notification', (event) => callback(event.payload))
+      return listen<any>('proactive-notification', (event) => callback(event.payload))
     },
     toggleProactive: async (enabled) => {
       const { invoke } = await import('@tauri-apps/api/core')
@@ -697,7 +697,7 @@ export function installTauriAdapters() {
     executeApprovedAction: (action) => executeAction(action, true),
     onSpotlightToChat: async (callback) => {
       const { listen } = await import('@tauri-apps/api/event')
-      void listen<string>('spotlight-to-chat', (event) => callback(event.payload))
+      return listen<string>('spotlight-to-chat', (event) => callback(event.payload))
     },
     notifyAiResponse: () => {},
     clearAiNotifications: () => {},
@@ -713,6 +713,12 @@ export function installTauriAdapters() {
 }
 
 async function captureSharedScreen(): Promise<string> {
+  // On Linux (especially under Wayland/WebKitGTK), getDisplayMedia often returns a black screen
+  // or fails silently. Bypass it to force fallback to native screenshot commands.
+  if (navigator.userAgent.toLowerCase().includes('linux')) {
+    throw new Error('Linux detected, bypassing getDisplayMedia to use native screenshot tools')
+  }
+
   if (!navigator.mediaDevices?.getDisplayMedia) {
     throw new Error('getDisplayMedia is not available')
   }

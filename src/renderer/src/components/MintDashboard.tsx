@@ -195,11 +195,11 @@ export default function MintDashboard() {
       if (failure?.status === 'rejected') setError(errorMessage(failure.reason))
       setDashboardDataReady(true)
     })
-    window.api.onSpotlightToChat((query) => {
+    const unlistenSpotlight = window.api.onSpotlightToChat((query) => {
       setView('chat')
       setMessage(query)
     })
-    window.api.onVisionReady((image) => {
+    const unlistenVision = window.api.onVisionReady((image) => {
       setImageAttachments((current) => [...current, { dataUri: image, name: 'Screen capture' }])
     })
     window.api?.onSettingsChanged?.(applyThemeStyles)
@@ -207,6 +207,8 @@ export default function MintDashboard() {
     const unlistenPromise = listen<any>('tool-approval-requested', (event) => setPendingApproval(event.payload))
     return () => {
       unlistenPromise.then((unlisten) => unlisten())
+      unlistenSpotlight.then((unlisten) => unlisten?.())
+      unlistenVision.then((unlisten) => unlisten?.())
     }
   }, [])
 
