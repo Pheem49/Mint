@@ -341,14 +341,8 @@ export default function ScreenPicker() {
           position: absolute;
           inset: 0;
           pointer-events: none;
-          box-shadow: inset 0 0 100px rgba(139, 92, 246, 0.25);
+          box-shadow: inset 0 0 70px rgba(139, 92, 246, 0.18);
           z-index: 5;
-          animation: vision-glow-pulse 3s ease-in-out infinite alternate;
-        }
-
-        @keyframes vision-glow-pulse {
-          from { box-shadow: inset 0 0 60px rgba(139, 92, 246, 0.15); }
-          to { box-shadow: inset 0 0 140px rgba(139, 92, 246, 0.35); }
         }
 
         #toolbar {
@@ -358,8 +352,8 @@ export default function ScreenPicker() {
           transform: translateX(-50%);
           z-index: 10;
           background: rgba(15, 23, 42, 0.85);
-          backdrop-filter: blur(16px);
-          -webkit-backdrop-filter: blur(16px);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
           border: 1px solid rgba(255, 255, 255, 0.08);
           padding: 8px 20px;
           border-radius: 999px;
@@ -466,8 +460,8 @@ export default function ScreenPicker() {
         #translation-box {
           position: absolute;
           background: rgba(15, 23, 42, 0.9);
-          backdrop-filter: blur(20px);
-          -webkit-backdrop-filter: blur(20px);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
           border: 1px solid rgba(255, 255, 255, 0.1);
           color: #f8fafc;
           padding: 14px 18px;

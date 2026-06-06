@@ -45,9 +45,9 @@ body {
     width: 60px;
     height: 60px;
     border-radius: 50%;
-    filter: blur(12px);
+    filter: blur(8px);
     opacity: 0;
-    transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity 0.25s ease, transform 0.25s ease;
 }
 
 .character-body {
@@ -106,10 +106,6 @@ body {
 }
 
 /* States */
-.state-idle .character-body {
-    animation: float 4s ease-in-out infinite;
-}
-
 .state-idle .eye {
     animation: blink 4s infinite;
 }
@@ -121,10 +117,9 @@ body {
 }
 
 .state-listening .aura {
-    opacity: 0.8;
+    opacity: 0.55;
     background: radial-gradient(circle, #06b6d4, transparent);
-    animation: aura-breathe 2s ease-in-out infinite;
-    transform: scale(1.4);
+    transform: scale(1.25);
 }
 
 .state-listening .eye {
@@ -142,14 +137,12 @@ body {
 .state-thinking .character-body {
     box-shadow: 0 0 20px rgba(245, 158, 11, 0.8);
     border-color: #f59e0b;
-    animation: pulse 1.5s infinite alternate;
 }
 
 .state-thinking .aura {
-    opacity: 0.7;
+    opacity: 0.5;
     background: radial-gradient(circle, #f59e0b, transparent);
-    animation: aura-spin 3s linear infinite;
-    transform: scale(1.2);
+    transform: scale(1.18);
     border: 2px dashed rgba(245, 158, 11, 0.3);
 }
 
@@ -167,10 +160,9 @@ body {
 }
 
 .state-speaking .aura {
-    opacity: 0.6;
+    opacity: 0.48;
     background: radial-gradient(circle, #10b981, transparent);
-    animation: aura-pulse 0.5s infinite alternate;
-    transform: scale(1.3);
+    transform: scale(1.2);
 }
 
 .state-speaking .eye {
@@ -182,34 +174,9 @@ body {
     animation: speak 0.3s infinite alternate;
 }
 
-/* Animations */
-@keyframes aura-breathe {
-    0%, 100% { transform: scale(1.2); opacity: 0.5; }
-    50% { transform: scale(1.6); opacity: 0.9; }
-}
-
-@keyframes aura-spin {
-    from { transform: scale(1.2) rotate(0deg); }
-    to { transform: scale(1.2) rotate(360deg); }
-}
-
-@keyframes aura-pulse {
-    from { transform: scale(1.1); opacity: 0.4; }
-    to { transform: scale(1.4); opacity: 0.8; }
-}
-@keyframes float {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-6px); }
-}
-
 @keyframes blink {
     0%, 96%, 100% { height: 8px; }
     98% { height: 2px; }
-}
-
-@keyframes pulse {
-    0% { transform: scale(1); }
-    100% { transform: scale(1.05); }
 }
 
 @keyframes speak {

@@ -131,7 +131,14 @@ export default function ModelPanel({
         </div>
 
         <div className="model-mount" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: isLocked ? 'none' : 'auto' }}>
-          <Live2DStage scale={scale} expressionIndex={expressionIndex} accessoryIndex={accessoryIndex} isLocked={isLocked} isActive={isActive} onLoadComplete={onModelLoadComplete} />
+          <Live2DStage
+            scale={scale}
+            expressionIndex={expressionIndex}
+            accessoryIndex={accessoryIndex}
+            isLocked={isLocked}
+            isActive={isActive}
+            onLoadComplete={onModelLoadComplete}
+          />
           <div className="interaction-guide">
             <div className="interaction-zone zone-head" onClick={() => onInteract('head')}><span>Head</span></div>
             <div className="interaction-zone zone-face" onClick={() => onInteract('cheek')}><span>Cheek</span></div>

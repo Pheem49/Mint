@@ -606,8 +606,7 @@ h1 {
   width: 100%;
   max-height: 100%;
   object-fit: contain;
-  filter: drop-shadow(0 22px 34px rgba(0, 0, 0, 0.26));
-  animation: modelFloat 4.5s ease-in-out infinite;
+  filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.2));
   transition: opacity 0.6s ease-out;
 }
 
@@ -801,19 +800,8 @@ h1 {
   height: 22px;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.24);
-  filter: blur(10px);
+  filter: blur(6px);
   transform: scaleX(1.2);
-}
-
-@keyframes modelFloat {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-10px);
-  }
 }
 
 .conversation-panel {
@@ -1539,12 +1527,6 @@ input:checked + .slider:before {
 .proactive-icon {
   font-size: 0.95rem;
   flex-shrink: 0;
-  animation: proactiveGlow 2s ease-in-out infinite alternate;
-}
-
-@keyframes proactiveGlow {
-  from { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 50%, transparent)); }
-  to   { filter: drop-shadow(0 0 8px color-mix(in srgb, var(--accent-hover, var(--accent)) 90%, transparent)); }
 }
 
 .proactive-message {
@@ -2221,43 +2203,12 @@ input:checked + .slider:before {
   position: relative;
 }
 
-/* Background glows when model is hidden */
 .assistant-workspace.model-hidden::before {
-  content: '';
-  position: absolute;
-  top: 15%;
-  left: 10%;
-  width: 450px;
-  height: 450px;
-  background: radial-gradient(circle, rgba(143, 108, 245, 0.12) 0%, transparent 70%);
-  filter: blur(90px);
-  pointer-events: none;
-  z-index: 0;
-  animation: floatGlowOne 25s infinite alternate ease-in-out;
+  content: none;
 }
 
 .assistant-workspace.model-hidden::after {
-  content: '';
-  position: absolute;
-  bottom: 15%;
-  right: 10%;
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, rgba(20, 184, 166, 0.08) 0%, transparent 70%);
-  filter: blur(100px);
-  pointer-events: none;
-  z-index: 0;
-  animation: floatGlowTwo 30s infinite alternate ease-in-out;
-}
-
-@keyframes floatGlowOne {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(80px, 50px) scale(1.15); }
-}
-
-@keyframes floatGlowTwo {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(-60px, -70px) scale(0.9); }
+  content: none;
 }
 
 /* Welcome Suggestions Styling */

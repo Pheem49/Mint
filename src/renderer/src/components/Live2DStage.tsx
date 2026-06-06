@@ -33,8 +33,7 @@ const ACCESSORY_MAP: Record<number, string | null> = {
 
 const TRACKING_SPEED = 1.25
 const MAX_DEVICE_PIXEL_RATIO = 1.25
-const ACTIVE_MAX_FPS = 30
-const INACTIVE_MAX_FPS = 8
+const ACTIVE_MAX_FPS = 60
 
 const clampToUnitCircle = (x: number, y: number) => {
   if (isNaN(x) || isNaN(y) || !isFinite(x) || !isFinite(y)) {
@@ -60,12 +59,18 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
 
   const setRenderActive = (active: boolean) => {
     const app = appRef.current
+    const model = modelRef.current
     if (!app) return
 
-    app.ticker.maxFPS = active ? ACTIVE_MAX_FPS : INACTIVE_MAX_FPS
+    app.ticker.maxFPS = ACTIVE_MAX_FPS
+    if (model) {
+      model.autoUpdate = active
+      model.renderable = active
+    }
 
     if (active) {
       app.start()
+      app.render()
     } else {
       app.stop()
     }
@@ -301,7 +306,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('blur', centerFocus)
     }
-  }, [isLocked])
+  }, [isLocked, isActive])
 
   // Update expressions & accessories dynamically
   useEffect(() => {

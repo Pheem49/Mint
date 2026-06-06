@@ -1,10 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
 import { type PictureEntry, convertFileSrc } from '../tauri'
 import type { DashboardView } from './DashboardSidebar'
-
-const INITIAL_VISIBLE_PICTURES = 18
-const PICTURE_RENDER_BATCH_SIZE = 18
-const PICTURE_RENDER_BATCH_DELAY_MS = 80
 
 interface PicturesLibraryProps {
   view: DashboardView
@@ -13,31 +8,6 @@ interface PicturesLibraryProps {
 }
 
 export default function PicturesLibrary({ view, pictures, onSetView }: PicturesLibraryProps) {
-  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_PICTURES)
-  const visiblePictures = useMemo(
-    () => pictures.slice(0, visibleCount),
-    [pictures, visibleCount],
-  )
-
-  useEffect(() => {
-    if (view !== 'pictures') {
-      setVisibleCount(INITIAL_VISIBLE_PICTURES)
-      return
-    }
-
-    setVisibleCount(INITIAL_VISIBLE_PICTURES)
-  }, [view, pictures])
-
-  useEffect(() => {
-    if (view !== 'pictures' || visibleCount >= pictures.length) return
-
-    const timer = window.setTimeout(() => {
-      setVisibleCount((current) => Math.min(current + PICTURE_RENDER_BATCH_SIZE, pictures.length))
-    }, PICTURE_RENDER_BATCH_DELAY_MS)
-
-    return () => window.clearTimeout(timer)
-  }, [view, pictures.length, visibleCount])
-
   if (view !== 'pictures') return null
 
   return (
@@ -63,7 +33,7 @@ export default function PicturesLibrary({ view, pictures, onSetView }: PicturesL
         </div>
       ) : (
         <div className="pictures-grid">
-          {visiblePictures.map((picture, index) => (
+          {pictures.map((picture, index) => (
             <article className="picture-card" key={picture.id}>
               <img src={convertFileSrc(picture.thumbnailPath || picture.thumbnailUrl || picture.path)} alt={picture.message || picture.filename} loading={index < 6 ? 'eager' : 'lazy'} decoding="async" />
               <div className="picture-card-meta"><span>{picture.message || picture.filename}</span></div>
