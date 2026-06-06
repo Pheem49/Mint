@@ -25,6 +25,14 @@ mod setup;
 mod skills;
 mod updater;
 
+const RESET: &str = "\x1b[0m";
+const MINT: &str = "\x1b[32m";
+const BLUE: &str = "\x1b[38;2;78;201;216m";
+const DIM: &str = "\x1b[90m";
+const ERROR: &str = "\x1b[31m";
+const WARN: &str = "\x1b[33m";
+const COMPOSER_BG: &str = "\x1b[48;2;35;39;45m";
+
 async fn run_code_agent_with_saved_image(
     task: &str,
     current_dir: &Path,
@@ -200,6 +208,10 @@ enum McpCommand {
     List,
     Remove {
         name: String,
+    },
+    Allow {
+        server: String,
+        tool: String,
     },
     Clear,
     Call {
@@ -514,6 +526,13 @@ async fn main() -> Result<()> {
                             "not found"
                         }
                     )
+                }
+                McpCommand::Allow { server, tool } => {
+                    if mcp::allow(&server, &tool)? {
+                        println!("allowed {server}/{tool}");
+                    } else {
+                        println!("already allowed {server}/{tool}");
+                    }
                 }
                 McpCommand::Clear => {
                     mcp::clear()?;
@@ -902,11 +921,11 @@ async fn main() -> Result<()> {
 async fn launch_mint_target(target: String) -> Result<()> {
     match target.as_str() {
         "cli" => {
-            println!("\x1b[32mStarting CLI Interactive Chat Assistant...\x1b[0m\n");
+            println!("{MINT}Starting CLI Interactive Chat Assistant...{RESET}\n");
             run_interactive_chat().await?;
         }
         "desktop" => {
-            println!("\x1b[32mLaunching Desktop App (npm run tauri:dev)... \x1b[0m\n");
+            println!("{MINT}Launching Desktop App (npm run tauri:dev)... {RESET}\n");
             let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .parent()
                 .and_then(|p| p.parent())
@@ -919,7 +938,7 @@ async fn launch_mint_target(target: String) -> Result<()> {
         }
         "web" => {
             println!(
-                "\x1b[32mLaunching Web App (vite) in background... (Vite Dev UI at http://localhost:9000)\x1b[0m"
+                "{MINT}Launching Web App (vite) in background...{RESET} {DIM}(Vite Dev UI at http://localhost:9000){RESET}"
             );
             let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .parent()
@@ -933,14 +952,14 @@ async fn launch_mint_target(target: String) -> Result<()> {
                 .spawn()
                 .map_err(|e| anyhow::anyhow!("Failed to launch web app: {e}"))?;
 
-            println!("\x1b[32mStarting local API server in foreground on port 3000...\x1b[0m\n");
+            println!("{MINT}Starting local API server in foreground on port 3000...{RESET}\n");
             let local_ip_msg = if let Some(ip) = mint_core::api_server::get_local_ip() {
                 format!("http://localhost:9000 (or http://{}:9000 from mobile)", ip)
             } else {
                 "http://localhost:9000".to_string()
             };
             println!(
-                "\x1b[36m👉 Please open \x1b[1;36m{}\x1b[0m\x1b[36m in your web browser to access the Mint Web UI!\x1b[0m\n",
+                "{BLUE}Please open {RESET}{}{BLUE} in your web browser to access the Mint Web UI.{RESET}\n",
                 local_ip_msg
             );
             mint_core::start_api_server(3000).await?;
@@ -1061,34 +1080,25 @@ fn execute_action(action: &str, config: &MintConfig) -> Result<()> {
         let args = args.trim();
         match cmd {
             "open" => {
-                println!("\x1b[33m⚡ System Action: Opening {}...\x1b[0m\n", args);
+                println!("{WARN}System action:{RESET} opening {args}...\n");
                 open_system_handler(args)?;
             }
             "open-app" => {
-                println!(
-                    "\x1b[33m⚡ System Action: Launching App {}...\x1b[0m\n",
-                    args
-                );
+                println!("{WARN}System action:{RESET} launching app {args}...\n");
                 launch_desktop_app(args)?;
             }
             "read-file" => {
-                println!(
-                    "\x1b[33m⚡ System Action: Reading File {}...\x1b[0m\n",
-                    args
-                );
+                println!("{WARN}System action:{RESET} reading file {args}...\n");
                 let path = PathBuf::from(args);
                 read_file_content(&path)?;
             }
             "read-folder" => {
-                println!(
-                    "\x1b[33m⚡ System Action: Reading Folder {}...\x1b[0m\n",
-                    args
-                );
+                println!("{WARN}System action:{RESET} reading folder {args}...\n");
                 let path = PathBuf::from(args);
                 read_folder_content(&path)?;
             }
             "run-shell" => {
-                println!("\x1b[33mSystem Action: Run local shell command\x1b[0m");
+                println!("{WARN}System action:{RESET} run local shell command");
                 println!("  {args}");
                 if confirm_shell_execution()? {
                     let output = run_shell_command(args, &std::env::current_dir()?, true, config)?;
@@ -1098,20 +1108,17 @@ fn execute_action(action: &str, config: &MintConfig) -> Result<()> {
                 }
             }
             _ => {
-                println!(
-                    "\x1b[31m⚠️ Unknown System Action: {} with args {}\x1b[0m\n",
-                    cmd, args
-                );
+                println!("{ERROR}Unknown system action:{RESET} {cmd} with args {args}\n");
             }
         }
     } else {
         match trimmed {
             "read-folder" => {
-                println!("\x1b[33m⚡ System Action: Reading Folder . ...\x1b[0m\n");
+                println!("{WARN}System action:{RESET} reading folder . ...\n");
                 read_folder_content(&PathBuf::from("."))?;
             }
             _ => {
-                println!("\x1b[31m⚠️ Invalid Action format: {}\x1b[0m\n", trimmed);
+                println!("{ERROR}Invalid action format:{RESET} {trimmed}\n");
             }
         }
     }
@@ -1159,9 +1166,9 @@ async fn handle_slash_command(
 
     match cmd {
         "/help" => {
-            println!("\n\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-            println!("\x1b[32m  Mint Interactive Commands\x1b[0m");
-            println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+            println!("\n{BLUE}────────────────────────────────────────────{RESET}");
+            println!("{MINT}  Mint Interactive Commands{RESET}");
+            println!("{BLUE}────────────────────────────────────────────{RESET}");
             let commands = [
                 ("/help", "Show this help"),
                 ("/fast [on|off]", "Toggle fast mode (hide thinking traces)"),
@@ -1176,12 +1183,14 @@ async fn handle_slash_command(
                 ("/memory clear", "Clear all interactions"),
                 ("/memory get <key>", "Read a profile value"),
                 ("/memory set <key> <val>", "Store a profile value"),
+                ("/mcp list", "List configured MCP servers"),
+                ("/mcp allow <server> <tool>", "Allow an MCP tool"),
                 ("/stats", "Show session statistics"),
                 ("/exit | /quit", "Exit Mint"),
                 ("/code <task>", "Run in code-agent mode"),
             ];
             for (cmd_name, desc) in &commands {
-                println!("  \x1b[33m{:<30}\x1b[0m {}", cmd_name, desc);
+                println!("  {MINT}{:<30}{RESET} {DIM}{}{RESET}", cmd_name, desc);
             }
             println!();
             Some(SlashResult::Handled)
@@ -1193,26 +1202,26 @@ async fn handle_slash_command(
                 "on" => true,
                 "" => !session.fast_mode,
                 _ => {
-                    println!("\x1b[33m/fast usage: /fast [on|off]\x1b[0m");
+                    println!("{WARN}/fast usage: /fast [on|off]{RESET}");
                     return Some(SlashResult::Handled);
                 }
             };
             if session.fast_mode {
-                println!("\x1b[90m[Fast] mode ON — thinking traces hidden\x1b[0m\n");
+                println!("{DIM}[Fast] mode ON — thinking traces hidden{RESET}\n");
             } else {
-                println!("\x1b[90m[Fast] mode OFF\x1b[0m\n");
+                println!("{DIM}[Fast] mode OFF{RESET}\n");
             }
             Some(SlashResult::Handled)
         }
 
         "/models" => {
             if rest.is_empty() {
-                println!("\n\x1b[36mConfigured providers:\x1b[0m");
+                println!("\n{BLUE}Configured providers:{RESET}");
                 for p in session.config.available_providers() {
                     let active = if p == session.config.ai_provider.as_str() {
-                        " \x1b[32m← active\x1b[0m"
+                        format!(" {MINT}← active{RESET}")
                     } else {
-                        ""
+                        String::new()
                     };
                     println!("  {p}{active}");
                 }
@@ -1220,7 +1229,7 @@ async fn handle_slash_command(
             } else {
                 session.config.ai_provider = rest.to_owned();
                 println!(
-                    "\x1b[90mSwitched to provider: {}\x1b[0m\n",
+                    "{DIM}Switched to provider: {}{RESET}\n",
                     session.config.ai_provider
                 );
             }
@@ -1232,28 +1241,28 @@ async fn handle_slash_command(
             if let Ok(true) = confirm("Clear conversation history? [y/N] ") {
                 if let Ok(memory) = MemoryStore::open_default() {
                     match memory.clear_interactions() {
-                        Ok(count) => println!("\x1b[90mCleared {count} interactions.\x1b[0m"),
-                        Err(error) => println!("\x1b[31mMemory error: {error}\x1b[0m"),
+                        Ok(count) => println!("{DIM}Cleared {count} interactions.{RESET}"),
+                        Err(error) => println!("{ERROR}Memory error:{RESET} {error}"),
                     }
                 }
-                println!("\x1b[90mConversation context cleared.\x1b[0m\n");
+                println!("{DIM}Conversation context cleared.{RESET}\n");
             }
             Some(SlashResult::Handled)
         }
 
         "/cd" => {
             if rest.is_empty() {
-                println!("\x1b[33m/cd requires a path\x1b[0m\n");
+                println!("{WARN}/cd requires a path{RESET}\n");
             } else {
                 let new_dir = PathBuf::from(rest);
                 if new_dir.is_dir() {
                     session.current_dir = new_dir.canonicalize().unwrap_or(new_dir);
                     println!(
-                        "\x1b[90mWorkspace: {}\x1b[0m\n",
+                        "{DIM}Workspace: {}{RESET}\n",
                         format_path_with_tilde(&session.current_dir)
                     );
                 } else {
-                    println!("\x1b[31mDirectory not found: {rest}\x1b[0m\n");
+                    println!("{ERROR}Directory not found:{RESET} {rest}\n");
                 }
             }
             Some(SlashResult::Handled)
@@ -1266,7 +1275,7 @@ async fn handle_slash_command(
                 .unwrap_or((rest, ""));
 
             if img_path.is_empty() {
-                println!("\x1b[33m/image usage: /image <path> [prompt]\x1b[0m\n");
+                println!("{WARN}/image usage: /image <path> [prompt]{RESET}\n");
                 return Some(SlashResult::Handled);
             }
             match image::load_image_as_data_uri(std::path::Path::new(img_path)) {
@@ -1278,16 +1287,14 @@ async fn handle_slash_command(
                         session.pending_image = Some(uri);
                     }
                     if prompt.is_empty() {
-                        println!(
-                            "\x1b[90mImage attached — type your prompt and press Enter\x1b[0m\n"
-                        );
+                        println!("{DIM}Image attached — type your prompt and press Enter{RESET}\n");
                         Some(SlashResult::Handled)
                     } else {
                         Some(SlashResult::ForwardToAgent(prompt.to_owned()))
                     }
                 }
                 Err(e) => {
-                    println!("\x1b[31mFailed to load image: {e}\x1b[0m\n");
+                    println!("{ERROR}Failed to load image:{RESET} {e}\n");
                     Some(SlashResult::Handled)
                 }
             }
@@ -1303,7 +1310,7 @@ async fn handle_slash_command(
                 }
                 if rest.is_empty() {
                     println!(
-                        "\x1b[90mClipboard image attached — type your prompt and press Enter\x1b[0m\n"
+                        "{DIM}Clipboard image attached — type your prompt and press Enter{RESET}\n"
                     );
                     Some(SlashResult::Handled)
                 } else {
@@ -1311,18 +1318,18 @@ async fn handle_slash_command(
                 }
             }
             Ok(None) => {
-                println!("\x1b[33mNo image found in clipboard.\x1b[0m\n");
+                println!("{WARN}No image found in clipboard.{RESET}\n");
                 Some(SlashResult::Handled)
             }
             Err(e) => {
-                println!("\x1b[31mClipboard error: {e}\x1b[0m\n");
+                println!("{ERROR}Clipboard error:{RESET} {e}\n");
                 Some(SlashResult::Handled)
             }
         },
 
         "/learn" => {
             if rest.is_empty() {
-                println!("\x1b[33m/learn usage: /learn <path>\x1b[0m\n");
+                println!("{WARN}/learn usage: /learn <path>{RESET}\n");
             } else {
                 let path = PathBuf::from(rest);
                 let path = if path.is_absolute() {
@@ -1332,10 +1339,10 @@ async fn handle_slash_command(
                 };
                 match skills::learn(&path) {
                     Ok(skill) => println!(
-                        "\x1b[90mLearned skill: {} ({})\x1b[0m\n",
+                        "{DIM}Learned skill: {} ({}){RESET}\n",
                         skill.name, skill.source_path
                     ),
-                    Err(error) => println!("\x1b[31mLearn error: {error}\x1b[0m\n"),
+                    Err(error) => println!("{ERROR}Learn error:{RESET} {error}\n"),
                 }
             }
             Some(SlashResult::Handled)
@@ -1345,7 +1352,7 @@ async fn handle_slash_command(
             let memory = match MemoryStore::open_default() {
                 Ok(m) => m,
                 Err(e) => {
-                    println!("\x1b[31mMemory error: {e}\x1b[0m\n");
+                    println!("{ERROR}Memory error:{RESET} {e}\n");
                     return Some(SlashResult::Handled);
                 }
             };
@@ -1357,12 +1364,12 @@ async fn handle_slash_command(
                 "list" | "" => match memory.recent_interactions(10) {
                     Ok(items) => {
                         if items.is_empty() {
-                            println!("\x1b[90mNo interactions yet.\x1b[0m\n");
+                            println!("{DIM}No interactions yet.{RESET}\n");
                         } else {
-                            println!("\n\x1b[36mRecent interactions:\x1b[0m");
+                            println!("\n{BLUE}Recent interactions:{RESET}");
                             for item in items.iter().rev() {
                                 println!(
-                                    "  \x1b[90m[{}]\x1b[0m \x1b[36mYou:\x1b[0m {}",
+                                    "  {DIM}[{}]{RESET} {BLUE}You:{RESET} {}",
                                     &item.created_at[..16.min(item.created_at.len())],
                                     if item.user_text.len() > 80 {
                                         format!("{}…", &item.user_text[..80])
@@ -1374,16 +1381,16 @@ async fn handle_slash_command(
                             println!();
                         }
                     }
-                    Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                    Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
                 "get" => {
                     if args.is_empty() {
-                        println!("\x1b[33m/memory get <key>\x1b[0m\n");
+                        println!("{WARN}/memory get <key>{RESET}\n");
                     } else {
                         match memory.get_profile(args) {
                             Ok(Some(val)) => println!("{val}\n"),
-                            Ok(None) => println!("\x1b[90m(not set)\x1b[0m\n"),
-                            Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                            Ok(None) => println!("{DIM}(not set){RESET}\n"),
+                            Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                         }
                     }
                 }
@@ -1393,35 +1400,75 @@ async fn handle_slash_command(
                         .map(|(k, v)| (k, v.trim()))
                         .unwrap_or((args, ""));
                     if key.is_empty() {
-                        println!("\x1b[33m/memory set <key> <value>\x1b[0m\n");
+                        println!("{WARN}/memory set <key> <value>{RESET}\n");
                     } else {
                         match memory.set_profile(key, val) {
-                            Ok(()) => println!("\x1b[90mStored {key}.\x1b[0m\n"),
-                            Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                            Ok(()) => println!("{DIM}Stored {key}.{RESET}\n"),
+                            Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                         }
                     }
                 }
                 "skills" => match memory.learned_skills(20) {
                     Ok(skills) => {
                         if skills.is_empty() {
-                            println!("\x1b[90mNo learned skills.\x1b[0m\n");
+                            println!("{DIM}No learned skills.{RESET}\n");
                         } else {
-                            println!("\n\x1b[36mLearned skills:\x1b[0m");
+                            println!("\n{BLUE}Learned skills:{RESET}");
                             for s in &skills {
                                 println!("  [{}] {} — {}", s.id, s.name, s.source_path);
                             }
                             println!();
                         }
                     }
-                    Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                    Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
                 "clear" => match memory.clear_interactions() {
-                    Ok(count) => println!("\x1b[90mCleared {count} interactions.\x1b[0m\n"),
-                    Err(e) => println!("\x1b[31mError: {e}\x1b[0m\n"),
+                    Ok(count) => println!("{DIM}Cleared {count} interactions.{RESET}\n"),
+                    Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
                 _ => println!(
-                    "\x1b[33m/memory usage: list | clear | get <key> | set <key> <val> | skills\x1b[0m\n"
+                    "{WARN}/memory usage: list | clear | get <key> | set <key> <val> | skills{RESET}\n"
                 ),
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/mcp" => {
+            let (subcmd, args) = rest
+                .split_once(char::is_whitespace)
+                .map(|(c, a)| (c, a.trim()))
+                .unwrap_or((rest, ""));
+            match subcmd {
+                "list" | "" => match mcp::list() {
+                    Ok(servers) if servers.is_empty() => {
+                        println!("{DIM}No MCP servers configured.{RESET}\n");
+                    }
+                    Ok(servers) => {
+                        println!("\n{BLUE}MCP servers:{RESET}");
+                        match serde_json::to_string_pretty(&servers) {
+                            Ok(json) => println!("{json}\n"),
+                            Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                        }
+                    }
+                    Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                },
+                "allow" => {
+                    let mut parts = args.split_whitespace();
+                    let server = parts.next();
+                    let tool = parts.next();
+                    if let (Some(server), Some(tool)) = (server, tool) {
+                        match mcp::allow(server, tool) {
+                            Ok(true) => println!("{DIM}Allowed MCP tool: {server}/{tool}{RESET}\n"),
+                            Ok(false) => {
+                                println!("{DIM}MCP tool already allowed: {server}/{tool}{RESET}\n")
+                            }
+                            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                        }
+                    } else {
+                        println!("{WARN}/mcp allow usage: <server> <tool>{RESET}\n");
+                    }
+                }
+                _ => println!("{WARN}/mcp usage: list | allow <server> <tool>{RESET}\n"),
             }
             Some(SlashResult::Handled)
         }
@@ -1433,8 +1480,8 @@ async fn handle_slash_command(
                 .and_then(|m| m.recent_interactions(1000))
                 .map(|v| v.len())
                 .unwrap_or(0);
-            println!("\n\x1b[36m─ Session Stats ─────────────────────────\x1b[0m");
-            println!("  Provider : \x1b[32m{provider}\x1b[0m");
+            println!("\n{BLUE}─ Session Stats ─────────────────────────{RESET}");
+            println!("  Provider : {MINT}{provider}{RESET}");
             println!("  Model    : {model}");
             println!(
                 "  Workspace: {}",
@@ -1448,9 +1495,9 @@ async fn handle_slash_command(
             if let Some(ref img_data) = session.pending_image {
                 let count = img_data.split_whitespace().count();
                 if count > 1 {
-                    println!("  Images   : \x1b[33m{} images attached\x1b[0m", count);
+                    println!("  Images   : {WARN}{} images attached{RESET}", count);
                 } else {
-                    println!("  Image    : \x1b[33mattached\x1b[0m");
+                    println!("  Image    : {WARN}attached{RESET}");
                 }
             }
             println!();
@@ -1461,7 +1508,7 @@ async fn handle_slash_command(
 
         "/code" => {
             if rest.is_empty() {
-                println!("\x1b[33m/code requires a task description\x1b[0m\n");
+                println!("{WARN}/code requires a task description{RESET}\n");
                 Some(SlashResult::Handled)
             } else {
                 Some(SlashResult::ForwardToAgent(format!("[code] {rest}")))
@@ -1511,42 +1558,42 @@ async fn run_interactive_chat() -> Result<()> {
 
     if term_width >= ascii_width + spacing + box_width {
         println!(
-            "\x1b[32m __  __ _       _    ___ _    ___ \x1b[0m   \x1b[37m╭{}╮\x1b[0m",
+            "{MINT} __  __ _       _    ___ _    ___ {RESET}   {DIM}╭{}╮{RESET}",
             "─".repeat(border_len)
         );
         println!(
-            "\x1b[32m|  \\/  (_)_ __ | |_ / __| |  |_ _|\x1b[0m   \x1b[37m│\x1b[0m \x1b[32m[Mint]\x1b[0m v{} | Active AI: {}{} \x1b[37m│\x1b[0m",
+            "{MINT}|  \\/  (_)_ __ | |_ / __| |  |_ _|{RESET}   {DIM}│{RESET} {MINT}[Mint]{RESET} v{} | Active AI: {}{} {DIM}│{RESET}",
             version,
             provider,
             " ".repeat(content_width - len1)
         );
         println!(
-            "\x1b[32m| |\\/| | | '_ \\|  _| (__| |__ | | \x1b[0m   \x1b[37m│\x1b[0m {}{} \x1b[37m│\x1b[0m",
+            "{MINT}| |\\/| | | '_ \\|  _| (__| |__ | | {RESET}   {DIM}│{RESET} {DIM}{}{}{RESET} {DIM}│{RESET}",
             line2_text,
             " ".repeat(content_width - len2)
         );
         println!(
-            "\x1b[32m|_|  |_|_|_| |_|\\__|\\___|\\___|___|\x1b[0m   \x1b[37m╰{}╯\x1b[0m",
+            "{MINT}|_|  |_|_|_| |_|\\__|\\___|\\___|___|{RESET}   {DIM}╰{}╯{RESET}",
             "─".repeat(border_len)
         );
     } else {
-        println!("\x1b[37m╭{}╮\x1b[0m", "─".repeat(border_len));
+        println!("{DIM}╭{}╮{RESET}", "─".repeat(border_len));
         println!(
-            "\x1b[37m│\x1b[0m \x1b[32m[Mint]\x1b[0m v{} | Active AI: {}{} \x1b[37m│\x1b[0m",
+            "{DIM}│{RESET} {MINT}[Mint]{RESET} v{} | Active AI: {}{} {DIM}│{RESET}",
             version,
             provider,
             " ".repeat(content_width - len1)
         );
         println!(
-            "\x1b[37m│\x1b[0m {}{} \x1b[37m│\x1b[0m",
+            "{DIM}│{RESET} {DIM}{}{}{RESET} {DIM}│{RESET}",
             line2_text,
             " ".repeat(content_width - len2)
         );
-        println!("\x1b[37m╰{}╯\x1b[0m", "─".repeat(border_len));
-        println!("\x1b[32m __  __ _       _    ___ _    ___ \x1b[0m");
-        println!("\x1b[32m|  \\/  (_)_ __ | |_ / __| |  |_ _|\x1b[0m");
-        println!("\x1b[32m| |\\/| | | '_ \\|  _| (__| |__ | | \x1b[0m");
-        println!("\x1b[32m|_|  |_|_|_| |_|\\__|\\___|\\___|___|\\x1b[0m");
+        println!("{DIM}╰{}╯{RESET}", "─".repeat(border_len));
+        println!("{MINT} __  __ _       _    ___ _    ___ {RESET}");
+        println!("{MINT}|  \\/  (_)_ __ | |_ / __| |  |_ _|{RESET}");
+        println!("{MINT}| |\\/| | | '_ \\|  _| (__| |__ | | {RESET}");
+        println!("{MINT}|_|  |_|_|_| |_|\\__|\\___|\\___|___|{RESET}");
     }
     println!("Type naturally or /help for commands. Ctrl+V pastes images. Ctrl+D exits.\n");
 
@@ -1598,7 +1645,7 @@ async fn run_interactive_chat() -> Result<()> {
                     )
                     .await
                     {
-                        println!("\x1b[31mError:\x1b[0m {error}\n");
+                        println!("{ERROR}Error:{RESET} {error}\n");
                     }
                     continue;
                 }
@@ -1619,7 +1666,7 @@ async fn run_interactive_chat() -> Result<()> {
                 )
                 .await
                 {
-                    println!("\x1b[31mError:\x1b[0m {error}\n");
+                    println!("{ERROR}Error:{RESET} {error}\n");
                 }
                 continue;
             }
@@ -1637,7 +1684,7 @@ async fn run_interactive_chat() -> Result<()> {
                 )
                 .await
                 {
-                    println!("\x1b[31mError:\x1b[0m {error}\n");
+                    println!("{ERROR}Error:{RESET} {error}\n");
                 }
                 continue;
             }
@@ -1650,7 +1697,7 @@ async fn run_interactive_chat() -> Result<()> {
                 .to_owned();
 
             println!();
-            print!("\x1b[32mMint:\x1b[0m \x1b[90mThinking...\x1b[0m");
+            print!("{MINT}Mint:{RESET} {DIM}Thinking...{RESET}");
             let _ = io::stdout().flush();
 
             let mut system_instruction = format!(
@@ -1692,7 +1739,7 @@ async fn run_interactive_chat() -> Result<()> {
                 |chunk| {
                     if first_chunk {
                         first_chunk = false;
-                        print!("\r\x1b[2K\x1b[32mMint:\x1b[0m ");
+                        print!("\r\x1b[2K{MINT}Mint:{RESET} ");
                     }
                     filter.process_chunk(&chunk, |text| {
                         print!("{}", text);
@@ -1720,21 +1767,21 @@ async fn run_interactive_chat() -> Result<()> {
                         // Show provider badge (with fallback indicator if applicable)
                         let badge = if let Some(fb_provider) = &fallback {
                             format!(
-                                "\x1b[90m{} • {} → fallback: {} • {}\x1b[0m",
+                                "{DIM}{} • {} → fallback: {} • {}{RESET}",
                                 session.config.ai_provider,
                                 active_model(&session.config.ai_provider, &session.config),
                                 fb_provider,
                                 response.model
                             )
                         } else {
-                            format!("\x1b[90m{} • {}\x1b[0m", response.provider, response.model)
+                            format!("{DIM}{} • {}{RESET}", response.provider, response.model)
                         };
                         println!("{badge}");
-                        println!("\x1b[90m{}\x1b[0m\n", "─".repeat(width));
+                        println!("{DIM}{}{RESET}\n", "─".repeat(width));
                     }
                     for action in actions {
                         if let Err(e) = execute_action(&action, &session.config) {
-                            println!("\x1b[31mError executing action:\x1b[0m {}\n", e);
+                            println!("{ERROR}Error executing action:{RESET} {e}\n");
                         }
                     }
                 }
@@ -1742,7 +1789,7 @@ async fn run_interactive_chat() -> Result<()> {
                     if first_chunk {
                         print!("\r\x1b[2K");
                     }
-                    println!("\x1b[31mError:\x1b[0m {}\n", e);
+                    println!("{ERROR}Error:{RESET} {e}\n");
                 }
             }
         } else {
@@ -1764,6 +1811,7 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/paste", "Attach image from clipboard"),
     ("/learn", "Import persistent skill/instruction"),
     ("/memory", "Manage long-term memory store"),
+    ("/mcp", "List configured MCP servers"),
     ("/stats", "Show session statistics"),
     ("/exit", "Exit Mint CLI"),
     ("/quit", "Exit Mint CLI"),
@@ -1785,7 +1833,7 @@ fn draw_input_box(
     let content_max_len = input_width.saturating_sub(prefix.chars().count());
 
     let display_str = if input.is_empty() {
-        format!("\x1b[90m{}\x1b[39m", placeholder)
+        format!("{DIM}{}\x1b[39m", placeholder)
     } else {
         input.to_string()
     };
@@ -1800,14 +1848,14 @@ fn draw_input_box(
     let padding = " ".repeat(pad_len);
     let blank_line = " ".repeat(input_width);
 
-    println!(" \x1b[48;2;65;69;77m{}\x1b[0m", blank_line);
+    println!(" {COMPOSER_BG}{blank_line}{RESET}");
     println!(
-        " \x1b[48;2;65;69;77m{}{}{}\x1b[0m",
+        " {COMPOSER_BG}{MINT}{}{RESET}{COMPOSER_BG}{}{}{RESET}",
         prefix, display_str, padding
     );
-    println!(" \x1b[48;2;65;69;77m{}\x1b[0m", blank_line);
+    println!(" {COMPOSER_BG}{blank_line}{RESET}");
 
-    let agent_str = format!(" [Agent] \x1b[33m{}\x1b[0m", model);
+    let agent_str = format!(" {DIM}[Agent]{RESET} {MINT}{}{RESET}", model);
     let path_label = format!("path: {}", path_str);
     let agent_visible_len = " [Agent] ".len() + model.chars().count();
     let path_visible_len = path_label.chars().count();
@@ -1815,7 +1863,10 @@ fn draw_input_box(
     let status_pad_len = (width - 1).saturating_sub(agent_visible_len + path_visible_len);
     let status_padding = " ".repeat(status_pad_len);
 
-    print!("{}{}{}", agent_str, status_padding, path_label);
+    print!(
+        "{}{}{}{}{}",
+        agent_str, status_padding, DIM, path_label, RESET
+    );
 
     // Compute and draw suggestions
     let search_query = tab_base_input.unwrap_or(input);
@@ -1829,16 +1880,13 @@ fn draw_input_box(
         if !matches.is_empty() {
             match_count = matches.len();
             println!();
-            println!(" \x1b[36mSuggestions:\x1b[0m");
+            println!(" {BLUE}Suggestions{RESET}");
             let highlight_idx = tab_index.map(|idx| idx % matches.len());
             for (i, (cmd, desc)) in matches.iter().enumerate() {
                 if Some(i) == highlight_idx {
-                    println!(
-                        "  \x1b[32m▶\x1b[0m \x1b[1;33m{:<12}\x1b[0m \x1b[90m-\x1b[0m \x1b[1;37m{}\x1b[0m",
-                        cmd, desc
-                    );
+                    println!("  {BLUE}▶ {:<12}{RESET} {DIM}- {}{RESET}", cmd, desc);
                 } else {
-                    println!("    \x1b[33m{:<12}\x1b[0m \x1b[90m-\x1b[0m {}", cmd, desc);
+                    println!("    {DIM}{:<12} - {}{RESET}", cmd, desc);
                 }
             }
         }
@@ -1958,7 +2006,7 @@ fn read_line_interactive(
                                 ctrl_d_pressed = true;
                                 disable_raw_mode()?;
                                 print!(
-                                    "\r\x1b[3B\r\x1b[2K\x1b[33mPress Ctrl+D again to exit\x1b[0m\x1b[3A"
+                                    "\r\x1b[3B\r\x1b[2K{WARN}Press Ctrl+D again to exit{RESET}\x1b[3A"
                                 );
                                 print!("\x1b[{}G", input_cursor_column(&input_chars, cursor_pos));
                                 let _ = io::stdout().flush();
@@ -2199,7 +2247,7 @@ fn read_line_interactive(
                             disable_raw_mode()?;
                             clear_input_box();
                             let input_str: String = input_chars.iter().collect();
-                            println!("\x1b[36mYou ›\x1b[0m {}", input_str);
+                            println!("{BLUE}You ›{RESET} {}", input_str);
                             let _ = io::stdout().flush();
                             break Some(InteractiveInput {
                                 text: input_str,
@@ -2380,7 +2428,7 @@ fn read_folder_content(path: &std::path::Path) -> Result<()> {
         let file_name_str = file_name.to_string_lossy();
         let metadata = entry.metadata()?;
         if metadata.is_dir() {
-            println!("\x1b[34m{}/\x1b[0m", file_name_str);
+            println!("{MINT}{}/{}", file_name_str, RESET);
         } else {
             println!("{}", file_name_str);
         }
@@ -2399,7 +2447,7 @@ pub fn confirm(prompt: &str) -> Result<bool> {
         .to_string();
 
     if SESSION_APPROVED.load(std::sync::atomic::Ordering::Relaxed) {
-        println!("{} \x1b[32mApprove (session-wide)\x1b[0m", clean_prompt);
+        println!("{} {MINT}Approve (session-wide){RESET}", clean_prompt);
         return Ok(true);
     }
 
@@ -2427,9 +2475,9 @@ pub fn confirm(prompt: &str) -> Result<bool> {
     let print_choices = |selected: usize| -> Result<()> {
         for (i, opt) in options.iter().enumerate() {
             if i == selected {
-                println!("  \x1b[36m❯ {}. {}\x1b[0m", i + 1, opt);
+                println!("  {BLUE}❯ {}. {}{RESET}", i + 1, opt);
             } else {
-                println!("    {}. {}", i + 1, opt);
+                println!("    {DIM}{}. {}{RESET}", i + 1, opt);
             }
         }
         io::stdout().flush()?;
@@ -2522,9 +2570,9 @@ pub fn confirm(prompt: &str) -> Result<bool> {
     print!("\x1b[{}A\x1b[J", options.len() + 1);
 
     let result_str = match choice {
-        0 => "\x1b[32mApprove\x1b[0m",
-        1 => "\x1b[32mApprove this session\x1b[0m",
-        _ => "\x1b[31mNo\x1b[0m",
+        0 => format!("{MINT}Approve{RESET}"),
+        1 => format!("{MINT}Approve this session{RESET}"),
+        _ => format!("{ERROR}No{RESET}"),
     };
     println!("{} {}", clean_prompt, result_str);
     let _ = io::stdout().flush();
@@ -2554,7 +2602,7 @@ fn print_shell_output(output: &mint_core::ShellOutput) {
         println!();
     }
     println!(
-        "\x1b[90m[exit: {} | sandboxed: {}]\x1b[0m\n",
+        "{DIM}[exit: {} | sandboxed: {}]{RESET}\n",
         output
             .status
             .map_or_else(|| "unknown".into(), |status| status.to_string()),

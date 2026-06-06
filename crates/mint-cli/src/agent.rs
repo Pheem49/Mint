@@ -12,6 +12,12 @@ use mint_core::{
     orchestrate_agent_loop,
 };
 
+const RESET: &str = "\x1b[0m";
+const MINT: &str = "\x1b[32m";
+const BLUE: &str = "\x1b[38;2;78;201;216m";
+const DIM: &str = "\x1b[90m";
+const BRIGHT: &str = "\x1b[1;97m";
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AgentOptions {
     pub fast_mode: bool,
@@ -78,7 +84,7 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::RunShell { command, mode } => {
-                println!("  \x1b[96m• Proposed command\x1b[0m");
+                println!("  {BLUE}• Proposed command{RESET}");
                 println!("    mode: {}", mode);
                 println!("    {}", command);
                 if confirm_pausing_interrupt(
@@ -91,7 +97,7 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::NoteWrite { path, .. } => {
-                println!("  \x1b[96m• Proposed note write\x1b[0m");
+                println!("  {BLUE}• Proposed note write{RESET}");
                 println!("    {}", path);
                 if confirm_pausing_interrupt(
                     "Approve writing this note? [y/N]",
@@ -126,7 +132,7 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::UserApproval { title, prompt } => {
-                println!("  \x1b[96m• Approval requested: {}\x1b[0m", title);
+                println!("  {BLUE}• Approval requested:{RESET} {}", title);
                 println!("    {}", prompt);
                 if confirm_pausing_interrupt(
                     "Approve this request? [y/N]",
@@ -138,7 +144,7 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::AskUser { question } => {
-                println!("  \x1b[96m• Question from agent\x1b[0m");
+                println!("  {BLUE}• Question from agent{RESET}");
                 println!("    {}", question);
                 print!("Answer (leave empty to decline): ");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -166,7 +172,6 @@ pub async fn run_code_agent_with_options(
                 if !timer_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = timer_live_status.lock()
                 {
-                    status.show_composer = true;
                     status.thinking = Some(format!(
                         "Thinking ({} • Esc to interrupt)",
                         format_elapsed(timer_started_at.elapsed())
@@ -182,7 +187,6 @@ pub async fn run_code_agent_with_options(
         AgentProgress::Thinking { elapsed_secs } => {
             if !options.fast_mode {
                 if let Ok(mut status) = progress_live_status.lock() {
-                    status.show_composer = true;
                     status.thinking = Some(format!(
                         "Thinking ({} • Esc to interrupt)",
                         format_elapsed(Duration::from_secs(elapsed_secs))
@@ -197,7 +201,6 @@ pub async fn run_code_agent_with_options(
                     commit_activity_snapshot(&mut status);
                     print_timeline_note(&thought);
                     status.thinking = None;
-                    status.show_composer = true;
                     render_live_status(&mut status);
                 }
             }
@@ -206,7 +209,6 @@ pub async fn run_code_agent_with_options(
             if !options.fast_mode {
                 if let Some(label) = explored_action_label(&action, &input) {
                     if let Ok(mut status) = progress_live_status.lock() {
-                        status.show_composer = true;
                         status.thinking = None;
                         status.explored.push(label);
                         render_live_status(&mut status);
@@ -278,7 +280,6 @@ pub async fn run_code_agent_with_options(
                 };
 
                 if let Ok(mut status) = progress_live_status.lock() {
-                    status.show_composer = true;
                     status.thinking = None;
                     if is_activity {
                         status.activities.push(label);
@@ -299,7 +300,6 @@ pub async fn run_code_agent_with_options(
                 && let Some(commands) = ran_command_labels(&action, &input)
                 && let Ok(mut status) = progress_live_status.lock()
             {
-                status.show_composer = true;
                 status.thinking = None;
                 for cmd in commands {
                     status.tasks.push(format!("Finished command: `{}`", cmd));
@@ -314,13 +314,12 @@ pub async fn run_code_agent_with_options(
         if !options.fast_mode {
             if let Ok(mut status) = chunk_live_status.lock() {
                 status.thinking = None;
-                status.show_composer = false;
                 commit_activity_snapshot(&mut status);
                 clear_live_status(&mut status);
             }
         }
         let formatted_summary = format_markdown_bold(&summary);
-        print!("\n\x1b[32mMint:\x1b[0m ");
+        print!("\n{MINT}Mint:{RESET} ");
         render_live_summary(&formatted_summary);
         println!();
     };
@@ -346,11 +345,12 @@ pub async fn run_code_agent_with_options(
         }
     };
     agent_done.store(true, Ordering::Relaxed);
-    if res.is_err() && !options.fast_mode {
+    if !options.fast_mode {
         if let Ok(mut status) = live_status.lock() {
             status.thinking = None;
-            status.show_composer = false;
-            commit_activity_snapshot(&mut status);
+            if res.is_err() {
+                commit_activity_snapshot(&mut status);
+            }
             clear_live_status(&mut status);
         }
     }
@@ -360,13 +360,13 @@ pub async fn run_code_agent_with_options(
         println!("Verification: {}", res.verification);
     }
     println!(
-        "\x1b[1;97m─ Worked for {}\x1b[0m",
+        "{DIM}─ Worked for {}{RESET}",
         format_elapsed(started_at.elapsed())
     );
 
     let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let width = tw as usize;
-    println!("\x1b[90m{}\x1b[0m", "─".repeat(width));
+    println!("{DIM}{}{RESET}", "─".repeat(width));
 
     Ok(res)
 }
@@ -406,9 +406,9 @@ fn render_live_summary(summary: &str) {
 fn print_colored_diff(diff: &str) {
     for line in diff.lines() {
         if line.starts_with("@@") {
-            println!("\x1b[96m{line}\x1b[0m");
+            println!("{BLUE}{line}{RESET}");
         } else if line.starts_with("--- ") || line.starts_with("+++ ") {
-            println!("\x1b[90m{line}\x1b[0m");
+            println!("{DIM}{line}{RESET}");
         } else if line.starts_with('-') {
             println!("\x1b[31m{line}\x1b[0m");
         } else if line.starts_with('+') {
@@ -457,7 +457,6 @@ struct LiveStatus {
     committed_explored: usize,
     committed_activities: usize,
     committed_tasks: usize,
-    show_composer: bool,
     rendered_lines: usize,
 }
 
@@ -530,10 +529,7 @@ fn render_live_status(status: &mut LiveStatus) {
     lines.extend(activities_lines(&status.activities[activities_start..]));
     lines.extend(explored_lines(&status.explored[explored_start..]));
     if let Some(thinking) = &status.thinking {
-        lines.push(format!("\x1b[1;97m• {thinking}\x1b[0m"));
-    }
-    if status.show_composer {
-        lines.extend(disabled_composer_lines());
+        lines.push(format!("{MINT}●{RESET} {BRIGHT}{thinking}{RESET}"));
     }
     if lines.is_empty() {
         return;
@@ -572,32 +568,13 @@ fn print_timeline_note(thought: &str) {
     if thought.is_empty() {
         return;
     }
-    println!("\x1b[90m• {thought}\x1b[0m");
+    println!("{DIM}• {thought}{RESET}");
 }
 
 fn print_timeline_separator() {
     let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let width = term_width as usize;
-    println!("\n\x1b[90m{}\x1b[0m\n", "─".repeat(width));
-}
-
-fn disabled_composer_lines() -> Vec<String> {
-    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
-    let width = term_width as usize;
-    let input_width = width.saturating_sub(2);
-    let prefix = "› ";
-    let placeholder = "Ask anything...";
-    let blank_line = " ".repeat(input_width);
-    let padding = " ".repeat(
-        input_width
-            .saturating_sub(prefix.chars().count())
-            .saturating_sub(placeholder.chars().count()),
-    );
-    vec![
-        format!(" \x1b[48;2;65;69;77m{blank_line}\x1b[0m"),
-        format!(" \x1b[48;2;65;69;77m{prefix}\x1b[90m{placeholder}\x1b[39m{padding}\x1b[0m"),
-        format!(" \x1b[48;2;65;69;77m{blank_line}\x1b[0m"),
-    ]
+    println!("\n{DIM}{}{RESET}\n", "─".repeat(width));
 }
 
 fn clear_live_status(status: &mut LiveStatus) {
@@ -617,13 +594,13 @@ fn explored_lines(actions: &[ExploredAction]) -> Vec<String> {
         return Vec::new();
     }
     let grouped = grouped_explored_actions(actions);
-    let mut lines = vec!["\x1b[96m• Explored\x1b[0m".to_owned()];
+    let mut lines = vec![format!("{BLUE}○ explored{RESET}")];
     lines.extend(grouped.iter().take(24).enumerate().map(|(index, action)| {
         let prefix = if index == 0 { "  └" } else { "   " };
-        format!("\x1b[96m{prefix} {action}\x1b[0m")
+        format!("{DIM}{prefix} {action}{RESET}")
     }));
     if grouped.len() > 24 {
-        lines.push(format!("\x1b[96m   ... {} more\x1b[0m", grouped.len() - 24));
+        lines.push(format!("{DIM}   ... {} more{RESET}", grouped.len() - 24));
     }
     lines
 }
@@ -659,16 +636,13 @@ fn activities_lines(activities: &[String]) -> Vec<String> {
     if activities.is_empty() {
         return Vec::new();
     }
-    let mut lines = vec!["\x1b[95m• Activity\x1b[0m".to_owned()];
+    let mut lines = vec![format!("{BLUE}◇ activity{RESET}")];
     lines.extend(activities.iter().take(24).enumerate().map(|(index, act)| {
         let prefix = if index == 0 { "  └" } else { "   " };
-        format!("\x1b[95m{prefix} {act}\x1b[0m")
+        format!("{DIM}{prefix} {act}{RESET}")
     }));
     if activities.len() > 24 {
-        lines.push(format!(
-            "\x1b[95m   ... {} more\x1b[0m",
-            activities.len() - 24
-        ));
+        lines.push(format!("{DIM}   ... {} more{RESET}", activities.len() - 24));
     }
     lines
 }
@@ -677,13 +651,13 @@ fn tasks_lines(tasks: &[String]) -> Vec<String> {
     if tasks.is_empty() {
         return Vec::new();
     }
-    let mut lines = vec!["\x1b[92m• Tasks\x1b[0m".to_owned()];
+    let mut lines = vec![format!("{BLUE}● tasks{RESET}")];
     lines.extend(tasks.iter().take(24).enumerate().map(|(index, task)| {
         let prefix = if index == 0 { "  └" } else { "   " };
-        format!("\x1b[92m{prefix} {task}\x1b[0m")
+        format!("{DIM}{prefix} {task}{RESET}")
     }));
     if tasks.len() > 24 {
-        lines.push(format!("\x1b[92m   ... {} more\x1b[0m", tasks.len() - 24));
+        lines.push(format!("{DIM}   ... {} more{RESET}", tasks.len() - 24));
     }
     lines
 }
@@ -748,9 +722,9 @@ fn format_markdown_bold(text: &str) -> String {
     let mut processed_markers = 0;
     for part in parts {
         if is_bold && processed_markers < pair_limit {
-            result.push_str("\x1b[96m");
+            result.push_str(BLUE);
             result.push_str(part);
-            result.push_str("\x1b[0m");
+            result.push_str(RESET);
         } else {
             result.push_str(part);
         }
