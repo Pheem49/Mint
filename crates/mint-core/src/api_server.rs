@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
     println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
     println!(
@@ -120,7 +120,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         "configPath": path_str,
                         "activeProvider": active,
                         "availableProviders": available,
-                        "integrations": {}
+                        "integrations": {},
+                        "localIp": get_local_ip()
                     });
                     send_json_response(socket, "200 OK", &status_json.to_string()).await;
                 }
@@ -443,6 +444,13 @@ fn execute_api_action(config: &MintConfig, action: ApiAction) -> Result<Value, S
     }
 }
 
+pub fn get_local_ip() -> Option<String> {
+    use std::net::UdpSocket;
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    socket.local_addr().ok().map(|addr| addr.ip().to_string())
+}
+
 fn system_info() -> Value {
     json!({
         "backend": "rust-api-server",
@@ -450,6 +458,7 @@ fn system_info() -> Value {
         "arch": std::env::consts::ARCH,
         "family": std::env::consts::FAMILY,
         "host": hostname(),
+        "localIp": get_local_ip(),
         "currentDir": std::env::current_dir().ok().map(|path| path.display().to_string()),
         "configPath": config_path().ok().map(|path| path.display().to_string()),
     })

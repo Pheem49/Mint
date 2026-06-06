@@ -16,6 +16,7 @@ export default defineConfig({
   },
   server: {
     port: 9000,
+    host: true,
     strictPort: true,
     fs: {
       allow: [
@@ -23,7 +24,20 @@ export default defineConfig({
       ]
     }
   },
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'rewrite-html',
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url === '/' || req.url === '/index.html') {
+            req.url = '/index-web.html'
+          }
+          next()
+        })
+      }
+    }
+  ],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src/renderer/src-web'),

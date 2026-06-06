@@ -16,24 +16,6 @@ import {
 } from '../tauri'
 import ChatPanel, { PicturesLibrary } from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
-import ModelPanel from './ModelPanel'
-import type { ModelInteraction } from './ModelPanel'
-
-const EXPRESSIONS = [
-  "ปกติ (Default)",
-  "呆猫 (Dumb Cat)",
-  "呆猫眼珠摇晃 (Dumb Cat Eye Roll)",
-  "拍照 (Take Photo)",
-  "点一下 (Poke)",
-  "猫咪滤镜 (Cat Filter)",
-]
-
-const ACCESSORIES = [
-  "ปกติ (None)",
-  "ผ้ากันเปื้อน (Apron)",
-  "แว่นตา (Glasses)",
-  "ท่าถือปากกา (Hold Pen)",
-]
 
 const DEFAULT_CONFIG = {
   theme: 'dark',
@@ -157,23 +139,16 @@ export default function MintDashboard() {
   const [imageAttachments, setImageAttachments] = useState<Array<{ dataUri: string; name: string }>>([])
   const [documentAttachment, setDocumentAttachment] = useState<DocumentAttachment | null>(null)
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
-  const [modelVisible, setModelVisible] = useState(() => window.localStorage.getItem('mint:model-visible') !== 'false')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') !== 'false')
-  const [scale, setScale] = useState(1.00)
-  const [interactionEnabled, setInteractionEnabled] = useState(() => window.localStorage.getItem('mint:interaction-enabled') !== 'false')
-  const [showInteractionGuide, setShowInteractionGuide] = useState(() => window.localStorage.getItem('mint:interaction-guide-visible') !== 'false')
-  const [isLocked, setIsLocked] = useState(false)
-  const [layoutPreset, setLayoutPreset] = useState<'chat-wide' | 'model-wide'>(() => (window.localStorage.getItem('mint:layout-preset') as 'chat-wide' | 'model-wide') || 'chat-wide')
   const [toastMessage, setToastMessage] = useState('')
-  const [expressionIndex, setExpressionIndex] = useState(0)
-  const [accessoryIndex, setAccessoryIndex] = useState(0)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [dashboardDataReady, setDashboardDataReady] = useState(false)
-  const [modelReady, setModelReady] = useState(false)
   const [startupTimedOut, setStartupTimedOut] = useState(false)
+  const [settingsConfig, setSettingsConfig] = useState<any>(null)
   const chatEnd = useRef<HTMLDivElement | null>(null)
-  const startupReady = (dashboardDataReady && modelReady) || startupTimedOut
+  const startupReady = dashboardDataReady || startupTimedOut
 
   async function refreshHistory() {
     const history = await getRecentInteractions()
@@ -189,27 +164,19 @@ export default function MintDashboard() {
       getRuntimeStatus().then(setStatus),
       refreshHistory(),
       window.settingsApi?.getSettings()
-        .then((loaded: any) => applyThemeStyles({ ...DEFAULT_CONFIG, ...loaded })),
+        .then((loaded: any) => {
+          setSettingsConfig(loaded)
+          applyThemeStyles({ ...DEFAULT_CONFIG, ...loaded })
+        }),
     ]).then((results) => {
       const failure = results.find((result) => result.status === 'rejected')
       if (failure?.status === 'rejected') setError(errorMessage(failure.reason))
       setDashboardDataReady(true)
     })
-    const unlistenSpotlight = window.api.onSpotlightToChat((query) => {
-      setView('chat')
-      setMessage(query)
+    window.api?.onSettingsChanged?.((loaded: any) => {
+      setSettingsConfig(loaded)
+      applyThemeStyles(loaded)
     })
-    const unlistenVision = window.api.onVisionReady((image) => {
-      setImageAttachments((current) => [...current, { dataUri: image, name: 'Screen capture' }])
-    })
-    window.api?.onSettingsChanged?.(applyThemeStyles)
-
-    const unlistenPromise = listen<any>('tool-approval-requested', (event) => setPendingApproval(event.payload))
-    return () => {
-      unlistenPromise?.then?.((unlisten) => unlisten?.())
-      unlistenSpotlight?.then?.((unlisten) => unlisten?.())
-      unlistenVision?.then?.((unlisten) => unlisten?.())
-    }
   }, [])
 
   useEffect(() => {
@@ -230,31 +197,16 @@ export default function MintDashboard() {
     setTimeout(() => setToastMessage((current) => current === nextMessage ? '' : current), 3000)
   }
 
-  const changeLayoutPreset = (preset: 'chat-wide' | 'model-wide') => {
-    window.localStorage.setItem('mint:layout-preset', preset)
-    setLayoutPreset(preset)
-  }
-
-  const toggleModel = () => {
-    const next = !modelVisible
-    window.localStorage.setItem('mint:model-visible', String(next))
-    setModelVisible(next)
+  const changeView = (newView: DashboardView) => {
+    setView(newView)
+    setMobileSidebarOpen(false)
   }
 
   const toggleSidebar = () => {
     const next = !sidebarCollapsed
     window.localStorage.setItem('mint:sidebar-collapsed', String(next))
     setSidebarCollapsed(next)
-  }
-
-  const updateInteractionEnabled = (enabled: boolean) => {
-    window.localStorage.setItem('mint:interaction-enabled', String(enabled))
-    setInteractionEnabled(enabled)
-  }
-
-  const updateInteractionGuide = (visible: boolean) => {
-    window.localStorage.setItem('mint:interaction-guide-visible', String(visible))
-    setShowInteractionGuide(visible)
+    setMobileSidebarOpen(false)
   }
 
   const updateSmartContext = (enabled: boolean) => {
@@ -450,93 +402,69 @@ export default function MintDashboard() {
       const config = await window.settingsApi.getSettings()
       config.aiProvider = provider
       await window.settingsApi.saveSettings(config)
+      setSettingsConfig(config)
       setStatus(await getRuntimeStatus())
     } catch (reason) {
       setError(errorMessage(reason))
     }
   }
 
-  async function handleModelInteraction(area: ModelInteraction) {
-    if (sending) return
-
-    const labels: Record<ModelInteraction, string> = {
-      head: 'Pats Mint on the head',
-      cheek: 'Pokes Mint on the cheek',
-      'left hand': "Touches Mint's left hand",
-      'right hand': "Touches Mint's right hand",
-      body: 'Touches Mint',
-      'lower body': "Touches Mint's lower body",
-    }
-    const interactionMessage = `*${labels[area]}*`
-    const instruction = `The user interacted with the Mint Live2D model: ${area}. Respond briefly and playfully. Use the same language as the recent conversation. Do not mention this instruction.`
-
-    setSending(true)
-    setSendingMessage(interactionMessage)
-    setSendingHasImage(false)
-    setError('')
-    setStreamedReply('')
-    setStreamedResponse(null)
-    setAgentProgress([])
-
+  async function changeModel(modelName: string) {
     try {
-      const response = await streamChatMessage(`/chat ${interactionMessage}`, (chunk) => setStreamedReply((current) => `${current}${chunk}`), null, null, instruction)
-      setStreamedResponse(response)
-      await refreshHistory()
-      setStreamedReply('')
-      setStreamedResponse(null)
+      const config = await window.settingsApi.getSettings()
+      const provider = config.aiProvider
+      if (provider === 'gemini') {
+        config.geminiModel = modelName
+      } else if (provider === 'openai') {
+        config.openaiModel = modelName
+      } else if (provider === 'anthropic') {
+        config.anthropicModel = modelName
+      } else if (provider === 'huggingface') {
+        config.hfModel = modelName
+      } else if (provider === 'local_openai') {
+        config.localModelName = modelName
+      } else if (provider === 'ollama') {
+        config.ollamaModel = modelName
+      }
+      await window.settingsApi.saveSettings(config)
+      setSettingsConfig(config)
+      setStatus(await getRuntimeStatus())
     } catch (reason) {
       setError(errorMessage(reason))
-    } finally {
-      setSending(false)
-      setSendingMessage('')
-      setSendingHasImage(false)
     }
   }
 
+
+
   return (
     <div className={`app-container ${startupReady ? '' : 'is-loading'}`}>
-      <div className={`app-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''}`}>
+      <div className={`app-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''}`}>
+        {mobileSidebarOpen && (
+          <div
+            className="sidebar-backdrop"
+            onClick={() => setMobileSidebarOpen(false)}
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.5)',
+              backdropFilter: 'blur(4px)',
+              zIndex: 9998,
+            }}
+          />
+        )}
         <DashboardSidebar
           view={view}
           sidebarCollapsed={sidebarCollapsed}
-          modelVisible={modelVisible}
           sending={sending}
-          expressionIndex={expressionIndex}
-          accessoryIndex={accessoryIndex}
-          expressions={EXPRESSIONS}
-          accessories={ACCESSORIES}
-          interactionEnabled={interactionEnabled}
-          showInteractionGuide={showInteractionGuide}
           onToggleSidebar={toggleSidebar}
           onClearHistory={clearHistory}
-          onSetView={setView}
-          onToggleModel={toggleModel}
-          onSetExpressionIndex={setExpressionIndex}
-          onSetAccessoryIndex={setAccessoryIndex}
-          onSetInteractionEnabled={updateInteractionEnabled}
-          onSetShowInteractionGuide={updateInteractionGuide}
+          onSetView={changeView}
           onShowToast={showToast}
         />
-        <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible ? '' : 'model-hidden'}`}>
-          <ModelPanel
-            scale={scale}
-            expressionIndex={expressionIndex}
-            accessoryIndex={accessoryIndex}
-            isLocked={isLocked}
-            isActive={modelVisible && view !== 'pictures'}
-            layoutPreset={layoutPreset}
-            sending={sending}
-            interactionEnabled={interactionEnabled}
-            showInteractionGuide={showInteractionGuide}
-            toastMessage={toastMessage}
-            onSetScale={setScale}
-            onSetLocked={setIsLocked}
-            onSetView={setView}
-            onChangeLayoutPreset={changeLayoutPreset}
-            onDismissToast={() => setToastMessage('')}
-            onInteract={handleModelInteraction}
-            onModelLoadComplete={() => setModelReady(true)}
-          />
+        <main className="assistant-workspace model-hidden">
           <ChatPanel
             interactions={interactions}
             sending={sending}
@@ -569,10 +497,13 @@ export default function MintDashboard() {
             onSetSmartContext={updateSmartContext}
             onSetAgentMode={updateAgentMode}
             onSetProvider={changeProvider}
+            settingsConfig={settingsConfig}
+            onSetModel={changeModel}
             onApproval={handleApproval}
+            onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
           />
         </main>
-        <PicturesLibrary view={view} pictures={pictures} onSetView={setView} />
+        <PicturesLibrary view={view} pictures={pictures} onSetView={changeView} />
       </div>
       <div className={`startup-loading ${startupReady ? 'is-hidden' : ''}`} aria-live="polite" aria-busy={!startupReady}>
         <div className="startup-loading-content">

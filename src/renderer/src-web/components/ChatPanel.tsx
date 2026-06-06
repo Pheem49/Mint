@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent, type RefObject, type DragEvent } from 'react'
 import {
   type AgentProgress,
   type ChatResponse,
@@ -7,6 +7,60 @@ import {
   convertFileSrc,
 } from '../tauri'
 import type { DashboardView } from './DashboardSidebar'
+
+const GEMINI_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+  'gemini-3.1-flash-lite',
+  'gemini-3.1-flash-lite-preview'
+]
+
+const OPENAI_MODELS = [
+  'gpt-4o',
+  'gpt-4o-mini',
+  'o1',
+  'o3-mini',
+  'o1-preview',
+  'o1-mini',
+  'gpt-4-turbo'
+]
+
+const ANTHROPIC_MODELS = [
+  'claude-3-7-sonnet-latest',
+  'claude-3-5-sonnet-latest',
+  'claude-3-5-haiku-latest',
+  'claude-3-opus-latest'
+]
+
+const HF_MODELS = [
+  'meta-llama/Llama-3.3-70B-Instruct',
+  'meta-llama/Meta-Llama-3-8B-Instruct',
+  'meta-llama/Llama-3.2-3B-Instruct',
+  'Qwen/Qwen2.5-72B-Instruct',
+  'Qwen/Qwen2.5-Coder-32B-Instruct',
+  'mistralai/Mistral-7B-Instruct-v0.3',
+  'google/gemma-2-9b-it'
+]
+
+const LOCAL_MODELS = [
+  'local-model',
+  'Qwen/Qwen2.5-7B-Instruct-GGUF',
+  'meta-llama/Llama-3.2-3B-Instruct-GGUF',
+  'lmstudio-community/gemma-2-9b-it-GGUF'
+]
+
+const OLLAMA_MODELS = [
+  'llama3:latest',
+  'llama3.1:latest',
+  'llama3.2:latest',
+  'gemma2:latest',
+  'mistral:latest',
+  'phi3:latest',
+  'qwen2.5:latest'
+]
 
 interface ApprovalDetails {
   title: string
@@ -131,6 +185,9 @@ interface ChatPanelProps {
   onSetAgentMode: (enabled: boolean) => void
   onSetProvider: (provider: string) => void
   onApproval: (approved: boolean) => void
+  onToggleMobileSidebar: () => void
+  settingsConfig: any
+  onSetModel: (model: string) => void
 }
 
 function renderFormattedMessage(text: string) {
@@ -167,6 +224,23 @@ function readableAssistantText(text: string) {
   return text
 }
 
+function renderSpeakerIcon(isSpeaking: boolean) {
+  if (isSpeaking) {
+    return (
+      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+      </svg>
+    )
+  }
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+    </svg>
+  )
+}
+
 export default function ChatPanel({
   interactions,
   sending,
@@ -198,10 +272,214 @@ export default function ChatPanel({
   onSetAgentMode,
   onSetProvider,
   onApproval,
+  onToggleMobileSidebar,
+  settingsConfig,
+  onSetModel,
 }: ChatPanelProps) {
   const agentActivities = activitiesFrom(agentProgress)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const toolMenuRef = useRef<HTMLDivElement | null>(null)
+
+  const getAvailableModels = (provider: string) => {
+    switch (provider) {
+      case 'gemini':
+        return GEMINI_MODELS
+      case 'openai':
+        return OPENAI_MODELS
+      case 'anthropic':
+        return ANTHROPIC_MODELS
+      case 'huggingface':
+        return HF_MODELS
+      case 'local_openai':
+        return LOCAL_MODELS
+      case 'ollama':
+        return OLLAMA_MODELS
+      default:
+        return []
+    }
+  }
+
+  const activeProvider = status?.activeProvider ?? ''
+  const availableModels = getAvailableModels(activeProvider)
+
+  const getActiveModel = (provider: string) => {
+    if (!settingsConfig) return ''
+    switch (provider) {
+      case 'gemini':
+        return settingsConfig.geminiModel
+      case 'openai':
+        return settingsConfig.openaiModel
+      case 'anthropic':
+        return settingsConfig.anthropicModel
+      case 'huggingface':
+        return settingsConfig.hfModel
+      case 'local_openai':
+        return settingsConfig.localModelName
+      case 'ollama':
+        return settingsConfig.ollamaModel
+      default:
+        return ''
+    }
+  }
+  const activeModel = getActiveModel(activeProvider)
+
+  // Voice Input (Speech to Text)
+  const [isRecording, setIsRecording] = useState(false)
+  const recognitionRef = useRef<any>(null)
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+      }
+      setIsRecording(false)
+    } else {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      if (!SpeechRecognition) {
+        alert("ขออภัยค่ะ เบราว์เซอร์ของคุณไม่รองรับการพิมพ์ด้วยเสียง (Web Speech API)")
+        return
+      }
+
+      try {
+        const recognition = new SpeechRecognition()
+        recognition.continuous = false
+        recognition.interimResults = false
+        recognition.lang = 'th-TH'
+
+        recognition.onstart = () => {
+          setIsRecording(true)
+        }
+
+        recognition.onresult = (event: any) => {
+          const resultText = event.results[0][0].transcript
+          if (resultText) {
+            onSetMessage((message ? message + ' ' : '') + resultText)
+          }
+        }
+
+        recognition.onerror = (event: any) => {
+          console.error('Speech recognition error', event.error)
+          setIsRecording(false)
+        }
+
+        recognition.onend = () => {
+          setIsRecording(false)
+        }
+
+        recognitionRef.current = recognition
+        recognition.start()
+      } catch (err) {
+        console.error('Failed to start speech recognition', err)
+        setIsRecording(false)
+      }
+    }
+  }
+
+  // Text to Speech (TTS)
+  const [speakingText, setSpeakingText] = useState<string | null>(null)
+
+  const speak = (text: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return
+
+    if (speakingText === text) {
+      window.speechSynthesis.cancel()
+      setSpeakingText(null)
+      return
+    }
+
+    window.speechSynthesis.cancel()
+    const cleanText = text
+      .replace(/\*\*([\s\S]*?)\*\*/g, '$1')
+      .replace(/[*_`#]/g, '')
+      .trim()
+
+    const utterance = new SpeechSynthesisUtterance(cleanText)
+    const hasThai = /[\u0e00-\u0e7f]/.test(cleanText)
+    utterance.lang = hasThai ? 'th-TH' : 'en-US'
+
+    const voices = window.speechSynthesis.getVoices()
+    const voice = voices.find(v => v.lang.startsWith(hasThai ? 'th' : 'en'))
+    if (voice) {
+      utterance.voice = voice
+    }
+
+    utterance.onend = () => {
+      setSpeakingText(null)
+    }
+    utterance.onerror = () => {
+      setSpeakingText(null)
+    }
+
+    setSpeakingText(text)
+    window.speechSynthesis.speak(utterance)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel()
+      }
+      if (recognitionRef.current) {
+        recognitionRef.current.stop()
+      }
+    }
+  }, [])
+
+  // Drag and Drop Zone Overlay
+  const [isDragging, setIsDragging] = useState(false)
+  const dragCounter = useRef(0)
+
+  const handleDragEnter = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    if (e.dataTransfer?.types?.includes('Files')) {
+      dragCounter.current++
+      setIsDragging(true)
+    }
+  }
+
+  const handleDragLeave = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    if (e.dataTransfer?.types?.includes('Files')) {
+      dragCounter.current--
+      if (dragCounter.current === 0) {
+        setIsDragging(false)
+      }
+    }
+  }
+
+  const handleDragOver = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+  }
+
+  const handleDrop = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    dragCounter.current = 0
+    setIsDragging(false)
+
+    const files = e.dataTransfer?.files
+    if (files && files.length > 0) {
+      const file = files[0]
+      if (file.type.startsWith('image/')) {
+        const input = document.getElementById('vision-file-input') as HTMLInputElement | null
+        if (input) {
+          const dt = new DataTransfer()
+          dt.items.add(file)
+          input.files = dt.files
+          const event = { target: input } as ChangeEvent<HTMLInputElement>
+          onSelectImage(event)
+        }
+      } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        const input = document.getElementById('document-file-input') as HTMLInputElement | null
+        if (input) {
+          const dt = new DataTransfer()
+          dt.items.add(file)
+          input.files = dt.files
+          const event = { target: input } as ChangeEvent<HTMLInputElement>
+          onSelectDocument(event)
+        }
+      }
+    }
+  }
   const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
     event.preventDefault()
@@ -264,15 +542,90 @@ export default function ChatPanel({
   }
 
   return (
-    <section className="conversation-panel">
+    <section
+      className="conversation-panel"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{ position: 'relative' }}
+    >
+      <div className="chat-header">
+        <button
+          className="mobile-menu-btn"
+          type="button"
+          onClick={onToggleMobileSidebar}
+          aria-label="Toggle menu"
+        >
+          ☰
+        </button>
+        <div className="chat-header-title">
+          <img src="./assets/icon.png" alt="Logo" className="chat-header-logo" />
+          <span>Agent Mint</span>
+        </div>
+      </div>
+
+      {isDragging && (
+        <div
+          className="drag-drop-overlay"
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(15, 23, 42, 0.82)',
+            backdropFilter: 'blur(8px)',
+            border: '2px dashed var(--accent)',
+            borderRadius: '16px',
+            margin: '12px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'white',
+            zIndex: 1000,
+            pointerEvents: 'auto',
+          }}
+        >
+          <div style={{ fontSize: '3.5rem', marginBottom: '16px' }}>🖼️</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 'bold', letterSpacing: '0.5px' }}>วางไฟล์เพื่อแนบข้อมูล</div>
+          <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '8px' }}>รองรับรูปภาพ (PNG, JPEG, WebP, GIF) และไฟล์ PDF</div>
+        </div>
+      )}
+
       <div className="chat-container">
         {interactions.length === 0 && !sending && (
           <div className="message ai-message" style={{ marginBottom: '16px' }}>
             <div className="bubble-wrapper">
               <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(welcomeInteraction.aiText)}</div>
-              <div className="message-time">
+              <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <button className="provider-badge">{welcomeInteraction.provider} • {welcomeInteraction.model}</button>
                 <span>14:44</span>
+                <button
+                  type="button"
+                  className={`tts-btn ${speakingText === welcomeInteraction.aiText ? 'is-speaking' : ''}`}
+                  onClick={() => speak(welcomeInteraction.aiText)}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: speakingText === welcomeInteraction.aiText ? 'var(--accent)' : 'var(--text-soft)',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem',
+                    padding: '2px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    opacity: 0.7,
+                    transition: 'all 0.2s',
+                  }}
+                  title={speakingText === welcomeInteraction.aiText ? "หยุดอ่านออกเสียง" : "อ่านออกเสียง"}
+                >
+                  {renderSpeakerIcon(speakingText === welcomeInteraction.aiText)}
+                </button>
               </div>
             </div>
           </div>
@@ -295,9 +648,29 @@ export default function ChatPanel({
             <div className="message ai-message">
               <div className="bubble-wrapper">
                 <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(interaction.aiText)}</div>
-                <div className="message-time">
+                <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
                   <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <button
+                    type="button"
+                    className={`tts-btn ${speakingText === interaction.aiText ? 'is-speaking' : ''}`}
+                    onClick={() => speak(interaction.aiText)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: speakingText === interaction.aiText ? 'var(--accent)' : 'var(--text-soft)',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem',
+                      padding: '2px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      opacity: 0.7,
+                      transition: 'all 0.2s',
+                    }}
+                    title={speakingText === interaction.aiText ? "หยุดอ่านออกเสียง" : "อ่านออกเสียง"}
+                  >
+                    {renderSpeakerIcon(speakingText === interaction.aiText)}
+                  </button>
                 </div>
               </div>
             </div>
@@ -330,44 +703,43 @@ export default function ChatPanel({
             <div className="message ai-message thinking-message">
               <div className="bubble-wrapper">
                 <div className="message-bubble"><span>{streamedReply ? renderFormattedMessage(streamedReply) : 'Thinking...'}</span></div>
-                {streamedResponse && <div className="message-time"><button className="provider-badge">{badge(streamedResponse.provider, streamedResponse.model)}</button></div>}
+                {streamedResponse && (
+                  <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button className="provider-badge">{badge(streamedResponse.provider, streamedResponse.model)}</button>
+                    {streamedReply && (
+                      <button
+                        type="button"
+                        className={`tts-btn ${speakingText === streamedReply ? 'is-speaking' : ''}`}
+                        onClick={() => speak(streamedReply)}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: speakingText === streamedReply ? 'var(--accent)' : 'var(--text-soft)',
+                          cursor: 'pointer',
+                          fontSize: '0.85rem',
+                          padding: '2px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          opacity: 0.7,
+                          transition: 'all 0.2s',
+                        }}
+                        title={speakingText === streamedReply ? "หยุดอ่านออกเสียง" : "อ่านออกเสียง"}
+                      >
+                         {renderSpeakerIcon(speakingText === streamedReply)}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {pendingApproval && (() => {
-          const details = renderApprovalDetails(pendingApproval.approval)
-          return (
-            <div className="message ai-message" style={{ width: '100%' }}>
-              <div className="bubble-wrapper" style={{ width: '100%' }}>
-                <div className="action-card approval-card" data-tier={details.isDangerous ? 'dangerous' : undefined} style={{ width: '100%' }}>
-                  <div className="approval-card-content">
-                    <div className="approval-card-title">{details.title}</div>
-                    <div className="approval-card-body" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{details.body}</div>
-                    {details.reason && <div className="approval-card-reason" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{details.reason}</div>}
-                  </div>
-                  <div className="approval-card-actions">
-                    <button type="button" className="approval-btn approval-btn-approve" onClick={() => onApproval(true)}>Approve</button>
-                    <button type="button" className="approval-btn approval-btn-cancel" onClick={() => onApproval(false)}>Cancel</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )
-        })()}
         <div ref={chatEnd} />
       </div>
 
       <div className="input-area">
         <div className="smart-context-bar">
-          <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label className="toggle-switch">
-              <input type="checkbox" checked={smartContext} onChange={(event) => onSetSmartContext(event.target.checked)} />
-              <span className="slider round" />
-            </label>
-            <span>Smart Context (Auto-Screen)</span>
-          </div>
           <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <label className="toggle-switch">
               <input type="checkbox" checked={agentMode} onChange={(event) => onSetAgentMode(event.target.checked)} />
@@ -394,7 +766,14 @@ export default function ChatPanel({
               ))}
               {documentName && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                  <span aria-hidden="true" style={{ fontSize: '1rem' }}>📄</span>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--accent)' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                    </svg>
+                  </span>
                   <span style={{ fontSize: '0.76rem', color: 'var(--text-soft)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>{documentName}</span>
                   <button type="button" onClick={onRemoveDocument} style={{ background: 'transparent', border: 0, color: '#ef4444', cursor: 'pointer' }}>✕</button>
                 </div>
@@ -413,19 +792,41 @@ export default function ChatPanel({
             rows={1}
           />
           <div className="chat-tool-menu-wrap" ref={toolMenuRef}>
-            <button id="chat-tool-btn" type="button" aria-haspopup="menu" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((open) => !open)}>+</button>
+            <button id="chat-tool-btn" type="button" aria-haspopup="menu" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((open) => !open)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
             {toolMenuOpen && (
               <div className="chat-tool-menu" role="menu">
                 <button type="button" role="menuitem" onClick={openImagePicker}>
-                  <span aria-hidden="true">⌕</span>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                      <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
+                  </span>
                   <span>Add image</span>
                 </button>
                 <button type="button" role="menuitem" onClick={openDocumentPicker}>
-                  <span aria-hidden="true">□</span>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                    </svg>
+                  </span>
                   <span>Add file</span>
                 </button>
                 <button type="button" role="menuitem" onClick={startWebSearch}>
-                  <span aria-hidden="true">○</span>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="2" y1="12" x2="22" y2="12"></line>
+                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                    </svg>
+                  </span>
                   <span>Search web</span>
                 </button>
               </div>
@@ -433,14 +834,93 @@ export default function ChatPanel({
           </div>
           <input id="vision-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={onSelectImage} style={{ display: 'none' }} />
           <input id="document-file-input" type="file" accept="application/pdf,.pdf" onChange={onSelectDocument} style={{ display: 'none' }} />
-          <button id="screen-capture-btn" type="button" onClick={onCaptureScreen} aria-label="Capture screen">
-            <span className="screen-capture-eye" aria-hidden="true" />
+          <div className="chat-provider-select" style={{ display: 'flex', gap: '4px', padding: 0, background: 'transparent', border: 0, width: '100%', height: '32px' }}>
+            <select 
+              value={status?.activeProvider ?? ''} 
+              onChange={(event) => onSetProvider(event.target.value)}
+              style={{
+                flex: 1,
+                minWidth: '65px',
+                height: '100%',
+                padding: '0 20px 0 6px',
+                background: 'transparent',
+                border: 0,
+                color: 'var(--text-soft)',
+                fontSize: '0.78rem',
+                outline: 'none',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {status?.availableProviders.map((provider) => {
+                let displayName = provider
+                if (provider === 'gemini') displayName = 'Gemini'
+                else if (provider === 'openai') displayName = 'OpenAI'
+                else if (provider === 'anthropic') displayName = 'Claude'
+                else if (provider === 'huggingface') displayName = 'HF'
+                else if (provider === 'local_openai') displayName = 'Local'
+                else if (provider === 'ollama') displayName = 'Ollama'
+                return <option key={provider} value={provider}>{displayName}</option>
+              })}
+            </select>
+            {availableModels.length > 0 && (
+              <select 
+                value={activeModel} 
+                onChange={(event) => onSetModel(event.target.value)}
+                style={{
+                  flex: 1.2,
+                  minWidth: '85px',
+                  height: '100%',
+                  padding: '0 20px 0 6px',
+                  background: 'transparent',
+                  border: 0,
+                  color: 'var(--text-soft)',
+                  fontSize: '0.78rem',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {availableModels.map((model) => (
+                  <option key={model} value={model}>{model.split('/').pop()}</option>
+                ))}
+                {!availableModels.includes(activeModel) && activeModel && (
+                  <option value={activeModel}>{activeModel.split('/').pop()}</option>
+                )}
+              </select>
+            )}
+          </div>
+          <button
+            id="mic-btn"
+            className={isRecording ? 'is-recording' : ''}
+            type="button"
+            onClick={toggleRecording}
+            title={isRecording ? "หยุดบันทึกเสียง" : "สั่งการด้วยเสียง"}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            {isRecording ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            )}
           </button>
-          <select className="chat-provider-select" value={status?.activeProvider ?? ''} onChange={(event) => onSetProvider(event.target.value)}>
-            {status?.availableProviders.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
-          </select>
-          <button id="mic-btn" type="button" onClick={() => alert("Voice transcription coming soon!")}>🎙</button>
-          <button id="send-btn" type="submit" disabled={sending || !message.trim()}>➤</button>
+          <button id="send-btn" type="submit" disabled={sending || !message.trim()} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
         </form>
       </div>
     </section>

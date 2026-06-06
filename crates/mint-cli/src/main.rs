@@ -934,8 +934,14 @@ async fn launch_mint_target(target: String) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("Failed to launch web app: {e}"))?;
 
             println!("\x1b[32mStarting local API server in foreground on port 3000...\x1b[0m\n");
+            let local_ip_msg = if let Some(ip) = mint_core::api_server::get_local_ip() {
+                format!("http://localhost:9000 (or http://{}:9000 from mobile)", ip)
+            } else {
+                "http://localhost:9000".to_string()
+            };
             println!(
-                "\x1b[36m👉 Please open \x1b[1;36mhttp://localhost:9000\x1b[0m\x1b[36m in your web browser to access the Mint Web UI!\x1b[0m\n"
+                "\x1b[36m👉 Please open \x1b[1;36m{}\x1b[0m\x1b[36m in your web browser to access the Mint Web UI!\x1b[0m\n",
+                local_ip_msg
             );
             mint_core::start_api_server(3000).await?;
         }

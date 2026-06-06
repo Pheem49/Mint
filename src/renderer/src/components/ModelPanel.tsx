@@ -64,7 +64,14 @@ export default function ModelPanel({
               </svg>
             )}
           </button>
-          <button className="model-panel-control" onClick={() => window.api.maximizeWindow()} title="Maximize Window">⤢</button>
+          <button className="model-panel-control" onClick={() => window.api.maximizeWindow()} title="Maximize Window" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <polyline points="9 21 3 21 3 15"></polyline>
+              <line x1="21" y1="3" x2="14" y2="10"></line>
+              <line x1="3" y1="21" x2="10" y2="14"></line>
+            </svg>
+          </button>
           <div className="model-scale-control">
             <input
               type="range"
@@ -76,7 +83,12 @@ export default function ModelPanel({
               disabled={isLocked}
             />
             <span className="model-scale-value">{scale.toFixed(2)}x</span>
-            <button className="model-scale-reset" onClick={() => onSetScale(1.00)} disabled={isLocked} title="Reset Scale">⟲</button>
+            <button className="model-scale-reset" onClick={() => onSetScale(1.00)} disabled={isLocked} title="Reset Scale" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                <polyline points="3 3 3 8 8 8"></polyline>
+              </svg>
+            </button>
           </div>
           <button className="model-panel-control" onClick={() => onSetView('pictures')} title="Saved Pictures">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -104,7 +116,12 @@ export default function ModelPanel({
         {toastMessage && (
           <div className="mint-notification" style={{ position: 'absolute', left: '14px', top: '62px', zIndex: 10, margin: 0, padding: '8px 14px', borderRadius: '8px', background: 'rgba(18, 18, 22, 0.85)', border: '1px solid rgba(255, 255, 255, 0.08)', backdropFilter: 'blur(12px)', color: '#f8fafc', fontSize: '0.82rem', boxShadow: '0 8px 22px rgba(0,0,0,0.2)', display: 'flex', alignItems: 'center', gap: '12px', transition: 'all 0.22s ease' }}>
             <span>{toastMessage}</span>
-            <button onClick={onDismissToast} style={{ background: 'transparent', border: 0, color: 'white', cursor: 'pointer', fontSize: '0.9rem' }}>✕</button>
+            <button onClick={onDismissToast} style={{ background: 'transparent', border: 0, color: 'white', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
           </div>
         )}
 

@@ -12,6 +12,85 @@ const COMMANDS = [
     { label: 'Open VS Code', desc: 'เปิดโปรแกรม VS Code', icon: '💻', action: { type: 'open_app', target: 'code' } },
 ]
 
+function getCommandIcon(iconName: string) {
+  const props = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.5, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, style: { display: 'inline-block', verticalAlign: 'middle' } }
+  switch (iconName) {
+    case '📺':
+      return (
+        <svg {...props}>
+          <path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"></path>
+          <polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon>
+        </svg>
+      )
+    case '📘':
+      return (
+        <svg {...props}>
+          <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path>
+        </svg>
+      )
+    case '📸':
+      return (
+        <svg {...props}>
+          <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+          <circle cx="12" cy="12" r="4"></circle>
+          <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+        </svg>
+      )
+    case '🐙':
+      return (
+        <svg {...props}>
+          <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+        </svg>
+      )
+    case '💻':
+      return (
+        <svg {...props}>
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+          <line x1="8" y1="21" x2="16" y2="21"></line>
+          <line x1="12" y1="17" x2="12" y2="21"></line>
+        </svg>
+      )
+    case '🌤️':
+      return (
+        <svg {...props}>
+          <path d="M12 2v2"></path>
+          <path d="M12 20v2"></path>
+          <path d="M4.93 4.93l1.41 1.41"></path>
+          <path d="M17.66 17.66l1.41 1.41"></path>
+          <path d="M2 12h2"></path>
+          <path d="M20 12h2"></path>
+          <path d="M6.34 17.66l-1.41 1.41"></path>
+          <path d="M19.07 4.93l-1.41 1.41"></path>
+          <circle cx="12" cy="12" r="4"></circle>
+        </svg>
+      )
+    case '🎵':
+      return (
+        <svg {...props}>
+          <path d="M9 18V5l12-2v13"></path>
+          <circle cx="6" cy="18" r="3"></circle>
+          <circle cx="18" cy="16" r="3"></circle>
+        </svg>
+      )
+    case '🧮':
+      return (
+        <svg {...props}>
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="9" y1="9" x2="15" y2="15"></line>
+          <line x1="15" y1="9" x2="9" y2="15"></line>
+        </svg>
+      )
+    case '✨':
+      return (
+        <svg {...props}>
+          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path>
+        </svg>
+      )
+    default:
+      return <span>{iconName}</span>
+  }
+}
+
 export default function SpotlightWindow() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<any[]>([])
@@ -158,7 +237,11 @@ export default function SpotlightWindow() {
   return (
     <div className="spotlight-container">
       <div className="input-wrapper">
-        <div className="spotlight-icon">✨</div>
+        <div className="spotlight-icon" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path>
+          </svg>
+        </div>
         <input 
           type="text" 
           id="spotlight-input" 
@@ -181,7 +264,9 @@ export default function SpotlightWindow() {
               onClick={() => handleAction(cmd.action)}
               onMouseEnter={() => setSelectedIndex(i)}
             >
-              <div className="result-icon">{cmd.icon}</div>
+              <div className="result-icon" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                {getCommandIcon(cmd.icon)}
+              </div>
               <div className="result-content">
                 <div className="result-title">{cmd.label}</div>
                 <div className="result-desc">{cmd.desc}</div>

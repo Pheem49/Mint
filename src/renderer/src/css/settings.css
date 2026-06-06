@@ -90,7 +90,7 @@ button {
 
 .settings-container {
     display: grid;
-    grid-template-rows: 0 minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
     height: 100vh;
     overflow: hidden;
     background: var(--panel-bg);
@@ -124,13 +124,15 @@ button {
     -webkit-app-region: drag;
     position: relative;
     z-index: 3;
-    min-height: 0;
-    padding: 0;
-    border-bottom: 0;
+    min-height: 64px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
 }
 
 .header-left {
-    display: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .settings-icon {
@@ -160,7 +162,8 @@ h1 {
 
 .close-btn {
     position: absolute;
-    top: 24px;
+    top: 50%;
+    transform: translateY(-50%);
     right: 24px;
     z-index: 5;
     display: grid;
@@ -172,13 +175,14 @@ h1 {
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
 }
 
 .close-btn:hover {
     background: rgba(239, 68, 68, 0.12);
     border-color: rgba(239, 68, 68, 0.28);
     color: var(--danger);
+    transform: translateY(-50%) scale(1.05);
 }
 
 .settings-body {
@@ -191,7 +195,7 @@ h1 {
 .settings-sidebar {
     width: 194px;
     min-width: 194px;
-    padding: 96px 8px 12px;
+    padding: 24px 8px 12px;
     overflow-y: auto;
     background: var(--sidebar-bg);
     border-right: 1px solid var(--border);
@@ -218,7 +222,9 @@ h1 {
 }
 
 .tab-btn span {
-    display: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .tab-btn strong {
@@ -244,7 +250,7 @@ h1 {
     flex: 1;
     min-width: 0;
     overflow-y: auto;
-    padding: 84px 92px 42px;
+    padding: 24px 32px 32px;
 }
 
 .settings-content::-webkit-scrollbar,
@@ -262,7 +268,9 @@ h1 {
     display: none;
     flex-direction: column;
     gap: 18px;
+    width: 100%;
     max-width: 624px;
+    margin: 0 auto;
     animation: fadeTab 0.18s ease;
 }
 
@@ -339,11 +347,11 @@ h1 {
 .setting-row {
     min-width: 0;
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) minmax(180px, 220px);
+    grid-template-columns: 220px 1fr;
     align-items: center;
     gap: 18px;
     min-height: 48px;
-    padding: 10px 12px;
+    padding: 12px 16px;
     border-top: 1px solid var(--border);
 }
 
@@ -512,6 +520,25 @@ input[type="color"] {
     border: 1px solid var(--border);
     border-radius: 11px;
     background: transparent;
+}
+
+.setting-section .toggle-row {
+    border: 0;
+    border-radius: 0;
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+}
+
+.setting-section .section-heading + .toggle-row,
+.setting-section .form-grid:first-child .toggle-row:first-child {
+    border-top: 0;
+}
+
+.setting-actions {
+    display: flex;
+    gap: 12px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
 }
 
 .toggle-row label {

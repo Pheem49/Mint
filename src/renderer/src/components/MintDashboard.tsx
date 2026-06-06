@@ -172,6 +172,7 @@ export default function MintDashboard() {
   const [dashboardDataReady, setDashboardDataReady] = useState(false)
   const [modelReady, setModelReady] = useState(false)
   const [startupTimedOut, setStartupTimedOut] = useState(false)
+  const [settingsConfig, setSettingsConfig] = useState<any>(null)
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const startupReady = (dashboardDataReady && modelReady) || startupTimedOut
 
@@ -189,7 +190,10 @@ export default function MintDashboard() {
       getRuntimeStatus().then(setStatus),
       refreshHistory(),
       window.settingsApi?.getSettings()
-        .then((loaded: any) => applyThemeStyles({ ...DEFAULT_CONFIG, ...loaded })),
+        .then((loaded: any) => {
+          setSettingsConfig(loaded)
+          applyThemeStyles({ ...DEFAULT_CONFIG, ...loaded })
+        }),
     ]).then((results) => {
       const failure = results.find((result) => result.status === 'rejected')
       if (failure?.status === 'rejected') setError(errorMessage(failure.reason))
@@ -202,7 +206,10 @@ export default function MintDashboard() {
     const unlistenVision = window.api.onVisionReady((image) => {
       setImageAttachments((current) => [...current, { dataUri: image, name: 'Screen capture' }])
     })
-    window.api?.onSettingsChanged?.(applyThemeStyles)
+    window.api?.onSettingsChanged?.((loaded: any) => {
+      setSettingsConfig(loaded)
+      applyThemeStyles(loaded)
+    })
 
     const unlistenPromise = listen<any>('tool-approval-requested', (event) => setPendingApproval(event.payload))
     return () => {
@@ -450,6 +457,32 @@ export default function MintDashboard() {
       const config = await window.settingsApi.getSettings()
       config.aiProvider = provider
       await window.settingsApi.saveSettings(config)
+      setSettingsConfig(config)
+      setStatus(await getRuntimeStatus())
+    } catch (reason) {
+      setError(errorMessage(reason))
+    }
+  }
+
+  async function changeModel(modelName: string) {
+    try {
+      const config = await window.settingsApi.getSettings()
+      const provider = config.aiProvider
+      if (provider === 'gemini') {
+        config.geminiModel = modelName
+      } else if (provider === 'openai') {
+        config.openaiModel = modelName
+      } else if (provider === 'anthropic') {
+        config.anthropicModel = modelName
+      } else if (provider === 'huggingface') {
+        config.hfModel = modelName
+      } else if (provider === 'local_openai') {
+        config.localModelName = modelName
+      } else if (provider === 'ollama') {
+        config.ollamaModel = modelName
+      }
+      await window.settingsApi.saveSettings(config)
+      setSettingsConfig(config)
       setStatus(await getRuntimeStatus())
     } catch (reason) {
       setError(errorMessage(reason))
@@ -569,6 +602,8 @@ export default function MintDashboard() {
             onSetSmartContext={updateSmartContext}
             onSetAgentMode={updateAgentMode}
             onSetProvider={changeProvider}
+            settingsConfig={settingsConfig}
+            onSetModel={changeModel}
             onApproval={handleApproval}
           />
         </main>
@@ -581,9 +616,14 @@ export default function MintDashboard() {
         </div>
       </div>
       {error && (
-        <div className="mint-error" style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 100, margin: 0, boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
-          {error}
-          <button onClick={() => setError('')} style={{ marginLeft: '12px', background: 'transparent', border: 0, color: 'white', cursor: 'pointer' }}>✕</button>
+        <div className="mint-error" style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 100, margin: 0, boxShadow: '0 8px 24px rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span>{error}</span>
+          <button onClick={() => setError('')} style={{ background: 'transparent', border: 0, color: 'white', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', padding: 0 }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
         </div>
       )}
     </div>

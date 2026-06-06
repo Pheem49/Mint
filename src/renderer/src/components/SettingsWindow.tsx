@@ -67,14 +67,71 @@ const DEFAULT_CONFIG = {
 
 type TabType = 'sect-general' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts'
 
+const GEMINI_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+  'gemini-3.1-flash-lite',
+  'gemini-3.1-flash-lite-preview'
+]
+
+const OPENAI_MODELS = [
+  'gpt-4o',
+  'gpt-4o-mini',
+  'o1',
+  'o3-mini',
+  'o1-preview',
+  'o1-mini',
+  'gpt-4-turbo'
+]
+
+const ANTHROPIC_MODELS = [
+  'claude-3-7-sonnet-latest',
+  'claude-3-5-sonnet-latest',
+  'claude-3-5-haiku-latest',
+  'claude-3-opus-latest'
+]
+
+const HF_MODELS = [
+  'meta-llama/Llama-3.3-70B-Instruct',
+  'meta-llama/Meta-Llama-3-8B-Instruct',
+  'meta-llama/Llama-3.2-3B-Instruct',
+  'Qwen/Qwen2.5-72B-Instruct',
+  'Qwen/Qwen2.5-Coder-32B-Instruct',
+  'mistralai/Mistral-7B-Instruct-v0.3',
+  'google/gemma-2-9b-it'
+]
+
+const LOCAL_MODELS = [
+  'local-model',
+  'Qwen/Qwen2.5-7B-Instruct-GGUF',
+  'meta-llama/Llama-3.2-3B-Instruct-GGUF',
+  'lmstudio-community/gemma-2-9b-it-GGUF'
+]
+
+const OLLAMA_MODELS = [
+  'llama3:latest',
+  'llama3.1:latest',
+  'llama3.2:latest',
+  'gemma2:latest',
+  'mistral:latest',
+  'phi3:latest',
+  'qwen2.5:latest'
+]
+
 export default function SettingsWindow() {
   const [activeTab, setActiveTab] = useState<TabType>('sect-general')
   const [config, setConfig] = useState(DEFAULT_CONFIG)
   
-  // Custom Gemini / OpenAI / Anthropic custom model helpers
+  // Custom model helpers for all providers
   const [customGemini, setCustomGemini] = useState('')
   const [customOpenAI, setCustomOpenAI] = useState('')
   const [customAnthropic, setCustomAnthropic] = useState('')
+  const [customHF, setCustomHF] = useState('')
+  const [customLocal, setCustomLocal] = useState('')
+  const [customOllama, setCustomOllama] = useState('')
 
   // New MCP Server Form state
   const [mcpName, setMcpName] = useState('')
@@ -93,14 +150,23 @@ export default function SettingsWindow() {
         setConfig(merged)
 
         // Set custom text helpers
-        if (merged.geminiModel !== 'gemini-2.5-flash' && merged.geminiModel !== 'gemini-3.1-flash-lite' && merged.geminiModel !== 'gemini-3.1-flash-lite-preview') {
+        if (!GEMINI_MODELS.includes(merged.geminiModel)) {
           setCustomGemini(merged.geminiModel)
         }
-        if (merged.openaiModel !== 'gpt-4o' && merged.openaiModel !== 'gpt-4o-mini' && merged.openaiModel !== 'o1-preview' && merged.openaiModel !== 'o1-mini') {
+        if (!OPENAI_MODELS.includes(merged.openaiModel)) {
           setCustomOpenAI(merged.openaiModel)
         }
-        if (merged.anthropicModel !== 'claude-3-5-sonnet-latest' && merged.anthropicModel !== 'claude-3-opus-latest' && merged.anthropicModel !== 'claude-3-5-haiku-latest') {
+        if (!ANTHROPIC_MODELS.includes(merged.anthropicModel)) {
           setCustomAnthropic(merged.anthropicModel)
+        }
+        if (!HF_MODELS.includes(merged.hfModel)) {
+          setCustomHF(merged.hfModel)
+        }
+        if (!LOCAL_MODELS.includes(merged.localModelName)) {
+          setCustomLocal(merged.localModelName)
+        }
+        if (!OLLAMA_MODELS.includes(merged.ollamaModel)) {
+          setCustomOllama(merged.ollamaModel)
         }
 
         applyThemeStyles(merged)
@@ -181,6 +247,15 @@ export default function SettingsWindow() {
     if (config.anthropicModel === 'custom') {
       finalConfig.anthropicModel = customAnthropic || 'claude-3-5-sonnet-latest'
     }
+    if (config.hfModel === 'custom') {
+      finalConfig.hfModel = customHF || 'meta-llama/Meta-Llama-3-8B-Instruct'
+    }
+    if (config.localModelName === 'custom') {
+      finalConfig.localModelName = customLocal || 'local-model'
+    }
+    if (config.ollamaModel === 'custom') {
+      finalConfig.ollamaModel = customOllama || 'llama3:latest'
+    }
 
     if (window.settingsApi) {
       await window.settingsApi.saveSettings(finalConfig)
@@ -195,6 +270,9 @@ export default function SettingsWindow() {
       setCustomGemini('')
       setCustomOpenAI('')
       setCustomAnthropic('')
+      setCustomHF('')
+      setCustomLocal('')
+      setCustomOllama('')
       applyThemeStyles(DEFAULT_CONFIG)
     }
   }
@@ -312,7 +390,12 @@ export default function SettingsWindow() {
     <div className="settings-container">
       <header className="settings-header drag-region">
         <div className="header-left">
-          <span className="settings-icon">⚙</span>
+          <span className="settings-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+          </span>
           <div>
             <h1>Settings</h1>
             <p>Configure Mint assistant behavior and integrations.</p>
@@ -330,22 +413,71 @@ export default function SettingsWindow() {
       <main className="settings-body">
         <nav className="settings-sidebar" aria-label="Settings sections">
           <button className={`tab-btn ${activeTab === 'sect-general' ? 'active' : ''}`} onClick={() => setActiveTab('sect-general')}>
-            <span>⚙</span><strong>General</strong>
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </span>
+            <strong>General</strong>
           </button>
           <button className={`tab-btn ${activeTab === 'sect-audio' ? 'active' : ''}`} onClick={() => setActiveTab('sect-audio')}>
-            <span>🕪</span><strong>Audio & Voice</strong>
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+              </svg>
+            </span>
+            <strong>Audio & Voice</strong>
           </button>
           <button className={`tab-btn ${activeTab === 'sect-automation' ? 'active' : ''}`} onClick={() => setActiveTab('sect-automation')}>
-            <span>🗲</span><strong>Automation</strong>
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+              </svg>
+            </span>
+            <strong>Automation</strong>
           </button>
           <button className={`tab-btn ${activeTab === 'sect-theme' ? 'active' : ''}`} onClick={() => setActiveTab('sect-theme')}>
-            <span>☼</span><strong>Theme & UI</strong>
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                <line x1="1" y1="12" x2="3" y2="12"></line>
+                <line x1="21" y1="12" x2="23" y2="12"></line>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+              </svg>
+            </span>
+            <strong>Theme & UI</strong>
           </button>
           <button className={`tab-btn ${activeTab === 'sect-plugins' ? 'active' : ''}`} onClick={() => setActiveTab('sect-plugins')}>
-            <span>❖</span><strong>Plugins</strong>
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
+              </svg>
+            </span>
+            <strong>Plugins</strong>
           </button>
           <button className={`tab-btn ${activeTab === 'sect-shortcuts' ? 'active' : ''}`} onClick={() => setActiveTab('sect-shortcuts')}>
-            <span>⌨</span><strong>Shortcuts</strong>
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2" ry="2"></rect>
+                <line x1="6" y1="8" x2="6" y2="8"></line>
+                <line x1="10" y1="8" x2="10" y2="8"></line>
+                <line x1="14" y1="8" x2="14" y2="8"></line>
+                <line x1="18" y1="8" x2="18" y2="8"></line>
+                <line x1="6" y1="12" x2="6" y2="12"></line>
+                <line x1="10" y1="12" x2="10" y2="12"></line>
+                <line x1="14" y1="12" x2="14" y2="12"></line>
+                <line x1="18" y1="12" x2="18" y2="12"></line>
+                <line x1="7" y1="16" x2="17" y2="16"></line>
+              </svg>
+            </span>
+            <strong>Shortcuts</strong>
           </button>
         </nav>
 
@@ -375,21 +507,19 @@ export default function SettingsWindow() {
                     </select>
                   </div>
 
-                  {config.aiProvider === 'gemini' && (
-                    <>
                       <div className="setting-row">
                         <label>Gemini Model</label>
                         <select 
-                          value={['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-flash-lite-preview'].includes(config.geminiModel) ? config.geminiModel : 'custom'} 
+                          value={GEMINI_MODELS.includes(config.geminiModel) ? config.geminiModel : 'custom'} 
                           onChange={(e) => updateField('geminiModel', e.target.value)}
                         >
-                          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                          <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
-                          <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview</option>
+                          {GEMINI_MODELS.map(model => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
                           <option value="custom">Custom...</option>
                         </select>
                       </div>
-                      {(!['gemini-2.5-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-flash-lite-preview'].includes(config.geminiModel) || config.geminiModel === 'custom') && (
+                      {(!GEMINI_MODELS.includes(config.geminiModel) || config.geminiModel === 'custom') && (
                         <div className="setting-row">
                           <label>Custom Gemini Model</label>
                           <input 
@@ -400,25 +530,20 @@ export default function SettingsWindow() {
                           />
                         </div>
                       )}
-                    </>
-                  )}
 
-                  {config.aiProvider === 'openai' && (
-                    <>
                       <div className="setting-row">
                         <label>OpenAI Model</label>
                         <select 
-                          value={['gpt-4o', 'gpt-4o-mini', 'o1-preview', 'o1-mini'].includes(config.openaiModel) ? config.openaiModel : 'custom'} 
+                          value={OPENAI_MODELS.includes(config.openaiModel) ? config.openaiModel : 'custom'} 
                           onChange={(e) => updateField('openaiModel', e.target.value)}
                         >
-                          <option value="gpt-4o">gpt-4o</option>
-                          <option value="gpt-4o-mini">gpt-4o-mini</option>
-                          <option value="o1-preview">o1-preview</option>
-                          <option value="o1-mini">o1-mini</option>
+                          {OPENAI_MODELS.map(model => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
                           <option value="custom">Custom...</option>
                         </select>
                       </div>
-                      {(!['gpt-4o', 'gpt-4o-mini', 'o1-preview', 'o1-mini'].includes(config.openaiModel) || config.openaiModel === 'custom') && (
+                      {(!OPENAI_MODELS.includes(config.openaiModel) || config.openaiModel === 'custom') && (
                         <div className="setting-row">
                           <label>Custom OpenAI Model</label>
                           <input 
@@ -429,24 +554,20 @@ export default function SettingsWindow() {
                           />
                         </div>
                       )}
-                    </>
-                  )}
 
-                  {config.aiProvider === 'anthropic' && (
-                    <>
                       <div className="setting-row">
                         <label>Anthropic Model</label>
                         <select 
-                          value={['claude-3-5-sonnet-latest', 'claude-3-opus-latest', 'claude-3-5-haiku-latest'].includes(config.anthropicModel) ? config.anthropicModel : 'custom'} 
+                          value={ANTHROPIC_MODELS.includes(config.anthropicModel) ? config.anthropicModel : 'custom'} 
                           onChange={(e) => updateField('anthropicModel', e.target.value)}
                         >
-                          <option value="claude-3-5-sonnet-latest">claude-3-5-sonnet-latest</option>
-                          <option value="claude-3-opus-latest">claude-3-opus-latest</option>
-                          <option value="claude-3-5-haiku-latest">claude-3-5-haiku-latest</option>
+                          {ANTHROPIC_MODELS.map(model => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
                           <option value="custom">Custom...</option>
                         </select>
                       </div>
-                      {(!['claude-3-5-sonnet-latest', 'claude-3-opus-latest', 'claude-3-5-haiku-latest'].includes(config.anthropicModel) || config.anthropicModel === 'custom') && (
+                      {(!ANTHROPIC_MODELS.includes(config.anthropicModel) || config.anthropicModel === 'custom') && (
                         <div className="setting-row">
                           <label>Custom Anthropic Model</label>
                           <input 
@@ -457,46 +578,78 @@ export default function SettingsWindow() {
                           />
                         </div>
                       )}
-                    </>
-                  )}
 
-                  {config.aiProvider === 'huggingface' && (
-                    <div className="setting-row">
-                      <label>Hugging Face Model</label>
-                      <input 
-                        type="text" 
-                        value={config.hfModel} 
-                        onChange={(e) => updateField('hfModel', e.target.value)} 
-                        placeholder="e.g. meta-llama/Meta-Llama-3-8B-Instruct" 
-                      />
-                    </div>
-                  )}
+                      <div className="setting-row">
+                        <label>Hugging Face Model</label>
+                        <select 
+                          value={HF_MODELS.includes(config.hfModel) ? config.hfModel : 'custom'} 
+                          onChange={(e) => updateField('hfModel', e.target.value)}
+                        >
+                          {HF_MODELS.map(model => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
+                          <option value="custom">Custom...</option>
+                        </select>
+                      </div>
+                      {(!HF_MODELS.includes(config.hfModel) || config.hfModel === 'custom') && (
+                        <div className="setting-row">
+                          <label>Custom Hugging Face Model</label>
+                          <input 
+                            type="text" 
+                            value={customHF} 
+                            onChange={(e) => { setCustomHF(e.target.value); updateField('hfModel', 'custom') }} 
+                            placeholder="e.g. meta-llama/Meta-Llama-3-8B-Instruct" 
+                          />
+                        </div>
+                      )}
 
-                  {config.aiProvider === 'local_openai' && (
-                    <>
                       <div className="setting-row">
                         <label>LM Studio Model</label>
-                        <input 
-                          type="text" 
-                          value={config.localModelName} 
-                          onChange={(e) => updateField('localModelName', e.target.value)} 
-                          placeholder="e.g. local-model" 
-                        />
+                        <select 
+                          value={LOCAL_MODELS.includes(config.localModelName) ? config.localModelName : 'custom'} 
+                          onChange={(e) => updateField('localModelName', e.target.value)}
+                        >
+                          {LOCAL_MODELS.map(model => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
+                          <option value="custom">Custom...</option>
+                        </select>
                       </div>
-                    </>
-                  )}
+                      {(!LOCAL_MODELS.includes(config.localModelName) || config.localModelName === 'custom') && (
+                        <div className="setting-row">
+                          <label>Custom LM Studio Model</label>
+                          <input 
+                            type="text" 
+                            value={customLocal} 
+                            onChange={(e) => { setCustomLocal(e.target.value); updateField('localModelName', 'custom') }} 
+                            placeholder="e.g. local-model" 
+                          />
+                        </div>
+                      )}
 
-                  {config.aiProvider === 'ollama' && (
-                    <div className="setting-row">
-                      <label>Ollama Model</label>
-                      <input 
-                        type="text" 
-                        value={config.ollamaModel} 
-                        onChange={(e) => updateField('ollamaModel', e.target.value)} 
-                        placeholder="e.g. llama3:latest" 
-                      />
-                    </div>
-                  )}
+                      <div className="setting-row">
+                        <label>Ollama Model</label>
+                        <select 
+                          value={OLLAMA_MODELS.includes(config.ollamaModel) ? config.ollamaModel : 'custom'} 
+                          onChange={(e) => updateField('ollamaModel', e.target.value)}
+                        >
+                          {OLLAMA_MODELS.map(model => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
+                          <option value="custom">Custom...</option>
+                        </select>
+                      </div>
+                      {(!OLLAMA_MODELS.includes(config.ollamaModel) || config.ollamaModel === 'custom') && (
+                        <div className="setting-row">
+                          <label>Custom Ollama Model</label>
+                          <input 
+                            type="text" 
+                            value={customOllama} 
+                            onChange={(e) => { setCustomOllama(e.target.value); updateField('ollamaModel', 'custom') }} 
+                            placeholder="e.g. llama3:latest" 
+                          />
+                        </div>
+                      )}
                 </div>
               </section>
 
@@ -926,7 +1079,12 @@ export default function SettingsWindow() {
                       <label>Background Gradient</label>
                       <div className="color-range" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <input type="color" value={config.customBgStart} onChange={(e) => updateField('customBgStart', e.target.value)} />
-                        <span>→</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--text-soft)' }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                            <polyline points="12 5 19 12 12 19"></polyline>
+                          </svg>
+                        </span>
                         <input type="color" value={config.customBgEnd} onChange={(e) => updateField('customBgEnd', e.target.value)} />
                       </div>
                     </div>

@@ -8,6 +8,60 @@ import {
 } from '../tauri'
 import type { DashboardView } from './DashboardSidebar'
 
+const GEMINI_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+  'gemini-3.1-flash-lite',
+  'gemini-3.1-flash-lite-preview'
+]
+
+const OPENAI_MODELS = [
+  'gpt-4o',
+  'gpt-4o-mini',
+  'o1',
+  'o3-mini',
+  'o1-preview',
+  'o1-mini',
+  'gpt-4-turbo'
+]
+
+const ANTHROPIC_MODELS = [
+  'claude-3-7-sonnet-latest',
+  'claude-3-5-sonnet-latest',
+  'claude-3-5-haiku-latest',
+  'claude-3-opus-latest'
+]
+
+const HF_MODELS = [
+  'meta-llama/Llama-3.3-70B-Instruct',
+  'meta-llama/Meta-Llama-3-8B-Instruct',
+  'meta-llama/Llama-3.2-3B-Instruct',
+  'Qwen/Qwen2.5-72B-Instruct',
+  'Qwen/Qwen2.5-Coder-32B-Instruct',
+  'mistralai/Mistral-7B-Instruct-v0.3',
+  'google/gemma-2-9b-it'
+]
+
+const LOCAL_MODELS = [
+  'local-model',
+  'Qwen/Qwen2.5-7B-Instruct-GGUF',
+  'meta-llama/Llama-3.2-3B-Instruct-GGUF',
+  'lmstudio-community/gemma-2-9b-it-GGUF'
+]
+
+const OLLAMA_MODELS = [
+  'llama3:latest',
+  'llama3.1:latest',
+  'llama3.2:latest',
+  'gemma2:latest',
+  'mistral:latest',
+  'phi3:latest',
+  'qwen2.5:latest'
+]
+
 interface ApprovalDetails {
   title: string
   body: string
@@ -131,6 +185,8 @@ interface ChatPanelProps {
   onSetAgentMode: (enabled: boolean) => void
   onSetProvider: (provider: string) => void
   onApproval: (approved: boolean) => void
+  settingsConfig: any
+  onSetModel: (model: string) => void
 }
 
 function renderFormattedMessage(text: string) {
@@ -198,10 +254,55 @@ export default function ChatPanel({
   onSetAgentMode,
   onSetProvider,
   onApproval,
+  settingsConfig,
+  onSetModel,
 }: ChatPanelProps) {
   const agentActivities = activitiesFrom(agentProgress)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const toolMenuRef = useRef<HTMLDivElement | null>(null)
+
+  const getAvailableModels = (provider: string) => {
+    switch (provider) {
+      case 'gemini':
+        return GEMINI_MODELS
+      case 'openai':
+        return OPENAI_MODELS
+      case 'anthropic':
+        return ANTHROPIC_MODELS
+      case 'huggingface':
+        return HF_MODELS
+      case 'local_openai':
+        return LOCAL_MODELS
+      case 'ollama':
+        return OLLAMA_MODELS
+      default:
+        return []
+    }
+  }
+
+  const activeProvider = status?.activeProvider ?? ''
+  const availableModels = getAvailableModels(activeProvider)
+
+  const getActiveModel = (provider: string) => {
+    if (!settingsConfig) return ''
+    switch (provider) {
+      case 'gemini':
+        return settingsConfig.geminiModel
+      case 'openai':
+        return settingsConfig.openaiModel
+      case 'anthropic':
+        return settingsConfig.anthropicModel
+      case 'huggingface':
+        return settingsConfig.hfModel
+      case 'local_openai':
+        return settingsConfig.localModelName
+      case 'ollama':
+        return settingsConfig.ollamaModel
+      default:
+        return ''
+    }
+  }
+  const activeModel = getActiveModel(activeProvider)
   const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
     event.preventDefault()
@@ -389,14 +490,29 @@ export default function ChatPanel({
               {imageAttachments.map((attachment, idx) => (
                 <div className="mint-image-attachment" key={idx}>
                   <img className="mint-image-preview" src={attachment.dataUri} alt={attachment.name || 'Image attachment'} />
-                  <button className="mint-attachment-remove" type="button" onClick={() => onRemoveImage(idx)} aria-label="Remove image">×</button>
+                  <button className="mint-attachment-remove" type="button" onClick={() => onRemoveImage(idx)} aria-label="Remove image">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
                 </div>
               ))}
               {documentName && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                  <span aria-hidden="true" style={{ fontSize: '1rem' }}>📄</span>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--text-soft)' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                    </svg>
+                  </span>
                   <span style={{ fontSize: '0.76rem', color: 'var(--text-soft)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>{documentName}</span>
-                  <button type="button" onClick={onRemoveDocument} style={{ background: 'transparent', border: 0, color: '#ef4444', cursor: 'pointer' }}>✕</button>
+                  <button type="button" onClick={onRemoveDocument} style={{ background: 'transparent', border: 0, color: '#ef4444', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
                 </div>
               )}
             </div>
@@ -413,19 +529,40 @@ export default function ChatPanel({
             rows={1}
           />
           <div className="chat-tool-menu-wrap" ref={toolMenuRef}>
-            <button id="chat-tool-btn" type="button" aria-haspopup="menu" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((open) => !open)}>+</button>
+            <button id="chat-tool-btn" type="button" aria-haspopup="menu" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((open) => !open)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
             {toolMenuOpen && (
               <div className="chat-tool-menu" role="menu">
-                <button type="button" role="menuitem" onClick={openImagePicker}>
-                  <span aria-hidden="true">⌕</span>
+                <button type="button" role="menuitem" onClick={openImagePicker} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                      <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
+                  </span>
                   <span>Add image</span>
                 </button>
-                <button type="button" role="menuitem" onClick={openDocumentPicker}>
-                  <span aria-hidden="true">□</span>
+                <button type="button" role="menuitem" onClick={openDocumentPicker} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                    </svg>
+                  </span>
                   <span>Add file</span>
                 </button>
-                <button type="button" role="menuitem" onClick={startWebSearch}>
-                  <span aria-hidden="true">○</span>
+                <button type="button" role="menuitem" onClick={startWebSearch} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8"></circle>
+                      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                  </span>
                   <span>Search web</span>
                 </button>
               </div>
@@ -436,11 +573,80 @@ export default function ChatPanel({
           <button id="screen-capture-btn" type="button" onClick={onCaptureScreen} aria-label="Capture screen">
             <span className="screen-capture-eye" aria-hidden="true" />
           </button>
-          <select className="chat-provider-select" value={status?.activeProvider ?? ''} onChange={(event) => onSetProvider(event.target.value)}>
-            {status?.availableProviders.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
-          </select>
-          <button id="mic-btn" type="button" onClick={() => alert("Voice transcription coming soon!")}>🎙</button>
-          <button id="send-btn" type="submit" disabled={sending || !message.trim()}>➤</button>
+          <div className="chat-provider-select" style={{ display: 'flex', gap: '4px', padding: 0, background: 'transparent', border: 0, width: '100%', height: '32px' }}>
+            <select 
+              value={status?.activeProvider ?? ''} 
+              onChange={(event) => onSetProvider(event.target.value)}
+              style={{
+                flex: 1,
+                minWidth: '65px',
+                height: '100%',
+                padding: '0 20px 0 6px',
+                background: 'transparent',
+                border: 0,
+                color: 'var(--text-soft)',
+                fontSize: '0.78rem',
+                outline: 'none',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {status?.availableProviders.map((provider) => {
+                let displayName = provider
+                if (provider === 'gemini') displayName = 'Gemini'
+                else if (provider === 'openai') displayName = 'OpenAI'
+                else if (provider === 'anthropic') displayName = 'Claude'
+                else if (provider === 'huggingface') displayName = 'HF'
+                else if (provider === 'local_openai') displayName = 'Local'
+                else if (provider === 'ollama') displayName = 'Ollama'
+                return <option key={provider} value={provider}>{displayName}</option>
+              })}
+            </select>
+            {availableModels.length > 0 && (
+              <select 
+                value={activeModel} 
+                onChange={(event) => onSetModel(event.target.value)}
+                style={{
+                  flex: 1.2,
+                  minWidth: '85px',
+                  height: '100%',
+                  padding: '0 20px 0 6px',
+                  background: 'transparent',
+                  border: 0,
+                  color: 'var(--text-soft)',
+                  fontSize: '0.78rem',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {availableModels.map((model) => (
+                  <option key={model} value={model}>{model.split('/').pop()}</option>
+                ))}
+                {!availableModels.includes(activeModel) && activeModel && (
+                  <option value={activeModel}>{activeModel.split('/').pop()}</option>
+                )}
+              </select>
+            )}
+          </div>
+          <button id="mic-btn" type="button" onClick={() => alert("Voice transcription coming soon!")} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+          </button>
+          <button id="send-btn" type="submit" disabled={sending || !message.trim()} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
         </form>
       </div>
     </section>

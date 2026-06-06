@@ -4,6 +4,7 @@ export interface RuntimeStatus {
   activeProvider: string
   availableProviders: string[]
   integrations: Record<string, unknown>
+  localIp?: string
 }
 
 export interface ChatResponse {
@@ -58,9 +59,14 @@ export interface CodeEditProposal {
   edits: Array<{ path: string; existed: boolean; diff: string }>
 }
 
+const getApiBase = () => {
+  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+  return `http://${host}:3000/api`;
+};
+
 export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+    const API_BASE = getApiBase();
     try {
       const res = await fetch(`${API_BASE}/status`);
       return await res.json();
@@ -87,7 +93,7 @@ export async function sendChatMessage(
 ): Promise<ChatResponse> {
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+    const API_BASE = getApiBase();
     try {
       const res = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
@@ -155,7 +161,7 @@ function withImagePlaceholder(message: string, imageDataUri?: string | null) {
 
 export async function getRecentInteractions(limit = 50): Promise<InteractionMemory[]> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+    const API_BASE = getApiBase();
     try {
       const res = await fetch(`${API_BASE}/interactions?limit=${limit}`);
       return await res.json();
@@ -170,7 +176,7 @@ export async function getRecentInteractions(limit = 50): Promise<InteractionMemo
 
 export async function clearChatHistory(): Promise<number> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+    const API_BASE = getApiBase();
     try {
       const res = await fetch(`${API_BASE}/interactions/clear`, { method: 'POST' });
       const data = await res.json();
@@ -186,7 +192,7 @@ export async function clearChatHistory(): Promise<number> {
 
 export async function listSavedPictures(): Promise<PictureEntry[]> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+    const API_BASE = getApiBase();
     try {
       const res = await fetch(`${API_BASE}/pictures`);
       const pictures = await res.json();
@@ -251,8 +257,8 @@ export function convertFileSrc(filePath: string, protocol = 'asset'): string {
 
 export function installTauriAdapters() {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    console.warn("Not running inside Tauri. Connecting to local API server fallback at http://localhost:3000/api.");
-    const API_BASE = "http://localhost:3000/api";
+    console.warn(`Not running inside Tauri. Connecting to local API server fallback at ${getApiBase()}.`);
+    const API_BASE = getApiBase();
 
     (window as any).settingsApi = {
       getSettings: async () => {
