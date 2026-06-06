@@ -4,6 +4,7 @@ import {
   getRecentInteractions,
   getRuntimeStatus,
   listSavedPictures,
+  selectWorkspaceDirectory,
   streamChatMessage,
   submitToolApproval,
   listen,
@@ -19,6 +20,7 @@ import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import ModelPanel from './ModelPanel'
 import type { ModelInteraction } from './ModelPanel'
 import PicturesLibrary from './PicturesLibrary'
+import WorkspacePanel from './WorkspacePanel'
 
 const EXPRESSIONS = [
   "ปกติ (Default)",
@@ -47,6 +49,8 @@ const DEFAULT_CONFIG = {
   fontFamily: "'Outfit', sans-serif",
   fontSize: '15px',
 }
+
+const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
 
 const MOCK_WELCOME_INTERACTION = {
   id: -1,
@@ -174,6 +178,7 @@ export default function MintDashboard() {
   const [modelReady, setModelReady] = useState(false)
   const [startupTimedOut, setStartupTimedOut] = useState(false)
   const [settingsConfig, setSettingsConfig] = useState<any>(null)
+  const [workspacePath, setWorkspacePath] = useState(() => window.localStorage.getItem(LAST_WORKSPACE_PATH_KEY) || '')
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const startupReady = (dashboardDataReady && modelReady) || startupTimedOut
 
@@ -230,6 +235,10 @@ export default function MintDashboard() {
   }, [view])
 
   useEffect(() => {
+    if (view === 'workspeac' && !agentMode) updateAgentMode(true)
+  }, [view, agentMode])
+
+  useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: 'smooth' })
   }, [interactions, sending, streamedReply, pendingApproval, agentProgress])
 
@@ -275,6 +284,16 @@ export default function MintDashboard() {
     setAgentMode(enabled)
   }
 
+  const updateWorkspacePath = (path: string) => {
+    const next = path.trim()
+    if (next) {
+      window.localStorage.setItem(LAST_WORKSPACE_PATH_KEY, next)
+    } else {
+      window.localStorage.removeItem(LAST_WORKSPACE_PATH_KEY)
+    }
+    setWorkspacePath(next)
+  }
+
   async function handleApproval(approved: boolean) {
     if (!pendingApproval) return
     try {
@@ -313,6 +332,7 @@ export default function MintDashboard() {
         '',
         (progress) => setAgentProgress((current) => [...current, progress].slice(-24)),
         outgoingDocument,
+        workspacePath || null,
       )
       setStreamedResponse(response)
       await refreshHistory()
@@ -429,6 +449,18 @@ export default function MintDashboard() {
   function startWebSearch() {
     updateAgentMode(true)
     setMessage((current) => current.trim() ? `Search web: ${current.trim()}` : 'Search web: ')
+  }
+
+  async function selectWorkspace() {
+    try {
+      const selected = await selectWorkspaceDirectory()
+      if (selected) {
+        updateWorkspacePath(selected)
+        setView('workspeac')
+      }
+    } catch (reason) {
+      setError(errorMessage(reason))
+    }
   }
 
   async function captureScreen() {
@@ -551,13 +583,23 @@ export default function MintDashboard() {
           onSetShowInteractionGuide={updateInteractionGuide}
           onShowToast={showToast}
         />
-        <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible ? '' : 'model-hidden'}`}>
+        <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspeac' ? '' : 'model-hidden'} ${view === 'workspeac' ? 'workspace-open' : ''}`}>
+          {view === 'workspeac' && (
+            <WorkspacePanel
+              agentMode={agentMode}
+              sending={sending}
+              workspacePath={workspacePath}
+              onEnableAgentMode={() => updateAgentMode(true)}
+              onSetMessage={setMessage}
+              onWorkspaceReady={updateWorkspacePath}
+            />
+          )}
           <ModelPanel
             scale={scale}
             expressionIndex={expressionIndex}
             accessoryIndex={accessoryIndex}
             isLocked={isLocked}
-            isActive={modelVisible && view !== 'pictures'}
+            isActive={modelVisible && view !== 'pictures' && view !== 'workspeac'}
             layoutPreset={layoutPreset}
             sending={sending}
             interactionEnabled={interactionEnabled}
@@ -586,6 +628,7 @@ export default function MintDashboard() {
             smartContext={smartContext}
             agentMode={agentMode}
             status={status}
+            workspacePath={workspacePath}
             chatEnd={chatEnd}
             welcomeInteraction={MOCK_WELCOME_INTERACTION}
             onSubmit={handleSubmit}
@@ -603,6 +646,7 @@ export default function MintDashboard() {
             onSetSmartContext={updateSmartContext}
             onSetAgentMode={updateAgentMode}
             onSetProvider={changeProvider}
+            onSelectWorkspace={selectWorkspace}
             settingsConfig={settingsConfig}
             onSetModel={changeModel}
             onApproval={handleApproval}

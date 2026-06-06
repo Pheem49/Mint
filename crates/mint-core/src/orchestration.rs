@@ -530,6 +530,7 @@ where
                 image_data_uri: pending_image.take(),
                 audio_data_uri: None,
                 document_attachment: None,
+                workspace_path: None,
             },
         )
         .await?;
@@ -556,6 +557,7 @@ where
                         image_data_uri: None,
                         audio_data_uri: None,
                         document_attachment: None,
+                        workspace_path: None,
                     },
                 )
                 .await?;
@@ -1651,6 +1653,7 @@ mod tests {
             image_data_uri: None,
             audio_data_uri: None,
             document_attachment: None,
+            workspace_path: None,
         };
         assert_eq!(
             enrich_request(&store, &request).unwrap().system_instruction,

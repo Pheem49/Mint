@@ -59,6 +59,7 @@ where
                 image_data_uri: None,
                 audio_data_uri: None,
                 document_attachment: None,
+                workspace_path: None,
             },
         )
         .await?;

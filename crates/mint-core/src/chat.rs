@@ -91,6 +91,8 @@ pub struct ChatRequest {
     pub audio_data_uri: Option<String>,
     #[serde(default)]
     pub document_attachment: Option<DocumentAttachment>,
+    #[serde(default)]
+    pub workspace_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -790,6 +792,7 @@ mod tests {
             image_data_uri: Some("data:image/png;base64,aGk= data:image/jpeg;base64,Ynl5".into()),
             audio_data_uri: None,
             document_attachment: None,
+            workspace_path: None,
         })
         .unwrap();
         assert_eq!(parts.len(), 3);

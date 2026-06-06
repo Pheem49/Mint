@@ -49,6 +49,13 @@ export interface PictureEntry {
   thumbnailUrl?: string
 }
 
+export interface WorkspaceTreeEntry {
+  name: string
+  path: string
+  kind: 'file' | 'directory'
+  children: WorkspaceTreeEntry[]
+}
+
 export interface CodeEdit {
   path: string
   content: string
@@ -86,6 +93,7 @@ export async function sendChatMessage(
   imageDataUri?: string | null,
   audioDataUri?: string | null,
   documentAttachment?: DocumentAttachment | null,
+  workspacePath?: string | null,
 ): Promise<ChatResponse> {
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
@@ -104,7 +112,7 @@ export async function sendChatMessage(
   }
   const { invoke } = await import('@tauri-apps/api/core')
   const response = await invoke<ChatResponse>('send_chat_message', {
-    request: { message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri, documentAttachment },
+    request: { message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri, documentAttachment, workspacePath },
   })
   if (imageDataUri) {
     await invoke('save_pictures', {
@@ -124,9 +132,10 @@ export async function streamChatMessage(
   systemInstruction = '',
   onProgress?: (progress: AgentProgress) => void,
   documentAttachment?: DocumentAttachment | null,
+  workspacePath?: string | null,
 ): Promise<ChatResponse> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const response = await sendChatMessage(message, imageDataUri, audioDataUri, documentAttachment);
+    const response = await sendChatMessage(message, imageDataUri, audioDataUri, documentAttachment, workspacePath);
     onChunk(response.text);
     return response;
   }
@@ -138,7 +147,7 @@ export async function streamChatMessage(
     else onProgress?.(event.progress)
   }
   const response = await invoke<ChatResponse>('stream_chat_message', {
-    request: { message: outgoingMessage, systemInstruction, imageDataUri, audioDataUri, documentAttachment },
+    request: { message: outgoingMessage, systemInstruction, imageDataUri, audioDataUri, documentAttachment, workspacePath },
     onEvent,
   })
   if (imageDataUri) {
@@ -211,6 +220,31 @@ export async function listSavedPictures(): Promise<PictureEntry[]> {
   }
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<PictureEntry[]>('list_pictures')
+}
+
+export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceTreeEntry> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    return {
+      name: 'Workspace',
+      path: '.',
+      kind: 'directory',
+      children: [
+        { name: 'src', path: 'src', kind: 'directory', children: [] },
+        { name: 'package.json', path: 'package.json', kind: 'file', children: [] },
+      ],
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<WorkspaceTreeEntry>('get_workspace_tree', { path })
+}
+
+export async function selectWorkspaceDirectory(): Promise<string | null> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    return null
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  const selected = await invoke<string | null>('select_workspace_directory')
+  return selected?.trim() || null
 }
 
 export async function submitToolApproval(token: string, approved: boolean): Promise<void> {

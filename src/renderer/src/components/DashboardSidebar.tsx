@@ -1,4 +1,4 @@
-export type DashboardView = 'chat' | 'pictures' | 'model'
+export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspeac'
 
 interface DashboardSidebarProps {
   view: DashboardView
@@ -98,6 +98,15 @@ export default function DashboardSidebar({
           </svg>
         </span>
         <span>Pictures</span>
+      </button>
+      <button className={`sidebar-top-action ${view === 'workspeac' ? 'is-active' : ''}`} onClick={() => onSetView('workspeac')}>
+        <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
+            <path d="M3 6v12"></path>
+          </svg>
+        </span>
+        <span>Workspeac</span>
       </button>
       <button className={`sidebar-top-action ${modelVisible ? 'is-active' : ''}`} onClick={onToggleModel}>
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>

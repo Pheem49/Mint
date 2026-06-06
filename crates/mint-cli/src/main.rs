@@ -620,6 +620,7 @@ async fn main() -> Result<()> {
                             image_data_uri,
                             audio_data_uri: None,
                             document_attachment: None,
+                            workspace_path: None,
                         },
                     )
                     .await?;
@@ -1735,6 +1736,7 @@ async fn run_interactive_chat() -> Result<()> {
                     image_data_uri: image_uri,
                     audio_data_uri: None,
                     document_attachment: None,
+                    workspace_path: None,
                 },
                 |chunk| {
                     if first_chunk {

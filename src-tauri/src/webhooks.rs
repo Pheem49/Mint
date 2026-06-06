@@ -152,6 +152,7 @@ async fn answer(text: &str, system: &str) -> String {
             image_data_uri: None,
             audio_data_uri: None,
             document_attachment: None,
+            workspace_path: None,
         },
     )
     .await

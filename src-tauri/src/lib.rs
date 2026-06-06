@@ -52,8 +52,8 @@ use proactive::{
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
-use std::path::PathBuf;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use system::{SmartContext, smart_context};
 use tauri::{
     AppHandle, Emitter, Manager,
@@ -80,6 +80,15 @@ struct RuntimeStatus {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceTreeEntry {
+    name: String,
+    path: String,
+    kind: &'static str,
+    children: Vec<WorkspaceTreeEntry>,
+}
+
+#[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 enum DesktopStreamEvent {
     Chunk { chunk: String },
@@ -88,6 +97,17 @@ enum DesktopStreamEvent {
 
 const MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
 const MAX_DOCUMENT_CONTEXT_CHARS: usize = 30_000;
+const WORKSPACE_TREE_MAX_DEPTH: usize = 3;
+const WORKSPACE_TREE_MAX_CHILDREN: usize = 160;
+const WORKSPACE_TREE_COLLAPSED_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "out",
+    "build",
+    "coverage",
+];
 
 fn request_with_document_context(
     config: &MintConfig,
@@ -188,6 +208,108 @@ fn get_runtime_status() -> Result<RuntimeStatus, String> {
 }
 
 #[tauri::command]
+fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String> {
+    let root = workspace_root(path.as_deref())?;
+    let name = root
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| root.display().to_string());
+    Ok(WorkspaceTreeEntry {
+        name,
+        path: root.display().to_string(),
+        kind: "directory",
+        children: workspace_children(&root, &root, 0)?,
+    })
+}
+
+#[tauri::command]
+fn select_workspace_directory() -> Result<Option<String>, String> {
+    for (program, args) in [
+        ("zenity", vec!["--file-selection", "--directory", "--title=Select Project"]),
+        ("kdialog", vec!["--getexistingdirectory", "."]),
+    ] {
+        let Ok(output) = Command::new(program)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+        else {
+            continue;
+        };
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if selected.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(workspace_root(Some(&selected))?.display().to_string()));
+    }
+    Ok(None)
+}
+
+fn workspace_root(path: Option<&str>) -> Result<PathBuf, String> {
+    let root = match path.map(str::trim).filter(|path| !path.is_empty()) {
+        Some(path) => PathBuf::from(path),
+        None => std::env::current_dir().map_err(|error| error.to_string())?,
+    };
+    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    if !root.is_dir() {
+        return Err(format!("workspace is not a directory: {}", root.display()));
+    }
+    Ok(root)
+}
+
+fn workspace_children(
+    root: &Path,
+    directory: &Path,
+    depth: usize,
+) -> Result<Vec<WorkspaceTreeEntry>, String> {
+    if depth >= WORKSPACE_TREE_MAX_DEPTH {
+        return Ok(Vec::new());
+    }
+
+    let mut entries = fs::read_dir(directory)
+        .map_err(|error| error.to_string())?
+        .flatten()
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if file_type.is_symlink() {
+                return None;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            Some((name, entry.path(), file_type.is_dir()))
+        })
+        .collect::<Vec<_>>();
+
+    entries.sort_by(|left, right| right.2.cmp(&left.2).then_with(|| left.0.cmp(&right.0)));
+    entries.truncate(WORKSPACE_TREE_MAX_CHILDREN);
+
+    entries
+        .into_iter()
+        .map(|(name, path, is_dir)| {
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
+            let children =
+                if is_dir && !WORKSPACE_TREE_COLLAPSED_DIRS.contains(&name.as_str()) {
+                    workspace_children(root, &path, depth + 1)?
+                } else {
+                    Vec::new()
+                };
+            Ok(WorkspaceTreeEntry {
+                name,
+                path: relative,
+                kind: if is_dir { "directory" } else { "file" },
+                children,
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
 fn get_config() -> Result<MintConfig, String> {
     load_config().map_err(|error| error.to_string())
 }
@@ -247,7 +369,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
         return Ok(response);
     }
 
-    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let root = workspace_root(request.workspace_path.as_deref())?;
     let fast_mode = config
         .extra
         .get("enableFastMode")
@@ -328,7 +450,7 @@ async fn stream_chat_message(
         return Ok(response);
     }
 
-    let root = std::env::current_dir().map_err(|e| e.to_string())?;
+    let root = workspace_root(request.workspace_path.as_deref())?;
     let fast_mode = config
         .extra
         .get("enableFastMode")
@@ -782,6 +904,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
+            get_workspace_tree,
+            select_workspace_directory,
             get_config,
             get_updater_status,
             check_for_updates,

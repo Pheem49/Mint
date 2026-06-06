@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
 import {
   type AgentProgress,
   type ChatResponse,
@@ -166,6 +166,7 @@ interface ChatPanelProps {
   smartContext: boolean
   agentMode: boolean
   status: RuntimeStatus | null
+  workspacePath: string
   chatEnd: RefObject<HTMLDivElement | null>
   welcomeInteraction: any
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
@@ -181,6 +182,7 @@ interface ChatPanelProps {
   onSetSmartContext: (enabled: boolean) => void
   onSetAgentMode: (enabled: boolean) => void
   onSetProvider: (provider: string) => void
+  onSelectWorkspace: () => void
   onApproval: (approved: boolean) => void
   settingsConfig: any
   onSetModel: (model: string) => void
@@ -235,6 +237,7 @@ export default function ChatPanel({
   smartContext,
   agentMode,
   status,
+  workspacePath,
   chatEnd,
   welcomeInteraction,
   onSubmit,
@@ -250,6 +253,7 @@ export default function ChatPanel({
   onSetSmartContext,
   onSetAgentMode,
   onSetProvider,
+  onSelectWorkspace,
   onApproval,
   settingsConfig,
   onSetModel,
@@ -300,6 +304,9 @@ export default function ChatPanel({
     }
   }
   const activeModel = getActiveModel(activeProvider)
+  const workspaceName = workspacePath
+    ? workspacePath.split(/[\\/]/).filter(Boolean).pop() || workspacePath
+    : 'Select Project'
   const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
     event.preventDefault()
@@ -359,6 +366,19 @@ export default function ChatPanel({
   const startWebSearch = () => {
     setToolMenuOpen(false)
     onStartWebSearch()
+  }
+  const appendWorkspaceReference = (reference: string) => {
+    const trimmed = reference.trim()
+    if (!trimmed) return
+    onSetMessage(message.trim() ? `${message.trimEnd()} ${trimmed}` : trimmed)
+  }
+  const handleWorkspaceDrop = (event: DragEvent<HTMLElement>) => {
+    const reference =
+      event.dataTransfer.getData('application/x-mint-workspace-path') ||
+      event.dataTransfer.getData('text/plain')
+    if (!reference.trim().startsWith('@')) return
+    event.preventDefault()
+    appendWorkspaceReference(reference)
   }
 
   return (
@@ -458,6 +478,15 @@ export default function ChatPanel({
       </div>
 
       <div className="input-area">
+        <button type="button" className="workspace-select-btn" onClick={onSelectWorkspace}>
+          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
+            </svg>
+          </span>
+          <span>{workspaceName}</span>
+          <span aria-hidden="true">⌄</span>
+        </button>
         <div className="smart-context-bar">
           <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <label className="toggle-switch">
@@ -478,6 +507,13 @@ export default function ChatPanel({
         <form
           id="chat-form"
           onSubmit={onSubmit}
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes('application/x-mint-workspace-path')) {
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'copy'
+            }
+          }}
+          onDrop={handleWorkspaceDrop}
           onPaste={(event: ClipboardEvent<HTMLElement>) => {
             if (onPasteImage(event.clipboardData)) event.preventDefault()
           }}
@@ -522,6 +558,7 @@ export default function ChatPanel({
               onSetMessage(event.target.value)
             }}
             onKeyDown={handleInputKeyDown}
+            onDrop={handleWorkspaceDrop}
             placeholder="Ask anything, @ to mention, / for actions"
             rows={1}
           />

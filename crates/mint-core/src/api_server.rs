@@ -274,6 +274,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             image_data_uri: req.image_data_uri,
                             audio_data_uri: req.audio_data_uri,
                             document_attachment: None,
+                            workspace_path: None,
                         };
                         let sent_image = chat_req.image_data_uri.clone();
                         let sent_message = chat_req.message.clone();
