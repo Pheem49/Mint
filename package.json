@@ -3,9 +3,11 @@
   "version": "1.5.4",
   "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
   "scripts": {
-    "dev:web": "vite",
+    "dev:web": "vite --config vite.config.web.ts",
     "web": "cargo run -p mint-cli -- web",
-    "build:web": "vite build",
+    "build:web": "vite build --config vite.config.web.ts",
+    "dev:desktop": "vite",
+    "build:desktop": "vite build",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
