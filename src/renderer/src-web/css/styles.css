@@ -2098,6 +2098,12 @@ input:checked + .slider:before {
   font-weight: 600;
 }
 
+.pictures-header-actions {
+  display: grid;
+  gap: 8px;
+  width: 130px;
+}
+
 .pictures-close-btn {
   height: 34px;
   padding: 0 14px;
@@ -2122,7 +2128,6 @@ input:checked + .slider:before {
   min-width: 0;
   overflow: hidden;
   color: inherit;
-  text-decoration: none;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-bg);
@@ -2150,9 +2155,34 @@ input:checked + .slider:before {
   color: var(--text-soft);
   font-size: 0.76rem;
   line-height: 1.35;
+}
+
+.picture-card-meta span {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.picture-folder-btn {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.picture-folder-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-soft));
+}
+
+.picture-folder-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .pictures-empty {

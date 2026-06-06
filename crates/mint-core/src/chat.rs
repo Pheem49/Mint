@@ -720,9 +720,7 @@ fn gemini_parts(request: &ChatRequest) -> Result<Vec<Value>, ChatError> {
             let payload = img
                 .strip_prefix("data:")
                 .and_then(|payload| payload.split_once(";base64,"))
-                .filter(|(mime_type, data)| {
-                    mime_type.starts_with("image/") && !data.is_empty()
-                })
+                .filter(|(mime_type, data)| mime_type.starts_with("image/") && !data.is_empty())
                 .ok_or(ChatError::InvalidAttachment)?;
             parts.push(json!({
                 "inlineData": {
@@ -737,9 +735,7 @@ fn gemini_parts(request: &ChatRequest) -> Result<Vec<Value>, ChatError> {
             let payload = aud
                 .strip_prefix("data:")
                 .and_then(|payload| payload.split_once(";base64,"))
-                .filter(|(mime_type, data)| {
-                    mime_type.starts_with("audio/") && !data.is_empty()
-                })
+                .filter(|(mime_type, data)| mime_type.starts_with("audio/") && !data.is_empty())
                 .ok_or(ChatError::InvalidAttachment)?;
             parts.push(json!({
                 "inlineData": {

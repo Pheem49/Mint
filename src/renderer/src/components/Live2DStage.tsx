@@ -32,6 +32,9 @@ const ACCESSORY_MAP: Record<number, string | null> = {
 }
 
 const TRACKING_SPEED = 1.25
+const MAX_DEVICE_PIXEL_RATIO = 1.25
+const ACTIVE_MAX_FPS = 30
+const INACTIVE_MAX_FPS = 8
 
 const clampToUnitCircle = (x: number, y: number) => {
   if (isNaN(x) || isNaN(y) || !isFinite(x) || !isFinite(y)) {
@@ -54,6 +57,19 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
   const [loading, setLoading] = useState(true)
   const baseWidthRef = useRef<number | null>(null)
   const baseHeightRef = useRef<number | null>(null)
+
+  const setRenderActive = (active: boolean) => {
+    const app = appRef.current
+    if (!app) return
+
+    app.ticker.maxFPS = active ? ACTIVE_MAX_FPS : INACTIVE_MAX_FPS
+
+    if (active) {
+      app.start()
+    } else {
+      app.stop()
+    }
+  }
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return
@@ -80,11 +96,13 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
         appInstance = new PIXI.Application({
           view: canvasRef.current!,
           backgroundAlpha: 0,
-          antialias: true,
+          antialias: false,
           autoDensity: true,
-          resolution: window.devicePixelRatio || 1,
+          resolution: Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO),
           resizeTo: containerRef.current!,
         })
+        appInstance.ticker.maxFPS = ACTIVE_MAX_FPS
+        appInstance.ticker.minFPS = 10
         appRef.current = appInstance
 
         // Load the Live2D model (served from public/models)
@@ -92,12 +110,11 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
         
         let json: any
         try {
-          const res = await fetch(`${modelUrl}?t=${Date.now()}`)
+          const res = await fetch(modelUrl)
           if (!res.ok) {
             throw new Error(`HTTP error ${res.status}: ${res.statusText}`)
           }
           json = await res.json()
-          console.log("Debug: Loaded JSON:", json)
           
           // Inject the URL so pixi-live2d-display can resolve relative paths
           json.url = modelUrl
@@ -121,8 +138,8 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
         const fitModel = () => {
           if (!modelRef.current || !appRef.current) return
           const m = modelRef.current
-          const stageHeight = appRef.current.renderer.height
-          const stageWidth = appRef.current.renderer.width
+          const stageHeight = appRef.current.screen.height
+          const stageWidth = appRef.current.screen.width
           
           if (stageWidth < 100 || stageHeight < 100) return
           
@@ -167,6 +184,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
         })
 
         applyExpressionAndAccessory(model, expressionIndex, accessoryIndex)
+        setRenderActive(isActive && document.visibilityState === 'visible')
         setLoading(false)
         onLoadComplete?.()
       } catch (err) {
@@ -203,8 +221,8 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
       app.resize()
       
       const model = modelRef.current
-      const stageHeight = app.renderer.height
-      const stageWidth = app.renderer.width
+      const stageHeight = app.screen.height
+      const stageWidth = app.screen.width
       
       if (stageWidth < 100 || stageHeight < 100) return
       
@@ -237,10 +255,15 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
   }, [scale, loading, isActive])
 
   useEffect(() => {
-    if (isActive) {
-      appRef.current?.start()
-    } else {
-      appRef.current?.stop()
+    const updateRenderState = () => {
+      setRenderActive(isActive && document.visibilityState === 'visible')
+    }
+
+    updateRenderState()
+    document.addEventListener('visibilitychange', updateRenderState)
+
+    return () => {
+      document.removeEventListener('visibilitychange', updateRenderState)
     }
   }, [isActive])
 
@@ -257,7 +280,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     const centerFocus = () => focus(0, 0)
 
     const handlePointerMove = (event: PointerEvent) => {
-      if (isLocked || !containerRef.current) return
+      if (isLocked || !isActive || document.visibilityState !== 'visible' || !containerRef.current) return
 
       const rect = containerRef.current.getBoundingClientRect()
       if (!rect.width || !rect.height) return

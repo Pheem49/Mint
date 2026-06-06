@@ -2,11 +2,8 @@ import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, typ
 import {
   type AgentProgress,
   type ChatResponse,
-  type PictureEntry,
   type RuntimeStatus,
-  convertFileSrc,
 } from '../tauri'
-import type { DashboardView } from './DashboardSidebar'
 
 const GEMINI_MODELS = [
   'gemini-2.5-flash',
@@ -923,45 +920,6 @@ export default function ChatPanel({
           </button>
         </form>
       </div>
-    </section>
-  )
-}
-
-interface PicturesLibraryProps {
-  view: DashboardView
-  pictures: PictureEntry[]
-  onSetView: (view: DashboardView) => void
-}
-
-export function PicturesLibrary({ view, pictures, onSetView }: PicturesLibraryProps) {
-  if (view !== 'pictures') return null
-
-  return (
-    <section className="pictures-library">
-      <header className="pictures-header">
-        <div><span className="pictures-kicker">Gallery</span><h2>Saved Pictures</h2></div>
-        <button className="pictures-close-btn" onClick={() => onSetView('chat')}>Close Gallery</button>
-      </header>
-      {pictures.length === 0 ? (
-        <div className="pictures-empty">
-          <div className="pictures-empty-icon" style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px', opacity: 0.3 }}>
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline>
-            </svg>
-          </div>
-          <p>No saved pictures yet</p>
-          <span>Images appear here after a message with an attachment is sent successfully.</span>
-        </div>
-      ) : (
-        <div className="pictures-grid">
-          {pictures.map((picture) => (
-            <a className="picture-card" href={picture.url} target="_blank" rel="noreferrer" key={picture.id} onClick={(event) => { event.preventDefault(); window.settingsApi?.openExternal(picture.url || '') }}>
-              <img src={convertFileSrc(picture.path)} alt={picture.message || picture.filename} loading="lazy" decoding="async" />
-              <div className="picture-card-meta">{picture.message || picture.filename}</div>
-            </a>
-          ))}
-        </div>
-      )}
     </section>
   )
 }

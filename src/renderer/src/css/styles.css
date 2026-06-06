@@ -2042,7 +2042,6 @@ input:checked + .slider:before {
 .app-body.pictures-open .assistant-workspace {
   opacity: 0;
   pointer-events: none;
-  transform: translateY(8px) scale(0.995);
 }
 
 .pictures-library {
@@ -2056,21 +2055,17 @@ input:checked + .slider:before {
   color: var(--text-main);
   opacity: 0;
   pointer-events: none;
-  transform: translateY(10px);
-  transition: opacity 0.24s ease, transform 0.24s ease;
 }
 
 .app-body.pictures-open .pictures-library {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
 }
 
 .pictures-library[hidden] {
   display: block;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(10px);
 }
 
 .pictures-header {
@@ -2098,6 +2093,12 @@ input:checked + .slider:before {
   font-weight: 600;
 }
 
+.pictures-header-actions {
+  display: grid;
+  gap: 8px;
+  width: 130px;
+}
+
 .pictures-close-btn {
   height: 34px;
   padding: 0 14px;
@@ -2114,26 +2115,23 @@ input:checked + .slider:before {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(174px, 1fr));
   gap: 14px;
-  animation: picturesGridIn 0.28s ease both;
 }
 
 .picture-card {
   position: relative;
   min-width: 0;
   overflow: hidden;
+  contain: layout paint style;
+  content-visibility: auto;
+  contain-intrinsic-size: 220px 210px;
   color: inherit;
-  text-decoration: none;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-bg);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.16);
-  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .picture-card:hover {
-  transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.22);
 }
 
 .picture-card img {
@@ -2150,9 +2148,34 @@ input:checked + .slider:before {
   color: var(--text-soft);
   font-size: 0.76rem;
   line-height: 1.35;
+}
+
+.picture-card-meta span {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.picture-folder-btn {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.picture-folder-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel-soft));
+}
+
+.picture-folder-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .pictures-empty {
@@ -2163,17 +2186,6 @@ input:checked + .slider:before {
   gap: 8px;
   color: var(--text-muted);
   text-align: center;
-}
-
-@keyframes picturesGridIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .pictures-empty.is-hidden {

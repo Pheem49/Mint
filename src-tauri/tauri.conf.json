@@ -5,7 +5,7 @@
   "identifier": "com.pheem49.mint",
   "build": {
     "beforeDevCommand": "npm run dev:desktop",
-    "beforeBuildCommand": "npm run build:desktop",
+    "beforeBuildCommand": "npm run build:desktop:ui",
     "devUrl": "http://localhost:9000",
     "frontendDist": "../out/renderer"
   },

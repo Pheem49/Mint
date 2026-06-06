@@ -76,7 +76,9 @@ pub fn save_sent_image_after_send(data_uri: Option<&str>, message: &str) {
         for img in data_uri.split_whitespace() {
             match mint_core::save_sent_image(img, message) {
                 Ok(entry) => println!("\x1b[90mSaved image: {}\x1b[0m", entry.path.display()),
-                Err(error) => eprintln!("\x1b[33mWarning: failed to save sent image: {error}\x1b[0m"),
+                Err(error) => {
+                    eprintln!("\x1b[33mWarning: failed to save sent image: {error}\x1b[0m")
+                }
             }
         }
     }

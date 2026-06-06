@@ -14,8 +14,9 @@ import {
   type PictureEntry,
   type RuntimeStatus,
 } from '../tauri'
-import ChatPanel, { PicturesLibrary } from './ChatPanel'
+import ChatPanel from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
+import PicturesLibrary from './PicturesLibrary'
 
 const DEFAULT_CONFIG = {
   theme: 'dark',

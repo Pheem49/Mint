@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::Cursor,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -10,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{ConfigError, config_path};
+
+const THUMBNAIL_MAX_SIZE: u32 = 360;
 
 #[derive(Debug, Error)]
 pub enum PictureError {
@@ -57,20 +60,42 @@ pub struct PictureEntry {
     pub source: String,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_path: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbnail_url: Option<String>,
 }
 
 pub fn list_saved_pictures() -> Result<Vec<PictureEntry>, PictureError> {
     let directory = pictures_directory()?;
     ensure_directory(&directory)?;
-    Ok(read_index(&directory)?
+    let mut changed = false;
+    let entries = read_index(&directory)?
         .into_iter()
         .filter(|entry| entry.path.exists())
         .map(|mut entry| {
+            if entry
+                .thumbnail_path
+                .as_ref()
+                .is_none_or(|thumbnail_path| !thumbnail_path.exists())
+            {
+                if let Some(thumbnail_path) = create_thumbnail_from_file(&directory, &entry) {
+                    entry.thumbnail_path = Some(thumbnail_path);
+                    changed = true;
+                }
+            }
             entry.url = Some(file_url(&entry.path));
+            entry.thumbnail_url = entry.thumbnail_path.as_deref().map(file_url);
             entry
         })
-        .collect())
+        .collect::<Vec<_>>();
+
+    if changed {
+        write_index(&directory, &entries)?;
+    }
+
+    Ok(entries)
 }
 
 pub fn save_chat_images(
@@ -135,19 +160,25 @@ fn save_chat_images_to_directory(
             extension
         );
         let path = directory.join(&filename);
-        fs::write(&path, bytes).map_err(|source| PictureError::WritePicture {
+        fs::write(&path, &bytes).map_err(|source| PictureError::WritePicture {
             path: path.clone(),
             source,
         })?;
+        let id = filename
+            .trim_end_matches(&format!(".{extension}"))
+            .to_owned();
+        let thumbnail_path = create_thumbnail_from_bytes(directory, &id, &bytes);
         let entry = PictureEntry {
-            id: filename.trim_end_matches(&format!(".{extension}")).into(),
+            id,
             filename,
             path,
             mime_type,
             created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
             source: source.into(),
             message: message.chars().take(240).collect(),
+            thumbnail_path,
             url: None,
+            thumbnail_url: None,
         };
         index.insert(0, entry.clone());
         saved.push(entry);
@@ -165,6 +196,30 @@ fn ensure_directory(directory: &Path) -> Result<(), PictureError> {
         path: directory.into(),
         source,
     })
+}
+
+fn thumbnails_directory(directory: &Path) -> PathBuf {
+    directory.join("thumbnails")
+}
+
+fn create_thumbnail_from_file(directory: &Path, entry: &PictureEntry) -> Option<PathBuf> {
+    let bytes = fs::read(&entry.path).ok()?;
+    create_thumbnail_from_bytes(directory, &entry.id, &bytes)
+}
+
+fn create_thumbnail_from_bytes(directory: &Path, id: &str, bytes: &[u8]) -> Option<PathBuf> {
+    let image = image::load_from_memory(bytes).ok()?;
+    let thumbnail = image.thumbnail(THUMBNAIL_MAX_SIZE, THUMBNAIL_MAX_SIZE);
+    let thumbnail_directory = thumbnails_directory(directory);
+    ensure_directory(&thumbnail_directory).ok()?;
+
+    let path = thumbnail_directory.join(format!("{id}.thumb.png"));
+    let mut encoded = Cursor::new(Vec::new());
+    thumbnail
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .ok()?;
+    fs::write(&path, encoded.into_inner()).ok()?;
+    Some(path)
 }
 
 fn read_index(directory: &Path) -> Result<Vec<PictureEntry>, PictureError> {

@@ -2119,6 +2119,7 @@ dependencies = [
  "chrono",
  "dirs",
  "futures-util",
+ "image",
  "quick-xml",
  "regex",
  "reqwest 0.12.28",

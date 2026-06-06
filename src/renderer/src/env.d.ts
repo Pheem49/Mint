@@ -43,6 +43,7 @@ interface Window {
     closeSettings: () => void;
     quitApp: () => void;
     openExternal: (url: string) => Promise<void>;
+    openFolder: (path: string) => Promise<void>;
     openCustomWorkflows: () => Promise<any>;
     reloadCustomWorkflows: () => Promise<any>;
   };

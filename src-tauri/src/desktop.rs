@@ -201,13 +201,14 @@ pub fn capture_screen() -> Result<String, String> {
 }
 
 pub fn read_clipboard_image() -> Result<String, String> {
-    let output = Command::new("wl-paste")
-        .args(&["-t", "image/png"])
-        .output();
+    let output = Command::new("wl-paste").args(&["-t", "image/png"]).output();
 
     if let Ok(out) = output {
         if out.status.success() && !out.stdout.is_empty() {
-            return Ok(format!("data:image/png;base64,{}", STANDARD.encode(&out.stdout)));
+            return Ok(format!(
+                "data:image/png;base64,{}",
+                STANDARD.encode(&out.stdout)
+            ));
         }
     }
 
@@ -217,7 +218,10 @@ pub fn read_clipboard_image() -> Result<String, String> {
 
     if let Ok(out) = output {
         if out.status.success() && !out.stdout.is_empty() {
-            return Ok(format!("data:image/png;base64,{}", STANDARD.encode(&out.stdout)));
+            return Ok(format!(
+                "data:image/png;base64,{}",
+                STANDARD.encode(&out.stdout)
+            ));
         }
     }
 

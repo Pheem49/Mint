@@ -45,7 +45,9 @@ export interface PictureEntry {
   createdAt: string
   source: string
   message: string
+  thumbnailPath?: string
   url?: string
+  thumbnailUrl?: string
 }
 
 export interface CodeEdit {
@@ -197,10 +199,16 @@ export async function listSavedPictures(): Promise<PictureEntry[]> {
       const res = await fetch(`${API_BASE}/pictures`);
       const pictures = await res.json();
       return Array.isArray(pictures)
-        ? pictures.map((picture) => ({
-            ...picture,
-            path: picture.url ? `${API_BASE.replace('/api', '')}${picture.url}` : picture.path,
-          }))
+        ? pictures.map((picture) => {
+            const pictureUrl = picture.url ? `${API_BASE.replace('/api', '')}${picture.url}` : undefined
+            return {
+              ...picture,
+              path: pictureUrl || picture.path,
+              thumbnailPath: undefined,
+              thumbnailUrl: pictureUrl,
+              url: pictureUrl || picture.url,
+            }
+          })
         : [];
     } catch (e) {
       console.error("Failed to fetch saved pictures from local server:", e);
@@ -291,6 +299,7 @@ export function installTauriAdapters() {
       },
       quitApp: () => {},
       openExternal: () => {},
+      openFolder: () => {},
       openCustomWorkflows: () => {},
       reloadCustomWorkflows: () => {},
     };
@@ -508,6 +517,10 @@ export function installTauriAdapters() {
     openExternal: async (url) => {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('run_desktop_action', { action: { type: 'open_url', target: url } })
+    },
+    openFolder: async (path) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('open_folder', { path })
     },
     openCustomWorkflows: async () => {
       const { invoke } = await import('@tauri-apps/api/core')

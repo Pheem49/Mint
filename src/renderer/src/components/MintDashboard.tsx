@@ -14,10 +14,11 @@ import {
   type PictureEntry,
   type RuntimeStatus,
 } from '../tauri'
-import ChatPanel, { PicturesLibrary } from './ChatPanel'
+import ChatPanel from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import ModelPanel from './ModelPanel'
 import type { ModelInteraction } from './ModelPanel'
+import PicturesLibrary from './PicturesLibrary'
 
 const EXPRESSIONS = [
   "ปกติ (Default)",

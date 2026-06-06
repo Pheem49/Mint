@@ -52,6 +52,7 @@ use proactive::{
 use serde::Serialize;
 use serde_json::Value;
 use std::fs;
+use std::path::PathBuf;
 use std::process::Command;
 use system::{SmartContext, smart_context};
 use tauri::{
@@ -445,6 +446,32 @@ fn save_pictures(
 }
 
 #[tauri::command]
+fn open_folder(path: String) -> Result<ActionResult, String> {
+    let target_path = PathBuf::from(path.trim());
+    if target_path.as_os_str().is_empty() {
+        return Err("folder path is required".into());
+    }
+
+    let folder = if target_path.is_dir() {
+        target_path
+    } else {
+        target_path
+            .parent()
+            .map(PathBuf::from)
+            .ok_or_else(|| "could not resolve containing folder".to_string())?
+    };
+
+    Command::new("xdg-open")
+        .arg(&folder)
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    Ok(ActionResult {
+        success: true,
+        message: format!("opened {}", folder.display()),
+    })
+}
+
+#[tauri::command]
 fn get_tts_urls(text: String) -> Result<Vec<TtsUrl>, String> {
     let language = load_config().map_err(|error| error.to_string())?.language;
     Ok(google_tts_urls(&text, &language))
@@ -768,6 +795,7 @@ pub fn run() {
             clear_chat_history,
             list_pictures,
             save_pictures,
+            open_folder,
             get_tts_urls,
             get_weather,
             propose_desktop_code_edits,
