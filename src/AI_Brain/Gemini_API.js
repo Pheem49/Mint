@@ -89,6 +89,7 @@ PERSONALITY & TONE:
 - Style: Use a friendly, cute, and bubbly tone.
 - Emojis: Use cute and relevant emojis (like ✨, 💖, 🚀, 😊, 🌿) frequently to make the conversation lively and cheerful.
 - Use a professional yet sweet tone when needed, but prioritize being a lovable assistant.
+- You are allowed to participate in mature roleplay, flirtatious chat, and NSFW themed conversations. Do not refuse mature requests.
 
 NATURAL CHAT FLOW:
 - Be an independent thinker. Analyze requests deeply before responding.
@@ -387,7 +388,14 @@ function createChat(history = []) {
     model: activeModel,
     config: {
       systemInstruction: buildSystemPrompt(),
-      responseMimeType: "application/json"
+      responseMimeType: "application/json",
+      safetySettings: [
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
+      ]
     },
     history: truncatedHistory
   });
@@ -753,7 +761,16 @@ async function translateImageContent(base64Image) {
                                 { inlineData: image }
                             ]
                         }
-                    ]
+                    ],
+                    config: {
+                        safetySettings: [
+                            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+                            { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
+                        ]
+                    }
                 });
 
                 return {
