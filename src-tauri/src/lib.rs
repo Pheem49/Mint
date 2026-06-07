@@ -97,16 +97,21 @@ enum DesktopStreamEvent {
 
 const MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
 const MAX_DOCUMENT_CONTEXT_CHARS: usize = 30_000;
-const WORKSPACE_TREE_MAX_DEPTH: usize = 3;
-const WORKSPACE_TREE_MAX_CHILDREN: usize = 160;
+const WORKSPACE_TREE_MAX_DEPTH: usize = 9;
+const WORKSPACE_TREE_MAX_CHILDREN: usize = 400;
 const WORKSPACE_TREE_COLLAPSED_DIRS: &[&str] = &[
+    ".antigravitycli",
+    ".cargo_home",
     ".git",
-    "node_modules",
-    "target",
-    "dist",
-    "out",
+    ".rustup",
+    ".rustup_copy",
+    ".rustup_home",
     "build",
     "coverage",
+    "dist",
+    "node_modules",
+    "out",
+    "target",
 ];
 
 fn request_with_document_context(

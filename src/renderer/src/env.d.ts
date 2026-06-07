@@ -1,4 +1,5 @@
 declare module '*.css';
+declare module '*.svg?url';
 
 interface Window {
   api: {
