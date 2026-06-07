@@ -925,17 +925,11 @@ async fn launch_mint_target(target: String) -> Result<()> {
             println!("{MINT}Starting CLI Interactive Chat Assistant...{RESET}\n");
             run_interactive_chat().await?;
         }
-        "desktop" => {
-            println!("{MINT}Launching Desktop App (npm run tauri:dev)... {RESET}\n");
-            let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .and_then(|p| p.parent())
-                .ok_or_else(|| anyhow::anyhow!("Failed to find project root directory"))?;
-            std::process::Command::new("npm")
-                .current_dir(project_root)
-                .args(&["run", "tauri:dev"])
-                .status()
-                .map_err(|e| anyhow::anyhow!("Failed to run desktop app: {e}"))?;
+        "app_link" => {
+            const APP_URL: &str = "https://kandone.aemeth.xyz";
+            println!("{MINT}Opening Mint App Link...{RESET}");
+            println!("{BLUE}Open app:{RESET} {APP_URL}\n");
+            open_system_handler(APP_URL)?;
         }
         "web" => {
             println!(

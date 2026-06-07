@@ -286,8 +286,8 @@ pub async fn run() -> Result<Option<String>> {
             enabled: false,
         },
         ToolOption {
-            name: "2. Desktop App (Tauri Desktop Dashboard)",
-            key: "desktop",
+            name: "2. Desktop App (Download & Install)",
+            key: "app_link",
             enabled: false,
         },
         ToolOption {
