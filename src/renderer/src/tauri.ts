@@ -104,7 +104,18 @@ export async function sendChatMessage(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri, documentAttachment })
       });
-      return await res.json();
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return {
+          provider: 'error',
+          model: 'error',
+          text: data?.text || data?.message || data?.status || `Local API returned HTTP ${res.status}`,
+        };
+      }
+      if (!data || typeof data.text !== 'string') {
+        return { provider: 'error', model: 'error', text: 'Local API returned an invalid chat response.' };
+      }
+      return data;
     } catch (e) {
       console.error("Failed to send chat message to local server:", e);
       return { provider: 'error', model: 'error', text: `Failed to connect to Local API Server: ${e}` };
@@ -161,7 +172,10 @@ export async function streamChatMessage(
 }
 
 function withImagePlaceholder(message: string, imageDataUri?: string | null) {
-  return imageDataUri && !message.includes('[Image #1]') ? `${message} [Image #1]` : message
+  if (!imageDataUri || message.includes('[Image #1]')) return message
+  const imageCount = imageDataUri.split(/\s+/).filter(Boolean).length
+  const markers = Array.from({ length: imageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
+  return markers ? `${message} ${markers}` : message
 }
 
 export async function getRecentInteractions(limit = 50): Promise<InteractionMemory[]> {
@@ -382,7 +396,18 @@ export function installTauriAdapters() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message, imageDataUri, audioDataUri, documentAttachment })
           });
-          return await res.json();
+          const data = await res.json().catch(() => null);
+          if (!res.ok) {
+            return {
+              provider: 'error',
+              model: 'error',
+              text: data?.text || data?.message || data?.status || `Local API returned HTTP ${res.status}`,
+            };
+          }
+          if (!data || typeof data.text !== 'string') {
+            return { provider: 'error', model: 'error', text: 'Local API returned an invalid chat response.' };
+          }
+          return data;
         } catch (e) {
           console.error("Failed to send message to local server:", e);
           return { provider: 'error', model: 'error', text: `Failed to connect to Local API Server: ${e}` };
