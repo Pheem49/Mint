@@ -41,7 +41,7 @@ def run_rustc(source_file, crate_type, out_dir, deps_dir, externs, extra_flags=[
     print("-" * 40)
     
     env = os.environ.copy()
-    env["CARGO_PKG_VERSION"] = "2.0.0-alpha.1"
+    env["CARGO_PKG_VERSION"] = "1.6.0"
     res = subprocess.run(args, capture_output=True, text=True, env=env)
     if res.returncode != 0:
         print("STDOUT:")
