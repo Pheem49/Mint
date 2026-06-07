@@ -253,6 +253,34 @@ h1 {
     padding: 24px 32px 32px;
 }
 
+.web-safe-notice {
+    width: 100%;
+    max-width: 624px;
+    margin: 0 auto 18px;
+    padding: 12px 14px;
+    border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--accent) 9%, var(--surface-bg));
+    color: var(--text-main);
+}
+
+.web-safe-notice strong,
+.web-safe-notice span {
+    display: block;
+}
+
+.web-safe-notice strong {
+    font-size: 0.82rem;
+    font-weight: 750;
+}
+
+.web-safe-notice span {
+    margin-top: 3px;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+
 .settings-content::-webkit-scrollbar,
 .settings-sidebar::-webkit-scrollbar {
     width: 6px;
@@ -665,6 +693,16 @@ input:checked + .toggle-slider::before {
     transition: transform 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
 }
 
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-danger:disabled,
+.btn-connect:disabled,
+.btn-disconnect:disabled {
+    opacity: 0.46;
+    cursor: not-allowed;
+    transform: none;
+}
+
 .btn-small {
     min-height: 32px;
     padding: 6px 11px;
@@ -718,6 +756,11 @@ input:checked + .toggle-slider::before {
 
 .full-width {
     width: 100%;
+}
+
+.web-safe-footer-note {
+    color: var(--text-muted);
+    font-size: 0.78rem;
 }
 
 .theme-grid {

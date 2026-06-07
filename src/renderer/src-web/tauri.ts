@@ -61,13 +61,19 @@ export interface CodeEditProposal {
   edits: Array<{ path: string; existed: boolean; diff: string }>
 }
 
-const getApiBase = () => {
+export const isTauriRuntime = () => (
+  typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__)
+)
+
+export const getLocalApiBase = () => {
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   return `http://${host}:3000/api`;
 };
 
+const getApiBase = getLocalApiBase
+
 export async function getRuntimeStatus(): Promise<RuntimeStatus> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
       const res = await fetch(`${API_BASE}/status`);
@@ -94,7 +100,7 @@ export async function sendChatMessage(
   documentAttachment?: DocumentAttachment | null,
 ): Promise<ChatResponse> {
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
       const res = await fetch(`${API_BASE}/chat`, {
@@ -102,7 +108,22 @@ export async function sendChatMessage(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri, documentAttachment })
       });
-      return await res.json();
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        return {
+          provider: 'error',
+          model: 'error',
+          text: data?.text || data?.message || data?.status || `Local API returned HTTP ${res.status}`,
+        };
+      }
+      if (!data || typeof data.text !== 'string') {
+        return {
+          provider: 'error',
+          model: 'error',
+          text: 'Local API returned an invalid chat response.',
+        };
+      }
+      return data;
     } catch (e) {
       console.error("Failed to send chat message to local server:", e);
       return { provider: 'error', model: 'error', text: `Failed to connect to Local API Server: ${e}` };
@@ -131,7 +152,7 @@ export async function streamChatMessage(
   onProgress?: (progress: AgentProgress) => void,
   documentAttachment?: DocumentAttachment | null,
 ): Promise<ChatResponse> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     const response = await sendChatMessage(message, imageDataUri, audioDataUri, documentAttachment);
     onChunk(response.text);
     return response;
@@ -158,11 +179,14 @@ export async function streamChatMessage(
 }
 
 function withImagePlaceholder(message: string, imageDataUri?: string | null) {
-  return imageDataUri && !message.includes('[Image #1]') ? `${message} [Image #1]` : message
+  if (!imageDataUri || message.includes('[Image #1]')) return message
+  const imageCount = imageDataUri.split(/\s+/).filter(Boolean).length
+  const markers = Array.from({ length: imageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
+  return markers ? `${message} ${markers}` : message
 }
 
 export async function getRecentInteractions(limit = 50): Promise<InteractionMemory[]> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
       const res = await fetch(`${API_BASE}/interactions?limit=${limit}`);
@@ -177,7 +201,7 @@ export async function getRecentInteractions(limit = 50): Promise<InteractionMemo
 }
 
 export async function clearChatHistory(): Promise<number> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
       const res = await fetch(`${API_BASE}/interactions/clear`, { method: 'POST' });
@@ -193,7 +217,7 @@ export async function clearChatHistory(): Promise<number> {
 }
 
 export async function listSavedPictures(): Promise<PictureEntry[]> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
       const res = await fetch(`${API_BASE}/pictures`);
@@ -220,7 +244,7 @@ export async function listSavedPictures(): Promise<PictureEntry[]> {
 }
 
 export async function submitToolApproval(token: string, approved: boolean): Promise<void> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     return;
   }
   const { invoke } = await import('@tauri-apps/api/core')
@@ -228,7 +252,7 @@ export async function submitToolApproval(token: string, approved: boolean): Prom
 }
 
 export async function proposeCodeEdits(root: string, edits: CodeEdit[]): Promise<CodeEditProposal> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     return { approvalRequired: false, approvalToken: '', edits: [] };
   }
   const { invoke } = await import('@tauri-apps/api/core')
@@ -236,7 +260,7 @@ export async function proposeCodeEdits(root: string, edits: CodeEdit[]): Promise
 }
 
 export async function applyCodeEdits(root: string, edits: CodeEdit[], approvalToken: string) {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     return;
   }
   const { invoke } = await import('@tauri-apps/api/core')
@@ -244,7 +268,7 @@ export async function applyCodeEdits(root: string, edits: CodeEdit[], approvalTo
 }
 
 export async function listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     return () => {};
   }
   const { listen: tauriListen } = await import('@tauri-apps/api/event');
@@ -252,7 +276,7 @@ export async function listen<T>(event: string, handler: (event: { payload: T }) 
 }
 
 export function convertFileSrc(filePath: string, protocol = 'asset'): string {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     return filePath;
   }
   const internals = (window as any).__TAURI_INTERNALS__;
@@ -264,7 +288,7 @@ export function convertFileSrc(filePath: string, protocol = 'asset'): string {
 }
 
 export function installTauriAdapters() {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     console.warn(`Not running inside Tauri. Connecting to local API server fallback at ${getApiBase()}.`);
     const API_BASE = getApiBase();
 
@@ -278,9 +302,9 @@ export function installTauriAdapters() {
           return {};
         }
       },
-      getUpdaterStatus: async () => ({}),
-      checkForUpdates: async () => ({}),
-      installAvailableUpdate: async () => {},
+      getUpdaterStatus: async () => ({ supported: false, message: 'Desktop updates are only available in the Tauri app.' }),
+      checkForUpdates: async () => ({ available: false, supported: false, message: 'Desktop updates are only available in the Tauri app.' }),
+      installAvailableUpdate: async () => 'Desktop updates are only available in the Tauri app.',
       saveSettings: async (config: any) => {
         try {
           const res = await fetch(`${API_BASE}/config`, {
@@ -297,11 +321,13 @@ export function installTauriAdapters() {
       closeSettings: () => {
         window.location.hash = '#/';
       },
-      quitApp: () => {},
-      openExternal: () => {},
-      openFolder: () => {},
-      openCustomWorkflows: () => {},
-      reloadCustomWorkflows: () => {},
+      quitApp: () => undefined,
+      openExternal: async (url: string) => {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      },
+      openFolder: async () => ({ success: false, message: 'Opening local folders is only available in the desktop app.' }),
+      openCustomWorkflows: async () => ({ success: false, message: 'Opening workflow files is only available in the desktop app.' }),
+      reloadCustomWorkflows: async () => ({ success: false, message: 'Reloading workflow files is only available in the desktop app.' }),
     };
 
     (window as any).spotlightAPI = {
@@ -354,7 +380,18 @@ export function installTauriAdapters() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message, imageDataUri, audioDataUri, documentAttachment })
           });
-          return await res.json();
+          const data = await res.json().catch(() => null);
+          if (!res.ok) {
+            return {
+              provider: 'error',
+              model: 'error',
+              text: data?.text || data?.message || data?.status || `Local API returned HTTP ${res.status}`,
+            };
+          }
+          if (!data || typeof data.text !== 'string') {
+            return { provider: 'error', model: 'error', text: 'Local API returned an invalid chat response.' };
+          }
+          return data;
         } catch (e) {
           console.error("Failed to send message to local server:", e);
           return { provider: 'error', model: 'error', text: `Failed to connect to Local API Server: ${e}` };
@@ -362,7 +399,7 @@ export function installTauriAdapters() {
       },
       closeWindow: () => {},
       minimizeWindow: () => {},
-      quitApp: () => {},
+      quitApp: () => undefined,
       maximizeWindow: () => {},
       resetChat: async () => {
         try {
@@ -772,7 +809,7 @@ async function captureSharedScreen(): Promise<string> {
 }
 
 export async function readClipboardImage(): Promise<string | null> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     return null
   }
   const { invoke } = await import('@tauri-apps/api/core')

@@ -61,6 +61,58 @@ function readDocument(file: File): Promise<string> {
   })
 }
 
+async function createTrimmedImagePreview(dataUri: string): Promise<string> {
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const nextImage = new Image()
+    nextImage.onload = () => resolve(nextImage)
+    nextImage.onerror = () => reject(new Error('Unable to prepare image preview'))
+    nextImage.src = dataUri
+  })
+
+  const canvas = document.createElement('canvas')
+  canvas.width = image.naturalWidth || image.width
+  canvas.height = image.naturalHeight || image.height
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context || canvas.width === 0 || canvas.height === 0) return dataUri
+
+  context.drawImage(image, 0, 0)
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height)
+  let minX = canvas.width
+  let minY = canvas.height
+  let maxX = -1
+  let maxY = -1
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const alpha = pixels.data[(y * canvas.width + x) * 4 + 3]
+      if (alpha > 12) {
+        minX = Math.min(minX, x)
+        minY = Math.min(minY, y)
+        maxX = Math.max(maxX, x)
+        maxY = Math.max(maxY, y)
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return dataUri
+
+  const padding = 8
+  const sx = Math.max(0, minX - padding)
+  const sy = Math.max(0, minY - padding)
+  const sw = Math.min(canvas.width - sx, maxX - minX + 1 + padding * 2)
+  const sh = Math.min(canvas.height - sy, maxY - minY + 1 + padding * 2)
+
+  if (sw >= canvas.width * 0.92 && sh >= canvas.height * 0.92) return dataUri
+
+  const previewCanvas = document.createElement('canvas')
+  previewCanvas.width = sw
+  previewCanvas.height = sh
+  const previewContext = previewCanvas.getContext('2d')
+  if (!previewContext) return dataUri
+  previewContext.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh)
+  return previewCanvas.toDataURL('image/png')
+}
+
 const lightenColor = (hex: string, amount: number) => {
   const clean = hex.replace('#', '')
   if (clean.length !== 6) return hex
@@ -133,11 +185,11 @@ export default function MintDashboard() {
   const [pictures, setPictures] = useState<PictureEntry[]>([])
   const [sending, setSending] = useState(false)
   const [sendingMessage, setSendingMessage] = useState('')
-  const [sendingHasImage, setSendingHasImage] = useState(false)
+  const [sendingImageCount, setSendingImageCount] = useState(0)
   const [streamedReply, setStreamedReply] = useState('')
   const [streamedResponse, setStreamedResponse] = useState<ChatResponse | null>(null)
   const [agentProgress, setAgentProgress] = useState<AgentProgress[]>([])
-  const [imageAttachments, setImageAttachments] = useState<Array<{ dataUri: string; name: string }>>([])
+  const [imageAttachments, setImageAttachments] = useState<Array<{ dataUri: string; name: string; previewDataUri?: string }>>([])
   const [documentAttachment, setDocumentAttachment] = useState<DocumentAttachment | null>(null)
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
@@ -234,13 +286,16 @@ export default function MintDashboard() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const trimmed = message.trim()
-    if (!trimmed || sending) return
-    const shouldUseAgentMode = agentMode || trimmed.toLowerCase().startsWith('search web:')
+    const hasAttachments = imageAttachments.length > 0 || Boolean(documentAttachment)
+    if ((!trimmed && !hasAttachments) || sending) return
+    const promptText = trimmed || (imageAttachments.length > 1 ? 'Describe these images.' : imageAttachments.length === 1 ? 'Describe this image.' : 'Summarize this document.')
+    const shouldUseAgentMode = agentMode || promptText.toLowerCase().startsWith('search web:')
     const outgoingImage = imageAttachments.map((img) => img.dataUri).join(' ')
+    const outgoingImageCount = imageAttachments.length
     const outgoingDocument = documentAttachment
     setSending(true)
-    setSendingMessage(trimmed)
-    setSendingHasImage(imageAttachments.length > 0)
+    setSendingMessage(promptText)
+    setSendingImageCount(outgoingImageCount)
     setError('')
     setStreamedReply('')
     setStreamedResponse(null)
@@ -251,7 +306,7 @@ export default function MintDashboard() {
 
     try {
       const response = await streamChatMessage(
-        shouldUseAgentMode ? trimmed : `/chat ${trimmed}`,
+        shouldUseAgentMode ? promptText : `/chat ${promptText}`,
         (chunk) => setStreamedReply((current) => `${current}${chunk}`),
         outgoingImage,
         null,
@@ -269,7 +324,7 @@ export default function MintDashboard() {
     } finally {
       setSending(false)
       setSendingMessage('')
-      setSendingHasImage(false)
+      setSendingImageCount(0)
     }
   }
 
@@ -278,7 +333,8 @@ export default function MintDashboard() {
     if (!file) return
     try {
       const dataUri = await readImage(file)
-      setImageAttachments((current) => [...current, { dataUri, name: file.name }])
+      const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
+      setImageAttachments((current) => [...current, { dataUri, previewDataUri, name: file.name }])
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -317,7 +373,11 @@ export default function MintDashboard() {
     readImage(file)
       .then((dataUri) => {
         const name = file.name && file.name !== 'image.png' ? file.name : 'Pasted image'
-        setImageAttachments((current) => [...current, { dataUri, name }])
+        createTrimmedImagePreview(dataUri)
+          .catch(() => dataUri)
+          .then((previewDataUri) => {
+            setImageAttachments((current) => [...current, { dataUri, previewDataUri, name }])
+          })
       })
       .catch((reason) => setError(errorMessage(reason)))
     return true
@@ -327,7 +387,8 @@ export default function MintDashboard() {
     try {
       const dataUri = await readTauriClipboardImage()
       if (dataUri) {
-        setImageAttachments((current) => [...current, { dataUri, name: 'Pasted image' }])
+        const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
+        setImageAttachments((current) => [...current, { dataUri, previewDataUri, name: 'Pasted image' }])
         return true
       }
     } catch (err) {
@@ -343,7 +404,8 @@ export default function MintDashboard() {
         const blob = await item.getType(imageType)
         const file = new File([blob], 'Pasted image', { type: imageType })
         const dataUri = await readImage(file)
-        setImageAttachments((current) => [...current, { dataUri, name: 'Pasted image' }])
+        const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
+        setImageAttachments((current) => [...current, { dataUri, previewDataUri, name: 'Pasted image' }])
         return true
       }
       return false
@@ -470,7 +532,7 @@ export default function MintDashboard() {
             interactions={interactions}
             sending={sending}
             sendingMessage={sendingMessage}
-            sendingHasImage={sendingHasImage}
+            sendingImageCount={sendingImageCount}
             streamedReply={streamedReply}
             streamedResponse={streamedResponse}
             agentProgress={agentProgress}

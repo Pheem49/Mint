@@ -15,6 +15,8 @@ use crate::{
     orchestrate_chat_with_fallback, save_chat_images, save_config, weather,
 };
 
+const MAX_API_REQUEST_BYTES: usize = 32 * 1024 * 1024;
+
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
@@ -32,44 +34,56 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
         };
 
         tokio::spawn(async move {
-            let mut buf = [0; 65536];
-            let mut read_bytes = 0;
+            let mut request_bytes = Vec::with_capacity(8192);
+            let mut chunk = [0_u8; 8192];
+            let mut expected_len: Option<usize> = None;
 
             loop {
-                let n = match socket.read(&mut buf[read_bytes..]).await {
+                let n = match socket.read(&mut chunk).await {
                     Ok(n) if n > 0 => n,
                     _ => break,
                 };
-                read_bytes += n;
-                if read_bytes >= buf.len() {
-                    break;
+                request_bytes.extend_from_slice(&chunk[..n]);
+                if request_bytes.len() > MAX_API_REQUEST_BYTES {
+                    send_json_response(
+                        socket,
+                        "413 Payload Too Large",
+                        "{\"provider\":\"error\",\"model\":\"error\",\"text\":\"Request is too large. Try a smaller image or fewer images.\"}",
+                    )
+                    .await;
+                    return;
                 }
-                let headers_str = String::from_utf8_lossy(&buf[..read_bytes]);
-                if headers_str.contains("\r\n\r\n") {
-                    if let Some(content_length_pos) =
-                        headers_str.to_lowercase().find("content-length:")
-                    {
-                        let sub = &headers_str[content_length_pos..];
-                        if let Some(line_end) = sub.find("\r\n") {
-                            let len_str = sub["content-length:".len()..line_end].trim();
-                            if let Ok(content_len) = len_str.parse::<usize>() {
-                                let header_len = headers_str.find("\r\n\r\n").unwrap() + 4;
-                                if read_bytes >= header_len + content_len {
-                                    break;
-                                }
-                                continue;
-                            }
-                        }
+
+                let headers_str = String::from_utf8_lossy(&request_bytes);
+                if expected_len.is_none() && headers_str.contains("\r\n\r\n") {
+                    expected_len = headers_str
+                        .to_lowercase()
+                        .find("content-length:")
+                        .and_then(|content_length_pos| {
+                            let sub = &headers_str[content_length_pos..];
+                            let line_end = sub.find("\r\n")?;
+                            sub["content-length:".len()..line_end].trim().parse::<usize>().ok()
+                        })
+                        .and_then(|content_len| {
+                            let header_len = headers_str.find("\r\n\r\n")? + 4;
+                            Some(header_len + content_len)
+                        });
+                }
+
+                if let Some(total_len) = expected_len {
+                    if request_bytes.len() >= total_len {
+                        break;
                     }
+                } else if headers_str.contains("\r\n\r\n") {
                     break;
                 }
             }
 
-            if read_bytes == 0 {
+            if request_bytes.is_empty() {
                 return;
             }
 
-            let request_str = String::from_utf8_lossy(&buf[..read_bytes]);
+            let request_str = String::from_utf8_lossy(&request_bytes);
             let lines: Vec<&str> = request_str.split("\r\n").collect();
             if lines.is_empty() {
                 return;
@@ -298,7 +312,10 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             Ok(resp) => {
                                 if let Some(image) = sent_image {
                                     let _ = save_chat_images(
-                                        vec![image],
+                                        image
+                                            .split_whitespace()
+                                            .map(str::to_owned)
+                                            .collect::<Vec<_>>(),
                                         Some("web".into()),
                                         Some(sent_message),
                                     );

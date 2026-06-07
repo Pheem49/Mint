@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { getLocalApiBase, isTauriRuntime } from '../tauri'
 
 const DEFAULT_CONFIG = {
   theme: 'dark',
@@ -122,6 +123,7 @@ const OLLAMA_MODELS = [
 ]
 
 export default function SettingsWindow() {
+  const isDesktopApp = isTauriRuntime()
   const [activeTab, setActiveTab] = useState<TabType>('sect-general')
   const [config, setConfig] = useState(DEFAULT_CONFIG)
   
@@ -282,16 +284,25 @@ export default function SettingsWindow() {
   }
 
   const handleQuit = () => {
+    if (!isDesktopApp) return
     if (confirm('Are you sure you want to exit Mint?')) {
       window.settingsApi?.quitApp()
     }
   }
 
   const handleOpenWorkflows = () => {
+    if (!isDesktopApp) {
+      alert('Workflow files can only be opened from the desktop app. The web app can still save workflow settings through the Local API.')
+      return
+    }
     window.settingsApi?.openCustomWorkflows()
   }
 
   const handleReloadWorkflows = async () => {
+    if (!isDesktopApp) {
+      alert('Reloading workflow files is only available in the desktop app.')
+      return
+    }
     if (window.settingsApi) {
       const res = await window.settingsApi.reloadCustomWorkflows()
       alert(res?.success ? 'Workflows reloaded successfully!' : 'Workflow reload failed.')
@@ -348,6 +359,10 @@ export default function SettingsWindow() {
   }
 
   const handleConnectPlugin = async (plugin: string) => {
+    if (!isDesktopApp && plugin === 'discord') {
+      alert('Discord Rich Presence requires the desktop app.')
+      return
+    }
     if (plugin === 'discord') {
       try {
         await window.api.executeProactiveAction({ type: 'plugin', pluginName: 'discord', target: '' })
@@ -361,6 +376,10 @@ export default function SettingsWindow() {
   }
 
   const handleCheckUpdates = async () => {
+    if (!isDesktopApp) {
+      setUpdateMessage('Desktop updates are only available in the Tauri app.')
+      return
+    }
     try {
       const update = await window.settingsApi.checkForUpdates()
       setUpdateAvailable(Boolean(update.available))
@@ -371,6 +390,10 @@ export default function SettingsWindow() {
   }
 
   const handleInstallUpdate = async () => {
+    if (!isDesktopApp) {
+      setUpdateMessage('Desktop updates are only available in the Tauri app.')
+      return
+    }
     if (!confirm('Install the signed Mint update now?')) return
     try {
       setUpdateMessage(await window.settingsApi.installAvailableUpdate())
@@ -398,7 +421,7 @@ export default function SettingsWindow() {
           </span>
           <div>
             <h1>Settings</h1>
-            <p>Configure Mint assistant behavior and integrations.</p>
+            <p>{isDesktopApp ? 'Configure Mint assistant behavior and integrations.' : `Web settings through Local API: ${getLocalApiBase()}`}</p>
           </div>
         </div>
         <button className="close-btn" onClick={handleClose} aria-label="Close">
@@ -482,6 +505,12 @@ export default function SettingsWindow() {
         </nav>
 
         <div className="settings-content">
+          {!isDesktopApp && (
+            <div className="web-safe-notice">
+              <strong>Web mode</strong>
+              <span>Desktop-only controls are hidden or disabled here. Settings are saved through the Local API server.</span>
+            </div>
+          )}
           {/* GENERAL SECTION */}
           {activeTab === 'sect-general' && (
             <div className="tab-pane active">
@@ -653,7 +682,7 @@ export default function SettingsWindow() {
                 </div>
               </section>
 
-              <section className="setting-section">
+              {isDesktopApp && <section className="setting-section">
                 <div className="section-heading">
                   <div>
                     <p className="section-kicker">Desktop updates</p>
@@ -690,7 +719,7 @@ export default function SettingsWindow() {
                   {updateAvailable && <button type="button" className="btn-primary" onClick={handleInstallUpdate}>Install signed update</button>}
                 </div>
                 {updateMessage && <p className="hint">{updateMessage}</p>}
-              </section>
+              </section>}
 
               <section className="setting-section">
                 <div className="section-heading">
@@ -758,7 +787,7 @@ export default function SettingsWindow() {
                 </div>
               </section>
 
-              <section className="setting-section">
+              {isDesktopApp && <section className="setting-section">
                 <div className="section-heading">
                   <div>
                     <p className="section-kicker">Desktop</p>
@@ -779,7 +808,7 @@ export default function SettingsWindow() {
                     <span className="toggle-slider"></span>
                   </label>
                 </div>
-              </section>
+              </section>}
             </div>
           )}
 
@@ -1020,9 +1049,10 @@ export default function SettingsWindow() {
                   </label>
                 </div>
                 <div className="button-row" style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-                  <button className="btn btn-secondary" onClick={handleOpenWorkflows}>Open workflows.json</button>
-                  <button className="btn btn-primary" onClick={handleReloadWorkflows}>Reload Rules</button>
+                  <button className="btn btn-secondary" onClick={handleOpenWorkflows} disabled={!isDesktopApp}>Open workflows.json</button>
+                  <button className="btn btn-primary" onClick={handleReloadWorkflows} disabled={!isDesktopApp}>Reload Rules</button>
                 </div>
+                {!isDesktopApp && <p className="hint">Opening and reloading local workflow files requires the desktop app.</p>}
               </section>
 
               <section className="setting-section">
@@ -1195,7 +1225,7 @@ export default function SettingsWindow() {
                         <div className="plugin-desc">{p.desc}</div>
                       </div>
                       <div className="plugin-actions">
-                        <button className="btn-connect" onClick={() => handleConnectPlugin(p.key)}>Connect</button>
+                        <button className="btn-connect" onClick={() => handleConnectPlugin(p.key)} disabled={!isDesktopApp && p.key === 'discord'}>Connect</button>
                       </div>
                     </div>
                   ))}
@@ -1273,7 +1303,11 @@ export default function SettingsWindow() {
       </main>
 
       <footer className="settings-footer">
-        <button className="btn-danger" onClick={handleQuit}>Quit Application</button>
+        {isDesktopApp ? (
+          <button className="btn-danger" onClick={handleQuit}>Quit Application</button>
+        ) : (
+          <span className="web-safe-footer-note">Browser tab controls are handled by your browser.</span>
+        )}
         <div className="footer-actions">
           <button className="btn-secondary" onClick={handleReset}>Reset to Default</button>
           <button className="btn-primary" onClick={handleSave}>Save Settings</button>

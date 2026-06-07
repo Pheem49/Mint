@@ -155,12 +155,12 @@ interface ChatPanelProps {
   interactions: any[]
   sending: boolean
   sendingMessage: string
-  sendingHasImage: boolean
+  sendingImageCount: number
   streamedReply: string
   streamedResponse: ChatResponse | null
   agentProgress: AgentProgress[]
   message: string
-  imageAttachments: Array<{ dataUri: string; name: string }>
+  imageAttachments: Array<{ dataUri: string; name: string; previewDataUri?: string }>
   documentName: string
   pendingApproval: any | null
   smartContext: boolean
@@ -242,7 +242,7 @@ export default function ChatPanel({
   interactions,
   sending,
   sendingMessage,
-  sendingHasImage,
+  sendingImageCount,
   streamedReply,
   streamedResponse,
   agentProgress,
@@ -276,6 +276,8 @@ export default function ChatPanel({
   const agentActivities = activitiesFrom(agentProgress)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const toolMenuRef = useRef<HTMLDivElement | null>(null)
+  const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || documentName)
+  const sendingImageMarkers = Array.from({ length: sendingImageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
 
   const getAvailableModels = (provider: string) => {
     switch (provider) {
@@ -676,7 +678,7 @@ export default function ChatPanel({
 
         {sending && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-            <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{sendingHasImage ? renderFormattedMessage(`${sendingMessage} [Image #1]`) : renderFormattedMessage(sendingMessage)}</div></div></div>
+            <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{sendingImageMarkers ? renderFormattedMessage(`${sendingMessage} ${sendingImageMarkers}`) : renderFormattedMessage(sendingMessage)}</div></div></div>
             {agentMode && agentActivities.length > 0 && (
               <div className="message ai-message agent-activity-message">
                 <div className="agent-activity-card">
@@ -757,7 +759,7 @@ export default function ChatPanel({
             <div className="mint-attachment">
               {imageAttachments.map((attachment, idx) => (
                 <div className="mint-image-attachment" key={idx}>
-                  <img className="mint-image-preview" src={attachment.dataUri} alt={attachment.name || 'Image attachment'} />
+                  <img className="mint-image-preview" src={attachment.previewDataUri || attachment.dataUri} alt={attachment.name || 'Image attachment'} />
                   <button className="mint-attachment-remove" type="button" onClick={() => onRemoveImage(idx)} aria-label="Remove image">×</button>
                 </div>
               ))}
@@ -912,7 +914,7 @@ export default function ChatPanel({
               </svg>
             )}
           </button>
-          <button id="send-btn" type="submit" disabled={sending || !message.trim()} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+          <button id="send-btn" type="submit" disabled={sending || !canSubmit} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"></line>
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
