@@ -230,7 +230,10 @@ fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String
 #[tauri::command]
 fn select_workspace_directory() -> Result<Option<String>, String> {
     for (program, args) in [
-        ("zenity", vec!["--file-selection", "--directory", "--title=Select Project"]),
+        (
+            "zenity",
+            vec!["--file-selection", "--directory", "--title=Select Project"],
+        ),
         ("kdialog", vec!["--getexistingdirectory", "."]),
     ] {
         let Ok(output) = Command::new(program)
@@ -298,12 +301,11 @@ fn workspace_children(
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .to_string();
-            let children =
-                if is_dir && !WORKSPACE_TREE_COLLAPSED_DIRS.contains(&name.as_str()) {
-                    workspace_children(root, &path, depth + 1)?
-                } else {
-                    Vec::new()
-                };
+            let children = if is_dir && !WORKSPACE_TREE_COLLAPSED_DIRS.contains(&name.as_str()) {
+                workspace_children(root, &path, depth + 1)?
+            } else {
+                Vec::new()
+            };
             Ok(WorkspaceTreeEntry {
                 name,
                 path: relative,

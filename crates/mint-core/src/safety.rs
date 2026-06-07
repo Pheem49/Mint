@@ -233,6 +233,7 @@ fn is_read_only_command(command: &str) -> bool {
                         | "cd"
                         | "du"
                         | "find"
+                        | "grep"
                         | "git"
                         | "head"
                         | "ls"

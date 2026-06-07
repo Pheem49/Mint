@@ -62,7 +62,10 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         .and_then(|content_length_pos| {
                             let sub = &headers_str[content_length_pos..];
                             let line_end = sub.find("\r\n")?;
-                            sub["content-length:".len()..line_end].trim().parse::<usize>().ok()
+                            sub["content-length:".len()..line_end]
+                                .trim()
+                                .parse::<usize>()
+                                .ok()
                         })
                         .and_then(|content_len| {
                             let header_len = headers_str.find("\r\n\r\n")? + 4;

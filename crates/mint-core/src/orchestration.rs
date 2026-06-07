@@ -167,7 +167,9 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
 
     let mut input_formats = Vec::new();
     if allowed_actions.contains(&"list_files") {
-        input_formats.push("- list_files: {\"path\":\".\",\"limit\":100}");
+        input_formats.push(
+            "- list_files: {\"path\":\".\",\"limit\":100} (workspace path, ~/path, or allowed user folder like Downloads)",
+        );
     }
     if allowed_actions.contains(&"read_file") {
         input_formats
@@ -269,6 +271,7 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
     );
     if allowed_actions.contains(&"list_files") || allowed_actions.contains(&"read_file") {
         rules.push("1. Inspect the workspace before editing.");
+        rules.push("1a. For user folders such as Downloads, Documents, Desktop, Pictures, Music, or Videos, use list_files with that folder name or ~/folder before using shell.");
     }
     if allowed_actions.contains(&"search_code") {
         rules.push(
@@ -399,6 +402,15 @@ pub struct AgentResult {
     pub summary: String,
     pub verification: String,
     pub fallback: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentDirectoryEntry {
+    name: String,
+    path: PathBuf,
+    kind: &'static str,
+    size: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -790,10 +802,9 @@ where
     let input = &decision.input;
     match decision.action.as_str() {
         "list_files" => {
-            let path = workspace_path(root, &input.path)?;
-            let files = list_code_files(&path, input.limit.unwrap_or(100), config)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string_pretty(&files)
+            let path = agent_read_path(root, &input.path, config)?;
+            let entries = list_directory_entries(&path, input.limit.unwrap_or(100), config)?;
+            Ok(serde_json::to_string_pretty(&entries)
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
         }
         "read_file" => {
@@ -1582,6 +1593,110 @@ fn parse_decision_or_finish(raw: &str) -> Result<AgentDecision, OrchestrationErr
     }
 }
 
+fn list_directory_entries(
+    path: &Path,
+    limit: usize,
+    config: &MintConfig,
+) -> Result<Vec<AgentDirectoryEntry>, OrchestrationError> {
+    let path = assert_path_capability(path, Capability::Read, config)
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+    if !path.is_dir() {
+        return Err(OrchestrationError::Agent(format!(
+            "path is not a directory: {}",
+            path.display()
+        )));
+    }
+
+    let mut entries = Vec::new();
+    let read_dir = std::fs::read_dir(&path).map_err(|e| {
+        OrchestrationError::Agent(format!(
+            "unable to read directory {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    for entry in read_dir.take(limit.max(1)) {
+        let entry = entry.map_err(|e| {
+            OrchestrationError::Agent(format!("unable to read directory entry: {e}"))
+        })?;
+        let entry_path = entry.path();
+        let file_type = entry.file_type().map_err(|e| {
+            OrchestrationError::Agent(format!(
+                "unable to read file type for {}: {}",
+                entry_path.display(),
+                e
+            ))
+        })?;
+        let size = if file_type.is_file() {
+            entry.metadata().ok().map(|metadata| metadata.len())
+        } else {
+            None
+        };
+        entries.push(AgentDirectoryEntry {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            path: entry_path,
+            kind: if file_type.is_dir() {
+                "directory"
+            } else if file_type.is_file() {
+                "file"
+            } else if file_type.is_symlink() {
+                "symlink"
+            } else {
+                "other"
+            },
+            size,
+        });
+    }
+    entries.sort_by(|a, b| {
+        a.kind
+            .cmp(b.kind)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(entries)
+}
+
+fn agent_read_path(
+    root: &Path,
+    value: &str,
+    config: &MintConfig,
+) -> Result<PathBuf, OrchestrationError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "." {
+        return workspace_path(root, ".");
+    }
+    if let Ok(path) = workspace_path(root, trimmed) {
+        return Ok(path);
+    }
+
+    let requested = Path::new(trimmed);
+    let mut candidates = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        if trimmed == "~" {
+            candidates.push(home.clone());
+        } else if let Some(rest) = trimmed.strip_prefix("~/") {
+            candidates.push(home.join(rest));
+        } else if requested.components().count() == 1 {
+            candidates.push(home.join(trimmed));
+        }
+    }
+    if requested.is_absolute() {
+        candidates.push(requested.to_path_buf());
+    }
+
+    for candidate in candidates {
+        let Ok(path) = candidate.canonicalize() else {
+            continue;
+        };
+        if assert_path_capability(&path, Capability::Read, config).is_ok() {
+            return Ok(path);
+        }
+    }
+
+    Err(OrchestrationError::Agent(format!(
+        "unable to resolve readable path: {trimmed}"
+    )))
+}
+
 fn meaningful_verification(value: &str) -> &str {
     let value = value.trim();
     if matches!(
@@ -1683,5 +1798,41 @@ mod tests {
         );
         let _ = std::fs::remove_file(target);
         let _ = std::fs::remove_dir(root);
+    }
+
+    #[test]
+    fn agent_list_files_includes_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "mint-agent-list-directories-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(root.join("Bunny Girl")).unwrap();
+        std::fs::write(root.join("note.txt"), "hello").unwrap();
+        let config = MintConfig {
+            allowed_read_paths: vec![root.clone()],
+            allowed_write_paths: vec![root.clone()],
+            blocked_paths: vec![],
+            blocked_file_names: vec![],
+            ..MintConfig::default()
+        };
+
+        let entries = list_directory_entries(&root, 100, &config).unwrap();
+
+        assert!(entries.iter().any(|entry| {
+            entry.name == "Bunny Girl" && entry.kind == "directory" && entry.size.is_none()
+        }));
+        assert!(entries.iter().any(|entry| {
+            entry.name == "note.txt" && entry.kind == "file" && entry.size == Some(5)
+        }));
+        let _ = std::fs::remove_file(root.join("note.txt"));
+        let _ = std::fs::remove_dir(root.join("Bunny Girl"));
+        let _ = std::fs::remove_dir(root);
+    }
+
+    #[test]
+    fn grep_is_classified_as_read_only() {
+        let classification = classify_shell_command("ls ~/Downloads | grep -F \"Bunny Girl\"");
+
+        assert_eq!(classification.mode.as_str(), "readOnly");
     }
 }
