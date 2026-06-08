@@ -18,8 +18,9 @@ use crate::semantic::{index_semantic_code, search_semantic_code};
 use crate::shell::run_shell_command;
 use crate::symbols::build_symbol_index;
 use crate::{
-    Capability, ChatError, ChatRequest, ChatResponse, MemoryError, MemoryStore, MintConfig,
-    assert_path_capability, classify_shell_command, send_chat, stream_chat,
+    Capability, ChatError, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID, MemoryError,
+    MemoryStore, MintConfig, assert_path_capability, classify_shell_command, send_chat,
+    stream_chat,
 };
 
 const CONTEXT_LIMIT: usize = 6;
@@ -41,7 +42,8 @@ pub async fn orchestrate_chat(
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let response = send_chat(config, &enriched).await?;
-    memory.add_interaction_with_metadata(
+    memory.add_interaction_for_chat(
+        request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -61,7 +63,8 @@ where
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let response = stream_chat(config, &enriched, on_chunk).await?;
-    memory.add_interaction_with_metadata(
+    memory.add_interaction_for_chat(
+        request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -77,7 +80,8 @@ pub async fn orchestrate_chat_with_fallback(
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let (response, fallback) = send_chat_with_fallback(config, &enriched).await?;
-    memory.add_interaction_with_metadata(
+    memory.add_interaction_for_chat(
+        request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -97,7 +101,8 @@ where
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let (response, fallback) = stream_chat_with_fallback(config, &enriched, on_chunk).await?;
-    memory.add_interaction_with_metadata(
+    memory.add_interaction_for_chat(
+        request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -107,7 +112,8 @@ where
 }
 
 fn enrich_request(memory: &MemoryStore, request: &ChatRequest) -> Result<ChatRequest, MemoryError> {
-    let mut interactions = memory.recent_interactions(CONTEXT_LIMIT)?;
+    let mut interactions =
+        memory.recent_interactions_for_chat(request_chat_id(request), CONTEXT_LIMIT)?;
     interactions.reverse();
     let transcript = interactions
         .into_iter()
@@ -125,6 +131,15 @@ fn enrich_request(memory: &MemoryStore, request: &ChatRequest) -> Result<ChatReq
         .to_owned();
     }
     Ok(enriched)
+}
+
+fn request_chat_id(request: &ChatRequest) -> &str {
+    request
+        .chat_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|chat_id| !chat_id.is_empty())
+        .unwrap_or(DEFAULT_CONVERSATION_ID)
 }
 
 const MAX_STEPS: usize = 16;
@@ -480,6 +495,7 @@ pub async fn orchestrate_agent_loop<Approve, Progress, Chunk>(
     task: &str,
     root: &Path,
     image_data_uri: Option<String>,
+    chat_id: Option<&str>,
     fast_mode: bool,
     mut approve: Approve,
     mut progress: Progress,
@@ -503,8 +519,13 @@ where
     let mut pending_image = image_data_uri;
 
     let mut system_prompt = build_system_prompt(config);
+    let chat_id = chat_id
+        .map(str::trim)
+        .filter(|chat_id| !chat_id.is_empty())
+        .unwrap_or(DEFAULT_CONVERSATION_ID);
+
     if let Ok(memory) = MemoryStore::open_default() {
-        if let Ok(mut interactions) = memory.recent_interactions(6) {
+        if let Ok(mut interactions) = memory.recent_interactions_for_chat(chat_id, 6) {
             interactions.reverse();
             let transcript = interactions
                 .into_iter()
@@ -539,6 +560,7 @@ where
             &ChatRequest {
                 message: observation.clone(),
                 system_instruction: system_prompt.clone(),
+                chat_id: Some(chat_id.to_owned()),
                 image_data_uri: pending_image.take(),
                 audio_data_uri: None,
                 document_attachment: None,
@@ -566,6 +588,7 @@ where
                             truncate(&response.text)
                         ),
                         system_instruction: system_prompt.clone(),
+                        chat_id: Some(chat_id.to_owned()),
                         image_data_uri: None,
                         audio_data_uri: None,
                         document_attachment: None,
@@ -687,7 +710,13 @@ where
             on_chunk(summary.clone());
 
             let memory = MemoryStore::open_default()?;
-            memory.add_interaction_with_metadata(task, &summary, &final_provider, &final_model)?;
+            memory.add_interaction_for_chat(
+                chat_id,
+                task,
+                &summary,
+                &final_provider,
+                &final_model,
+            )?;
             memory.save_workspace_session(&root.to_string_lossy(), &summary, &verification)?;
 
             return Ok(AgentResult {
@@ -718,7 +747,7 @@ where
                 input: input_val,
             });
 
-            match execute_tool(&root, config, &decision, &mut approve).await {
+            match execute_tool(&root, config, &decision, chat_id, &mut approve).await {
                 Ok(result) => result,
                 Err(error) => {
                     format!("Error: {}", error)
@@ -794,6 +823,7 @@ async fn execute_tool<Approve>(
     root: &Path,
     config: &MintConfig,
     decision: &AgentDecision,
+    chat_id: &str,
     approve_cb: &mut Approve,
 ) -> Result<String, OrchestrationError>
 where
@@ -909,7 +939,7 @@ where
             let mut results = Vec::new();
 
             if let Ok(memory) = MemoryStore::open_default() {
-                if let Ok(interactions) = memory.recent_interactions(50) {
+                if let Ok(interactions) = memory.recent_interactions_for_chat(chat_id, 50) {
                     for item in interactions.iter().rev() {
                         if item.user_text.to_ascii_lowercase().contains(&query_lower)
                             || item.ai_text.to_ascii_lowercase().contains(&query_lower)
@@ -1765,6 +1795,7 @@ mod tests {
         let request = ChatRequest {
             message: "hello".into(),
             system_instruction: "system".into(),
+            chat_id: None,
             image_data_uri: None,
             audio_data_uri: None,
             document_attachment: None,

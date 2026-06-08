@@ -33,11 +33,11 @@ use tokio::sync::oneshot;
 use integrations::{channel_inventory, list_plugins};
 use mint_core::{
     AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, ChatRequest, ChatResponse,
-    CodeEdit, CodeEditProposal, InteractionMemory, MemoryStore, MintConfig, PictureEntry, TtsUrl,
-    WeatherReport, apply_code_edits, classify_shell_command, config_path, extract_document_text,
-    google_tts_urls, list_saved_pictures, load_config, load_workflows, orchestrate_agent_loop,
-    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, propose_code_edits,
-    save_chat_images, save_config, weather, workflows_path,
+    ChatSession, CodeEdit, CodeEditProposal, InteractionMemory, MemoryStore, MintConfig,
+    PictureEntry, TtsUrl, WeatherReport, apply_code_edits, classify_shell_command, config_path,
+    extract_document_text, google_tts_urls, list_saved_pictures, load_config, load_workflows,
+    orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    propose_code_edits, save_chat_images, save_config, weather, workflows_path,
 };
 use plugins::execute_plugin;
 
@@ -420,6 +420,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
         &request.message,
         &root,
         request.image_data_uri.clone(),
+        request.chat_id.as_deref(),
         fast_mode,
         approve_cb,
         progress_cb,
@@ -516,6 +517,7 @@ async fn stream_chat_message(
         &request.message,
         &root,
         request.image_data_uri.clone(),
+        request.chat_id.as_deref(),
         fast_mode,
         approve_cb,
         progress_cb,
@@ -532,16 +534,46 @@ async fn stream_chat_message(
 }
 
 #[tauri::command]
-fn get_recent_interactions(limit: Option<usize>) -> Result<Vec<InteractionMemory>, String> {
+fn get_recent_interactions(
+    limit: Option<usize>,
+    chat_id: Option<String>,
+) -> Result<Vec<InteractionMemory>, String> {
     MemoryStore::open_default()
-        .and_then(|memory| memory.recent_interactions(limit.unwrap_or(5)))
+        .and_then(|memory| {
+            memory.recent_interactions_for_chat(
+                chat_id
+                    .as_deref()
+                    .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID),
+                limit.unwrap_or(5),
+            )
+        })
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn clear_chat_history() -> Result<usize, String> {
+fn list_chat_sessions() -> Result<Vec<ChatSession>, String> {
     MemoryStore::open_default()
-        .and_then(|memory| memory.clear_interactions())
+        .and_then(|memory| memory.list_chat_sessions())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn delete_chat_session(chat_id: String) -> Result<usize, String> {
+    MemoryStore::open_default()
+        .and_then(|memory| memory.delete_chat_session(&chat_id))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_chat_history(chat_id: Option<String>) -> Result<usize, String> {
+    MemoryStore::open_default()
+        .and_then(|memory| {
+            memory.clear_interactions_for_chat(
+                chat_id
+                    .as_deref()
+                    .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID),
+            )
+        })
         .map_err(|error| error.to_string())
 }
 
@@ -923,6 +955,8 @@ pub fn run() {
             stream_chat_message,
             submit_tool_approval,
             get_recent_interactions,
+            list_chat_sessions,
+            delete_chat_session,
             clear_chat_history,
             list_pictures,
             save_pictures,

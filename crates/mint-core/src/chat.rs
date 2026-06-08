@@ -86,6 +86,8 @@ pub struct ChatRequest {
     #[serde(default)]
     pub system_instruction: String,
     #[serde(default)]
+    pub chat_id: Option<String>,
+    #[serde(default)]
     pub image_data_uri: Option<String>,
     #[serde(default)]
     pub audio_data_uri: Option<String>,
@@ -789,6 +791,7 @@ mod tests {
         let parts = gemini_parts(&ChatRequest {
             message: "describe".into(),
             system_instruction: String::new(),
+            chat_id: None,
             image_data_uri: Some("data:image/png;base64,aGk= data:image/jpeg;base64,Ynl5".into()),
             audio_data_uri: None,
             document_attachment: None,

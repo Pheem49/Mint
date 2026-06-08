@@ -539,10 +539,11 @@ export default function ChatPanel({
     setToolMenuOpen(false)
     onStartWebSearch()
   }
+  const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
 
   return (
     <section
-      className="conversation-panel"
+      className={`conversation-panel ${isEmptyChat ? 'is-empty' : ''}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -598,38 +599,6 @@ export default function ChatPanel({
       )}
 
       <div className="chat-container">
-        {interactions.length === 0 && !sending && (
-          <div className="message ai-message" style={{ marginBottom: '16px' }}>
-            <div className="bubble-wrapper">
-              <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(welcomeInteraction.aiText)}</div>
-              <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button className="provider-badge">{welcomeInteraction.provider} • {welcomeInteraction.model}</button>
-                <span>14:44</span>
-                <button
-                  type="button"
-                  className={`tts-btn ${speakingText === welcomeInteraction.aiText ? 'is-speaking' : ''}`}
-                  onClick={() => speak(welcomeInteraction.aiText)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: speakingText === welcomeInteraction.aiText ? 'var(--accent)' : 'var(--text-soft)',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem',
-                    padding: '2px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    opacity: 0.7,
-                    transition: 'all 0.2s',
-                  }}
-                  title={speakingText === welcomeInteraction.aiText ? "หยุดอ่านออกเสียง" : "อ่านออกเสียง"}
-                >
-                  {renderSpeakerIcon(speakingText === welcomeInteraction.aiText)}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {interactions.map((interaction) => (
           <div key={interaction.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
             {interaction.isSystemEvent ? (
@@ -738,6 +707,7 @@ export default function ChatPanel({
       </div>
 
       <div className="input-area">
+        {isEmptyChat && <div className="empty-chat-prompt">Mint Agent is ready to work</div>}
         <div className="smart-context-bar">
           <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <label className="toggle-switch">

@@ -382,22 +382,11 @@ export default function ChatPanel({
     event.preventDefault()
     appendWorkspaceReference(reference)
   }
+  const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
 
   return (
-    <section className="conversation-panel">
+    <section className={`conversation-panel ${isEmptyChat ? 'is-empty' : ''}`}>
       <div className="chat-container">
-        {interactions.length === 0 && !sending && (
-          <div className="message ai-message" style={{ marginBottom: '16px' }}>
-            <div className="bubble-wrapper">
-              <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(welcomeInteraction.aiText)}</div>
-              <div className="message-time">
-                <button className="provider-badge">{welcomeInteraction.provider} • {welcomeInteraction.model}</button>
-                <span>14:44</span>
-              </div>
-            </div>
-          </div>
-        )}
-
         {interactions.map((interaction) => (
           <div key={interaction.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
             {interaction.isSystemEvent ? (
@@ -480,6 +469,7 @@ export default function ChatPanel({
       </div>
 
       <div className="input-area">
+        {isEmptyChat && <div className="empty-chat-prompt">Mint Agent is ready to work</div>}
         <button type="button" className="workspace-select-btn" onClick={onSelectWorkspace}>
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">

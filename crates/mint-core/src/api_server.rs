@@ -10,9 +10,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use crate::{
-    ApprovalOutcome, ChatRequest, ChatResponse, MemoryStore, MintConfig, config_path,
-    create_folder, find_paths, list_saved_pictures, load_config, orchestrate_agent_loop,
-    orchestrate_chat_with_fallback, save_chat_images, save_config, weather,
+    ApprovalOutcome, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID, MemoryStore, MintConfig,
+    config_path, create_folder, find_paths, list_saved_pictures, load_config,
+    orchestrate_agent_loop, orchestrate_chat_with_fallback, save_chat_images, save_config, weather,
 };
 
 const MAX_API_REQUEST_BYTES: usize = 32 * 1024 * 1024;
@@ -154,7 +154,11 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         .unwrap_or(50)
                         .min(200);
                     if let Ok(memory) = MemoryStore::open_default() {
-                        let list = memory.recent_interactions(limit).unwrap_or_default();
+                        let chat_id = query_param(query, "chatId")
+                            .unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
+                        let list = memory
+                            .recent_interactions_for_chat(&chat_id, limit)
+                            .unwrap_or_default();
                         if let Ok(json_str) = serde_json::to_string(&list) {
                             send_json_response(socket, "200 OK", &json_str).await;
                             return;
@@ -162,9 +166,36 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     }
                     send_json_response(socket, "500 Internal Server Error", "[]").await;
                 }
+                ("GET", "/api/chat-sessions") => {
+                    if let Ok(memory) = MemoryStore::open_default() {
+                        let list = memory.list_chat_sessions().unwrap_or_default();
+                        if let Ok(json_str) = serde_json::to_string(&list) {
+                            send_json_response(socket, "200 OK", &json_str).await;
+                            return;
+                        }
+                    }
+                    send_json_response(socket, "500 Internal Server Error", "[]").await;
+                }
+                ("POST", "/api/chat-sessions/delete") => {
+                    let chat_id = query_param(query, "chatId").unwrap_or_default();
+                    if let Ok(memory) = MemoryStore::open_default() {
+                        let deleted = memory.delete_chat_session(&chat_id).unwrap_or(0);
+                        let response = serde_json::json!({ "status": "ok", "deleted": deleted });
+                        send_json_response(socket, "200 OK", &response.to_string()).await;
+                    } else {
+                        send_json_response(
+                            socket,
+                            "500 Internal Server Error",
+                            "{\"status\":\"error\",\"deleted\":0}",
+                        )
+                        .await;
+                    }
+                }
                 ("POST", "/api/interactions/clear") => {
                     if let Ok(memory) = MemoryStore::open_default() {
-                        let _ = memory.clear_interactions();
+                        let chat_id = query_param(query, "chatId")
+                            .unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
+                        let _ = memory.clear_interactions_for_chat(&chat_id);
                         send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
                     } else {
                         send_json_response(
@@ -279,6 +310,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     struct ApiChatRequest {
                         message: String,
                         system_instruction: Option<String>,
+                        chat_id: Option<String>,
                         image_data_uri: Option<String>,
                         audio_data_uri: Option<String>,
                     }
@@ -288,6 +320,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         let mut chat_req = ChatRequest {
                             message: req.message,
                             system_instruction: req.system_instruction.unwrap_or_default(),
+                            chat_id: req.chat_id,
                             image_data_uri: req.image_data_uri,
                             audio_data_uri: req.audio_data_uri,
                             document_attachment: None,
@@ -374,6 +407,7 @@ async fn run_web_agent_loop(
         &request.message,
         &root,
         request.image_data_uri.clone(),
+        request.chat_id.as_deref(),
         fast_mode,
         |_| Ok(ApprovalOutcome::Denied),
         |_| {},

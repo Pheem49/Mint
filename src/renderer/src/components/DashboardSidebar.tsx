@@ -1,10 +1,18 @@
 export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspeac'
 
+interface ChatSessionItem {
+  id: string
+  title: string
+  kind: string
+}
+
 interface DashboardSidebarProps {
   view: DashboardView
   sidebarCollapsed: boolean
   modelVisible: boolean
   sending: boolean
+  chatSessions: ChatSessionItem[]
+  activeConversationId: string
   expressionIndex: number
   accessoryIndex: number
   expressions: string[]
@@ -13,6 +21,8 @@ interface DashboardSidebarProps {
   showInteractionGuide: boolean
   onToggleSidebar: () => void
   onClearHistory: (action: 'New chat' | 'Clear history') => void
+  onSelectConversation: (id: string) => void
+  onDeleteConversation: (id: string) => void
   onSetView: (view: DashboardView) => void
   onToggleModel: () => void
   onSetExpressionIndex: (index: number) => void
@@ -27,6 +37,8 @@ export default function DashboardSidebar({
   sidebarCollapsed,
   modelVisible,
   sending,
+  chatSessions,
+  activeConversationId,
   expressionIndex,
   accessoryIndex,
   expressions,
@@ -35,6 +47,8 @@ export default function DashboardSidebar({
   showInteractionGuide,
   onToggleSidebar,
   onClearHistory,
+  onSelectConversation,
+  onDeleteConversation,
   onSetView,
   onToggleModel,
   onSetExpressionIndex,
@@ -53,6 +67,13 @@ export default function DashboardSidebar({
     const next = !interactionEnabled
     onSetInteractionEnabled(next)
     onShowToast(next ? 'เปิดการโต้ตอบกับโมเดล ⦸' : 'ปิดการโต้ตอบกับโมเดล ⦸')
+  }
+
+  const conversationSessions = chatSessions.filter((session) => session.kind !== 'cli' && session.id !== 'conversation-default')
+  const cliSession = chatSessions.find((session) => session.kind === 'cli' || session.id === 'cli') ?? {
+    id: 'cli',
+    title: 'cli',
+    kind: 'cli',
   }
 
   return (
@@ -179,36 +200,75 @@ export default function DashboardSidebar({
       )}
 
       <div className="sidebar-section">
-        <div className="sidebar-section-title">Assistant</div>
-        <button className="sidebar-project active">
-          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-            </svg>
-          </span>
-          <span>Mint</span>
-          <span className="mint-status-pill" data-state={sending ? "thinking" : "idle"}>
-            <span className="mint-status-dot" />
-            <span className="mint-status-label">{sending ? "Thinking" : "Idle"}</span>
-          </span>
-        </button>
-        <button className="sidebar-project" onClick={() => onShowToast("เปิดใช้งาน Smart Tools: พร้อมช่วยสแกนและวิเคราะห์แล้วค่ะ! ∽")}>
-          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
-              <rect x="9" y="9" width="6" height="6"></rect>
-              <line x1="9" y1="1" x2="9" y2="4"></line>
-              <line x1="15" y1="1" x2="15" y2="4"></line>
-              <line x1="9" y1="20" x2="9" y2="23"></line>
-              <line x1="15" y1="20" x2="15" y2="23"></line>
-              <line x1="20" y1="9" x2="23" y2="9"></line>
-              <line x1="20" y1="15" x2="23" y2="15"></line>
-              <line x1="1" y1="9" x2="4" y2="9"></line>
-              <line x1="1" y1="15" x2="4" y2="15"></line>
-            </svg>
-          </span>
-          <span>Smart Tools</span>
-        </button>
+        <div className="sidebar-section-title">Conversation CLI</div>
+        <div className="sidebar-chat-list sidebar-cli-list">
+          <button
+            className={`sidebar-project sidebar-chat-item ${cliSession.id === activeConversationId ? 'active' : ''}`}
+            onClick={() => onSelectConversation(cliSession.id)}
+            title={cliSession.title}
+          >
+            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 17l6-6-6-6"></path>
+                <path d="M12 19h8"></path>
+              </svg>
+            </span>
+            <span className="sidebar-chat-title">{cliSession.title || 'cli'}</span>
+            {cliSession.id === activeConversationId && (
+              <span className="mint-status-pill" data-state={sending ? "thinking" : "idle"}>
+                <span className="mint-status-dot" />
+                <span className="mint-status-label">{sending ? "Thinking" : "Idle"}</span>
+              </span>
+            )}
+          </button>
+        </div>
+        <div className="sidebar-section-title sidebar-subsection-title">Conversations</div>
+        <div className="sidebar-chat-list">
+          {conversationSessions.map((session) => (
+            <button
+              key={session.id}
+              className={`sidebar-project sidebar-chat-item ${session.id === activeConversationId ? 'active' : ''}`}
+              onClick={() => onSelectConversation(session.id)}
+              title={session.title}
+            >
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </span>
+              <span className="sidebar-chat-title">{session.title || 'New chat'}</span>
+              {session.id === activeConversationId && (
+                <span className="mint-status-pill" data-state={sending ? "thinking" : "idle"}>
+                  <span className="mint-status-dot" />
+                  <span className="mint-status-label">{sending ? "Thinking" : "Idle"}</span>
+                </span>
+              )}
+              <span
+                className="sidebar-chat-delete"
+                role="button"
+                tabIndex={0}
+                title="Delete conversation"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onDeleteConversation(session.id)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onDeleteConversation(session.id)
+                  }
+                }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="sidebar-bottom-actions">
@@ -221,7 +281,7 @@ export default function DashboardSidebar({
               <line x1="14" y1="11" x2="14" y2="17"></line>
             </svg>
           </span>
-          <span>Clear</span>
+          <span>Clear Messages</span>
         </button>
         <button className="settings-btn" onClick={() => window.api.openSettings()}>
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>

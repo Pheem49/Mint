@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use mint_core::{
-    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, MintConfig, OrchestrationError,
-    orchestrate_agent_loop,
+    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, CHAT_CLI_ID, MintConfig,
+    OrchestrationError, orchestrate_agent_loop,
 };
 
 const RESET: &str = "\x1b[0m";
@@ -329,6 +329,7 @@ pub async fn run_code_agent_with_options(
         task,
         root,
         image_data_uri,
+        Some(CHAT_CLI_ID),
         options.fast_mode,
         approve_cb,
         progress_cb,

@@ -54,8 +54,15 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
   const modelRef = useRef<any>(null)
   const appRef = useRef<PIXI.Application | null>(null)
   const [loading, setLoading] = useState(true)
+  const [shouldRender, setShouldRender] = useState(isActive)
   const baseWidthRef = useRef<number | null>(null)
   const baseHeightRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (isActive && !shouldRender) {
+      setShouldRender(true)
+    }
+  }, [isActive, shouldRender])
 
   const setRenderActive = (active: boolean) => {
     const app = appRef.current
@@ -77,6 +84,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
   }
 
   useEffect(() => {
+    if (!shouldRender) return
     if (!canvasRef.current || !containerRef.current) return
 
     let isMounted = true
@@ -213,7 +221,7 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
       }
       modelRef.current = null
     }
-  }, [])
+  }, [shouldRender])
 
   // Update scale & position dynamically when scale changes or container resizes
   useEffect(() => {

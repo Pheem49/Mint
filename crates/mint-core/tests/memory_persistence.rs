@@ -3,7 +3,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use mint_core::MemoryStore;
+use mint_core::{CHAT_CLI_ID, DEFAULT_CONVERSATION_ID, MemoryStore};
 
 fn store(name: &str) -> MemoryStore {
     let path = test_path(name, "sqlite");
@@ -63,6 +63,75 @@ fn clears_interactions() {
     store.add_interaction("hello", "hi").unwrap();
     assert_eq!(store.clear_interactions().unwrap(), 1);
     assert!(store.recent_interactions(10).unwrap().is_empty());
+}
+
+#[test]
+fn keeps_cli_history_separate_from_conversation_history() {
+    let store = store("chat-session-split");
+    store
+        .add_interaction_for_chat(CHAT_CLI_ID, "cli question", "cli answer", "openai", "gpt")
+        .unwrap();
+    store
+        .add_interaction_for_chat(
+            "conversation-test",
+            "app question",
+            "app answer",
+            "gemini",
+            "gemini-test",
+        )
+        .unwrap();
+
+    let cli = store.recent_interactions_for_chat(CHAT_CLI_ID, 10).unwrap();
+    let app = store
+        .recent_interactions_for_chat("conversation-test", 10)
+        .unwrap();
+
+    assert_eq!(cli.len(), 1);
+    assert_eq!(cli[0].chat_id, CHAT_CLI_ID);
+    assert_eq!(cli[0].user_text, "cli question");
+    assert_eq!(app.len(), 1);
+    assert_eq!(app[0].chat_id, "conversation-test");
+    assert_eq!(app[0].user_text, "app question");
+}
+
+#[test]
+fn legacy_recent_interactions_use_default_conversation() {
+    let store = store("default-conversation");
+    store
+        .add_interaction_with_metadata("default question", "default answer", "gemini", "test")
+        .unwrap();
+    store
+        .add_interaction_for_chat(CHAT_CLI_ID, "cli question", "cli answer", "openai", "test")
+        .unwrap();
+
+    let default_items = store.recent_interactions(10).unwrap();
+    assert_eq!(default_items.len(), 1);
+    assert_eq!(default_items[0].chat_id, DEFAULT_CONVERSATION_ID);
+    assert_eq!(default_items[0].user_text, "default question");
+}
+
+#[test]
+fn deletes_conversation_without_deleting_cli_session() {
+    let store = store("delete-conversation");
+    store
+        .add_interaction_for_chat("conversation-delete", "remove me", "ok", "gemini", "test")
+        .unwrap();
+    store
+        .add_interaction_for_chat(CHAT_CLI_ID, "keep me", "ok", "openai", "test")
+        .unwrap();
+
+    assert_eq!(store.delete_chat_session("conversation-delete").unwrap(), 1);
+    assert!(
+        store
+            .recent_interactions_for_chat("conversation-delete", 10)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        store.recent_interactions_for_chat(CHAT_CLI_ID, 10).unwrap()[0].user_text,
+        "keep me"
+    );
+    assert_eq!(store.delete_chat_session(CHAT_CLI_ID).unwrap(), 0);
 }
 
 #[test]

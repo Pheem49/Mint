@@ -56,6 +56,7 @@ where
             &ChatRequest {
                 message: observation,
                 system_instruction: system_instruction.into(),
+                chat_id: None,
                 image_data_uri: None,
                 audio_data_uri: None,
                 document_attachment: None,

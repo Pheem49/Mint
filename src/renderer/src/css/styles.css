@@ -1812,6 +1812,11 @@ input:checked + .slider:before {
   font-size: 0.9rem;
 }
 
+.sidebar-subsection-title {
+  padding-top: 14px;
+  padding-bottom: 8px;
+}
+
 .sidebar-section-title.clickable {
   cursor: pointer;
   user-select: none;
@@ -1838,6 +1843,62 @@ input:checked + .slider:before {
   width: 100%;
   cursor: default;
   text-align: left;
+}
+
+.sidebar-chat-list {
+  display: grid;
+  gap: 2px;
+  max-height: min(360px, 42vh);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.sidebar-chat-item {
+  cursor: pointer;
+}
+
+.sidebar-chat-item:hover {
+  background: var(--surface-strong);
+  color: var(--text-main);
+}
+
+.sidebar-chat-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-chat-delete {
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: var(--text-muted);
+  opacity: 0;
+  flex: 0 0 auto;
+}
+
+.sidebar-chat-item:hover .sidebar-chat-delete,
+.sidebar-chat-delete:focus-visible {
+  opacity: 1;
+}
+
+.sidebar-chat-delete:hover {
+  color: #fca5a5;
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.sidebar-chat-item.active .sidebar-chat-delete {
+  margin-left: 2px;
+}
+
+.sidebar-chat-item.active:hover .mint-status-pill {
+  display: none;
 }
 
 .app-body.sidebar-collapsed .sidebar-new-chat,
@@ -2706,6 +2767,39 @@ input:checked + .slider:before {
 
 .assistant-workspace.model-hidden .input-area {
   width: 100%;
+}
+
+.conversation-panel.is-empty {
+  justify-content: center;
+}
+
+.assistant-workspace.model-hidden .conversation-panel.is-empty {
+  grid-template-rows: minmax(0, 1fr);
+  align-content: center;
+  justify-content: stretch;
+  width: min(840px, calc(100% - 64px));
+  margin: 0 auto;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.conversation-panel.is-empty .chat-container {
+  display: none;
+}
+
+.conversation-panel.is-empty .input-area {
+  width: 100%;
+  margin: auto 0;
+  transform: translateY(-7vh);
+}
+
+.empty-chat-prompt {
+  margin: 0 0 28px;
+  color: var(--text-main);
+  font-size: clamp(2rem, 4vw, 3.15rem);
+  font-weight: 500;
+  line-height: 1.18;
+  text-align: center;
 }
 
 .chat-container {

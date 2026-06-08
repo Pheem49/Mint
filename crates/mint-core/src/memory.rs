@@ -4,6 +4,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub const CHAT_CLI_ID: &str = "cli";
+pub const DEFAULT_CONVERSATION_ID: &str = "conversation-default";
+
 #[derive(Debug, Error)]
 pub enum MemoryError {
     #[error("unable to determine the user config directory")]
@@ -26,11 +29,22 @@ pub struct MemoryStore {
 #[serde(rename_all = "camelCase")]
 pub struct InteractionMemory {
     pub id: i64,
+    pub chat_id: String,
     pub user_text: String,
     pub ai_text: String,
     pub provider: String,
     pub model: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSession {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -96,39 +110,114 @@ impl MemoryStore {
         provider: &str,
         model: &str,
     ) -> Result<i64, MemoryError> {
+        self.add_interaction_for_chat(DEFAULT_CONVERSATION_ID, user_text, ai_text, provider, model)
+    }
+
+    pub fn add_interaction_for_chat(
+        &self,
+        chat_id: &str,
+        user_text: &str,
+        ai_text: &str,
+        provider: &str,
+        model: &str,
+    ) -> Result<i64, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
         let connection = self.connection()?;
+        ensure_builtin_chat_sessions(&connection)?;
+        ensure_chat_session_row(&connection, &chat_id)?;
         connection.execute(
-            "INSERT INTO interaction_memories (user_text, ai_text, provider, model)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![user_text, ai_text, provider, model],
+            "INSERT INTO interaction_memories (chat_id, user_text, ai_text, provider, model)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![chat_id, user_text, ai_text, provider, model],
+        )?;
+        connection.execute(
+            "UPDATE chat_sessions
+             SET title = CASE
+               WHEN title = 'New chat' AND ?2 != '' THEN substr(?2, 1, 80)
+               ELSE title
+             END,
+             updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+            params![chat_id, user_text.trim()],
         )?;
         Ok(connection.last_insert_rowid())
     }
 
     pub fn recent_interactions(&self, limit: usize) -> Result<Vec<InteractionMemory>, MemoryError> {
+        self.recent_interactions_for_chat(DEFAULT_CONVERSATION_ID, limit)
+    }
+
+    pub fn recent_interactions_for_chat(
+        &self,
+        chat_id: &str,
+        limit: usize,
+    ) -> Result<Vec<InteractionMemory>, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
         let connection = self.connection()?;
+        ensure_builtin_chat_sessions(&connection)?;
+        ensure_chat_session_row(&connection, &chat_id)?;
         let mut statement = connection.prepare(
-            "SELECT id, user_text, ai_text, provider, model, created_at
+            "SELECT id, chat_id, user_text, ai_text, provider, model, created_at
              FROM interaction_memories
+             WHERE chat_id = ?1
              ORDER BY id DESC
-             LIMIT ?1",
+             LIMIT ?2",
         )?;
-        let rows = statement.query_map(params![limit as i64], |row| {
-            Ok(InteractionMemory {
+        let rows = statement.query_map(params![chat_id, limit as i64], interaction_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn list_chat_sessions(&self) -> Result<Vec<ChatSession>, MemoryError> {
+        let connection = self.connection()?;
+        ensure_builtin_chat_sessions(&connection)?;
+        let mut statement = connection.prepare(
+            "SELECT id, title, kind, created_at, updated_at
+             FROM chat_sessions
+             ORDER BY CASE WHEN id = ?1 THEN 0 ELSE 1 END, updated_at DESC",
+        )?;
+        let rows = statement.query_map(params![CHAT_CLI_ID], |row| {
+            Ok(ChatSession {
                 id: row.get(0)?,
-                user_text: row.get(1)?,
-                ai_text: row.get(2)?,
-                provider: row.get(3)?,
-                model: row.get(4)?,
-                created_at: row.get(5)?,
+                title: row.get(1)?,
+                kind: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     pub fn clear_interactions(&self) -> Result<usize, MemoryError> {
+        self.clear_interactions_for_chat(DEFAULT_CONVERSATION_ID)
+    }
+
+    pub fn clear_interactions_for_chat(&self, chat_id: &str) -> Result<usize, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
         let connection = self.connection()?;
-        Ok(connection.execute("DELETE FROM interaction_memories", [])?)
+        Ok(connection.execute(
+            "DELETE FROM interaction_memories WHERE chat_id = ?1",
+            params![chat_id],
+        )?)
+    }
+
+    pub fn delete_chat_session(&self, chat_id: &str) -> Result<usize, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        if chat_id == CHAT_CLI_ID {
+            return Ok(0);
+        }
+        let connection = self.connection()?;
+        let transaction = connection.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM interaction_memories WHERE chat_id = ?1",
+            params![chat_id],
+        )?;
+        let deleted = transaction.execute(
+            "DELETE FROM chat_sessions
+             WHERE id = ?1 AND kind = 'conversation'",
+            params![chat_id],
+        )?;
+        transaction.commit()?;
+        Ok(deleted)
     }
 
     pub fn save_workspace_session(
@@ -375,12 +464,20 @@ fn initialize(
          );
          CREATE TABLE IF NOT EXISTS interaction_memories (
            id INTEGER PRIMARY KEY AUTOINCREMENT,
+           chat_id TEXT NOT NULL DEFAULT 'conversation-default',
            user_text TEXT NOT NULL,
            ai_text TEXT NOT NULL,
            provider TEXT NOT NULL DEFAULT '',
            model TEXT NOT NULL DEFAULT '',
            keywords TEXT DEFAULT '',
            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+         );
+         CREATE TABLE IF NOT EXISTS chat_sessions (
+           id TEXT PRIMARY KEY,
+           title TEXT NOT NULL DEFAULT 'New chat',
+           kind TEXT NOT NULL DEFAULT 'conversation',
+           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
          );
          CREATE TABLE IF NOT EXISTS learned_skills (
            id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -400,6 +497,12 @@ fn initialize(
     ensure_column(
         connection,
         "interaction_memories",
+        "chat_id",
+        "TEXT NOT NULL DEFAULT 'conversation-default'",
+    )?;
+    ensure_column(
+        connection,
+        "interaction_memories",
         "provider",
         "TEXT NOT NULL DEFAULT ''",
     )?;
@@ -408,6 +511,30 @@ fn initialize(
         "interaction_memories",
         "model",
         "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        connection,
+        "chat_sessions",
+        "kind",
+        "TEXT NOT NULL DEFAULT 'conversation'",
+    )?;
+    connection.execute(
+        "UPDATE interaction_memories
+         SET chat_id = ?1
+         WHERE chat_id IS NULL OR trim(chat_id) = ''",
+        params![DEFAULT_CONVERSATION_ID],
+    )?;
+    ensure_builtin_chat_sessions(connection)?;
+    connection.execute(
+        "UPDATE interaction_memories
+         SET chat_id = ?1
+         WHERE chat_id = ?2",
+        params![CHAT_CLI_ID, DEFAULT_CONVERSATION_ID],
+    )?;
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interaction_memories_chat_id_id
+         ON interaction_memories(chat_id, id)",
+        [],
     )?;
     if migrate_legacy_history {
         migrate_json_history(connection)?;
@@ -443,4 +570,64 @@ fn learned_skill_row(row: &rusqlite::Row<'_>) -> Result<LearnedSkill, rusqlite::
         content: row.get(3)?,
         created_at: row.get(4)?,
     })
+}
+
+fn interaction_row(row: &rusqlite::Row<'_>) -> Result<InteractionMemory, rusqlite::Error> {
+    Ok(InteractionMemory {
+        id: row.get(0)?,
+        chat_id: row.get(1)?,
+        user_text: row.get(2)?,
+        ai_text: row.get(3)?,
+        provider: row.get(4)?,
+        model: row.get(5)?,
+        created_at: row.get(6)?,
+    })
+}
+
+fn normalized_chat_id(chat_id: &str) -> String {
+    let trimmed = chat_id.trim();
+    if trimmed.is_empty() {
+        DEFAULT_CONVERSATION_ID.to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn ensure_builtin_chat_sessions(connection: &Connection) -> Result<(), rusqlite::Error> {
+    connection.execute(
+        "INSERT OR IGNORE INTO chat_sessions (id, title, kind)
+         VALUES (?1, 'cli', 'cli')",
+        params![CHAT_CLI_ID],
+    )?;
+    connection.execute(
+        "UPDATE chat_sessions
+         SET title = 'cli', kind = 'cli'
+         WHERE id = ?1",
+        params![CHAT_CLI_ID],
+    )?;
+    connection.execute(
+        "INSERT OR IGNORE INTO chat_sessions (id, title, kind)
+         VALUES (?1, 'Conversation', 'conversation')",
+        params![DEFAULT_CONVERSATION_ID],
+    )?;
+    Ok(())
+}
+
+fn ensure_chat_session_row(connection: &Connection, chat_id: &str) -> Result<(), rusqlite::Error> {
+    let kind = if chat_id == CHAT_CLI_ID {
+        "cli"
+    } else {
+        "conversation"
+    };
+    let title = if chat_id == CHAT_CLI_ID {
+        "Chat CLI"
+    } else {
+        "New chat"
+    };
+    connection.execute(
+        "INSERT OR IGNORE INTO chat_sessions (id, title, kind)
+         VALUES (?1, ?2, ?3)",
+        params![chat_id, title, kind],
+    )?;
+    Ok(())
 }

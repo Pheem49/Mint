@@ -1,8 +1,10 @@
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react'
 import {
   clearChatHistory,
+  deleteChatSession,
   getRecentInteractions,
   getRuntimeStatus,
+  listChatSessions,
   listSavedPictures,
   streamChatMessage,
   submitToolApproval,
@@ -10,6 +12,7 @@ import {
   readClipboardImage as readTauriClipboardImage,
   type AgentProgress,
   type ChatResponse,
+  type ChatSession,
   type DocumentAttachment,
   type PictureEntry,
   type RuntimeStatus,
@@ -28,6 +31,25 @@ const DEFAULT_CONFIG = {
   glassBlur: 'blur(16px)',
   fontFamily: "'Outfit', sans-serif",
   fontSize: '15px',
+}
+
+const ACTIVE_CONVERSATION_ID_KEY = 'mint:web-active-conversation-id'
+
+function createConversationId() {
+  const random = Math.random().toString(36).slice(2, 10)
+  return `conversation-${Date.now().toString(36)}-${random}`
+}
+
+function activeConversationId() {
+  const existing = window.localStorage.getItem(ACTIVE_CONVERSATION_ID_KEY)
+  if (existing === 'conversation-default') {
+    window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, 'cli')
+    return 'cli'
+  }
+  if (existing) return existing
+  const next = createConversationId()
+  window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, next)
+  return next
 }
 
 const MOCK_WELCOME_INTERACTION = {
@@ -200,12 +222,33 @@ export default function MintDashboard() {
   const [dashboardDataReady, setDashboardDataReady] = useState(false)
   const [startupTimedOut, setStartupTimedOut] = useState(false)
   const [settingsConfig, setSettingsConfig] = useState<any>(null)
+  const [conversationId, setConversationId] = useState(activeConversationId)
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const startupReady = dashboardDataReady || startupTimedOut
 
   async function refreshHistory() {
-    const history = await getRecentInteractions()
+    const history = await getRecentInteractions(50, conversationId)
     setInteractions(history.reverse())
+  }
+
+  async function refreshChatSessions(nextActiveId = conversationId) {
+    const sessions = await listChatSessions()
+    const isKnown = sessions.some((session) => session.id === nextActiveId)
+    setChatSessions(
+      isKnown || nextActiveId === 'cli'
+        ? sessions
+        : [
+            {
+              id: nextActiveId,
+              title: 'New chat',
+              kind: 'conversation',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+            ...sessions,
+          ],
+    )
   }
 
   async function refreshPictures() {
@@ -216,6 +259,7 @@ export default function MintDashboard() {
     Promise.allSettled([
       getRuntimeStatus().then(setStatus),
       refreshHistory(),
+      refreshChatSessions(),
       window.settingsApi?.getSettings()
         .then((loaded: any) => {
           setSettingsConfig(loaded)
@@ -313,9 +357,12 @@ export default function MintDashboard() {
         '',
         (progress) => setAgentProgress((current) => [...current, progress].slice(-24)),
         outgoingDocument,
+        null,
+        conversationId,
       )
       setStreamedResponse(response)
       await refreshHistory()
+      await refreshChatSessions()
       await refreshPictures()
       setStreamedReply('')
       setStreamedResponse(null)
@@ -447,14 +494,70 @@ export default function MintDashboard() {
   }
 
   async function clearHistory(action: 'New chat' | 'Clear history') {
-    if (!window.confirm(`${action} will clear the current conversation history. Continue?`)) return
     try {
-      await clearChatHistory()
+      if (action === 'New chat') {
+        const next = createConversationId()
+        window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, next)
+        setConversationId(next)
+        await refreshChatSessions(next)
+      } else {
+        if (!window.confirm(`${action} will clear the current conversation history. Continue?`)) return
+        await clearChatHistory(conversationId)
+      }
       setInteractions([])
       setStreamedReply('')
       setStreamedResponse(null)
       setMessage('')
       setImageAttachments([])
+    } catch (reason) {
+      setError(errorMessage(reason))
+    }
+  }
+
+  async function selectConversation(id: string) {
+    if (id === conversationId) {
+      changeView('chat')
+      return
+    }
+    window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, id)
+    setConversationId(id)
+    changeView('chat')
+    setStreamedReply('')
+    setStreamedResponse(null)
+    setMessage('')
+    setImageAttachments([])
+    setDocumentAttachment(null)
+    const history = await getRecentInteractions(50, id)
+    setInteractions(history.reverse())
+  }
+
+  async function deleteConversation(id: string) {
+    if (id === 'cli') return
+    const session = chatSessions.find((item) => item.id === id)
+    const title = session?.title || 'this chat'
+    if (!window.confirm(`Delete "${title}"? This will remove the conversation and its messages.`)) return
+
+    try {
+      await deleteChatSession(id)
+      const remaining = chatSessions.filter((item) => item.id !== id && item.kind !== 'cli' && item.id !== 'conversation-default')
+      const nextActive = id === conversationId
+        ? (remaining[0]?.id ?? createConversationId())
+        : conversationId
+
+      if (nextActive !== conversationId) {
+        window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, nextActive)
+        setConversationId(nextActive)
+        const history = await getRecentInteractions(50, nextActive)
+        setInteractions(history.reverse())
+      }
+
+      await refreshChatSessions(nextActive)
+      if (id !== conversationId) return
+      setStreamedReply('')
+      setStreamedResponse(null)
+      setMessage('')
+      setImageAttachments([])
+      setDocumentAttachment(null)
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -522,10 +625,13 @@ export default function MintDashboard() {
           view={view}
           sidebarCollapsed={sidebarCollapsed}
           sending={sending}
+          chatSessions={chatSessions}
+          activeConversationId={conversationId}
           onToggleSidebar={toggleSidebar}
           onClearHistory={clearHistory}
+          onSelectConversation={selectConversation}
+          onDeleteConversation={deleteConversation}
           onSetView={changeView}
-          onShowToast={showToast}
         />
         <main className="assistant-workspace model-hidden">
           <ChatPanel

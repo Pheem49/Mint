@@ -30,11 +30,20 @@ type DesktopStreamEvent =
 
 export interface InteractionMemory {
   id: number
+  chatId: string
   userText: string
   aiText: string
   provider: string
   model: string
   createdAt: string
+}
+
+export interface ChatSession {
+  id: string
+  title: string
+  kind: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface PictureEntry {
@@ -98,6 +107,8 @@ export async function sendChatMessage(
   imageDataUri?: string | null,
   audioDataUri?: string | null,
   documentAttachment?: DocumentAttachment | null,
+  workspacePath?: string | null,
+  chatId?: string | null,
 ): Promise<ChatResponse> {
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
   if (typeof window === 'undefined' || !isTauriRuntime()) {
@@ -106,7 +117,7 @@ export async function sendChatMessage(
       const res = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri, documentAttachment })
+        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, documentAttachment })
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
@@ -131,7 +142,7 @@ export async function sendChatMessage(
   }
   const { invoke } = await import('@tauri-apps/api/core')
   const response = await invoke<ChatResponse>('send_chat_message', {
-    request: { message: outgoingMessage, systemInstruction: '', imageDataUri, audioDataUri, documentAttachment },
+    request: { message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, documentAttachment, workspacePath },
   })
   if (imageDataUri) {
     await invoke('save_pictures', {
@@ -151,9 +162,11 @@ export async function streamChatMessage(
   systemInstruction = '',
   onProgress?: (progress: AgentProgress) => void,
   documentAttachment?: DocumentAttachment | null,
+  workspacePath?: string | null,
+  chatId?: string | null,
 ): Promise<ChatResponse> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
-    const response = await sendChatMessage(message, imageDataUri, audioDataUri, documentAttachment);
+    const response = await sendChatMessage(message, imageDataUri, audioDataUri, documentAttachment, workspacePath, chatId);
     onChunk(response.text);
     return response;
   }
@@ -165,7 +178,7 @@ export async function streamChatMessage(
     else onProgress?.(event.progress)
   }
   const response = await invoke<ChatResponse>('stream_chat_message', {
-    request: { message: outgoingMessage, systemInstruction, imageDataUri, audioDataUri, documentAttachment },
+    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, documentAttachment, workspacePath },
     onEvent,
   })
   if (imageDataUri) {
@@ -185,11 +198,13 @@ function withImagePlaceholder(message: string, imageDataUri?: string | null) {
   return markers ? `${message} ${markers}` : message
 }
 
-export async function getRecentInteractions(limit = 50): Promise<InteractionMemory[]> {
+export async function getRecentInteractions(limit = 50, chatId?: string | null): Promise<InteractionMemory[]> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/interactions?limit=${limit}`);
+      const params = new URLSearchParams({ limit: String(limit) });
+      if (chatId) params.set('chatId', chatId);
+      const res = await fetch(`${API_BASE}/interactions?${params.toString()}`);
       return await res.json();
     } catch (e) {
       console.error("Failed to fetch chat history from local server:", e);
@@ -197,14 +212,50 @@ export async function getRecentInteractions(limit = 50): Promise<InteractionMemo
     }
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<InteractionMemory[]>('get_recent_interactions', { limit })
+  return invoke<InteractionMemory[]>('get_recent_interactions', { limit, chatId })
 }
 
-export async function clearChatHistory(): Promise<number> {
+export async function listChatSessions(): Promise<ChatSession[]> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/interactions/clear`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/chat-sessions`);
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      console.error("Failed to fetch chat sessions from local server:", e);
+      return [];
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<ChatSession[]>('list_chat_sessions')
+}
+
+export async function deleteChatSession(chatId: string): Promise<number> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    try {
+      const params = new URLSearchParams({ chatId });
+      const res = await fetch(`${API_BASE}/chat-sessions/delete?${params.toString()}`, { method: 'POST' });
+      const data = await res.json();
+      return typeof data?.deleted === 'number' ? data.deleted : 0;
+    } catch (e) {
+      console.error("Failed to delete chat session on local server:", e);
+      return 0;
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<number>('delete_chat_session', { chatId })
+}
+
+export async function clearChatHistory(chatId?: string | null): Promise<number> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    try {
+      const params = new URLSearchParams();
+      if (chatId) params.set('chatId', chatId);
+      const suffix = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${API_BASE}/interactions/clear${suffix}`, { method: 'POST' });
       const data = await res.json();
       return data.status === 'ok' ? 1 : 0;
     } catch (e) {
@@ -213,7 +264,7 @@ export async function clearChatHistory(): Promise<number> {
     }
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<number>('clear_chat_history')
+  return invoke<number>('clear_chat_history', { chatId })
 }
 
 export async function listSavedPictures(): Promise<PictureEntry[]> {

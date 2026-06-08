@@ -7,13 +7,13 @@ use std::{
 };
 
 use mint_core::{
-    Capability, ChatRequest, CodeEdit, CodePatchHunk, KnowledgeStore, MemoryStore, MintConfig,
-    TaskStore, apply_code_edits, assert_path_capability, build_code_patch, build_symbol_index,
-    classify_shell_command, config_path, create_folder, execute_native_plugin, find_paths,
-    index_semantic_code, initialize_config, inspect_code_plan, list_code_files, load_config,
-    native_plugins, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    propose_code_edits, read_code_file, repository_summary, run_shell_command, search_code,
-    search_semantic_code, set_config_value,
+    CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, KnowledgeStore, MemoryStore,
+    MintConfig, TaskStore, apply_code_edits, assert_path_capability, build_code_patch,
+    build_symbol_index, classify_shell_command, config_path, create_folder, execute_native_plugin,
+    find_paths, index_semantic_code, initialize_config, inspect_code_plan, list_code_files,
+    load_config, native_plugins, orchestrate_chat_stream_with_fallback,
+    orchestrate_chat_with_fallback, propose_code_edits, read_code_file, repository_summary,
+    run_shell_command, search_code, search_semantic_code, set_config_value,
 };
 
 mod agent;
@@ -617,6 +617,7 @@ async fn main() -> Result<()> {
                         &ChatRequest {
                             message: message.clone(),
                             system_instruction: system,
+                            chat_id: Some(CHAT_CLI_ID.to_owned()),
                             image_data_uri,
                             audio_data_uri: None,
                             document_attachment: None,
@@ -641,7 +642,9 @@ async fn main() -> Result<()> {
                     MemoryCommand::Recent { limit } => {
                         println!(
                             "{}",
-                            serde_json::to_string_pretty(&memory.recent_interactions(limit)?)?
+                            serde_json::to_string_pretty(
+                                &memory.recent_interactions_for_chat(CHAT_CLI_ID, limit)?
+                            )?
                         );
                     }
                 }
@@ -1356,7 +1359,7 @@ async fn handle_slash_command(
                 .map(|(c, a)| (c, a.trim()))
                 .unwrap_or((rest, ""));
             match subcmd {
-                "list" | "" => match memory.recent_interactions(10) {
+                "list" | "" => match memory.recent_interactions_for_chat(CHAT_CLI_ID, 10) {
                     Ok(items) => {
                         if items.is_empty() {
                             println!("{DIM}No interactions yet.{RESET}\n");
@@ -1417,7 +1420,7 @@ async fn handle_slash_command(
                     }
                     Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
-                "clear" => match memory.clear_interactions() {
+                "clear" => match memory.clear_interactions_for_chat(CHAT_CLI_ID) {
                     Ok(count) => println!("{DIM}Cleared {count} interactions.{RESET}\n"),
                     Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
@@ -1472,7 +1475,7 @@ async fn handle_slash_command(
             let provider = &session.config.ai_provider;
             let model = active_model(provider, &session.config);
             let interactions = MemoryStore::open_default()
-                .and_then(|m| m.recent_interactions(1000))
+                .and_then(|m| m.recent_interactions_for_chat(CHAT_CLI_ID, 1000))
                 .map(|v| v.len())
                 .unwrap_or(0);
             println!("\n{BLUE}─ Session Stats ─────────────────────────{RESET}");
@@ -1727,6 +1730,7 @@ async fn run_interactive_chat() -> Result<()> {
                 &ChatRequest {
                     message: message.clone(),
                     system_instruction,
+                    chat_id: Some(CHAT_CLI_ID.to_owned()),
                     image_data_uri: image_uri,
                     audio_data_uri: None,
                     document_attachment: None,

@@ -47,7 +47,8 @@ pub use mcp::{
     clear_mcp_servers, configured_mcp_servers, list_mcp_servers, remove_mcp_server,
 };
 pub use memory::{
-    InteractionMemory, LearnedSkill, MemoryError, MemoryStore, WorkspaceSession, memory_path,
+    CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, InteractionMemory, LearnedSkill,
+    MemoryError, MemoryStore, WorkspaceSession, memory_path,
 };
 pub use orchestration::{
     AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, OrchestrationError,

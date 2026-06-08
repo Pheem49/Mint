@@ -176,6 +176,7 @@ async fn answer(text: &str, system_instruction: &str) -> String {
         &ChatRequest {
             message: text.into(),
             system_instruction: system_instruction.into(),
+            chat_id: None,
             image_data_uri: None,
             audio_data_uri: None,
             document_attachment: None,
