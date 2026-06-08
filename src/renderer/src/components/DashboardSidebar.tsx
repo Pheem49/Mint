@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspeac'
 
 interface ChatSessionItem {
@@ -23,6 +25,7 @@ interface DashboardSidebarProps {
   onClearHistory: (action: 'New chat' | 'Clear history') => void
   onSelectConversation: (id: string) => void
   onDeleteConversation: (id: string) => void
+  onRenameConversation?: (id: string, newTitle: string) => void
   onSetView: (view: DashboardView) => void
   onToggleModel: () => void
   onSetExpressionIndex: (index: number) => void
@@ -49,6 +52,7 @@ export default function DashboardSidebar({
   onClearHistory,
   onSelectConversation,
   onDeleteConversation,
+  onRenameConversation,
   onSetView,
   onToggleModel,
   onSetExpressionIndex,
@@ -57,6 +61,15 @@ export default function DashboardSidebar({
   onSetShowInteractionGuide,
   onShowToast,
 }: DashboardSidebarProps) {
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [editTitleValue, setEditTitleValue] = useState('')
+
+  const handleSaveRename = (id: string) => {
+    if (editTitleValue.trim() && editTitleValue.trim() !== chatSessions.find(s => s.id === id)?.title) {
+      onRenameConversation?.(id, editTitleValue.trim())
+    }
+    setEditingSessionId(null)
+  }
   const toggleInteractionGuide = () => {
     const next = !showInteractionGuide
     onSetShowInteractionGuide(next)
@@ -236,36 +249,83 @@ export default function DashboardSidebar({
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                 </svg>
               </span>
-              <span className="sidebar-chat-title">{session.title || 'New chat'}</span>
+              {editingSessionId === session.id ? (
+                <input
+                  type="text"
+                  className="sidebar-chat-rename-input"
+                  value={editTitleValue}
+                  onChange={(e) => setEditTitleValue(e.target.value)}
+                  onBlur={() => handleSaveRename(session.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSaveRename(session.id)
+                    } else if (e.key === 'Escape') {
+                      setEditingSessionId(null)
+                    }
+                  }}
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span className="sidebar-chat-title">{session.title || 'New chat'}</span>
+              )}
               {session.id === activeConversationId && (
                 <span className="mint-status-pill" data-state={sending ? "thinking" : "idle"}>
                   <span className="mint-status-dot" />
                   <span className="mint-status-label">{sending ? "Thinking" : "Idle"}</span>
                 </span>
               )}
-              <span
-                className="sidebar-chat-delete"
-                role="button"
-                tabIndex={0}
-                title="Delete conversation"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onDeleteConversation(session.id)
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    onDeleteConversation(session.id)
-                  }
-                }}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="3 6 5 6 21 6"></polyline>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
-                  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                </svg>
-              </span>
+              {editingSessionId !== session.id && (
+                <>
+                  <span
+                    className="sidebar-chat-edit"
+                    role="button"
+                    tabIndex={0}
+                    title="Rename conversation"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      setEditingSessionId(session.id)
+                      setEditTitleValue(session.title || '')
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        setEditingSessionId(session.id)
+                        setEditTitleValue(session.title || '')
+                      }
+                    }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 20h9"></path>
+                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                    </svg>
+                  </span>
+                  <span
+                    className="sidebar-chat-delete"
+                    role="button"
+                    tabIndex={0}
+                    title="Delete conversation"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onDeleteConversation(session.id)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        onDeleteConversation(session.id)
+                      }
+                    }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                  </span>
+                </>
+              )}
             </button>
           ))}
         </div>

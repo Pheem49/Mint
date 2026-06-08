@@ -2,6 +2,7 @@ import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'r
 import {
   clearChatHistory,
   deleteChatSession,
+  renameChatSession,
   getRecentInteractions,
   getRuntimeStatus,
   listChatSessions,
@@ -652,6 +653,16 @@ export default function MintDashboard() {
     }
   }
 
+  async function renameConversation(id: string, newTitle: string) {
+    if (!newTitle.trim()) return
+    try {
+      await renameChatSession(id, newTitle.trim())
+      await refreshChatSessions(conversationId)
+    } catch (reason) {
+      setError(errorMessage(reason))
+    }
+  }
+
   async function changeProvider(provider: string) {
     try {
       const config = await window.settingsApi.getSettings()
@@ -756,6 +767,7 @@ export default function MintDashboard() {
           activeConversationId={conversationId}
           onSelectConversation={selectConversation}
           onDeleteConversation={deleteConversation}
+          onRenameConversation={renameConversation}
           onSetView={setView}
           onToggleModel={toggleModel}
           onSetExpressionIndex={setExpressionIndex}

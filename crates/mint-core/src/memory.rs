@@ -220,6 +220,19 @@ impl MemoryStore {
         Ok(deleted)
     }
 
+    pub fn rename_chat_session(&self, chat_id: &str, new_title: &str) -> Result<usize, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        let connection = self.connection()?;
+        let updated = connection.execute(
+            "UPDATE chat_sessions
+             SET title = ?2,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+            params![chat_id, new_title.trim()],
+        )?;
+        Ok(updated)
+    }
+
     pub fn save_workspace_session(
         &self,
         workspace_path: &str,

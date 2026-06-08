@@ -287,6 +287,63 @@ export async function deleteChatSession(chatId: string): Promise<number> {
   return invoke<number>('delete_chat_session', { chatId })
 }
 
+export async function renameChatSession(chatId: string, newTitle: string): Promise<number> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    try {
+      const res = await fetch(`${API_BASE}/chat-sessions/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, newTitle })
+      });
+      const data = await res.json();
+      return typeof data?.updated === 'number' ? data.updated : 0;
+    } catch (e) {
+      console.error("Failed to rename chat session on local server:", e);
+      return 0;
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<number>('rename_chat_session', { chatId, newTitle })
+}
+
+export async function getProfileValue(key: string): Promise<string> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    try {
+      const params = new URLSearchParams({ key });
+      const res = await fetch(`${API_BASE}/profile?${params.toString()}`);
+      const data = await res.json();
+      return data.value || '';
+    } catch (e) {
+      console.error("Failed to get profile key from local server:", e);
+      return '';
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string | null>('get_profile_value', { key }).then(res => res || '')
+}
+
+export async function setProfileValue(key: string, value: string): Promise<boolean> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    try {
+      const res = await fetch(`${API_BASE}/profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value })
+      });
+      const data = await res.json();
+      return data.status === 'ok';
+    } catch (e) {
+      console.error("Failed to set profile key on local server:", e);
+      return false;
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<void>('set_profile_value', { key, value }).then(() => true).catch(() => false)
+}
+
 export async function clearChatHistory(chatId?: string | null): Promise<number> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();

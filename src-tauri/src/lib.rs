@@ -565,6 +565,27 @@ fn delete_chat_session(chat_id: String) -> Result<usize, String> {
 }
 
 #[tauri::command]
+fn rename_chat_session(chat_id: String, new_title: String) -> Result<usize, String> {
+    MemoryStore::open_default()
+        .and_then(|memory| memory.rename_chat_session(&chat_id, &new_title))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_profile_value(key: String) -> Result<Option<String>, String> {
+    MemoryStore::open_default()
+        .and_then(|memory| memory.get_profile(&key))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_profile_value(key: String, value: String) -> Result<(), String> {
+    MemoryStore::open_default()
+        .and_then(|memory| memory.set_profile(&key, &value))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn clear_chat_history(chat_id: Option<String>) -> Result<usize, String> {
     MemoryStore::open_default()
         .and_then(|memory| {
@@ -957,6 +978,9 @@ pub fn run() {
             get_recent_interactions,
             list_chat_sessions,
             delete_chat_session,
+            rename_chat_session,
+            get_profile_value,
+            set_profile_value,
             clear_chat_history,
             list_pictures,
             save_pictures,

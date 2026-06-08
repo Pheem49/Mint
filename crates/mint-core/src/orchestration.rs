@@ -49,6 +49,7 @@ pub async fn orchestrate_chat(
         &response.provider,
         &response.model,
     )?;
+    spawn_auto_memory_update(config.clone(), request.message.clone(), response.text.clone());
     Ok(response)
 }
 
@@ -70,6 +71,7 @@ where
         &response.provider,
         &response.model,
     )?;
+    spawn_auto_memory_update(config.clone(), request.message.clone(), response.text.clone());
     Ok(response)
 }
 
@@ -87,6 +89,7 @@ pub async fn orchestrate_chat_with_fallback(
         &response.provider,
         &response.model,
     )?;
+    spawn_auto_memory_update(config.clone(), request.message.clone(), response.text.clone());
     Ok((response, fallback))
 }
 
@@ -108,6 +111,7 @@ where
         &response.provider,
         &response.model,
     )?;
+    spawn_auto_memory_update(config.clone(), request.message.clone(), response.text.clone());
     Ok((response, fallback))
 }
 
@@ -121,6 +125,29 @@ fn enrich_request(memory: &MemoryStore, request: &ChatRequest) -> Result<ChatReq
         .collect::<Vec<_>>()
         .join("\n\n");
     let mut enriched = request.clone();
+
+    let mut profile_instructions = String::new();
+    if let Ok(Some(name)) = memory.get_profile("name") {
+        if !name.trim().is_empty() {
+            profile_instructions.push_str(&format!("User Name: {}\n", name.trim()));
+        }
+    }
+    if let Ok(Some(preferences)) = memory.get_profile("preferences") {
+        if !preferences.trim().is_empty() {
+            profile_instructions.push_str(&format!("User Preferences & Profile:\n{}\n", preferences.trim()));
+        }
+    }
+
+    if !profile_instructions.is_empty() {
+        enriched.system_instruction = format!(
+            "{}\n\nUser Profile Information:\n{}",
+            enriched.system_instruction.trim(),
+            profile_instructions.trim()
+        )
+        .trim()
+        .to_owned();
+    }
+
     if !transcript.is_empty() {
         enriched.system_instruction = format!(
             "{}\n\nRecent conversation context:\n{}",
@@ -525,6 +552,26 @@ where
         .unwrap_or(DEFAULT_CONVERSATION_ID);
 
     if let Ok(memory) = MemoryStore::open_default() {
+        let mut profile_instructions = String::new();
+        if let Ok(Some(name)) = memory.get_profile("name") {
+            if !name.trim().is_empty() {
+                profile_instructions.push_str(&format!("User Name: {}\n", name.trim()));
+            }
+        }
+        if let Ok(Some(preferences)) = memory.get_profile("preferences") {
+            if !preferences.trim().is_empty() {
+                profile_instructions.push_str(&format!("User Preferences & Profile:\n{}\n", preferences.trim()));
+            }
+        }
+
+        if !profile_instructions.is_empty() {
+            system_prompt = format!(
+                "{}\n\nUser Profile Information:\n{}",
+                system_prompt.trim(),
+                profile_instructions.trim()
+            );
+        }
+
         if let Ok(mut interactions) = memory.recent_interactions_for_chat(chat_id, 6) {
             interactions.reverse();
             let transcript = interactions
@@ -718,6 +765,7 @@ where
                 &final_model,
             )?;
             memory.save_workspace_session(&root.to_string_lossy(), &summary, &verification)?;
+            spawn_auto_memory_update(config.clone(), task.to_string(), summary.clone());
 
             return Ok(AgentResult {
                 provider: final_provider,
@@ -1781,6 +1829,102 @@ fn truncate(value: &str) -> String {
         }
         format!("{}\n...<truncated>", &value[..end])
     }
+}
+
+pub fn spawn_auto_memory_update(
+    config: MintConfig,
+    user_text: String,
+    ai_text: String,
+) {
+    tokio::spawn(async move {
+        if let Err(e) = auto_extract_and_update_memory(&config, &user_text, &ai_text).await {
+            eprintln!("Auto memory update failed: {:?}", e);
+        }
+    });
+}
+
+pub async fn auto_extract_and_update_memory(
+    config: &MintConfig,
+    user_text: &str,
+    ai_text: &str,
+) -> Result<(), OrchestrationError> {
+    let memory = MemoryStore::open_default()?;
+    
+    // Retrieve current profile values
+    let current_name = memory.get_profile("name").unwrap_or(None).unwrap_or_default();
+    let current_pref = memory.get_profile("preferences").unwrap_or(None).unwrap_or_default();
+
+    // System instruction for memory extraction
+    let system_instruction = r#"You are a background agent responsible for updating a user's profile memory.
+Analyze the latest conversation turn below.
+Determine if the user shared their name, nickname, or any preferences, hobbies, or instructions on how they want the assistant to behave (e.g. language, formatting preference, details).
+Update the existing Profile Name and Profile Preferences accordingly.
+Keep existing preferences, add new ones, and resolve conflicts. Do not add metadata (like "preferred name") unless it is a generic preference. Keep formatting simple (e.g. list style or bullet points).
+You must return the updated profile strictly as a valid JSON object with keys:
+- "name": (string) updated name or same if not changed.
+- "preferences": (string) updated preferences list or same if not changed.
+
+Format the response strictly as valid JSON, with no other text, markers, or markdown.
+Do NOT wrap the JSON in ```json ... ``` code blocks. Just output the raw JSON object.
+
+Example response:
+{
+  "name": "Pheem",
+  "preferences": "Always explain code step-by-step. Prefers TypeScript. Default language is Thai."
+}"#.to_string();
+
+    let message = format!(
+        "Current Name: {}\nCurrent Preferences:\n{}\n\nLatest Turn:\nUser: {}\nAssistant: {}",
+        current_name, current_pref, user_text, ai_text
+    );
+
+    let request = ChatRequest {
+        message,
+        system_instruction,
+        chat_id: None,
+        image_data_uri: None,
+        audio_data_uri: None,
+        document_attachment: None,
+        workspace_path: None,
+    };
+
+    // Send the chat request to LLM
+    let response = send_chat(config, &request).await?;
+    let text_reply = response.text.trim();
+
+    // Attempt to parse the JSON response
+    let clean_json = if text_reply.starts_with("```") {
+        let lines: Vec<&str> = text_reply.lines().collect();
+        let mut filtered = Vec::new();
+        for line in lines {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("```") {
+                filtered.push(trimmed);
+            }
+        }
+        filtered.join("\n")
+    } else {
+        text_reply.to_string()
+    };
+
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&clean_json) {
+        if let Some(obj) = value.as_object() {
+            if let Some(new_name) = obj.get("name").and_then(|v| v.as_str()) {
+                let trimmed_name = new_name.trim();
+                if !trimmed_name.is_empty() && trimmed_name != current_name {
+                    memory.set_profile("name", trimmed_name)?;
+                }
+            }
+            if let Some(new_pref) = obj.get("preferences").and_then(|v| v.as_str()) {
+                let trimmed_pref = new_pref.trim();
+                if !trimmed_pref.is_empty() && trimmed_pref != current_pref {
+                    memory.set_profile("preferences", trimmed_pref)?;
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

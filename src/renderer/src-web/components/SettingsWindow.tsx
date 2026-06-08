@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { getLocalApiBase, isTauriRuntime } from '../tauri'
+import { getLocalApiBase, isTauriRuntime, getProfileValue, setProfileValue } from '../tauri'
 
 const DEFAULT_CONFIG = {
   theme: 'dark',
@@ -66,7 +66,7 @@ const DEFAULT_CONFIG = {
   enableWhatsappBridge: false
 }
 
-type TabType = 'sect-general' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts'
+type TabType = 'sect-general' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory'
 
 const GEMINI_MODELS = [
   'gemini-2.5-flash',
@@ -127,6 +127,10 @@ export default function SettingsWindow() {
   const [activeTab, setActiveTab] = useState<TabType>('sect-general')
   const [config, setConfig] = useState(DEFAULT_CONFIG)
   
+  // Custom user profile / memory state
+  const [userName, setUserName] = useState('')
+  const [userPreferences, setUserPreferences] = useState('')
+  
   // Custom model helpers for all providers
   const [customGemini, setCustomGemini] = useState('')
   const [customOpenAI, setCustomOpenAI] = useState('')
@@ -146,6 +150,15 @@ export default function SettingsWindow() {
   // Load settings on mount
   useEffect(() => {
     async function loadSettings() {
+      try {
+        const nameVal = await getProfileValue('name')
+        const prefVal = await getProfileValue('preferences')
+        setUserName(nameVal || '')
+        setUserPreferences(prefVal || '')
+      } catch (e) {
+        console.error("Failed to load user profile memory:", e)
+      }
+
       if (window.settingsApi) {
         const loaded = await window.settingsApi.getSettings()
         const merged = { ...DEFAULT_CONFIG, ...loaded }
@@ -259,6 +272,13 @@ export default function SettingsWindow() {
       finalConfig.ollamaModel = customOllama || 'llama3:latest'
     }
 
+    try {
+      await setProfileValue('name', userName)
+      await setProfileValue('preferences', userPreferences)
+    } catch (e) {
+      console.error("Failed to save user profile memory:", e)
+    }
+
     if (window.settingsApi) {
       await window.settingsApi.saveSettings(finalConfig)
       applyThemeStyles(finalConfig)
@@ -275,6 +295,14 @@ export default function SettingsWindow() {
       setCustomHF('')
       setCustomLocal('')
       setCustomOllama('')
+      setUserName('')
+      setUserPreferences('')
+      try {
+        await setProfileValue('name', '')
+        await setProfileValue('preferences', '')
+      } catch (e) {
+        console.error("Failed to reset profile memory:", e)
+      }
       applyThemeStyles(DEFAULT_CONFIG)
     }
   }
@@ -443,6 +471,16 @@ export default function SettingsWindow() {
               </svg>
             </span>
             <strong>General</strong>
+          </button>
+          <button className={`tab-btn ${activeTab === 'sect-memory' ? 'active' : ''}`} onClick={() => setActiveTab('sect-memory')}>
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path>
+                <path d="M12 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"></path>
+                <path d="M6 18a6 6 0 0 1 12 0"></path>
+              </svg>
+            </span>
+            <strong>Memory & Profile</strong>
           </button>
           <button className={`tab-btn ${activeTab === 'sect-audio' ? 'active' : ''}`} onClick={() => setActiveTab('sect-audio')}>
             <span style={{ display: 'inline-flex', alignItems: 'center' }}>
@@ -809,6 +847,47 @@ export default function SettingsWindow() {
                   </label>
                 </div>
               </section>}
+            </div>
+          )}
+
+          {/* MEMORY SECTION */}
+          {activeTab === 'sect-memory' && (
+            <div className="tab-pane active animate-fade-in">
+              <section className="setting-section">
+                <div className="section-heading">
+                  <div>
+                    <p className="section-kicker">Cross-session Memory</p>
+                    <h2 className="section-title">User Profile & Preferences</h2>
+                  </div>
+                  <p className="section-description">
+                    Information and preferences stored here will be remembered across all conversations. Mint automatically learns and updates your profile details from your chats in the background, but you can also edit them manually.
+                  </p>
+                </div>
+
+                <div className="form-grid single">
+                  <div className="setting-row">
+                    <label>Your Name / Nickname</label>
+                    <input 
+                      type="text" 
+                      value={userName} 
+                      onChange={(e) => setUserName(e.target.value)} 
+                      placeholder="e.g. Pheem, Jane" 
+                    />
+                    <p className="hint">Used by the assistant to address you in conversation.</p>
+                  </div>
+
+                  <div className="setting-row">
+                    <label>Custom Instructions & Preferences</label>
+                    <textarea 
+                      value={userPreferences} 
+                      onChange={(e) => setUserPreferences(e.target.value)} 
+                      placeholder="e.g. Explain coding concepts step-by-step. Prefer TypeScript. Talk in Thai. Keep explanations concise." 
+                      style={{ minHeight: '150px', resize: 'vertical' }}
+                    />
+                    <p className="hint">Preferences, guidelines, or persona instructions for the assistant.</p>
+                  </div>
+                </div>
+              </section>
             </div>
           )}
 

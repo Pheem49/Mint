@@ -1985,6 +1985,19 @@ input:checked + .slider:before {
 .sidebar-chat-delete {
   width: 24px;
   height: 24px;
+  margin-left: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: var(--text-muted);
+  opacity: 0;
+  flex: 0 0 auto;
+}
+
+.sidebar-chat-edit {
+  width: 24px;
+  height: 24px;
   margin-left: auto;
   display: inline-flex;
   align-items: center;
@@ -1996,7 +2009,9 @@ input:checked + .slider:before {
 }
 
 .sidebar-chat-item:hover .sidebar-chat-delete,
-.sidebar-chat-delete:focus-visible {
+.sidebar-chat-delete:focus-visible,
+.sidebar-chat-item:hover .sidebar-chat-edit,
+.sidebar-chat-edit:focus-visible {
   opacity: 1;
 }
 
@@ -2005,8 +2020,28 @@ input:checked + .slider:before {
   background: rgba(248, 113, 113, 0.12);
 }
 
-.sidebar-chat-item.active .sidebar-chat-delete {
-  margin-left: 2px;
+.sidebar-chat-edit:hover {
+  color: #c7d2fe;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.sidebar-chat-rename-input {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 0.82rem;
+  padding: 2px 6px;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+  margin-right: 4px;
+}
+
+.sidebar-chat-rename-input:focus {
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .sidebar-chat-item.active:hover .mint-status-pill {
