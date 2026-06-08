@@ -1835,7 +1835,7 @@ fn draw_input_box(
     let display_str = if input.is_empty() {
         format!("{DIM}{}\x1b[39m", placeholder)
     } else {
-        input.to_string()
+        format_placeholders(input)
     };
 
     let visible_len = if input.is_empty() {
@@ -1954,6 +1954,8 @@ fn read_line_interactive(
     let placeholder = "Ask anything...";
     let mut ctrl_d_pressed = false;
     let mut pasted_image: Option<String> = None;
+    let mut paste_contents: Vec<(String, String)> = Vec::new();
+    let mut last_paste_time: Option<std::time::Instant> = None;
 
     // Track tab autocomplete state
     let mut tab_base_input: Option<String> = None;
@@ -1964,10 +1966,47 @@ fn read_line_interactive(
     let _ = io::stdout().flush();
 
     enable_raw_mode()?;
+    let _ = crossterm::execute!(io::stdout(), crossterm::event::EnableBracketedPaste);
 
     let result = loop {
         if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key_event) = event::read()? {
+            let ev = event::read()?;
+            if let Event::Paste(text) = &ev {
+                let clean_text = text.trim_end_matches(&['\r', '\n'][..]).to_string();
+                let lines_count = clean_text.lines().count();
+                if lines_count > 1 || clean_text.chars().count() > 100 {
+                    let paste_id = paste_contents.len() + 1;
+                    let placeholder_str = if lines_count > 1 {
+                        format!("[Pasted text #{} +{} lines]", paste_id, lines_count - 1)
+                    } else {
+                        format!("[Pasted text #{}]", paste_id)
+                    };
+                    paste_contents.push((placeholder_str.clone(), clean_text));
+                    for c in placeholder_str.chars() {
+                        input_chars.insert(cursor_pos, c);
+                        cursor_pos += 1;
+                    }
+                } else {
+                    for c in clean_text.chars() {
+                        input_chars.insert(cursor_pos, c);
+                        cursor_pos += 1;
+                    }
+                }
+                disable_raw_mode()?;
+                redraw_input_box(
+                    &input_chars,
+                    cursor_pos,
+                    placeholder,
+                    model,
+                    path_str,
+                    None,
+                    None,
+                );
+                enable_raw_mode()?;
+                last_paste_time = Some(std::time::Instant::now());
+                continue;
+            }
+            if let Event::Key(key_event) = ev {
                 if key_event.kind == event::KeyEventKind::Press {
                     let is_ctrl_d = matches!(key_event.code, KeyCode::Char('d'))
                         && key_event
@@ -2244,13 +2283,25 @@ fn read_line_interactive(
                             enable_raw_mode()?;
                         }
                         KeyCode::Enter => {
+                            if let Some(time) = last_paste_time {
+                                if time.elapsed() < std::time::Duration::from_millis(100) {
+                                    continue;
+                                }
+                            }
                             disable_raw_mode()?;
                             clear_input_box();
                             let input_str: String = input_chars.iter().collect();
-                            println!("{BLUE}You ›{RESET} {}", input_str);
+
+                            let mut expanded_str = input_str.clone();
+                            for (placeholder_str, content) in &paste_contents {
+                                expanded_str = expanded_str.replace(placeholder_str, content);
+                            }
+
+                            println!("{BLUE}You ›{RESET} {}", expanded_str);
                             let _ = io::stdout().flush();
+
                             break Some(InteractiveInput {
-                                text: input_str,
+                                text: expanded_str,
                                 pasted_image,
                             });
                         }
@@ -2267,6 +2318,7 @@ fn read_line_interactive(
         }
     };
 
+    let _ = crossterm::execute!(io::stdout(), crossterm::event::DisableBracketedPaste);
     Ok(result)
 }
 
@@ -2291,6 +2343,33 @@ fn format_path_with_tilde(path: &std::path::Path) -> String {
         }
     }
     path_str
+}
+
+fn format_placeholders(s: &str) -> String {
+    let mut result = String::new();
+    let chars = s.chars().collect::<Vec<_>>();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '[' && i + 12 < chars.len() {
+            let slice: String = chars[i..i+13].iter().collect();
+            if slice == "[Pasted text #" {
+                if let Some(end_offset) = chars[i..].iter().position(|&c| c == ']') {
+                    let end_idx = i + end_offset;
+                    let inside: String = chars[i+1..end_idx].iter().collect();
+                    result.push('[');
+                    result.push_str(BLUE);
+                    result.push_str(&inside);
+                    result.push_str("\x1b[39m");
+                    result.push(']');
+                    i = end_idx + 1;
+                    continue;
+                }
+            }
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+    result
 }
 
 fn is_thai_zero_width(c: char) -> bool {

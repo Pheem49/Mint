@@ -207,6 +207,16 @@ pub async fn run_code_agent_with_options(
         }
         AgentProgress::ToolStart { action, input } => {
             if !options.fast_mode {
+                if action == "create_plan" || action == "update_plan" {
+                    if let Some(steps) = extract_plan_steps(&input) {
+                        if let Ok(mut status) = progress_live_status.lock() {
+                            status.thinking = None;
+                            status.plan_steps = steps;
+                            render_live_status(&mut status);
+                        }
+                        return;
+                    }
+                }
                 if let Some(label) = explored_action_label(&action, &input) {
                     if let Ok(mut status) = progress_live_status.lock() {
                         status.thinking = None;
@@ -295,16 +305,25 @@ pub async fn run_code_agent_with_options(
             input,
             result,
         } => {
-            if !options.fast_mode
-                && command_was_run(&result)
-                && let Some(commands) = ran_command_labels(&action, &input)
-                && let Ok(mut status) = progress_live_status.lock()
-            {
-                status.thinking = None;
-                for cmd in commands {
-                    status.tasks.push(format!("Finished command: `{}`", cmd));
+            if !options.fast_mode {
+                if action == "create_plan" || action == "update_plan" {
+                    if let Some(steps) = extract_plan_steps(&input) {
+                        if let Ok(mut status) = progress_live_status.lock() {
+                            status.thinking = None;
+                            status.plan_steps = steps;
+                            render_live_status(&mut status);
+                        }
+                    }
+                } else if command_was_run(&result)
+                    && let Some(commands) = ran_command_labels(&action, &input)
+                    && let Ok(mut status) = progress_live_status.lock()
+                {
+                    status.thinking = None;
+                    for cmd in commands {
+                        status.tasks.push(format!("Finished command: `{}`", cmd));
+                    }
+                    render_live_status(&mut status);
                 }
-                render_live_status(&mut status);
             }
         }
     };
@@ -455,6 +474,7 @@ struct LiveStatus {
     explored: Vec<ExploredAction>,
     activities: Vec<String>,
     tasks: Vec<String>,
+    plan_steps: Vec<String>,
     committed_explored: usize,
     committed_activities: usize,
     committed_tasks: usize,
@@ -526,6 +546,7 @@ fn render_live_status(status: &mut LiveStatus) {
     let activities_start = status.committed_activities.min(status.activities.len());
     let tasks_start = status.committed_tasks.min(status.tasks.len());
 
+    lines.extend(plan_lines(&status.plan_steps));
     lines.extend(tasks_lines(&status.tasks[tasks_start..]));
     lines.extend(activities_lines(&status.activities[activities_start..]));
     lines.extend(explored_lines(&status.explored[explored_start..]));
@@ -644,6 +665,45 @@ fn activities_lines(activities: &[String]) -> Vec<String> {
     }));
     if activities.len() > 24 {
         lines.push(format!("{DIM}   ... {} more{RESET}", activities.len() - 24));
+    }
+    lines
+}
+
+fn extract_plan_steps(input: &serde_json::Value) -> Option<Vec<String>> {
+    let steps_val = input.get("steps")?;
+    let arr = steps_val.as_array()?;
+    let mut steps = Vec::new();
+    for v in arr {
+        if let Some(s) = v.as_str() {
+            steps.push(s.to_string());
+        }
+    }
+    Some(steps)
+}
+
+fn plan_lines(steps: &[String]) -> Vec<String> {
+    if steps.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![format!("{BLUE}● plan{RESET}")];
+    for (index, step) in steps.iter().enumerate() {
+        let prefix = if index == steps.len() - 1 { "  └" } else { "  ├" };
+        let (checked, text) = if step.to_lowercase().starts_with("done:") {
+            (format!("{MINT}[x]{RESET}"), step["done:".len()..].trim())
+        } else if step.to_lowercase().starts_with("done: ") {
+            (format!("{MINT}[x]{RESET}"), step["done: ".len()..].trim())
+        } else if step.to_lowercase().starts_with("in_progress:") {
+            (format!("{BLUE}[~]{RESET}"), step["in_progress:".len()..].trim())
+        } else if step.to_lowercase().starts_with("in_progress: ") {
+            (format!("{BLUE}[~]{RESET}"), step["in_progress: ".len()..].trim())
+        } else if step.to_lowercase().starts_with("todo:") {
+            (format!("{DIM}[ ]{RESET}"), step["todo:".len()..].trim())
+        } else if step.to_lowercase().starts_with("todo: ") {
+            (format!("{DIM}[ ]{RESET}"), step["todo: ".len()..].trim())
+        } else {
+            (format!("{DIM}[ ]{RESET}"), step.trim())
+        };
+        lines.push(format!("{DIM}{} {}{RESET} {}", prefix, checked, text));
     }
     lines
 }
