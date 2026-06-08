@@ -157,9 +157,48 @@ export async function streamChatMessage(
   chatId?: string | null,
 ): Promise<ChatResponse> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const response = await sendChatMessage(message, imageDataUri, audioDataUri, documentAttachment, workspacePath, chatId);
-    onChunk(response.text);
-    return response;
+    const API_BASE = "http://localhost:3000/api";
+    const outgoingMessage = withImagePlaceholder(message, imageDataUri);
+    const res = await fetch(`${API_BASE}/chat-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, documentAttachment })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.text || data?.message || `HTTP ${res.status}`);
+    }
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new Error("No response body reader");
+    }
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResponse: ChatResponse | null = null;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          if (event.type === 'chunk') {
+            onChunk(event.chunk);
+          } else if (event.type === 'progress') {
+            onProgress?.(event.progress);
+          } else if (event.type === 'done') {
+            finalResponse = event.response;
+          }
+        } catch (e) {
+          console.error("Failed to parse stream line:", line, e);
+        }
+      }
+    }
+    if (finalResponse) return finalResponse;
+    throw new Error("Stream closed without a final response");
   }
   const { invoke, Channel } = await import('@tauri-apps/api/core')
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
