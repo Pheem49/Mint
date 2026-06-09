@@ -33,8 +33,8 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
-    "targets": "all",
+    "createUpdaterArtifacts": false,
+    "targets": ["deb"],
     "icon": [
       "../assets/icon.png"
     ]
