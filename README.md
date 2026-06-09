@@ -430,6 +430,11 @@ Mint's historical Electron desktop runtime and Node CLI have been removed. The
 active application is the native Tauri v2 and Rust implementation documented
 above. See [`TAURI_MIGRATION.md`](TAURI_MIGRATION.md) for compatibility notes.
 
+## Contributing
+
+We welcome contributions from the community! Whether you want to fix a bug, add a new provider, or build a new integration, please check out our [CONTRIBUTING.md](file:///home/pheem49/vscode/Project/Mint-CLI/CONTRIBUTING.md) guide for setup instructions, project architecture details, and our roadmap.
+
 ## License
 
 Mint is licensed under the [AGPL-3.0-only license](LICENSE).
+

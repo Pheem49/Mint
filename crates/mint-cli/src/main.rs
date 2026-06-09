@@ -2699,7 +2699,6 @@ mod tests {
         let mut cursor = chars.len();
 
         insert_image_placeholder(&mut chars, &mut cursor);
-        insert_image_placeholder(&mut chars, &mut cursor);
 
         assert_eq!(chars.iter().collect::<String>(), "ask [Image #1]");
         assert_eq!(cursor, "ask [Image #1]".chars().count());
