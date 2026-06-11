@@ -5,6 +5,7 @@ import { resolve } from 'path'
 export default defineConfig({
   root: resolve(__dirname, 'src/renderer'),
   base: './',
+  cacheDir: resolve(__dirname, '.vite-web'),
   build: {
     outDir: resolve(__dirname, 'out/renderer'),
     emptyOutDir: true,
@@ -23,6 +24,9 @@ export default defineConfig({
         resolve(__dirname)
       ]
     }
+  },
+  optimizeDeps: {
+    force: true,
   },
   plugins: [
     react(),

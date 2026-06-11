@@ -31,7 +31,7 @@ interface Window {
     onSpotlightToChat: (callback: (query: string) => void) => void;
     notifyAiResponse: () => void;
     clearAiNotifications: () => void;
-    getTtsUrls: (text: string) => Promise<string[]>;
+    getTtsUrls: (text: string) => Promise<Array<{ shortText: string; url: string }>>;
     setAiState: (state: string) => void;
   };
   settingsApi: {

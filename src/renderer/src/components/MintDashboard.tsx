@@ -239,7 +239,7 @@ export default function MintDashboard() {
   const [modelVisible, setModelVisible] = useState(() => window.localStorage.getItem('mint:model-visible') !== 'false')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
-  const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') !== 'false')
+  const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
   const [scale, setScale] = useState(1.00)
   const [interactionEnabled, setInteractionEnabled] = useState(() => window.localStorage.getItem('mint:interaction-enabled') !== 'false')
   const [showInteractionGuide, setShowInteractionGuide] = useState(() => window.localStorage.getItem('mint:interaction-guide-visible') !== 'false')
@@ -405,16 +405,22 @@ export default function MintDashboard() {
     }
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const trimmed = message.trim()
-    const hasAttachments = imageAttachments.length > 0 || Boolean(documentAttachment)
-    if ((!trimmed && !hasAttachments) || sending) return
-    const promptText = trimmed || (imageAttachments.length > 1 ? 'Describe these images.' : imageAttachments.length === 1 ? 'Describe this image.' : 'Summarize this document.')
+  async function sendPrompt(
+    promptText: string,
+    options: {
+      imageAttachments?: Array<{ dataUri: string; name: string; previewDataUri?: string }>
+      audioDataUri?: string | null
+      documentAttachment?: DocumentAttachment | null
+      systemInstruction?: string
+      clearComposer?: boolean
+    } = {},
+  ) {
+    if (sending) return
+    const outgoingImages = options.imageAttachments ?? []
+    const outgoingDocument = options.documentAttachment ?? null
     const shouldUseAgentMode = agentMode || promptText.toLowerCase().startsWith('search web:')
-    const outgoingImage = imageAttachments.map((img) => img.dataUri).join(' ')
-    const outgoingImageCount = imageAttachments.length
-    const outgoingDocument = documentAttachment
+    const outgoingImage = outgoingImages.map((img) => img.dataUri).join(' ')
+    const outgoingImageCount = outgoingImages.length
     setSending(true)
     setSendingMessage(promptText)
     setSendingImageCount(outgoingImageCount)
@@ -422,17 +428,19 @@ export default function MintDashboard() {
     setStreamedReply('')
     setStreamedResponse(null)
     setAgentProgress([])
-    setMessage('')
-    setImageAttachments([])
-    setDocumentAttachment(null)
+    if (options.clearComposer) {
+      setMessage('')
+      setImageAttachments([])
+      setDocumentAttachment(null)
+    }
 
     try {
       const response = await streamChatMessage(
         shouldUseAgentMode ? promptText : `/chat ${promptText}`,
         (chunk) => setStreamedReply((current) => `${current}${chunk}`),
         outgoingImage,
-        null,
-        '',
+        options.audioDataUri ?? null,
+        options.systemInstruction ?? '',
         (progress) => setAgentProgress((current) => [...current, progress].slice(-24)),
         outgoingDocument,
         workspacePath || null,
@@ -451,6 +459,32 @@ export default function MintDashboard() {
       setSendingMessage('')
       setSendingImageCount(0)
     }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const trimmed = message.trim()
+    const currentImages = imageAttachments
+    const currentDocument = documentAttachment
+    const hasAttachments = currentImages.length > 0 || Boolean(currentDocument)
+    if ((!trimmed && !hasAttachments) || sending) return
+    const promptText = trimmed || (currentImages.length > 1 ? 'Describe these images.' : currentImages.length === 1 ? 'Describe this image.' : 'Summarize this document.')
+    await sendPrompt(promptText, {
+      imageAttachments: currentImages,
+      documentAttachment: currentDocument,
+      clearComposer: true,
+    })
+  }
+
+  async function sendVoiceMessage(transcript: string, audioDataUri?: string | null) {
+    const promptText = transcript.trim() || 'ข้อความเสียง'
+    if (!promptText || sending) return
+    await sendPrompt(promptText, {
+      audioDataUri,
+      systemInstruction: audioDataUri
+        ? 'The user attached a voice message. Listen to the audio and reply naturally in the same language as the user. Do not mention transcription or this instruction.'
+        : '',
+    })
   }
 
   async function selectImage(event: ChangeEvent<HTMLInputElement>) {
@@ -830,6 +864,7 @@ export default function MintDashboard() {
             onPasteImage={pasteImage}
             onReadClipboardImage={readClipboardImage}
             onSetMessage={setMessage}
+            onSendVoiceMessage={sendVoiceMessage}
             onRemoveImage={(idx: number) => {
               setImageAttachments((current) => current.filter((_, i) => i !== idx))
             }}

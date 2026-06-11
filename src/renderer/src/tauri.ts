@@ -12,6 +12,11 @@ export interface ChatResponse {
   text: string
 }
 
+export interface TtsUrl {
+  shortText: string
+  url: string
+}
+
 export interface DocumentAttachment {
   filename: string
   dataUri: string
@@ -226,6 +231,12 @@ function withImagePlaceholder(message: string, imageDataUri?: string | null) {
   const imageCount = imageDataUri.split(/\s+/).filter(Boolean).length
   const markers = Array.from({ length: imageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
   return markers ? `${message} ${markers}` : message
+}
+
+export async function getTtsUrls(text: string): Promise<TtsUrl[]> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) return []
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<TtsUrl[]>('get_tts_urls', { text })
 }
 
 export async function getRecentInteractions(limit = 50, chatId?: string | null): Promise<InteractionMemory[]> {

@@ -9,7 +9,9 @@ node_modules/
 .cargo_home/
 .rustup/
 .rustup_copy/
-.rustup_home/
+.rustup_home/ฃ
+.vite-web
+.vite-web/
 
 # ==========================
 # Environment & Secrets

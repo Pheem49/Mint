@@ -3,6 +3,7 @@ import {
   type AgentProgress,
   type ChatResponse,
   type RuntimeStatus,
+  getTtsUrls,
 } from '../tauri'
 
 const GEMINI_MODELS = [
@@ -175,6 +176,7 @@ interface ChatPanelProps {
   onPasteImage: (clipboardData: DataTransfer) => boolean
   onReadClipboardImage: () => Promise<boolean>
   onSetMessage: (message: string) => void
+  onSendVoiceMessage: (message: string, audioDataUri?: string | null) => Promise<void>
   onRemoveImage: (idx: number) => void
   onRemoveDocument: () => void
   onStartWebSearch: () => void
@@ -222,6 +224,35 @@ function readableAssistantText(text: string) {
   return text
 }
 
+function renderSpeakerIcon(isSpeaking: boolean) {
+  if (isSpeaking) {
+    return (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+      </svg>
+    )
+  }
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+    </svg>
+  )
+}
+
+function cleanSpeechText(text: string) {
+  return readableAssistantText(text)
+    .replace(/\*\*([\s\S]*?)\*\*/g, '$1')
+    .replace(/[*_`#]/g, '')
+    .trim()
+}
+
+function numericSetting(value: unknown, fallback: number) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : fallback
+}
+
 export default function ChatPanel({
   interactions,
   sending,
@@ -246,6 +277,7 @@ export default function ChatPanel({
   onPasteImage,
   onReadClipboardImage,
   onSetMessage,
+  onSendVoiceMessage,
   onRemoveImage,
   onRemoveDocument,
   onStartWebSearch,
@@ -260,9 +292,31 @@ export default function ChatPanel({
 }: ChatPanelProps) {
   const agentActivities = activitiesFrom(agentProgress)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const [voiceMode, setVoiceMode] = useState(false)
+  const [voiceTranscript, setVoiceTranscript] = useState('')
+  const [voiceAwaitingResponse, setVoiceAwaitingResponse] = useState(false)
+  const [speakingText, setSpeakingText] = useState<string | null>(null)
   const toolMenuRef = useRef<HTMLDivElement | null>(null)
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const vadTimerRef = useRef<number | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const speechRunRef = useRef(0)
+  const historyReadyRef = useRef(false)
+  const submittedDuringSessionRef = useRef(false)
+  const lastAutoSpokenIdRef = useRef<number | string | null>(null)
+  const voiceModeRef = useRef(false)
+  const sendingRef = useRef(false)
+  const voiceAwaitingResponseRef = useRef(false)
+  const speakingRef = useRef<string | null>(null)
+  const restartTimerRef = useRef<number | null>(null)
   const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || documentName)
   const sendingImageMarkers = Array.from({ length: sendingImageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
+  const voiceStatus = speakingText ? 'speaking' : (sending || voiceAwaitingResponse) ? 'thinking' : isRecording ? 'listening' : voiceMode ? 'ready' : 'off'
+  const voiceStatusLabel = voiceStatus === 'speaking' ? 'กำลังตอบ' : voiceStatus === 'thinking' ? 'กำลังคิด' : voiceStatus === 'listening' ? 'กำลังฟัง' : 'พร้อมฟัง'
 
   const getAvailableModels = (provider: string) => {
     switch (provider) {
@@ -317,10 +371,347 @@ export default function ChatPanel({
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     submitOnEnter(event)
   }
+  const clearRestartTimer = () => {
+    if (restartTimerRef.current === null) return
+    window.clearTimeout(restartTimerRef.current)
+    restartTimerRef.current = null
+  }
+  const clearVadTimer = () => {
+    if (vadTimerRef.current === null) return
+    window.clearInterval(vadTimerRef.current)
+    vadTimerRef.current = null
+  }
+  const stopRecognition = () => {
+    clearRestartTimer()
+    recognitionRef.current?.stop()
+    recognitionRef.current = null
+    clearVadTimer()
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop()
+    }
+    mediaRecorderRef.current = null
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+    mediaStreamRef.current = null
+    audioContextRef.current?.close().catch(() => {})
+    audioContextRef.current = null
+    setIsRecording(false)
+  }
+  const scheduleVoiceListen = (delayMs = 350) => {
+    clearRestartTimer()
+    if (!voiceModeRef.current || sendingRef.current || voiceAwaitingResponseRef.current || speakingRef.current) return
+    restartTimerRef.current = window.setTimeout(() => {
+      restartTimerRef.current = null
+      startRecognition(true)
+    }, delayMs)
+  }
+  const cancelSpeech = () => {
+    speechRunRef.current += 1
+    audioRef.current?.pause()
+    audioRef.current = null
+    speakingRef.current = null
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel()
+    }
+    setSpeakingText(null)
+  }
+  const speakNative = (text: string, displayText: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      setSpeakingText(null)
+      return
+    }
+    const hasThai = /[\u0e00-\u0e7f]/.test(text)
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = hasThai ? 'th-TH' : 'en-US'
+    utterance.volume = Math.max(0, Math.min(1, numericSetting(settingsConfig?.ttsVolume, 1)))
+    utterance.rate = Math.max(0.1, Math.min(10, numericSetting(settingsConfig?.ttsSpeed, 1)))
+    utterance.pitch = Math.max(0, Math.min(2, numericSetting(settingsConfig?.ttsPitch, 1)))
+    const voice = window.speechSynthesis.getVoices().find((item) => item.lang.startsWith(hasThai ? 'th' : 'en'))
+    if (voice) utterance.voice = voice
+    const finishSpeech = () => {
+      setSpeakingText((current) => (current === displayText ? null : current))
+      speakingRef.current = null
+      scheduleVoiceListen(900)
+    }
+    utterance.onend = finishSpeech
+    utterance.onerror = finishSpeech
+    speakingRef.current = displayText
+    setSpeakingText(displayText)
+    window.speechSynthesis.speak(utterance)
+  }
+  const playGoogleTts = async (text: string, displayText: string, runId: number) => {
+    const chunks = await getTtsUrls(text)
+    for (const chunk of chunks) {
+      if (speechRunRef.current !== runId) return
+      await new Promise<void>((resolve, reject) => {
+        const audio = new Audio(chunk.url)
+        audio.volume = Math.max(0, Math.min(1, numericSetting(settingsConfig?.ttsVolume, 1)))
+        audio.playbackRate = Math.max(0.25, Math.min(4, numericSetting(settingsConfig?.ttsSpeed, 1)))
+        audioRef.current = audio
+        audio.onended = () => resolve()
+        audio.onpause = () => resolve()
+        audio.onerror = () => reject(new Error('Google TTS playback failed'))
+        audio.play().catch(reject)
+      })
+    }
+    if (speechRunRef.current === runId) {
+      setSpeakingText((current) => (current === displayText ? null : current))
+      speakingRef.current = null
+      scheduleVoiceListen(900)
+    }
+  }
+  const speak = (text: string) => {
+    const speechText = cleanSpeechText(text)
+    if (!speechText) return
+    if (speakingText === text) {
+      cancelSpeech()
+      return
+    }
+
+    cancelSpeech()
+    const runId = speechRunRef.current
+    speakingRef.current = text
+    setSpeakingText(text)
+    if (settingsConfig?.ttsProvider === 'google') {
+      playGoogleTts(speechText, text, runId).catch((error) => {
+        console.warn('Google TTS failed, falling back to native speech synthesis:', error)
+        if (speechRunRef.current === runId) speakNative(speechText, text)
+      })
+      return
+    }
+    speakNative(speechText, text)
+  }
+  const blobToDataUri = (blob: Blob) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read audio recording'))
+    reader.onload = () => resolve(String(reader.result))
+    reader.readAsDataURL(blob)
+  })
+  const preferredAudioMimeType = () => {
+    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg']
+    return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? ''
+  }
+  const startAudioRecording = async (autoSend: boolean) => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      alert('ขออภัย ระบบนี้ไม่สามารถเข้าถึงไมค์หรืออัดเสียงใน WebView นี้ได้')
+      voiceModeRef.current = false
+      setVoiceMode(false)
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = preferredAudioMimeType()
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      const chunks: Blob[] = []
+      let heardVoice = false
+      let quietSince = 0
+      const startedAt = Date.now()
+      const audioContext = new AudioContext()
+      const source = audioContext.createMediaStreamSource(stream)
+      const analyser = audioContext.createAnalyser()
+      const samples = new Uint8Array(analyser.fftSize)
+      source.connect(analyser)
+
+      mediaStreamRef.current = stream
+      mediaRecorderRef.current = recorder
+      audioContextRef.current = audioContext
+      setVoiceTranscript('กำลังฟังเสียงจากไมค์')
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data)
+      }
+      recorder.onstop = async () => {
+        clearVadTimer()
+        mediaRecorderRef.current = null
+        mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
+        mediaStreamRef.current = null
+        audioContextRef.current?.close().catch(() => {})
+        audioContextRef.current = null
+        setIsRecording(false)
+        if (!autoSend || !voiceModeRef.current || chunks.length === 0) return
+        if (!heardVoice) {
+          setVoiceTranscript('ยังไม่ได้ยินเสียงพูด')
+          scheduleVoiceListen(700)
+          return
+        }
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
+        const audioDataUri = await blobToDataUri(blob)
+        setVoiceTranscript('ส่งเสียงให้ AI แล้ว')
+        voiceAwaitingResponseRef.current = true
+        setVoiceAwaitingResponse(true)
+        onSendVoiceMessage('', audioDataUri)
+          .catch((error) => console.error('Voice audio message failed', error))
+          .finally(() => {
+            voiceAwaitingResponseRef.current = false
+            setVoiceAwaitingResponse(false)
+            scheduleVoiceListen()
+          })
+      }
+
+      recorder.start()
+      setIsRecording(true)
+      vadTimerRef.current = window.setInterval(() => {
+        analyser.getByteTimeDomainData(samples)
+        let peak = 0
+        for (const sample of samples) {
+          peak = Math.max(peak, Math.abs(sample - 128))
+        }
+        const now = Date.now()
+        if (peak > 12) {
+          heardVoice = true
+          quietSince = 0
+          setVoiceTranscript('กำลังฟัง...')
+        } else if (heardVoice) {
+          quietSince = quietSince || now
+        }
+        const silenceElapsed = quietSince ? now - quietSince : 0
+        const totalElapsed = now - startedAt
+        if ((heardVoice && silenceElapsed > 1300) || totalElapsed > 12000) {
+          recorder.stop()
+        }
+      }, 120)
+    } catch (error) {
+      console.error('Failed to record microphone audio', error)
+      setIsRecording(false)
+      voiceModeRef.current = false
+      setVoiceMode(false)
+      alert('เปิดไมค์ไม่สำเร็จ กรุณาตรวจสิทธิ์ microphone ของแอป')
+    }
+  }
+  const startRecognition = (autoSend: boolean) => {
+    if (recognitionRef.current || sendingRef.current || voiceAwaitingResponseRef.current || speakingRef.current) return
+
+    const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognitionApi) {
+      startAudioRecording(autoSend)
+      return
+    }
+
+    let sentTranscript = false
+
+    try {
+      const recognition = new SpeechRecognitionApi()
+      recognition.continuous = false
+      recognition.interimResults = true
+      recognition.lang = settingsConfig?.language === 'en' ? 'en-US' : 'th-TH'
+      recognition.onstart = () => setIsRecording(true)
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
+        let interimText = ''
+        let finalText = ''
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const transcript = event.results[index]?.[0]?.transcript ?? ''
+          if (event.results[index]?.isFinal) finalText += transcript
+          else interimText += transcript
+        }
+        const displayText = (finalText || interimText).trim()
+        if (displayText) setVoiceTranscript(displayText)
+        const resultText = finalText.trim()
+        if (!resultText) return
+        sentTranscript = true
+        recognition.stop()
+        setVoiceTranscript(resultText)
+        if (autoSend) {
+          voiceAwaitingResponseRef.current = true
+          setVoiceAwaitingResponse(true)
+          onSendVoiceMessage(resultText)
+            .catch((error) => console.error('Voice message failed', error))
+            .finally(() => {
+              voiceAwaitingResponseRef.current = false
+              setVoiceAwaitingResponse(false)
+              scheduleVoiceListen()
+            })
+        } else {
+          onSetMessage(message.trim() ? `${message.trimEnd()} ${resultText}` : resultText)
+        }
+      }
+      recognition.onerror = (event: Event) => {
+        console.error('Speech recognition error', event)
+        setIsRecording(false)
+      }
+      recognition.onend = () => {
+        recognitionRef.current = null
+        setIsRecording(false)
+        if (autoSend && voiceModeRef.current && !sentTranscript) scheduleVoiceListen()
+      }
+      recognitionRef.current = recognition
+      recognition.start()
+    } catch (error) {
+      console.error('Failed to start speech recognition', error)
+      recognitionRef.current = null
+      setIsRecording(false)
+    }
+  }
+  const toggleRecording = () => {
+    if (voiceMode) {
+      voiceModeRef.current = false
+      voiceAwaitingResponseRef.current = false
+      setVoiceMode(false)
+      setVoiceAwaitingResponse(false)
+      setVoiceTranscript('')
+      stopRecognition()
+      cancelSpeech()
+      return
+    }
+
+    voiceModeRef.current = true
+    setVoiceMode(true)
+    setVoiceAwaitingResponse(false)
+    setVoiceTranscript('')
+    startRecognition(true)
+  }
   const resizeInput = (element: HTMLTextAreaElement) => {
     element.style.height = 'auto'
-    element.style.height = `${Math.min(element.scrollHeight, 72)}px`
+    element.style.height = `${Math.min(element.scrollHeight, 120)}px`
   }
+  useEffect(() => {
+    return () => {
+      clearRestartTimer()
+      cancelSpeech()
+      stopRecognition()
+    }
+  }, [])
+  useEffect(() => {
+    voiceModeRef.current = voiceMode
+    if (!voiceMode) {
+      clearRestartTimer()
+      setVoiceTranscript('')
+    }
+  }, [voiceMode])
+  useEffect(() => {
+    sendingRef.current = sending
+  }, [sending])
+  useEffect(() => {
+    voiceAwaitingResponseRef.current = voiceAwaitingResponse
+  }, [voiceAwaitingResponse])
+  useEffect(() => {
+    speakingRef.current = speakingText
+  }, [speakingText])
+  useEffect(() => {
+    if (!voiceMode || sending || voiceAwaitingResponse || speakingText || isRecording) return
+    scheduleVoiceListen()
+  }, [voiceMode, sending, voiceAwaitingResponse, speakingText, isRecording])
+  useEffect(() => {
+    if (sending) submittedDuringSessionRef.current = true
+  }, [sending])
+  useEffect(() => {
+    if (interactions.length === 0) return
+    const latest = interactions[interactions.length - 1]
+    if (!historyReadyRef.current) {
+      historyReadyRef.current = true
+      if (!submittedDuringSessionRef.current) {
+        lastAutoSpokenIdRef.current = latest?.id ?? null
+        return
+      }
+    }
+    if (sending) return
+    if (!settingsConfig?.enableVoiceReply && !voiceMode) {
+      lastAutoSpokenIdRef.current = latest?.id ?? null
+      return
+    }
+    if (!latest?.aiText || latest.id === lastAutoSpokenIdRef.current) return
+    lastAutoSpokenIdRef.current = latest.id
+    speak(latest.aiText)
+  }, [interactions, sending, settingsConfig?.enableVoiceReply])
   useEffect(() => {
     if (!toolMenuOpen) return
     const closeMenu = (event: MouseEvent) => {
@@ -404,9 +795,17 @@ export default function ChatPanel({
             <div className="message ai-message">
               <div className="bubble-wrapper">
                 <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(interaction.aiText)}</div>
-                <div className="message-time">
+                <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
                   <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <button
+                    type="button"
+                    className={`tts-btn ${speakingText === interaction.aiText ? 'is-speaking' : ''}`}
+                    onClick={() => speak(interaction.aiText)}
+                    title={speakingText === interaction.aiText ? 'หยุดอ่านออกเสียง' : 'อ่านออกเสียง'}
+                  >
+                    {renderSpeakerIcon(speakingText === interaction.aiText)}
+                  </button>
                 </div>
               </div>
             </div>
@@ -439,7 +838,21 @@ export default function ChatPanel({
             <div className="message ai-message thinking-message">
               <div className="bubble-wrapper">
                 <div className="message-bubble"><span>{streamedReply ? renderFormattedMessage(streamedReply) : 'Thinking...'}</span></div>
-                {streamedResponse && <div className="message-time"><button className="provider-badge">{badge(streamedResponse.provider, streamedResponse.model)}</button></div>}
+                {streamedResponse && (
+                  <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button className="provider-badge">{badge(streamedResponse.provider, streamedResponse.model)}</button>
+                    {streamedReply && (
+                      <button
+                        type="button"
+                        className={`tts-btn ${speakingText === streamedReply ? 'is-speaking' : ''}`}
+                        onClick={() => speak(streamedReply)}
+                        title={speakingText === streamedReply ? 'หยุดอ่านออกเสียง' : 'อ่านออกเสียง'}
+                      >
+                        {renderSpeakerIcon(speakingText === streamedReply)}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -495,6 +908,13 @@ export default function ChatPanel({
             <span>Agent Mode</span>
           </div>
         </div>
+        {voiceMode && (
+          <div className="voice-mode-bar" data-state={voiceStatus}>
+            <span className="voice-mode-dot" />
+            <span>{voiceStatusLabel}</span>
+            {voiceTranscript && <span className="voice-mode-transcript">{voiceTranscript}</span>}
+          </div>
+        )}
 
         <form
           id="chat-form"
@@ -659,13 +1079,26 @@ export default function ChatPanel({
               </select>
             )}
           </div>
-          <button id="mic-btn" type="button" onClick={() => alert("Voice transcription coming soon!")} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-              <line x1="12" y1="19" x2="12" y2="23"></line>
-              <line x1="8" y1="23" x2="16" y2="23"></line>
-            </svg>
+          <button
+            id="mic-btn"
+            className={`${isRecording ? 'is-recording' : ''} ${voiceMode ? 'voice-mode-active' : ''}`}
+            type="button"
+            onClick={toggleRecording}
+            title={voiceMode ? 'ปิดโหมดสนทนาเสียง' : 'เปิดโหมดสนทนาเสียง'}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            {isRecording ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            )}
           </button>
           <button id="send-btn" type="submit" disabled={sending || !canSubmit} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
