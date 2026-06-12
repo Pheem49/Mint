@@ -72,8 +72,15 @@ function badge(provider: string, model: string) {
 }
 
 interface AgentActivity {
-  text: string
+  label: string
+  target: string
+  kind: 'file' | 'folder' | 'search' | 'terminal' | 'tool'
   state: 'active' | 'done' | 'error'
+}
+
+interface AgentActivityView {
+  summary: string
+  items: AgentActivity[]
 }
 
 function activityDetail(input: Record<string, unknown>, key: string) {
@@ -81,59 +88,115 @@ function activityDetail(input: Record<string, unknown>, key: string) {
   return typeof value === 'string' && value.trim() ? value : ''
 }
 
-function describeTool(action: string, input: Record<string, unknown>) {
+function formatActivityTarget(value: string) {
+  const compact = value.replace(/^\/home\/([^/]+)/, '~')
+  return compact || 'workspace'
+}
+
+function activityKind(action: string, target: string): AgentActivity['kind'] {
+  if (['search_code', 'semantic_search', 'knowledge_search', 'web_search', 'memory_recall'].includes(action)) return 'search'
+  if (['run_shell', 'verify'].includes(action)) return 'terminal'
+  if (['list_files', 'detect_project'].includes(action)) return 'folder'
+  if (['read_file', 'symbols', 'read_diagnostics', 'git_diff', 'apply_patch', 'write_file', 'note_write', 'view_image'].includes(action)) return 'file'
+  return target.includes('/') && !/\.[^/]+$/.test(target) ? 'folder' : 'tool'
+}
+
+function describeTool(action: string, input: Record<string, unknown>): AgentActivity {
   const path = activityDetail(input, 'path')
   const query = activityDetail(input, 'query')
   const command = activityDetail(input, 'command')
+  const name = activityDetail(input, 'name')
+  const tool = activityDetail(input, 'tool')
+  const target = path || query || command || name || tool || action.replaceAll('_', ' ')
   const labels: Record<string, string> = {
-    list_files: path ? `List ${path}` : 'List workspace files',
-    read_file: path ? `Read ${path}` : 'Read file',
-    search_code: query ? `Search code for "${query}"` : 'Search code',
-    symbols: path ? `Inspect symbols in ${path}` : 'Inspect symbols',
-    semantic_index: path ? `Index semantic code in ${path}` : 'Index semantic code',
-    semantic_search: query ? `Semantic search for "${query}"` : 'Semantic code search',
-    knowledge_search: query ? `Search knowledge for "${query}"` : 'Search local knowledge',
-    web_search: query ? `Search the web for "${query}"` : 'Search the web',
-    memory_recall: query ? `Recall memory for "${query}"` : 'Recall memory',
-    git_status: 'Read git status',
-    git_diff: path ? `Read git diff for ${path}` : 'Read git diff',
-    git_log: 'Read git log',
-    git_branch: 'Read git branch',
-    create_plan: 'Create plan',
-    update_plan: 'Update plan',
-    request_user_approval: 'Request approval',
-    ask_user: query ? `Ask: ${query}` : 'Ask user',
-    detect_project: path ? `Detect project in ${path}` : 'Detect project',
-    list_tests: path ? `List tests in ${path}` : 'List tests',
-    read_diagnostics: path ? `Read diagnostics in ${path}` : 'Read diagnostics',
-    view_image: path ? `View image ${path}` : 'View image',
-    note_write: path ? `Write note ${path}` : 'Write note',
-    run_plugin: activityDetail(input, 'name') ? `Run plugin ${activityDetail(input, 'name')}` : 'Run plugin',
-    mcp_tool: activityDetail(input, 'tool') ? `Call MCP tool ${activityDetail(input, 'tool')}` : 'Call MCP tool',
-    run_shell: command ? `Run \`${command}\`` : 'Run shell command',
-    verify: command ? `Verify with \`${command}\`` : 'Verify changes',
-    apply_patch: path ? `Patch ${path}` : 'Apply code patch',
-    write_file: path ? `Write ${path}` : 'Write file',
+    apply_patch: 'Applying patch',
+    ask_user: 'Asking user',
+    create_plan: 'Creating plan',
+    detect_project: 'Detecting project',
+    git_branch: 'Reading branch',
+    git_diff: 'Reading diff',
+    git_log: 'Reading log',
+    git_status: 'Reading git status',
+    knowledge_search: 'Searching knowledge',
+    list_files: 'Listing files',
+    list_tests: 'Listing tests',
+    mcp_tool: 'Calling MCP tool',
+    memory_recall: 'Recalling memory',
+    note_write: 'Writing note',
+    read_diagnostics: 'Reading diagnostics',
+    read_file: 'Reading file',
+    request_user_approval: 'Requesting approval',
+    run_plugin: 'Running plugin',
+    run_shell: 'Running command',
+    search_code: 'Searching code',
+    semantic_index: 'Indexing code',
+    semantic_search: 'Searching code',
+    symbols: 'Inspecting symbols',
+    update_plan: 'Updating plan',
+    verify: 'Verifying',
+    view_image: 'Viewing image',
+    web_search: 'Searching web',
+    write_file: 'Writing file',
   }
-  return labels[action] ?? `Use ${action.replaceAll('_', ' ')}`
+  return {
+    label: labels[action] ?? 'Using tool',
+    target: formatActivityTarget(target),
+    kind: activityKind(action, target),
+    state: 'active',
+  }
 }
 
-function activitiesFrom(progress: AgentProgress[]) {
+function activitySummary(items: AgentActivity[]) {
+  const files = new Set<string>()
+  const folders = new Set<string>()
+  for (const item of items) {
+    if (item.kind === 'file') files.add(item.target)
+    if (item.kind === 'folder') folders.add(item.target)
+  }
+  const parts = [
+    files.size ? `${files.size} ${files.size === 1 ? 'file' : 'files'}` : '',
+    folders.size ? `${folders.size} ${folders.size === 1 ? 'folder' : 'folders'}` : '',
+  ].filter(Boolean)
+  return parts.length ? `Exploring ${parts.join(', ')}` : 'Working through task'
+}
+
+function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
   const activities: AgentActivity[] = []
   for (const event of progress) {
-    if (event.type === 'Thought' && event.data.thought.trim()) {
-      activities.push({ text: event.data.thought, state: 'done' })
-    } else if (event.type === 'ToolStart') {
-      activities.push({ text: describeTool(event.data.action, event.data.input), state: 'active' })
+    if (event.type === 'ToolStart') {
+      activities.push(describeTool(event.data.action, event.data.input))
     } else if (event.type === 'ToolEnd') {
       for (let index = activities.length - 1; index >= 0; index -= 1) {
         if (activities[index].state !== 'active') continue
         activities[index].state = event.data.result.startsWith('Error:') ? 'error' : 'done'
+        if (activities[index].state === 'error') activities[index].label = 'Failed'
         break
       }
     }
   }
-  return activities.slice(-8)
+  const items = activities.slice(-12)
+  return { summary: activitySummary(activities), items }
+}
+
+function renderAgentActivityTable(activityView: AgentActivityView) {
+  return (
+    <div className="agent-activity-list">
+      <div className="agent-activity-table-head" aria-hidden="true">
+        <span>Tool</span>
+        <span />
+        <span>Target</span>
+        <span />
+      </div>
+      {activityView.items.map((activity, index) => (
+        <div className="agent-activity-item" data-kind={activity.kind} data-state={activity.state} key={`${index}-${activity.label}-${activity.target}`}>
+          <span className="agent-activity-label">{activity.label}</span>
+          <span className="agent-activity-icon" aria-hidden="true" />
+          <span className="agent-activity-text">{activity.target}</span>
+          <span className="agent-activity-chevron" aria-hidden="true">&gt;</span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function renderApprovalDetails(approval: any): ApprovalDetails {
@@ -160,6 +223,7 @@ interface ChatPanelProps {
   streamedReply: string
   streamedResponse: ChatResponse | null
   agentProgress: AgentProgress[]
+  agentActivitySnapshots: Record<string, AgentProgress[]>
   message: string
   imageAttachments: Array<{ dataUri: string; name: string; previewDataUri?: string }>
   documentName: string
@@ -260,6 +324,7 @@ export default function ChatPanel({
   streamedReply,
   streamedResponse,
   agentProgress,
+  agentActivitySnapshots,
   message,
   imageAttachments,
   documentName,
@@ -289,6 +354,7 @@ export default function ChatPanel({
   onSetModel,
 }: ChatPanelProps) {
   const agentActivities = activitiesFrom(agentProgress)
+  const [openActivityIds, setOpenActivityIds] = useState<Record<string, boolean>>({})
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const toolMenuRef = useRef<HTMLDivElement | null>(null)
   const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || documentName)
@@ -814,6 +880,30 @@ export default function ChatPanel({
     onStartWebSearch()
   }
   const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
+  const renderCompletedActivity = (interaction: any) => {
+    const interactionId = String(interaction.id)
+    const activityView = activitiesFrom(agentActivitySnapshots[interactionId] ?? [])
+    if (activityView.items.length === 0) return null
+    const isOpen = Boolean(openActivityIds[interactionId])
+    return (
+      <div className="agent-activity-history">
+        <button
+          type="button"
+          className="agent-activity-toggle"
+          aria-expanded={isOpen}
+          onClick={() => setOpenActivityIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
+        >
+          <span>{activityView.summary}</span>
+          <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
+        </button>
+        {isOpen && (
+          <div className="agent-activity-card agent-activity-card-history">
+            {renderAgentActivityTable(activityView)}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <section
@@ -889,6 +979,7 @@ export default function ChatPanel({
             )}
             <div className="message ai-message">
               <div className="bubble-wrapper">
+                {renderCompletedActivity(interaction)}
                 <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(interaction.aiText)}</div>
                 <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
@@ -922,23 +1013,16 @@ export default function ChatPanel({
         {sending && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
             <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{sendingImageMarkers ? renderFormattedMessage(`${sendingMessage} ${sendingImageMarkers}`) : renderFormattedMessage(sendingMessage)}</div></div></div>
-            {agentMode && agentActivities.length > 0 && (
+            {agentMode && agentActivities.items.length > 0 && (
               <div className="message ai-message agent-activity-message">
                 <div className="agent-activity-card">
                   <div className="agent-activity-header">
-                    <span>Agent activity</span>
+                    <span>{agentActivities.summary}</span>
                     <span className="agent-activity-status" data-state={pendingApproval ? 'approval' : 'active'}>
                       {pendingApproval ? 'Waiting for approval' : 'Working'}
                     </span>
                   </div>
-                  <div className="agent-activity-list">
-                    {agentActivities.map((activity, index) => (
-                      <div className="agent-activity-item" data-state={activity.state} key={`${index}-${activity.text}`}>
-                        <span className="agent-activity-dot" />
-                        <span className="agent-activity-text">{activity.text}</span>
-                      </div>
-                    ))}
-                  </div>
+                  {renderAgentActivityTable(agentActivities)}
                 </div>
               </div>
             )}

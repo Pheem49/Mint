@@ -213,7 +213,13 @@ fn get_runtime_status() -> Result<RuntimeStatus, String> {
 }
 
 #[tauri::command]
-fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String> {
+async fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String> {
+    tokio::task::spawn_blocking(move || build_workspace_tree(path))
+        .await
+        .map_err(|error| format!("workspace tree task failed: {error}"))?
+}
+
+fn build_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String> {
     let root = workspace_root(path.as_deref())?;
     let name = root
         .file_name()
@@ -228,7 +234,13 @@ fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String
 }
 
 #[tauri::command]
-fn select_workspace_directory() -> Result<Option<String>, String> {
+async fn select_workspace_directory() -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(select_workspace_directory_blocking)
+        .await
+        .map_err(|error| format!("workspace picker task failed: {error}"))?
+}
+
+fn select_workspace_directory_blocking() -> Result<Option<String>, String> {
     for (program, args) in [
         (
             "zenity",

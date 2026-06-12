@@ -233,6 +233,7 @@ export default function MintDashboard() {
   const [streamedReply, setStreamedReply] = useState('')
   const [streamedResponse, setStreamedResponse] = useState<ChatResponse | null>(null)
   const [agentProgress, setAgentProgress] = useState<AgentProgress[]>([])
+  const [agentActivitySnapshots, setAgentActivitySnapshots] = useState<Record<string, AgentProgress[]>>({})
   const [imageAttachments, setImageAttachments] = useState<Array<{ dataUri: string; name: string; previewDataUri?: string }>>([])
   const [documentAttachment, setDocumentAttachment] = useState<DocumentAttachment | null>(null)
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
@@ -428,6 +429,7 @@ export default function MintDashboard() {
     setStreamedReply('')
     setStreamedResponse(null)
     setAgentProgress([])
+    const progressSnapshot: AgentProgress[] = []
     if (options.clearComposer) {
       setMessage('')
       setImageAttachments([])
@@ -441,13 +443,28 @@ export default function MintDashboard() {
         outgoingImage,
         options.audioDataUri ?? null,
         options.systemInstruction ?? '',
-        (progress) => setAgentProgress((current) => [...current, progress].slice(-24)),
+        (progress) => {
+          progressSnapshot.push(progress)
+          setAgentProgress((current) => [...current, progress].slice(-24))
+        },
         outgoingDocument,
         workspacePath || null,
         conversationId,
       )
       setStreamedResponse(response)
-      await refreshHistory()
+      const history = (await getRecentInteractions(50, conversationId)).reverse()
+      if (progressSnapshot.length > 0) {
+        const newestInteraction = [...history]
+          .reverse()
+          .find((interaction) => interaction.aiText === response.text || interaction.userText === promptText) ?? history[history.length - 1]
+        if (newestInteraction?.id != null) {
+          setAgentActivitySnapshots((current) => ({
+            ...current,
+            [String(newestInteraction.id)]: progressSnapshot.slice(),
+          }))
+        }
+      }
+      setInteractions(history)
       await refreshChatSessions()
       await refreshPictures()
       setStreamedReply('')
@@ -629,6 +646,7 @@ export default function MintDashboard() {
         await clearChatHistory(conversationId)
       }
       setInteractions([])
+      setAgentActivitySnapshots({})
       setStreamedReply('')
       setStreamedResponse(null)
       setMessage('')
@@ -651,6 +669,7 @@ export default function MintDashboard() {
     setMessage('')
     setImageAttachments([])
     setDocumentAttachment(null)
+    setAgentProgress([])
     const history = await getRecentInteractions(50, id)
     setInteractions(history.reverse())
   }
@@ -671,6 +690,7 @@ export default function MintDashboard() {
       if (nextActive !== conversationId) {
         window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, nextActive)
         setConversationId(nextActive)
+        setAgentProgress([])
         const history = await getRecentInteractions(50, nextActive)
         setInteractions(history.reverse())
       }
@@ -848,6 +868,7 @@ export default function MintDashboard() {
             streamedReply={streamedReply}
             streamedResponse={streamedResponse}
             agentProgress={agentProgress}
+            agentActivitySnapshots={agentActivitySnapshots}
             message={message}
             imageAttachments={imageAttachments}
             documentName={documentAttachment?.filename ?? ''}
