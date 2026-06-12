@@ -26,8 +26,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Typecheck UI
+        run: npm run typecheck
+
       - name: Build web UI
         run: npm run build:web
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --no-deps
 
       - name: Run Rust tests
         run: cargo test -p mint-core -p mint-cli

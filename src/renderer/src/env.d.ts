@@ -1,7 +1,11 @@
 declare module '*.css';
 declare module '*.svg?url';
 
+type Unlisten = () => void;
+
 interface Window {
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
   api: {
     sendMessage: (message: string, base64Image?: string | null, base64Audio?: string | null, documentAttachment?: { filename: string; dataUri: string } | null) => Promise<any>;
     closeWindow: () => void;
@@ -18,18 +22,18 @@ interface Window {
     getWeather: (city: string) => Promise<any>;
     getSettings: () => Promise<any>;
     saveSettings: (config: any) => Promise<any>;
-    onSettingsChanged: (callback: (data: any) => void) => void;
+    onSettingsChanged: (callback: (data: any) => void) => Promise<void>;
     startVision: () => Promise<any>;
-    onVisionReady: (callback: (data: string) => void) => void;
+    onVisionReady: (callback: (data: string) => void) => Promise<Unlisten>;
     captureSilentScreen: () => Promise<string | null>;
     getSmartContext: () => Promise<any>;
-    onProactiveSuggestion: (callback: (data: any) => void) => void;
-    onProactiveNotification: (callback: (data: any) => void) => void;
+    onProactiveSuggestion: (callback: (data: any) => void) => Promise<Unlisten>;
+    onProactiveNotification: (callback: (data: any) => void) => Promise<Unlisten>;
     toggleProactive: (isOn: boolean) => void;
     recordBehavior: (context: any) => void;
     executeProactiveAction: (action: any) => Promise<any>;
     executeApprovedAction: (action: any) => Promise<any>;
-    onSpotlightToChat: (callback: (query: string) => void) => void;
+    onSpotlightToChat: (callback: (query: string) => void) => Promise<Unlisten>;
     notifyAiResponse: () => void;
     clearAiNotifications: () => void;
     getTtsUrls: (text: string) => Promise<Array<{ shortText: string; url: string }>>;
@@ -55,7 +59,7 @@ interface Window {
     hide: () => void;
     resize: (width: number, height: number) => void;
     getSettings: () => Promise<any>;
-    onSettingsChanged: (callback: (config: any) => void) => void;
+    onSettingsChanged: (callback: (config: any) => void) => Promise<void>;
   };
   screenPickerApi: {
     onScreenshot: (callback: (data: string) => void) => void;
@@ -82,6 +86,10 @@ interface SpeechRecognition extends EventTarget {
   start(): void;
   stop(): void;
   abort(): void;
+}
+
+interface SpeechRecognitionConstructor {
+  new(): SpeechRecognition;
 }
 
 interface SpeechRecognitionEvent extends Event {

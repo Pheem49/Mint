@@ -147,7 +147,7 @@ function materialFileIcon(name: string, fileExtension: string) {
   return FILE_ICONS_BY_NAME[name.toLowerCase()] || FILE_ICONS_BY_EXTENSION[fileExtension] || documentIcon
 }
 
-function TreeNode({ entry, level }: { entry: WorkspaceTreeEntry; level: number }) {
+function TreeNode({ entry, level }: { entry: WorkspaceTreeEntry; level: number; key?: string }) {
   const [open, setOpen] = useState(level < 1)
   const isDirectory = entry.kind === 'directory'
   const hasChildren = entry.children.length > 0

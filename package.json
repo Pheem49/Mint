@@ -5,6 +5,7 @@
   "scripts": {
     "dev:web": "vite --config vite.config.web.ts",
     "web": "cargo run -p mint-cli -- web",
+    "typecheck": "tsc --noEmit",
     "build:web": "vite build --config vite.config.web.ts",
     "dev:desktop": "vite",
     "build:desktop:ui": "vite build",

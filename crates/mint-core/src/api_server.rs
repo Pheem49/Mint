@@ -10,10 +10,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use crate::{
-    ApprovalOutcome, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID, MemoryStore, MintConfig,
-    config_path, create_folder, find_paths, list_saved_pictures, load_config,
-    orchestrate_agent_loop, orchestrate_chat_with_fallback, orchestrate_chat_stream_with_fallback,
-    save_chat_images, save_config, weather, AgentProgress,
+    AgentProgress, ApprovalOutcome, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID,
+    MemoryStore, MintConfig, config_path, create_folder, find_paths, list_saved_pictures,
+    load_config, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
+    orchestrate_chat_with_fallback, save_chat_images, save_config, weather,
 };
 
 const MAX_API_REQUEST_BYTES: usize = 32 * 1024 * 1024;
@@ -202,8 +202,11 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
                     if let Ok(req) = serde_json::from_str::<RenameRequest>(body) {
                         if let Ok(memory) = MemoryStore::open_default() {
-                            let updated = memory.rename_chat_session(&req.chat_id, &req.new_title).unwrap_or(0);
-                            let response = serde_json::json!({ "status": "ok", "updated": updated });
+                            let updated = memory
+                                .rename_chat_session(&req.chat_id, &req.new_title)
+                                .unwrap_or(0);
+                            let response =
+                                serde_json::json!({ "status": "ok", "updated": updated });
                             send_json_response(socket, "200 OK", &response.to_string()).await;
                             return;
                         }
@@ -219,10 +222,16 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     let key = query_param(query, "key").unwrap_or_default();
                     if let Ok(memory) = MemoryStore::open_default() {
                         let value = memory.get_profile(&key).unwrap_or(None).unwrap_or_default();
-                        send_json_response(socket, "200 OK", &serde_json::json!({ "value": value }).to_string()).await;
+                        send_json_response(
+                            socket,
+                            "200 OK",
+                            &serde_json::json!({ "value": value }).to_string(),
+                        )
+                        .await;
                         return;
                     }
-                    send_json_response(socket, "500 Internal Server Error", "{\"value\":\"\"}").await;
+                    send_json_response(socket, "500 Internal Server Error", "{\"value\":\"\"}")
+                        .await;
                 }
                 ("POST", "/api/profile") => {
                     #[derive(Deserialize)]
@@ -237,7 +246,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             return;
                         }
                     }
-                    send_json_response(socket, "500 Internal Server Error", "{\"status\":\"error\"}").await;
+                    send_json_response(
+                        socket,
+                        "500 Internal Server Error",
+                        "{\"status\":\"error\"}",
+                    )
+                    .await;
                 }
                 ("POST", "/api/interactions/clear") => {
                     if let Ok(memory) = MemoryStore::open_default() {
@@ -483,20 +497,24 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             {
                                 let tx_progress = tx.clone();
                                 let progress_cb = move |progress: AgentProgress| {
-                                    if let Ok(json_val) = serde_json::to_string(&serde_json::json!({
-                                        "type": "progress",
-                                        "progress": progress
-                                    })) {
+                                    if let Ok(json_val) =
+                                        serde_json::to_string(&serde_json::json!({
+                                            "type": "progress",
+                                            "progress": progress
+                                        }))
+                                    {
                                         let _ = tx_progress.send(format!("{}\n", json_val));
                                     }
                                 };
 
                                 let tx_chunk = tx.clone();
                                 let on_chunk = move |chunk: String| {
-                                    if let Ok(json_val) = serde_json::to_string(&serde_json::json!({
-                                        "type": "chunk",
-                                        "chunk": chunk
-                                    })) {
+                                    if let Ok(json_val) =
+                                        serde_json::to_string(&serde_json::json!({
+                                            "type": "chunk",
+                                            "chunk": chunk
+                                        }))
+                                    {
                                         let _ = tx_chunk.send(format!("{}\n", json_val));
                                     }
                                 };
@@ -507,21 +525,31 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     let chat_req_clone = chat_req.clone();
                                     let tx_done = tx.clone();
                                     tokio::spawn(async move {
-                                        let result = orchestrate_chat_stream_with_fallback(&config_clone, &chat_req_clone, move |chunk| {
-                                            if let Ok(json_val) = serde_json::to_string(&serde_json::json!({
-                                                "type": "chunk",
-                                                "chunk": chunk
-                                            })) {
-                                                let _ = tx_chunk_inner.send(format!("{}\n", json_val));
-                                            }
-                                        }).await;
+                                        let result = orchestrate_chat_stream_with_fallback(
+                                            &config_clone,
+                                            &chat_req_clone,
+                                            move |chunk| {
+                                                if let Ok(json_val) =
+                                                    serde_json::to_string(&serde_json::json!({
+                                                        "type": "chunk",
+                                                        "chunk": chunk
+                                                    }))
+                                                {
+                                                    let _ = tx_chunk_inner
+                                                        .send(format!("{}\n", json_val));
+                                                }
+                                            },
+                                        )
+                                        .await;
 
                                         match result {
                                             Ok((response, _)) => {
-                                                if let Ok(json_val) = serde_json::to_string(&serde_json::json!({
-                                                    "type": "done",
-                                                    "response": response
-                                                })) {
+                                                if let Ok(json_val) =
+                                                    serde_json::to_string(&serde_json::json!({
+                                                        "type": "done",
+                                                        "response": response
+                                                    }))
+                                                {
                                                     let _ = tx_done.send(format!("{}\n", json_val));
                                                 }
                                             }
@@ -534,7 +562,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                                         "text": format!("Error orchestrating chat: {e}")
                                                     }
                                                 });
-                                                let _ = tx_done.send(format!("{}\n", err_json.to_string()));
+                                                let _ = tx_done
+                                                    .send(format!("{}\n", err_json.to_string()));
                                             }
                                         }
                                     });
@@ -563,7 +592,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                             |_| Ok(ApprovalOutcome::Denied),
                                             progress_cb,
                                             on_chunk,
-                                        ).await;
+                                        )
+                                        .await;
 
                                         match result {
                                             Ok(res) => {
@@ -572,10 +602,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                                     model: res.model,
                                                     text: res.summary,
                                                 };
-                                                if let Ok(json_val) = serde_json::to_string(&serde_json::json!({
-                                                    "type": "done",
-                                                    "response": response
-                                                })) {
+                                                if let Ok(json_val) =
+                                                    serde_json::to_string(&serde_json::json!({
+                                                        "type": "done",
+                                                        "response": response
+                                                    }))
+                                                {
                                                     let _ = tx_done.send(format!("{}\n", json_val));
                                                 }
                                             }
@@ -588,7 +620,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                                         "text": format!("Error orchestrating agent: {e}")
                                                     }
                                                 });
-                                                let _ = tx_done.send(format!("{}\n", err_json.to_string()));
+                                                let _ = tx_done
+                                                    .send(format!("{}\n", err_json.to_string()));
                                             }
                                         }
                                     });

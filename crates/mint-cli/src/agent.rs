@@ -687,15 +687,25 @@ fn plan_lines(steps: &[String]) -> Vec<String> {
     }
     let mut lines = vec![format!("{BLUE}● plan{RESET}")];
     for (index, step) in steps.iter().enumerate() {
-        let prefix = if index == steps.len() - 1 { "  └" } else { "  ├" };
+        let prefix = if index == steps.len() - 1 {
+            "  └"
+        } else {
+            "  ├"
+        };
         let (checked, text) = if step.to_lowercase().starts_with("done:") {
             (format!("{MINT}[x]{RESET}"), step["done:".len()..].trim())
         } else if step.to_lowercase().starts_with("done: ") {
             (format!("{MINT}[x]{RESET}"), step["done: ".len()..].trim())
         } else if step.to_lowercase().starts_with("in_progress:") {
-            (format!("{BLUE}[~]{RESET}"), step["in_progress:".len()..].trim())
+            (
+                format!("{BLUE}[~]{RESET}"),
+                step["in_progress:".len()..].trim(),
+            )
         } else if step.to_lowercase().starts_with("in_progress: ") {
-            (format!("{BLUE}[~]{RESET}"), step["in_progress: ".len()..].trim())
+            (
+                format!("{BLUE}[~]{RESET}"),
+                step["in_progress: ".len()..].trim(),
+            )
         } else if step.to_lowercase().starts_with("todo:") {
             (format!("{DIM}[ ]{RESET}"), step["todo:".len()..].trim())
         } else if step.to_lowercase().starts_with("todo: ") {

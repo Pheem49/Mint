@@ -220,7 +220,11 @@ impl MemoryStore {
         Ok(deleted)
     }
 
-    pub fn rename_chat_session(&self, chat_id: &str, new_title: &str) -> Result<usize, MemoryError> {
+    pub fn rename_chat_session(
+        &self,
+        chat_id: &str,
+        new_title: &str,
+    ) -> Result<usize, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
         let connection = self.connection()?;
         let updated = connection.execute(

@@ -49,7 +49,11 @@ pub async fn orchestrate_chat(
         &response.provider,
         &response.model,
     )?;
-    spawn_auto_memory_update(config.clone(), request.message.clone(), response.text.clone());
+    spawn_auto_memory_update(
+        config.clone(),
+        request.message.clone(),
+        response.text.clone(),
+    );
     Ok(response)
 }
 
@@ -71,7 +75,11 @@ where
         &response.provider,
         &response.model,
     )?;
-    spawn_auto_memory_update(config.clone(), request.message.clone(), response.text.clone());
+    spawn_auto_memory_update(
+        config.clone(),
+        request.message.clone(),
+        response.text.clone(),
+    );
     Ok(response)
 }
 
@@ -89,7 +97,11 @@ pub async fn orchestrate_chat_with_fallback(
         &response.provider,
         &response.model,
     )?;
-    spawn_auto_memory_update(config.clone(), request.message.clone(), response.text.clone());
+    spawn_auto_memory_update(
+        config.clone(),
+        request.message.clone(),
+        response.text.clone(),
+    );
     Ok((response, fallback))
 }
 
@@ -111,7 +123,11 @@ where
         &response.provider,
         &response.model,
     )?;
-    spawn_auto_memory_update(config.clone(), request.message.clone(), response.text.clone());
+    spawn_auto_memory_update(
+        config.clone(),
+        request.message.clone(),
+        response.text.clone(),
+    );
     Ok((response, fallback))
 }
 
@@ -134,7 +150,10 @@ fn enrich_request(memory: &MemoryStore, request: &ChatRequest) -> Result<ChatReq
     }
     if let Ok(Some(preferences)) = memory.get_profile("preferences") {
         if !preferences.trim().is_empty() {
-            profile_instructions.push_str(&format!("User Preferences & Profile:\n{}\n", preferences.trim()));
+            profile_instructions.push_str(&format!(
+                "User Preferences & Profile:\n{}\n",
+                preferences.trim()
+            ));
         }
     }
 
@@ -560,7 +579,10 @@ where
         }
         if let Ok(Some(preferences)) = memory.get_profile("preferences") {
             if !preferences.trim().is_empty() {
-                profile_instructions.push_str(&format!("User Preferences & Profile:\n{}\n", preferences.trim()));
+                profile_instructions.push_str(&format!(
+                    "User Preferences & Profile:\n{}\n",
+                    preferences.trim()
+                ));
             }
         }
 
@@ -1831,11 +1853,7 @@ fn truncate(value: &str) -> String {
     }
 }
 
-pub fn spawn_auto_memory_update(
-    config: MintConfig,
-    user_text: String,
-    ai_text: String,
-) {
+pub fn spawn_auto_memory_update(config: MintConfig, user_text: String, ai_text: String) {
     tokio::spawn(async move {
         if let Err(e) = auto_extract_and_update_memory(&config, &user_text, &ai_text).await {
             eprintln!("Auto memory update failed: {:?}", e);
@@ -1849,10 +1867,16 @@ pub async fn auto_extract_and_update_memory(
     ai_text: &str,
 ) -> Result<(), OrchestrationError> {
     let memory = MemoryStore::open_default()?;
-    
+
     // Retrieve current profile values
-    let current_name = memory.get_profile("name").unwrap_or(None).unwrap_or_default();
-    let current_pref = memory.get_profile("preferences").unwrap_or(None).unwrap_or_default();
+    let current_name = memory
+        .get_profile("name")
+        .unwrap_or(None)
+        .unwrap_or_default();
+    let current_pref = memory
+        .get_profile("preferences")
+        .unwrap_or(None)
+        .unwrap_or_default();
 
     // System instruction for memory extraction
     let system_instruction = r#"You are a background agent responsible for updating a user's profile memory.

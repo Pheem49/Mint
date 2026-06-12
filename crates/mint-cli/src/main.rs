@@ -2351,11 +2351,11 @@ fn format_placeholders(s: &str) -> String {
     let mut i = 0;
     while i < chars.len() {
         if chars[i] == '[' && i + 12 < chars.len() {
-            let slice: String = chars[i..i+13].iter().collect();
+            let slice: String = chars[i..i + 13].iter().collect();
             if slice == "[Pasted text #" {
                 if let Some(end_offset) = chars[i..].iter().position(|&c| c == ']') {
                     let end_idx = i + end_offset;
-                    let inside: String = chars[i+1..end_idx].iter().collect();
+                    let inside: String = chars[i + 1..end_idx].iter().collect();
                     result.push('[');
                     result.push_str(BLUE);
                     result.push_str(&inside);
