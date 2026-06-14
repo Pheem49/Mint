@@ -6,6 +6,7 @@ use std::io::{self, Write};
 use std::process::Command;
 
 struct OnboardService {
+    category: &'static str,
     name: &'static str,
     key: &'static str,
     enabled: bool,
@@ -59,41 +60,49 @@ pub async fn run() -> Result<()> {
     // ────────────────────────────────────────────────────────────────
     let mut services = vec![
         OnboardService {
+            category: "AI Providers",
             name: "Anthropic (Claude) API",
             key: "anthropic",
             enabled: !config.anthropic_api_key.is_empty(),
         },
         OnboardService {
+            category: "AI Providers",
             name: "OpenAI API",
             key: "openai",
             enabled: !config.openai_api_key.is_empty(),
         },
         OnboardService {
+            category: "AI Providers",
             name: "OpenRouter API",
             key: "openrouter",
             enabled: !config.openrouter_api_key.is_empty(),
         },
         OnboardService {
+            category: "AI Providers",
             name: "DeepSeek API",
             key: "deepseek",
             enabled: !config.deepseek_api_key.is_empty(),
         },
         OnboardService {
+            category: "AI Providers",
             name: "Hugging Face API",
             key: "huggingface",
             enabled: !config.hf_api_key.is_empty(),
         },
         OnboardService {
+            category: "AI Providers",
             name: "Local OpenAI (e.g. LM Studio)",
             key: "local_openai",
             enabled: !config.local_api_base_url.is_empty(),
         },
         OnboardService {
+            category: "AI Providers",
             name: "Ollama",
             key: "ollama",
             enabled: !config.ollama_model.is_empty(),
         },
         OnboardService {
+            category: "Search",
             name: "Google Search API",
             key: "google_search",
             enabled: !config
@@ -104,6 +113,7 @@ pub async fn run() -> Result<()> {
                 .is_empty(),
         },
         OnboardService {
+            category: "Search",
             name: "Brave Search API",
             key: "brave_search",
             enabled: !config
@@ -114,6 +124,7 @@ pub async fn run() -> Result<()> {
                 .is_empty(),
         },
         OnboardService {
+            category: "Messaging Bridges",
             name: "Telegram Bot Bridge",
             key: "telegram",
             enabled: config
@@ -123,6 +134,7 @@ pub async fn run() -> Result<()> {
                 .unwrap_or(false),
         },
         OnboardService {
+            category: "Messaging Bridges",
             name: "Discord Bot Bridge",
             key: "discord",
             enabled: config
@@ -132,6 +144,7 @@ pub async fn run() -> Result<()> {
                 .unwrap_or(false),
         },
         OnboardService {
+            category: "Messaging Bridges",
             name: "Slack Bot Bridge",
             key: "slack",
             enabled: config
@@ -141,6 +154,7 @@ pub async fn run() -> Result<()> {
                 .unwrap_or(false),
         },
         OnboardService {
+            category: "Messaging Bridges",
             name: "LINE Bot Bridge",
             key: "line",
             enabled: config
@@ -150,6 +164,7 @@ pub async fn run() -> Result<()> {
                 .unwrap_or(false),
         },
         OnboardService {
+            category: "Messaging Bridges",
             name: "WhatsApp Cloud Bridge",
             key: "whatsapp",
             enabled: config
@@ -159,6 +174,7 @@ pub async fn run() -> Result<()> {
                 .unwrap_or(false),
         },
         OnboardService {
+            category: "Productivity",
             name: "Gmail Plugin",
             key: "gmail",
             enabled: config
@@ -168,6 +184,7 @@ pub async fn run() -> Result<()> {
                 .unwrap_or(false),
         },
         OnboardService {
+            category: "Productivity",
             name: "Google Calendar Plugin",
             key: "calendar",
             enabled: config
@@ -177,6 +194,7 @@ pub async fn run() -> Result<()> {
                 .unwrap_or(false),
         },
         OnboardService {
+            category: "Productivity",
             name: "Notion Plugin",
             key: "notion",
             enabled: config
@@ -221,7 +239,7 @@ pub async fn run() -> Result<()> {
                                     cursor = services.len() - 1;
                                 }
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", services.len());
+                                print!("\x1b[{}A\x1b[J", service_display_lines(&services));
                                 print_services(&services, cursor);
                                 enable_raw_mode()?;
                             }
@@ -232,14 +250,14 @@ pub async fn run() -> Result<()> {
                                     cursor = 0;
                                 }
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", services.len());
+                                print!("\x1b[{}A\x1b[J", service_display_lines(&services));
                                 print_services(&services, cursor);
                                 enable_raw_mode()?;
                             }
                             KeyCode::Char(' ') => {
                                 services[cursor].enabled = !services[cursor].enabled;
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", services.len());
+                                print!("\x1b[{}A\x1b[J", service_display_lines(&services));
                                 print_services(&services, cursor);
                                 enable_raw_mode()?;
                             }
@@ -248,7 +266,7 @@ pub async fn run() -> Result<()> {
                                     svc.enabled = true;
                                 }
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", services.len());
+                                print!("\x1b[{}A\x1b[J", service_display_lines(&services));
                                 print_services(&services, cursor);
                                 enable_raw_mode()?;
                             }
@@ -257,7 +275,7 @@ pub async fn run() -> Result<()> {
                                     svc.enabled = !svc.enabled;
                                 }
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", services.len());
+                                print!("\x1b[{}A\x1b[J", service_display_lines(&services));
                                 print_services(&services, cursor);
                                 enable_raw_mode()?;
                             }
@@ -789,7 +807,12 @@ fn is_selected(key: &str, services: &[OnboardService]) -> bool {
 }
 
 fn print_services(services: &[OnboardService], cursor: usize) {
+    let mut current_category = "";
     for (i, svc) in services.iter().enumerate() {
+        if svc.category != current_category {
+            current_category = svc.category;
+            println!("  \x1b[1;32m{}:\x1b[0m", svc.category);
+        }
         let checkbox = if svc.enabled {
             "\x1b[32m◉\x1b[0m"
         } else {
@@ -797,14 +820,26 @@ fn print_services(services: &[OnboardService], cursor: usize) {
         };
         if i == cursor {
             println!(
-                "  \x1b[36m❯\x1b[0m {} \x1b[36m{}\x1b[0m",
+                "    \x1b[36m❯\x1b[0m {} \x1b[36m{}\x1b[0m",
                 checkbox, svc.name
             );
         } else {
-            println!("    {} {}", checkbox, svc.name);
+            println!("      {} {}", checkbox, svc.name);
         }
     }
     let _ = io::stdout().flush();
+}
+
+fn service_display_lines(services: &[OnboardService]) -> usize {
+    let categories = services
+        .iter()
+        .fold(Vec::<&str>::new(), |mut categories, service| {
+            if categories.last().copied() != Some(service.category) {
+                categories.push(service.category);
+            }
+            categories
+        });
+    services.len() + categories.len()
 }
 
 fn prompt_select_or_custom(
