@@ -1712,6 +1712,7 @@ async fn run_interactive_chat() -> Result<()> {
                 - `[ACTION: read-file <file_path>]` to read the contents of a file. \
                 - `[ACTION: read-folder <path>]` to list files/folders in a directory. \
                 - `[ACTION: run-shell <command>]` to run a non-destructive local shell command after approval. \
+                You may discuss mature personal topics at a non-explicit level, including adult relationships, sex education, intimacy, emotions, and feelings. Keep the tone respectful and supportive, avoid graphic sexual detail, and do not engage with sexual content involving minors, coercion, exploitation, or sexual violence. \
                 Write the action block on a single line at the very end of your response."
             );
             if let Ok(memory) = MemoryStore::open_default() {
