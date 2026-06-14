@@ -424,6 +424,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 }
                             }
                             Err(e) => {
+                                eprintln!("API Chat error: {:?}", e);
                                 let err_json = serde_json::json!({
                                     "provider": "error",
                                     "model": "error",
@@ -554,6 +555,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                                 }
                                             }
                                             Err(e) => {
+                                                eprintln!("API Chat Stream error: {:?}", e);
                                                 let err_json = serde_json::json!({
                                                     "type": "done",
                                                     "response": {
@@ -601,6 +603,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                                     provider: res.provider,
                                                     model: res.model,
                                                     text: res.summary,
+                                                    fallback_provider: res.fallback,
                                                 };
                                                 if let Ok(json_val) =
                                                     serde_json::to_string(&serde_json::json!({
@@ -693,6 +696,7 @@ async fn run_web_agent_loop(
         provider: result.provider,
         model: result.model,
         text: result.summary,
+        fallback_provider: result.fallback,
     })
 }
 

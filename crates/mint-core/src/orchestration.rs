@@ -42,12 +42,13 @@ pub async fn orchestrate_chat(
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let response = send_chat(config, &enriched).await?;
-    memory.add_interaction_for_chat(
+    memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
         &response.model,
+        response.fallback_provider.as_deref(),
     )?;
     spawn_auto_memory_update(
         config.clone(),
@@ -68,12 +69,13 @@ where
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let response = stream_chat(config, &enriched, on_chunk).await?;
-    memory.add_interaction_for_chat(
+    memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
         &response.model,
+        response.fallback_provider.as_deref(),
     )?;
     spawn_auto_memory_update(
         config.clone(),
@@ -90,12 +92,13 @@ pub async fn orchestrate_chat_with_fallback(
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let (response, fallback) = send_chat_with_fallback(config, &enriched).await?;
-    memory.add_interaction_for_chat(
+    memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
         &response.model,
+        response.fallback_provider.as_deref(),
     )?;
     spawn_auto_memory_update(
         config.clone(),
@@ -116,12 +119,13 @@ where
     let memory = MemoryStore::open_default()?;
     let enriched = enrich_request(&memory, request)?;
     let (response, fallback) = stream_chat_with_fallback(config, &enriched, on_chunk).await?;
-    memory.add_interaction_for_chat(
+    memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
         &response.model,
+        response.fallback_provider.as_deref(),
     )?;
     spawn_auto_memory_update(
         config.clone(),
@@ -649,7 +653,7 @@ where
         final_provider = response.provider.clone();
         final_model = response.model.clone();
         if fallback.is_some() {
-            final_fallback = fallback.clone();
+            final_fallback = response.fallback_provider.clone();
         }
 
         let decision = match parse_decision_or_finish(&response.text) {
@@ -787,12 +791,13 @@ where
             on_chunk(summary.clone());
 
             let memory = MemoryStore::open_default()?;
-            memory.add_interaction_for_chat(
+            memory.add_interaction_for_chat_with_fallback(
                 chat_id,
                 task,
                 &summary,
                 &final_provider,
                 &final_model,
+                final_fallback.as_deref(),
             )?;
             memory.save_workspace_session(&root.to_string_lossy(), &summary, &verification)?;
             spawn_auto_memory_update(config.clone(), task.to_string(), summary.clone());

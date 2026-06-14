@@ -10,6 +10,7 @@ export interface ChatResponse {
   provider: string
   model: string
   text: string
+  fallbackProvider?: string | null
 }
 
 export interface TtsUrl {
@@ -39,6 +40,7 @@ export interface InteractionMemory {
   aiText: string
   provider: string
   model: string
+  fallbackProvider?: string | null
   createdAt: string
 }
 

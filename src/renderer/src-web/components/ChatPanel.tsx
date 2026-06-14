@@ -88,6 +88,34 @@ function badge(provider: string, model: string) {
   return [provider, model].filter(Boolean).join(' / ')
 }
 
+function providerLabel(provider: string) {
+  switch (provider) {
+    case 'gemini':
+      return 'Gemini'
+    case 'openai':
+      return 'OpenAI'
+    case 'openrouter':
+      return 'OpenRouter'
+    case 'deepseek':
+      return 'DeepSeek'
+    case 'anthropic':
+      return 'Claude'
+    case 'huggingface':
+      return 'Hugging Face'
+    case 'local_openai':
+      return 'Local OpenAI'
+    case 'ollama':
+      return 'Ollama'
+    default:
+      return provider || 'Primary provider'
+  }
+}
+
+function fallbackNotice(response: Pick<ChatResponse, 'provider' | 'fallbackProvider'> | null | undefined) {
+  if (!response?.fallbackProvider) return ''
+  return `${providerLabel(response.fallbackProvider)} unavailable, fell back to ${providerLabel(response.provider)}.`
+}
+
 interface AgentActivity {
   label: string
   target: string
@@ -371,6 +399,7 @@ export default function ChatPanel({
   onSetModel,
 }: ChatPanelProps) {
   const agentActivities = activitiesFrom(agentProgress)
+  const activeFallbackNotice = fallbackNotice(streamedResponse)
   const [openActivityIds, setOpenActivityIds] = useState<Record<string, boolean>>({})
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const toolMenuRef = useRef<HTMLDivElement | null>(null)
@@ -1008,6 +1037,7 @@ export default function ChatPanel({
                 <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(interaction.aiText)}</div>
                 <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
+                  {fallbackNotice(interaction) && <span className="provider-fallback-notice">{fallbackNotice(interaction)}</span>}
                   <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   <button
                     type="button"
@@ -1057,6 +1087,7 @@ export default function ChatPanel({
                 {streamedResponse && (
                   <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <button className="provider-badge">{badge(streamedResponse.provider, streamedResponse.model)}</button>
+                    {activeFallbackNotice && <span className="provider-fallback-notice">{activeFallbackNotice}</span>}
                     {streamedReply && (
                       <button
                         type="button"

@@ -34,6 +34,7 @@ pub struct InteractionMemory {
     pub ai_text: String,
     pub provider: String,
     pub model: String,
+    pub fallback_provider: Option<String>,
     pub created_at: String,
 }
 
@@ -121,14 +122,28 @@ impl MemoryStore {
         provider: &str,
         model: &str,
     ) -> Result<i64, MemoryError> {
+        self.add_interaction_for_chat_with_fallback(
+            chat_id, user_text, ai_text, provider, model, None,
+        )
+    }
+
+    pub fn add_interaction_for_chat_with_fallback(
+        &self,
+        chat_id: &str,
+        user_text: &str,
+        ai_text: &str,
+        provider: &str,
+        model: &str,
+        fallback_provider: Option<&str>,
+    ) -> Result<i64, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
         let connection = self.connection()?;
         ensure_builtin_chat_sessions(&connection)?;
         ensure_chat_session_row(&connection, &chat_id)?;
         connection.execute(
-            "INSERT INTO interaction_memories (chat_id, user_text, ai_text, provider, model)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![chat_id, user_text, ai_text, provider, model],
+            "INSERT INTO interaction_memories (chat_id, user_text, ai_text, provider, model, fallback_provider)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![chat_id, user_text, ai_text, provider, model, fallback_provider],
         )?;
         connection.execute(
             "UPDATE chat_sessions
@@ -157,7 +172,7 @@ impl MemoryStore {
         ensure_builtin_chat_sessions(&connection)?;
         ensure_chat_session_row(&connection, &chat_id)?;
         let mut statement = connection.prepare(
-            "SELECT id, chat_id, user_text, ai_text, provider, model, created_at
+            "SELECT id, chat_id, user_text, ai_text, provider, model, fallback_provider, created_at
              FROM interaction_memories
              WHERE chat_id = ?1
              ORDER BY id DESC
@@ -486,6 +501,7 @@ fn initialize(
            ai_text TEXT NOT NULL,
            provider TEXT NOT NULL DEFAULT '',
            model TEXT NOT NULL DEFAULT '',
+           fallback_provider TEXT DEFAULT NULL,
            keywords TEXT DEFAULT '',
            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
          );
@@ -528,6 +544,12 @@ fn initialize(
         "interaction_memories",
         "model",
         "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        connection,
+        "interaction_memories",
+        "fallback_provider",
+        "TEXT DEFAULT NULL",
     )?;
     ensure_column(
         connection,
@@ -597,7 +619,8 @@ fn interaction_row(row: &rusqlite::Row<'_>) -> Result<InteractionMemory, rusqlit
         ai_text: row.get(3)?,
         provider: row.get(4)?,
         model: row.get(5)?,
-        created_at: row.get(6)?,
+        fallback_provider: row.get(6)?,
+        created_at: row.get(7)?,
     })
 }
 

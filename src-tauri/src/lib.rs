@@ -445,6 +445,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
         provider: res.provider,
         model: res.model,
         text: res.summary,
+        fallback_provider: res.fallback,
     })
 }
 
@@ -542,6 +543,7 @@ async fn stream_chat_message(
         provider: res.provider,
         model: res.model,
         text: res.summary,
+        fallback_provider: res.fallback,
     })
 }
 

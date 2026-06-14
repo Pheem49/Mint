@@ -35,11 +35,19 @@ fn stores_recent_interactions_with_provider_metadata() {
     store
         .add_interaction_with_metadata("hello", "hi", "gemini", "gemini-test")
         .unwrap();
-    let interactions = store.recent_interactions(1).unwrap();
-    assert_eq!(interactions[0].user_text, "hello");
-    assert_eq!(interactions[0].ai_text, "hi");
+    store
+        .add_interaction_for_chat_with_fallback("", "question", "answer", "gemini", "gemini-test", Some("ollama"))
+        .unwrap();
+
+    let interactions = store.recent_interactions(2).unwrap();
+    assert_eq!(interactions[0].user_text, "question");
+    assert_eq!(interactions[0].ai_text, "answer");
     assert_eq!(interactions[0].provider, "gemini");
     assert_eq!(interactions[0].model, "gemini-test");
+    assert_eq!(interactions[0].fallback_provider, Some("ollama".to_owned()));
+
+    assert_eq!(interactions[1].user_text, "hello");
+    assert_eq!(interactions[1].fallback_provider, None);
 }
 
 #[test]

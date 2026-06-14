@@ -23,7 +23,8 @@ pub async fn send_chat_with_fallback(
             continue;
         }
         let alt = config_for_provider(config, provider);
-        if let Ok(r) = send_chat(&alt, request).await {
+        if let Ok(mut r) = send_chat(&alt, request).await {
+            r.fallback_provider = Some(config.ai_provider.clone());
             return Ok((r, Some(provider.to_owned())));
         }
     }
@@ -44,14 +45,17 @@ where
     match stream_chat(config, request, &mut on_chunk).await {
         Ok(r) => return Ok((r, None)),
         Err(e) if !is_recoverable(&e) => return Err(e),
-        Err(_) => {}
+        Err(e) => {
+            eprintln!("Ollama stream chat failed, falling back: {:?}", e);
+        }
     }
     for provider in config.available_providers() {
         if provider == config.ai_provider.as_str() {
             continue;
         }
         let alt = config_for_provider(config, provider);
-        if let Ok(r) = stream_chat(&alt, request, &mut on_chunk).await {
+        if let Ok(mut r) = stream_chat(&alt, request, &mut on_chunk).await {
+            r.fallback_provider = Some(config.ai_provider.clone());
             return Ok((r, Some(provider.to_owned())));
         }
     }
@@ -110,6 +114,8 @@ pub struct ChatResponse {
     pub provider: String,
     pub model: String,
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_provider: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -149,6 +155,7 @@ pub async fn send_chat(
         provider: provider.into(),
         model,
         text,
+        fallback_provider: None,
     })
 }
 
@@ -177,6 +184,7 @@ where
         provider: provider.into(),
         model,
         text,
+        fallback_provider: None,
     })
 }
 
@@ -620,9 +628,16 @@ fn provider_key(configured: &str, environment_variable: &str) -> String {
 }
 
 fn require_supported_attachments(provider: &str, request: &ChatRequest) -> Result<(), ChatError> {
-    if provider != "gemini"
-        && (request.image_data_uri.is_some() || request.audio_data_uri.is_some())
-    {
+    let has_image = request
+        .image_data_uri
+        .as_ref()
+        .map_or(false, |s| !s.trim().is_empty());
+    let has_audio = request
+        .audio_data_uri
+        .as_ref()
+        .map_or(false, |s| !s.trim().is_empty());
+
+    if provider != "gemini" && (has_image || has_audio) {
         return Err(ChatError::UnsupportedAttachments(provider.into()));
     }
     Ok(())
