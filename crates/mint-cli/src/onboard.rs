@@ -1,14 +1,40 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use mint_core::{load_config, save_config};
 use std::io::{self, Write};
+use std::process::Command;
 
 struct OnboardService {
     name: &'static str,
     key: &'static str,
     enabled: bool,
 }
+
+const OPENROUTER_MODEL_PRESETS: &[&str] = &[
+    "openai/gpt-4o-mini",
+    "openai/gpt-4o",
+    "anthropic/claude-3.5-sonnet",
+    "anthropic/claude-3.5-haiku",
+    "google/gemini-2.5-flash",
+    "meta-llama/llama-3.3-70b-instruct",
+    "mistralai/mistral-large",
+];
+
+const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "deepseek-chat",
+    "deepseek-reasoner",
+];
+
+const OLLAMA_MODEL_PRESETS: &[&str] = &[
+    "llama3:latest",
+    "llama3.1:latest",
+    "qwen2.5:latest",
+    "mistral:latest",
+    "gemma2:latest",
+];
 
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
@@ -41,6 +67,16 @@ pub async fn run() -> Result<()> {
             name: "OpenAI API",
             key: "openai",
             enabled: !config.openai_api_key.is_empty(),
+        },
+        OnboardService {
+            name: "OpenRouter API",
+            key: "openrouter",
+            enabled: !config.openrouter_api_key.is_empty(),
+        },
+        OnboardService {
+            name: "DeepSeek API",
+            key: "deepseek",
+            enabled: !config.deepseek_api_key.is_empty(),
         },
         OnboardService {
             name: "Hugging Face API",
@@ -266,6 +302,41 @@ pub async fn run() -> Result<()> {
         config.openai_api_key = String::new();
     }
 
+    // OpenRouter
+    if is_selected("openrouter", &services) {
+        println!("\n\x1b[36m--- OpenRouter API ---\x1b[0m");
+        println!(
+            "\x1b[90mOpenRouter model uses a provider/model slug, for example: openai/gpt-4o-mini, anthropic/claude-3.5-sonnet, google/gemini-2.5-flash, meta-llama/llama-3.3-70b-instruct, mistralai/mistral-large\x1b[0m"
+        );
+        config.openrouter_api_key =
+            prompt_sensitive("OpenRouter API Key", &config.openrouter_api_key)?;
+        config.openrouter_model = prompt_select_or_custom(
+            "OpenRouter Model Slug",
+            static_model_options(OPENROUTER_MODEL_PRESETS),
+            Some(&config.openrouter_model),
+            "Custom model slug...",
+        )?;
+    } else {
+        config.openrouter_api_key = String::new();
+    }
+
+    // DeepSeek
+    if is_selected("deepseek", &services) {
+        println!("\n\x1b[36m--- DeepSeek API ---\x1b[0m");
+        println!(
+            "\x1b[90mDeepSeek uses OpenAI-compatible model names. Prefer deepseek-v4-flash or deepseek-v4-pro; deepseek-chat and deepseek-reasoner are compatibility aliases scheduled for deprecation on 2026-07-24.\x1b[0m"
+        );
+        config.deepseek_api_key = prompt_sensitive("DeepSeek API Key", &config.deepseek_api_key)?;
+        config.deepseek_model = prompt_select_or_custom(
+            "DeepSeek Model",
+            static_model_options(DEEPSEEK_MODEL_PRESETS),
+            Some(&config.deepseek_model),
+            "Custom DeepSeek model...",
+        )?;
+    } else {
+        config.deepseek_api_key = String::new();
+    }
+
     // Hugging Face
     if is_selected("huggingface", &services) {
         println!("\n\x1b[36m--- Hugging Face API ---\x1b[0m");
@@ -288,8 +359,23 @@ pub async fn run() -> Result<()> {
     // Ollama
     if is_selected("ollama", &services) {
         println!("\n\x1b[36m--- Ollama ---\x1b[0m");
+        println!(
+            "\x1b[90mOllama model must match a local model installed on this machine. Examples: llama3:latest, llama3.1:latest, qwen2.5:latest, mistral:latest, gemma2:latest. Run `ollama list` to see yours.\x1b[0m"
+        );
         config.ollama_host = prompt_input("Ollama Host", Some(&config.ollama_host))?;
-        config.ollama_model = prompt_input("Ollama Model", Some(&config.ollama_model))?;
+        let ollama_models = installed_ollama_models();
+        if !ollama_models.is_empty() {
+            println!(
+                "\x1b[90mFound {} local Ollama model(s).\x1b[0m",
+                ollama_models.len()
+            );
+        }
+        config.ollama_model = prompt_select_or_custom(
+            "Ollama Local Model Name",
+            model_options(&ollama_models, OLLAMA_MODEL_PRESETS),
+            Some(&config.ollama_model),
+            "Custom local model name...",
+        )?;
     } else {
         config.ollama_host = String::new();
         config.ollama_model = String::new();
@@ -716,6 +802,133 @@ fn print_services(services: &[OnboardService], cursor: usize) {
             );
         } else {
             println!("    {} {}", checkbox, svc.name);
+        }
+    }
+    let _ = io::stdout().flush();
+}
+
+fn prompt_select_or_custom(
+    label: &str,
+    presets: Vec<String>,
+    current: Option<&str>,
+    custom_label: &str,
+) -> Result<String> {
+    let current = current.unwrap_or("").trim();
+    let mut options: Vec<String> = Vec::new();
+    if !current.is_empty() && !presets.iter().any(|preset| preset == current) {
+        options.push(current.to_string());
+    }
+    options.extend(presets);
+    options.push(custom_label.to_string());
+
+    let mut cursor = if current.is_empty() {
+        0
+    } else {
+        options
+            .iter()
+            .position(|option| option == current)
+            .unwrap_or(0)
+    };
+
+    println!("{}", label);
+    println!("  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Enter: Select]\x1b[0m");
+    print_select_options(&options, cursor);
+    enable_raw_mode()?;
+
+    loop {
+        match event::poll(std::time::Duration::from_millis(100)) {
+            Ok(true) => {
+                if let Event::Key(key_event) = event::read()? {
+                    if key_event.kind == event::KeyEventKind::Press {
+                        let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                            && key_event
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL);
+                        if is_ctrl_c {
+                            disable_raw_mode()?;
+                            println!("\n\x1b[31mOnboarding cancelled.\x1b[0m");
+                            bail!("onboarding cancelled");
+                        }
+
+                        match key_event.code {
+                            KeyCode::Up => {
+                                if cursor > 0 {
+                                    cursor -= 1;
+                                } else {
+                                    cursor = options.len() - 1;
+                                }
+                                disable_raw_mode()?;
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                print_select_options(&options, cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Down => {
+                                if cursor < options.len() - 1 {
+                                    cursor += 1;
+                                } else {
+                                    cursor = 0;
+                                }
+                                disable_raw_mode()?;
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                print_select_options(&options, cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Enter => {
+                                disable_raw_mode()?;
+                                println!();
+                                let selected = options[cursor].clone();
+                                if selected == custom_label {
+                                    return prompt_input(label, Some(current));
+                                }
+                                return Ok(selected);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(error) => {
+                disable_raw_mode()?;
+                return Err(error.into());
+            }
+        }
+    }
+}
+
+fn static_model_options(presets: &[&str]) -> Vec<String> {
+    presets.iter().map(|value| value.to_string()).collect()
+}
+
+fn model_options(installed: &[String], fallback: &[&str]) -> Vec<String> {
+    if installed.is_empty() {
+        static_model_options(fallback)
+    } else {
+        installed.to_vec()
+    }
+}
+
+fn installed_ollama_models() -> Vec<String> {
+    let output = match Command::new("ollama").arg("list").output() {
+        Ok(output) if output.status.success() => output,
+        _ => return Vec::new(),
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|name| !name.trim().is_empty())
+        .map(|name| name.to_string())
+        .collect()
+}
+
+fn print_select_options(options: &[String], cursor: usize) {
+    for (i, option) in options.iter().enumerate() {
+        if i == cursor {
+            println!("  \x1b[36m❯\x1b[0m \x1b[36m{}\x1b[0m", option);
+        } else {
+            println!("    {}", option);
         }
     }
     let _ = io::stdout().flush();

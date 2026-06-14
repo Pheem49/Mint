@@ -137,7 +137,9 @@ pub async fn send_chat(
     require_supported_attachments(provider, request)?;
     let (model, text) = match provider {
         "gemini" => call_gemini(&client, config, request).await?,
-        "openai" | "local_openai" => call_openai(&client, config, request).await?,
+        "openai" | "local_openai" | "openrouter" | "deepseek" => {
+            call_openai(&client, config, request).await?
+        }
         "ollama" => call_ollama(&client, config, request).await?,
         "anthropic" => call_anthropic(&client, config, request).await?,
         "huggingface" => call_huggingface(&client, config, request).await?,
@@ -163,7 +165,9 @@ where
     require_supported_attachments(provider, request)?;
     let (model, text) = match provider {
         "gemini" => stream_gemini(&client, config, request, &mut on_chunk).await?,
-        "openai" | "local_openai" => stream_openai(&client, config, request, &mut on_chunk).await?,
+        "openai" | "local_openai" | "openrouter" | "deepseek" => {
+            stream_openai(&client, config, request, &mut on_chunk).await?
+        }
         "ollama" => stream_ollama(&client, config, request, &mut on_chunk).await?,
         "anthropic" => stream_anthropic(&client, config, request, &mut on_chunk).await?,
         "huggingface" => stream_huggingface(&client, config, request, &mut on_chunk).await?,
@@ -211,16 +215,36 @@ async fn call_openai(
     request: &ChatRequest,
 ) -> Result<(String, String), ChatError> {
     let local = config.ai_provider == "local_openai";
-    let api_key = provider_key(&config.openai_api_key, "OPENAI_API_KEY");
-    if !local {
+    let openrouter = config.ai_provider == "openrouter";
+    let deepseek = config.ai_provider == "deepseek";
+    let api_key = if openrouter {
+        provider_key(&config.openrouter_api_key, "OPENROUTER_API_KEY")
+    } else if deepseek {
+        provider_key(&config.deepseek_api_key, "DEEPSEEK_API_KEY")
+    } else {
+        provider_key(&config.openai_api_key, "OPENAI_API_KEY")
+    };
+    if openrouter {
+        required_key("openrouter", &api_key)?;
+    } else if deepseek {
+        required_key("deepseek", &api_key)?;
+    } else if !local {
         required_key("openai", &api_key)?;
     }
-    let base_url = if local {
+    let base_url = if openrouter {
+        "https://openrouter.ai/api/v1"
+    } else if deepseek {
+        "https://api.deepseek.com"
+    } else if local {
         config.local_api_base_url.trim_end_matches('/')
     } else {
         "https://api.openai.com/v1"
     };
-    let model = if local {
+    let model = if openrouter {
+        config.openrouter_model.clone()
+    } else if deepseek {
+        config.deepseek_model.clone()
+    } else if local {
         config.local_model_name.clone()
     } else {
         config.openai_model.clone()
@@ -379,16 +403,36 @@ where
     F: FnMut(String),
 {
     let local = config.ai_provider == "local_openai";
-    let api_key = provider_key(&config.openai_api_key, "OPENAI_API_KEY");
-    if !local {
+    let openrouter = config.ai_provider == "openrouter";
+    let deepseek = config.ai_provider == "deepseek";
+    let api_key = if openrouter {
+        provider_key(&config.openrouter_api_key, "OPENROUTER_API_KEY")
+    } else if deepseek {
+        provider_key(&config.deepseek_api_key, "DEEPSEEK_API_KEY")
+    } else {
+        provider_key(&config.openai_api_key, "OPENAI_API_KEY")
+    };
+    if openrouter {
+        required_key("openrouter", &api_key)?;
+    } else if deepseek {
+        required_key("deepseek", &api_key)?;
+    } else if !local {
         required_key("openai", &api_key)?;
     }
-    let base_url = if local {
+    let base_url = if openrouter {
+        "https://openrouter.ai/api/v1"
+    } else if deepseek {
+        "https://api.deepseek.com"
+    } else if local {
         config.local_api_base_url.trim_end_matches('/')
     } else {
         "https://api.openai.com/v1"
     };
-    let model = if local {
+    let model = if openrouter {
+        config.openrouter_model.clone()
+    } else if deepseek {
+        config.deepseek_model.clone()
+    } else if local {
         config.local_model_name.clone()
     } else {
         config.openai_model.clone()

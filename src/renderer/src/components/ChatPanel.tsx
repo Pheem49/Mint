@@ -26,6 +26,23 @@ const OPENAI_MODELS = [
   'gpt-4-turbo'
 ]
 
+const OPENROUTER_MODELS = [
+  'openai/gpt-4o-mini',
+  'openai/gpt-4o',
+  'anthropic/claude-3.5-sonnet',
+  'anthropic/claude-3.5-haiku',
+  'google/gemini-2.5-flash',
+  'meta-llama/llama-3.3-70b-instruct',
+  'mistralai/mistral-large'
+]
+
+const DEEPSEEK_MODELS = [
+  'deepseek-v4-flash',
+  'deepseek-v4-pro',
+  'deepseek-chat',
+  'deepseek-reasoner'
+]
+
 const ANTHROPIC_MODELS = [
   'claude-3-7-sonnet-latest',
   'claude-3-5-sonnet-latest',
@@ -390,6 +407,10 @@ export default function ChatPanel({
         return GEMINI_MODELS
       case 'openai':
         return OPENAI_MODELS
+      case 'openrouter':
+        return OPENROUTER_MODELS
+      case 'deepseek':
+        return DEEPSEEK_MODELS
       case 'anthropic':
         return ANTHROPIC_MODELS
       case 'huggingface':
@@ -413,6 +434,10 @@ export default function ChatPanel({
         return settingsConfig.geminiModel
       case 'openai':
         return settingsConfig.openaiModel
+      case 'openrouter':
+        return settingsConfig.openrouterModel
+      case 'deepseek':
+        return settingsConfig.deepseekModel
       case 'anthropic':
         return settingsConfig.anthropicModel
       case 'huggingface':
@@ -1127,6 +1152,8 @@ export default function ChatPanel({
                 let displayName = provider
                 if (provider === 'gemini') displayName = 'Gemini'
                 else if (provider === 'openai') displayName = 'OpenAI'
+                else if (provider === 'openrouter') displayName = 'OpenRouter'
+                else if (provider === 'deepseek') displayName = 'DeepSeek'
                 else if (provider === 'anthropic') displayName = 'Claude'
                 else if (provider === 'huggingface') displayName = 'HF'
                 else if (provider === 'local_openai') displayName = 'Local'

@@ -479,7 +479,7 @@ struct AgentDecision {
     #[serde(default)]
     thought: String,
     action: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_agent_input")]
     input: AgentInput,
 }
 
@@ -534,6 +534,13 @@ struct AgentPatch {
     path: PathBuf,
     #[serde(default)]
     hunks: Vec<CodePatchHunk>,
+}
+
+fn deserialize_agent_input<'de, D>(deserializer: D) -> Result<AgentInput, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<AgentInput>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 pub async fn orchestrate_agent_loop<Approve, Progress, Chunk>(
@@ -1973,6 +1980,24 @@ mod tests {
             enrich_request(&store, &request).unwrap().system_instruction,
             "system"
         );
+    }
+
+    #[test]
+    fn agent_decision_allows_null_input() {
+        let decision = parse_decision(r#"{"thought":"done","action":"finish","input":null}"#)
+            .expect("null input should parse as default input");
+
+        assert_eq!(decision.action, "finish");
+        assert!(decision.input.summary.is_empty());
+    }
+
+    #[test]
+    fn agent_decision_allows_missing_input() {
+        let decision = parse_decision(r#"{"thought":"done","action":"finish"}"#)
+            .expect("missing input should parse as default input");
+
+        assert_eq!(decision.action, "finish");
+        assert!(decision.input.summary.is_empty());
     }
 
     #[test]

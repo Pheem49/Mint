@@ -15,6 +15,8 @@ const DEFAULT_CONFIG = {
   aiProvider: 'gemini',
   geminiModel: 'gemini-2.5-flash',
   openaiModel: 'gpt-4o',
+  openrouterModel: 'openai/gpt-4o-mini',
+  deepseekModel: 'deepseek-v4-flash',
   anthropicModel: 'claude-3-5-sonnet-latest',
   ollamaModel: 'llama3:latest',
   language: 'th-TH',
@@ -40,6 +42,8 @@ const DEFAULT_CONFIG = {
   ollamaHost: '',
   anthropicApiKey: '',
   openaiApiKey: '',
+  openrouterApiKey: '',
+  deepseekApiKey: '',
   hfApiKey: '',
   automationBrowser: 'chromium',
   browserDebugUrl: 'http://127.0.0.1:9222/json/list',
@@ -88,6 +92,23 @@ const OPENAI_MODELS = [
   'gpt-4-turbo'
 ]
 
+const OPENROUTER_MODELS = [
+  'openai/gpt-4o-mini',
+  'openai/gpt-4o',
+  'anthropic/claude-3.5-sonnet',
+  'anthropic/claude-3.5-haiku',
+  'google/gemini-2.5-flash',
+  'meta-llama/llama-3.3-70b-instruct',
+  'mistralai/mistral-large'
+]
+
+const DEEPSEEK_MODELS = [
+  'deepseek-v4-flash',
+  'deepseek-v4-pro',
+  'deepseek-chat',
+  'deepseek-reasoner'
+]
+
 const ANTHROPIC_MODELS = [
   'claude-3-7-sonnet-latest',
   'claude-3-5-sonnet-latest',
@@ -134,6 +155,8 @@ export default function SettingsWindow() {
   // Custom model helpers for all providers
   const [customGemini, setCustomGemini] = useState('')
   const [customOpenAI, setCustomOpenAI] = useState('')
+  const [customOpenRouter, setCustomOpenRouter] = useState('')
+  const [customDeepSeek, setCustomDeepSeek] = useState('')
   const [customAnthropic, setCustomAnthropic] = useState('')
   const [customHF, setCustomHF] = useState('')
   const [customLocal, setCustomLocal] = useState('')
@@ -170,6 +193,12 @@ export default function SettingsWindow() {
         }
         if (!OPENAI_MODELS.includes(merged.openaiModel)) {
           setCustomOpenAI(merged.openaiModel)
+        }
+        if (!OPENROUTER_MODELS.includes(merged.openrouterModel)) {
+          setCustomOpenRouter(merged.openrouterModel)
+        }
+        if (!DEEPSEEK_MODELS.includes(merged.deepseekModel)) {
+          setCustomDeepSeek(merged.deepseekModel)
         }
         if (!ANTHROPIC_MODELS.includes(merged.anthropicModel)) {
           setCustomAnthropic(merged.anthropicModel)
@@ -258,6 +287,12 @@ export default function SettingsWindow() {
     }
     if (config.openaiModel === 'custom') {
       finalConfig.openaiModel = customOpenAI || 'gpt-4o'
+    }
+    if (config.openrouterModel === 'custom') {
+      finalConfig.openrouterModel = customOpenRouter || 'openai/gpt-4o-mini'
+    }
+    if (config.deepseekModel === 'custom') {
+      finalConfig.deepseekModel = customDeepSeek || 'deepseek-v4-flash'
     }
     if (config.anthropicModel === 'custom') {
       finalConfig.anthropicModel = customAnthropic || 'claude-3-5-sonnet-latest'
@@ -568,6 +603,8 @@ export default function SettingsWindow() {
                       <option value="gemini">Google Gemini (Cloud)</option>
                       <option value="anthropic">Anthropic Claude</option>
                       <option value="openai">OpenAI</option>
+                      <option value="openrouter">OpenRouter</option>
+                      <option value="deepseek">DeepSeek</option>
                       <option value="ollama">Ollama (Local / Private)</option>
                       <option value="huggingface">Hugging Face (Inference API)</option>
                       <option value="local_openai">Local (LM Studio / OpenAI Compatible)</option>
@@ -618,6 +655,54 @@ export default function SettingsWindow() {
                             value={customOpenAI} 
                             onChange={(e) => { setCustomOpenAI(e.target.value); updateField('openaiModel', 'custom') }} 
                             placeholder="e.g. gpt-4o" 
+                          />
+                        </div>
+                      )}
+
+                      <div className="setting-row">
+                        <label>OpenRouter Model</label>
+                        <select
+                          value={OPENROUTER_MODELS.includes(config.openrouterModel) ? config.openrouterModel : 'custom'}
+                          onChange={(e) => updateField('openrouterModel', e.target.value)}
+                        >
+                          {OPENROUTER_MODELS.map(model => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
+                          <option value="custom">Custom...</option>
+                        </select>
+                      </div>
+                      {(!OPENROUTER_MODELS.includes(config.openrouterModel) || config.openrouterModel === 'custom') && (
+                        <div className="setting-row">
+                          <label>Custom OpenRouter Model</label>
+                          <input
+                            type="text"
+                            value={customOpenRouter}
+                            onChange={(e) => { setCustomOpenRouter(e.target.value); updateField('openrouterModel', 'custom') }}
+                            placeholder="e.g. anthropic/claude-3.5-sonnet"
+                          />
+                        </div>
+                      )}
+
+                      <div className="setting-row">
+                        <label>DeepSeek Model</label>
+                        <select
+                          value={DEEPSEEK_MODELS.includes(config.deepseekModel) ? config.deepseekModel : 'custom'}
+                          onChange={(e) => updateField('deepseekModel', e.target.value)}
+                        >
+                          {DEEPSEEK_MODELS.map(model => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
+                          <option value="custom">Custom...</option>
+                        </select>
+                      </div>
+                      {(!DEEPSEEK_MODELS.includes(config.deepseekModel) || config.deepseekModel === 'custom') && (
+                        <div className="setting-row">
+                          <label>Custom DeepSeek Model</label>
+                          <input
+                            type="text"
+                            value={customDeepSeek}
+                            onChange={(e) => { setCustomDeepSeek(e.target.value); updateField('deepseekModel', 'custom') }}
+                            placeholder="e.g. deepseek-v4-pro"
                           />
                         </div>
                       )}
@@ -784,6 +869,24 @@ export default function SettingsWindow() {
                       value={config.openaiApiKey} 
                       onChange={(e) => updateField('openaiApiKey', e.target.value)} 
                       placeholder="Enter OpenAI API Key..." 
+                    />
+                  </div>
+                  <div className="setting-row">
+                    <label>OpenRouter API Key</label>
+                    <input
+                      type="password"
+                      value={config.openrouterApiKey}
+                      onChange={(e) => updateField('openrouterApiKey', e.target.value)}
+                      placeholder="Enter OpenRouter API Key..."
+                    />
+                  </div>
+                  <div className="setting-row">
+                    <label>DeepSeek API Key</label>
+                    <input
+                      type="password"
+                      value={config.deepseekApiKey}
+                      onChange={(e) => updateField('deepseekApiKey', e.target.value)}
+                      placeholder="Enter DeepSeek API Key..."
                     />
                   </div>
                   <div className="setting-row">

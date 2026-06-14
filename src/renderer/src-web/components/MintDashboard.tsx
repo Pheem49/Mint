@@ -648,6 +648,10 @@ export default function MintDashboard() {
         config.geminiModel = modelName
       } else if (provider === 'openai') {
         config.openaiModel = modelName
+      } else if (provider === 'openrouter') {
+        config.openrouterModel = modelName
+      } else if (provider === 'deepseek') {
+        config.deepseekModel = modelName
       } else if (provider === 'anthropic') {
         config.anthropicModel = modelName
       } else if (provider === 'huggingface') {

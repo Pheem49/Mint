@@ -50,6 +50,10 @@ pub struct MintConfig {
     pub anthropic_model: String,
     pub openai_api_key: String,
     pub openai_model: String,
+    pub openrouter_api_key: String,
+    pub openrouter_model: String,
+    pub deepseek_api_key: String,
+    pub deepseek_model: String,
     pub hf_api_key: String,
     pub hf_model: String,
     pub local_api_base_url: String,
@@ -95,6 +99,10 @@ impl Default for MintConfig {
             anthropic_model: "claude-3-5-sonnet-latest".into(),
             openai_api_key: String::new(),
             openai_model: "gpt-4o".into(),
+            openrouter_api_key: String::new(),
+            openrouter_model: "openai/gpt-4o-mini".into(),
+            deepseek_api_key: String::new(),
+            deepseek_model: "deepseek-v4-flash".into(),
             hf_api_key: String::new(),
             hf_model: "meta-llama/Meta-Llama-3-8B-Instruct".into(),
             local_api_base_url: String::new(),
@@ -128,6 +136,12 @@ impl MintConfig {
         }
         if has_value(&self.openai_api_key) {
             providers.push("openai");
+        }
+        if has_value(&self.openrouter_api_key) {
+            providers.push("openrouter");
+        }
+        if has_value(&self.deepseek_api_key) {
+            providers.push("deepseek");
         }
         if has_value(&self.api_key) {
             providers.push("gemini");
@@ -298,12 +312,21 @@ mod tests {
         let config = MintConfig {
             api_key: "gemini-secret".into(),
             openai_api_key: "openai-secret".into(),
+            openrouter_api_key: "openrouter-secret".into(),
+            deepseek_api_key: "deepseek-secret".into(),
             local_api_base_url: "http://localhost:1234/v1".into(),
             ..MintConfig::default()
         };
         assert_eq!(
             config.available_providers(),
-            vec!["openai", "gemini", "local_openai", "ollama"]
+            vec![
+                "openai",
+                "openrouter",
+                "deepseek",
+                "gemini",
+                "local_openai",
+                "ollama"
+            ]
         );
     }
 

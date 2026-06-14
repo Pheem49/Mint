@@ -1226,10 +1226,13 @@ async fn handle_slash_command(
                 println!();
             } else {
                 session.config.ai_provider = rest.to_owned();
-                println!(
-                    "{DIM}Switched to provider: {}{RESET}\n",
-                    session.config.ai_provider
-                );
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => println!(
+                        "{DIM}Switched to provider: {}{RESET}\n",
+                        session.config.ai_provider
+                    ),
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
+                }
             }
             Some(SlashResult::Handled)
         }
@@ -1626,7 +1629,7 @@ async fn run_interactive_chat() -> Result<()> {
             match handle_slash_command(&mut session, &query_str).await {
                 Some(SlashResult::Handled) => continue,
                 Some(SlashResult::Exit) => {
-                    println!("Goodbye!");
+                    print_exit_message(&session);
                     break;
                 }
                 Some(SlashResult::ForwardToAgent(task)) => {
@@ -1793,12 +1796,27 @@ async fn run_interactive_chat() -> Result<()> {
                 }
             }
         } else {
-            println!("Goodbye!");
+            print_exit_message(&session);
             break;
         }
     }
 
     Ok(())
+}
+
+fn print_exit_message(session: &InteractiveSession) {
+    println!("\n{MINT}──────────────── Mint session closed ────────────────{RESET}");
+    println!(
+        "{DIM}Provider:{RESET} {} {DIM}• Model:{RESET} {}",
+        session.config.ai_provider,
+        active_model(&session.config.ai_provider, &session.config)
+    );
+    println!(
+        "{DIM}Workspace:{RESET} {}",
+        format_path_with_tilde(&session.current_dir)
+    );
+    println!("{DIM}Saved config stays available for the next Mint run.{RESET}");
+    println!("{MINT}See you next time.{RESET}\n");
 }
 
 const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
@@ -2389,6 +2407,8 @@ fn active_model<'a>(provider: &str, config: &'a mint_core::MintConfig) -> &'a st
     match provider {
         "anthropic" => &config.anthropic_model,
         "openai" => &config.openai_model,
+        "openrouter" => &config.openrouter_model,
+        "deepseek" => &config.deepseek_model,
         "huggingface" => &config.hf_model,
         "local_openai" => &config.local_model_name,
         "ollama" => &config.ollama_model,
