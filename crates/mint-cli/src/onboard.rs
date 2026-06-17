@@ -4,6 +4,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use mint_core::{load_config, save_config};
 use std::io::{self, Write};
 use std::process::Command;
+use std::net::TcpStream;
 
 struct OnboardService {
     category: &'static str,
@@ -12,11 +13,34 @@ struct OnboardService {
     enabled: bool,
 }
 
+const GEMINI_MODEL_PRESETS: &[&str] = &[
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+];
+
+const ANTHROPIC_MODEL_PRESETS: &[&str] = &[
+    "claude-sonnet-4-20250514",
+    "claude-opus-4-20250514",
+    "claude-haiku-35-20241022",
+];
+
+const OPENAI_MODEL_PRESETS: &[&str] = &[
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "o3",
+    "o4-mini",
+];
+
 const OPENROUTER_MODEL_PRESETS: &[&str] = &[
     "openai/gpt-4o-mini",
     "openai/gpt-4o",
-    "anthropic/claude-3.5-sonnet",
-    "anthropic/claude-3.5-haiku",
+    "anthropic/claude-sonnet-4",
+    "anthropic/claude-haiku-3.5",
     "google/gemini-2.5-flash",
     "meta-llama/llama-3.3-70b-instruct",
     "mistralai/mistral-large",
@@ -29,13 +53,13 @@ const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
     "deepseek-reasoner",
 ];
 
-const OLLAMA_MODEL_PRESETS: &[&str] = &[
-    "llama3:latest",
-    "llama3.1:latest",
-    "qwen2.5:latest",
-    "mistral:latest",
-    "gemma2:latest",
+const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
+    "meta-llama/Llama-3.3-70B-Instruct",
+    "Qwen/Qwen3-235B-A22B",
+    "mistralai/Mistral-Small-24B-Instruct-2501",
+    "google/gemma-3-27b-it",
 ];
+
 
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
@@ -52,7 +76,12 @@ pub async fn run() -> Result<()> {
     println!("\x1b[33mStep 1: Core AI Activation (Gemini)\x1b[0m");
     println!("Mint is powered primarily by Google Gemini.");
     config.api_key = prompt_sensitive("Gemini API Key", &config.api_key)?;
-    config.gemini_model = prompt_input("Gemini Model", Some(&config.gemini_model))?;
+    config.gemini_model = prompt_select_or_custom(
+        "Gemini Model",
+        static_model_options(GEMINI_MODEL_PRESETS),
+        Some(&config.gemini_model),
+        "Custom Gemini model...",
+    )?;
     println!();
 
     // ────────────────────────────────────────────────────────────────
@@ -306,7 +335,12 @@ pub async fn run() -> Result<()> {
         println!("\n\x1b[36m--- Anthropic (Claude) API ---\x1b[0m");
         config.anthropic_api_key =
             prompt_sensitive("Anthropic API Key", &config.anthropic_api_key)?;
-        config.anthropic_model = prompt_input("Anthropic Model", Some(&config.anthropic_model))?;
+        config.anthropic_model = prompt_select_or_custom(
+            "Anthropic Model",
+            static_model_options(ANTHROPIC_MODEL_PRESETS),
+            Some(&config.anthropic_model),
+            "Custom Anthropic model...",
+        )?;
     } else {
         config.anthropic_api_key = String::new();
     }
@@ -315,7 +349,12 @@ pub async fn run() -> Result<()> {
     if is_selected("openai", &services) {
         println!("\n\x1b[36m--- OpenAI API ---\x1b[0m");
         config.openai_api_key = prompt_sensitive("OpenAI API Key", &config.openai_api_key)?;
-        config.openai_model = prompt_input("OpenAI Model", Some(&config.openai_model))?;
+        config.openai_model = prompt_select_or_custom(
+            "OpenAI Model",
+            static_model_options(OPENAI_MODEL_PRESETS),
+            Some(&config.openai_model),
+            "Custom OpenAI model...",
+        )?;
     } else {
         config.openai_api_key = String::new();
     }
@@ -359,7 +398,12 @@ pub async fn run() -> Result<()> {
     if is_selected("huggingface", &services) {
         println!("\n\x1b[36m--- Hugging Face API ---\x1b[0m");
         config.hf_api_key = prompt_sensitive("Hugging Face API Key", &config.hf_api_key)?;
-        config.hf_model = prompt_input("Hugging Face Model", Some(&config.hf_model))?;
+        config.hf_model = prompt_select_or_custom(
+            "Hugging Face Model",
+            static_model_options(HUGGINGFACE_MODEL_PRESETS),
+            Some(&config.hf_model),
+            "Custom Hugging Face model...",
+        )?;
     } else {
         config.hf_api_key = String::new();
     }
@@ -377,23 +421,26 @@ pub async fn run() -> Result<()> {
     // Ollama
     if is_selected("ollama", &services) {
         println!("\n\x1b[36m--- Ollama ---\x1b[0m");
-        println!(
-            "\x1b[90mOllama model must match a local model installed on this machine. Examples: llama3:latest, llama3.1:latest, qwen2.5:latest, mistral:latest, gemma2:latest. Run `ollama list` to see yours.\x1b[0m"
-        );
         config.ollama_host = prompt_input("Ollama Host", Some(&config.ollama_host))?;
         let ollama_models = installed_ollama_models();
-        if !ollama_models.is_empty() {
+        if ollama_models.is_empty() {
+            println!(
+                "\x1b[90mNo local Ollama models found. Run `ollama pull <model>` to install one, or type a model name manually.\x1b[0m"
+            );
+            config.ollama_model = prompt_input("Ollama Model Name", Some(&config.ollama_model))?;
+        } else {
             println!(
                 "\x1b[90mFound {} local Ollama model(s).\x1b[0m",
                 ollama_models.len()
             );
+            config.ollama_model = prompt_select_or_custom(
+                "Ollama Local Model Name",
+                ollama_models,
+                Some(&config.ollama_model),
+                "Custom local model name...",
+            )?;
         }
-        config.ollama_model = prompt_select_or_custom(
-            "Ollama Local Model Name",
-            model_options(&ollama_models, OLLAMA_MODEL_PRESETS),
-            Some(&config.ollama_model),
-            "Custom local model name...",
-        )?;
+        ensure_ollama_serving(&config.ollama_host);
     } else {
         config.ollama_host = String::new();
         config.ollama_model = String::new();
@@ -935,14 +982,6 @@ fn static_model_options(presets: &[&str]) -> Vec<String> {
     presets.iter().map(|value| value.to_string()).collect()
 }
 
-fn model_options(installed: &[String], fallback: &[&str]) -> Vec<String> {
-    if installed.is_empty() {
-        static_model_options(fallback)
-    } else {
-        installed.to_vec()
-    }
-}
-
 fn installed_ollama_models() -> Vec<String> {
     let output = match Command::new("ollama").arg("list").output() {
         Ok(output) if output.status.success() => output,
@@ -956,6 +995,75 @@ fn installed_ollama_models() -> Vec<String> {
         .filter(|name| !name.trim().is_empty())
         .map(|name| name.to_string())
         .collect()
+}
+
+fn ensure_ollama_serving(host: &str) {
+    let host = if host.trim().is_empty() {
+        "http://localhost:11434"
+    } else {
+        host.trim_end_matches('/')
+    };
+
+    // Parse host:port for TCP check
+    let addr = host
+        .strip_prefix("http://")
+        .or_else(|| host.strip_prefix("https://"))
+        .unwrap_or(host);
+    let addr = if !addr.contains(':') {
+        format!("{}:11434", addr)
+    } else {
+        addr.to_string()
+    };
+
+    // Check if Ollama is already serving
+    if TcpStream::connect_timeout(
+        &addr.parse().unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap()),
+        std::time::Duration::from_secs(1),
+    )
+    .is_ok()
+    {
+        println!("\x1b[32m✔ Ollama server is already running at {}\x1b[0m", host);
+        return;
+    }
+
+    // Not running — try to start it
+    print!("\x1b[33m⏳ Starting Ollama server...\x1b[0m");
+    let _ = io::stdout().flush();
+
+    match Command::new("ollama")
+        .arg("serve")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(_) => {
+            // Wait for server to become ready (up to 10 seconds)
+            let mut ready = false;
+            for _ in 0..20 {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                if TcpStream::connect_timeout(
+                    &addr.parse().unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap()),
+                    std::time::Duration::from_secs(1),
+                )
+                .is_ok()
+                {
+                    ready = true;
+                    break;
+                }
+            }
+            if ready {
+                println!("\r\x1b[32m✔ Ollama server started successfully at {}\x1b[0m          ", host);
+            } else {
+                println!("\r\x1b[31m✘ Ollama server started but not responding yet. It may need more time.\x1b[0m");
+            }
+        }
+        Err(e) => {
+            println!(
+                "\r\x1b[31m✘ Failed to start Ollama server: {}. Please run `ollama serve` manually.\x1b[0m",
+                e
+            );
+        }
+    }
 }
 
 fn print_select_options(options: &[String], cursor: usize) {

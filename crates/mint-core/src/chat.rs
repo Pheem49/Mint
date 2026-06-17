@@ -286,6 +286,10 @@ async fn call_ollama(
         config.ollama_host.trim_end_matches('/')
     };
     let model = config.ollama_model.clone();
+    let mut user_message = json!({ "role": "user", "content": request.message });
+    if let Some(images) = ollama_images(request) {
+        user_message["images"] = json!(images);
+    }
     let response: Value = client
         .post(format!("{host}/api/chat"))
         .json(&json!({
@@ -293,7 +297,7 @@ async fn call_ollama(
             "stream": false,
             "messages": [
                 { "role": "system", "content": request.system_instruction },
-                { "role": "user", "content": request.message }
+                user_message
             ]
         }))
         .send()
@@ -472,6 +476,10 @@ where
         config.ollama_host.trim_end_matches('/')
     };
     let model = config.ollama_model.clone();
+    let mut user_message = json!({ "role": "user", "content": request.message });
+    if let Some(images) = ollama_images(request) {
+        user_message["images"] = json!(images);
+    }
     let response = client
         .post(format!("{host}/api/chat"))
         .json(&json!({
@@ -479,7 +487,7 @@ where
             "stream": true,
             "messages": [
                 { "role": "system", "content": request.system_instruction },
-                { "role": "user", "content": request.message }
+                user_message
             ]
         }))
         .send()
@@ -637,10 +645,29 @@ fn require_supported_attachments(provider: &str, request: &ChatRequest) -> Resul
         .as_ref()
         .map_or(false, |s| !s.trim().is_empty());
 
-    if provider != "gemini" && (has_image || has_audio) {
-        return Err(ChatError::UnsupportedAttachments(provider.into()));
+    match provider {
+        "gemini" => Ok(()),
+        "ollama" if has_audio => Err(ChatError::UnsupportedAttachments(provider.into())),
+        "ollama" => Ok(()),
+        _ if has_image || has_audio => Err(ChatError::UnsupportedAttachments(provider.into())),
+        _ => Ok(()),
     }
-    Ok(())
+}
+
+/// Extract base64 image data from the request for Ollama's `images` field.
+/// Ollama expects a plain array of base64 strings (without the data URI prefix).
+fn ollama_images(request: &ChatRequest) -> Option<Vec<String>> {
+    let image_data = request.image_data_uri.as_ref()?;
+    let images: Vec<String> = image_data
+        .split_whitespace()
+        .filter_map(|img| {
+            img.strip_prefix("data:")
+                .and_then(|payload| payload.split_once(";base64,"))
+                .filter(|(mime, data)| mime.starts_with("image/") && !data.is_empty())
+                .map(|(_, data)| data.to_owned())
+        })
+        .collect();
+    if images.is_empty() { None } else { Some(images) }
 }
 
 fn wants_agent_json(request: &ChatRequest) -> bool {
