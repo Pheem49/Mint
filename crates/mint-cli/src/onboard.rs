@@ -3,8 +3,8 @@ use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use mint_core::{load_config, save_config};
 use std::io::{self, Write};
-use std::process::Command;
 use std::net::TcpStream;
+use std::process::Command;
 
 struct OnboardService {
     category: &'static str,
@@ -59,7 +59,6 @@ const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
     "mistralai/Mistral-Small-24B-Instruct-2501",
     "google/gemma-3-27b-it",
 ];
-
 
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
@@ -1017,12 +1016,17 @@ fn ensure_ollama_serving(host: &str) {
 
     // Check if Ollama is already serving
     if TcpStream::connect_timeout(
-        &addr.parse().unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap()),
+        &addr
+            .parse()
+            .unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap()),
         std::time::Duration::from_secs(1),
     )
     .is_ok()
     {
-        println!("\x1b[32m✔ Ollama server is already running at {}\x1b[0m", host);
+        println!(
+            "\x1b[32m✔ Ollama server is already running at {}\x1b[0m",
+            host
+        );
         return;
     }
 
@@ -1042,7 +1046,9 @@ fn ensure_ollama_serving(host: &str) {
             for _ in 0..20 {
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 if TcpStream::connect_timeout(
-                    &addr.parse().unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap()),
+                    &addr
+                        .parse()
+                        .unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap()),
                     std::time::Duration::from_secs(1),
                 )
                 .is_ok()
@@ -1052,9 +1058,14 @@ fn ensure_ollama_serving(host: &str) {
                 }
             }
             if ready {
-                println!("\r\x1b[32m✔ Ollama server started successfully at {}\x1b[0m          ", host);
+                println!(
+                    "\r\x1b[32m✔ Ollama server started successfully at {}\x1b[0m          ",
+                    host
+                );
             } else {
-                println!("\r\x1b[31m✘ Ollama server started but not responding yet. It may need more time.\x1b[0m");
+                println!(
+                    "\r\x1b[31m✘ Ollama server started but not responding yet. It may need more time.\x1b[0m"
+                );
             }
         }
         Err(e) => {

@@ -36,7 +36,14 @@ fn stores_recent_interactions_with_provider_metadata() {
         .add_interaction_with_metadata("hello", "hi", "gemini", "gemini-test")
         .unwrap();
     store
-        .add_interaction_for_chat_with_fallback("", "question", "answer", "gemini", "gemini-test", Some("ollama"))
+        .add_interaction_for_chat_with_fallback(
+            "",
+            "question",
+            "answer",
+            "gemini",
+            "gemini-test",
+            Some("ollama"),
+        )
         .unwrap();
 
     let interactions = store.recent_interactions(2).unwrap();

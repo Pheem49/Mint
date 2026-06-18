@@ -22,7 +22,10 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
     println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-    println!("\x1b[32m       Mint Local API Server running at http://{}\x1b[0m", addr);
+    println!(
+        "\x1b[32m       Mint Local API Server running at http://{}\x1b[0m",
+        addr
+    );
     println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
 
     // Start background messaging bridges (Telegram, Discord, Slack)
