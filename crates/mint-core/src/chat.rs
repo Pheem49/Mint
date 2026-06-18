@@ -667,7 +667,11 @@ fn ollama_images(request: &ChatRequest) -> Option<Vec<String>> {
                 .map(|(_, data)| data.to_owned())
         })
         .collect();
-    if images.is_empty() { None } else { Some(images) }
+    if images.is_empty() {
+        None
+    } else {
+        Some(images)
+    }
 }
 
 fn wants_agent_json(request: &ChatRequest) -> bool {
