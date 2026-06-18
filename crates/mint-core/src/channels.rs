@@ -6,9 +6,22 @@ use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 pub fn start_channels() {
-    tokio::spawn(restarting_loop(telegram_loop));
-    tokio::spawn(restarting_loop(discord_loop));
-    tokio::spawn(restarting_loop(slack_loop));
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::spawn(restarting_loop(telegram_loop));
+        tokio::spawn(restarting_loop(discord_loop));
+        tokio::spawn(restarting_loop(slack_loop));
+    } else {
+        std::thread::spawn(|| {
+            if let Ok(rt) = tokio::runtime::Runtime::new() {
+                rt.block_on(async {
+                    let h1 = tokio::spawn(restarting_loop(telegram_loop));
+                    let h2 = tokio::spawn(restarting_loop(discord_loop));
+                    let h3 = tokio::spawn(restarting_loop(slack_loop));
+                    let _ = tokio::join!(h1, h2, h3);
+                });
+            }
+        });
+    }
 }
 
 async fn restarting_loop<F, Fut>(mut run: F)
