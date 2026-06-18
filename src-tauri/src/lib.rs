@@ -1,5 +1,4 @@
 mod browser;
-mod channels;
 mod desktop;
 mod discord_rpc;
 mod events;
@@ -17,7 +16,7 @@ use browser::{
     BrowserTab, click as browser_click, list_tabs as browser_list_tabs,
     navigate as browser_navigate, read_page_text,
 };
-use channels::start_channels;
+
 use desktop::{
     ActionResult, CaptureRect, DesktopAction, capture_screen, close_window, emit_to_main,
     execute_action, hide_window, integration_status, open_desktop_window, position_widget,
@@ -37,7 +36,7 @@ use mint_core::{
     PictureEntry, TtsUrl, WeatherReport, apply_code_edits, classify_shell_command, config_path,
     extract_document_text, google_tts_urls, list_saved_pictures, load_config, load_workflows,
     orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    propose_code_edits, save_chat_images, save_config, weather, workflows_path,
+    propose_code_edits, save_chat_images, save_config, start_channels, weather, workflows_path,
 };
 use plugins::execute_plugin;
 

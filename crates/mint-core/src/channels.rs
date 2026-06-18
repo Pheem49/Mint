@@ -1,14 +1,14 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use mint_core::{ChatRequest, MintConfig, load_config, orchestrate_chat};
+use crate::{ChatRequest, MintConfig, load_config, orchestrate_chat};
 use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 pub fn start_channels() {
-    tauri::async_runtime::spawn(restarting_loop(telegram_loop));
-    tauri::async_runtime::spawn(restarting_loop(discord_loop));
-    tauri::async_runtime::spawn(restarting_loop(slack_loop));
+    tokio::spawn(restarting_loop(telegram_loop));
+    tokio::spawn(restarting_loop(discord_loop));
+    tokio::spawn(restarting_loop(slack_loop));
 }
 
 async fn restarting_loop<F, Fut>(mut run: F)
@@ -24,7 +24,7 @@ where
 }
 
 async fn telegram_loop() -> Result<(), String> {
-    let client = mint_core::HTTP_CLIENT.clone();
+    let client = crate::HTTP_CLIENT.clone();
     let mut offset = 0_i64;
     loop {
         let Some(token) = enabled_value("enableTelegramBridge", "telegramBotToken") else {
@@ -104,7 +104,7 @@ async fn discord_loop() -> Result<(), String> {
                     });
                     if !direct_message && !mentioned { continue }
                     let reply = answer(text, "Reply concisely for a Discord chat.").await;
-                    let _ = mint_core::HTTP_CLIENT.clone().post(format!("https://discord.com/api/v10/channels/{channel}/messages"))
+                    let _ = crate::HTTP_CLIENT.clone().post(format!("https://discord.com/api/v10/channels/{channel}/messages"))
                         .header("Authorization", format!("Bot {token}")).json(&json!({ "content": reply })).send().await;
                 }
             }
@@ -118,7 +118,7 @@ async fn slack_loop() -> Result<(), String> {
         return Ok(());
     };
     let bot_token = config_value("slackBotToken").ok_or("missing slackBotToken")?;
-    let value: Value = mint_core::HTTP_CLIENT
+    let value: Value = crate::HTTP_CLIENT
         .clone()
         .post("https://slack.com/api/apps.connections.open")
         .bearer_auth(&app_token)
@@ -156,7 +156,7 @@ async fn slack_loop() -> Result<(), String> {
             continue;
         };
         let reply = answer(text, "Reply concisely for a Slack chat.").await;
-        let _ = mint_core::HTTP_CLIENT
+        let _ = crate::HTTP_CLIENT
             .clone()
             .post("https://slack.com/api/chat.postMessage")
             .bearer_auth(&bot_token)

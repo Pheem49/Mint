@@ -16,40 +16,60 @@ The desktop application and native CLI share the same Rust domain layer, so chat
 memory, knowledge, tools, safety policies, and integrations behave consistently
 across both interfaces.
 
-## What Mint Can Do
+## 🌟 What Mint Can Do
 
 Mint is a local-first AI assistant running on your machine, capable of handling tasks via either the desktop application or the terminal interface (CLI):
+
+---
 
 ### 1. 🤖 AI Chat & Multi-Providers
 - Connect to **Gemini, OpenAI, Anthropic (Claude), Ollama (Local), Hugging Face**, and LM Studio.
 - Run private local LLMs inside your machine using Ollama or connect to leading cloud APIs.
 - Supports system instructions, temperature adjustments, voice replies, and image analysis (Multimodal).
 
+---
+
 ### 2. 🎨 Interactive Live2D Desktop Assistant
 - An interactive anime avatar (**Shiroko**) displayed right on your desktop with gaze tracking (eye/face follows your mouse pointer).
 - Toggle expression changes and cycle through character accessories dynamically.
 - Custom interaction zones (Head, Cheek, Hands, Body) that trigger unique animations and message toasts.
 
+---
+
 ### 3. 💻 Autonomous Code Agent
 - Run code agent loops via `/code <task>` or the terminal command `mint code agent "<task>"`.
 - Scan your project workspace, build multi-file implementation plans, fix test suite errors, and write edits automatically.
-- Run local tests, cargo checks, and shell commands. **Risky actions and file writes require your explicit terminal approval first.**
+- Run local tests, cargo checks, and shell commands.
+> [!IMPORTANT]
+> **Safety First:** Risky actions and file writes require your explicit terminal approval first.
+
+---
 
 ### 4. 🧠 Long-Term Memory & Knowledge Base
 - Persistent conversation memory stored locally in SQLite. Manage user profile memory with `/memory set/get` or CLI commands.
 - Index local directories, text files, and documentation to build your private searchable knowledge base.
 
+---
+
 ### 5. 🔌 Tool & MCP Integrations
 - Support **Model Context Protocol (MCP)** to connect tools like Google/Brave Search, Filesystem servers, and GitHub context.
 - Local plugins for Spotify playback control, Google Calendar, Gmail drafts, and Notion workspace reading.
 
+---
+
 ### 6. 🌐 Messaging Bridges
 - Bridge your local AI assistant to messaging services: **Telegram, Discord Gateway, Discord RPC, Slack, LINE, and WhatsApp**.
 - Host local chatbot webhooks that relay chat traffic into your configured LLM.
+> [!TIP]
+> **Headless Background Execution:** Enabled bridges automatically run in the background when you launch either the desktop application OR the local API/Web server (`mint api` / `mint web`). This allows you to chat with Mint from anywhere without needing the desktop GUI window open.
+
+---
 
 ### 7. 📸 Screen Capture & Translation
 - Capture screen snapshots for instant visual analysis by the AI.
 - Real-time continuous overlay translation of specific screen regions.
+
+---
 
 ## Highlights
 
@@ -248,6 +268,7 @@ mint onboard
 mint setup
 mint status
 mint web
+mint api
 mint chat "<message>"
 ```
 
@@ -259,6 +280,7 @@ mint chat "<message>"
 | `mint onboard` | Configure Mint for first use |
 | `mint setup` | Interactively manage enabled agent tools |
 | `mint web` | Launch the web UI and local API server |
+| `mint api` | Start only the local API server |
 | `mint status` | Show runtime status |
 | `mint config init` | Create the local configuration file |
 | `mint config path` | Print the configuration file path |
@@ -268,11 +290,13 @@ mint chat "<message>"
 | `mint providers` | List configured AI providers |
 | `mint chat "<message>"` | Send one chat message |
 | `mint memory recent` | Show recent conversation memory |
+| `mint task list` | List all tasks (pending and completed) |
 | `mint task pending` | List pending tasks |
 | `mint knowledge add <path>` | Index a local document |
 | `mint knowledge search "<query>"` | Search indexed knowledge |
 | `mint plugin list` | List local plugins |
 | `mint mcp list` | List configured MCP servers |
+| `mint learn <path>` | Import a persistent learned skill file |
 | `mint update --check` | Check for an available update |
 
 

@@ -77,6 +77,8 @@ pub use weather::{WeatherError, WeatherReport, weather};
 pub use workflows::{WorkflowError, load_workflows, workflows_path};
 pub mod api_server;
 pub use api_server::start_api_server;
+pub mod channels;
+pub use channels::start_channels;
 
 pub static HTTP_CLIENT: std::sync::LazyLock<reqwest::Client> =
     std::sync::LazyLock::new(reqwest::Client::new);
