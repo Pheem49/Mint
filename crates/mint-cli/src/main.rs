@@ -1605,7 +1605,34 @@ async fn run_interactive_chat() -> Result<()> {
         pending_image: None,
     };
 
+    let mut printed_update = false;
+    if let Some((current, latest)) = updater::get_cached_update_notice() {
+        updater::print_update_notice(&current, &latest);
+        printed_update = true;
+    }
+
+    let mut update_handle = if updater::should_check_for_update() {
+        Some(tokio::task::spawn_blocking(
+            updater::check_for_update_quietly,
+        ))
+    } else {
+        None
+    };
+
     loop {
+        if let Some(handle) = update_handle.take() {
+            if handle.is_finished() {
+                if let Ok(Some((current, latest))) = handle.await {
+                    if !printed_update {
+                        updater::print_update_notice(&current, &latest);
+                        printed_update = true;
+                    }
+                }
+            } else {
+                update_handle = Some(handle);
+            }
+        }
+
         let path_str = format_path_with_tilde(&session.current_dir);
         let model_str = active_model(&session.config.ai_provider, &session.config).to_owned();
 
