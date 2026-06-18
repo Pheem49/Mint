@@ -1,0 +1,379 @@
+@import './css/styles.css';
+@import './css/settings.css';
+@import './css/spotlight.css';
+@import './css/widget.css';
+
+* {
+  box-sizing: border-box;
+}
+
+body, html, #root {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  color: #e5e7eb;
+  background: transparent;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+button, textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.mint-app {
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid rgb(148 163 184 / 20%);
+  background: radial-gradient(circle at top left, #252058, #111827 52%, #0b1020);
+}
+
+.mint-sidebar {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 18px 12px;
+  border-right: 1px solid rgb(148 163 184 / 16%);
+  background: rgb(7 12 28 / 68%);
+}
+
+.mint-brand {
+  display: grid;
+  gap: 2px;
+  padding: 0 8px 18px;
+}
+
+.mint-brand strong {
+  color: #c4b5fd;
+  font-size: 1.25rem;
+}
+
+.mint-brand span,
+.mint-toolbar span,
+.mint-sidebar__footer span,
+.mint-picture span,
+.mint-message small {
+  color: #94a3b8;
+  font-size: 0.72rem;
+}
+
+.mint-sidebar nav {
+  display: grid;
+  gap: 4px;
+}
+
+.mint-sidebar button,
+.mint-toolbar button,
+.mint-model button,
+.mint-attachment button,
+.mint-composer label,
+.mint-composer button {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #cbd5e1;
+}
+
+.mint-sidebar button {
+  padding: 10px 9px;
+  text-align: left;
+}
+
+.mint-sidebar button:hover,
+.mint-sidebar button.active,
+.mint-toolbar button:hover {
+  border-color: rgb(167 139 250 / 28%);
+  background: rgb(124 58 237 / 18%);
+  color: #f8fafc;
+}
+
+.mint-sidebar__footer {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+  padding: 10px 4px 0;
+}
+
+.mint-sidebar__footer button {
+  border-color: rgb(167 139 250 / 30%);
+  text-align: center;
+}
+
+.mint-workspace {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.mint-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 58px;
+  gap: 12px;
+  padding: 10px 18px;
+  border-bottom: 1px solid rgb(148 163 184 / 15%);
+  background: rgb(15 23 42 / 48%);
+}
+
+.mint-toolbar div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.mint-toolbar__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.mint-toolbar button {
+  padding: 7px 10px;
+  font-size: 0.76rem;
+}
+
+.mint-error {
+  margin: 10px 18px 0;
+  padding: 9px 11px;
+  border: 1px solid rgb(251 113 133 / 35%);
+  border-radius: 8px;
+  background: rgb(127 29 29 / 25%);
+  color: #fecdd3;
+  font-size: 0.82rem;
+}
+
+.mint-chat {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.mint-chat__messages,
+.mint-pictures {
+  min-height: 0;
+  overflow: auto;
+  padding: 22px clamp(18px, 4vw, 46px);
+}
+
+.mint-message-group {
+  display: grid;
+  gap: 7px;
+  margin: 0 auto 16px;
+  max-width: 840px;
+}
+
+.mint-message {
+  width: fit-content;
+  max-width: min(82%, 720px);
+  padding: 11px 13px;
+  border: 1px solid rgb(148 163 184 / 16%);
+  border-radius: 10px;
+  color: #e2e8f0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.mint-message--user {
+  justify-self: end;
+  background: rgb(109 40 217 / 24%);
+}
+
+.mint-message--assistant {
+  display: grid;
+  gap: 8px;
+  background: rgb(30 41 59 / 72%);
+}
+
+.mint-message small {
+  color: #a78bfa;
+}
+
+.mint-composer {
+  display: grid;
+  gap: 9px;
+  margin: 0 clamp(18px, 4vw, 46px) 20px;
+  padding: 11px;
+  border: 1px solid rgb(148 163 184 / 20%);
+  border-radius: 12px;
+  background: rgb(15 23 42 / 82%);
+}
+
+.mint-composer textarea {
+  width: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f8fafc;
+}
+
+.mint-composer__actions,
+.mint-attachment {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.mint-composer__actions span {
+  margin-right: auto;
+  color: #94a3b8;
+  font-size: 0.74rem;
+}
+
+.mint-composer label,
+.mint-composer button,
+.mint-model button,
+.mint-attachment button {
+  padding: 7px 10px;
+  border-color: rgb(148 163 184 / 20%);
+  font-size: 0.76rem;
+}
+
+.mint-composer label:hover,
+.mint-model button:hover,
+.mint-attachment button:hover {
+  background: rgb(51 65 85 / 58%);
+}
+
+.mint-composer button {
+  border-color: rgb(167 139 250 / 32%);
+  background: #6d28d9;
+  color: white;
+}
+
+.mint-composer button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.mint-composer input[type='file'] {
+  display: none;
+}
+
+.mint-attachment {
+  padding: 7px;
+  border-radius: 8px;
+  background: rgb(30 41 59 / 76%);
+}
+
+.mint-attachment img {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.mint-attachment span {
+  margin-right: auto;
+  overflow: hidden;
+  color: #cbd5e1;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mint-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin: 18vh auto;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.mint-empty strong {
+  color: #e2e8f0;
+}
+
+.mint-pictures__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 13px;
+}
+
+.mint-picture {
+  display: grid;
+  gap: 7px;
+  overflow: hidden;
+  padding-bottom: 10px;
+  border: 1px solid rgb(148 163 184 / 17%);
+  border-radius: 10px;
+  background: rgb(30 41 59 / 68%);
+  color: #e2e8f0;
+  text-decoration: none;
+}
+
+.mint-picture:hover {
+  border-color: rgb(167 139 250 / 55%);
+  transform: translateY(-2px);
+}
+
+.mint-picture img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: #111827;
+}
+
+.mint-picture strong,
+.mint-picture span {
+  overflow: hidden;
+  padding: 0 9px;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mint-model {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 16px;
+  padding: 28px;
+}
+
+.mint-model__stage {
+  display: grid;
+  min-height: 260px;
+  width: min(620px, 100%);
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  border: 1px dashed rgb(148 163 184 / 28%);
+  border-radius: 16px;
+  color: #94a3b8;
+  background: rgb(15 23 42 / 42%);
+  text-align: center;
+}
+
+.mint-model__stage.visible {
+  border-color: rgb(167 139 250 / 58%);
+  background: radial-gradient(circle, rgb(109 40 217 / 25%), rgb(15 23 42 / 42%));
+}
+
+.mint-model__stage strong {
+  color: #ddd6fe;
+}
+
+@media (max-width: 700px) {
+  .mint-app {
+    grid-template-columns: 76px minmax(0, 1fr);
+  }
+
+  .mint-brand span,
+  .mint-sidebar__footer span {
+    display: none;
+  }
+
+  .mint-sidebar button {
+    padding: 9px 5px;
+    font-size: 0.72rem;
+    text-align: center;
+  }
+}

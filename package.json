@@ -1,32 +1,30 @@
 {
   "name": "@pheem49/mint",
-  "version": "1.5.5",
-  "description": "A powerful Electron-based AI desktop assistant powered by Google Gemini, featuring screen vision, web automation, and proactive suggestions.",
-  "main": "main.js",
+  "version": "1.6.0",
+  "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
   "scripts": {
-    "start": "electron .",
-    "test": "jest --testPathPatterns=tests/",
-    "test:watch": "jest --testPathPatterns=tests/ --watch",
-    "build:linux": "electron-builder --linux",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "build:all": "electron-builder --linux --mac --win",
-    "cli": "node mint-cli.js",
-    "install:desktop": "node scripts/install_linux_desktop_entry.js"
-  },
-  "jest": {
-    "testEnvironment": "node",
-    "testMatch": [
-      "**/tests/**/*.test.js"
-    ],
-    "collectCoverageFrom": [
-      "src/AI_Brain/memory_store.js",
-      "src/AI_Brain/knowledge_base.js",
-      "src/System/config_manager.js"
-    ]
-  },
-  "bin": {
-    "mint": "mint-cli.js"
+    "dev:web": "vite --config vite.config.web.ts",
+    "web": "cargo run -p mint-cli -- web",
+    "typecheck": "tsc --noEmit",
+    "build:web": "vite build --config vite.config.web.ts",
+    "dev:desktop": "vite",
+    "build:desktop:ui": "vite build",
+    "build:desktop": "tauri build --no-bundle",
+    "build:desktop:bundle": "tauri build && mkdir -p target/release/mint-desktop-portable && cp target/release/mint-desktop target/release/mint-desktop-portable/mint-desktop && mkdir -p target/release/bundle/tar && tar -czf target/release/bundle/tar/mint-desktop.tar.gz -C target/release mint-desktop-portable && rm -rf target/release/mint-desktop-portable",
+    "build:cli": "cargo build -p mint-cli --release",
+    "build:all": "npm run build:web && npm run build:desktop && npm run build:cli",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build && mkdir -p target/release/mint-desktop-portable && cp target/release/mint-desktop target/release/mint-desktop-portable/mint-desktop && mkdir -p target/release/bundle/tar && tar -czf target/release/bundle/tar/mint-desktop.tar.gz -C target/release mint-desktop-portable && rm -rf target/release/mint-desktop-portable",
+    "package": "tauri build && mkdir -p target/release/mint-desktop-portable && cp target/release/mint-desktop target/release/mint-desktop-portable/mint-desktop && mkdir -p target/release/bundle/tar && tar -czf target/release/bundle/tar/mint-desktop.tar.gz -C target/release mint-desktop-portable && rm -rf target/release/mint-desktop-portable",
+    "rust:cli": "cargo run -p mint-cli --",
+    "rust:test": "cargo test -p mint-core -p mint-cli",
+    "dev": "tauri dev",
+    "build": "npm run build:desktop:ui",
+    "preview": "vite preview",
+    "start": "tauri dev",
+    "test": "cargo test -p mint-core -p mint-cli",
+    "cli": "cargo run -p mint-cli --"
   },
   "keywords": [],
   "author": {
@@ -36,86 +34,20 @@
   "license": "AGPL-3.0-only",
   "type": "commonjs",
   "dependencies": {
-    "@google/genai": "^1.44.0",
-    "@inkjs/ui": "^2.0.0",
-    "axios": "^1.13.6",
-    "cheerio": "^1.2.0",
-    "commander": "^14.0.3",
-    "dotenv": "^17.3.1",
-    "ink": "^7.0.1",
-    "ink-text-input": "^6.0.0",
-    "mammoth": "^1.12.0",
-    "pdf-parse": "^2.4.5",
-    "react": "^19.2.5",
-    "read-excel-file": "^9.0.10",
-    "zod": "^4.4.3"
-  },
-  "peerDependenciesOptional": {
-    "puppeteer": ">=22.0.0",
-    "whatsapp-web.js": ">=1.0.0",
-    "qrcode-terminal": ">=0.12.0",
-    "discord.js": ">=14.0.0",
-    "@slack/bolt": ">=4.0.0",
-    "telegraf": ">=4.0.0",
-    "@line/bot-sdk": ">=11.0.0",
-    "express": ">=4.0.0"
-  },
-  "devDependencies": {
-    "@hazart-pkg/live2d-core": "^1.0.1",
-    "@vitejs/plugin-react": "^6.0.1",
-    "electron": "^40.7.0",
-    "electron-builder": "^26.8.1",
-    "framer-motion": "^12.38.0",
-    "jest": "^30.4.0",
-    "lucide-react": "^1.9.0",
+    "@tauri-apps/api": "^2.0.0",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
+    "react": "^19.2.5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "material-icon-theme": "^5.35.0",
     "react-dom": "^19.2.5",
+    "typescript": "^6.0.3",
     "vite": "^8.0.10"
   },
   "overrides": {
     "gh-pages": "^5.0.0"
-  },
-  "build": {
-    "appId": "com.pheem49.mint",
-    "productName": "Mint",
-    "executableName": "mint-ai",
-    "artifactName": "${productName}-${version}-${arch}.${ext}",
-    "files": [
-      "**/*",
-      "!node_modules/.cache/**"
-    ],
-    "linux": {
-      "icon": "assets/icon.png",
-      "executableName": "mint-ai",
-      "target": [
-        "tar.gz",
-        "deb"
-      ],
-      "category": "Utility"
-    },
-    "mac": {
-      "icon": "assets/icon.png",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "category": "public.app-category.productivity"
-    },
-    "win": {
-      "icon": "assets/icon.png",
-      "target": [
-        "nsis",
-        "portable"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    },
-    "deb": {
-      "packageName": "mint-ai",
-      "artifactName": "mint-ai_${version}_${arch}.${ext}"
-    }
   }
 }

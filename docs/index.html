@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mint | Experience the Future of Desktop Assistance</title>
-    <meta name="description" content="A powerful Electron-based AI desktop assistant powered by Google Gemini, featuring screen vision, web automation, and proactive suggestions.">
+    <meta name="description" content="Mint - Native Desktop AI Assistant ที่ใช้ Rust Backend และ React UI พร้อมความสามารถ Screen Vision, Web Automation และ Proactive Suggestions">
     <link rel="stylesheet" href="style.css">
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
     <link rel="icon" type="image/png" href="assets/icon.png">
@@ -24,18 +24,18 @@
         <div class="nav-links">
             <a href="#features">Features</a>
             <a href="guide.html">Documentation</a>
-            <a href="https://www.npmjs.com/package/@pheem49/mint">Resources</a>
+            <a href="https://github.com/Pheem49/Mint/releases">Resources</a>
             <a href="https://github.com/Pheem49/Mint" class="github-link">GitHub</a>
         </div>
     </nav>
 
     <header class="hero">
         <h1>Experience the Future <br>of Desktop Assistance</h1>
-        <p>Mint features a <b>Unified Agent Loop</b> that combines screen vision, web automation, and proactive AI to supercharge your workflow. Powered by Google Gemini 3 Flash.</p>
+        <p><b>Mint</b> คือ <b>Native Desktop AI Assistant</b> ที่ใช้ <b>Rust Backend</b> และ <b>React UI</b> มาพร้อมกับ <b>Unified Agent Loop</b> ที่รวม Screen Vision, Web Automation และ AI เชิงรุกเข้าด้วยกันเพื่อยกระดับการทำงานของคุณ ขับเคลื่อนด้วย Google Gemini 1.5 Flash</p>
         
         <div class="install-container" id="install-cmd">
             <span>$</span>
-            <code>npm install -g @pheem49/mint@latest</code>
+            <code>npm run tauri:build</code>
             <button class="copy-btn" title="Copy to clipboard" onclick="copyCommand()">
                 <i class="ph ph-copy"></i>
             </button>
@@ -120,7 +120,7 @@
 
     <script>
         function copyCommand() {
-            const cmd = "npm install -g @pheem49/mint@latest";
+            const cmd = "npm run tauri:build";
             navigator.clipboard.writeText(cmd);
             const icon = document.querySelector('.copy-btn i');
             icon.classList.replace('ph-copy', 'ph-check');

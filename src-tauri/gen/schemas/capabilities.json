@@ -1,0 +1,1 @@
+{"main":{"identifier":"main","description":"Capabilities for Mint desktop windows managed by the Rust backend.","local":true,"windows":["main","settings","spotlight","widget","screen-picker"],"permissions":["core:default"]}}

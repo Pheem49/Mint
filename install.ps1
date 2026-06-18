@@ -1,64 +1,42 @@
-<#
-.SYNOPSIS
-Mint CLI Installation Script for Windows
-.DESCRIPTION
-Installs the Mint CLI package globally via NPM.
-#>
+Write-Host "=== Installing Mint CLI ===" -ForegroundColor Green
 
-$ErrorActionPreference = "Stop"
-
-Write-Host "Starting Mint CLI installation..." -ForegroundColor Cyan
-
-# 1. Check for Node.js
-try {
-    $nodeVersion = (node -v) 2>$null
-    if ([string]::IsNullOrWhiteSpace($nodeVersion)) {
-        Write-Host "[Error] Node.js is not found on your system!" -ForegroundColor Red
-        Write-Host "Please install Node.js (version 18 or higher) before using Mint CLI." -ForegroundColor Yellow
-        Write-Host "Download at: https://nodejs.org/"
-        exit 1
-    }
-} catch {
-    Write-Host "[Error] Node.js is not found on your system!" -ForegroundColor Red
-    Write-Host "Please install Node.js (version 18 or higher) before using Mint CLI." -ForegroundColor Yellow
-    Write-Host "Download at: https://nodejs.org/"
+# Check for Cargo
+if ((Get-Command "cargo" -ErrorAction SilentlyContinue) -eq $null) {
+    Write-Error "Rust/Cargo is not installed. Please install Rust first: https://www.rust-lang.org/tools/install"
     exit 1
 }
 
-# 2. Check for NPM
-try {
-    $npmVersion = (npm -v) 2>$null
-    if ([string]::IsNullOrWhiteSpace($npmVersion)) {
-        Write-Host "[Error] NPM is not found on your system!" -ForegroundColor Red
-        exit 1
-    }
-} catch {
-    Write-Host "[Error] NPM is not found on your system!" -ForegroundColor Red
-    exit 1
+# Create temp dir
+$TempDir = Join-Path $env:TEMP "Mint-Build-$(Get-Random)"
+New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
+
+Write-Host "Cloning Mint repository..." -ForegroundColor Cyan
+git clone https://github.com/Pheem49/Mint.git $TempDir
+
+Push-Location $TempDir
+
+Write-Host "Building Mint CLI in release mode..." -ForegroundColor Cyan
+cargo build --release -p mint-cli
+
+# Target binary path
+$InstallDir = "$env:USERPROFILE\.mint\bin"
+if (!(Test-Path $InstallDir)) {
+    New-Item -ItemType Directory -Path $InstallDir | Out-Null
 }
 
-# Check Node.js version (recommend 18+)
-$majorVersion = [int]($nodeVersion.Substring(1).Split('.')[0])
-if ($majorVersion -lt 18) {
-    Write-Host "[Warning] Your Node.js version is too old (current: $nodeVersion)" -ForegroundColor Yellow
-    Write-Host "It is recommended to update to version 18 or higher for full functionality." -ForegroundColor Yellow
+Write-Host "Installing binary to $InstallDir..." -ForegroundColor Cyan
+Copy-Item "target\release\mint.exe" "$InstallDir\mint.exe" -Force
+
+# Add to user Path if not present
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($UserPath -notlike "*$InstallDir*") {
+    Write-Host "Adding $InstallDir to user Path..." -ForegroundColor Yellow
+    [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
+    $env:Path += ";$InstallDir"
 }
 
-# 3. Install Mint CLI via NPM
-Write-Host "Downloading and installing @pheem49/mint..." -ForegroundColor Cyan
+Pop-Location
+Remove-Item -Recurse -Force $TempDir
 
-try {
-    # In Windows, we usually don't need sudo for global npm install if Node was installed for the user.
-    # We will just run the command normally.
-    npm install -g @pheem49/mint@latest
-} catch {
-    Write-Host "[Error] Installation failed. Try running PowerShell as Administrator." -ForegroundColor Red
-    exit 1
-}
-
-Write-Host ""
-Write-Host "Mint CLI installed successfully!" -ForegroundColor Green
-Write-Host "- Run 'mint' to get started."
-Write-Host "- Run 'mint onboard' to set up your API Keys."
-Write-Host "----------------------------------------"
-Write-Host "Happy coding!" -ForegroundColor Cyan
+Write-Host "=== Mint CLI Installed Successfully! ===" -ForegroundColor Green
+Write-Host "Please restart your terminal/PowerShell session, then type 'mint' to get started." -ForegroundColor Yellow

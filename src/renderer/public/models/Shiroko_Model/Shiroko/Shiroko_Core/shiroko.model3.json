@@ -1,0 +1,36 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "shiroko.moc3",
+		"Textures": [
+			"shiroko.4096/texture_00.png",
+			"shiroko.4096/texture_01.png",
+			"shiroko.4096/texture_02.png",
+			"shiroko.4096/texture_03.png"
+		],
+		"Physics": "shiroko.physics3.json",
+		"DisplayInfo": "shiroko.cdi3.json",
+		"Expressions": [
+			{ "Name": "Apron", "File": "apron.exp3.json" },
+			{ "Name": "Dazed", "File": "dazed.exp3.json" },
+			{ "Name": "Photo", "File": "photo.exp3.json" },
+			{ "Name": "Glasses", "File": "glasses.exp3.json" },
+			{ "Name": "Pen", "File": "pen.exp3.json" },
+			{ "Name": "Click", "File": "click.exp3.json" },
+			{ "Name": "CatFilter", "File": "catfilter.exp3.json" },
+			{ "Name": "DazedEyes", "File": "dazedeyes.exp3.json" }
+		]
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": ["ParamEyeLOpen", "ParamEyeROpen"]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": ["ParamMouthOpenY"]
+		}
+	]
+}

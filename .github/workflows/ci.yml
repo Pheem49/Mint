@@ -11,7 +11,6 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      PUPPETEER_SKIP_DOWNLOAD: true
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
@@ -25,10 +24,22 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Run tests
-        run: npm test -- --runInBand
+      - name: Typecheck UI
+        run: npm run typecheck
+
+      - name: Build web UI
+        run: npm run build:web
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --no-deps
+
+      - name: Run Rust tests
+        run: cargo test -p mint-core -p mint-cli
 
       - name: Audit dependencies
         run: npm audit --audit-level=high

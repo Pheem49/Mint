@@ -1,46 +1,123 @@
-# Mint
+<div align="center">
+  <img src="assets/icon.png" alt="Mint icon" width="112" />
 
-<p align="center">
-  <img src="assets/icon.png" alt="Mint Icon" width="160">
-</p>
+  # Mint
 
-<p align="center">
-  <strong>Unified AI Desktop Assistant, Agentic CLI, and local-first automation workspace.</strong>
-</p>
+  **A native desktop AI assistant with a shared Rust core and an optional terminal interface.**
 
-<p align="center">
-  <img src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=for-the-badge" alt="License">
-  <img src="https://img.shields.io/badge/Node.js-LTS-green?style=for-the-badge&logo=node.js" alt="Node.js">
-  <img src="https://img.shields.io/badge/Electron-40.x-47848F?style=for-the-badge&logo=electron" alt="Electron">
-  <img src="https://img.shields.io/badge/CLI-Unified_Agent-orange?style=for-the-badge" alt="CLI Agentic">
-  <a href="https://pheem49.github.io/Mint/guide.html"><img src="https://img.shields.io/badge/Documentation-View_Guide-00ffa3?style=for-the-badge" alt="Documentation"></a>
-</p>
+  [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://v2.tauri.app/)
+  [![Rust](https://img.shields.io/badge/Rust-backend-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+  [![React](https://img.shields.io/badge/React-TypeScript-149ECA?logo=react&logoColor=white)](https://react.dev/)
+  [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+</div>
 
-Mint is an AI assistant built to live in your desktop and terminal. It combines a transparent Electron desktop assistant, a unified agentic CLI, project-aware coding tools, local memory, automation, multi-provider AI routing, MCP extensions, and safety controls.
+Mint is a local-first AI assistant built with Tauri v2, Rust, React, and TypeScript.
+The desktop application and native CLI share the same Rust domain layer, so chat,
+memory, knowledge, tools, safety policies, and integrations behave consistently
+across both interfaces.
 
-## What's New
+## 🌟 What Mint Can Do
 
-- **Antigravity-style Desktop Layout:** Desktop UI now has a collapsible sidebar, Chat/Pictures navigation, smoother page transitions, startup loading polish, and clearer destructive-action confirmations.
-- **Local Pictures Library:** Images sent from the desktop chat are saved locally under `~/.config/mint/Pictures` after the user sends the message, with an in-app Pictures gallery and local metadata index.
-- **Image Privacy Hardening:** Chat history no longer stores raw image base64 data for saved images; history keeps a text placeholder while the actual file stays in the local Pictures folder.
-- **Theme & UI Controls:** Settings now include theme, accent color, system text color, glass blur, font family, and font size controls that apply to the desktop interface.
-- **Unified CLI Agent:** `mint` now routes every normal message through the same agent loop. It can think, answer conversationally, inspect projects, edit files, run tools, and finish directly for simple chat.
-- **Fast Mode:** `/fast` switches the interactive CLI into a quieter `[Fast]` status that keeps the working indicator visible but hides internal `Thinking:` and tool-progress trace messages.
-- **Live CLI Replies:** Mint responses now appear in one live-updating `Mint` message instead of waiting for the whole final answer to render at once.
-- **Learned Skills:** `mint learn <path>` and `/learn <path>` import local `.md` or `.txt` files as persistent skill/instruction memory. Learned skills can be listed and deleted.
-- **Provider Fallback:** The agent can fall back across supported providers, for example from local OpenAI-compatible backends to Gemini.
-- **Provider Visibility:** Desktop and CLI responses show the provider/model that actually answered, including fallback results.
-- **Live2D Assistant Model:** Desktop UI now supports a Live2D Shiroko model with expression cycling, lip sync while speaking, transparent interaction-area overlays, and click-to-chat reactions.
-- **Google Workspace + Notion Integrations:** Gmail, Google Calendar, and Notion plugins can be configured from onboarding.
-- **Safety Manager:** Central safety policy for shell commands and actions, including deterministic command blocking, permission tiers, path guards, and action logs.
-- **Refactored Main Process:** Electron startup is split into focused modules for windows, IPC, proactive loop, screen capture, and action execution.
-- **CI & Audit Baseline:** GitHub Actions runs install, tests, and security audit. Current local test baseline is `137` passing tests and `0` high vulnerabilities.
-- **Dependency Hardening:** Removed vulnerable `google-tts-api` and `xlsx`; replaced with internal Google TTS URL generation and `read-excel-file`.
+Mint is a local-first AI assistant running on your machine, capable of handling tasks via either the desktop application or the terminal interface (CLI):
 
-## Installation & Setup
+---
+
+### 1. 🤖 AI Chat & Multi-Providers
+- Connect to **Gemini, OpenAI, Anthropic (Claude), Ollama (Local), Hugging Face**, and LM Studio.
+- Run private local LLMs inside your machine using Ollama or connect to leading cloud APIs.
+- Supports system instructions, temperature adjustments, voice replies, and image analysis (Multimodal).
+
+---
+
+### 2. 🎨 Interactive Live2D Desktop Assistant
+- An interactive anime avatar (**Shiroko**) displayed right on your desktop with gaze tracking (eye/face follows your mouse pointer).
+- Toggle expression changes and cycle through character accessories dynamically.
+- Custom interaction zones (Head, Cheek, Hands, Body) that trigger unique animations and message toasts.
+
+---
+
+### 3. 💻 Autonomous Code Agent
+- Run code agent loops via `/code <task>` or the terminal command `mint code agent "<task>"`.
+- Scan your project workspace, build multi-file implementation plans, fix test suite errors, and write edits automatically.
+- Run local tests, cargo checks, and shell commands.
+> [!IMPORTANT]
+> **Safety First:** Risky actions and file writes require your explicit terminal approval first.
+
+---
+
+### 4. 🧠 Long-Term Memory & Knowledge Base
+- Persistent conversation memory stored locally in SQLite. Manage user profile memory with `/memory set/get` or CLI commands.
+- Index local directories, text files, and documentation to build your private searchable knowledge base.
+
+---
+
+### 5. 🔌 Tool & MCP Integrations
+- Support **Model Context Protocol (MCP)** to connect tools like Google/Brave Search, Filesystem servers, and GitHub context.
+- Local plugins for Spotify playback control, Google Calendar, Gmail drafts, and Notion workspace reading.
+
+---
+
+### 6. 🌐 Messaging Bridges
+- Bridge your local AI assistant to messaging services: **Telegram, Discord Gateway, Discord RPC, Slack, LINE, and WhatsApp**.
+- Host local chatbot webhooks that relay chat traffic into your configured LLM.
+> [!TIP]
+> **Headless Background Execution:** Enabled bridges automatically run in the background when you launch either the desktop application OR the local API/Web server (`mint api` / `mint web`). This allows you to chat with Mint from anywhere without needing the desktop GUI window open.
+
+---
+
+### 7. 📸 Screen Capture & Translation
+- Capture screen snapshots for instant visual analysis by the AI.
+- Real-time continuous overlay translation of specific screen regions.
+
+---
+
+## Highlights
+
+- Multi-provider chat with Gemini, OpenAI, Anthropic, Ollama, Hugging Face, and
+  local OpenAI-compatible endpoints.
+- Native streaming responses, SQLite-backed memory, tasks, searchable local
+  knowledge, skills, and semantic code search.
+- Desktop dashboard with a Live2D assistant, model interaction areas, pictures,
+  screen capture, continuous translation, spotlight, tray, widget, and proactive
+  suggestions.
+- Native code-agent workflow for workspace inspection, planning, editing, shell
+  execution, and verification with explicit approval for risky actions.
+- MCP servers, local plugins, custom workflows, weather, web search, and
+  optional external services.
+- Telegram, Discord Gateway, Discord RPC, Slack Socket Mode, LINE, and WhatsApp
+  Cloud API integrations.
+- Signed Tauri update checks with an explicit approval step before installation.
+
+## Screenshots
+
+| Desktop assistant | Settings |
+| --- | --- |
+| ![Mint desktop assistant](docs/assets/Agent_Mint.png) | ![Mint settings](docs/assets/Settings.png) |
+
+![Mint CLI](docs/assets/CLI_Screen.png)
+
+## Prerequisites
+
+- Node.js and npm
+- A Rust toolchain
+- Tauri v2 native build dependencies for your operating system
+
+On Debian, Ubuntu, or Linux Mint:
+
+```bash
+sudo apt-get install -y \
+  build-essential curl file pkg-config wget \
+  libdbus-1-dev libwebkit2gtk-4.1-dev \
+  libayatana-appindicator3-dev librsvg2-dev \
+  poppler-utils unzip patchelf
+```
+
+See the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/)
+for other platforms.
+
+## Installation
 
 ### Quick Install (Recommended)
-
 The easiest way to install Mint CLI is using our installation script:
 
 **For macOS & Linux:**
@@ -48,385 +125,340 @@ The easiest way to install Mint CLI is using our installation script:
 curl -fsSL https://raw.githubusercontent.com/Pheem49/Mint/main/install.sh | bash
 ```
 
-**For Windows (PowerShell or CMD):**
+**For Windows (PowerShell):**
 ```powershell
 powershell -Command "iwr -useb https://raw.githubusercontent.com/Pheem49/Mint/main/install.ps1 | iex"
 ```
 
-### NPM Install
-
-If you prefer to install via NPM directly:
-
-```bash
-npm install -g @pheem49/mint@latest
-```
-
-### Local Development
-
-```bash
-git clone https://github.com/Pheem49/Mint.git
-cd Mint
-npm install
-```
-
+---
 ### Quick Start
-
 ```bash
 mint onboard
-mint
-npm start
+mint setup
+mint 
+mint web
+mint chat "Hello"
 ```
 
 Most integrations can be configured from:
-
 ```bash
 mint onboard
+mint setup
+mint
 ```
 
-### Gmail
+### Manual Installation
 
-Gmail uses Google OAuth, not a plain Gmail address/password. Configure the OAuth Client ID and Client Secret in onboarding, leave the refresh token empty if you do not have one yet, and keep `Gmail User ID` as `me` for the signed-in account.
+### 1. Configure API Keys
+Copy the template and configure your LLM credentials (Gemini, OpenAI, Anthropic, etc.):
+```bash
+cp .env.example .env
+```
+Open the `.env` file and insert your API keys (e.g. `GEMINI_API_KEY=your_key_here`).
 
-After onboarding, run one of:
+### 2. Desktop Application
+Install the dependencies and start the application in development mode:
+```bash
+npm install
+npm run tauri:dev
+```
+To compile and build a production standalone desktop package:
+```bash
+npm run tauri:build
+```
+*(The Vite renderer output is generated in `out/renderer` and can be manually built via `npm run build:web`)*
+
+### 3. Native CLI
+To install the `mint` command-line tool globally:
+
+* **Option A (Release Build - Recommended for speed):**
+  ```bash
+  cargo build --release -p mint-cli
+  sudo cp target/release/mint /usr/local/bin/
+  ```
+* **Option B (Cargo Install):**
+  ```bash
+  cargo install --path crates/mint-cli
+  ```
+* **Option C (Development Shell Alias):**
+  If you are actively modifying code and want changes to reflect instantly, set up the alias under the [Setting up the mint Shortcut](#setting-up-the-mint-shortcut) section.
+
+## Desktop Assistant
+
+The desktop application provides:
+
+- A streaming chat panel with provider selection and optional smart context.
+- A Live2D model panel with gaze tracking, interaction zones, and visual area
+  guides.
+- Local conversation memory, tasks, searchable knowledge, and pictures.
+- Screen capture and continuous screen translation.
+- Spotlight, widget, tray, proactive glow, and background task queue windows.
+- Settings for models, API keys, voice, automation, integrations, MCP servers,
+  workflows, appearance, updates, and agent collaboration.
+
+The sidebar, Live2D interaction state, and area-guide visibility are stored
+locally so the dashboard restores the previous UI state after restarting.
+
+## Native CLI
+
+You can interact with Mint's Rust backend directly using the command line. If you set up the `mint` shortcut alias, you can run commands directly as `mint <command>`. Otherwise, you can fall back to running them through npm as `npm run cli -- <command>`.
+
+### Setting up the `mint` Shortcut
+
+You can choose one of the following methods to enable the global `mint` command:
+
+**Option 1: Using Shell Alias (For active development - updates instantly on code changes)**
+
+To run the commands using the prefix `mint` from anywhere in your workspace (automatically compiling your code updates on execution):
+
+*For Bash (`~/.bashrc`):*
+```bash
+echo 'alias mint="cargo run --manifest-path /home/pheem49/vscode/Project/Mint-CLI/Cargo.toml -p mint-cli --"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+*For Zsh (`~/.zshrc`):*
+```bash
+echo 'alias mint="cargo run --manifest-path /home/pheem49/vscode/Project/Mint-CLI/Cargo.toml -p mint-cli --"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**Option 2: Install via Cargo (For standard Rust installation)**
+
+This will compile the Rust CLI and install it inside your native Cargo binary directory:
 
 ```bash
-mint gmail auth
-mint gmail auth --no-open
+cargo install --path crates/mint-cli
 ```
+*Note: Make sure your `~/.cargo/bin` is added to your shell's `$PATH` variable.*
 
-`mint gmail auth` opens the browser automatically. `mint gmail auth --no-open` prints the auth link for you to open manually. Both flows save `gmailRefreshToken` locally after Google redirects back to Mint. Recommended scopes are `gmail.readonly` and `gmail.compose`; Mint creates drafts only and does not send email automatically.
+**Option 3: Compile and Install Globally (For release binary - fastest run speed)**
 
-### Google Calendar
-
-Google Calendar uses OAuth credentials and a refresh token. Onboarding stores:
-
-- `googleCalendarClientId`
-- `googleCalendarClientSecret`
-- `googleCalendarRefreshToken`
-- `googleCalendarId`, usually `primary`
-
-The plugin can list events and create events through the Calendar API. If OAuth is not configured, it falls back to opening Google Calendar in the browser.
-
-### Notion
-
-Notion uses an internal integration secret. After creating an integration in Notion, share the target page or database with that integration, then configure:
-
-- `notionApiKey`
-- `notionDatabaseId`, optional default database
-- `notionPageId`, optional default page
-- `notionTitleProperty`, default `Name`
-
-The plugin can create pages, query database pages, and append text blocks.
-
-## Key Features
-
-<details>
-<summary>Show details</summary>
-
-### Unified CLI Agent
-
-Mint CLI is not just a chat wrapper. It is a workspace-aware agent loop.
-
-- **Think Before Acting:** Every request goes through an agent decision step.
-- **Fast Mode:** Toggle `/fast` to hide internal thought/progress messages while keeping the final answer, approvals, tools, and working indicator unchanged.
-- **Live Answer Rendering:** Final answers are streamed into a single Mint message block as they arrive.
-- **Conversational + Coding in One Flow:** Casual messages can finish directly; coding tasks can inspect, plan, edit, and verify.
-- **Workspace Context:** Reads current path, git status, diff summary, package scripts, and previous workspace session memory.
-- **Tool Use:** Supports web search, file listing, file reading, scoped code search, path finding, shell commands, patch edits, file writes, opening folders, and asking the user.
-- **Approval Flow:** Shell commands, patches, and full-file writes require user approval.
-- **Provider Support:** Gemini, OpenAI, Anthropic, and local OpenAI-compatible endpoints for agent tasks.
-- **Agent Collaboration Option:** Optional reviewer pass can be enabled for longer tasks.
-
-### Desktop Assistant
-
-- **Electron Desktop UI:** Transparent desktop assistant window with tray support.
-- **Collapsible Workspace Sidebar:** Desktop navigation starts collapsed on app launch and can be expanded for Chat, Pictures, model controls, and settings.
-- **Chat Navigation Safety:** `New Chat` and `Clear` ask for confirmation before clearing the current conversation history.
-- **Pictures Gallery:** Sent images are available in a local-only Pictures view inside the desktop app.
-- **Live2D Model View:** Optional Live2D assistant panel with model show/hide persistence. New installs start with the model hidden until the user enables it.
-- **Live2D Expressions:** Cycle model expressions from the toolbar and show an on-canvas expression toast for the active expression.
-- **Click Reactions:** Named model interaction zones (`Head Pat`, `Cheek Poke`, `Hand Tap`, `Shoulder Tap`, and `Careful`) can trigger temporary expressions and send short contextual prompts into the normal chat flow.
-- **Interaction Guide Overlay:** Toggle a transparent overlay that labels clickable model areas without blocking pointer input.
-- **Voice Lip Sync:** When Mint speaks, Live2D mouth parameters animate during TTS playback and reset when speech ends.
-- **Floating Widget:** Always-on-top quick access widget.
-- **Spotlight Launcher:** `Alt+Space` quick prompt window.
-- **Screen Vision:** Capture the screen and send selected regions to the AI.
-- **Live Translation:** Continuously translate a selected screen area.
-- **Proactive Suggestions:** Periodic screen/context analysis with behavior memory.
-- **System Notifications:** Low battery, connection changes, and proactive notices.
-- **Settings UI:** Configure provider, model, theme, keys, bridge options, MCP, and assistant behavior.
-- **Appearance Controls:** Customize theme, accent color, text color, glass blur, font family, and UI font size.
-
-### Automation
-
-- **Apps and Websites:** Open local apps, URLs, search queries, files, and folders.
-- **Browser Automation:** Use Puppeteer-driven browser workflows.
-- **File Operations:** Create folders, find paths, open files/folders, and move files to trash.
-- **System Automation:** Volume, mute, brightness, suspend, restart, shutdown, and window minimization helpers.
-- **Granular Automation:** Mouse move, mouse click, typing, and key tap actions.
-- **Custom Workflows:** Process-monitoring rules loaded from local config.
-- **Headless Agent:** Queue background tasks with `mint task`.
-
-### Knowledge and Memory
-
-- **Chat History:** Persistent local chat transcript.
-- **Timestamp Preservation:** Desktop chat history keeps original message timestamps across app restarts and history syncs.
-- **Local Sent-Image Storage:** Desktop image attachments are saved as local files only after sending, under `~/.config/mint/Pictures`.
-- **Behavior Memory:** Stores recurring user context for proactive suggestions.
-- **Long-Term Memory Store:** SQLite-backed user context, session memories, usage patterns, and response cache.
-- **Learned Skill Files:** Import `.md` or `.txt` instruction files with `mint learn <path>` or `/learn <path>`. Mint remembers them as persistent skill/instruction context.
-- **Knowledge Base / RAG:** Index and search local `.txt`, `.md`, `.pdf`, `.docx`, and `.xlsx` files.
-- **Workspace Session Memory:** Remembers previous task summary and verification for each workspace.
-
-### Multi-Provider AI
-
-- **Gemini:** Main default provider with model selection.
-- **OpenAI:** GPT-compatible cloud provider.
-- **Anthropic:** Claude-compatible provider.
-- **Local OpenAI Compatible:** LM Studio or other local `/v1/chat/completions` servers.
-- **Ollama / Hugging Face:** Available in general provider configuration where supported.
-- **Fallback Routing:** Agent provider selection can fall back when local providers are offline.
-- **Response Badges:** Chat surfaces show the provider/model that produced the final response, such as `gemini • gemini-3.1-flash-lite-preview`.
-
-### Messaging Bridges and Plugins
-
-- **Discord Bridge**
-- **Telegram Bridge**
-- **Slack Bridge**
-- **LINE Bridge**
-- **WhatsApp Bridge**
-- **Google Search and Brave Search Bridges**
-- **Spotify Plugin**
-- **Docker Plugin**
-- **Obsidian Plugin**
-- **System Monitor and Metrics Plugins**
-- **Google Calendar Plugin:** List events and create calendar events via Google Calendar API, with browser fallback.
-- **Gmail Plugin:** Search/read Gmail and create drafts safely. It does not send email automatically.
-- **Notion Plugin:** Create notes/pages, read databases, and append page blocks through the Notion API.
-- **MCP Manager**
-
-### MCP Extensions
-
-Mint supports the **Model Context Protocol (MCP)** so external tools can be added without hardcoding them into Mint.
+If you want to compile the project in release mode and install it directly to your system's global binaries directory (for the fastest startup time without cargo check overhead):
 
 ```bash
-mint mcp add <name> <command> --args <args...> --env <KEY=VALUE>
-mint mcp list
-mint mcp remove <name>
-mint mcp clear
+# Build the binary in release mode
+cargo build --release -p mint-cli
+
+# Copy it into your system binary directory
+sudo cp target/release/mint /usr/local/bin/
 ```
-
-Example:
-
-```bash
-mint mcp add google-search npx --args -y @modelcontextprotocol/server-google-search --env GOOGLE_API_KEY=your_key GOOGLE_SEARCH_ENGINE_ID=your_id
-```
-
-</details>
-
-## Safety System
-
-<details>
-<summary>Show details</summary>
-
-Mint includes a central safety layer in `src/System/safety_manager.js`.
-
-- **Permission Tiers:** `safe`, `approval`, `dangerous`, and `blocked`.
-- **Deterministic Command Blocking:** Blocks known dangerous shell commands regardless of what the AI requests.
-- **Blocked Examples:** `rm -rf`, `git reset --hard`, `git clean -f`, `mkfs`, raw disk writes, `shutdown`, `reboot`, `sudo`, `chmod -R 777`, `curl | sh`, and `wget | bash`.
-- **Dangerous Actions:** `delete_file` and destructive `system_automation` actions require explicit permission.
-- **Path Guard:** Prevents path traversal outside an allowed root.
-- **Action Logs:** Writes JSONL records to `~/.config/mint/action-log.jsonl`.
-- **Test Coverage:** Safety tests verify destructive command blocking, dangerous action classification, path traversal protection, and action executor enforcement.
-
-</details>
-
-## Screenshots
-
-<details>
-<summary>Show screenshots</summary>
-
-<p align="center">
-  <img src="assets/Agent_Mint.png" alt="Mint Desktop UI" width="48%">
-  <img src="assets/Settings.png" alt="Mint Settings" width="48%">
-  <br>
-  <sub><strong>Desktop Assistant UI</strong> with Live2D model, chat panel, sidebar navigation, and local Pictures view. <strong>Settings UI</strong> for providers, automation, theme, voice, plugins, and MCP configuration.</sub>
-</p>
-
-<p align="center">
-  <img src="assets/CLI_Screen.png" alt="Mint CLI" width="100%">
-  <br>
-  <sub><strong>Unified CLI Agent</strong> for chat, coding tasks, tool use, workspace context, image input, and command workflows.</sub>
-</p>
-
-</details>
-
-## CLI Commands
-
-<details>
-<summary>Show details</summary>
-
-- `mint` / `mint chat` - Start the unified interactive agent UI.
-- `mint chat "<message>"` - Start with an initial message.
-- `mint chat --image ./screenshot.png "What is on this screen?"` - Attach an image to the initial chat message.
-- `/image ./screenshot.png What is on this screen?` - Attach an image while inside the interactive CLI, then press Enter to send.
-- `Ctrl+V` or `/paste What is on this screen?` - Attach clipboard images inside the interactive CLI, then press Enter to send.
-- `mint learn ./skill.md` - Read a local `.md` or `.txt` file and remember it as a persistent Mint skill/instruction.
-- `mint learn --list` - List learned skill files.
-- `mint learn --delete <id|path|name>` - Delete a learned skill by ID, path, or file name.
-- `mint summarize [path]` - Summarize repository structure, package metadata, git state, and key files.
-- `mint symbols [path]` - Build a local source symbol index for supported code files.
-- `mint semantic-code index [path]` - Create embeddings for local source code chunks.
-- `mint semantic-code search "<query>"` - Search the indexed code semantically.
-- `mint code "<task>"` - Run a specific coding task in the current workspace.
-- `mint code --image ./mockup.png "Build this UI"` - Attach an image as visual context for a coding task.
-- `mint gmail auth` - Open Google OAuth and save a Gmail refresh token.
-- `mint gmail auth --no-open` - Print the Gmail OAuth link without opening a browser.
-- `mint task "<task>"` - Queue a background task for the headless agent.
-- `mint agent [task]` - Run the background/headless agent.
-- `mint mcp` - Manage MCP servers.
-- `mint update` - Check npm and install the latest Mint CLI version.
-- `mint update --check` - Check for a newer version without installing it.
-- `mint list` - Display available features and commands.
-- `mint onboard` - Configure Mint for first use.
-
-</details>
-
-## CLI Updates
-
-<details>
-<summary>Show details</summary>
-
-Mint CLI checks for updates automatically on startup. The auto-check is enabled by default, uses a 24-hour cooldown, and updates from npm with `npm install -g @pheem49/mint@latest` when a newer package version is available.
-
-Use manual update commands when you want direct control:
-
-```bash
-mint update
-mint update --check
-mint update --dry-run
-```
-
-You can skip the startup auto-check for one command:
-
-```bash
-MINT_SKIP_AUTO_UPDATE=1 mint
-```
-
-To disable automatic update checks, set `enableAutoUpdate` to `false` in your Mint config file.
-
-</details>
-
-## Interactive Slash Commands
-
-<details>
-<summary>Show details</summary>
-
-Inside `mint`:
-
-- `/help` - Show commands.
-- `/fast [on|off|status]` - Toggle Fast Mode. Fast Mode shows `[Fast]`, keeps `Mint is thinking...`, and hides `Thinking:`/progress trace messages.
-- `/summarize [path] [--json]` - Summarize the current repository without using the AI agent.
-- `/symbols [path] [--json] [--limit n]` - Build a local source symbol index without using the AI agent.
-- `/semantic-code index` - Create embeddings for source code chunks in the current workspace.
-- `/semantic-code search <query>` - Search the indexed code semantically.
-- `/learn <path>` - Read a local `.md` or `.txt` file and remember it as a persistent Mint skill/instruction.
-- `/memory skills` - Show learned skill files.
-- `/memory skills delete <id|path|name>` - Delete a learned skill.
-- `/image <path> [prompt]` - Attach an image from disk.
-- `/paste [prompt]` - Attach an image from the clipboard.
-- `/code <task>` - Force Code Mode.
-- `/cd <path>` - Change active workspace directory.
-- `/models [name]` - Show or switch model/provider.
-- `/memory [cmd]` - Manage long-term memory.
-- `/config` - Show current configuration.
-- `/copy` - Copy last response.
-- `/clear` / `/reset` - Clear conversation history.
-- `/agent <type>` - Switch specialized persona.
-- `/workspace` - Manage registered workspaces.
-- `/stats` - Show system statistics.
-- `/review` - Ask reviewer persona to critique the last answer.
-- `/exit` - Exit.
-
-</details>
-
-## Development
-
-<details>
-<summary>Show details</summary>
-
-```bash
-npm test
-npm test -- --runInBand
-npm audit --audit-level=high
-npm start
-npm run build:linux
-```
-
-</details>
-
-## Project Structure
-
-<details>
-<summary>Show details</summary>
-
-```text
-Mint/
-├── main.js                         # Electron bootstrap and wiring
-├── mint-cli.js                     # CLI entry point
-├── mint-cli-logic.js               # CLI action executor bridge
-├── src/
-│   ├── AI_Brain/                   # Providers, memory, RAG, autonomous/headless agents
-│   ├── Automation_Layer/           # File, app, website, and browser automation
-│   ├── Channels/                   # Messaging and search bridges
-│   ├── CLI/                        # Unified CLI UI, router, code agent, workspaces
-│   ├── Command_Parser/             # Structured AI response parser
-│   ├── Plugins/                    # Plugin manager and integrations
-│   ├── System/                     # Config, IPC, safety, windows, screen capture, notifications
-│   └── UI/                         # Electron renderer, settings, widgets, spotlight
-├── tests/                          # Jest tests
-├── docs/                           # Documentation site
-└── package.json
-```
-
-</details>
-
-## Runtime Notes
-
-<details>
-<summary>Show details</summary>
-
-- Mint is currently a **Node.js + CommonJS** project, not TypeScript.
-- API keys are stored locally in Mint config or environment variables.
-- Google OAuth refresh tokens for Gmail and Calendar are stored locally in Mint config.
-- Desktop chat images sent by the user are stored locally in `~/.config/mint/Pictures`, with metadata in `~/.config/mint/Pictures/pictures.json`.
-- Desktop chat history is stored locally in `~/.config/mint/mint-chat-history.json`.
-- Local OpenAI-compatible providers require a running local server such as LM Studio.
-- Some desktop features depend on Linux tools such as `xdg-open`, `gio`, `xdotool`, `amixer`, `pactl`, `brightnessctl`, or `xbacklight`.
-- Electron GUI behavior should be smoke-tested manually after large UI or main-process changes.
-
-</details>
-
-## Security & Privacy
-
-<details>
-<summary>Show details</summary>
-
-- **Local Control:** Mint prioritizes local execution and local configuration.
-- **Local Picture Storage:** Desktop images are saved only on the user's machine, under `~/.config/mint/Pictures`, after the user sends a message with an image.
-- **No Raw Image History:** Saved desktop images are omitted from chat history as raw base64 and replaced with a text placeholder.
-- **User Approval:** Shell commands, patches, and file writes require explicit approval in the CLI agent.
-- **Safety Manager:** Dangerous commands and actions are blocked or gated by deterministic policy.
-- **Action Audit Trail:** Tool actions are logged locally for debugging and accountability.
-- **Secure Config Practice:** Keys stay on the user's machine and are only sent to the selected AI/search provider.
-
-</details>
-
-## License
-
-Mint is licensed under the **GNU Affero General Public License v3.0**.
-See the [LICENSE](LICENSE) file for details.
+Once copied, you can run `mint` globally from any folder in your terminal!mint chat "Hello"
 
 ---
 
-<p align="center">Made with love by <a href="https://github.com/Pheem49">Pheem49</a></p>
+### Start Interactive Chat Assistant
+
+To start the interactive terminal AI chatbot assistant, simply run:
+
+```bash
+mint
+# Or fallback: npm run cli
+```
+This opens the Mint interactive shell, where you can type prompts naturally or use `/commands` (like `/help`, `/cd`, `/clear`, `/exit`).
+
+---
+
+### CLI Subcommands
+
+You can run individual subcommands by appending them after `mint`:
+
+```bash
+mint onboard
+mint setup
+mint status
+mint web
+mint api
+mint chat "<message>"
+```
+
+### Common Commands
+
+| Command | Purpose |
+| --- | --- |
+| `mint` | Start the interactive terminal chat assistant |
+| `mint onboard` | Configure Mint for first use |
+| `mint setup` | Interactively manage enabled agent tools |
+| `mint web` | Launch the web UI and local API server |
+| `mint api` | Start only the local API server |
+| `mint status` | Show runtime status |
+| `mint config init` | Create the local configuration file |
+| `mint config path` | Print the configuration file path |
+| `mint config show` | Print the current configuration |
+| `mint config set <key> <value>` | Update a configuration value |
+| `mint config doctor` | Validate the local setup |
+| `mint providers` | List configured AI providers |
+| `mint chat "<message>"` | Send one chat message |
+| `mint memory recent` | Show recent conversation memory |
+| `mint task list` | List all tasks (pending and completed) |
+| `mint task pending` | List pending tasks |
+| `mint knowledge add <path>` | Index a local document |
+| `mint knowledge search "<query>"` | Search indexed knowledge |
+| `mint plugin list` | List local plugins |
+| `mint mcp list` | List configured MCP servers |
+| `mint learn <path>` | Import a persistent learned skill file |
+| `mint update --check` | Check for an available update |
+
+
+
+### Code Agent
+
+Mint includes native workspace tools for code inspection, planning, editing, and execution:
+
+```bash
+mint code agent "inspect this repo and fix the failing tests"
+mint code summary .
+mint code search "shell approval flow" .
+mint symbols .
+mint semantic-code index .
+mint semantic-code search "provider fallback"
+```
+
+Inside interactive mode, use:
+
+```text
+/code <task>
+```
+
+Code-related fixes, workspace inspection, and test requests are routed into the code-agent loop automatically. Shell commands and file edits require explicit terminal approval before Mint applies them.
+
+### Tools And Automation
+
+```bash
+mint files find README
+mint safety path README.md
+mint safety shell cargo test -p mint-core
+mint run --approve -- cargo test -p mint-core
+mint open README.md
+mint open-app code
+mint learn ./skill.md
+```
+
+### MCP Servers
+
+Add a local MCP server and call one of its tools:
+
+```bash
+mint mcp add filesystem npx \
+  --args -y \
+  --args @modelcontextprotocol/server-filesystem \
+  --args .
+
+mint mcp list
+mint mcp call filesystem list_directory \
+  --arguments '{"path":"."}'
+```
+
+### Interactive Commands
+
+| Command | Purpose |
+| --- | --- |
+| `/help` | Show interactive help |
+| `/fast [on\|off]` | Toggle fast response mode |
+| `/models [name]` | List or select a model |
+| `/clear` or `/reset` | Clear the active conversation |
+| `/cd <path>` | Change workspace directory |
+| `/image <path> [prompt]` | Send an image with an optional prompt |
+| `/paste [prompt]` | Use an image from the clipboard |
+| `/learn <path>` | Import a local skill |
+| `/memory list` | List stored memories |
+| `/memory clear` | Clear stored memories |
+| `/memory get <key>` | Read one memory value |
+| `/memory set <key> <value>` | Store one memory value |
+| `/stats` | Show session statistics |
+| `/code <task>` | Start a code-agent task |
+| `/exit` or `/quit` | Leave interactive mode |
+
+## Configuration
+
+Mint stores its local configuration in the platform config directory:
+
+| Platform | Typical path |
+| --- | --- |
+| Linux | `~/.config/mint/mint-config.json` |
+| macOS | `~/Library/Application Support/mint/mint-config.json` |
+| Windows | `%APPDATA%\mint\mint-config.json` |
+
+Create and inspect the configuration:
+
+```bash
+npm run cli -- config init
+npm run cli -- config path
+npm run cli -- config show
+npm run cli -- config doctor
+```
+
+Configuration covers provider credentials, model preferences, browser context,
+voice and TTS, proactive suggestions, headless tasks, updates, workflows, MCP
+servers, and optional integrations such as Calendar, Gmail, Notion, Telegram,
+Discord, Slack, LINE, WhatsApp, Google Search, and Brave Search.
+
+The optional browser smart-context helper can provide active-tab context from:
+
+```text
+http://127.0.0.1:3212/context
+```
+
+Chromium automation uses the local debugging endpoint:
+
+```text
+http://127.0.0.1:9222/json/list
+```
+
+## Webhook Integrations
+
+LINE and WhatsApp webhook listeners bind to localhost by default. Read
+[`docs/WEBHOOK_FORWARDING.md`](docs/WEBHOOK_FORWARDING.md) before exposing them
+through a TLS tunnel.
+
+## Safety And Privacy
+
+Mint keeps high-risk behavior behind explicit policy checks:
+
+- Shell commands are evaluated before execution.
+- Code edits and update installation require approval.
+- Sensitive directories such as `.ssh`, `.gnupg`, and Mint's own config
+  directory are protected by default.
+- Sensitive filenames such as `.env` and private key files are blocked from
+  routine workspace access.
+- LINE and WhatsApp webhook services listen locally unless you intentionally
+  forward them.
+
+Review the generated command or edit preview before approving an action.
+
+## Development
+
+Useful validation commands:
+
+```bash
+npm run build:web
+cargo test -p mint-core -p mint-cli -p mint-desktop
+cargo check -p mint-desktop
+npm run tauri:build -- --debug --no-bundle
+```
+
+### Project Layout
+
+```text
+crates/mint-core   Shared Rust domain logic
+crates/mint-cli    Native Rust CLI
+src-tauri          Tauri desktop backend and IPC commands
+src/renderer       React and TypeScript webview UI
+docs               Project documentation
+out/renderer       Generated Vite renderer output
+```
+
+## Migration Status
+
+Mint's historical Electron desktop runtime and Node CLI have been removed. The
+active application is the native Tauri v2 and Rust implementation documented
+above. See [`TAURI_MIGRATION.md`](TAURI_MIGRATION.md) for compatibility notes.
+
+## Contributing
+
+We welcome contributions from the community! Whether you want to fix a bug, add a new provider, or build a new integration, please check out our [CONTRIBUTING.md](file:///home/pheem49/vscode/Project/Mint-CLI/CONTRIBUTING.md) guide for setup instructions, project architecture details, and our roadmap.
+
+## License
+
+Mint is licensed under the [AGPL-3.0-only license](LICENSE).
+

@@ -1,54 +1,36 @@
 #!/bin/bash
-# Mint CLI Installation Script
-# Usage: curl -fsSL <URL>/install.sh | bash
-
 set -e
 
-echo "Starting Mint CLI installation..."
+echo "=== Installing Mint CLI ==="
 
-# 1. Check for Node.js
-if ! command -v node &> /dev/null
-then
-    echo "[Error] Node.js is not found on your system!"
-    echo "Please install Node.js (version 18 or higher) before using Mint CLI."
-    echo "Download at: https://nodejs.org/"
+# Check for Rust/Cargo
+if ! command -v cargo &> /dev/null; then
+    echo "Error: Rust/Cargo is not installed."
+    echo "Please install Rust first: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
     exit 1
 fi
 
-# 2. Check for NPM
-if ! command -v npm &> /dev/null
-then
-    echo "[Error] NPM is not found on your system!"
-    exit 1
-fi
+# Create a temporary directory
+TEMP_DIR=$(mktemp -d)
+echo "Cloning Mint repository to temporary directory..."
+git clone https://github.com/Pheem49/Mint.git "$TEMP_DIR"
 
-# Check Node.js version (recommend 18+)
-NODE_VERSION=$(node -v | cut -d 'v' -f 2 | cut -d '.' -f 1)
-if [ "$NODE_VERSION" -lt 18 ]; then
-    echo "[Warning] Your Node.js version is too old (current: v${NODE_VERSION})"
-    echo "It is recommended to update to version 18 or higher for full functionality."
-fi
+cd "$TEMP_DIR"
 
-# 3. Install Mint CLI via NPM
-echo "Downloading and installing @pheem49/mint (may require Admin/Root privileges)..."
+echo "Building Mint CLI in release mode..."
+cargo build --release -p mint-cli
 
-# Determine if we need sudo
-if [ "$EUID" -ne 0 ] && command -v sudo &> /dev/null; then
-    # Check if npm global directory is writable by the current user (e.g., using NVM)
-    NPM_PREFIX=$(npm config get prefix 2>/dev/null || echo "/usr/local")
-    if [ -w "$NPM_PREFIX" ] || [ -w "$NPM_PREFIX/lib/node_modules" ]; then
-        npm install -g @pheem49/mint@latest
-    else
-        # Preserve user's PATH so sudo can find npm if it's installed via custom paths
-        sudo env "PATH=$PATH" npm install -g @pheem49/mint@latest
-    fi
+echo "Installing binary to /usr/local/bin..."
+# Try copying to /usr/local/bin (may require sudo)
+if [ -w /usr/local/bin ]; then
+    cp target/release/mint /usr/local/bin/mint
 else
-    npm install -g @pheem49/mint@latest
+    echo "Permission denied for /usr/local/bin. Requesting sudo permission..."
+    sudo cp target/release/mint /usr/local/bin/mint
 fi
 
-echo ""
-echo "Mint CLI installed successfully!"
-echo "- Run 'mint' to get started."
-echo "- Run 'mint onboard' to set up your API Keys."
-echo "----------------------------------------"
-echo "Happy coding!"
+echo "Cleaning up..."
+rm -rf "$TEMP_DIR"
+
+echo "=== Mint CLI Installed Successfully! ==="
+echo "Type 'mint' to get started."
