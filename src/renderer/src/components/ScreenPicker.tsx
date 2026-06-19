@@ -119,7 +119,7 @@ export default function ScreenPicker() {
     const overlayCtx = overlay.getContext('2d')
     if (!overlayCtx) return
     overlayCtx.clearRect(0, 0, overlay.width, overlay.height)
-    overlayCtx.strokeStyle = isTranslateMode ? '#8b5cf6' : '#00ff88'
+    overlayCtx.strokeStyle = isTranslateMode ? '#10b981' : '#00ff88'
     overlayCtx.lineWidth = 3
     overlayCtx.strokeRect(rect.x, rect.y, rect.width, rect.height)
   }
@@ -134,7 +134,7 @@ export default function ScreenPicker() {
 
     const rect = normalizeRect(currentCoords)
     overlayCtx.clearRect(rect.x, rect.y, rect.width, rect.height)
-    overlayCtx.strokeStyle = isTranslateMode ? '#8b5cf6' : '#00ff88'
+    overlayCtx.strokeStyle = isTranslateMode ? '#10b981' : '#00ff88'
     overlayCtx.lineWidth = 2
     overlayCtx.strokeRect(rect.x, rect.y, rect.width, rect.height)
   }
@@ -341,7 +341,7 @@ export default function ScreenPicker() {
           position: absolute;
           inset: 0;
           pointer-events: none;
-          box-shadow: inset 0 0 70px rgba(139, 92, 246, 0.18);
+          box-shadow: inset 0 0 70px rgba(16, 185, 129, 0.18);
           z-index: 5;
         }
 
@@ -403,21 +403,21 @@ export default function ScreenPicker() {
         }
 
         .btn-translate {
-          background: rgba(139, 92, 246, 0.15);
-          color: #c4b5fd;
-          border-color: rgba(139, 92, 246, 0.3);
+          background: rgba(16, 185, 129, 0.15);
+          color: #a7f3d0;
+          border-color: rgba(16, 185, 129, 0.3);
         }
 
         .btn-translate:hover {
-          background: rgba(139, 92, 246, 0.3);
-          color: #f5f3ff;
+          background: rgba(16, 185, 129, 0.3);
+          color: #ecfdf5;
         }
 
         .btn-translate.active {
-          background: #8b5cf6;
+          background: #10b981;
           color: #ffffff;
-          border-color: #7c3aed;
-          box-shadow: 0 0 15px rgba(139, 92, 246, 0.4);
+          border-color: #059669;
+          box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
         }
 
         .btn-primary {
@@ -448,7 +448,7 @@ export default function ScreenPicker() {
           height: 14px;
           border: 2px solid rgba(255, 255, 255, 0.2);
           border-radius: 50%;
-          border-top-color: #8b5cf6;
+          border-top-color: #10b981;
           animation: picker-spin 0.8s linear infinite;
           margin-right: 8px;
         }

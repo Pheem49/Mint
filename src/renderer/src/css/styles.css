@@ -12,8 +12,8 @@
   --text-muted: #8f8f94;
   --text-soft: #d1d1d4;
   --placeholder: #818187;
-  --accent: #8f6cf5;
-  --accent-hover: #a98cff;
+  --accent: #10b981;
+  --accent-hover: #34d399;
   --border: rgba(255, 255, 255, 0.075);
   --border-light: rgba(255, 255, 255, 0.11);
   --shadow: none;
@@ -343,9 +343,9 @@ h1 {
 
 .accessory-cycle-btn:hover,
 .accessory-cycle-btn.active {
-  background: rgba(168, 85, 247, 0.14);
-  border-color: rgba(168, 85, 247, 0.24);
-  color: #c4b5fd;
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.24);
+  color: #a7f3d0;
 }
 
 .toggle-interaction-btn:hover,
@@ -2282,7 +2282,7 @@ input:checked + .slider:before {
 
 .mint-status-pill[data-state="thinking"],
 .model-activity-badge[data-state="thinking"] {
-  color: #c4b5fd;
+  color: #a7f3d0;
 }
 
 .mint-status-pill[data-state="thinking"] .mint-status-dot,

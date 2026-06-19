@@ -384,10 +384,15 @@ mod tests {
 
     #[test]
     fn shell_mode_policy_reads_config_allowlist() {
-        let config = MintConfig::default();
+        let mut config = MintConfig::default();
+        config.extra.insert(
+            "allowedShellModes".to_string(),
+            serde_json::json!(["readOnly", "test"]),
+        );
         assert!(shell_mode_allowed(&config, ShellCommandMode::ReadOnly));
         assert!(shell_mode_allowed(&config, ShellCommandMode::Test));
         assert!(!shell_mode_allowed(&config, ShellCommandMode::Network));
+        assert!(!shell_mode_allowed(&config, ShellCommandMode::Mutating));
     }
 
     #[test]

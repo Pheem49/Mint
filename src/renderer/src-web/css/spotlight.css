@@ -1,6 +1,6 @@
 :root {
     --bg-color: rgba(15, 23, 42, 0.85);
-    --accent: #8b5cf6;
+    --accent: #10b981;
     --text-main: #f8fafc;
     --text-muted: #94a3b8;
     --border: rgba(255, 255, 255, 0.1);
@@ -41,8 +41,8 @@ body {
 }
 
 @keyframes glow {
-    from { filter: drop-shadow(0 0 2px rgba(139, 92, 246, 0.5)); }
-    to { filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.8)); }
+    from { filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.5)); }
+    to { filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.8)); }
 }
 
 #spotlight-input {
@@ -88,7 +88,7 @@ body {
 }
 
 .result-item:hover, .result-item.selected {
-    background: rgba(139, 92, 246, 0.2);
+    background: rgba(16, 185, 129, 0.2);
 }
 
 .result-icon {

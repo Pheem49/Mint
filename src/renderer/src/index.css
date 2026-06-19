@@ -32,7 +32,7 @@ button {
   height: 100%;
   overflow: hidden;
   border: 1px solid rgb(148 163 184 / 20%);
-  background: radial-gradient(circle at top left, #252058, #111827 52%, #0b1020);
+  background: radial-gradient(circle at top left, #064e3b, #111827 52%, #0b1020);
 }
 
 .mint-sidebar {
@@ -51,7 +51,7 @@ button {
 }
 
 .mint-brand strong {
-  color: #c4b5fd;
+  color: #a7f3d0;
   font-size: 1.25rem;
 }
 
@@ -89,8 +89,8 @@ button {
 .mint-sidebar button:hover,
 .mint-sidebar button.active,
 .mint-toolbar button:hover {
-  border-color: rgb(167 139 250 / 28%);
-  background: rgb(124 58 237 / 18%);
+  border-color: rgb(52 211 153 / 28%);
+  background: rgb(16 185 129 / 18%);
   color: #f8fafc;
 }
 
@@ -102,7 +102,7 @@ button {
 }
 
 .mint-sidebar__footer button {
-  border-color: rgb(167 139 250 / 30%);
+  border-color: rgb(52 211 153 / 30%);
   text-align: center;
 }
 
@@ -181,7 +181,7 @@ button {
 
 .mint-message--user {
   justify-self: end;
-  background: rgb(109 40 217 / 24%);
+  background: rgb(16 185 129 / 24%);
 }
 
 .mint-message--assistant {
@@ -191,7 +191,7 @@ button {
 }
 
 .mint-message small {
-  color: #a78bfa;
+  color: #34d399;
 }
 
 .mint-composer {
@@ -242,8 +242,8 @@ button {
 }
 
 .mint-composer button {
-  border-color: rgb(167 139 250 / 32%);
-  background: #6d28d9;
+  border-color: rgb(52 211 153 / 32%);
+  background: #059669;
   color: white;
 }
 
@@ -310,7 +310,7 @@ button {
 }
 
 .mint-picture:hover {
-  border-color: rgb(167 139 250 / 55%);
+  border-color: rgb(52 211 153 / 55%);
   transform: translateY(-2px);
 }
 
@@ -353,12 +353,12 @@ button {
 }
 
 .mint-model__stage.visible {
-  border-color: rgb(167 139 250 / 58%);
-  background: radial-gradient(circle, rgb(109 40 217 / 25%), rgb(15 23 42 / 42%));
+  border-color: rgb(52 211 153 / 58%);
+  background: radial-gradient(circle, rgb(16 185 129 / 25%), rgb(15 23 42 / 42%));
 }
 
 .mint-model__stage strong {
-  color: #ddd6fe;
+  color: #d1fae5;
 }
 
 @media (max-width: 700px) {

@@ -237,6 +237,8 @@ export default function MintDashboard() {
   const [imageAttachments, setImageAttachments] = useState<Array<{ dataUri: string; name: string; previewDataUri?: string }>>([])
   const [documentAttachment, setDocumentAttachment] = useState<DocumentAttachment | null>(null)
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
+  const [sessionAutoApproved, setSessionAutoApproved] = useState(false)
+  const sessionAutoApprovedRef = useRef(false)
   const [modelVisible, setModelVisible] = useState(() => window.localStorage.getItem('mint:model-visible') !== 'false')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
@@ -318,7 +320,15 @@ export default function MintDashboard() {
       applyThemeStyles(loaded)
     })
 
-    const unlistenPromise = listen<any>('tool-approval-requested', (event) => setPendingApproval(event.payload))
+    const unlistenPromise = listen<any>('tool-approval-requested', (event) => {
+      if (sessionAutoApprovedRef.current) {
+        submitToolApproval(event.payload.token, true).catch((err) => {
+          console.error("Auto approval failed:", err)
+        })
+      } else {
+        setPendingApproval(event.payload)
+      }
+    })
     return () => {
       unlistenPromise?.then?.((unlisten) => unlisten?.())
       unlistenSpotlight?.then?.((unlisten) => unlisten?.())
@@ -395,9 +405,20 @@ export default function MintDashboard() {
     setWorkspacePath(next)
   }
 
-  async function handleApproval(approved: boolean) {
+  useEffect(() => {
+    if (!sending) {
+      sessionAutoApprovedRef.current = false
+      setSessionAutoApproved(false)
+    }
+  }, [sending])
+
+  async function handleApproval(approved: boolean, autoApproveSession = false) {
     if (!pendingApproval) return
     try {
+      if (autoApproveSession) {
+        sessionAutoApprovedRef.current = true
+        setSessionAutoApproved(true)
+      }
       await submitToolApproval(pendingApproval.token, approved)
     } catch (reason) {
       setError(errorMessage(reason))

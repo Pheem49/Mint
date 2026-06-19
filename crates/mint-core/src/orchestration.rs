@@ -192,7 +192,7 @@ fn request_chat_id(request: &ChatRequest) -> &str {
         .unwrap_or(DEFAULT_CONVERSATION_ID)
 }
 
-const MAX_STEPS: usize = 16;
+const MAX_STEPS: usize = 32;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
 pub fn build_system_prompt(config: &MintConfig) -> String {
     let mut allowed_actions = vec![
@@ -1680,6 +1680,14 @@ fn parse_agent_json<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, Orch
 fn parse_shorthand_finish(raw: &str) -> Result<AgentDecision, serde_json::Error> {
     let value: Value = serde_json::from_str(raw)?;
     let finish = value.get("finish").cloned().unwrap_or(Value::Null);
+    let input = match finish {
+        Value::Object(_) => serde_json::from_value(finish)?,
+        Value::String(s) => AgentInput {
+            summary: s,
+            ..AgentInput::default()
+        },
+        _ => AgentInput::default(),
+    };
     Ok(AgentDecision {
         thought: value
             .get("thought")
@@ -1687,7 +1695,7 @@ fn parse_shorthand_finish(raw: &str) -> Result<AgentDecision, serde_json::Error>
             .unwrap_or_default()
             .into(),
         action: "finish".into(),
-        input: serde_json::from_value(finish)?,
+        input,
     })
 }
 
@@ -2004,6 +2012,27 @@ mod tests {
 
         assert_eq!(decision.action, "finish");
         assert!(decision.input.summary.is_empty());
+    }
+
+    #[test]
+    fn shorthand_finish_allows_null_or_missing_finish() {
+        let decision = parse_decision(r#"{"thought":"done","finish":null}"#)
+            .expect("null finish should parse");
+        assert_eq!(decision.action, "finish");
+        assert!(decision.input.summary.is_empty());
+
+        let decision = parse_decision(r#"{"thought":"done"}"#)
+            .expect("missing finish should parse");
+        assert_eq!(decision.action, "finish");
+        assert!(decision.input.summary.is_empty());
+    }
+
+    #[test]
+    fn shorthand_finish_allows_string_finish_as_summary() {
+        let decision = parse_decision(r#"{"thought":"done","finish":"all done!"}"#)
+            .expect("string finish should parse as summary");
+        assert_eq!(decision.action, "finish");
+        assert_eq!(decision.input.summary, "all done!");
     }
 
     #[test]
