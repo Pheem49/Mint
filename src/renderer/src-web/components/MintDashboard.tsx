@@ -318,7 +318,7 @@ export default function MintDashboard() {
     setAgentMode(enabled)
   }
 
-  async function handleApproval(approved: boolean) {
+  async function handleApproval(approved: boolean, _autoApproveSession = false) {
     if (!pendingApproval) return
     try {
       await submitToolApproval(pendingApproval.token, approved)

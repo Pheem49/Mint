@@ -294,7 +294,7 @@ interface ChatPanelProps {
   onSetAgentMode: (enabled: boolean) => void
   onSetProvider: (provider: string) => void
   onSelectWorkspace: () => void
-  onApproval: (approved: boolean) => void
+  onApproval: (approved: boolean, autoApproveSession?: boolean) => void
   settingsConfig: any
   onSetModel: (model: string) => void
 }
@@ -397,6 +397,119 @@ function numericSetting(value: unknown, fallback: number) {
   return Number.isFinite(numeric) ? numeric : fallback
 }
 
+interface DiffHunk {
+  oldText: string
+  newText: string
+}
+
+interface FileChange {
+  path: string
+  created: boolean
+  additions: number
+  deletions: number
+  hunks: DiffHunk[]
+}
+
+function parseFileChangesFromProgress(progress: AgentProgress[]): FileChange[] {
+  const changes = new Map<string, FileChange>()
+  let activeEdit: { action: string; path: string; created: boolean; additions: number; deletions: number; hunks: DiffHunk[] } | null = null
+
+  for (const event of progress || []) {
+    if (event.type === 'ToolStart') {
+      if (event.data.action === 'apply_patch') {
+        const patch = (event.data.input as any)?.patch
+        if (patch && typeof patch.path === 'string') {
+          let additions = 0
+          let deletions = 0
+          const hunksList: DiffHunk[] = []
+          const hunks = patch.hunks
+          if (Array.isArray(hunks)) {
+            for (const hunk of hunks) {
+              const oldText = hunk?.oldText || ''
+              const newText = hunk?.newText || ''
+              const oldLines = oldText ? oldText.split('\n').length : 0
+              const newLines = newText ? newText.split('\n').length : 0
+              deletions += oldLines
+              additions += newLines
+              hunksList.push({ oldText, newText })
+            }
+          }
+          activeEdit = {
+            action: 'apply_patch',
+            path: patch.path,
+            created: false,
+            additions,
+            deletions,
+            hunks: hunksList
+          }
+        }
+      } else if (event.data.action === 'write_file') {
+        const path = (event.data.input as any)?.path
+        const fileContent = (event.data.input as any)?.file_content || ''
+        if (typeof path === 'string') {
+          const additions = fileContent ? fileContent.split('\n').length : 0
+          activeEdit = {
+            action: 'write_file',
+            path,
+            created: true,
+            additions,
+            deletions: 0,
+            hunks: [{ oldText: '', newText: fileContent }]
+          }
+        }
+      } else {
+        activeEdit = null
+      }
+    } else if (event.type === 'ToolEnd') {
+      if (activeEdit && (event.data.action === 'apply_patch' || event.data.action === 'write_file')) {
+        const isError = typeof event.data.result === 'string' && event.data.result.startsWith('Error:')
+        if (!isError) {
+          try {
+            const applied = JSON.parse(event.data.result)
+            const appliedPaths = Array.isArray(applied) ? applied.map(item => item?.path).filter(Boolean) : [activeEdit.path]
+            
+            for (const path of appliedPaths) {
+              const existing = changes.get(path)
+              if (existing) {
+                existing.additions += activeEdit.additions
+                existing.deletions += activeEdit.deletions
+                existing.hunks.push(...activeEdit.hunks)
+              } else {
+                changes.set(path, {
+                  path,
+                  created: activeEdit.created,
+                  additions: activeEdit.additions,
+                  deletions: activeEdit.deletions,
+                  hunks: [...activeEdit.hunks]
+                })
+              }
+            }
+          } catch (e) {
+            const path = activeEdit.path
+            const existing = changes.get(path)
+            if (existing) {
+              existing.additions += activeEdit.additions
+              existing.deletions += activeEdit.deletions
+              existing.hunks.push(...activeEdit.hunks)
+            } else {
+              changes.set(path, {
+                path,
+                created: activeEdit.created,
+                additions: activeEdit.additions,
+                deletions: activeEdit.deletions,
+                hunks: [...activeEdit.hunks]
+              })
+            }
+          }
+        }
+      }
+      activeEdit = null
+    }
+  }
+
+  return Array.from(changes.values())
+}
+
 export default function ChatPanel({
   interactions,
   sending,
@@ -438,6 +551,8 @@ export default function ChatPanel({
   const agentActivities = activitiesFrom(agentProgress)
   const activeFallbackNotice = fallbackNotice(streamedResponse)
   const [openActivityIds, setOpenActivityIds] = useState<Record<string, boolean>>({})
+  const [openReviewIds, setOpenReviewIds] = useState<Record<string, boolean>>({})
+  const [openFileDiffs, setOpenFileDiffs] = useState<Record<string, boolean>>({})
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [voiceMode, setVoiceMode] = useState(false)
@@ -954,6 +1069,196 @@ export default function ChatPanel({
     )
   }
 
+  const renderFileChanges = (interaction: any) => {
+    const interactionId = String(interaction.id)
+    const progress = agentActivitySnapshots[interactionId] ?? []
+    const changes = parseFileChangesFromProgress(progress)
+    if (changes.length === 0) return null
+
+    const totalAdditions = changes.reduce((sum, c) => sum + c.additions, 0)
+    const totalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0)
+    const isOpen = Boolean(openReviewIds[interactionId])
+
+    return (
+      <div className="file-changes-summary-container" style={{ marginBottom: '8px' }}>
+        <button
+          type="button"
+          className="agent-activity-toggle"
+          aria-expanded={isOpen}
+          onClick={() => setOpenReviewIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 500 }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+            <polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+          <span>
+            {changes.length} {changes.length === 1 ? 'file' : 'files'} changed
+            {totalAdditions > 0 && <span style={{ color: '#10b981', marginLeft: '6px' }}>+{totalAdditions}</span>}
+            {totalDeletions > 0 && <span style={{ color: '#ef4444', marginLeft: '4px' }}>-{totalDeletions}</span>}
+          </span>
+          <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
+        </button>
+
+        {isOpen && (
+          <div className="agent-activity-card" style={{ border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '8px', padding: '10px', background: 'rgba(15, 23, 42, 0.6)', marginTop: '4px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {changes.map((change) => {
+                const fileKey = `${interactionId}-${change.path}`
+                const isDiffOpen = Boolean(openFileDiffs[fileKey])
+                const fileName = change.path.split('/').pop() || change.path
+                const dirPath = change.path.includes('/') ? change.path.substring(0, change.path.lastIndexOf('/')) : ''
+
+                return (
+                  <div key={change.path} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '4px' }}>
+                    <div
+                      onClick={() => setOpenFileDiffs((current) => ({ ...current, [fileKey]: !current[fileKey] }))}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '4px 6px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.02)' }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                          <polyline points="14 2 14 8 20 8" />
+                        </svg>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: change.created ? '#10b981' : '#cbd5e1' }}>
+                          {fileName}
+                          {dirPath && <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 400, marginLeft: '6px' }}>{dirPath}</span>}
+                          {change.created && <span style={{ fontSize: '0.7rem', color: '#10b981', marginLeft: '6px', padding: '1px 4px', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '3px', background: 'rgba(16, 185, 129, 0.1)' }}>new</span>}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem' }}>
+                        {change.additions > 0 && <span style={{ color: '#10b981' }}>+{change.additions}</span>}
+                        {change.deletions > 0 && <span style={{ color: '#ef4444' }}>-{change.deletions}</span>}
+                        <span style={{ color: '#64748b', transform: isDiffOpen ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform 0.15s' }}>&gt;</span>
+                      </div>
+                    </div>
+
+                    {isDiffOpen && (
+                      <div style={{ marginTop: '6px', background: '#0b0f19', borderRadius: '6px', padding: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', overflowX: 'auto', maxHeight: '300px' }}>
+                        {change.hunks.map((hunk, hIdx) => (
+                          <div key={hIdx} style={{ fontSize: '0.74rem', fontFamily: 'monospace', lineHeight: '1.4', marginBottom: hIdx < change.hunks.length - 1 ? '10px' : 0 }}>
+                            {hunk.oldText && (
+                              <div style={{ background: 'rgba(239, 68, 68, 0.12)', borderLeft: '3px solid #ef4444', padding: '4px 6px', color: '#fca5a5', whiteSpace: 'pre-wrap' }}>
+                                {hunk.oldText.split('\n').map((line, lIdx) => (
+                                  <div key={lIdx}>- {line}</div>
+                                ))}
+                              </div>
+                            )}
+                            {hunk.newText && (
+                              <div style={{ background: 'rgba(16, 185, 129, 0.12)', borderLeft: '3px solid #10b981', padding: '4px 6px', color: '#a7f3d0', whiteSpace: 'pre-wrap' }}>
+                                {hunk.newText.split('\n').map((line, lIdx) => (
+                                  <div key={lIdx}>+ {line}</div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const renderActiveFileChanges = () => {
+    const changes = parseFileChangesFromProgress(agentProgress)
+    if (changes.length === 0) return null
+
+    const totalAdditions = changes.reduce((sum, c) => sum + c.additions, 0)
+    const totalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0)
+    const isOpen = Boolean(openReviewIds['active-run'])
+
+    return (
+      <div className="message ai-message agent-activity-message" style={{ marginTop: '4px', marginBottom: '8px' }}>
+        <div className="agent-activity-card" style={{ border: '1px solid rgba(16, 185, 129, 0.25)', borderRadius: '8px', padding: '10px', background: 'rgba(15, 23, 42, 0.6)' }}>
+          <button
+            type="button"
+            className="agent-activity-toggle"
+            aria-expanded={isOpen}
+            onClick={() => setOpenReviewIds((current) => ({ ...current, 'active-run': !current['active-run'] }))}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 500, border: 0, background: 'transparent', padding: 0 }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
+            </svg>
+            <span>
+              {changes.length} {changes.length === 1 ? 'file' : 'files'} changed in this run
+              {totalAdditions > 0 && <span style={{ color: '#10b981', marginLeft: '6px' }}>+{totalAdditions}</span>}
+              {totalDeletions > 0 && <span style={{ color: '#ef4444', marginLeft: '4px' }}>-{totalDeletions}</span>}
+            </span>
+            <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
+          </button>
+
+          {isOpen && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+              {changes.map((change) => {
+                const fileKey = `active-${change.path}`
+                const isDiffOpen = Boolean(openFileDiffs[fileKey])
+                const fileName = change.path.split('/').pop() || change.path
+                const dirPath = change.path.includes('/') ? change.path.substring(0, change.path.lastIndexOf('/')) : ''
+
+                return (
+                  <div key={change.path} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '4px' }}>
+                    <div
+                      onClick={() => setOpenFileDiffs((current) => ({ ...current, [fileKey]: !current[fileKey] }))}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '4px 6px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.02)' }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                          <polyline points="14 2 14 8 20 8" />
+                        </svg>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: change.created ? '#10b981' : '#cbd5e1' }}>
+                          {fileName}
+                          {dirPath && <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 400, marginLeft: '6px' }}>{dirPath}</span>}
+                          {change.created && <span style={{ fontSize: '0.7rem', color: '#10b981', marginLeft: '6px', padding: '1px 4px', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '3px', background: 'rgba(16, 185, 129, 0.1)' }}>new</span>}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem' }}>
+                        {change.additions > 0 && <span style={{ color: '#10b981' }}>+{change.additions}</span>}
+                        {change.deletions > 0 && <span style={{ color: '#ef4444' }}>-{change.deletions}</span>}
+                        <span style={{ color: '#64748b', transform: isDiffOpen ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform 0.15s' }}>&gt;</span>
+                      </div>
+                    </div>
+
+                    {isDiffOpen && (
+                      <div style={{ marginTop: '6px', background: '#0b0f19', borderRadius: '6px', padding: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', overflowX: 'auto', maxHeight: '300px' }}>
+                        {change.hunks.map((hunk, hunkIdx) => (
+                          <div key={hunkIdx} style={{ fontSize: '0.74rem', fontFamily: 'monospace', lineHeight: '1.4', marginBottom: hunkIdx < change.hunks.length - 1 ? '10px' : 0 }}>
+                            {hunk.oldText && (
+                              <div style={{ background: 'rgba(239, 68, 68, 0.12)', borderLeft: '3px solid #ef4444', padding: '4px 6px', color: '#fca5a5', whiteSpace: 'pre-wrap' }}>
+                                {hunk.oldText.split('\n').map((line, lIdx) => (
+                                  <div key={lIdx}>- {line}</div>
+                                ))}
+                              </div>
+                            )}
+                            {hunk.newText && (
+                              <div style={{ background: 'rgba(16, 185, 129, 0.12)', borderLeft: '3px solid #10b981', padding: '4px 6px', color: '#a7f3d0', whiteSpace: 'pre-wrap' }}>
+                                {hunk.newText.split('\n').map((line, lIdx) => (
+                                  <div key={lIdx}>+ {line}</div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <section className={`conversation-panel ${isEmptyChat ? 'is-empty' : ''}`}>
       <div className="chat-container">
@@ -974,6 +1279,7 @@ export default function ChatPanel({
             <div className="message ai-message">
               <div className="bubble-wrapper">
                 {renderCompletedActivity(interaction)}
+                {renderFileChanges(interaction)}
                 <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(interaction.aiText)}</div>
                 <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
@@ -1009,6 +1315,7 @@ export default function ChatPanel({
                 </div>
               </div>
             )}
+            {renderActiveFileChanges()}
             <div className="message ai-message thinking-message">
               <div className="bubble-wrapper">
                 <div className="message-bubble"><span>{streamedReply ? renderFormattedMessage(streamedReply) : 'Thinking...'}</span></div>
@@ -1046,6 +1353,7 @@ export default function ChatPanel({
                   </div>
                   <div className="approval-card-actions">
                     <button type="button" className="approval-btn approval-btn-approve" onClick={() => onApproval(true)}>Approve</button>
+                    <button type="button" className="approval-btn" style={{ backgroundColor: 'rgba(16, 185, 129, 0.22)', borderColor: 'rgba(16, 185, 129, 0.4)', color: '#a7f3d0' }} onClick={() => onApproval(true, true)}>Approve this session</button>
                     <button type="button" className="approval-btn approval-btn-cancel" onClick={() => onApproval(false)}>Cancel</button>
                   </div>
                 </div>
