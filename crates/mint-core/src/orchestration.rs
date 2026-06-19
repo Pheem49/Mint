@@ -192,7 +192,7 @@ fn request_chat_id(request: &ChatRequest) -> &str {
         .unwrap_or(DEFAULT_CONVERSATION_ID)
 }
 
-const MAX_STEPS: usize = 16;
+const MAX_STEPS: usize = 32;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
 pub fn build_system_prompt(config: &MintConfig) -> String {
     let mut allowed_actions = vec![

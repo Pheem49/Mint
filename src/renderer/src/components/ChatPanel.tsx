@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useRef, useState, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
 import {
   type AgentProgress,
   type ChatResponse,
@@ -302,16 +302,51 @@ interface ChatPanelProps {
 function renderFormattedMessage(text: string) {
   const displayText = readableAssistantText(text)
   if (!displayText) return null
-  const parts = displayText.split(/\*\*([\s\S]*?)\*\*/g)
-  return parts.map((part, index) => {
-    if (index % 2 === 1) {
+  
+  const lines = displayText.split('\n')
+  return lines.map((line, lineIndex) => {
+    const headerMatch = line.match(/^(#{1,6})\s+(.*)$/)
+    
+    const formatInline = (str: string) => {
+      const parts = str.split(/\*\*([\s\S]*?)\*\*/g)
+      return parts.map((part, partIndex) => {
+        if (partIndex % 2 === 1) {
+          return (
+            <strong key={partIndex} className="chat-bold-highlight">
+              {part}
+            </strong>
+          )
+        }
+        return part
+      })
+    }
+
+    if (headerMatch) {
+      const level = headerMatch[1].length
+      const content = headerMatch[2]
+      
+      const style = {
+        fontWeight: 'bold',
+        display: 'block',
+        marginTop: level === 1 ? '16px' : level === 2 ? '14px' : '10px',
+        marginBottom: '6px',
+        fontSize: level === 1 ? '1.25em' : level === 2 ? '1.15em' : '1.05em',
+        color: 'var(--text-main)'
+      }
+      
       return (
-        <strong key={index} className="chat-bold-highlight">
-          {part}
-        </strong>
+        <span key={lineIndex} style={style}>
+          {formatInline(content)}
+        </span>
       )
     }
-    return part
+
+    return (
+      <Fragment key={lineIndex}>
+        {formatInline(line)}
+        {lineIndex < lines.length - 1 && '\n'}
+      </Fragment>
+    )
   })
 }
 

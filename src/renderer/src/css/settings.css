@@ -486,7 +486,7 @@ input[type="color"] {
 
 .toggle-visibility:hover {
     background: var(--accent-soft);
-    border-color: rgba(139, 92, 246, 0.36);
+    border-color: rgba(16, 185, 129, 0.36);
     color: var(--text-main);
 }
 
@@ -628,13 +628,13 @@ input:checked + .toggle-slider::before {
     border: 3px solid var(--panel-bg);
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.5), 0 6px 16px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.5), 0 6px 16px rgba(0, 0, 0, 0.25);
 }
 
 .range-value {
     min-width: 68px;
     padding: 5px 9px;
-    border: 1px solid rgba(139, 92, 246, 0.3);
+    border: 1px solid rgba(16, 185, 129, 0.3);
     border-radius: 8px;
     background: var(--accent-soft);
     color: var(--accent-hover);

@@ -1,6 +1,6 @@
 :root {
-    --accent: #8b5cf6;
-    --accent-glow: rgba(139, 92, 246, 0.6);
+    --accent: #10b981;
+    --accent-glow: rgba(16, 185, 129, 0.6);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }

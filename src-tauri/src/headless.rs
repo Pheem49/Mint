@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::browser::{click, navigate, read_page_text};
 
-const MAX_STEPS: usize = 10;
+const MAX_STEPS: usize = 20;
 const SYSTEM_PROMPT: &str = r#"You are Mint's native background task agent. Return only JSON:
 {"thought":"short progress note","action":"done|propose_folder|propose_write_file|open_url|browser_read|browser_click|knowledge_search|propose_bash","target":"path, URL, selector, query, command, or final result","data":"optional file content"}
 Use only one action per response. Background tasks never mutate the filesystem or execute shell commands. Use propose_folder, propose_write_file, and propose_bash so Mint can record a proposal for explicit user approval."#;
