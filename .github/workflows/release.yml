@@ -58,16 +58,11 @@ jobs:
       - name: Build desktop bundle
         run: npm run tauri:build
 
-      - name: Build CLI
-        run: npm run build:cli
-
       - name: Collect artifacts
         run: |
           mkdir -p release-artifacts
           cp target/release/bundle/deb/*.deb release-artifacts/
           cp target/release/bundle/tar/*.tar.gz release-artifacts/
-          cp target/release/mint release-artifacts/mint-cli-linux-x86_64
-          sha256sum release-artifacts/* > release-artifacts/SHA256SUMS
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
