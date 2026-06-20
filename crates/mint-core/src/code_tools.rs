@@ -466,12 +466,13 @@ fn is_ignored_directory(path: &Path) -> bool {
 }
 
 pub fn parse_github_url(url: &str) -> Option<(String, String)> {
-    let cleaned = url.trim()
+    let cleaned = url
+        .trim()
         .trim_start_matches("https://")
         .trim_start_matches("http://")
         .trim_start_matches("www.")
         .trim_start_matches("github.com/");
-    
+
     let parts: Vec<&str> = cleaned.split('/').collect();
     if parts.len() >= 2 {
         let owner = parts[0].to_string();
@@ -493,17 +494,26 @@ pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String
 
     // 1. Fetch Repository Info
     let repo_url = format!("https://api.github.com/repos/{}/{}", owner, repo);
-    let repo_resp = client.get(&repo_url).send().await.map_err(|e| e.to_string())?;
+    let repo_resp = client
+        .get(&repo_url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     if !repo_resp.status().is_success() {
-        return Err(format!("Failed to fetch repository metadata: {}", repo_resp.status()));
+        return Err(format!(
+            "Failed to fetch repository metadata: {}",
+            repo_resp.status()
+        ));
     }
     let repo_info: serde_json::Value = repo_resp.json().await.map_err(|e| e.to_string())?;
-    
-    let description = repo_info["description"].as_str().unwrap_or("No description provided.");
+
+    let description = repo_info["description"]
+        .as_str()
+        .unwrap_or("No description provided.");
     let language = repo_info["language"].as_str().unwrap_or("Unknown");
     let stars = repo_info["stargazers_count"].as_u64().unwrap_or(0);
     let forks = repo_info["forks_count"].as_u64().unwrap_or(0);
-    
+
     let mut topics_list = Vec::new();
     if let Some(topics) = repo_info["topics"].as_array() {
         for t in topics {
@@ -520,7 +530,11 @@ pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String
 
     // 2. Fetch Directory contents (top level)
     let contents_url = format!("https://api.github.com/repos/{}/{}/contents", owner, repo);
-    let contents_resp = client.get(&contents_url).send().await.map_err(|e| e.to_string())?;
+    let contents_resp = client
+        .get(&contents_url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     let mut file_tree = String::from("Unavailable");
     if contents_resp.status().is_success() {
         if let Ok(contents_info) = contents_resp.json::<serde_json::Value>().await {
@@ -538,7 +552,11 @@ pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String
 
     // 3. Fetch README.md
     let readme_url = format!("https://api.github.com/repos/{}/{}/readme", owner, repo);
-    let readme_resp = client.get(&readme_url).send().await.map_err(|e| e.to_string())?;
+    let readme_resp = client
+        .get(&readme_url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     let mut readme_text = String::from("No README available.");
     if readme_resp.status().is_success() {
         if let Ok(readme_info) = readme_resp.json::<serde_json::Value>().await {

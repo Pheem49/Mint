@@ -51,7 +51,8 @@ pub async fn resolve_github_links(message: &str, config: &MintConfig) -> String 
     use std::sync::OnceLock;
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        regex::Regex::new(r"https?://(?:www\.)?github\.com/([a-zA-Z0-9\-_.]+)/([a-zA-Z0-9\-_.]+)").unwrap()
+        regex::Regex::new(r"https?://(?:www\.)?github\.com/([a-zA-Z0-9\-_.]+)/([a-zA-Z0-9\-_.]+)")
+            .unwrap()
     });
 
     let mut resolved_msg = message.to_string();
@@ -64,11 +65,16 @@ pub async fn resolve_github_links(message: &str, config: &MintConfig) -> String 
             if repo.ends_with(".git") {
                 repo = repo[..repo.len() - 4].to_string();
             }
-            let repo_clean: String = repo.chars().take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '.').collect();
-            
+            let repo_clean: String = repo
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
+                .collect();
+
             let repo_key = format!("{owner}/{repo_clean}");
             if resolved_repos.insert(repo_key.clone()) {
-                if let Ok(summary) = crate::code_tools::fetch_github_repo_summary(owner, &repo_clean).await {
+                if let Ok(summary) =
+                    crate::code_tools::fetch_github_repo_summary(owner, &repo_clean).await
+                {
                     resolved_msg.push_str(&format!(
                         "\n\n--- Auto-Resolved GitHub Metadata for {} ---\n{}\n--------------------------------------------",
                         repo_key, summary
@@ -2075,8 +2081,8 @@ mod tests {
         assert_eq!(decision.action, "finish");
         assert!(decision.input.summary.is_empty());
 
-        let decision = parse_decision(r#"{"thought":"done"}"#)
-            .expect("missing finish should parse");
+        let decision =
+            parse_decision(r#"{"thought":"done"}"#).expect("missing finish should parse");
         assert_eq!(decision.action, "finish");
         assert!(decision.input.summary.is_empty());
     }

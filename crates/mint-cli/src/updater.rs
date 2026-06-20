@@ -1,5 +1,5 @@
-use std::process::Command;
 use std::path::PathBuf;
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
@@ -165,7 +165,11 @@ pub fn print_update_notice(current: &str, latest: &str) {
     let notes_url = "https://github.com/Pheem49/Mint/releases/latest";
 
     // Text lengths (including 1 leading space)
-    let title_clean_len = 1 + 3 + format!("Update available! {} -> {}", current, latest).chars().count();
+    let title_clean_len = 1
+        + 3
+        + format!("Update available! {} -> {}", current, latest)
+            .chars()
+            .count();
     let command_msg_len = 1 + command_msg.len();
     let notes_label_len = 1 + notes_label.len();
     let notes_url_len = 1 + notes_url.len();
@@ -173,16 +177,24 @@ pub fn print_update_notice(current: &str, latest: &str) {
     let max_len = command_msg_len
         .max(title_clean_len)
         .max(notes_label_len)
-        .max(notes_url_len) + 1; // plus 1 for trailing space before right border
+        .max(notes_url_len)
+        + 1; // plus 1 for trailing space before right border
 
     let border = "─".repeat(max_len);
     println!("\x1b[33m╭{}╮\x1b[0m", border);
-    
+
     // Line 1: Title
-    let title_display = format!(" ✨ Update available! \x1b[1;32m{}\x1b[0;33m -> \x1b[1;32m{}\x1b[0;33m", current, latest);
+    let title_display = format!(
+        " ✨ Update available! \x1b[1;32m{}\x1b[0;33m -> \x1b[1;32m{}\x1b[0;33m",
+        current, latest
+    );
     let padding1 = max_len - title_clean_len;
-    println!("\x1b[33m│\x1b[0m{}{}\x1b[33m│\x1b[0m", title_display, " ".repeat(padding1));
-    
+    println!(
+        "\x1b[33m│\x1b[0m{}{}\x1b[33m│\x1b[0m",
+        title_display,
+        " ".repeat(padding1)
+    );
+
     // Line 2: Command
     let padding2 = max_len - command_msg_len;
     println!(
@@ -209,7 +221,7 @@ pub fn print_update_notice(current: &str, latest: &str) {
         notes_url,
         " ".repeat(padding5)
     );
-    
+
     println!("\x1b[33m╰{}╯\x1b[0m\n", border);
 }
 

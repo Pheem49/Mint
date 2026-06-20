@@ -10,11 +10,11 @@ use mint_core::{
     CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, KnowledgeStore, MemoryStore,
     MintConfig, TaskStore, apply_code_edits, assert_path_capability, build_code_patch,
     build_symbol_index, classify_shell_command, config_path, create_folder, execute_native_plugin,
-    find_paths, index_semantic_code, initialize_config, inspect_code_plan, list_code_files,
-    load_config, native_plugins, orchestrate_chat_stream_with_fallback,
-    orchestrate_chat_with_fallback, propose_code_edits, read_code_file, repository_summary,
-    run_shell_command, search_code, search_semantic_code, set_config_value,
-    parse_github_url, fetch_github_repo_summary,
+    fetch_github_repo_summary, find_paths, index_semantic_code, initialize_config,
+    inspect_code_plan, list_code_files, load_config, native_plugins,
+    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, parse_github_url,
+    propose_code_edits, read_code_file, repository_summary, run_shell_command, search_code,
+    search_semantic_code, set_config_value,
 };
 
 mod agent;
@@ -2746,18 +2746,24 @@ fn print_shell_output(output: &mint_core::ShellOutput) {
     );
 }
 
-
-
 async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
     let Some((owner, repo_name)) = parse_github_url(repo) else {
-        anyhow::bail!("Invalid GitHub repository URL/format. Please use 'owner/repo' or a full GitHub URL.");
+        anyhow::bail!(
+            "Invalid GitHub repository URL/format. Please use 'owner/repo' or a full GitHub URL."
+        );
     };
 
-    println!("Fetching information for {}/{} from GitHub...", owner, repo_name);
+    println!(
+        "Fetching information for {}/{} from GitHub...",
+        owner, repo_name
+    );
     let summary = match fetch_github_repo_summary(&owner, &repo_name).await {
         Ok(s) => s,
         Err(e) => {
-            anyhow::bail!("Failed to fetch repository summary: {}. Check that the repository is public and spelled correctly.", e);
+            anyhow::bail!(
+                "Failed to fetch repository summary: {}. Check that the repository is public and spelled correctly.",
+                e
+            );
         }
     };
 
@@ -2781,12 +2787,14 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
     )
     .await?;
 
-    println!("\n--- AI Repository Overview for {}/{} ---", owner, repo_name);
+    println!(
+        "\n--- AI Repository Overview for {}/{} ---",
+        owner, repo_name
+    );
     println!("{}", response.text);
     println!("--------------------------------------------------");
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {

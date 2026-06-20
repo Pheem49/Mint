@@ -787,15 +787,15 @@ fn confirm_pausing_interrupt(prompt: &str, approval_active: &AtomicBool) -> bool
 fn format_markdown_bold(text: &str) -> String {
     let mut formatted_lines = Vec::new();
     let mut in_code_block = false;
-    
+
     for line in text.lines() {
         let mut formatted_line = line.to_string();
         let trimmed = line.trim_start();
-        
+
         if trimmed.starts_with("```") {
             in_code_block = !in_code_block;
         }
-        
+
         if !in_code_block {
             let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
             if hash_count > 0 && hash_count <= 6 {
@@ -818,10 +818,10 @@ fn format_markdown_bold(text: &str) -> String {
             // Do not format markdown inside code blocks
             formatted_line = line.to_string();
         }
-        
+
         formatted_lines.push(formatted_line);
     }
-    
+
     let mut result = formatted_lines.join("\n");
     if text.ends_with('\n') {
         result.push('\n');
