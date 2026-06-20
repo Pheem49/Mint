@@ -938,7 +938,7 @@ async fn launch_mint_target(target: String) -> Result<()> {
             run_interactive_chat().await?;
         }
         "app_link" => {
-            const APP_URL: &str = "https://kandone.aemeth.xyz";
+            const APP_URL: &str = "https://mint.aemeth.xyz";
             println!("{MINT}Opening Mint App Link...{RESET}");
             println!("{BLUE}Open app:{RESET} {APP_URL}\n");
             open_system_handler(APP_URL)?;
