@@ -14,6 +14,7 @@ use mint_core::{
     load_config, native_plugins, orchestrate_chat_stream_with_fallback,
     orchestrate_chat_with_fallback, propose_code_edits, read_code_file, repository_summary,
     run_shell_command, search_code, search_semantic_code, set_config_value,
+    parse_github_url, fetch_github_repo_summary,
 };
 
 mod agent;
@@ -399,6 +400,11 @@ enum CodeCommand {
         approval_token: String,
         #[arg(long, default_value = ".")]
         root: PathBuf,
+    },
+    /// Fetch GitHub repository metadata and README, then get an overview of the repo.
+    GithubOverview {
+        /// The GitHub repository URL or name (e.g. "https://github.com/owner/repo" or "owner/repo").
+        repo: String,
     },
 }
 
@@ -895,6 +901,9 @@ async fn main() -> Result<()> {
                             &config,
                         )?)?
                     ),
+                    CodeCommand::GithubOverview { repo } => {
+                        run_github_overview(&repo, &config).await?;
+                    }
                 }
             }
             Command::Open { target } => {
@@ -2736,6 +2745,48 @@ fn print_shell_output(output: &mint_core::ShellOutput) {
         output.sandboxed
     );
 }
+
+
+
+async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
+    let Some((owner, repo_name)) = parse_github_url(repo) else {
+        anyhow::bail!("Invalid GitHub repository URL/format. Please use 'owner/repo' or a full GitHub URL.");
+    };
+
+    println!("Fetching information for {}/{} from GitHub...", owner, repo_name);
+    let summary = match fetch_github_repo_summary(&owner, &repo_name).await {
+        Ok(s) => s,
+        Err(e) => {
+            anyhow::bail!("Failed to fetch repository summary: {}. Check that the repository is public and spelled correctly.", e);
+        }
+    };
+
+    println!("Analyzing repository with AI model...");
+    let prompt = format!(
+        "Here is the metadata, top-level directory structure, and README.md content for the GitHub repository {}/{}:\n\n{}\n\nBased on this information, please provide a high-level overview of what this repository is about, what tech stack it uses, its overall architecture, and how it is organized.",
+        owner, repo_name, summary
+    );
+
+    let (response, _) = orchestrate_chat_with_fallback(
+        config,
+        &ChatRequest {
+            message: prompt,
+            system_instruction: "You are a professional software architect providing a high-level overview of a code repository based on its metadata and README.".to_string(),
+            chat_id: Some("github_review".to_string()),
+            image_data_uri: None,
+            audio_data_uri: None,
+            document_attachment: None,
+            workspace_path: None,
+        },
+    )
+    .await?;
+
+    println!("\n--- AI Repository Overview for {}/{} ---", owner, repo_name);
+    println!("{}", response.text);
+    println!("--------------------------------------------------");
+    Ok(())
+}
+
 
 #[cfg(test)]
 mod tests {

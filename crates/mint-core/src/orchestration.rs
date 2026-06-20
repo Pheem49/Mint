@@ -35,12 +35,59 @@ pub enum OrchestrationError {
     Agent(String),
 }
 
+pub async fn resolve_github_links(message: &str, config: &MintConfig) -> String {
+    // Check if a GitHub MCP server is configured in Settings
+    let github_mcp_configured = crate::mcp::configured_mcp_servers(config)
+        .ok()
+        .map(|servers| servers.contains_key("github"))
+        .unwrap_or(false);
+
+    if github_mcp_configured {
+        // If GitHub MCP is active, we let it handle the repo via tool calls
+        // to avoid duplicate/redundant context.
+        return message.to_string();
+    }
+
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"https?://(?:www\.)?github\.com/([a-zA-Z0-9\-_.]+)/([a-zA-Z0-9\-_.]+)").unwrap()
+    });
+
+    let mut resolved_msg = message.to_string();
+    let mut resolved_repos = std::collections::HashSet::new();
+
+    for caps in re.captures_iter(message) {
+        if let (Some(owner_match), Some(repo_match)) = (caps.get(1), caps.get(2)) {
+            let owner = owner_match.as_str();
+            let mut repo = repo_match.as_str().to_string();
+            if repo.ends_with(".git") {
+                repo = repo[..repo.len() - 4].to_string();
+            }
+            let repo_clean: String = repo.chars().take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '.').collect();
+            
+            let repo_key = format!("{owner}/{repo_clean}");
+            if resolved_repos.insert(repo_key.clone()) {
+                if let Ok(summary) = crate::code_tools::fetch_github_repo_summary(owner, &repo_clean).await {
+                    resolved_msg.push_str(&format!(
+                        "\n\n--- Auto-Resolved GitHub Metadata for {} ---\n{}\n--------------------------------------------",
+                        repo_key, summary
+                    ));
+                }
+            }
+        }
+    }
+    resolved_msg
+}
+
 pub async fn orchestrate_chat(
     config: &MintConfig,
     request: &ChatRequest,
 ) -> Result<ChatResponse, OrchestrationError> {
+    let mut resolved_request = request.clone();
+    resolved_request.message = resolve_github_links(&request.message, config).await;
     let memory = MemoryStore::open_default()?;
-    let enriched = enrich_request(&memory, request)?;
+    let enriched = enrich_request(&memory, &resolved_request)?;
     let response = send_chat(config, &enriched).await?;
     memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
@@ -66,8 +113,10 @@ pub async fn orchestrate_chat_stream<F>(
 where
     F: FnMut(String),
 {
+    let mut resolved_request = request.clone();
+    resolved_request.message = resolve_github_links(&request.message, config).await;
     let memory = MemoryStore::open_default()?;
-    let enriched = enrich_request(&memory, request)?;
+    let enriched = enrich_request(&memory, &resolved_request)?;
     let response = stream_chat(config, &enriched, on_chunk).await?;
     memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
@@ -89,8 +138,10 @@ pub async fn orchestrate_chat_with_fallback(
     config: &MintConfig,
     request: &ChatRequest,
 ) -> Result<(ChatResponse, Option<String>), OrchestrationError> {
+    let mut resolved_request = request.clone();
+    resolved_request.message = resolve_github_links(&request.message, config).await;
     let memory = MemoryStore::open_default()?;
-    let enriched = enrich_request(&memory, request)?;
+    let enriched = enrich_request(&memory, &resolved_request)?;
     let (response, fallback) = send_chat_with_fallback(config, &enriched).await?;
     memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
@@ -116,8 +167,10 @@ pub async fn orchestrate_chat_stream_with_fallback<F>(
 where
     F: FnMut(String),
 {
+    let mut resolved_request = request.clone();
+    resolved_request.message = resolve_github_links(&request.message, config).await;
     let memory = MemoryStore::open_default()?;
-    let enriched = enrich_request(&memory, request)?;
+    let enriched = enrich_request(&memory, &resolved_request)?;
     let (response, fallback) = stream_chat_with_fallback(config, &enriched, on_chunk).await?;
     memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
@@ -572,8 +625,9 @@ where
             e
         ))
     })?;
+    let resolved_task = resolve_github_links(task, config).await;
     let skills = crate::skills::learned_skills_context().unwrap_or_default();
-    let mut observation = initial_observation(task, &root, &skills);
+    let mut observation = initial_observation(&resolved_task, &root, &skills);
     let mut pending_image = image_data_uri;
 
     let mut system_prompt = build_system_prompt(config);

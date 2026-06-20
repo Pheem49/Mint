@@ -53,6 +53,7 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ### 5. 🔌 Tool & MCP Integrations
 - Support **Model Context Protocol (MCP)** to connect tools like Google/Brave Search, Filesystem servers, and GitHub context.
+- **Auto GitHub Link Resolver:** Automatically detects GitHub URLs in chat messages (CLI, Web, and Desktop) and Code Agent tasks. It fetches and injects the repository's metadata, directory structure, and README as prompt context, serving as an instant fallback when the GitHub MCP server is not active.
 - Local plugins for Spotify playback control, Google Calendar, Gmail drafts, and Notion workspace reading.
 
 ---
@@ -307,6 +308,7 @@ Mint includes native workspace tools for code inspection, planning, editing, and
 
 ```bash
 mint code agent "inspect this repo and fix the failing tests"
+mint code github-overview "Pheem49/Mint"
 mint code summary .
 mint code search "shell approval flow" .
 mint symbols .

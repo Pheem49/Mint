@@ -465,6 +465,101 @@ fn is_ignored_directory(path: &Path) -> bool {
         .is_some_and(|name| IGNORED_DIRECTORIES.contains(&name))
 }
 
+pub fn parse_github_url(url: &str) -> Option<(String, String)> {
+    let cleaned = url.trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_start_matches("www.")
+        .trim_start_matches("github.com/");
+    
+    let parts: Vec<&str> = cleaned.split('/').collect();
+    if parts.len() >= 2 {
+        let owner = parts[0].to_string();
+        let mut repo = parts[1].to_string();
+        if repo.ends_with(".git") {
+            repo = repo[..repo.len() - 4].to_string();
+        }
+        Some((owner, repo))
+    } else {
+        None
+    }
+}
+
+pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("mint-core")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // 1. Fetch Repository Info
+    let repo_url = format!("https://api.github.com/repos/{}/{}", owner, repo);
+    let repo_resp = client.get(&repo_url).send().await.map_err(|e| e.to_string())?;
+    if !repo_resp.status().is_success() {
+        return Err(format!("Failed to fetch repository metadata: {}", repo_resp.status()));
+    }
+    let repo_info: serde_json::Value = repo_resp.json().await.map_err(|e| e.to_string())?;
+    
+    let description = repo_info["description"].as_str().unwrap_or("No description provided.");
+    let language = repo_info["language"].as_str().unwrap_or("Unknown");
+    let stars = repo_info["stargazers_count"].as_u64().unwrap_or(0);
+    let forks = repo_info["forks_count"].as_u64().unwrap_or(0);
+    
+    let mut topics_list = Vec::new();
+    if let Some(topics) = repo_info["topics"].as_array() {
+        for t in topics {
+            if let Some(t_str) = t.as_str() {
+                topics_list.push(t_str.to_string());
+            }
+        }
+    }
+    let topics_str = if topics_list.is_empty() {
+        "None".to_string()
+    } else {
+        topics_list.join(", ")
+    };
+
+    // 2. Fetch Directory contents (top level)
+    let contents_url = format!("https://api.github.com/repos/{}/{}/contents", owner, repo);
+    let contents_resp = client.get(&contents_url).send().await.map_err(|e| e.to_string())?;
+    let mut file_tree = String::from("Unavailable");
+    if contents_resp.status().is_success() {
+        if let Ok(contents_info) = contents_resp.json::<serde_json::Value>().await {
+            if let Some(arr) = contents_info.as_array() {
+                let mut files = Vec::new();
+                for item in arr {
+                    let name = item["name"].as_str().unwrap_or("");
+                    let r#type = item["type"].as_str().unwrap_or("");
+                    files.push(format!("- {} ({})", name, r#type));
+                }
+                file_tree = files.join("\n");
+            }
+        }
+    }
+
+    // 3. Fetch README.md
+    let readme_url = format!("https://api.github.com/repos/{}/{}/readme", owner, repo);
+    let readme_resp = client.get(&readme_url).send().await.map_err(|e| e.to_string())?;
+    let mut readme_text = String::from("No README available.");
+    if readme_resp.status().is_success() {
+        if let Ok(readme_info) = readme_resp.json::<serde_json::Value>().await {
+            if let Some(content_b64) = readme_info["content"].as_str() {
+                let cleaned_b64 = content_b64.replace('\n', "").replace('\r', "");
+                use base64::{Engine as _, engine::general_purpose::STANDARD};
+                if let Ok(decoded_bytes) = STANDARD.decode(cleaned_b64) {
+                    readme_text = String::from_utf8_lossy(&decoded_bytes).to_string();
+                }
+            }
+        }
+    }
+
+    let summary = format!(
+        "Repository: {}/{}\nDescription: {}\nPrimary Language: {}\nStars: {}\nForks: {}\nTopics: {}\n\nTop-level File Directory:\n{}\n\nREADME.md:\n{}",
+        owner, repo, description, language, stars, forks, topics_str, file_tree, readme_text
+    );
+
+    Ok(summary)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
