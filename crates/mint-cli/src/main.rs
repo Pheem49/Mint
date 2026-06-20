@@ -947,12 +947,36 @@ async fn launch_mint_target(target: String) -> Result<()> {
             println!(
                 "{MINT}Launching Web App (vite) in background...{RESET} {DIM}(Vite Dev UI at http://localhost:9000){RESET}"
             );
-            let project_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .and_then(|p| p.parent())
-                .ok_or_else(|| anyhow::anyhow!("Failed to find project root directory"))?;
+            let project_root = {
+                let mut found = None;
+                if let Ok(exe_path) = std::env::current_exe() {
+                    let mut path = exe_path.parent();
+                    while let Some(p) = path {
+                        if p.join("package.json").exists() {
+                            found = Some(p.to_path_buf());
+                            break;
+                        }
+                        path = p.parent();
+                    }
+                }
+                if found.is_none() {
+                    if let Ok(cwd) = std::env::current_dir() {
+                        let mut path = Some(cwd.as_path());
+                        while let Some(p) = path {
+                            if p.join("package.json").exists() {
+                                found = Some(p.to_path_buf());
+                                break;
+                            }
+                            path = p.parent();
+                        }
+                    }
+                }
+                found.ok_or_else(|| {
+                    anyhow::anyhow!("Failed to find project root directory containing package.json")
+                })?
+            };
             std::process::Command::new("npm")
-                .current_dir(project_root)
+                .current_dir(&project_root)
                 .args(&["run", "dev:web"])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())

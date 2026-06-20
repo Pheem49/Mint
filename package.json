@@ -1,6 +1,6 @@
 {
   "name": "@pheem49/mint",
-  "version": "1.6.0",
+  "version": "1.6.2",
   "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
   "scripts": {
     "dev:web": "vite --config vite.config.web.ts",
@@ -24,28 +24,40 @@
     "preview": "vite preview",
     "start": "tauri dev",
     "test": "cargo test -p mint-core -p mint-cli",
-    "cli": "cargo run -p mint-cli --"
+    "cli": "cargo run -p mint-cli --",
+    "postinstall": "cargo build -p mint-cli --release && mkdir -p bin && cp target/release/mint bin/mint"
   },
   "keywords": [],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pheem49/Mint.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Pheem49/Mint/issues"
+  },
+  "homepage": "https://github.com/Pheem49/Mint#readme",
   "author": {
     "name": "Pheem49",
     "email": "killerpheem13@gmail.com"
   },
   "license": "AGPL-3.0-only",
   "type": "commonjs",
+  "bin": {
+    "mint": "src/bin/index.js"
+  },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
-    "pixi-live2d-display": "^0.4.0",
-    "pixi.js": "^6.5.10",
-    "react": "^19.2.5"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0",
     "@vitejs/plugin-react": "^6.0.1",
     "material-icon-theme": "^5.35.0",
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "^6.5.10",
+    "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "typescript": "^6.0.3",
     "vite": "^8.0.10"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
   },
   "overrides": {
     "gh-pages": "^5.0.0"

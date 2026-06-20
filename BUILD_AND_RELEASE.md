@@ -43,3 +43,19 @@ runs publish a GitHub Release.
 The updater requires a configured release endpoint, a public key in the Tauri config, and signed
 release artifacts. Exercise update installation against the published endpoint before promoting a
 release.
+
+## Publish to npm
+
+To publish the repository package to the npm registry as a public scoped package:
+
+1. **Log in to npm** (if not already logged in):
+   ```bash
+   npm login
+   ```
+
+2. **Publish the package** (since `@pheem49/mint` is a scoped package, you must specify public access):
+   ```bash
+   npm publish --access public
+   ```
+
+*Note: You must bump the version number in `package.json` before publishing a new version.*
