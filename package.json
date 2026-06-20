@@ -1,6 +1,6 @@
 {
   "name": "@pheem49/mint",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
   "scripts": {
     "dev:web": "vite --config vite.config.web.ts",
@@ -25,7 +25,7 @@
     "start": "tauri dev",
     "test": "cargo test -p mint-core -p mint-cli",
     "cli": "cargo run -p mint-cli --",
-    "prepublishOnly": "npm run build:cli && mkdir -p bin && cp target/release/mint bin/mint"
+    "postinstall": "cargo build -p mint-cli --release && mkdir -p bin && cp target/release/mint bin/mint"
   },
   "keywords": [],
   "author": {
@@ -35,7 +35,7 @@
   "license": "AGPL-3.0-only",
   "type": "commonjs",
   "bin": {
-    "mint": "./bin/mint"
+    "mint": "src/bin/index.js"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

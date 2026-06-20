@@ -32,7 +32,7 @@ coverage/
 target/
 release/
 build/
-bin/
+/bin/
 
 # ==========================
 # Logs

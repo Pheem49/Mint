@@ -1,9 +1,7 @@
-# Ignore Rust backend files
-crates/
+# Ignore Rust backend and build files
 src-tauri/
 target/
-Cargo.toml
-Cargo.lock
+out/
 rustc_checker.py
 
 # Ignore local configuration and developer tools
