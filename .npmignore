@@ -1,0 +1,29 @@
+# Ignore Rust backend files
+crates/
+src-tauri/
+target/
+Cargo.toml
+Cargo.lock
+rustc_checker.py
+
+# Ignore local configuration and developer tools
+.agents/
+.antigravitycli/
+.cargo_home/
+.codex/
+.rustup/
+.rustup_copy/
+.rustup_home/
+.vite-web/
+.env*
+logs/
+
+# Ignore documentation and guidelines
+docs/
+BUILD_AND_RELEASE.md
+CONTRIBUTING.md
+TAURI_MIGRATION.md
+
+# Ignore installer scripts
+install.sh
+install.ps1

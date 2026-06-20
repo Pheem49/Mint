@@ -24,7 +24,8 @@
     "preview": "vite preview",
     "start": "tauri dev",
     "test": "cargo test -p mint-core -p mint-cli",
-    "cli": "cargo run -p mint-cli --"
+    "cli": "cargo run -p mint-cli --",
+    "prepublishOnly": "npm run build:cli && mkdir -p bin && cp target/release/mint bin/mint"
   },
   "keywords": [],
   "author": {
@@ -33,19 +34,22 @@
   },
   "license": "AGPL-3.0-only",
   "type": "commonjs",
+  "bin": {
+    "mint": "./bin/mint"
+  },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
-    "pixi-live2d-display": "^0.4.0",
-    "pixi.js": "^6.5.10",
-    "react": "^19.2.5"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0",
     "@vitejs/plugin-react": "^6.0.1",
     "material-icon-theme": "^5.35.0",
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "^6.5.10",
+    "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "typescript": "^6.0.3",
     "vite": "^8.0.10"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
   },
   "overrides": {
     "gh-pages": "^5.0.0"
