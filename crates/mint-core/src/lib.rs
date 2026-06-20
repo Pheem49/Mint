@@ -32,7 +32,7 @@ pub use code_tools::{
     AppliedCodeEdit, CodeEdit, CodeEditPreview, CodeEditProposal, CodeFile, CodeInspectionError,
     CodePatchHunk, CodePlan, CodeSearchHit, RepositorySummary, apply_code_edits, build_code_patch,
     inspect_code_plan, list_code_files, propose_code_edits, read_code_file, repository_summary,
-    search_code,
+    search_code, parse_github_url, fetch_github_repo_summary,
 };
 pub use config::{
     ConfigError, MintConfig, config_path, initialize_config, load_config, save_config,
