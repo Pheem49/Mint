@@ -46,9 +46,6 @@ export default function PicturesLibrary({ view, pictures, onSetView }: PicturesL
         <div><span className="pictures-kicker">Gallery</span><h2>Saved Pictures</h2></div>
         <div className="pictures-header-actions">
           <button className="pictures-close-btn" onClick={() => onSetView('chat')}>Close Gallery</button>
-          <button type="button" className="picture-folder-btn" disabled={pictures.length === 0} onClick={() => window.settingsApi?.openFolder(pictures[0]?.path || '')}>
-            Open Folder
-          </button>
         </div>
       </header>
       {pictures.length === 0 ? (
