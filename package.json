@@ -1,6 +1,6 @@
 {
   "name": "@pheem49/mint",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
   "scripts": {
     "dev:web": "vite --config vite.config.web.ts",
@@ -28,6 +28,14 @@
     "postinstall": "cargo build -p mint-cli --release && mkdir -p bin && cp target/release/mint bin/mint"
   },
   "keywords": [],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Pheem49/Mint.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Pheem49/Mint/issues"
+  },
+  "homepage": "https://github.com/Pheem49/Mint#readme",
   "author": {
     "name": "Pheem49",
     "email": "killerpheem13@gmail.com"
