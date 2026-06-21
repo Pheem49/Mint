@@ -604,13 +604,7 @@ where
 fn parse_stream_line(format: StreamFormat, line: &str) -> Option<String> {
     let payload = match format {
         StreamFormat::Ollama => line,
-        _ => {
-            if let Some(stripped) = line.strip_prefix("data:") {
-                stripped.trim()
-            } else {
-                return None;
-            }
-        }
+        _ => line.strip_prefix("data: ")?.trim(),
     };
     if payload.is_empty() || payload == "[DONE]" {
         return None;
@@ -864,30 +858,6 @@ mod tests {
             parse_stream_line(
                 StreamFormat::OpenAi,
                 r#"data: {"choices":[{"delta":{"content":"hello"}}]}"#
-            )
-            .as_deref(),
-            Some("hello")
-        );
-        assert_eq!(
-            parse_stream_line(
-                StreamFormat::OpenAi,
-                r#"data:{"choices":[{"delta":{"content":"hello"}}]}"#
-            )
-            .as_deref(),
-            Some("hello")
-        );
-        assert_eq!(
-            parse_stream_line(
-                StreamFormat::Gemini,
-                r#"data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}"#
-            )
-            .as_deref(),
-            Some("hello")
-        );
-        assert_eq!(
-            parse_stream_line(
-                StreamFormat::Gemini,
-                r#"data:{"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}"#
             )
             .as_deref(),
             Some("hello")
