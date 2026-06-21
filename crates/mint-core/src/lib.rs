@@ -5,6 +5,7 @@ pub mod chat;
 pub mod code_tools;
 pub mod config;
 pub mod files;
+pub mod image_gen;
 pub mod knowledge;
 pub mod mcp;
 pub mod memory;
@@ -54,6 +55,9 @@ pub use orchestration::{
     AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, OrchestrationError,
     orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
     orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+};
+pub use image_gen::{
+    GeneratedImage, ImageGenError, ImageGenRequest, ImageGenResponse, generate_images,
 };
 pub use pictures::{
     PictureEntry, PictureError, list_saved_pictures, parse_data_uri, save_chat_images,

@@ -2,6 +2,7 @@
 @import './css/settings.css';
 @import './css/spotlight.css';
 @import './css/widget.css';
+@import './css/image-studio.css';
 
 * {
   box-sizing: border-box;

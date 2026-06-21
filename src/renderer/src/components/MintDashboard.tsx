@@ -21,6 +21,7 @@ import {
 } from '../tauri'
 import ChatPanel from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
+import ImageStudioPanel from './ImageStudioPanel'
 import ModelPanel from './ModelPanel'
 import type { ModelInteraction } from './ModelPanel'
 import PicturesLibrary from './PicturesLibrary'
@@ -342,7 +343,7 @@ export default function MintDashboard() {
   }, [])
 
   useEffect(() => {
-    if (view === 'pictures') refreshPictures().catch((reason: unknown) => setError(errorMessage(reason)))
+    if (view === 'pictures' || view === 'imagine') refreshPictures().catch((reason: unknown) => setError(errorMessage(reason)))
   }, [view])
 
   useEffect(() => {
@@ -927,6 +928,14 @@ export default function MintDashboard() {
           />
         </main>
         <PicturesLibrary view={view} pictures={pictures} onSetView={setView} />
+        <ImageStudioPanel
+          view={view}
+          onRefreshPictures={refreshPictures}
+          onSendToChat={(_url, imgPrompt) => {
+            setView('chat')
+            setMessage(imgPrompt)
+          }}
+        />
       </div>
       <div className={`startup-loading ${startupReady ? 'is-hidden' : ''}`} aria-live="polite" aria-busy={!startupReady}>
         <div className="startup-loading-content">

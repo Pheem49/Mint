@@ -21,6 +21,7 @@ import {
 import ChatPanel from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import PicturesLibrary from './PicturesLibrary'
+import ImageStudioPanel from './ImageStudioPanel'
 
 const DEFAULT_CONFIG = {
   theme: 'dark',
@@ -745,6 +746,14 @@ export default function MintDashboard() {
           />
         </main>
         <PicturesLibrary view={view} pictures={pictures} onSetView={changeView} />
+        <ImageStudioPanel
+          view={view}
+          onRefreshPictures={refreshPictures}
+          onSendToChat={(_url, imgPrompt) => {
+            setView('chat')
+            setMessage(imgPrompt)
+          }}
+        />
       </div>
       <div className={`startup-loading ${startupReady ? 'is-hidden' : ''}`} aria-live="polite" aria-busy={!startupReady}>
         <div className="startup-loading-content">

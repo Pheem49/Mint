@@ -65,6 +65,22 @@ export interface PictureEntry {
   thumbnailUrl?: string
 }
 
+export interface ImageGenRequest {
+  prompt: string
+  negativePrompt?: string
+  aspectRatio?: '1:1' | '16:9' | '9:16' | '4:3'
+  numImages?: number
+  model?: string
+}
+
+export interface ImageGenResponse {
+  images: PictureEntry[]
+  model: string
+  provider: string
+  prompt: string
+  description?: string | null
+}
+
 export interface WorkspaceTreeEntry {
   name: string
   path: string
@@ -392,6 +408,41 @@ export async function listSavedPictures(): Promise<PictureEntry[]> {
   }
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<PictureEntry[]>('list_pictures')
+}
+
+export async function generateImages(
+  request: ImageGenRequest
+): Promise<ImageGenResponse> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const API_BASE = 'http://localhost:3000/api'
+    const res = await fetch(`${API_BASE}/image-generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: request.prompt,
+        negativePrompt: request.negativePrompt,
+        aspectRatio: request.aspectRatio ?? '1:1',
+        numImages: request.numImages ?? 1,
+        model: request.model,
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => null)
+      throw new Error(err?.error || `Image generation failed: HTTP ${res.status}`)
+    }
+    const data = await res.json()
+    // Normalize image URLs for web mode
+    const images: PictureEntry[] = Array.isArray(data.images)
+      ? data.images.map((pic: PictureEntry) => {
+          const pictureUrl = pic.url ? `http://localhost:3000${pic.url}` : pic.url
+          return { ...pic, url: pictureUrl, thumbnailUrl: pictureUrl }
+        })
+      : []
+    return { ...data, images }
+  }
+  // Desktop / Tauri mode
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<ImageGenResponse>('generate_images', { request })
 }
 
 export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceTreeEntry> {
