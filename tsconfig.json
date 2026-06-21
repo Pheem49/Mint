@@ -26,5 +26,5 @@
       "@shared/*": ["./src/*"]
     }
   },
-  "include": ["src/renderer/src", "src/renderer/src/env.d.ts"]
+  "include": ["src/renderer/src", "src/renderer/src-web", "src/renderer/src/env.d.ts"]
 }
