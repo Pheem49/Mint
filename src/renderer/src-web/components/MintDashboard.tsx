@@ -749,7 +749,7 @@ export default function MintDashboard() {
       <div className={`startup-loading ${startupReady ? 'is-hidden' : ''}`} aria-live="polite" aria-busy={!startupReady}>
         <div className="startup-loading-content">
           <div className="startup-loading-dots" aria-hidden="true"><span /><span /><span /></div>
-          <div className="startup-loading-text">Loading Agent Mint</div>
+          <div className="startup-loading-text">Loading Mint Agent</div>
         </div>
       </div>
       {error && (

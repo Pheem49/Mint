@@ -1319,7 +1319,7 @@ export default function ChatPanel({
         </button>
         <div className="chat-header-title">
           <img src="./assets/icon.png" alt="Logo" className="chat-header-logo" />
-          <span>Agent Mint</span>
+          <span>Mint Agent</span>
         </div>
       </div>
 
