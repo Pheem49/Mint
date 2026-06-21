@@ -1,5 +1,5 @@
 /* ============================================================
-   Image Studio Panel — NanoBanana (Gemini Image Generation)
+   Image Studio Panel — Multi-provider Image Generation
    ============================================================ */
 
 /* Root panel: overlays the main content area, aligned with sidebar */
@@ -204,6 +204,47 @@
   border-radius: 50%;
   background: #34d399;
   margin-left: 2px;
+}
+
+/* ── Provider selector ─────────────────────────────────── */
+.img-studio-provider-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.img-studio-provider-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
+  border: 1px solid rgb(148 163 184 / 18%);
+  border-radius: 99px;
+  background: rgb(15 23 42 / 60%);
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.img-studio-provider-btn:hover:not(:disabled) {
+  border-color: rgb(52 211 153 / 35%);
+  background: rgb(16 185 129 / 10%);
+  color: #a7f3d0;
+}
+
+.img-studio-provider-btn.is-active {
+  border-color: rgb(52 211 153 / 65%);
+  background: rgb(16 185 129 / 22%);
+  color: #6ee7b7;
+  font-weight: 600;
+  box-shadow: 0 0 0 1px rgb(52 211 153 / 20%) inset;
+}
+
+.img-studio-provider-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* ── Aspect ratio buttons ──────────────────────────────── */

@@ -71,6 +71,13 @@ export interface ImageGenRequest {
   aspectRatio?: '1:1' | '16:9' | '9:16' | '4:3'
   numImages?: number
   model?: string
+  /** Which image generation provider to use. Falls back to config default when omitted. */
+  provider?: string
+}
+
+export interface ImageGenProviders {
+  active: string
+  available: string[]
 }
 
 export interface ImageGenResponse {
@@ -424,6 +431,7 @@ export async function generateImages(
         aspectRatio: request.aspectRatio ?? '1:1',
         numImages: request.numImages ?? 1,
         model: request.model,
+        provider: request.provider,
       }),
     })
     if (!res.ok) {
@@ -444,6 +452,70 @@ export async function generateImages(
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<ImageGenResponse>('generate_images', { request })
 }
+
+/** Fetch which image-generation providers are currently configured on the backend. */
+export async function getImageGenProviders(): Promise<ImageGenProviders> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const API_BASE = 'http://localhost:3000/api'
+    try {
+      const res = await fetch(`${API_BASE}/image-gen/providers`)
+      if (res.ok) return await res.json()
+    } catch (_) { /* ignore */ }
+    return { active: 'nanobanana', available: ['nanobanana'] }
+  }
+  // Desktop / Tauri: read config to know which keys are set
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const config = await invoke<Record<string, string>>('get_config')
+    const available: string[] = []
+    if (config.api_key)            available.push('nanobanana')
+    if (config.openai_api_key)     available.push('dalle')
+    if (config.stability_api_key)  available.push('stability')
+    if (config.ideogram_api_key)   available.push('ideogram')
+    if (config.replicate_api_key)  available.push('replicate')
+    if (available.length === 0)    available.push('nanobanana')
+    const active = available.includes(config.image_gen_provider)
+      ? config.image_gen_provider
+      : available[0]
+    return { active, available }
+  } catch (_) {
+    return { active: 'nanobanana', available: ['nanobanana'] }
+  }
+}
+
+/** Updates the default image generation provider in the configuration. */
+export async function setDefaultImageProvider(provider: string): Promise<boolean> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const API_BASE = "http://localhost:3000/api";
+    try {
+      const getRes = await fetch(`${API_BASE}/config`)
+      if (!getRes.ok) return false
+      const config = await getRes.json()
+      config.image_gen_provider = provider
+      const saveRes = await fetch(`${API_BASE}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      })
+      return saveRes.ok
+    } catch (_) {
+      return false
+    }
+  }
+
+  // Desktop / Tauri
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const config = await invoke<any>('get_config')
+    config.image_gen_provider = provider
+    await invoke('update_config', { config })
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+
 
 export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceTreeEntry> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {

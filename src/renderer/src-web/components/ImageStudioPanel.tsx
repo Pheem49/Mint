@@ -1,9 +1,11 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import {
   generateImages,
+  getImageGenProviders,
   convertFileSrc,
   type ImageGenRequest,
   type ImageGenResponse,
+  type ImageGenProviders,
   type PictureEntry,
 } from '../tauri'
 
@@ -27,6 +29,53 @@ const STYLE_SUGGESTIONS = [
   'cinematic', 'digital art', '3D render', 'sketch',
 ]
 
+// Per-provider model presets shown in the model dropdown
+const PROVIDER_MODELS: Record<string, { value: string; label: string }[]> = {
+  nanobanana: [
+    { value: 'gemini-2.5-flash-image', label: 'Gemini 2.5 Flash Image (Default)' },
+    { value: 'gemini-2.0-flash-image', label: 'Gemini 2.0 Flash Image' },
+  ],
+  dalle: [
+    { value: 'dall-e-3',    label: 'DALL·E 3 (Default)' },
+    { value: 'gpt-image-1', label: 'GPT-Image-1' },
+    { value: 'dall-e-2',    label: 'DALL·E 2' },
+  ],
+  stability: [
+    { value: 'sd3.5-large',       label: 'SD 3.5 Large (Default)' },
+    { value: 'sd3.5-large-turbo', label: 'SD 3.5 Large Turbo' },
+    { value: 'sd3-medium',        label: 'SD 3 Medium' },
+    { value: 'core',              label: 'Stable Image Core' },
+  ],
+  ideogram: [
+    { value: 'V_3',       label: 'Ideogram V3 (Default)' },
+    { value: 'V_2',       label: 'Ideogram V2' },
+    { value: 'V_2_TURBO', label: 'Ideogram V2 Turbo' },
+  ],
+  replicate: [
+    { value: 'black-forest-labs/flux-1.1-pro',          label: 'FLUX 1.1 Pro (Default)' },
+    { value: 'black-forest-labs/flux-schnell',          label: 'FLUX Schnell (fast)' },
+    { value: 'stability-ai/sdxl',                       label: 'SDXL' },
+    { value: 'bytedance/sdxl-lightning-4step',          label: 'SDXL Lightning' },
+  ],
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  nanobanana: '✦ NanoBanana (Gemini)',
+  dalle:      '⬡ DALL·E (OpenAI)',
+  stability:  '◈ Stability AI',
+  ideogram:   '◉ Ideogram',
+  replicate:  '⬢ Replicate',
+}
+
+function providerLabel(key: string) {
+  return PROVIDER_LABELS[key] ?? key
+}
+
+function defaultModelForProvider(provider: string): string {
+  const models = PROVIDER_MODELS[provider]
+  return models?.[0]?.value ?? ''
+}
+
 function SkeletonCard() {
   return (
     <div className="img-studio-skeleton">
@@ -39,15 +88,41 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
   const [prompt, setPrompt] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
   const [showNegative, setShowNegative] = useState(false)
-  const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash-image')
-  const [customModel, setCustomModel] = useState('')
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1')
   const [numImages, setNumImages] = useState(1)
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<ImageGenResponse | null>(null)
   const [promptHistory, setPromptHistory] = useState<string[]>([])
+
+  // Provider / model state
+  const [providers, setProviders] = useState<ImageGenProviders>({ active: 'nanobanana', available: ['nanobanana'] })
+  const [selectedProvider, setSelectedProvider] = useState('nanobanana')
+  const [selectedModel, setSelectedModel] = useState(defaultModelForProvider('nanobanana'))
+  const [customModel, setCustomModel] = useState('')
+
   const promptRef = useRef<HTMLTextAreaElement>(null)
+
+  // Load available providers on mount
+  useEffect(() => {
+    let cancelled = false
+    getImageGenProviders().then((data) => {
+      if (cancelled) return
+      setProviders(data)
+      setSelectedProvider(data.active)
+      setSelectedModel(defaultModelForProvider(data.active))
+    }).catch(() => { /* keep defaults */ })
+    return () => { cancelled = true }
+  }, [])
+
+  // When provider changes, reset model to provider's default
+  const handleProviderChange = (provider: string) => {
+    setSelectedProvider(provider)
+    setSelectedModel(defaultModelForProvider(provider))
+    setCustomModel('')
+  }
+
+  const effectiveModel = selectedModel === 'custom' ? customModel.trim() : selectedModel
 
   const handleGenerate = useCallback(async () => {
     const trimmed = prompt.trim()
@@ -62,7 +137,8 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
       negativePrompt: negativePrompt.trim() || undefined,
       aspectRatio,
       numImages,
-      model: selectedModel === 'custom' ? customModel.trim() : selectedModel,
+      model: effectiveModel || undefined,
+      provider: selectedProvider,
     }
 
     try {
@@ -77,7 +153,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
     } finally {
       setGenerating(false)
     }
-  }, [prompt, negativePrompt, aspectRatio, numImages, generating, onRefreshPictures, selectedModel, customModel])
+  }, [prompt, negativePrompt, aspectRatio, numImages, generating, onRefreshPictures, selectedProvider, effectiveModel])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -97,6 +173,8 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
 
   if (view !== 'imagine') return null
 
+  const modelOptions = PROVIDER_MODELS[selectedProvider] ?? []
+
   return (
     <div className="img-studio" id="image-studio-panel" role="main" aria-label="Image Studio">
       {/* Header */}
@@ -107,48 +185,83 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
           </svg>
           <h1>Image Studio</h1>
           <span className="img-studio-badge">
-            {selectedModel === 'custom' ? (customModel.trim() || 'custom') : selectedModel}
+            {providerLabel(selectedProvider)}
           </span>
         </div>
-        <p className="img-studio-subtitle">Generate images with Google's Gemini image model</p>
+        <p className="img-studio-subtitle">
+          Generate images with{' '}
+          {providers.available.length > 1
+            ? `${providers.available.length} configured providers`
+            : providerLabel(selectedProvider)}
+        </p>
       </header>
 
       {/* Main content */}
       <div className="img-studio-content">
         {/* Left: controls */}
         <section className="img-studio-controls" aria-label="Generation settings">
-          {/* Model selection */}
-          <div className="img-studio-field">
-            <label className="img-studio-label" htmlFor="img-studio-model">
-              Model
-              <span className="img-studio-label-hint">Select the generation model</span>
-            </label>
-            <select
-              id="img-studio-model"
-              className="img-studio-textarea"
-              style={{ padding: '8px 10px', height: '38px', cursor: 'pointer' }}
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
-              disabled={generating}
-            >
-              <option value="gemini-2.5-flash-image">Gemini 2.5 Flash Image (Default)</option>
-              <option value="gemini-3.1-flash-image">Gemini 3.1 Flash Image</option>
-              <option value="gemini-3-pro-image">Gemini 3 Pro Image</option>
-              <option value="imagen-3.0-generate-002">Imagen 3</option>
-              <option value="custom">Custom Model ID...</option>
-            </select>
-            {selectedModel === 'custom' && (
+
+          {/* Provider & Model side-by-side dropdown selectors */}
+          <div className="img-studio-field" style={{ display: 'flex', gap: '10px', width: '100%' }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label className="img-studio-label" htmlFor="img-studio-provider" style={{ display: 'flex', alignItems: 'center', width: '100%', height: '18px' }}>
+                <span>Provider</span>
+              </label>
+              <select
+                id="img-studio-provider"
+                className="img-studio-textarea"
+                style={{ padding: '8px 10px', height: '38px', cursor: 'pointer' }}
+                value={selectedProvider}
+                onChange={(e) => handleProviderChange(e.target.value)}
+                disabled={generating}
+              >
+                {providers.available.map((prov) => (
+                  <option key={prov} value={prov}>
+                    {providerLabel(prov).replace(/^[^a-zA-Z0-9]+/, '') /* remove prefix symbol if preferred or keep it */}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label className="img-studio-label" htmlFor="img-studio-model" style={{ display: 'flex', alignItems: 'center', height: '18px' }}>
+                Model
+              </label>
+              <select
+                id="img-studio-model"
+                className="img-studio-textarea"
+                style={{ padding: '8px 10px', height: '38px', cursor: 'pointer' }}
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                disabled={generating}
+              >
+                {modelOptions.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+                <option value="custom">Custom Model ID...</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Custom Model ID input */}
+          {selectedModel === 'custom' && (
+            <div className="img-studio-field" style={{ marginTop: '-8px' }}>
               <input
                 type="text"
                 className="img-studio-textarea img-studio-textarea--sm"
-                style={{ marginTop: '5px' }}
-                placeholder="e.g. gemini-3.1-flash-image"
+                placeholder={
+                  selectedProvider === 'replicate'
+                    ? 'e.g. owner/model-name'
+                    : selectedProvider === 'dalle'
+                    ? 'e.g. dall-e-3'
+                    : 'e.g. sd3.5-large'
+                }
                 value={customModel}
                 onChange={(e) => setCustomModel(e.target.value)}
                 disabled={generating}
               />
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Prompt */}
           <div className="img-studio-field">
@@ -243,24 +356,33 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
             </div>
           </div>
 
-          {/* Count */}
+          {/* Count — DALL·E 3 only supports n=1 */}
           <div className="img-studio-field">
-            <span className="img-studio-label">Number of images</span>
+            <span className="img-studio-label">
+              Number of images
+              {(selectedProvider === 'dalle' && (effectiveModel === 'dall-e-3' || effectiveModel === 'gpt-image-1')) && (
+                <span className="img-studio-label-hint"> (DALL·E 3 / GPT-Image-1: max 1)</span>
+              )}
+            </span>
             <div className="img-studio-count-group" role="radiogroup" aria-label="Image count">
-              {[1, 2, 3, 4].map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  role="radio"
-                  aria-checked={numImages === n}
-                  className={`img-studio-count-btn ${numImages === n ? 'is-active' : ''}`}
-                  onClick={() => setNumImages(n)}
-                  disabled={generating}
-                  id={`img-studio-count-${n}`}
-                >
-                  {n}
-                </button>
-              ))}
+              {[1, 2, 3, 4].map((n) => {
+                const isDisabled = generating ||
+                  (selectedProvider === 'dalle' && (effectiveModel === 'dall-e-3' || effectiveModel === 'gpt-image-1') && n > 1)
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    role="radio"
+                    aria-checked={numImages === n}
+                    className={`img-studio-count-btn ${numImages === n ? 'is-active' : ''}`}
+                    onClick={() => setNumImages(n)}
+                    disabled={isDisabled}
+                    id={`img-studio-count-${n}`}
+                  >
+                    {n}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
@@ -332,7 +454,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                 <SkeletonCard key={i} />
               ))}
               <p className="img-studio-generating-label" aria-live="assertive">
-                Creating {numImages} image{numImages > 1 ? 's' : ''} — this may take a few seconds…
+                Creating {numImages} image{numImages > 1 ? 's' : ''} with {providerLabel(selectedProvider)} — this may take a few seconds…
               </p>
             </div>
           )}
@@ -389,7 +511,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                 ))}
               </div>
               <p className="img-studio-meta">
-                Model: <strong>{result.model}</strong> · {result.images.length} image{result.images.length > 1 ? 's' : ''} · Saved to gallery
+                Provider: <strong>{providerLabel(result.provider)}</strong> · Model: <strong>{result.model}</strong> · {result.images.length} image{result.images.length > 1 ? 's' : ''} · Saved to gallery
               </p>
             </>
           )}
@@ -402,7 +524,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                 </svg>
               </div>
               <p>Your generated images will appear here</p>
-              <span>Type a prompt and click Generate Image to start</span>
+              <span>Select a provider, type a prompt, and click Generate Image to start</span>
             </div>
           )}
         </section>

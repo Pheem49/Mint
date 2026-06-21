@@ -60,6 +60,38 @@ const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
     "google/gemma-3-27b-it",
 ];
 
+// ── Image Generation Providers ──────────────────────────────────────────────
+const NANOBANANA_IMAGE_MODEL_PRESETS: &[&str] = &[
+    "gemini-2.5-flash-image",
+    "gemini-2.0-flash-image",
+];
+
+const DALLE_MODEL_PRESETS: &[&str] = &[
+    "dall-e-3",
+    "gpt-image-1",
+    "dall-e-2",
+];
+
+const STABILITY_MODEL_PRESETS: &[&str] = &[
+    "sd3.5-large",
+    "sd3.5-large-turbo",
+    "sd3-medium",
+    "core",
+];
+
+const IDEOGRAM_MODEL_PRESETS: &[&str] = &[
+    "V_3",
+    "V_2",
+    "V_2_TURBO",
+];
+
+const REPLICATE_MODEL_PRESETS: &[&str] = &[
+    "black-forest-labs/flux-1.1-pro",
+    "black-forest-labs/flux-schnell",
+    "stability-ai/sdxl",
+    "bytedance/sdxl-lightning-4step",
+];
+
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
 
@@ -230,6 +262,37 @@ pub async fn run() -> Result<()> {
                 .get("pluginNotionEnabled")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+        },
+        // ── Image Generation ─────────────────────────────────────────────────
+        OnboardService {
+            category: "Image Generation",
+            name: "Google NanoBanana (Gemini Images)  [uses Gemini key]",
+            key: "img_nanobanana",
+            enabled: !config.api_key.is_empty() && !config.nanobanana_model.is_empty(),
+        },
+        OnboardService {
+            category: "Image Generation",
+            name: "OpenAI DALL·E  [uses OpenAI key]",
+            key: "img_dalle",
+            enabled: !config.openai_api_key.is_empty() && !config.dalle_model.is_empty(),
+        },
+        OnboardService {
+            category: "Image Generation",
+            name: "Stability AI (Stable Diffusion)",
+            key: "img_stability",
+            enabled: !config.stability_api_key.is_empty(),
+        },
+        OnboardService {
+            category: "Image Generation",
+            name: "Ideogram v3",
+            key: "img_ideogram",
+            enabled: !config.ideogram_api_key.is_empty(),
+        },
+        OnboardService {
+            category: "Image Generation",
+            name: "Replicate (FLUX / SDXL / custom)",
+            key: "img_replicate",
+            enabled: !config.replicate_api_key.is_empty(),
         },
     ];
 
@@ -842,7 +905,93 @@ pub async fn run() -> Result<()> {
         );
     }
 
-    println!();
+    // ────────────────────────────────────────────────────────────────────────
+    // Image Generation providers
+    // ────────────────────────────────────────────────────────────────────────
+
+    // NanoBanana (Gemini Images)
+    if is_selected("img_nanobanana", &services) {
+        println!("\n\x1b[36m--- Google NanoBanana (Gemini Images) ---\x1b[0m");
+        println!(
+            "\x1b[90mUses the same Gemini API key as Step 1. Select the image generation model.\x1b[0m"
+        );
+        config.nanobanana_model = prompt_select_or_custom(
+            "NanoBanana Model",
+            static_model_options(NANOBANANA_IMAGE_MODEL_PRESETS),
+            Some(&config.nanobanana_model),
+            "Custom NanoBanana model...",
+        )?;
+    }
+
+    // DALL·E
+    if is_selected("img_dalle", &services) {
+        println!("\n\x1b[36m--- OpenAI DALL·E ---\x1b[0m");
+        println!(
+            "\x1b[90mUses the same OpenAI API key. DALL·E 3 supports only 1 image per request; DALL·E 2 supports up to 10.\x1b[0m"
+        );
+        config.dalle_model = prompt_select_or_custom(
+            "DALL·E Model",
+            static_model_options(DALLE_MODEL_PRESETS),
+            Some(&config.dalle_model),
+            "Custom DALL·E model...",
+        )?;
+    }
+
+    // Stability AI
+    if is_selected("img_stability", &services) {
+        println!("\n\x1b[36m--- Stability AI ---\x1b[0m");
+        println!(
+            "\x1b[90mGet your API key at https://platform.stability.ai/. Supports SD3.5 Large, SD3 Medium, and Stable Image Core.\x1b[0m"
+        );
+        config.stability_api_key =
+            prompt_sensitive("Stability AI API Key", &config.stability_api_key)?;
+        config.stability_model = prompt_select_or_custom(
+            "Stability Model",
+            static_model_options(STABILITY_MODEL_PRESETS),
+            Some(&config.stability_model),
+            "Custom Stability model...",
+        )?;
+    } else {
+        config.stability_api_key = String::new();
+    }
+
+    // Ideogram
+    if is_selected("img_ideogram", &services) {
+        println!("\n\x1b[36m--- Ideogram ---\x1b[0m");
+        println!(
+            "\x1b[90mGet your API key at https://ideogram.ai/api. Supports V_3, V_2, and V_2_TURBO.\x1b[0m"
+        );
+        config.ideogram_api_key =
+            prompt_sensitive("Ideogram API Key", &config.ideogram_api_key)?;
+        config.ideogram_model = prompt_select_or_custom(
+            "Ideogram Model",
+            static_model_options(IDEOGRAM_MODEL_PRESETS),
+            Some(&config.ideogram_model),
+            "Custom Ideogram model...",
+        )?;
+    } else {
+        config.ideogram_api_key = String::new();
+    }
+
+    // Replicate
+    if is_selected("img_replicate", &services) {
+        println!("\n\x1b[36m--- Replicate ---\x1b[0m");
+        println!(
+            "\x1b[90mGet your API token at https://replicate.com/account/api-tokens. Works with FLUX, SDXL, and any public image model.\x1b[0m"
+        );
+        config.replicate_api_key =
+            prompt_sensitive("Replicate API Token", &config.replicate_api_key)?;
+        config.replicate_model = prompt_select_or_custom(
+            "Replicate Model (owner/model-name)",
+            static_model_options(REPLICATE_MODEL_PRESETS),
+            Some(&config.replicate_model),
+            "Custom Replicate model...",
+        )?;
+    } else {
+        config.replicate_api_key = String::new();
+    }
+
+
     save_config(&config)?;
     println!("\x1b[32m✅ Configuration saved successfully!\x1b[0m");
     Ok(())

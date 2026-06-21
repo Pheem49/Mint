@@ -677,6 +677,9 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         num_images: Option<u8>,
                         #[serde(default)]
                         model: Option<String>,
+                        /// Which image provider to use (overrides config.image_gen_provider).
+                        #[serde(default)]
+                        provider: Option<String>,
                     }
 
                     if let Ok(req) = serde_json::from_str::<ImageGenApiRequest>(body) {
@@ -687,6 +690,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             aspect_ratio: req.aspect_ratio,
                             num_images: req.num_images,
                             model: req.model,
+                            provider: req.provider,
                         };
                         match generate_images(&config, &gen_request).await {
                             Ok(result) => {
@@ -697,7 +701,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     .collect();
                                 let mut saved = save_chat_images(
                                     data_uris,
-                                    Some("nanobanana".into()),
+                                    Some(result.provider.clone()),
                                     Some(req.prompt.clone()),
                                 )
                                 .unwrap_or_default();
@@ -732,6 +736,32 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         )
                         .await;
                     }
+                }
+                ("GET", "/api/image-gen/providers") => {
+                    let config = load_config().unwrap_or_default();
+                    let mut available: Vec<String> = Vec::new();
+                    if !config.api_key.trim().is_empty() {
+                        available.push("nanobanana".into());
+                    }
+                    if !config.openai_api_key.trim().is_empty() {
+                        available.push("dalle".into());
+                    }
+                    if !config.stability_api_key.trim().is_empty() {
+                        available.push("stability".into());
+                    }
+                    if !config.ideogram_api_key.trim().is_empty() {
+                        available.push("ideogram".into());
+                    }
+                    if !config.replicate_api_key.trim().is_empty() {
+                        available.push("replicate".into());
+                    }
+                    let active = if available.contains(&config.image_gen_provider) {
+                        config.image_gen_provider.clone()
+                    } else {
+                        available.first().cloned().unwrap_or_else(|| "nanobanana".into())
+                    };
+                    let response = json!({ "active": active, "available": available });
+                    send_json_response(socket, "200 OK", &response.to_string()).await;
                 }
                 _ => {
                     send_json_response(socket, "404 Not Found", "{\"error\":\"Not Found\"}").await;
