@@ -7,11 +7,11 @@ use std::{
 };
 
 use mint_core::{
-    CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, KnowledgeStore, MemoryStore,
-    MintConfig, TaskStore, apply_code_edits, assert_path_capability, build_code_patch,
+    CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, ImageGenRequest, KnowledgeStore,
+    MemoryStore, MintConfig, TaskStore, apply_code_edits, assert_path_capability, build_code_patch,
     build_symbol_index, classify_shell_command, config_path, create_folder, execute_native_plugin,
-    fetch_github_repo_summary, find_paths, index_semantic_code, initialize_config,
-    inspect_code_plan, list_code_files, load_config, native_plugins,
+    fetch_github_repo_summary, find_paths, generate_images, index_semantic_code,
+    initialize_config, inspect_code_plan, list_code_files, load_config, native_plugins,
     orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, parse_github_url,
     propose_code_edits, read_code_file, repository_summary, run_shell_command, search_code,
     search_semantic_code, set_config_value,
@@ -180,6 +180,23 @@ enum Command {
     Onboard,
     /// Interactively manage enabled agent tools.
     Setup,
+    /// Generate an image from a text prompt using NanoBanana (Gemini image model).
+    Imagine {
+        /// Text description of the image to generate.
+        prompt: String,
+        /// Aspect ratio: 1:1, 16:9, 9:16, or 4:3 [default: 1:1]
+        #[arg(long, default_value = "1:1")]
+        aspect: String,
+        /// Number of images to generate (1–4) [default: 1]
+        #[arg(long, default_value_t = 1)]
+        count: u8,
+        /// Negative prompt — elements to avoid in the image
+        #[arg(long)]
+        negative: Option<String>,
+        /// Save the first generated image to this path
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -926,6 +943,57 @@ async fn main() -> Result<()> {
                     launch_mint_target(target).await?;
                 }
             }
+            Command::Imagine {
+                prompt,
+                aspect,
+                count,
+                negative,
+                output,
+            } => {
+                let config = load_config()?;
+                let count = count.clamp(1, 4);
+                eprint!("{DIM}✦ Generating {count} image(s)...{RESET}");
+                let _ = std::io::stderr().flush();
+                let request = ImageGenRequest {
+                    prompt: prompt.clone(),
+                    negative_prompt: negative,
+                    aspect_ratio: Some(aspect),
+                    num_images: Some(count),
+                    model: None,
+                    provider: None,
+                };
+                match generate_images(&config, &request).await {
+                    Ok(result) => {
+                        eprintln!("\r{MINT}✦ Generated {} image(s)         {RESET}", result.images.len());
+                        let data_uris: Vec<String> =
+                            result.images.iter().map(|img| img.data_uri.clone()).collect();
+                        match mint_core::save_chat_images(data_uris, Some(result.provider.clone()), Some(prompt.clone())) {
+                            Ok(saved) => {
+                                for entry in &saved {
+                                    println!("{MINT}✓{RESET} Saved: {}", entry.path.display());
+                                }
+                                // If --output specified, copy first image there
+                                if let (Some(out_path), Some(first)) = (&output, saved.first()) {
+                                    match std::fs::copy(&first.path, out_path) {
+                                        Ok(_) => println!("{MINT}✓{RESET} Copied to: {}", out_path.display()),
+                                        Err(e) => eprintln!("{WARN}Warning: could not copy to output path: {e}{RESET}"),
+                                    }
+                                }
+                                if let Some(desc) = &result.description {
+                                    if !desc.is_empty() {
+                                        println!("\n{DIM}{desc}{RESET}");
+                                    }
+                                }
+                            }
+                            Err(e) => eprintln!("{ERROR}Failed to save images: {e}{RESET}"),
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{ERROR}✗ Image generation failed: {e}{RESET}");
+                        anyhow::bail!("image generation failed: {e}");
+                    }
+                }
+            }
         },
     }
     Ok(())
@@ -1214,6 +1282,7 @@ async fn handle_slash_command(
                 ("/memory clear", "Clear all interactions"),
                 ("/memory get <key>", "Read a profile value"),
                 ("/memory set <key> <val>", "Store a profile value"),
+                ("/image-provider [name]", "List image gen providers or switch default provider"),
                 ("/mcp list", "List configured MCP servers"),
                 ("/mcp allow <server> <tool>", "Allow an MCP tool"),
                 ("/stats", "Show session statistics"),
@@ -1265,6 +1334,57 @@ async fn handle_slash_command(
                         session.config.ai_provider
                     ),
                     Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/image-provider" => {
+            let mut available = Vec::new();
+            if !session.config.api_key.trim().is_empty() {
+                available.push("nanobanana");
+            }
+            if !session.config.openai_api_key.trim().is_empty() {
+                available.push("dalle");
+            }
+            if !session.config.stability_api_key.trim().is_empty() {
+                available.push("stability");
+            }
+            if !session.config.ideogram_api_key.trim().is_empty() {
+                available.push("ideogram");
+            }
+            if !session.config.replicate_api_key.trim().is_empty() {
+                available.push("replicate");
+            }
+            if available.is_empty() {
+                available.push("nanobanana");
+            }
+
+            if rest.is_empty() {
+                println!("\n{BLUE}Configured image generation providers:{RESET}");
+                for p in &available {
+                    let active = if p == &session.config.image_gen_provider.as_str() {
+                        format!(" {MINT}← active{RESET}")
+                    } else {
+                        String::new()
+                    };
+                    println!("  {p}{active}");
+                }
+                println!();
+            } else {
+                if available.contains(&rest) {
+                    session.config.image_gen_provider = rest.to_owned();
+                    match mint_core::save_config(&session.config) {
+                        Ok(()) => println!(
+                            "{DIM}Switched default image provider to: {}{RESET}\n",
+                            session.config.image_gen_provider
+                        ),
+                        Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
+                    }
+                } else {
+                    println!(
+                        "{ERROR}Provider '{rest}' is not configured or invalid.{RESET}\n"
+                    );
                 }
             }
             Some(SlashResult::Handled)
@@ -1884,6 +2004,7 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/help", "Show help menu"),
     ("/fast", "Toggle fast mode (hide thinking traces)"),
     ("/models", "List AI providers or switch active provider"),
+    ("/image-provider", "List image gen providers or switch default provider"),
     ("/clear", "Clear conversation history"),
     ("/cd", "Change active workspace directory"),
     ("/image", "Attach image from disk"),
@@ -1963,9 +2084,9 @@ fn draw_input_box(
             let highlight_idx = tab_index.map(|idx| idx % matches.len());
             for (i, (cmd, desc)) in matches.iter().enumerate() {
                 if Some(i) == highlight_idx {
-                    println!("  {BLUE}▶ {:<12}{RESET} {DIM}- {}{RESET}", cmd, desc);
+                    println!("  {BLUE}▶ {:<16}{RESET} {DIM}- {}{RESET}", cmd, desc);
                 } else {
-                    println!("    {DIM}{:<12} - {}{RESET}", cmd, desc);
+                    println!("    {DIM}{:<16} - {}{RESET}", cmd, desc);
                 }
             }
         }

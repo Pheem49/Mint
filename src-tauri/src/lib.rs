@@ -37,6 +37,7 @@ use mint_core::{
     extract_document_text, google_tts_urls, list_saved_pictures, load_config, load_workflows,
     orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
     propose_code_edits, save_chat_images, save_config, start_channels, weather, workflows_path,
+    ImageGenRequest,
 };
 use plugins::execute_plugin;
 
@@ -626,6 +627,49 @@ async fn submit_tool_approval(
     }
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopImageGenResponse {
+    images: Vec<PictureEntry>,
+    model: String,
+    provider: String,
+    prompt: String,
+    description: Option<String>,
+}
+
+#[tauri::command]
+async fn generate_images(
+    request: ImageGenRequest,
+) -> Result<DesktopImageGenResponse, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    
+    // Call core generate_images logic
+    let result = mint_core::generate_images(&config, &request)
+        .await
+        .map_err(|error| error.to_string())?;
+        
+    // Save images to Pictures library (just like api_server does)
+    let data_uris: Vec<String> = result
+        .images
+        .iter()
+        .map(|img| img.data_uri.clone())
+        .collect();
+    let saved = save_chat_images(
+        data_uris,
+        Some("nanobanana".into()),
+        Some(request.prompt.clone()),
+    )
+    .map_err(|error| error.to_string())?;
+    
+    Ok(DesktopImageGenResponse {
+        images: saved,
+        model: result.model,
+        provider: result.provider,
+        prompt: result.prompt,
+        description: result.description,
+    })
+}
+
 #[tauri::command]
 fn list_pictures() -> Result<Vec<PictureEntry>, String> {
     list_saved_pictures().map_err(|error| error.to_string())
@@ -978,6 +1022,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
             get_workspace_tree,
+            generate_images,
             select_workspace_directory,
             get_config,
             get_updater_status,

@@ -11,9 +11,10 @@ use tokio::net::TcpListener;
 
 use crate::{
     AgentProgress, ApprovalOutcome, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID,
-    MemoryStore, MintConfig, config_path, create_folder, find_paths, list_saved_pictures,
-    load_config, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
-    orchestrate_chat_with_fallback, save_chat_images, save_config, weather,
+    ImageGenRequest, MemoryStore, MintConfig, config_path, create_folder, find_paths,
+    generate_images, list_saved_pictures, load_config, orchestrate_agent_loop,
+    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, save_chat_images,
+    save_config, weather,
 };
 
 const MAX_API_REQUEST_BYTES: usize = 32 * 1024 * 1024;
@@ -662,6 +663,105 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         "{\"status\":\"invalid chat request body\"}",
                     )
                     .await;
+                }
+                ("POST", "/api/image-generate") => {
+                    #[derive(serde::Deserialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct ImageGenApiRequest {
+                        prompt: String,
+                        #[serde(default)]
+                        negative_prompt: Option<String>,
+                        #[serde(default)]
+                        aspect_ratio: Option<String>,
+                        #[serde(default)]
+                        num_images: Option<u8>,
+                        #[serde(default)]
+                        model: Option<String>,
+                        /// Which image provider to use (overrides config.image_gen_provider).
+                        #[serde(default)]
+                        provider: Option<String>,
+                    }
+
+                    if let Ok(req) = serde_json::from_str::<ImageGenApiRequest>(body) {
+                        let config = load_config().unwrap_or_default();
+                        let gen_request = ImageGenRequest {
+                            prompt: req.prompt.clone(),
+                            negative_prompt: req.negative_prompt,
+                            aspect_ratio: req.aspect_ratio,
+                            num_images: req.num_images,
+                            model: req.model,
+                            provider: req.provider,
+                        };
+                        match generate_images(&config, &gen_request).await {
+                            Ok(result) => {
+                                let data_uris: Vec<String> = result
+                                    .images
+                                    .iter()
+                                    .map(|img| img.data_uri.clone())
+                                    .collect();
+                                let mut saved = save_chat_images(
+                                    data_uris,
+                                    Some(result.provider.clone()),
+                                    Some(req.prompt.clone()),
+                                )
+                                .unwrap_or_default();
+                                for picture in &mut saved {
+                                    picture.url = Some(format!("/api/pictures/{}", picture.filename));
+                                    picture.thumbnail_url = Some(format!("/api/pictures/{}", picture.filename));
+                                }
+                                let response = json!({
+                                    "images": saved,
+                                    "model": result.model,
+                                    "provider": result.provider,
+                                    "prompt": result.prompt,
+                                    "description": result.description
+                                });
+                                send_json_response(socket, "200 OK", &response.to_string()).await;
+                            }
+                            Err(e) => {
+                                let err = json!({ "error": e.to_string() });
+                                send_json_response(
+                                    socket,
+                                    "500 Internal Server Error",
+                                    &err.to_string(),
+                                )
+                                .await;
+                            }
+                        }
+                    } else {
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"error\":\"invalid image generation request body\"}",
+                        )
+                        .await;
+                    }
+                }
+                ("GET", "/api/image-gen/providers") => {
+                    let config = load_config().unwrap_or_default();
+                    let mut available: Vec<String> = Vec::new();
+                    if !config.api_key.trim().is_empty() {
+                        available.push("nanobanana".into());
+                    }
+                    if !config.openai_api_key.trim().is_empty() {
+                        available.push("dalle".into());
+                    }
+                    if !config.stability_api_key.trim().is_empty() {
+                        available.push("stability".into());
+                    }
+                    if !config.ideogram_api_key.trim().is_empty() {
+                        available.push("ideogram".into());
+                    }
+                    if !config.replicate_api_key.trim().is_empty() {
+                        available.push("replicate".into());
+                    }
+                    let active = if available.contains(&config.image_gen_provider) {
+                        config.image_gen_provider.clone()
+                    } else {
+                        available.first().cloned().unwrap_or_else(|| "nanobanana".into())
+                    };
+                    let response = json!({ "active": active, "available": available });
+                    send_json_response(socket, "200 OK", &response.to_string()).await;
                 }
                 _ => {
                     send_json_response(socket, "404 Not Found", "{\"error\":\"Not Found\"}").await;
