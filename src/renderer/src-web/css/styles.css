@@ -18,6 +18,16 @@
   --border-light: rgba(255, 255, 255, 0.11);
   --shadow: none;
   --glass-blur: none;
+  --status-listening: #7dd3fc;
+  --status-thinking: var(--accent);
+  --status-speaking: #22c55e;
+  --status-error: #ef4444;
+  --hover-delete: #fca5a5;
+  --hover-delete-bg: rgba(248, 113, 113, 0.12);
+  --hover-edit: #c7d2fe;
+  --hover-edit-bg: rgba(99, 102, 241, 0.12);
+  --close-btn-hover-bg: #3a2020;
+  --close-btn-hover-color: #ff8a8a;
 }
 
 [data-theme="light"] {
@@ -37,6 +47,16 @@
   --border: rgba(0, 0, 0, 0.06);
   --border-light: rgba(255, 255, 255, 0.6);
   --shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  --status-listening: #0284c7;
+  --status-thinking: var(--accent);
+  --status-speaking: #16a34a;
+  --status-error: #dc2626;
+  --hover-delete: #dc2626;
+  --hover-delete-bg: rgba(220, 38, 38, 0.08);
+  --hover-edit: #4f46e5;
+  --hover-edit-bg: rgba(79, 70, 229, 0.08);
+  --close-btn-hover-bg: #fee2e2;
+  --close-btn-hover-color: #dc2626;
 }
 
 [data-theme="midnight"] {
@@ -56,6 +76,16 @@
   --border: rgba(99, 102, 241, 0.16);
   --border-light: rgba(99, 102, 241, 0.26);
   --shadow: none;
+  --status-listening: #7dd3fc;
+  --status-thinking: var(--accent);
+  --status-speaking: #22c55e;
+  --status-error: #fca5a5;
+  --hover-delete: #fca5a5;
+  --hover-delete-bg: rgba(248, 113, 113, 0.12);
+  --hover-edit: #c7d2fe;
+  --hover-edit-bg: rgba(99, 102, 241, 0.12);
+  --close-btn-hover-bg: #3a2020;
+  --close-btn-hover-color: #ff8a8a;
 }
 
 * {
@@ -107,7 +137,6 @@ body {
 
 /* Header - Drag Region */
 .drag-region {
-  app-region: no-drag;
   -webkit-app-region: no-drag;
   min-height: 34px;
   padding: 0 8px;
@@ -124,7 +153,6 @@ body {
 }
 
 .header-content {
-  app-region: drag;
   -webkit-app-region: drag;
   display: flex;
   align-items: center;
@@ -134,7 +162,6 @@ body {
 }
 
 .titlebar-drag-space {
-  app-region: drag;
   -webkit-app-region: drag;
   align-self: stretch;
   min-width: 0;
@@ -165,7 +192,6 @@ h1 {
 .header-actions,
 .header-utility,
 .window-controls {
-  app-region: no-drag;
   -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
@@ -197,7 +223,6 @@ h1 {
 .clear-btn,
 .settings-btn {
   -webkit-app-region: no-drag;
-  app-region: no-drag;
   min-width: 0;
   height: 28px;
   border: 1px solid transparent;
@@ -231,7 +256,6 @@ h1 {
 .maximize-btn,
 .minimize-btn {
   -webkit-app-region: no-drag;
-  app-region: no-drag;
   background: transparent;
   border: none;
   color: var(--text-muted);
@@ -2190,13 +2214,13 @@ input:checked + .slider:before {
 }
 
 .sidebar-chat-delete:hover {
-  color: #fca5a5;
-  background: rgba(248, 113, 113, 0.12);
+  color: var(--hover-delete);
+  background: var(--hover-delete-bg);
 }
 
 .sidebar-chat-edit:hover {
-  color: #c7d2fe;
-  background: rgba(99, 102, 241, 0.12);
+  color: var(--hover-edit);
+  background: var(--hover-edit-bg);
 }
 
 .sidebar-chat-rename-input {
@@ -2288,49 +2312,49 @@ input:checked + .slider:before {
 
 .mint-status-pill[data-state="listening"],
 .model-activity-badge[data-state="listening"] {
-  color: #7dd3fc;
+  color: var(--status-listening);
 }
 
 .mint-status-pill[data-state="listening"] .mint-status-dot,
 .model-activity-badge[data-state="listening"] .mint-status-dot {
-  background: #38bdf8;
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.16);
+  background: var(--status-listening);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-listening) 16%, transparent);
   animation: mintStatusPulse 1.2s ease-in-out infinite;
 }
 
 .mint-status-pill[data-state="thinking"],
 .model-activity-badge[data-state="thinking"] {
-  color: #a7f3d0;
+  color: var(--status-thinking);
 }
 
 .mint-status-pill[data-state="thinking"] .mint-status-dot,
 .model-activity-badge[data-state="thinking"] .mint-status-dot {
-  background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  background: var(--status-thinking);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-thinking) 20%, transparent);
   animation: mintStatusPulse 1s ease-in-out infinite;
 }
 
 .mint-status-pill[data-state="speaking"],
 .model-activity-badge[data-state="speaking"] {
-  color: #86efac;
+  color: var(--status-speaking);
 }
 
 .mint-status-pill[data-state="speaking"] .mint-status-dot,
 .model-activity-badge[data-state="speaking"] .mint-status-dot {
-  background: #22c55e;
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.16);
+  background: var(--status-speaking);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-speaking) 16%, transparent);
   animation: mintStatusPulse 0.9s ease-in-out infinite;
 }
 
 .mint-status-pill[data-state="error"],
 .model-activity-badge[data-state="error"] {
-  color: #fca5a5;
+  color: var(--status-error);
 }
 
 .mint-status-pill[data-state="error"] .mint-status-dot,
 .model-activity-badge[data-state="error"] .mint-status-dot {
-  background: #ef4444;
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.16);
+  background: var(--status-error);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-error) 16%, transparent);
 }
 
 @keyframes mintStatusPulse {
@@ -3319,8 +3343,8 @@ input:checked + .slider:before {
 }
 
 .close-btn:hover {
-  background: #3a2020;
-  color: #ff8a8a;
+  background: var(--close-btn-hover-bg);
+  color: var(--close-btn-hover-color);
 }
 
 .assistant-workspace.layout-horizontal {

@@ -3,6 +3,7 @@ import {
   generateImages,
   getImageGenProviders,
   convertFileSrc,
+  listSavedPictures,
   type ImageGenRequest,
   type ImageGenResponse,
   type ImageGenProviders,
@@ -94,6 +95,25 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
   const [error, setError] = useState('')
   const [result, setResult] = useState<ImageGenResponse | null>(null)
   const [promptHistory, setPromptHistory] = useState<string[]>([])
+  const [historyPictures, setHistoryPictures] = useState<PictureEntry[]>([])
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const pics = await listSavedPictures()
+      const imageGenSources = ['nanobanana', 'dalle', 'stability', 'ideogram', 'replicate']
+      const filtered = pics.filter((pic) =>
+        imageGenSources.includes(pic.source?.toLowerCase()),
+      )
+      const sorted = [...filtered].sort((a, b) => {
+        const da = a.createdAt ? new Date(a.createdAt).getTime() : 0
+        const db = b.createdAt ? new Date(b.createdAt).getTime() : 0
+        return db - da || b.filename.localeCompare(a.filename)
+      })
+      setHistoryPictures(sorted)
+    } catch (err) {
+      console.error('Failed to load history pictures:', err)
+    }
+  }, [])
 
   // Provider / model state
   const [providers, setProviders] = useState<ImageGenProviders>({ active: 'nanobanana', available: ['nanobanana'] })
@@ -103,7 +123,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
 
   const promptRef = useRef<HTMLTextAreaElement>(null)
 
-  // Load available providers on mount
+  // Load available providers and history on mount
   useEffect(() => {
     let cancelled = false
     getImageGenProviders().then((data) => {
@@ -112,8 +132,9 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
       setSelectedProvider(data.active)
       setSelectedModel(defaultModelForProvider(data.active))
     }).catch(() => { /* keep defaults */ })
+    loadHistory()
     return () => { cancelled = true }
-  }, [])
+  }, [loadHistory])
 
   // When provider changes, reset model to provider's default
   const handleProviderChange = (provider: string) => {
@@ -148,6 +169,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
         [trimmed, ...prev.filter((p) => p !== trimmed)].slice(0, 8),
       )
       onRefreshPictures?.()
+      loadHistory()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -448,85 +470,167 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
 
         {/* Right: results */}
         <section className="img-studio-results" aria-label="Generated images" aria-live="polite">
-          {generating && (
-            <div className="img-studio-skeleton-grid">
-              {Array.from({ length: numImages }).map((_, i) => (
-                <SkeletonCard key={i} />
-              ))}
-              <p className="img-studio-generating-label" aria-live="assertive">
-                Creating {numImages} image{numImages > 1 ? 's' : ''} with {providerLabel(selectedProvider)} — this may take a few seconds…
-              </p>
-            </div>
-          )}
+          {/* Active Generation Session workspace */}
+          <div className="img-studio-active-workspace">
+            {generating && (
+              <div className="img-studio-skeleton-grid">
+                {Array.from({ length: numImages }).map((_, i) => (
+                  <SkeletonCard key={i} />
+                ))}
+                <p className="img-studio-generating-label" aria-live="assertive">
+                  Creating {numImages} image{numImages > 1 ? 's' : ''} with {providerLabel(selectedProvider)} — this may take a few seconds…
+                </p>
+              </div>
+            )}
 
-          {!generating && result && (
-            <>
-              {result.description && (
-                <p className="img-studio-description">{result.description}</p>
-              )}
-              <div
-                className="img-studio-grid"
-                style={{ '--img-count': result.images.length } as React.CSSProperties}
-              >
-                {result.images.map((entry, idx) => (
-                  <article key={entry.id} className="img-studio-card" aria-label={`Generated image ${idx + 1}`}>
-                    <div className="img-studio-card-img-wrap">
-                      <img
-                        src={convertFileSrc(entry.url || entry.path)}
-                        alt={entry.message || prompt}
-                        className="img-studio-card-img"
-                        loading="eager"
-                        decoding="async"
-                      />
-                    </div>
-                    <div className="img-studio-card-actions">
-                      <button
-                        type="button"
-                        className="img-studio-action-btn"
-                        onClick={() => downloadImage(entry, idx)}
-                        title="Download image"
-                        id={`img-studio-download-${idx}`}
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                        </svg>
-                        Download
-                      </button>
-                      {onSendToChat && (
+            {!generating && result && (
+              <>
+                {result.description && (
+                  <p className="img-studio-description">{result.description}</p>
+                )}
+                <div
+                  className="img-studio-grid"
+                  style={{ '--img-count': result.images.length } as React.CSSProperties}
+                >
+                  {result.images.map((entry, idx) => (
+                    <article key={entry.id} className="img-studio-card" aria-label={`Generated image ${idx + 1}`}>
+                      <div className="img-studio-card-img-wrap">
+                        <img
+                          src={convertFileSrc(entry.url || entry.path)}
+                          alt={entry.message || prompt}
+                          className="img-studio-card-img"
+                          loading="eager"
+                          decoding="async"
+                        />
+                      </div>
+                      <div className="img-studio-card-actions">
                         <button
                           type="button"
-                          className="img-studio-action-btn img-studio-action-btn--primary"
-                          onClick={() => onSendToChat(entry.url || entry.path, prompt)}
-                          title="Send to Chat"
-                          id={`img-studio-send-${idx}`}
+                          className="img-studio-action-btn"
+                          onClick={() => downloadImage(entry, idx)}
+                          title="Download image"
+                          id={`img-studio-download-${idx}`}
                         >
                           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                           </svg>
-                          Send to Chat
+                          Download
                         </button>
-                      )}
-                    </div>
-                  </article>
-                ))}
-              </div>
-              <p className="img-studio-meta">
-                Provider: <strong>{providerLabel(result.provider)}</strong> · Model: <strong>{result.model}</strong> · {result.images.length} image{result.images.length > 1 ? 's' : ''} · Saved to gallery
-              </p>
-            </>
-          )}
+                        {onSendToChat && (
+                          <button
+                            type="button"
+                            className="img-studio-action-btn img-studio-action-btn--primary"
+                            onClick={() => onSendToChat(entry.url || entry.path, prompt)}
+                            title="Send to Chat"
+                            id={`img-studio-send-${idx}`}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                            </svg>
+                            Send to Chat
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                <p className="img-studio-meta">
+                  Provider: <strong>{providerLabel(result.provider)}</strong> · Model: <strong>{result.model}</strong> · {result.images.length} image{result.images.length > 1 ? 's' : ''} · Saved to gallery
+                </p>
+              </>
+            )}
 
-          {!generating && !result && (
-            <div className="img-studio-empty">
-              <div className="img-studio-empty-icon" aria-hidden="true">
-                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-                </svg>
+            {!generating && !result && (
+              <div className="img-studio-active-empty">
+                <div className="img-studio-empty-icon" aria-hidden="true">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                  </svg>
+                </div>
+                <p>No active generation</p>
+                <span>Enter a prompt on the left pane and generate new images.</span>
               </div>
-              <p>Your generated images will appear here</p>
-              <span>Select a provider, type a prompt, and click Generate Image to start</span>
+            )}
+          </div>
+
+          {/* 2. Middle divider / tab header */}
+          <div className="img-studio-history-header">
+            <div className="img-studio-history-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+              </svg>
+              <span>Gallery & History</span>
+              <span className="img-studio-history-badge">
+                {(() => {
+                  const currentIds = new Set(result?.images.map(img => img.id) || [])
+                  return historyPictures.filter(img => !currentIds.has(img.id)).length
+                })()}
+              </span>
             </div>
-          )}
+          </div>
+
+          {/* 3. Previously Generated Gallery list */}
+          <div className="img-studio-history-gallery">
+            {(() => {
+              const currentIds = new Set(result?.images.map(img => img.id) || [])
+              const filteredHistory = historyPictures.filter(img => !currentIds.has(img.id))
+              
+              if (filteredHistory.length === 0) {
+                return (
+                  <div className="img-studio-gallery-empty">
+                    <p>Your saved gallery is empty</p>
+                    <span>Generated images will be stored here automatically.</span>
+                  </div>
+                )
+              }
+              
+              return (
+                <div className="img-studio-grid">
+                  {filteredHistory.map((picture, idx) => (
+                    <article key={picture.id} className="img-studio-card" aria-label={`Saved image ${idx + 1}`}>
+                      <div className="img-studio-card-img-wrap">
+                        <img
+                          src={convertFileSrc(picture.thumbnailUrl || picture.thumbnailPath || picture.url || picture.path)}
+                          alt={picture.message || 'Generated image'}
+                          className="img-studio-card-img"
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      </div>
+                      <div className="img-studio-card-actions">
+                        <button
+                          type="button"
+                          className="img-studio-action-btn"
+                          onClick={() => downloadImage(picture, idx)}
+                          title="Download image"
+                          id={`img-studio-gallery-download-${idx}`}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                          </svg>
+                          Download
+                        </button>
+                        {onSendToChat && (
+                          <button
+                            type="button"
+                            className="img-studio-action-btn img-studio-action-btn--primary"
+                            onClick={() => onSendToChat(picture.url || picture.path, picture.message || '')}
+                            title="Send to Chat"
+                            id={`img-studio-gallery-send-${idx}`}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                            </svg>
+                            Send to Chat
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )
+            })()}
+          </div>
         </section>
       </div>
     </div>
