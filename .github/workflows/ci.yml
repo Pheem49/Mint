@@ -23,6 +23,20 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Set up Rust
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl file pkg-config wget \
+            libdbus-1-dev libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev librsvg2-dev \
+            poppler-utils unzip patchelf
+
       - name: Install dependencies
         run: npm ci
 
