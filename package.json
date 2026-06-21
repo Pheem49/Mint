@@ -48,13 +48,13 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@vitejs/plugin-react": "^6.0.1",
-    "material-icon-theme": "^5.35.0",
+    "material-icon-theme": "5.34.0",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "typescript": "^6.0.3",
-    "vite": "^8.0.10"
+    "vite": "^8.0.16"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

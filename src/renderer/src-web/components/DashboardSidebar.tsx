@@ -63,8 +63,8 @@ export default function DashboardSidebar({
           if (event.key === 'Enter' || event.key === ' ') onToggleSidebar()
         }}
       >
-        <img src="./assets/icon.png" alt="Agent Mint Logo" className="sidebar-logo" />
-        <span className="sidebar-brand-name">Agent Mint</span>
+        <img src="./assets/icon.png" alt="Mint Agent Logo" className="sidebar-logo" />
+        <span className="sidebar-brand-name">Mint Agent</span>
       </div>
 
       <button className="sidebar-new-chat" onClick={() => onClearHistory('New chat')}>
