@@ -1,5 +1,4 @@
 # Ignore Rust backend and build files
-src-tauri/
 target/
 out/
 rustc_checker.py
