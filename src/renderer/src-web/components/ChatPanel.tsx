@@ -260,6 +260,64 @@ function renderApprovalDetails(approval: any): ApprovalDetails {
   return { title: 'Unknown Action', body: JSON.stringify(approval, null, 2), reason: 'Requires approval to proceed.', isDangerous: false }
 }
 
+function renderDiff(diffText: string) {
+  if (!diffText) return null
+  const lines = diffText.split('\n')
+  return (
+    <div style={{ 
+      background: '#0b0f19', 
+      borderRadius: '6px', 
+      padding: '8px', 
+      border: '1px solid rgba(255, 255, 255, 0.08)', 
+      overflowX: 'auto', 
+      maxHeight: '400px',
+      fontFamily: 'monospace',
+      fontSize: '0.74rem',
+      lineHeight: '1.4',
+    }}>
+      {lines.map((line, idx) => {
+        let style: any = {
+          whiteSpace: 'pre-wrap',
+          padding: '2px 6px',
+        }
+        
+        if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) {
+          style = {
+            ...style,
+            color: '#64748b',
+            fontWeight: 'bold',
+          }
+        } else if (line.startsWith('+')) {
+          style = {
+            ...style,
+            background: 'rgba(16, 185, 129, 0.12)',
+            borderLeft: '3px solid #10b981',
+            color: '#a7f3d0'
+          }
+        } else if (line.startsWith('-')) {
+          style = {
+            ...style,
+            background: 'rgba(239, 68, 68, 0.12)',
+            borderLeft: '3px solid #ef4444',
+            color: '#fca5a5'
+          }
+        } else {
+          style = {
+            ...style,
+            color: '#e2e8f0',
+          }
+        }
+        
+        return (
+          <div key={idx} style={style}>
+            {line}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 interface ChatPanelProps {
   interactions: any[]
   sending: boolean
@@ -722,6 +780,25 @@ export default function ChatPanel({
     }
   }
   const activeModel = getActiveModel(activeProvider)
+
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+
+  useEffect(() => {
+    if (!sending) {
+      setElapsedSeconds(0)
+      return
+    }
+
+    const startTime = Date.now()
+    setElapsedSeconds(0)
+
+    const timer = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000)
+      setElapsedSeconds(elapsed)
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [sending])
 
   const [isRecording, setIsRecording] = useState(false)
   const [voiceMode, setVoiceMode] = useState(false)
@@ -1541,7 +1618,30 @@ export default function ChatPanel({
             {renderActiveFileChanges()}
             <div className="message ai-message thinking-message">
               <div className="bubble-wrapper">
-                <div className="message-bubble"><span>{streamedReply ? renderFormattedMessage(streamedReply) : 'Thinking...'}</span></div>
+                <div className="message-bubble">
+                  <span>
+                    {streamedReply ? (
+                      renderFormattedMessage(streamedReply)
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-soft, #94a3b8)' }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', flexShrink: 0 }}>
+                          <circle cx="12" cy="12" r="10" stroke="rgba(255, 255, 255, 0.12)" />
+                          <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--accent)" strokeLinecap="round">
+                            <animateTransform
+                              attributeName="transform"
+                              type="rotate"
+                              from="0 12 12"
+                              to="360 12 12"
+                              dur="0.9s"
+                              repeatCount="indefinite"
+                            />
+                          </path>
+                        </svg>
+                        <span>Thinking for {elapsedSeconds}s</span>
+                      </div>
+                    )}
+                  </span>
+                </div>
                 {streamedResponse && (
                   <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <button className="provider-badge">{badge(streamedResponse.provider, streamedResponse.model)}</button>
@@ -1575,6 +1675,38 @@ export default function ChatPanel({
           </div>
         )}
 
+        {pendingApproval && (() => {
+          const details = renderApprovalDetails(pendingApproval.approval)
+          const writeFile = pendingApproval.approval?.WriteFile
+          const applyPatch = pendingApproval.approval?.ApplyPatch
+          const diffText = writeFile?.diff || applyPatch?.diff
+
+          return (
+            <div className="message ai-message" style={{ width: '100%' }}>
+              <div className="bubble-wrapper" style={{ width: '100%' }}>
+                <div className="action-card approval-card" data-tier={details.isDangerous ? 'dangerous' : undefined} style={{ width: '100%' }}>
+                  <div className="approval-card-content" style={{ width: '100%' }}>
+                    <div className="approval-card-title">{details.title}</div>
+                    <div className="approval-card-body" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{details.body}</div>
+                    {diffText ? (
+                      <div className="approval-card-diff-container" style={{ marginTop: '8px', width: '100%' }}>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-soft, #94a3b8)', marginBottom: '4px' }}>Diff:</div>
+                        {renderDiff(diffText)}
+                      </div>
+                    ) : (
+                      details.reason && <div className="approval-card-reason" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{details.reason}</div>
+                    )}
+                  </div>
+                  <div className="approval-card-actions">
+                    <button type="button" className="approval-btn approval-btn-approve" onClick={() => onApproval(true)}>Approve</button>
+                    <button type="button" className="approval-btn" style={{ backgroundColor: 'rgba(16, 185, 129, 0.22)', borderColor: 'rgba(16, 185, 129, 0.4)', color: '#a7f3d0' }} onClick={() => onApproval(true, true)}>Approve this session</button>
+                    <button type="button" className="approval-btn approval-btn-cancel" onClick={() => onApproval(false)}>Cancel</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
         <div ref={chatEnd} />
       </div>
 
