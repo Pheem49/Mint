@@ -298,55 +298,171 @@ interface ChatPanelProps {
   onSetModel: (model: string) => void
 }
 
+function ChatCodeBlock({ code, language }: { code: string; language: string; key?: any }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy code: ', err)
+    }
+  }
+
+  const handleDownload = () => {
+    try {
+      const blob = new Blob([code], { type: 'text/plain;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `code.${language === 'plaintext' ? 'txt' : language}`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Failed to download code: ', err)
+    }
+  }
+
+  const displayLang = language.charAt(0).toUpperCase() + language.slice(1).toLowerCase()
+
+  return (
+    <div className="chat-code-block-container" style={{ whiteSpace: 'normal' }}>
+      <div className="chat-code-block-header">
+        <span className="chat-code-block-lang">{displayLang}</span>
+        <div className="chat-code-block-actions">
+          <button type="button" onClick={handleDownload} title="Download code" className="chat-code-action-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
+          <button type="button" onClick={handleCopy} title="Copy code" className="chat-code-action-btn">
+            {copied ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            )}
+          </button>
+        </div>
+      </div>
+      <pre className="chat-code-block-body">
+        <code>{code}</code>
+      </pre>
+    </div>
+  )
+}
+
 function renderFormattedMessage(text: string) {
   const displayText = readableAssistantText(text)
   if (!displayText) return null
-  
-  const lines = displayText.split('\n')
-  return lines.map((line, lineIndex) => {
-    const headerMatch = line.match(/^(#{1,6})\s+(.*)$/)
-    
-    const formatInline = (str: string) => {
-      const parts = str.split(/\*\*([\s\S]*?)\*\*/g)
-      return parts.map((part, partIndex) => {
-        if (partIndex % 2 === 1) {
+
+  const formatInline = (str: string) => {
+    const codeParts = str.split(/`([\s\S]*?)`/g)
+    return codeParts.map((codePart, codeIndex) => {
+      if (codeIndex % 2 === 1) {
+        return (
+          <code key={`code-${codeIndex}`} className="chat-inline-code">
+            {codePart}
+          </code>
+        )
+      }
+      const boldParts = codePart.split(/\*\*([\s\S]*?)\*\*/g)
+      return boldParts.map((boldPart, boldIndex) => {
+        if (boldIndex % 2 === 1) {
           return (
-            <strong key={partIndex} className="chat-bold-highlight">
-              {part}
+            <strong key={`bold-${boldIndex}`} className="chat-bold-highlight">
+              {boldPart}
             </strong>
           )
         }
-        return part
+        return boldPart
       })
+    })
+  }
+
+  const lines = displayText.split('\n')
+  const items: any[] = []
+
+  let inCodeBlock = false
+  let codeBlockLang = ''
+  let codeBlockLines: string[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+
+    if (line.trim().startsWith('```')) {
+      if (inCodeBlock) {
+        const codeText = codeBlockLines.join('\n')
+        items.push(
+          <ChatCodeBlock
+            key={`code-block-${i}`}
+            code={codeText}
+            language={codeBlockLang}
+          />
+        )
+        inCodeBlock = false
+        codeBlockLines = []
+      } else {
+        inCodeBlock = true
+        codeBlockLang = line.trim().slice(3).trim() || 'plaintext'
+      }
+      continue
     }
 
+    if (inCodeBlock) {
+      codeBlockLines.push(line)
+      continue
+    }
+
+    const headerMatch = line.match(/^(#{1,6})\s+(.*)$/)
     if (headerMatch) {
       const level = headerMatch[1].length
       const content = headerMatch[2]
-      
+
       const style = {
         fontWeight: 'bold',
         display: 'block',
         marginTop: level === 1 ? '16px' : level === 2 ? '14px' : '10px',
         marginBottom: '6px',
         fontSize: level === 1 ? '1.25em' : level === 2 ? '1.15em' : '1.05em',
-        color: 'var(--text-main)'
+        color: 'var(--text-main)',
       }
-      
-      return (
-        <span key={lineIndex} style={style}>
+
+      items.push(
+        <span key={`line-${i}`} style={style}>
           {formatInline(content)}
         </span>
       )
+    } else {
+      items.push(
+        <Fragment key={`line-${i}`}>
+          {formatInline(line)}
+          {i < lines.length - 1 && '\n'}
+        </Fragment>
+      )
     }
+  }
 
-    return (
-      <Fragment key={lineIndex}>
-        {formatInline(line)}
-        {lineIndex < lines.length - 1 && '\n'}
-      </Fragment>
+  if (inCodeBlock && codeBlockLines.length > 0) {
+    const codeText = codeBlockLines.join('\n')
+    items.push(
+      <ChatCodeBlock
+        key={`code-block-end`}
+        code={codeText}
+        language={codeBlockLang}
+      />
     )
-  })
+  }
+
+  return items
 }
 
 function readableAssistantText(text: string) {

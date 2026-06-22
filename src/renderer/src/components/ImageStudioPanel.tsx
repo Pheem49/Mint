@@ -496,7 +496,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                     <article key={entry.id} className="img-studio-card" aria-label={`Generated image ${idx + 1}`}>
                       <div className="img-studio-card-img-wrap">
                         <img
-                          src={convertFileSrc(entry.url || entry.path)}
+                          src={convertFileSrc(entry.path || entry.url)}
                           alt={entry.message || prompt}
                           className="img-studio-card-img"
                           loading="eager"
@@ -590,7 +590,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                     <article key={picture.id} className="img-studio-card" aria-label={`Saved image ${idx + 1}`}>
                       <div className="img-studio-card-img-wrap">
                         <img
-                          src={convertFileSrc(picture.thumbnailUrl || picture.thumbnailPath || picture.url || picture.path)}
+                          src={convertFileSrc(picture.thumbnailPath || picture.thumbnailUrl || picture.path || picture.url)}
                           alt={picture.message || 'Generated image'}
                           className="img-studio-card-img"
                           loading="lazy"

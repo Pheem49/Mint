@@ -143,6 +143,8 @@ const OLLAMA_MODELS = [
   'qwen2.5:latest'
 ]
 
+
+
 export default function SettingsWindow() {
   const [activeTab, setActiveTab] = useState<TabType>('sect-general')
   const [config, setConfig] = useState(DEFAULT_CONFIG)
@@ -168,6 +170,8 @@ export default function SettingsWindow() {
   const [mcpEnv, setMcpEnv] = useState('')
   const [updateMessage, setUpdateMessage] = useState('')
   const [updateAvailable, setUpdateAvailable] = useState(false)
+
+
 
   // Load settings on mount
   useEffect(() => {
@@ -942,24 +946,28 @@ export default function SettingsWindow() {
                 <div className="form-grid single">
                   <div className="setting-row">
                     <label>Your Name / Nickname</label>
-                    <input 
-                      type="text" 
-                      value={userName} 
-                      onChange={(e) => setUserName(e.target.value)} 
-                      placeholder="e.g. Pheem, Jane" 
-                    />
-                    <p className="hint">Used by the assistant to address you in conversation.</p>
+                    <div className="memory-field-container">
+                      <input 
+                        type="text" 
+                        value={userName} 
+                        onChange={(e) => setUserName(e.target.value)} 
+                        placeholder="e.g. Pheem, Jane" 
+                      />
+                      <p className="hint">Used by the assistant to address you in conversation.</p>
+                    </div>
                   </div>
 
                   <div className="setting-row">
                     <label>Custom Instructions & Preferences</label>
-                    <textarea 
-                      value={userPreferences} 
-                      onChange={(e) => setUserPreferences(e.target.value)} 
-                      placeholder="e.g. Explain coding concepts step-by-step. Prefer TypeScript. Talk in Thai. Keep explanations concise." 
-                      style={{ minHeight: '150px', resize: 'vertical' }}
-                    />
-                    <p className="hint">Preferences, guidelines, or persona instructions for the assistant.</p>
+                    <div className="memory-field-container">
+                      <textarea 
+                        value={userPreferences} 
+                        onChange={(e) => setUserPreferences(e.target.value)} 
+                        placeholder="e.g. Explain coding concepts step-by-step. Prefer TypeScript. Talk in Thai. Keep explanations concise." 
+                        style={{ minHeight: '150px', resize: 'vertical' }}
+                      />
+                      <p className="hint">Preferences, guidelines, or persona instructions for the assistant.</p>
+                    </div>
                   </div>
                 </div>
               </section>
