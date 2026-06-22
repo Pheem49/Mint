@@ -255,7 +255,7 @@ h1 {
 
 .web-safe-notice {
     width: 100%;
-    max-width: 624px;
+    max-width: 1000px;
     margin: 0 auto 18px;
     padding: 12px 14px;
     border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
@@ -297,7 +297,7 @@ h1 {
     flex-direction: column;
     gap: 18px;
     width: 100%;
-    max-width: 624px;
+    max-width: 1000px;
     margin: 0 auto;
     animation: fadeTab 0.18s ease;
 }
@@ -369,7 +369,7 @@ h1 {
 
 .form-grid.single {
     grid-template-columns: minmax(0, 1fr);
-    max-width: 540px;
+    max-width: 100%;
 }
 
 .setting-row {
@@ -623,7 +623,7 @@ input:checked + .toggle-slider::before {
 .slider-stack {
     display: grid;
     gap: 16px;
-    max-width: 660px;
+    max-width: 100%;
 }
 
 .slider-group {
@@ -1098,3 +1098,13 @@ kbd {
         grid-template-columns: minmax(0, 1fr);
     }
 }
+
+.memory-field-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    align-items: flex-start;
+}
+
+

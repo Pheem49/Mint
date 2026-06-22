@@ -378,3 +378,108 @@ button {
     text-align: center;
   }
 }
+
+/* Premium Markdown Styles for Chat Messages */
+.chat-inline-code {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #34d399;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
+  font-size: 0.88em;
+}
+
+.chat-code-block-container {
+  display: flex;
+  flex-direction: column;
+  background: var(--input-bg, #0f172a);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 12px 0;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.chat-code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface-bg, #1e293b);
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-code-block-lang {
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-transform: capitalize;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.chat-code-block-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.chat-code-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-soft, #94a3b8);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.chat-code-action-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--accent-hover, #34d399);
+}
+
+.chat-code-block-body {
+  margin: 0;
+  padding: 14px;
+  overflow-x: auto;
+  background: var(--input-bg, #0f172a);
+}
+
+.chat-code-block-body code {
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
+  font-size: 0.88rem;
+  color: var(--text-main, #e2e8f0);
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.chat-ordered-list,
+.chat-unordered-list {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.chat-ordered-list {
+  list-style-type: decimal;
+}
+
+.chat-unordered-list {
+  list-style-type: disc;
+}
+
+.chat-bold-highlight {
+  color: var(--accent) !important;
+}
+
+.chat-inline-code {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
+  font-size: 0.9em;
+}
