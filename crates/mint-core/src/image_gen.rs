@@ -57,7 +57,9 @@ pub struct ImageGenResponse {
 #[derive(Debug, Error)]
 pub enum ImageGenError {
     // ── NanoBanana ──────────────────────────────────────────────────────────
-    #[error("missing Gemini API key — set GEMINI_API_KEY or configure api_key for NanoBanana image generation")]
+    #[error(
+        "missing Gemini API key — set GEMINI_API_KEY or configure api_key for NanoBanana image generation"
+    )]
     MissingApiKey,
     // ── DALL·E ───────────────────────────────────────────────────────────────
     #[error("missing OpenAI API key — configure openai_api_key to use DALL·E")]
@@ -151,9 +153,8 @@ async fn call_nanobanana(
             }
         });
 
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    );
+    let url =
+        format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent");
 
     let full_prompt = build_prompt(request);
     let num_images = request.num_images.unwrap_or(1).clamp(1, 4);
@@ -230,7 +231,10 @@ fn parse_nanobanana_response(
                     continue;
                 }
                 let data_uri = format!("data:{mime_type};base64,{b64}");
-                images.push(GeneratedImage { data_uri, mime_type });
+                images.push(GeneratedImage {
+                    data_uri,
+                    mime_type,
+                });
             }
         }
     }
@@ -310,7 +314,9 @@ async fn call_dalle(
         .await?;
 
     if let Some(err) = response.get("error") {
-        let msg = err["message"].as_str().unwrap_or("unknown OpenAI API error");
+        let msg = err["message"]
+            .as_str()
+            .unwrap_or("unknown OpenAI API error");
         return Err(ImageGenError::ModelError(msg.to_owned()));
     }
 
@@ -692,11 +698,7 @@ async fn call_replicate(
 }
 
 /// Poll a Replicate prediction URL until it reaches a terminal state.
-async fn poll_replicate(
-    client: &Client,
-    api_key: &str,
-    url: &str,
-) -> Result<Value, ImageGenError> {
+async fn poll_replicate(client: &Client, api_key: &str, url: &str) -> Result<Value, ImageGenError> {
     for _ in 0..60 {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
@@ -738,7 +740,13 @@ async fn fetch_url_as_data_uri(client: &Client, url: &str) -> Result<String, Ima
         .headers()
         .get("content-type")
         .and_then(|v| v.to_str().ok())
-        .map(|ct| ct.split(';').next().unwrap_or("image/jpeg").trim().to_owned())
+        .map(|ct| {
+            ct.split(';')
+                .next()
+                .unwrap_or("image/jpeg")
+                .trim()
+                .to_owned()
+        })
         .unwrap_or_else(|| "image/jpeg".to_owned());
 
     let bytes = resp.bytes().await?;
@@ -760,7 +768,11 @@ fn uuid_v4_hex() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(12345);
-    format!("{:016x}{:016x}", seed as u64 ^ 0xDEAD_BEEF_CAFE_BABE, seed as u64)
+    format!(
+        "{:016x}{:016x}",
+        seed as u64 ^ 0xDEAD_BEEF_CAFE_BABE,
+        seed as u64
+    )
 }
 
 /// Encode `fields` as a `multipart/form-data` text-only body for the given boundary.
@@ -786,7 +798,9 @@ fn build_prompt(request: &ImageGenRequest) -> String {
     if let Some(ref neg) = request.negative_prompt {
         let neg = neg.trim();
         if !neg.is_empty() {
-            prompt.push_str(&format!("\n\nNegative prompt (avoid these elements): {neg}"));
+            prompt.push_str(&format!(
+                "\n\nNegative prompt (avoid these elements): {neg}"
+            ));
         }
     }
 

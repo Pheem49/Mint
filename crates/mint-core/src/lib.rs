@@ -40,6 +40,9 @@ pub use config::{
     set_config_value,
 };
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
+pub use image_gen::{
+    GeneratedImage, ImageGenError, ImageGenRequest, ImageGenResponse, generate_images,
+};
 pub use knowledge::{
     KnowledgeError, KnowledgeHit, KnowledgeSource, KnowledgeStore, extract_document_text,
 };
@@ -55,9 +58,6 @@ pub use orchestration::{
     AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, OrchestrationError,
     orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
     orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-};
-pub use image_gen::{
-    GeneratedImage, ImageGenError, ImageGenRequest, ImageGenResponse, generate_images,
 };
 pub use pictures::{
     PictureEntry, PictureError, list_saved_pictures, parse_data_uri, save_chat_images,

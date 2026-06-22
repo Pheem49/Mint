@@ -10,8 +10,8 @@ use mint_core::{
     CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, ImageGenRequest, KnowledgeStore,
     MemoryStore, MintConfig, TaskStore, apply_code_edits, assert_path_capability, build_code_patch,
     build_symbol_index, classify_shell_command, config_path, create_folder, execute_native_plugin,
-    fetch_github_repo_summary, find_paths, generate_images, index_semantic_code,
-    initialize_config, inspect_code_plan, list_code_files, load_config, native_plugins,
+    fetch_github_repo_summary, find_paths, generate_images, index_semantic_code, initialize_config,
+    inspect_code_plan, list_code_files, load_config, native_plugins,
     orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, parse_github_url,
     propose_code_edits, read_code_file, repository_summary, run_shell_command, search_code,
     search_semantic_code, set_config_value,
@@ -964,10 +964,20 @@ async fn main() -> Result<()> {
                 };
                 match generate_images(&config, &request).await {
                     Ok(result) => {
-                        eprintln!("\r{MINT}✦ Generated {} image(s)         {RESET}", result.images.len());
-                        let data_uris: Vec<String> =
-                            result.images.iter().map(|img| img.data_uri.clone()).collect();
-                        match mint_core::save_chat_images(data_uris, Some(result.provider.clone()), Some(prompt.clone())) {
+                        eprintln!(
+                            "\r{MINT}✦ Generated {} image(s)         {RESET}",
+                            result.images.len()
+                        );
+                        let data_uris: Vec<String> = result
+                            .images
+                            .iter()
+                            .map(|img| img.data_uri.clone())
+                            .collect();
+                        match mint_core::save_chat_images(
+                            data_uris,
+                            Some(result.provider.clone()),
+                            Some(prompt.clone()),
+                        ) {
                             Ok(saved) => {
                                 for entry in &saved {
                                     println!("{MINT}✓{RESET} Saved: {}", entry.path.display());
@@ -975,8 +985,13 @@ async fn main() -> Result<()> {
                                 // If --output specified, copy first image there
                                 if let (Some(out_path), Some(first)) = (&output, saved.first()) {
                                     match std::fs::copy(&first.path, out_path) {
-                                        Ok(_) => println!("{MINT}✓{RESET} Copied to: {}", out_path.display()),
-                                        Err(e) => eprintln!("{WARN}Warning: could not copy to output path: {e}{RESET}"),
+                                        Ok(_) => println!(
+                                            "{MINT}✓{RESET} Copied to: {}",
+                                            out_path.display()
+                                        ),
+                                        Err(e) => eprintln!(
+                                            "{WARN}Warning: could not copy to output path: {e}{RESET}"
+                                        ),
                                     }
                                 }
                                 if let Some(desc) = &result.description {
@@ -1282,7 +1297,10 @@ async fn handle_slash_command(
                 ("/memory clear", "Clear all interactions"),
                 ("/memory get <key>", "Read a profile value"),
                 ("/memory set <key> <val>", "Store a profile value"),
-                ("/image-provider [name]", "List image gen providers or switch default provider"),
+                (
+                    "/image-provider [name]",
+                    "List image gen providers or switch default provider",
+                ),
                 ("/mcp list", "List configured MCP servers"),
                 ("/mcp allow <server> <tool>", "Allow an MCP tool"),
                 ("/stats", "Show session statistics"),
@@ -1382,9 +1400,7 @@ async fn handle_slash_command(
                         Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
                     }
                 } else {
-                    println!(
-                        "{ERROR}Provider '{rest}' is not configured or invalid.{RESET}\n"
-                    );
+                    println!("{ERROR}Provider '{rest}' is not configured or invalid.{RESET}\n");
                 }
             }
             Some(SlashResult::Handled)
@@ -2004,7 +2020,10 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/help", "Show help menu"),
     ("/fast", "Toggle fast mode (hide thinking traces)"),
     ("/models", "List AI providers or switch active provider"),
-    ("/image-provider", "List image gen providers or switch default provider"),
+    (
+        "/image-provider",
+        "List image gen providers or switch default provider",
+    ),
     ("/clear", "Clear conversation history"),
     ("/cd", "Change active workspace directory"),
     ("/image", "Attach image from disk"),
