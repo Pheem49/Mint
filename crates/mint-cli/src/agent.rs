@@ -178,7 +178,7 @@ pub async fn run_code_agent_with_options(
                     ));
                     render_live_status(&mut status);
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(Duration::from_millis(150)).await;
             }
         });
     }
@@ -479,6 +479,7 @@ struct LiveStatus {
     committed_activities: usize,
     committed_tasks: usize,
     rendered_lines: usize,
+    spinner_tick: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -551,7 +552,10 @@ fn render_live_status(status: &mut LiveStatus) {
     lines.extend(activities_lines(&status.activities[activities_start..]));
     lines.extend(explored_lines(&status.explored[explored_start..]));
     if let Some(thinking) = &status.thinking {
-        lines.push(format!("{MINT}●{RESET} {BRIGHT}{thinking}{RESET}"));
+        let frames = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+        let frame = frames[status.spinner_tick % frames.len()];
+        status.spinner_tick += 1;
+        lines.push(format!("{MINT}{frame}{RESET}{BRIGHT}{thinking}{RESET}"));
     }
     if lines.is_empty() {
         return;

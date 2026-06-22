@@ -1294,8 +1294,8 @@ h1 {
 .approval-card {
   align-items: stretch;
   flex-direction: column;
-  background: rgba(245, 158, 11, 0.12);
-  border-color: rgba(245, 158, 11, 0.38);
+  background: transparent;
+  border-color: transparent;
 }
 
 .approval-card[data-tier="dangerous"] {
