@@ -706,8 +706,10 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 )
                                 .unwrap_or_default();
                                 for picture in &mut saved {
-                                    picture.url = Some(format!("/api/pictures/{}", picture.filename));
-                                    picture.thumbnail_url = Some(format!("/api/pictures/{}", picture.filename));
+                                    picture.url =
+                                        Some(format!("/api/pictures/{}", picture.filename));
+                                    picture.thumbnail_url =
+                                        Some(format!("/api/pictures/{}", picture.filename));
                                 }
                                 let response = json!({
                                     "images": saved,
@@ -758,7 +760,10 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     let active = if available.contains(&config.image_gen_provider) {
                         config.image_gen_provider.clone()
                     } else {
-                        available.first().cloned().unwrap_or_else(|| "nanobanana".into())
+                        available
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| "nanobanana".into())
                     };
                     let response = json!({ "active": active, "available": available });
                     send_json_response(socket, "200 OK", &response.to_string()).await;

@@ -61,29 +61,15 @@ const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
 ];
 
 // ── Image Generation Providers ──────────────────────────────────────────────
-const NANOBANANA_IMAGE_MODEL_PRESETS: &[&str] = &[
-    "gemini-2.5-flash-image",
-    "gemini-2.0-flash-image",
-];
+const NANOBANANA_IMAGE_MODEL_PRESETS: &[&str] =
+    &["gemini-2.5-flash-image", "gemini-2.0-flash-image"];
 
-const DALLE_MODEL_PRESETS: &[&str] = &[
-    "dall-e-3",
-    "gpt-image-1",
-    "dall-e-2",
-];
+const DALLE_MODEL_PRESETS: &[&str] = &["dall-e-3", "gpt-image-1", "dall-e-2"];
 
-const STABILITY_MODEL_PRESETS: &[&str] = &[
-    "sd3.5-large",
-    "sd3.5-large-turbo",
-    "sd3-medium",
-    "core",
-];
+const STABILITY_MODEL_PRESETS: &[&str] =
+    &["sd3.5-large", "sd3.5-large-turbo", "sd3-medium", "core"];
 
-const IDEOGRAM_MODEL_PRESETS: &[&str] = &[
-    "V_3",
-    "V_2",
-    "V_2_TURBO",
-];
+const IDEOGRAM_MODEL_PRESETS: &[&str] = &["V_3", "V_2", "V_2_TURBO"];
 
 const REPLICATE_MODEL_PRESETS: &[&str] = &[
     "black-forest-labs/flux-1.1-pro",
@@ -961,8 +947,7 @@ pub async fn run() -> Result<()> {
         println!(
             "\x1b[90mGet your API key at https://ideogram.ai/api. Supports V_3, V_2, and V_2_TURBO.\x1b[0m"
         );
-        config.ideogram_api_key =
-            prompt_sensitive("Ideogram API Key", &config.ideogram_api_key)?;
+        config.ideogram_api_key = prompt_sensitive("Ideogram API Key", &config.ideogram_api_key)?;
         config.ideogram_model = prompt_select_or_custom(
             "Ideogram Model",
             static_model_options(IDEOGRAM_MODEL_PRESETS),
@@ -990,7 +975,6 @@ pub async fn run() -> Result<()> {
     } else {
         config.replicate_api_key = String::new();
     }
-
 
     save_config(&config)?;
     println!("\x1b[32m✅ Configuration saved successfully!\x1b[0m");

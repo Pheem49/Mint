@@ -32,12 +32,12 @@ use tokio::sync::oneshot;
 use integrations::{channel_inventory, list_plugins};
 use mint_core::{
     AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, ChatRequest, ChatResponse,
-    ChatSession, CodeEdit, CodeEditProposal, InteractionMemory, MemoryStore, MintConfig,
-    PictureEntry, TtsUrl, WeatherReport, apply_code_edits, classify_shell_command, config_path,
-    extract_document_text, google_tts_urls, list_saved_pictures, load_config, load_workflows,
-    orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    propose_code_edits, save_chat_images, save_config, start_channels, weather, workflows_path,
-    ImageGenRequest,
+    ChatSession, CodeEdit, CodeEditProposal, ImageGenRequest, InteractionMemory, MemoryStore,
+    MintConfig, PictureEntry, TtsUrl, WeatherReport, apply_code_edits, classify_shell_command,
+    config_path, extract_document_text, google_tts_urls, list_saved_pictures, load_config,
+    load_workflows, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
+    orchestrate_chat_with_fallback, propose_code_edits, save_chat_images, save_config,
+    start_channels, weather, workflows_path,
 };
 use plugins::execute_plugin;
 
@@ -638,16 +638,14 @@ struct DesktopImageGenResponse {
 }
 
 #[tauri::command]
-async fn generate_images(
-    request: ImageGenRequest,
-) -> Result<DesktopImageGenResponse, String> {
+async fn generate_images(request: ImageGenRequest) -> Result<DesktopImageGenResponse, String> {
     let config = load_config().map_err(|error| error.to_string())?;
-    
+
     // Call core generate_images logic
     let result = mint_core::generate_images(&config, &request)
         .await
         .map_err(|error| error.to_string())?;
-        
+
     // Save images to Pictures library (just like api_server does)
     let data_uris: Vec<String> = result
         .images
@@ -660,7 +658,7 @@ async fn generate_images(
         Some(request.prompt.clone()),
     )
     .map_err(|error| error.to_string())?;
-    
+
     Ok(DesktopImageGenResponse {
         images: saved,
         model: result.model,
