@@ -89,13 +89,44 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
   Cloud API integrations.
 - Signed Tauri update checks with an explicit approval step before installation.
 
-## Screenshots
+## User Interface
 
-| Desktop assistant | Settings |
-| --- | --- |
-| ![Mint desktop assistant](docs/assets/Agent_Mint.png) | ![Mint settings](docs/assets/Settings.png) |
+### Desktop App
+<table width="100%">
+  <tr>
+    <td align="center" width="50%"><b>Desktop Assistant</b></td>
+    <td align="center" width="50%"><b>Settings</b></td>
+  </tr>
+  <tr>
+    <td><img src="assets/Mint_Desktop.png" alt="Desktop Assistant" /></td>
+    <td><img src="assets/Setting.png" alt="Settings" /></td>
+  </tr>
+</table>
 
-![Mint CLI](docs/assets/CLI_Screen.png)
+### Web UI
+<table width="100%">
+  <tr>
+    <td align="center"><img src="assets/Mint_Web.png" alt="Web UI" /></td>
+  </tr>
+</table>
+
+### CLI
+<table width="100%">
+  <tr>
+    <td align="center"><img src="assets/Mint_CLI.png" alt="CLI" /></td>
+  </tr>
+</table>
+
+### Workspace & Agent
+<table width="100%">
+  <tr>
+    <td align="center"><img src="assets/Mint_WorkSpace.png" alt="Workspace & Agent" /></td>
+  </tr>
+</table>
+
+
+
+
 
 ## Prerequisites
 
