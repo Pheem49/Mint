@@ -3,14 +3,14 @@ import { getLocalApiBase, isTauriRuntime, getProfileValue, setProfileValue } fro
 
 const DEFAULT_CONFIG = {
   theme: 'dark',
-  accentColor: '#4f83e6',
+  accentColor: '#10b981',
   systemTextColor: '#f8fafc',
   customBgStart: '#0f172a',
   customBgEnd: '#1e1b4b',
   customPanelBg: '#1e293b',
   glassBlur: 'blur(16px)',
   fontFamily: "'Outfit', sans-serif",
-  fontSize: '15px',
+  fontSize: '18px',
   apiKey: '',
   aiProvider: 'gemini',
   geminiModel: 'gemini-2.5-flash',
@@ -1379,10 +1379,11 @@ export default function SettingsWindow() {
                   <div className="setting-row">
                     <label>Font Size</label>
                     <select value={config.fontSize} onChange={(e) => updateField('fontSize', e.target.value)}>
-                      <option value="14px">Small</option>
-                      <option value="15px">Medium (Default)</option>
-                      <option value="16px">Large</option>
-                      <option value="17px">Extra Large</option>
+                      <option value="16px">Small</option>
+                      <option value="18px">Medium (Default)</option>
+                      <option value="22px">Large</option>
+                      <option value="26px">Extra Large</option>
+                      <option value="30px">Extra Extra Large</option>
                     </select>
                   </div>
                 </div>

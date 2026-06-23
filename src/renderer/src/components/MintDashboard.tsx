@@ -45,14 +45,14 @@ const ACCESSORIES = [
 
 const DEFAULT_CONFIG = {
   theme: 'dark',
-  accentColor: '#4f83e6',
+  accentColor: '#10b981',
   systemTextColor: '#f8fafc',
   customBgStart: '#0f172a',
   customBgEnd: '#1e1b4b',
   customPanelBg: '#1e293b',
   glassBlur: 'blur(16px)',
   fontFamily: "'Outfit', sans-serif",
-  fontSize: '15px',
+  fontSize: '18px',
 }
 
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
@@ -188,7 +188,7 @@ const applyThemeStyles = (cfg: any) => {
   document.documentElement.style.setProperty('--text-main', systemTextColor)
   document.documentElement.style.setProperty('--glass-blur', cfg.glassBlur || 'blur(16px)')
   document.body.style.fontFamily = cfg.fontFamily || "'Outfit', sans-serif"
-  document.documentElement.style.fontSize = cfg.fontSize || '15px'
+  document.documentElement.style.fontSize = cfg.fontSize || '18px'
 
   if (theme === 'custom') {
     if (cfg.customBgStart && cfg.customBgEnd) {

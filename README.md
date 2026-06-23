@@ -16,27 +16,27 @@ The desktop application and native CLI share the same Rust domain layer, so chat
 memory, knowledge, tools, safety policies, and integrations behave consistently
 across both interfaces.
 
-## 🌟 What Mint Can Do
+## <img src="assets/features.svg" width="24" height="24" valign="middle" /> What Mint Can Do
 
 Mint is a local-first AI assistant running on your machine, capable of handling tasks via either the desktop application or the terminal interface (CLI):
 
 ---
 
-### 1. 🤖 AI Chat & Multi-Providers
+### 1. <img src="assets/chat.svg" width="18" height="18" valign="middle" /> AI Chat & Multi-Providers
 - Connect to **Gemini, OpenAI, Anthropic (Claude), Ollama (Local), Hugging Face**, and LM Studio.
 - Run private local LLMs inside your machine using Ollama or connect to leading cloud APIs.
 - Supports system instructions, temperature adjustments, voice replies, and image analysis (Multimodal).
 
 ---
 
-### 2. 🎨 Interactive Live2D Desktop Assistant
+### 2. <img src="assets/live2d.svg" width="18" height="18" valign="middle" /> Interactive Live2D Desktop Assistant
 - An interactive anime avatar (**Shiroko**) displayed right on your desktop with gaze tracking (eye/face follows your mouse pointer).
 - Toggle expression changes and cycle through character accessories dynamically.
 - Custom interaction zones (Head, Cheek, Hands, Body) that trigger unique animations and message toasts.
 
 ---
 
-### 3. 💻 Autonomous Code Agent
+### 3. <img src="assets/code.svg" width="18" height="18" valign="middle" /> Autonomous Code Agent
 - Run code agent loops via `/code <task>` or the terminal command `mint code agent "<task>"`.
 - Scan your project workspace, build multi-file implementation plans, fix test suite errors, and write edits automatically.
 - Run local tests, cargo checks, and shell commands.
@@ -45,20 +45,20 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ---
 
-### 4. 🧠 Long-Term Memory & Knowledge Base
+### 4. <img src="assets/memory.svg" width="18" height="18" valign="middle" /> Long-Term Memory & Knowledge Base
 - Persistent conversation memory stored locally in SQLite. Manage user profile memory with `/memory set/get` or CLI commands.
 - Index local directories, text files, and documentation to build your private searchable knowledge base.
 
 ---
 
-### 5. 🔌 Tool & MCP Integrations
+### 5. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Tool & MCP Integrations
 - Support **Model Context Protocol (MCP)** to connect tools like Google/Brave Search, Filesystem servers, and GitHub context.
 - **Auto GitHub Link Resolver:** Automatically detects GitHub URLs in chat messages (CLI, Web, and Desktop) and Code Agent tasks. It fetches and injects the repository's metadata, directory structure, and README as prompt context, serving as an instant fallback when the GitHub MCP server is not active.
 - Local plugins for Spotify playback control, Google Calendar, Gmail drafts, and Notion workspace reading.
 
 ---
 
-### 6. 🌐 Messaging Bridges
+### 6. <img src="assets/bridges.svg" width="18" height="18" valign="middle" /> Messaging Bridges
 - Bridge your local AI assistant to messaging services: **Telegram, Discord Gateway, Discord RPC, Slack, LINE, and WhatsApp**.
 - Host local chatbot webhooks that relay chat traffic into your configured LLM.
 > [!TIP]
@@ -66,9 +66,15 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ---
 
-### 7. 📸 Screen Capture & Translation
+### 7. <img src="assets/screencapture.svg" width="18" height="18" valign="middle" /> Screen Capture & Translation
 - Capture screen snapshots for instant visual analysis by the AI.
 - Real-time continuous overlay translation of specific screen regions.
+
+---
+
+### 8. <img src="assets/imagegen.svg" width="18" height="18" valign="middle" /> AI Image Generation
+- Generate high-quality images directly from chat or terminal using **DALL-E 3, Stability AI (Stable Diffusion), Ideogram, Replicate (Flux)**, and Google NanoBanana.
+- Supports aspect ratio selections, negative prompts, custom image counts, and automatic storage of generated pictures to the local library.
 
 ---
 
@@ -76,6 +82,7 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 - Multi-provider chat with Gemini, OpenAI, Anthropic, Ollama, Hugging Face, and
   local OpenAI-compatible endpoints.
+- Image generation using DALL-E 3, Stability AI, Ideogram, Replicate, and NanoBanana.
 - Native streaming responses, SQLite-backed memory, tasks, searchable local
   knowledge, skills, and semantic code search.
 - Desktop dashboard with a Live2D assistant, model interaction areas, pictures,
@@ -89,53 +96,21 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
   Cloud API integrations.
 - Signed Tauri update checks with an explicit approval step before installation.
 
-## User Interface
+## <img src="assets/setup.svg" width="24" height="24" valign="middle" /> Prerequisites
 
-### Desktop App
-<table width="100%">
-  <tr>
-    <td align="center" width="50%"><b>Desktop Assistant</b></td>
-    <td align="center" width="50%"><b>Settings</b></td>
-  </tr>
-  <tr>
-    <td><img src="assets/Mint_Desktop.png" alt="Desktop Assistant" /></td>
-    <td><img src="assets/Setting.png" alt="Settings" /></td>
-  </tr>
-</table>
+Before you can build or run Mint locally, make sure you have the following system tools installed:
 
-### Web UI
-<table width="100%">
-  <tr>
-    <td align="center"><img src="assets/Mint_Web.png" alt="Web UI" /></td>
-  </tr>
-</table>
+| Tool | Description | Required For |
+| :--- | :--- | :--- |
+| **Node.js & npm** | JavaScript runtime and package manager | Frontend UI (React, Vite, TypeScript) |
+| **Rust Toolchain** | Rust compiler (`rustc`) and package manager (`cargo`) | Shared domain logic, CLI, and Tauri backend |
+| **System Dependencies** | Native OS libraries (compiler tools, dbus, webkit) | Compiling window GUI, Webview rendering, and OS utilities |
 
-### CLI
-<table width="100%">
-  <tr>
-    <td align="center"><img src="assets/Mint_CLI.png" alt="CLI" /></td>
-  </tr>
-</table>
+### Linux Dependencies
 
-### Workspace & Agent
-<table width="100%">
-  <tr>
-    <td align="center"><img src="assets/Mint_WorkSpace.png" alt="Workspace & Agent" /></td>
-  </tr>
-</table>
+Install the required C compilers, WebKitGTK, and system libraries for your specific Linux distribution:
 
-
-
-
-
-## Prerequisites
-
-- Node.js and npm
-- A Rust toolchain
-- Tauri v2 native build dependencies for your operating system
-
-On Debian, Ubuntu, or Linux Mint:
-
+**Debian / Ubuntu / Linux Mint:**
 ```bash
 sudo apt-get install -y \
   build-essential curl file pkg-config wget \
@@ -144,8 +119,25 @@ sudo apt-get install -y \
   poppler-utils unzip patchelf
 ```
 
-See the [Tauri prerequisites guide](https://v2.tauri.app/start/prerequisites/)
-for other platforms.
+**Fedora / RHEL / CentOS:**
+```bash
+sudo dnf groupinstall -y "Development Tools"
+sudo dnf install -y \
+  webkit2gtk4.1-devel openssl-devel curl wget glibc-devel \
+  dbus-devel libayatana-appindicator-devel librsvg2-devel \
+  poppler-utils unzip patchelf
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -Syu --needed \
+  base-devel webkit2gtk-4.1 openssl curl wget \
+  dbus libayatana-appindicator librsvg \
+  poppler unzip patchelf
+```
+
+> [!TIP]
+> **Other Platforms:** If you are developing on macOS or Windows, follow the official [Tauri Prerequisites Guide](https://v2.tauri.app/start/prerequisites/) to set up your build environment.
 
 ## Installation
 
@@ -170,6 +162,7 @@ mint setup
 mint 
 mint web
 mint chat "Hello"
+mint imagine "A futuristic mint-colored robot" --aspect 16:9
 ```
 
 Most integrations can be configured from:
@@ -214,6 +207,42 @@ To install the `mint` command-line tool globally:
   ```
 * **Option C (Development Shell Alias):**
   If you are actively modifying code and want changes to reflect instantly, set up the alias under the [Setting up the mint Shortcut](#setting-up-the-mint-shortcut) section.
+
+
+## User Interface
+
+### Desktop App
+<table width="100%">
+  <tr>
+    <td align="center" width="50%"><b>Desktop Assistant</b></td>
+    <td align="center" width="50%"><b>Settings</b></td>
+  </tr>
+  <tr>
+    <td><img src="assets/Mint_Desktop.png" alt="Desktop Assistant" /></td>
+    <td><img src="assets/Setting.png" alt="Settings" /></td>
+  </tr>
+</table>
+
+### Web UI
+<table width="100%">
+  <tr>
+    <td align="center"><img src="assets/Mint_Web.png" alt="Web UI" /></td>
+  </tr>
+</table>
+
+### CLI
+<table width="100%">
+  <tr>
+    <td align="center"><img src="assets/Mint_CLI.png" alt="CLI" /></td>
+  </tr>
+</table>
+
+### Workspace & Agent
+<table width="100%">
+  <tr>
+    <td align="center"><img src="assets/Mint_WorkSpace.png" alt="Workspace & Agent" /></td>
+  </tr>
+</table>
 
 ## Desktop Assistant
 
@@ -321,6 +350,7 @@ mint chat "<message>"
 | `mint config doctor` | Validate the local setup |
 | `mint providers` | List configured AI providers |
 | `mint chat "<message>"` | Send one chat message |
+| `mint imagine "<prompt>"` | Generate an image from a text prompt |
 | `mint memory recent` | Show recent conversation memory |
 | `mint task list` | List all tasks (pending and completed) |
 | `mint task pending` | List pending tasks |
