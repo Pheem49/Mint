@@ -99,7 +99,7 @@ impl Default for MintConfig {
         ];
         Self {
             theme: "dark".into(),
-            accent_color: "#8b5cf6".into(),
+            accent_color: "#10b981".into(),
             language: "th-TH".into(),
             assistant_mode: "chat".into(),
             ai_provider: "gemini".into(),
