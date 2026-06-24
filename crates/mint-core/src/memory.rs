@@ -36,6 +36,8 @@ pub struct InteractionMemory {
     pub model: String,
     pub fallback_provider: Option<String>,
     pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_activity: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -172,7 +174,7 @@ impl MemoryStore {
         ensure_builtin_chat_sessions(&connection)?;
         ensure_chat_session_row(&connection, &chat_id)?;
         let mut statement = connection.prepare(
-            "SELECT id, chat_id, user_text, ai_text, provider, model, fallback_provider, created_at
+            "SELECT id, chat_id, user_text, ai_text, provider, model, fallback_provider, created_at, agent_activity_json
              FROM interaction_memories
              WHERE chat_id = ?1
              ORDER BY id DESC
@@ -200,6 +202,20 @@ impl MemoryStore {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn set_interaction_agent_activity_json(
+        &self,
+        interaction_id: i64,
+        activity_json: &str,
+    ) -> Result<usize, MemoryError> {
+        let connection = self.connection()?;
+        Ok(connection.execute(
+            "UPDATE interaction_memories
+             SET agent_activity_json = ?2
+             WHERE id = ?1",
+            params![interaction_id, activity_json],
+        )?)
     }
 
     pub fn clear_interactions(&self) -> Result<usize, MemoryError> {
@@ -553,6 +569,12 @@ fn initialize(
     )?;
     ensure_column(
         connection,
+        "interaction_memories",
+        "agent_activity_json",
+        "TEXT DEFAULT NULL",
+    )?;
+    ensure_column(
+        connection,
         "chat_sessions",
         "kind",
         "TEXT NOT NULL DEFAULT 'conversation'",
@@ -612,6 +634,9 @@ fn learned_skill_row(row: &rusqlite::Row<'_>) -> Result<LearnedSkill, rusqlite::
 }
 
 fn interaction_row(row: &rusqlite::Row<'_>) -> Result<InteractionMemory, rusqlite::Error> {
+    let agent_activity = row
+        .get::<_, Option<String>>(8)?
+        .and_then(|raw| serde_json::from_str(&raw).ok());
     Ok(InteractionMemory {
         id: row.get(0)?,
         chat_id: row.get(1)?,
@@ -621,6 +646,7 @@ fn interaction_row(row: &rusqlite::Row<'_>) -> Result<InteractionMemory, rusqlit
         model: row.get(5)?,
         fallback_provider: row.get(6)?,
         created_at: row.get(7)?,
+        agent_activity,
     })
 }
 

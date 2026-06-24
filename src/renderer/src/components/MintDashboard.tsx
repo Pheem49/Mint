@@ -1,4 +1,5 @@
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react'
+import { mergeActivitySnapshots, trimAgentProgress } from '../agentProgress'
 import {
   clearChatHistory,
   deleteChatSession,
@@ -8,6 +9,7 @@ import {
   listChatSessions,
   listSavedPictures,
   selectWorkspaceDirectory,
+  saveInteractionAgentActivity,
   streamChatMessage,
   submitToolApproval,
   listen,
@@ -28,19 +30,19 @@ import PicturesLibrary from './PicturesLibrary'
 import WorkspacePanel from './WorkspacePanel'
 
 const EXPRESSIONS = [
-  "ปกติ (Default)",
-  "呆猫 (Dumb Cat)",
-  "呆猫眼珠摇晃 (Dumb Cat Eye Roll)",
-  "拍照 (Take Photo)",
-  "点一下 (Poke)",
-  "猫咪滤镜 (Cat Filter)",
+  "Default",
+  "Dumb Cat",
+  "Dumb Cat Eye Roll",
+  "Take Photo",
+  "Poke",
+  "Cat Filter",
 ]
 
 const ACCESSORIES = [
-  "ปกติ (None)",
-  "ผ้ากันเปื้อน (Apron)",
-  "แว่นตา (Glasses)",
-  "ท่าถือปากกา (Hold Pen)",
+  "None",
+  "Apron",
+  "Glasses",
+  "Hold Pen",
 ]
 
 const DEFAULT_CONFIG = {
@@ -78,7 +80,7 @@ function activeConversationId() {
 const MOCK_WELCOME_INTERACTION = {
   id: -1,
   userText: '',
-  aiText: `มิ้นท์กำลังรอสแตนด์บายเตรียมพร้อมช่วยคุณทีมอยู่เลยค่ะ! ✨ แล้วก็แอบนั่งจัดระเบียบข้อมูลนิดๆ หน่อยๆ ให้พร้อมใช้ด้วยค่ะ 😊💖\n\nแต่พอคุณทีมทักมา มิ้นท์ก็วางมือจากทุกอย่างมาคุยกับคุณทีมก่อนเลยนะคะค้าา! ช่วงนี้มีอะไรให้มิ้นท์ช่วยดูแล หรืออยากชวนคุยเรื่องไหนเป็นพิเศษไหมคะ มิ้นท์พร้อมมว๊ากกกค่ะ! 🚀🎯`,
+  aiText: `Hi there! I'm Mint, your AI assistant! 🎯✨ I'm here and ready to help you with whatever you need. I've been organizing some background data to make things smoother for you. 💖\n\nBut the moment you start chatting with me, I'll put everything aside and focus on you! Is there something I can help you with today, or would you like to chat about something special? Let's do this! 🚀💪`,
   provider: 'gemini',
   model: 'gemini-3-flash-preview',
   createdAt: new Date().toISOString(),
@@ -235,6 +237,8 @@ export default function MintDashboard() {
   const [streamedResponse, setStreamedResponse] = useState<ChatResponse | null>(null)
   const [agentProgress, setAgentProgress] = useState<AgentProgress[]>([])
   const [agentActivitySnapshots, setAgentActivitySnapshots] = useState<Record<string, AgentProgress[]>>({})
+  const [thinkingExpanded, setThinkingExpanded] = useState<Record<string, boolean>>({})
+  const liveThinkingOpenRef = useRef(true)
   const [imageAttachments, setImageAttachments] = useState<Array<{ dataUri: string; name: string; previewDataUri?: string }>>([])
   const [documentAttachment, setDocumentAttachment] = useState<DocumentAttachment | null>(null)
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
@@ -264,7 +268,9 @@ export default function MintDashboard() {
 
   async function refreshHistory() {
     const history = await getRecentInteractions(50, conversationId)
-    setInteractions(history.reverse())
+    const reversed = history.reverse()
+    setInteractions(reversed)
+    setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
   }
 
   async function refreshChatSessions(nextActiveId = conversationId) {
@@ -451,6 +457,8 @@ export default function MintDashboard() {
     setStreamedReply('')
     setStreamedResponse(null)
     setAgentProgress([])
+    liveThinkingOpenRef.current = true
+    setThinkingExpanded((current) => ({ ...current, live: true }))
     const progressSnapshot: AgentProgress[] = []
     if (options.clearComposer) {
       setMessage('')
@@ -467,7 +475,7 @@ export default function MintDashboard() {
         options.systemInstruction ?? '',
         (progress) => {
           progressSnapshot.push(progress)
-          setAgentProgress((current) => [...current, progress].slice(-24))
+          setAgentProgress((current) => trimAgentProgress([...current, progress]))
         },
         outgoingDocument,
         workspacePath || null,
@@ -475,18 +483,33 @@ export default function MintDashboard() {
       )
       setStreamedResponse(response)
       const history = (await getRecentInteractions(50, conversationId)).reverse()
+      let enrichedHistory = history
       if (progressSnapshot.length > 0) {
         const newestInteraction = [...history]
           .reverse()
           .find((interaction) => interaction.aiText === response.text || interaction.userText === promptText) ?? history[history.length - 1]
         if (newestInteraction?.id != null) {
+          const interactionKey = String(newestInteraction.id)
+          enrichedHistory = history.map((interaction) =>
+            interaction.id === newestInteraction.id
+              ? { ...interaction, agentActivity: progressSnapshot }
+              : interaction,
+          )
           setAgentActivitySnapshots((current) => ({
             ...current,
-            [String(newestInteraction.id)]: progressSnapshot.slice(),
+            [interactionKey]: progressSnapshot.slice(),
           }))
+          if (liveThinkingOpenRef.current) {
+            setThinkingExpanded((current) => ({
+              ...current,
+              [interactionKey]: true,
+            }))
+          }
+          await saveInteractionAgentActivity(newestInteraction.id, progressSnapshot)
         }
       }
-      setInteractions(history)
+      setInteractions(enrichedHistory)
+      setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, enrichedHistory))
       await refreshChatSessions()
       await refreshPictures()
       setStreamedReply('')
@@ -516,7 +539,7 @@ export default function MintDashboard() {
   }
 
   async function sendVoiceMessage(transcript: string, audioDataUri?: string | null) {
-    const promptText = transcript.trim() || 'ข้อความเสียง'
+    const promptText = transcript.trim() || 'Voice message'
     if (!promptText || sending) return
     await sendPrompt(promptText, {
       audioDataUri,
@@ -678,6 +701,11 @@ export default function MintDashboard() {
     }
   }
 
+  function handleThinkingExpandedChange(key: string, open: boolean) {
+    if (key === 'live') liveThinkingOpenRef.current = open
+    setThinkingExpanded((current) => ({ ...current, [key]: open }))
+  }
+
   async function selectConversation(id: string) {
     if (id === conversationId) {
       setView('chat')
@@ -693,7 +721,9 @@ export default function MintDashboard() {
     setDocumentAttachment(null)
     setAgentProgress([])
     const history = await getRecentInteractions(50, id)
-    setInteractions(history.reverse())
+    const reversed = history.reverse()
+    setInteractions(reversed)
+    setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
   }
 
   async function deleteConversation(id: string) {
@@ -714,7 +744,9 @@ export default function MintDashboard() {
         setConversationId(nextActive)
         setAgentProgress([])
         const history = await getRecentInteractions(50, nextActive)
-        setInteractions(history.reverse())
+        const reversed = history.reverse()
+        setInteractions(reversed)
+        setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
       }
 
       await refreshChatSessions(nextActive)
@@ -895,6 +927,8 @@ export default function MintDashboard() {
             streamedResponse={streamedResponse}
             agentProgress={agentProgress}
             agentActivitySnapshots={agentActivitySnapshots}
+            thinkingExpanded={thinkingExpanded}
+            onThinkingExpandedChange={handleThinkingExpandedChange}
             message={message}
             imageAttachments={imageAttachments}
             documentName={documentAttachment?.filename ?? ''}

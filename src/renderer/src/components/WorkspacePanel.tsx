@@ -221,7 +221,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
 
   const startWorkspacePrompt = () => {
     onEnableAgentMode()
-    onSetMessage('ดู workspace นี้แล้วช่วยวางแผนงานต่อไปให้หน่อย')
+    onSetMessage('Review this workspace and help plan next steps')
   }
 
   return (

@@ -385,7 +385,7 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
             "- write_file: {\"path\":\"new/relative/path\",\"fileContent\":\"full file content\"}",
         );
     }
-    input_formats.push("- finish: {\"summary\":\"concise final answer\",\"verification\":\"checks run or not run\"}");
+    input_formats.push("- finish: {\"summary\":\"concise final answer in Thai when the user writes Thai\",\"verification\":\"checks run or not run\"}");
 
     let input_formats_str = input_formats.join("\n");
 

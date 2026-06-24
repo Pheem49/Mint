@@ -73,13 +73,13 @@ export default function DashboardSidebar({
   const toggleInteractionGuide = () => {
     const next = !showInteractionGuide
     onSetShowInteractionGuide(next)
-    onShowToast(next ? 'เปิดการแสดงจุดสัมผัส (Interaction Zones) ⊹' : 'ปิดการแสดงจุดสัมผัส ⊹')
+    onShowToast(next ? 'Show interaction zones ⊹' : 'Hide interaction zones ⊹')
   }
 
   const toggleInteraction = () => {
     const next = !interactionEnabled
     onSetInteractionEnabled(next)
-    onShowToast(next ? 'เปิดการโต้ตอบกับโมเดล ⦸' : 'ปิดการโต้ตอบกับโมเดล ⦸')
+    onShowToast(next ? 'Enable model interaction ⦸' : 'Disable model interaction ⦸')
   }
 
   const conversationSessions = chatSessions.filter((session) => session.kind !== 'cli' && session.id !== 'conversation-default')
@@ -94,7 +94,7 @@ export default function DashboardSidebar({
       <div
         className="sidebar-brand clickable"
         onClick={onToggleSidebar}
-        title={sidebarCollapsed ? "ขยายแถบด้านข้าง" : "ยุบแถบด้านข้าง"}
+        title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         role="button"
         tabIndex={0}
         onKeyDown={(event) => {

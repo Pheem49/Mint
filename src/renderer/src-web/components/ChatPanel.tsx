@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, Fragment, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent, type RefObject, type DragEvent } from 'react'
+import { hasAgentToolActivity, thoughtsFrom } from '../agentProgress'
 import {
   type AgentProgress,
   type ChatResponse,
@@ -327,6 +328,8 @@ interface ChatPanelProps {
   streamedResponse: ChatResponse | null
   agentProgress: AgentProgress[]
   agentActivitySnapshots: Record<string, AgentProgress[]>
+  thinkingExpanded: Record<string, boolean>
+  onThinkingExpandedChange: (key: string, open: boolean) => void
   message: string
   imageAttachments: Array<{ dataUri: string; name: string; previewDataUri?: string }>
   documentName: string
@@ -523,6 +526,98 @@ function renderFormattedMessage(text: string) {
   return items
 }
 
+const THINKING_LABELS = {
+  live: 'Thinking…',
+  completed: (count: number) => `Thinking process (${count} steps)`,
+  step: (index: number) => `Step ${index}`,
+  emptyHint: 'Model didn\'t send thinking steps this time',
+} as const
+
+function ThinkingBlock({
+  thoughts,
+  isLive = false,
+  blockKey,
+  expanded,
+  onExpandedChange,
+  showEmptyHint = false,
+}: {
+  thoughts: string[]
+  isLive?: boolean
+  blockKey: string
+  expanded?: boolean
+  onExpandedChange?: (key: string, open: boolean) => void
+  showEmptyHint?: boolean
+}) {
+  const contentRef = useRef<HTMLDivElement>(null)
+  const isControlled = expanded !== undefined && Boolean(onExpandedChange)
+  const [localOpen, setLocalOpen] = useState(isLive)
+  const isOpen = isControlled ? Boolean(expanded) : localOpen
+
+  const setOpen = (open: boolean) => {
+    if (isControlled && onExpandedChange) onExpandedChange(blockKey, open)
+    else setLocalOpen(open)
+  }
+
+  useEffect(() => {
+    if (isLive && !isControlled) setLocalOpen(true)
+  }, [isLive, isControlled])
+
+  useEffect(() => {
+    if (!isLive || !isOpen || !contentRef.current) return
+    contentRef.current.scrollTop = contentRef.current.scrollHeight
+  }, [thoughts, isLive, isOpen])
+
+  if (thoughts.length === 0 && !showEmptyHint) return null
+
+  if (thoughts.length === 0) {
+    return (
+      <div className="thinking-block thinking-block-empty-state" data-live={isLive ? 'true' : 'false'}>
+        <span className="thinking-block-empty">{THINKING_LABELS.emptyHint}</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`thinking-block${isLive ? ' is-live' : ''}`}>
+      <button
+        type="button"
+        className="thinking-block-header"
+        onClick={() => setOpen(!isOpen)}
+        aria-expanded={isOpen}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+          <circle cx="12" cy="12" r="10" />
+        </svg>
+        <span className="thinking-block-label">
+          {isLive ? THINKING_LABELS.live : THINKING_LABELS.completed(thoughts.length)}
+        </span>
+        {isLive && <span className="thinking-block-live-dot" aria-hidden="true" />}
+        <span className={`thinking-block-chevron${isOpen ? ' is-open' : ''}`} aria-hidden="true">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </span>
+      </button>
+      {isOpen && (
+        <div className="thinking-block-body">
+          <div className="thinking-block-content" ref={contentRef}>
+            {thoughts.map((thought, index) => (
+              <div className="thinking-block-step" key={`${blockKey}-${index}`}>
+                {thoughts.length > 1 && (
+                  <div className="thinking-block-step-label">{THINKING_LABELS.step(index + 1)}</div>
+                )}
+                <div className="thinking-block-step-body">{renderFormattedMessage(thought)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function readableAssistantText(text: string) {
   if (typeof text !== 'string') return ''
   const trimmed = text.trim()
@@ -692,6 +787,8 @@ export default function ChatPanel({
   streamedResponse,
   agentProgress,
   agentActivitySnapshots,
+  thinkingExpanded,
+  onThinkingExpandedChange,
   message,
   imageAttachments,
   documentName,
@@ -821,7 +918,7 @@ export default function ChatPanel({
   const speakingRef = useRef<string | null>(null)
   const restartTimerRef = useRef<number | null>(null)
   const voiceStatus = speakingText ? 'speaking' : (sending || voiceAwaitingResponse) ? 'thinking' : isRecording ? 'listening' : voiceMode ? 'ready' : 'off'
-  const voiceStatusLabel = voiceStatus === 'speaking' ? 'กำลังตอบ' : voiceStatus === 'thinking' ? 'กำลังคิด' : voiceStatus === 'listening' ? 'กำลังฟัง' : 'พร้อมฟัง'
+  const voiceStatusLabel = voiceStatus === 'speaking' ? 'Speaking' : voiceStatus === 'thinking' ? 'Thinking' : voiceStatus === 'listening' ? 'Listening' : 'Ready'
 
   const clearRestartTimer = () => {
     if (restartTimerRef.current === null) return
@@ -943,7 +1040,7 @@ export default function ChatPanel({
   }
   const startAudioRecording = async (autoSend: boolean) => {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      alert('ขออภัย ระบบนี้ไม่สามารถเข้าถึงไมค์หรืออัดเสียงในเบราว์เซอร์นี้ได้')
+      alert("Sorry, this system cannot access the microphone or record audio in this browser")
       voiceModeRef.current = false
       setVoiceMode(false)
       return
@@ -966,7 +1063,7 @@ export default function ChatPanel({
       mediaStreamRef.current = stream
       mediaRecorderRef.current = recorder
       audioContextRef.current = audioContext
-      setVoiceTranscript('กำลังฟังเสียงจากไมค์')
+      setVoiceTranscript('Listening to microphone...')
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) chunks.push(event.data)
@@ -981,13 +1078,13 @@ export default function ChatPanel({
         setIsRecording(false)
         if (!autoSend || !voiceModeRef.current || chunks.length === 0) return
         if (!heardVoice) {
-          setVoiceTranscript('ยังไม่ได้ยินเสียงพูด')
+          setVoiceTranscript('No speech detected')
           scheduleVoiceListen(700)
           return
         }
         const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
         const audioDataUri = await blobToDataUri(blob)
-        setVoiceTranscript('ส่งเสียงให้ AI แล้ว')
+        setVoiceTranscript('Sent audio to AI')
         voiceAwaitingResponseRef.current = true
         setVoiceAwaitingResponse(true)
         onSendVoiceMessage('', audioDataUri)
@@ -1011,7 +1108,7 @@ export default function ChatPanel({
         if (peak > 12) {
           heardVoice = true
           quietSince = 0
-          setVoiceTranscript('กำลังฟัง...')
+          setVoiceTranscript('Listening...')
         } else if (heardVoice) {
           quietSince = quietSince || now
         }
@@ -1026,7 +1123,7 @@ export default function ChatPanel({
       setIsRecording(false)
       voiceModeRef.current = false
       setVoiceMode(false)
-      alert('เปิดไมค์ไม่สำเร็จ กรุณาตรวจสิทธิ์ microphone ของเบราว์เซอร์')
+      alert('Failed to open microphone. Please check microphone permissions in your browser')
     }
   }
   const startRecognition = (autoSend: boolean) => {
@@ -1544,8 +1641,8 @@ export default function ChatPanel({
           }}
         >
           <div style={{ fontSize: '3.5rem', marginBottom: '16px' }}>🖼️</div>
-          <div style={{ fontSize: '1.25rem', fontWeight: 'bold', letterSpacing: '0.5px' }}>วางไฟล์เพื่อแนบข้อมูล</div>
-          <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '8px' }}>รองรับรูปภาพ (PNG, JPEG, WebP, GIF) และไฟล์ PDF</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 'bold', letterSpacing: '0.5px' }}>Drag files to attach data</div>
+          <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '8px' }}>Supports images (PNG, JPEG, WebP, GIF) and PDF files</div>
         </div>
       )}
 
@@ -1568,6 +1665,19 @@ export default function ChatPanel({
               <div className="bubble-wrapper">
                 {renderCompletedActivity(interaction)}
                 {renderFileChanges(interaction)}
+                {(() => {
+                  const progress = agentActivitySnapshots[String(interaction.id)] ?? interaction.agentActivity ?? []
+                  const thoughts = thoughtsFrom(progress)
+                  return (
+                    <ThinkingBlock
+                      blockKey={String(interaction.id)}
+                      thoughts={thoughts}
+                      expanded={thinkingExpanded[String(interaction.id)] ?? false}
+                      onExpandedChange={onThinkingExpandedChange}
+                      showEmptyHint={hasAgentToolActivity(progress) && thoughts.length === 0}
+                    />
+                  )
+                })()}
                 <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(interaction.aiText)}</div>
                 <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
@@ -1589,7 +1699,7 @@ export default function ChatPanel({
                       opacity: 0.7,
                       transition: 'all 0.2s',
                     }}
-                    title={speakingText === interaction.aiText ? "หยุดอ่านออกเสียง" : "อ่านออกเสียง"}
+                    title={speakingText === interaction.aiText ? "Stop reading" : "Read aloud"}
                   >
                     {renderSpeakerIcon(speakingText === interaction.aiText)}
                   </button>
@@ -1618,6 +1728,19 @@ export default function ChatPanel({
             {renderActiveFileChanges()}
             <div className="message ai-message thinking-message">
               <div className="bubble-wrapper">
+                <ThinkingBlock
+                  blockKey="live"
+                  thoughts={thoughtsFrom(agentProgress)}
+                  isLive={true}
+                  expanded={thinkingExpanded.live ?? true}
+                  onExpandedChange={onThinkingExpandedChange}
+                  showEmptyHint={
+                    agentMode
+                    && hasAgentToolActivity(agentProgress)
+                    && thoughtsFrom(agentProgress).length === 0
+                    && !streamedReply
+                  }
+                />
                 <div className="message-bubble">
                   <span>
                     {streamedReply ? (
@@ -1663,7 +1786,7 @@ export default function ChatPanel({
                           opacity: 0.7,
                           transition: 'all 0.2s',
                         }}
-                        title={speakingText === streamedReply ? "หยุดอ่านออกเสียง" : "อ่านออกเสียง"}
+                        title={speakingText === streamedReply ? "Stop reading" : "Read aloud"}
                       >
                          {renderSpeakerIcon(speakingText === streamedReply)}
                       </button>

@@ -2,14 +2,14 @@ import React, { useState, useEffect, useRef } from 'react'
 import { evaluateArithmetic } from '../calculator'
 
 const COMMANDS = [
-    { label: 'Open YouTube', desc: 'เปิดเว็บไซต์ YouTube', icon: '📺', action: { type: 'open_url', target: 'https://youtube.com' } },
-    { label: 'Open Facebook', desc: 'เปิดเว็บไซต์ Facebook', icon: '📘', action: { type: 'open_url', target: 'https://facebook.com' } },
-    { label: 'Open Instagram', desc: 'เปิดเว็บไซต์ Instagram', icon: '📸', action: { type: 'open_url', target: 'https://instagram.com' } },
-    { label: 'Open GitHub', desc: 'เปิดเว็บไซต์ GitHub', icon: '🐙', action: { type: 'open_url', target: 'https://github.com' } },
-    { label: 'System Info', desc: 'ดูข้อมูลระบบ', icon: '💻', action: { type: 'chat', query: 'ขอข้อมูลระบบหน่อย' } },
-    { label: 'Weather', desc: 'เช็คสภาพอากาศ', icon: '🌤️', action: { type: 'chat', query: 'อากาศที่กรุงเทพเป็นยังไง' } },
-    { label: 'Open Spotify', desc: 'เปิดโปรแกรม Spotify', icon: '🎵', action: { type: 'open_app', target: 'spotify' } },
-    { label: 'Open VS Code', desc: 'เปิดโปรแกรม VS Code', icon: '💻', action: { type: 'open_app', target: 'code' } },
+    { label: 'Open YouTube', desc: 'Open YouTube website', icon: '📺', action: { type: 'open_url', target: 'https://youtube.com' } },
+    { label: 'Open Facebook', desc: 'Open Facebook website', icon: '📘', action: { type: 'open_url', target: 'https://facebook.com' } },
+    { label: 'Open Instagram', desc: 'Open Instagram website', icon: '📸', action: { type: 'open_url', target: 'https://instagram.com' } },
+    { label: 'Open GitHub', desc: 'Open GitHub website', icon: '🐙', action: { type: 'open_url', target: 'https://github.com' } },
+    { label: 'System Info', desc: 'Show system information', icon: '💻', action: { type: 'chat', query: 'Show me system information' } },
+    { label: 'Weather', desc: 'Check the weather', icon: '🌤️', action: { type: 'chat', query: 'What is the current weather' } },
+    { label: 'Open Spotify', desc: 'Open Spotify app', icon: '🎵', action: { type: 'open_app', target: 'spotify' } },
+    { label: 'Open VS Code', desc: 'Open VS Code app', icon: '💻', action: { type: 'open_app', target: 'code' } },
 ]
 
 function getCommandIcon(iconName: string) {
