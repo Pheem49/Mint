@@ -555,7 +555,7 @@ fn render_live_status(status: &mut LiveStatus) {
         let frames = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
         let frame = frames[status.spinner_tick % frames.len()];
         status.spinner_tick += 1;
-        lines.push(format!("{MINT}{frame}{RESET}{BRIGHT}{thinking}{RESET}"));
+        lines.push(format!("{MINT}{frame}{RESET} {BRIGHT}{thinking}{RESET}"));
     }
     if lines.is_empty() {
         return;

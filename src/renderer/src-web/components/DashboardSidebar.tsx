@@ -56,7 +56,7 @@ export default function DashboardSidebar({
       <div
         className="sidebar-brand clickable"
         onClick={onToggleSidebar}
-        title={sidebarCollapsed ? "ขยายแถบด้านข้าง" : "ยุบแถบด้านข้าง"}
+        title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         role="button"
         tabIndex={0}
         onKeyDown={(event) => {

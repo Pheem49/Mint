@@ -548,6 +548,22 @@ async fn stream_chat_message(
 }
 
 #[tauri::command]
+fn save_interaction_agent_activity(
+    interaction_id: i64,
+    activity: Vec<AgentProgress>,
+) -> Result<(), String> {
+    let activity_json =
+        serde_json::to_string(&activity).map_err(|error| error.to_string())?;
+    MemoryStore::open_default()
+        .and_then(|memory| {
+            memory
+                .set_interaction_agent_activity_json(interaction_id, &activity_json)
+                .map(|_| ())
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_recent_interactions(
     limit: Option<usize>,
     chat_id: Option<String>,
@@ -1032,6 +1048,7 @@ pub fn run() {
             stream_chat_message,
             submit_tool_approval,
             get_recent_interactions,
+            save_interaction_agent_activity,
             list_chat_sessions,
             delete_chat_session,
             rename_chat_session,

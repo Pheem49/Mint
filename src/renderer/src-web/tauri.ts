@@ -43,6 +43,7 @@ export interface InteractionMemory {
   model: string
   fallbackProvider?: string | null
   createdAt: string
+  agentActivity?: AgentProgress[] | null
 }
 
 export interface ChatSession {
@@ -290,6 +291,30 @@ export async function getRecentInteractions(limit = 50, chatId?: string | null):
   }
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<InteractionMemory[]>('get_recent_interactions', { limit, chatId })
+}
+
+export async function saveInteractionAgentActivity(
+  interactionId: number,
+  activity: AgentProgress[],
+): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    try {
+      const res = await fetch(`${API_BASE}/interactions/agent-activity`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interactionId, activity }),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+    } catch (error) {
+      console.error('Failed to persist agent activity:', error);
+    }
+    return;
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('save_interaction_agent_activity', { interactionId, activity })
 }
 
 export async function listChatSessions(): Promise<ChatSession[]> {

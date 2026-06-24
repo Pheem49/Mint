@@ -98,13 +98,13 @@ export default function ModelPanel({
             </svg>
           </button>
           <div className="layout-preset-group">
-            <button className={`layout-preset-btn ${layoutPreset === 'chat-wide' ? 'is-active' : ''}`} onClick={() => onChangeLayoutPreset('chat-wide')} title="ขยายหน้าต่างแชท (ย่อโมเดล)">
+            <button className={`layout-preset-btn ${layoutPreset === 'chat-wide' ? 'is-active' : ''}`} onClick={() => onChangeLayoutPreset('chat-wide')} title="Expand chat panel (minimize model)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
                 <path d="M9 3v18" />
               </svg>
             </button>
-            <button className={`layout-preset-btn ${layoutPreset === 'model-wide' ? 'is-active' : ''}`} onClick={() => onChangeLayoutPreset('model-wide')} title="ขยายหน้าต่างโมเดล (ย่อแชท)">
+            <button className={`layout-preset-btn ${layoutPreset === 'model-wide' ? 'is-active' : ''}`} onClick={() => onChangeLayoutPreset('model-wide')} title="Expand model panel (minimize chat)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
                 <path d="M15 3v18" />

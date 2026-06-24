@@ -272,6 +272,45 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         .await;
                     }
                 }
+                ("POST", "/api/interactions/agent-activity") => {
+                    #[derive(Deserialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct SaveAgentActivityRequest {
+                        interaction_id: i64,
+                        activity: Vec<AgentProgress>,
+                    }
+
+                    if let Ok(payload) = serde_json::from_str::<SaveAgentActivityRequest>(body) {
+                        if let Ok(memory) = MemoryStore::open_default() {
+                            match serde_json::to_string(&payload.activity) {
+                                Ok(activity_json) => {
+                                    if memory
+                                        .set_interaction_agent_activity_json(
+                                            payload.interaction_id,
+                                            &activity_json,
+                                        )
+                                        .is_ok()
+                                    {
+                                        send_json_response(
+                                            socket,
+                                            "200 OK",
+                                            "{\"status\":\"ok\"}",
+                                        )
+                                        .await;
+                                        return;
+                                    }
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                    }
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        "{\"status\":\"invalid agent activity payload\"}",
+                    )
+                    .await;
+                }
                 ("GET", "/api/pictures") => match list_saved_pictures() {
                     Ok(mut pictures) => {
                         for picture in &mut pictures {

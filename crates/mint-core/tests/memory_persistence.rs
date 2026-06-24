@@ -58,6 +58,34 @@ fn stores_recent_interactions_with_provider_metadata() {
 }
 
 #[test]
+fn stores_and_reads_interaction_agent_activity() {
+    let store = store("agent-activity");
+    let interaction_id = store
+        .add_interaction_with_metadata("hello", "hi", "gemini", "gemini-test")
+        .unwrap();
+    store
+        .set_interaction_agent_activity_json(
+            interaction_id,
+            r#"[{"type":"Thought","data":{"thought":"step one"}}]"#,
+        )
+        .unwrap();
+
+    let interactions = store.recent_interactions(1).unwrap();
+    assert_eq!(interactions.len(), 1);
+    let activity = interactions[0]
+        .agent_activity
+        .as_ref()
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(activity.len(), 1);
+    assert_eq!(
+        activity[0].get("type").and_then(|value| value.as_str()),
+        Some("Thought")
+    );
+}
+
+#[test]
 fn preserves_chat_history_when_store_is_reopened() {
     let path = test_path("reopen-history", "sqlite");
     let _ = std::fs::remove_file(&path);
