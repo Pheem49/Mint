@@ -397,9 +397,7 @@ h1 {
   opacity: 1;
 }
 
-.interaction-guide-btn:hover {
-  /* pictures header actions */
-}
+/* pictures header actions */
 
 .picture-refresh-btn {
   -webkit-app-region: no-drag;
@@ -423,6 +421,7 @@ h1 {
   color: var(--accent);
 }
 
+.interaction-guide-btn:hover {
   background: rgba(34, 211, 238, 0.14);
   border-color: rgba(34, 211, 238, 0.2);
   color: #67e8f9;
