@@ -779,7 +779,7 @@ export default function MintDashboard() {
             onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
           />
         </main>
-        <PicturesLibrary view={view} pictures={pictures} onSetView={changeView} />
+        <PicturesLibrary view={view} pictures={pictures} onSetView={changeView} onRefreshPictures={refreshPictures} />
         <ImageStudioPanel
           view={view}
           onRefreshPictures={refreshPictures}

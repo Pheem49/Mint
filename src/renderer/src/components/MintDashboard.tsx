@@ -292,8 +292,15 @@ export default function MintDashboard() {
     )
   }
 
+  const [picturesRefreshing, setPicturesRefreshing] = useState(false)
+
   async function refreshPictures() {
-    setPictures(await listSavedPictures())
+    setPicturesRefreshing(true)
+    try {
+      setPictures(await listSavedPictures())
+    } finally {
+      setPicturesRefreshing(false)
+    }
   }
 
   useEffect(() => {
@@ -961,7 +968,7 @@ export default function MintDashboard() {
             onApproval={handleApproval}
           />
         </main>
-        <PicturesLibrary view={view} pictures={pictures} onSetView={setView} />
+        <PicturesLibrary view={view} pictures={pictures} onSetView={setView} onRefreshPictures={refreshPictures} />
         <ImageStudioPanel
           view={view}
           onRefreshPictures={refreshPictures}
