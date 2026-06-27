@@ -483,3 +483,49 @@ button {
   font-family: 'Fira Code', 'Courier New', Courier, monospace;
   font-size: 0.9em;
 }
+
+/* Premium Table Styles for Chat Panel */
+.chat-table-container {
+  overflow-x: auto;
+  margin: 14px 0;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(30, 41, 59, 0.35);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.chat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  text-align: left;
+  line-height: 1.5;
+}
+
+.chat-table th {
+  padding: 12px 16px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.15);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.chat-table td {
+  padding: 12px 16px;
+  color: var(--text-main, #e2e8f0);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chat-table tbody tr {
+  transition: background 0.15s ease;
+}
+
+.chat-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.chat-table tbody tr:last-child td {
+  border-bottom: none;
+}

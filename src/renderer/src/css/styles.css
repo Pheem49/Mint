@@ -3346,8 +3346,7 @@ input:checked + .slider:before {
 }
 
 /* Force AI replies to render as plain inline text (no bubble/frame). */
-.message.ai-message .message-bubble,
-.message.ai-message .message-bubble * {
+.message.ai-message .message-bubble {
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;

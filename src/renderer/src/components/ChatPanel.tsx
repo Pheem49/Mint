@@ -422,6 +422,11 @@ function ChatCodeBlock({ code, language }: { code: string; language: string; key
   )
 }
 
+const isTableLine = (line: string): boolean => {
+  const trimmed = line.trim()
+  return trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 1
+}
+
 function renderFormattedMessage(text: string) {
   const displayText = readableAssistantText(text)
   if (!displayText) return null
@@ -450,6 +455,113 @@ function renderFormattedMessage(text: string) {
     })
   }
 
+  const renderHtmlTable = (tableLines: string[], key: string) => {
+    const rows: string[][] = []
+    for (const line of tableLines) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      const content = trimmed.slice(1, -1)
+      const contentEscaped = content.replace(/\\\|/g, '\u0000')
+      const cols = contentEscaped.split('|').map(s => s.replace(/\u0000/g, '|').trim())
+      rows.push(cols)
+    }
+
+    if (rows.length === 0) return null
+
+    let hasSeparator = false
+    let separatorIdx = -1
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      if (row.length > 0 && row.every(col => /^[-\s:]+$/.test(col))) {
+        hasSeparator = true
+        separatorIdx = i
+        break
+      }
+    }
+
+    let headerRow: string[] | null = null
+    const dataRows: string[][] = []
+
+    if (hasSeparator) {
+      if (separatorIdx > 0) {
+        headerRow = rows[separatorIdx - 1]
+        for (let i = 0; i < rows.length; i++) {
+          if (i !== separatorIdx && i !== separatorIdx - 1) {
+            dataRows.push(rows[i])
+          }
+        }
+      } else {
+        for (let i = 0; i < rows.length; i++) {
+          if (i !== separatorIdx) {
+            dataRows.push(rows[i])
+          }
+        }
+      }
+    } else {
+      headerRow = rows[0]
+      for (let i = 1; i < rows.length; i++) {
+        dataRows.push(rows[i])
+      }
+    }
+
+    return (
+      <div key={key} className="chat-table-container" style={{
+        overflowX: 'auto',
+        margin: '14px 0',
+        width: '100%',
+        borderRadius: '8px',
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        background: 'rgba(30, 41, 59, 0.35)',
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+      }}>
+        <table className="chat-table" style={{
+          width: '100%',
+          borderCollapse: 'collapse',
+          fontSize: '0.86rem',
+          textAlign: 'left',
+          lineHeight: '1.5',
+        }}>
+          {headerRow && (
+            <thead>
+              <tr style={{
+                background: 'rgba(255, 255, 255, 0.04)',
+                borderBottom: '2px solid rgba(255, 255, 255, 0.15)',
+              }}>
+                {headerRow.map((col, idx) => (
+                  <th key={`th-${idx}`} style={{
+                    padding: '12px 16px',
+                    fontWeight: 700,
+                    color: 'var(--accent, #38bdf8)',
+                    fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+                  }}>
+                    {formatInline(col)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+          )}
+          <tbody>
+            {dataRows.map((row, rIdx) => (
+              <tr key={`tr-${rIdx}`} style={{
+                background: rIdx % 2 === 1 ? 'rgba(255, 255, 255, 0.015)' : 'transparent',
+                borderBottom: rIdx < dataRows.length - 1 ? '1px solid rgba(255, 255, 255, 0.08)' : 'none',
+              }}>
+                {row.map((col, cIdx) => (
+                  <td key={`td-${cIdx}`} style={{
+                    padding: '12px 16px',
+                    color: 'var(--text-main, #e2e8f0)',
+                  }}>
+                    {formatInline(col)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   const lines = displayText.split('\n')
   const items: any[] = []
 
@@ -457,10 +569,24 @@ function renderFormattedMessage(text: string) {
   let codeBlockLang = ''
   let codeBlockLines: string[] = []
 
+  let inTable = false
+  let tableLines: string[] = []
+
+  const flushTable = (index: number) => {
+    if (tableLines.length > 0) {
+      items.push(renderHtmlTable(tableLines, `table-${index}`))
+      tableLines = []
+      inTable = false
+    }
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
     if (line.trim().startsWith('```')) {
+      if (inTable) {
+        flushTable(i)
+      }
       if (inCodeBlock) {
         const codeText = codeBlockLines.join('\n')
         items.push(
@@ -484,45 +610,58 @@ function renderFormattedMessage(text: string) {
       continue
     }
 
-    const headerMatch = line.match(/^(#{1,6})\s+(.*)$/)
-    if (headerMatch) {
-      const level = headerMatch[1].length
-      const content = headerMatch[2]
-
-      const style = {
-        fontWeight: 'bold',
-        display: 'block',
-        marginTop: level === 1 ? '16px' : level === 2 ? '14px' : '10px',
-        marginBottom: '6px',
-        fontSize: level === 1 ? '1.25em' : level === 2 ? '1.15em' : '1.05em',
-        color: 'var(--text-main)',
+    if (isTableLine(line)) {
+      inTable = true
+      tableLines.push(line)
+    } else {
+      if (inTable) {
+        flushTable(i)
       }
 
-      items.push(
-        <span key={`line-${i}`} style={style}>
-          {formatInline(content)}
-        </span>
-      )
-    } else {
-      const listMatch = line.match(/^(\s*)([-*+])\s+(.*)$/)
-      if (listMatch) {
-        const indent = listMatch[1]
-        const content = listMatch[3]
+      const headerMatch = line.match(/^(#{1,6})\s+(.*)$/)
+      if (headerMatch) {
+        const level = headerMatch[1].length
+        const content = headerMatch[2]
+
+        const style = {
+          fontWeight: 'bold',
+          display: 'block',
+          marginTop: level === 1 ? '16px' : level === 2 ? '14px' : '10px',
+          marginBottom: '6px',
+          fontSize: level === 1 ? '1.25em' : level === 2 ? '1.15em' : '1.05em',
+          color: 'var(--text-main)',
+        }
+
         items.push(
-          <Fragment key={`line-${i}`}>
-            {indent}• {formatInline(content)}
-            {i < lines.length - 1 && '\n'}
-          </Fragment>
+          <span key={`line-${i}`} style={style}>
+            {formatInline(content)}
+          </span>
         )
       } else {
-        items.push(
-          <Fragment key={`line-${i}`}>
-            {formatInline(line)}
-            {i < lines.length - 1 && '\n'}
-          </Fragment>
-        )
+        const listMatch = line.match(/^(\s*)([-*+])\s+(.*)$/)
+        if (listMatch) {
+          const indent = listMatch[1]
+          const content = listMatch[3]
+          items.push(
+            <Fragment key={`line-${i}`}>
+              {indent}• {formatInline(content)}
+              {i < lines.length - 1 && '\n'}
+            </Fragment>
+          )
+        } else {
+          items.push(
+            <Fragment key={`line-${i}`}>
+              {formatInline(line)}
+              {i < lines.length - 1 && '\n'}
+            </Fragment>
+          )
+        }
       }
     }
+  }
+
+  if (inTable) {
+    flushTable(lines.length)
   }
 
   if (inCodeBlock && codeBlockLines.length > 0) {

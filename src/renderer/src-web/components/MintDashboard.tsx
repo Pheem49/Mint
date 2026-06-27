@@ -214,6 +214,7 @@ export default function MintDashboard() {
   const [sendingImageCount, setSendingImageCount] = useState(0)
   const [streamedReply, setStreamedReply] = useState('')
   const [streamedResponse, setStreamedResponse] = useState<ChatResponse | null>(null)
+  const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null)
   const [agentProgress, setAgentProgress] = useState<AgentProgress[]>([])
   const [agentActivitySnapshots, setAgentActivitySnapshots] = useState<Record<string, AgentProgress[]>>({})
   const [thinkingExpanded, setThinkingExpanded] = useState<Record<string, boolean>>({})
@@ -353,6 +354,7 @@ export default function MintDashboard() {
     const outgoingImage = outgoingImages.map((img) => img.dataUri).join(' ')
     const outgoingImageCount = outgoingImages.length
     setSending(true)
+    setStreamingConversationId(conversationId)
     setSendingMessage(promptText)
     setSendingImageCount(outgoingImageCount)
     setError('')
@@ -420,6 +422,7 @@ export default function MintDashboard() {
       setError(errorMessage(reason))
     } finally {
       setSending(false)
+      setStreamingConversationId(null)
       setSendingMessage('')
       setSendingImageCount(0)
     }
@@ -739,19 +742,19 @@ export default function MintDashboard() {
         <main className="assistant-workspace model-hidden">
           <ChatPanel
             interactions={interactions}
-            sending={sending}
-            sendingMessage={sendingMessage}
-            sendingImageCount={sendingImageCount}
-            streamedReply={streamedReply}
-            streamedResponse={streamedResponse}
-            agentProgress={agentProgress}
+            sending={sending && streamingConversationId === conversationId}
+            sendingMessage={streamingConversationId === conversationId ? sendingMessage : ''}
+            sendingImageCount={streamingConversationId === conversationId ? sendingImageCount : 0}
+            streamedReply={streamingConversationId === conversationId ? streamedReply : ''}
+            streamedResponse={streamingConversationId === conversationId ? streamedResponse : null}
+            agentProgress={streamingConversationId === conversationId ? agentProgress : []}
             agentActivitySnapshots={agentActivitySnapshots}
             thinkingExpanded={thinkingExpanded}
             onThinkingExpandedChange={handleThinkingExpandedChange}
             message={message}
             imageAttachments={imageAttachments}
             documentName={documentAttachment?.filename ?? ''}
-            pendingApproval={pendingApproval}
+            pendingApproval={streamingConversationId === conversationId ? pendingApproval : null}
             smartContext={smartContext}
             agentMode={agentMode}
             status={status}

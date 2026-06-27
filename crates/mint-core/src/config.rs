@@ -310,7 +310,7 @@ fn runtime_extra_defaults() -> BTreeMap<String, Value> {
         "notionPageId": "",
         "notionTitleProperty": "Name",
         "allowedShellModes": ["readOnly", "test", "mutating", "network"],
-        "allowedNativePlugins": ["dev_tools", "system_metrics"],
+        "allowedNativePlugins": ["dev_tools", "system_metrics", "github"],
         "allowedMcpTools": {},
         "mcpServers": {}
     }))
@@ -380,7 +380,7 @@ mod tests {
         );
         assert_eq!(
             config.extra["allowedNativePlugins"],
-            serde_json::json!(["dev_tools", "system_metrics"])
+            serde_json::json!(["dev_tools", "system_metrics", "github"])
         );
         assert_eq!(config.extra["allowedMcpTools"], serde_json::json!({}));
     }

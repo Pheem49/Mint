@@ -26,7 +26,7 @@ export default function App() {
         <MintDashboard />
         <div
           className="settings-modal-overlay"
-          onClick={() => window.api?.closeSettings?.()}
+          onClick={() => window.settingsApi?.closeSettings?.()}
         >
           <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
             <SettingsWindow />

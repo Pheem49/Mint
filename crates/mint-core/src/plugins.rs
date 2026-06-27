@@ -84,6 +84,10 @@ pub fn native_plugins() -> Vec<NativePlugin> {
             name: "notion",
             description: "Create notes, read databases, and append blocks through Notion API.",
         },
+        NativePlugin {
+            name: "github",
+            description: "List issues, view issues, list pull requests, or check PR status via gh CLI.",
+        },
     ]
 }
 
@@ -104,6 +108,7 @@ pub async fn execute_native_plugin(
         "gmail" => gmail(config, instruction).await,
         "google_calendar" => calendar(config, instruction).await,
         "notion" => notion(config, instruction).await,
+        "github" => github(instruction),
         _ => Err(PluginError::UnknownPlugin(name.into())),
     }
 }
@@ -227,6 +232,33 @@ fn spotify(instruction: &str) -> Result<String, PluginError> {
         }
     }
     run("playerctl", &args)
+}
+
+fn github(instruction: &str) -> Result<String, PluginError> {
+    let parts = instruction.split_whitespace().collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["list_issues"] | ["issue", "list"] => run("gh", &["issue", "list", "--limit", "10"]),
+        ["view_issue", id] | ["issue", "view", id] => {
+            if id.chars().all(|c| c.is_ascii_digit()) {
+                run("gh", &["issue", "view", id])
+            } else {
+                invalid("github", "view_issue/issue view requires a numeric issue ID")
+            }
+        }
+        ["list_prs"] | ["pr", "list"] => run("gh", &["pr", "list", "--limit", "10"]),
+        ["pr_status"] | ["pr", "status"] => run("gh", &["pr", "status"]),
+        ["view_pr", id] | ["pr", "view", id] => {
+            if id.chars().all(|c| c.is_ascii_digit()) {
+                run("gh", &["pr", "view", id])
+            } else {
+                invalid("github", "view_pr/pr view requires a numeric PR ID")
+            }
+        }
+        _ => invalid(
+            "github",
+            "expected list_issues, view_issue <id>, list_prs, pr_status, or view_pr <id>",
+        ),
+    }
 }
 
 fn system_metrics(instruction: &str) -> Result<String, PluginError> {
