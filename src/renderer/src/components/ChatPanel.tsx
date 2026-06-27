@@ -504,12 +504,24 @@ function renderFormattedMessage(text: string) {
         </span>
       )
     } else {
-      items.push(
-        <Fragment key={`line-${i}`}>
-          {formatInline(line)}
-          {i < lines.length - 1 && '\n'}
-        </Fragment>
-      )
+      const listMatch = line.match(/^(\s*)([-*+])\s+(.*)$/)
+      if (listMatch) {
+        const indent = listMatch[1]
+        const content = listMatch[3]
+        items.push(
+          <Fragment key={`line-${i}`}>
+            {indent}• {formatInline(content)}
+            {i < lines.length - 1 && '\n'}
+          </Fragment>
+        )
+      } else {
+        items.push(
+          <Fragment key={`line-${i}`}>
+            {formatInline(line)}
+            {i < lines.length - 1 && '\n'}
+          </Fragment>
+        )
+      }
     }
   }
 

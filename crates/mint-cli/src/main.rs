@@ -1084,6 +1084,79 @@ async fn launch_mint_target(target: String) -> Result<()> {
     Ok(())
 }
 
+struct CliStreamFormatter {
+    line_start: bool,
+    whitespace_buf: String,
+    marker_buf: Option<char>,
+}
+
+impl CliStreamFormatter {
+    fn new() -> Self {
+        Self {
+            line_start: true,
+            whitespace_buf: String::new(),
+            marker_buf: None,
+        }
+    }
+
+    fn process_char(&mut self, c: char, mut print_fn: impl FnMut(char)) {
+        if self.line_start {
+            if let Some(marker) = self.marker_buf {
+                if c.is_whitespace() {
+                    for ws in self.whitespace_buf.chars() {
+                        print_fn(ws);
+                    }
+                    print_fn('•');
+                    print_fn(c);
+                } else {
+                    for ws in self.whitespace_buf.chars() {
+                        print_fn(ws);
+                    }
+                    print_fn(marker);
+                    print_fn(c);
+                }
+                self.whitespace_buf.clear();
+                self.marker_buf = None;
+                self.line_start = c == '\n';
+            } else {
+                if c.is_whitespace() && c != '\n' {
+                    self.whitespace_buf.push(c);
+                } else if c == '-' || c == '*' || c == '+' {
+                    self.marker_buf = Some(c);
+                } else {
+                    for ws in self.whitespace_buf.chars() {
+                        print_fn(ws);
+                    }
+                    self.whitespace_buf.clear();
+                    print_fn(c);
+                    self.line_start = c == '\n';
+                }
+            }
+        } else {
+            print_fn(c);
+            if c == '\n' {
+                self.line_start = true;
+            }
+        }
+    }
+
+    fn finalize(&mut self, mut print_fn: impl FnMut(char)) {
+        if let Some(marker) = self.marker_buf {
+            for ws in self.whitespace_buf.chars() {
+                print_fn(ws);
+            }
+            print_fn(marker);
+            self.whitespace_buf.clear();
+            self.marker_buf = None;
+        } else if !self.whitespace_buf.is_empty() {
+            for ws in self.whitespace_buf.chars() {
+                print_fn(ws);
+            }
+            self.whitespace_buf.clear();
+        }
+    }
+}
+
 struct ActionStreamFilter {
     buffer: String,
     in_action: bool,
@@ -1924,6 +1997,7 @@ async fn run_interactive_chat() -> Result<()> {
             let sent_image = image_uri.clone();
             let mut first_chunk = true;
             let mut filter = ActionStreamFilter::new();
+            let mut formatter = CliStreamFormatter::new();
 
             let stream_result = orchestrate_chat_stream_with_fallback(
                 &session.config,
@@ -1942,7 +2016,11 @@ async fn run_interactive_chat() -> Result<()> {
                         print!("\r\x1b[2K{MINT}Mint:{RESET} ");
                     }
                     filter.process_chunk(&chunk, |text| {
-                        print!("{}", text);
+                        for c in text.chars() {
+                            formatter.process_char(c, |formatted_c| {
+                                print!("{}", formatted_c);
+                            });
+                        }
                     });
                     let _ = io::stdout().flush();
                 },
@@ -1950,7 +2028,14 @@ async fn run_interactive_chat() -> Result<()> {
             .await;
 
             let actions = filter.finalize(|text| {
-                print!("{}", text);
+                for c in text.chars() {
+                    formatter.process_char(c, |formatted_c| {
+                        print!("{}", formatted_c);
+                    });
+                }
+            });
+            formatter.finalize(|formatted_c| {
+                print!("{}", formatted_c);
             });
             let _ = io::stdout().flush();
 

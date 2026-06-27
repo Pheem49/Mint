@@ -801,22 +801,50 @@ fn format_markdown_bold(text: &str) -> String {
         }
 
         if !in_code_block {
-            let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
-            if hash_count > 0 && hash_count <= 6 {
-                let next_char = trimmed.chars().nth(hash_count);
-                let is_heading = match next_char {
-                    Some(' ') => true,
-                    Some(c) => !c.is_alphanumeric(),
-                    None => true,
-                };
-                if is_heading {
-                    // Make the entire heading line bold and bright white
-                    formatted_line = format!("{}{}{}", BRIGHT, line, RESET);
+            let mut leading_spaces = 0;
+            let mut is_list_item = false;
+            let mut marker_char = '-';
+            
+            for (idx, c) in line.char_indices() {
+                if c.is_whitespace() {
+                    leading_spaces += c.len_utf8();
+                } else {
+                    if c == '-' || c == '*' || c == '+' {
+                        let after = &line[idx + c.len_utf8()..];
+                        if after.chars().next().map_or(false, |c| c.is_whitespace()) {
+                            is_list_item = true;
+                            marker_char = c;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if is_list_item {
+                let marker_len = marker_char.len_utf8();
+                let mut new_line = String::new();
+                new_line.push_str(&line[..leading_spaces]);
+                new_line.push('•');
+                new_line.push_str(&line[leading_spaces + marker_len..]);
+                formatted_line = process_inline_bold(&new_line);
+            } else {
+                let hash_count = trimmed.chars().take_while(|&c| c == '#').count();
+                if hash_count > 0 && hash_count <= 6 {
+                    let next_char = trimmed.chars().nth(hash_count);
+                    let is_heading = match next_char {
+                        Some(' ') => true,
+                        Some(c) => !c.is_alphanumeric(),
+                        None => true,
+                    };
+                    if is_heading {
+                        // Make the entire heading line bold and bright white
+                        formatted_line = format!("{}{}{}", BRIGHT, line, RESET);
+                    } else {
+                        formatted_line = process_inline_bold(&formatted_line);
+                    }
                 } else {
                     formatted_line = process_inline_bold(&formatted_line);
                 }
-            } else {
-                formatted_line = process_inline_bold(&formatted_line);
             }
         } else {
             // Do not format markdown inside code blocks
