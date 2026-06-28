@@ -103,19 +103,6 @@ export default function DashboardSidebar({
         </span>
         <span>Image Studio</span>
       </button>
-      <button className={`sidebar-top-action ${view === 'workflows' ? 'is-active' : ''}`} onClick={() => onSetView('workflows')}>
-        <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 12h16"></path>
-            <path d="M12 4v16"></path>
-            <rect x="2" y="9" width="4" height="6" rx="1"></rect>
-            <rect x="18" y="9" width="4" height="6" rx="1"></rect>
-            <rect x="10" y="2" width="4" height="4" rx="1"></rect>
-            <rect x="10" y="18" width="4" height="4" rx="1"></rect>
-          </svg>
-        </span>
-        <span>Workflow (Beta)</span>
-      </button>
 
       <div className="sidebar-section">
         <div className="sidebar-section-title">Conversation CLI</div>
