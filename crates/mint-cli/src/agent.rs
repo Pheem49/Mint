@@ -804,7 +804,7 @@ fn format_markdown_bold(text: &str) -> String {
             let mut leading_spaces = 0;
             let mut is_list_item = false;
             let mut marker_char = '-';
-            
+
             for (idx, c) in line.char_indices() {
                 if c.is_whitespace() {
                     leading_spaces += c.len_utf8();

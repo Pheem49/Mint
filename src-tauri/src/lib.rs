@@ -552,8 +552,7 @@ fn save_interaction_agent_activity(
     interaction_id: i64,
     activity: Vec<AgentProgress>,
 ) -> Result<(), String> {
-    let activity_json =
-        serde_json::to_string(&activity).map_err(|error| error.to_string())?;
+    let activity_json = serde_json::to_string(&activity).map_err(|error| error.to_string())?;
     MemoryStore::open_default()
         .and_then(|memory| {
             memory

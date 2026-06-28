@@ -242,7 +242,10 @@ fn github(instruction: &str) -> Result<String, PluginError> {
             if id.chars().all(|c| c.is_ascii_digit()) {
                 run("gh", &["issue", "view", id])
             } else {
-                invalid("github", "view_issue/issue view requires a numeric issue ID")
+                invalid(
+                    "github",
+                    "view_issue/issue view requires a numeric issue ID",
+                )
             }
         }
         ["list_prs"] | ["pr", "list"] => run("gh", &["pr", "list", "--limit", "10"]),

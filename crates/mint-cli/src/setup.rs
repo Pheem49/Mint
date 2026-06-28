@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use mint_core::{load_config, save_config, native_plugins};
+use mint_core::{load_config, native_plugins, save_config};
 use std::io::{self, Write};
 
 struct ToolOption {
