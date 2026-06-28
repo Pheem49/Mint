@@ -19,7 +19,22 @@ export default function App() {
 
   let content = <MintDashboard />
 
-  if (route.startsWith('/settings')) content = <SettingsWindow />
+  // For web, show settings as a centered modal overlay instead of a full-page route
+  if (route.startsWith('/settings')) {
+    content = (
+      <>
+        <MintDashboard />
+        <div
+          className="settings-modal-overlay"
+          onClick={() => window.settingsApi?.closeSettings?.()}
+        >
+          <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+            <SettingsWindow />
+          </div>
+        </div>
+      </>
+    )
+  }
 
   return <Suspense fallback={null}>{content}</Suspense>
 }

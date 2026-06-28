@@ -10,9 +10,10 @@ interface PicturesLibraryProps {
   view: DashboardView
   pictures: PictureEntry[]
   onSetView: (view: DashboardView) => void
+  onRefreshPictures?: () => Promise<void>
 }
 
-export default function PicturesLibrary({ view, pictures, onSetView }: PicturesLibraryProps) {
+export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPictures }: PicturesLibraryProps) {
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_PICTURES)
   const visiblePictures = useMemo(
     () => pictures.slice(0, visibleCount),
@@ -46,6 +47,9 @@ export default function PicturesLibrary({ view, pictures, onSetView }: PicturesL
         <div><span className="pictures-kicker">Gallery</span><h2>Saved Pictures</h2></div>
         <div className="pictures-header-actions">
           <button className="pictures-close-btn" onClick={() => onSetView('chat')}>Close Gallery</button>
+          <button type="button" className="picture-refresh-btn" title="Refresh" onClick={() => onRefreshPictures?.()}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14"/></svg>
+          </button>
         </div>
       </header>
       {pictures.length === 0 ? (

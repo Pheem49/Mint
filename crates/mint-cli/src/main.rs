@@ -1084,6 +1084,284 @@ async fn launch_mint_target(target: String) -> Result<()> {
     Ok(())
 }
 
+fn is_table_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.len() > 1
+}
+
+fn process_inline_bold(s: &str) -> String {
+    let mut result = String::new();
+    let parts = s.split("**");
+    let mut is_bold = false;
+    for part in parts {
+        if is_bold {
+            result.push_str("\x1b[1m");
+            result.push_str(part);
+            result.push_str("\x1b[0m");
+        } else {
+            result.push_str(part);
+        }
+        is_bold = !is_bold;
+    }
+    result
+}
+
+fn format_line(line: &str) -> String {
+    let mut formatted = line.to_string();
+    let trimmed = line.trim_start();
+    if (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ")) && trimmed.len() >= 2 {
+        let leading_len = line.len() - trimmed.len();
+        let leading_spaces = &line[..leading_len];
+        formatted = format!("{}•{}", leading_spaces, &trimmed[1..]);
+    }
+    process_inline_bold(&formatted)
+}
+
+fn unicode_width(s: &str) -> usize {
+    let mut count = 0;
+    for c in s.chars() {
+        let val = c as u32;
+        if (0x0E31..=0x0E31).contains(&val)
+            || (0x0E34..=0x0E3A).contains(&val)
+            || (0x0E47..=0x0E4E).contains(&val)
+        {
+            continue;
+        }
+        if is_cjk(c) {
+            count += 2;
+        } else {
+            count += 1;
+        }
+    }
+    count
+}
+
+fn is_cjk(c: char) -> bool {
+    let val = c as u32;
+    (0x4E00..=0x9FFF).contains(&val)
+        || (0x3400..=0x4DBF).contains(&val)
+        || (0x20000..=0x2A6DF).contains(&val)
+        || (0xAC00..=0xD7AF).contains(&val)
+        || (0x3040..=0x309F).contains(&val)
+        || (0x30A0..=0x30FF).contains(&val)
+}
+
+fn render_markdown_table(table_lines: &[String]) -> String {
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for line in table_lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let content = &trimmed[1..trimmed.len() - 1];
+        let content_escaped = content.replace("\\|", "\u{0000}");
+        let cols: Vec<String> = content_escaped
+            .split('|')
+            .map(|s| s.replace("\u{0000}", "|").trim().to_string())
+            .collect();
+        rows.push(cols);
+    }
+
+    if rows.is_empty() {
+        return String::new();
+    }
+
+    let mut has_separator = false;
+    let mut separator_idx = None;
+    for (i, row) in rows.iter().enumerate() {
+        if row.iter().all(|col| col.chars().all(|c| c == '-' || c == ':' || c == ' ' || c == '\t')) && !row.is_empty() {
+            has_separator = true;
+            separator_idx = Some(i);
+            break;
+        }
+    }
+
+    let mut data_rows: Vec<Vec<String>> = Vec::new();
+    let mut header_row: Option<Vec<String>> = None;
+
+    if has_separator {
+        let sep_idx = separator_idx.unwrap();
+        if sep_idx > 0 {
+            header_row = Some(rows[sep_idx - 1].clone());
+            for (i, row) in rows.iter().enumerate() {
+                if i != sep_idx && i != sep_idx - 1 {
+                    data_rows.push(row.clone());
+                }
+            }
+        } else {
+            for (i, row) in rows.iter().enumerate() {
+                if i != sep_idx {
+                    data_rows.push(row.clone());
+                }
+            }
+        }
+    } else {
+        header_row = Some(rows[0].clone());
+        data_rows = rows[1..].to_vec();
+    }
+
+    let num_cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let mut col_widths = vec![0; num_cols];
+    
+    if let Some(ref header) = header_row {
+        for (i, col) in header.iter().enumerate() {
+            if i < num_cols {
+                col_widths[i] = col_widths[i].max(unicode_width(col));
+            }
+        }
+    }
+    for row in &data_rows {
+        for (i, col) in row.iter().enumerate() {
+            if i < num_cols {
+                col_widths[i] = col_widths[i].max(unicode_width(col));
+            }
+        }
+    }
+
+    let mut rendered = String::new();
+
+    let draw_border = |left: &str, mid: &str, right: &str, fill: &str, widths: &[usize]| -> String {
+        let mut s = left.to_string();
+        for (i, &w) in widths.iter().enumerate() {
+            s.push_str(&fill.repeat(w + 2));
+            if i < widths.len() - 1 {
+                s.push_str(mid);
+            }
+        }
+        s.push_str(right);
+        s.push('\n');
+        s
+    };
+
+    rendered.push_str(&draw_border("┌", "┬", "┐", "─", &col_widths));
+
+    if let Some(ref header) = header_row {
+        rendered.push_str("│");
+        for (i, col) in header.iter().enumerate() {
+            let width = unicode_width(col);
+            let padding = col_widths[i] - width;
+            rendered.push_str(&format!(" \x1b[1;36m{}\x1b[0m{}", col, " ".repeat(padding + 1)));
+            rendered.push_str("│");
+        }
+        rendered.push('\n');
+        rendered.push_str(&draw_border("├", "┼", "┤", "─", &col_widths));
+    }
+
+    for (r_idx, row) in data_rows.iter().enumerate() {
+        rendered.push_str("│");
+        for i in 0..num_cols {
+            let col_val = row.get(i).cloned().unwrap_or_default();
+            let width = unicode_width(&col_val);
+            let padding = col_widths[i] - width;
+            rendered.push_str(&format!(" {}{}", col_val, " ".repeat(padding + 1)));
+            rendered.push_str("│");
+        }
+        rendered.push('\n');
+
+        if r_idx < data_rows.len() - 1 {
+            rendered.push_str(&draw_border("├", "┼", "┤", "─", &col_widths));
+        }
+    }
+
+    rendered.push_str(&draw_border("└", "┴", "┘", "─", &col_widths).trim_end());
+    rendered
+}
+
+struct CliStreamFormatter {
+    line_buffer: String,
+    table_buffer: Vec<String>,
+    in_code_block: bool,
+}
+
+impl CliStreamFormatter {
+    fn new() -> Self {
+        Self {
+            line_buffer: String::new(),
+            table_buffer: Vec::new(),
+            in_code_block: false,
+        }
+    }
+
+    fn process_char(&mut self, c: char, mut print_fn: impl FnMut(char)) {
+        self.line_buffer.push(c);
+        if c == '\n' {
+            let mut line = self.line_buffer.clone();
+            self.line_buffer.clear();
+            if line.ends_with('\n') {
+                line.pop();
+            }
+
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") {
+                self.in_code_block = !self.in_code_block;
+            }
+
+            if self.in_code_block {
+                if !self.table_buffer.is_empty() {
+                    self.flush_table(&mut print_fn);
+                }
+                for ch in line.chars() {
+                    print_fn(ch);
+                }
+                print_fn('\n');
+            } else {
+                if is_table_line(&line) {
+                    self.table_buffer.push(line);
+                } else {
+                    if !self.table_buffer.is_empty() {
+                        self.flush_table(&mut print_fn);
+                    }
+                    let formatted = format_line(&line);
+                    for ch in formatted.chars() {
+                        print_fn(ch);
+                    }
+                    print_fn('\n');
+                }
+            }
+        }
+    }
+
+    fn finalize(&mut self, mut print_fn: impl FnMut(char)) {
+        if !self.line_buffer.is_empty() {
+            let mut line = self.line_buffer.clone();
+            self.line_buffer.clear();
+            if line.ends_with('\n') {
+                line.pop();
+            }
+            if self.in_code_block {
+                if !self.table_buffer.is_empty() {
+                    self.flush_table(&mut print_fn);
+                }
+                for ch in line.chars() {
+                    print_fn(ch);
+                }
+            } else if is_table_line(&line) {
+                self.table_buffer.push(line);
+            } else {
+                if !self.table_buffer.is_empty() {
+                    self.flush_table(&mut print_fn);
+                }
+                let formatted = format_line(&line);
+                for ch in formatted.chars() {
+                    print_fn(ch);
+                }
+            }
+        }
+        if !self.table_buffer.is_empty() {
+            self.flush_table(&mut print_fn);
+        }
+    }
+
+    fn flush_table<F: FnMut(char)>(&mut self, mut print_fn: F) {
+        let rendered = render_markdown_table(&self.table_buffer);
+        for ch in rendered.chars() {
+            print_fn(ch);
+        }
+        print_fn('\n');
+        self.table_buffer.clear();
+    }
+}
+
 struct ActionStreamFilter {
     buffer: String,
     in_action: bool,
@@ -1293,6 +1571,7 @@ async fn handle_slash_command(
                 ("/paste [prompt]", "Attach image from clipboard"),
                 ("Ctrl+V", "Paste clipboard image as [Image #1]"),
                 ("/learn <path>", "Import a persistent .md or .txt skill"),
+                ("/plugins <name> [prompt]", "Generate a skill.md file for a plugin/skill"),
                 ("/memory list", "Show recent interactions"),
                 ("/memory clear", "Clear all interactions"),
                 ("/memory get <key>", "Read a profile value"),
@@ -1676,6 +1955,101 @@ async fn handle_slash_command(
 
         "/exit" | "/quit" => Some(SlashResult::Exit),
 
+        "/plugins" | "/plugin" => {
+            let (plugin_name, prompt) = rest
+                .split_once(char::is_whitespace)
+                .map(|(p, r)| (p, r.trim()))
+                .unwrap_or((rest, ""));
+
+            if plugin_name.is_empty() {
+                println!("\n{BLUE}────────────────────────────────────────────{RESET}");
+                println!("{MINT}  Available Plugins & Skills{RESET}");
+                println!("{BLUE}────────────────────────────────────────────{RESET}");
+                
+                println!("{MINT}Native Plugins:{RESET}");
+                for p in native_plugins() {
+                    println!("  - {BLUE}{:<20}{RESET} {}", p.name, p.description);
+                }
+                
+                println!("\n{MINT}Custom Skills/Plugins (Active):{RESET}");
+                let mut active_skills = std::collections::HashSet::new();
+                if let Ok(memory) = MemoryStore::open_default() {
+                    match memory.learned_skills(100) {
+                        Ok(skills) => {
+                            if skills.is_empty() {
+                                println!("  {DIM}(No custom skills/plugins learned yet. Use '/learn <path>' to add one.){RESET}");
+                            } else {
+                                for s in &skills {
+                                    println!("  - {BLUE}{:<20}{RESET} {}", s.name, s.source_path);
+                                    
+                                    // Try to store canonicalized active path
+                                    if let Ok(canon) = Path::new(&s.source_path).canonicalize() {
+                                        active_skills.insert(canon);
+                                    } else {
+                                        active_skills.insert(PathBuf::from(&s.source_path));
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => println!("  {ERROR}Error loading custom skills: {e}{RESET}"),
+                    }
+                }
+
+                // Scan local workspace skills directory
+                let local_skills_dir = session.current_dir.join("skills");
+                if local_skills_dir.is_dir() {
+                    if let Ok(entries) = fs::read_dir(&local_skills_dir) {
+                        let mut local_files = Vec::new();
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.is_file() {
+                                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                                    if matches!(ext.to_ascii_lowercase().as_str(), "md" | "txt") {
+                                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                                            if let Ok(canon_path) = path.canonicalize() {
+                                                local_files.push((name.to_owned(), canon_path));
+                                            } else {
+                                                local_files.push((name.to_owned(), path));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        let inactive_files: Vec<_> = local_files
+                            .into_iter()
+                            .filter(|(_, full_path)| !active_skills.contains(full_path))
+                            .map(|(name, _)| name)
+                            .collect();
+
+                        if !inactive_files.is_empty() {
+                            println!("\n{MINT}Local Skill Files (Found but not learned/active yet):{RESET}");
+                            for file in inactive_files {
+                                println!("  - {WARN}{:<20}{RESET} skills/{} {DIM}(Type '/learn skills/{}' to activate){RESET}", file, file, file);
+                            }
+                        }
+                    }
+                }
+
+                println!();
+                Some(SlashResult::Handled)
+            } else {
+                let agent_prompt = if prompt.is_empty() {
+                    format!(
+                        "Create a skill markdown file for the plugin '{}' at the path 'skills/{}.md' in the workspace. Write the appropriate instructions inside.",
+                        plugin_name, plugin_name
+                    )
+                } else {
+                    format!(
+                        "Create a skill markdown file for the plugin '{}' at the path 'skills/{}.md' in the workspace based on these instructions: {}",
+                        plugin_name, plugin_name, prompt
+                    )
+                };
+                Some(SlashResult::ForwardToAgent(agent_prompt))
+            }
+        }
+
         "/code" => {
             if rest.is_empty() {
                 println!("{WARN}/code requires a task description{RESET}\n");
@@ -1924,6 +2298,7 @@ async fn run_interactive_chat() -> Result<()> {
             let sent_image = image_uri.clone();
             let mut first_chunk = true;
             let mut filter = ActionStreamFilter::new();
+            let mut formatter = CliStreamFormatter::new();
 
             let stream_result = orchestrate_chat_stream_with_fallback(
                 &session.config,
@@ -1942,7 +2317,11 @@ async fn run_interactive_chat() -> Result<()> {
                         print!("\r\x1b[2K{MINT}Mint:{RESET} ");
                     }
                     filter.process_chunk(&chunk, |text| {
-                        print!("{}", text);
+                        for c in text.chars() {
+                            formatter.process_char(c, |formatted_c| {
+                                print!("{}", formatted_c);
+                            });
+                        }
                     });
                     let _ = io::stdout().flush();
                 },
@@ -1950,7 +2329,14 @@ async fn run_interactive_chat() -> Result<()> {
             .await;
 
             let actions = filter.finalize(|text| {
-                print!("{}", text);
+                for c in text.chars() {
+                    formatter.process_char(c, |formatted_c| {
+                        print!("{}", formatted_c);
+                    });
+                }
+            });
+            formatter.finalize(|formatted_c| {
+                print!("{}", formatted_c);
             });
             let _ = io::stdout().flush();
 
@@ -2029,6 +2415,7 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/image", "Attach image from disk"),
     ("/paste", "Attach image from clipboard"),
     ("/learn", "Import persistent skill/instruction"),
+    ("/plugins", "List or generate plugins/skills"),
     ("/memory", "Manage long-term memory store"),
     ("/mcp", "List configured MCP servers"),
     ("/stats", "Show session statistics"),

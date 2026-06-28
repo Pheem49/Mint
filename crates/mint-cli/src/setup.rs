@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use mint_core::{load_config, save_config};
+use mint_core::{load_config, save_config, native_plugins};
 use std::io::{self, Write};
 
 struct ToolOption {
@@ -12,15 +12,6 @@ struct ToolOption {
 
 pub async fn run() -> Result<Option<String>> {
     let mut config = load_config()?;
-
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-    println!("\x1b[32m       Mint CLI Tool Manager Wizard\x1b[0m");
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-    println!("Configure which agent tools are enabled or disabled:");
-    println!(
-        "  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Space: Toggle | a: All | i: Invert | Enter: Confirm]\x1b[0m"
-    );
-    println!();
 
     let mut options = vec![
         ToolOption {
@@ -178,7 +169,7 @@ pub async fn run() -> Result<Option<String>> {
     ];
 
     let mut cursor = 0;
-    print_options(&options, cursor);
+    redraw_phase_1(&options, cursor);
     enable_raw_mode()?;
 
     loop {
@@ -204,8 +195,7 @@ pub async fn run() -> Result<Option<String>> {
                                     cursor = options.len() - 1;
                                 }
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", options.len());
-                                print_options(&options, cursor);
+                                redraw_phase_1(&options, cursor);
                                 enable_raw_mode()?;
                             }
                             KeyCode::Down => {
@@ -215,15 +205,13 @@ pub async fn run() -> Result<Option<String>> {
                                     cursor = 0;
                                 }
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", options.len());
-                                print_options(&options, cursor);
+                                redraw_phase_1(&options, cursor);
                                 enable_raw_mode()?;
                             }
                             KeyCode::Char(' ') => {
                                 options[cursor].enabled = !options[cursor].enabled;
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", options.len());
-                                print_options(&options, cursor);
+                                redraw_phase_1(&options, cursor);
                                 enable_raw_mode()?;
                             }
                             KeyCode::Char('a') => {
@@ -231,8 +219,7 @@ pub async fn run() -> Result<Option<String>> {
                                     opt.enabled = true;
                                 }
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", options.len());
-                                print_options(&options, cursor);
+                                redraw_phase_1(&options, cursor);
                                 enable_raw_mode()?;
                             }
                             KeyCode::Char('i') => {
@@ -240,8 +227,7 @@ pub async fn run() -> Result<Option<String>> {
                                     opt.enabled = !opt.enabled;
                                 }
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", options.len());
-                                print_options(&options, cursor);
+                                redraw_phase_1(&options, cursor);
                                 enable_raw_mode()?;
                             }
                             KeyCode::Enter => {
@@ -270,14 +256,134 @@ pub async fn run() -> Result<Option<String>> {
     config.disabled_tools = disabled;
     save_config(&config)?;
 
-    println!("\x1b[32mSuccessfully updated tool configurations!\x1b[0m\n");
+    println!("\x1b[32mSuccessfully updated agent tool configurations!\x1b[0m\n");
 
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-    println!("\x1b[32m       Choose where to run Mint AI Agent\x1b[0m");
-    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-    println!("Select the environment you want to launch:");
-    println!("  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Enter: Confirm]\x1b[0m");
+    let all_native = native_plugins();
+    let allowed_plugins: std::collections::HashSet<String> = config
+        .extra
+        .get("allowedNativePlugins")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            vec![
+                "dev_tools".to_string(),
+                "system_metrics".to_string(),
+                "github".to_string(),
+            ]
+            .into_iter()
+            .collect()
+        });
+
+    let mut native_options: Vec<ToolOption> = all_native
+        .iter()
+        .map(|p| {
+            let has_all_permission = allowed_plugins.contains("*");
+            let is_enabled = has_all_permission || allowed_plugins.contains(p.name);
+            ToolOption {
+                name: p.name,
+                key: p.name,
+                enabled: is_enabled,
+            }
+        })
+        .collect();
+
+    let mut native_cursor = 0;
+    redraw_phase_2(&native_options, native_cursor);
+    enable_raw_mode()?;
+
+    loop {
+        match event::poll(std::time::Duration::from_millis(100)) {
+            Ok(true) => {
+                if let Event::Key(key_event) = event::read()? {
+                    if key_event.kind == event::KeyEventKind::Press {
+                        let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                            && key_event
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL);
+                        if is_ctrl_c {
+                            disable_raw_mode()?;
+                            println!("\n\x1b[31mSetup cancelled.\x1b[0m");
+                            return Ok(None);
+                        }
+
+                        match key_event.code {
+                            KeyCode::Up => {
+                                if native_cursor > 0 {
+                                    native_cursor -= 1;
+                                } else {
+                                    native_cursor = native_options.len() - 1;
+                                }
+                                disable_raw_mode()?;
+                                redraw_phase_2(&native_options, native_cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Down => {
+                                if native_cursor < native_options.len() - 1 {
+                                    native_cursor += 1;
+                                } else {
+                                    native_cursor = 0;
+                                }
+                                disable_raw_mode()?;
+                                redraw_phase_2(&native_options, native_cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Char(' ') => {
+                                native_options[native_cursor].enabled =
+                                    !native_options[native_cursor].enabled;
+                                disable_raw_mode()?;
+                                redraw_phase_2(&native_options, native_cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Char('a') => {
+                                for opt in &mut native_options {
+                                    opt.enabled = true;
+                                }
+                                disable_raw_mode()?;
+                                redraw_phase_2(&native_options, native_cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Char('i') => {
+                                for opt in &mut native_options {
+                                    opt.enabled = !opt.enabled;
+                                }
+                                disable_raw_mode()?;
+                                redraw_phase_2(&native_options, native_cursor);
+                                enable_raw_mode()?;
+                            }
+                            KeyCode::Enter => {
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(_) => {
+                break;
+            }
+        }
+    }
+    disable_raw_mode()?;
     println!();
+
+    let enabled_natives: Vec<serde_json::Value> = native_options
+        .iter()
+        .filter(|o| o.enabled)
+        .map(|o| serde_json::Value::String(o.key.to_string()))
+        .collect();
+
+    config.extra.insert(
+        "allowedNativePlugins".to_string(),
+        serde_json::Value::Array(enabled_natives),
+    );
+    save_config(&config)?;
+
+    println!("\x1b[32mSuccessfully updated native plugins configurations!\x1b[0m\n");
 
     let run_options = vec![
         ToolOption {
@@ -298,7 +404,7 @@ pub async fn run() -> Result<Option<String>> {
     ];
 
     let mut run_cursor = 0;
-    print_run_options(&run_options, run_cursor);
+    redraw_phase_3(&run_options, run_cursor);
     enable_raw_mode()?;
 
     loop {
@@ -324,8 +430,7 @@ pub async fn run() -> Result<Option<String>> {
                                     run_cursor = run_options.len() - 1;
                                 }
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", run_options.len());
-                                print_run_options(&run_options, run_cursor);
+                                redraw_phase_3(&run_options, run_cursor);
                                 enable_raw_mode()?;
                             }
                             KeyCode::Down => {
@@ -335,8 +440,7 @@ pub async fn run() -> Result<Option<String>> {
                                     run_cursor = 0;
                                 }
                                 disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", run_options.len());
-                                print_run_options(&run_options, run_cursor);
+                                redraw_phase_3(&run_options, run_cursor);
                                 enable_raw_mode()?;
                             }
                             KeyCode::Enter => {
@@ -387,4 +491,41 @@ fn print_run_options(options: &[ToolOption], cursor: usize) {
         }
     }
     let _ = io::stdout().flush();
+}
+
+fn redraw_phase_1(options: &[ToolOption], cursor: usize) {
+    print!("\x1b[2J\x1b[1;1H");
+    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("\x1b[32m       Mint CLI Tool Manager Wizard\x1b[0m");
+    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("Configure which agent tools are enabled or disabled:");
+    println!(
+        "  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Space: Toggle | a: All | i: Invert | Enter: Confirm]\x1b[0m"
+    );
+    println!();
+    print_options(options, cursor);
+}
+
+fn redraw_phase_2(options: &[ToolOption], cursor: usize) {
+    print!("\x1b[2J\x1b[1;1H");
+    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("\x1b[32m       Configure Native Plugins Access\x1b[0m");
+    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("Select which native plugins are allowed to run:");
+    println!(
+        "  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Space: Toggle | a: All | i: Invert | Enter: Confirm]\x1b[0m"
+    );
+    println!();
+    print_options(options, cursor);
+}
+
+fn redraw_phase_3(options: &[ToolOption], cursor: usize) {
+    print!("\x1b[2J\x1b[1;1H");
+    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("\x1b[32m       Choose where to run Mint AI Agent\x1b[0m");
+    println!("\x1b[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
+    println!("Select the environment you want to launch:");
+    println!("  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Enter: Confirm]\x1b[0m");
+    println!();
+    print_run_options(options, cursor);
 }
