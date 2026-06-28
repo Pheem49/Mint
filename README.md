@@ -95,6 +95,8 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 - Telegram, Discord Gateway, Discord RPC, Slack Socket Mode, LINE, and WhatsApp
   Cloud API integrations.
 - Signed Tauri update checks with an explicit approval step before installation.
+- Dynamic local Ollama model fetching in the Settings Window to query and display the actual models installed on your machine.
+- Pill-styled clean horizontal system event dividers for provider and model change notifications in the chat panel.
 
 ## <img src="assets/setup.svg" width="24" height="24" valign="middle" /> Prerequisites
 

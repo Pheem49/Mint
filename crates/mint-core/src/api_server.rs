@@ -272,6 +272,35 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         .await;
                     }
                 }
+                ("POST", "/api/interactions") => {
+                    #[derive(Deserialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct ApiSaveInteraction {
+                        chat_id: String,
+                        user_text: String,
+                        provider: String,
+                        model: String,
+                    }
+
+                    if let Ok(req) = serde_json::from_str::<ApiSaveInteraction>(body) {
+                        if let Ok(memory) = MemoryStore::open_default() {
+                            match memory.add_interaction_for_chat(&req.chat_id, &req.user_text, "", &req.provider, &req.model) {
+                                Ok(row_id) => {
+                                    let res_json = json!({ "success": true, "id": row_id });
+                                    send_json_response(socket, "200 OK", &res_json.to_string()).await;
+                                }
+                                Err(error) => {
+                                    let err_json = json!({ "success": false, "message": error.to_string() });
+                                    send_json_response(socket, "500 Internal Server Error", &err_json.to_string()).await;
+                                }
+                            }
+                        } else {
+                            send_json_response(socket, "500 Internal Server Error", "{\"success\":false,\"message\":\"db error\"}").await;
+                        }
+                    } else {
+                        send_json_response(socket, "400 Bad Request", "{\"success\":false,\"message\":\"invalid body\"}").await;
+                    }
+                }
                 ("POST", "/api/interactions/agent-activity") => {
                     #[derive(Deserialize)]
                     #[serde(rename_all = "camelCase")]

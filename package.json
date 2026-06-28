@@ -58,6 +58,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "@xyflow/react": "^12.11.1",
     "material-icon-theme": "5.34.0",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",

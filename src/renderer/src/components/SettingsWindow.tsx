@@ -162,6 +162,7 @@ export default function SettingsWindow() {
   const [customHF, setCustomHF] = useState('')
   const [customLocal, setCustomLocal] = useState('')
   const [customOllama, setCustomOllama] = useState('')
+  const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
 
   // New MCP Server Form state
   const [mcpName, setMcpName] = useState('')
@@ -221,6 +222,31 @@ export default function SettingsWindow() {
     }
     loadSettings()
   }, [])
+
+  useEffect(() => {
+    const fetchOllamaModels = async () => {
+      const host = config.ollamaHost || 'http://127.0.0.1:11434';
+      const cleanHost = host.replace(/\/$/, '');
+      try {
+        const res = await fetch(`${cleanHost}/api/tags`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.models)) {
+            const names = data.models.map((m: any) => m.name);
+            setDynamicOllamaModels(names);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to fetch local Ollama models:", err);
+      }
+      setDynamicOllamaModels(OLLAMA_MODELS);
+    };
+
+    if (config.ollamaHost) {
+      fetchOllamaModels();
+    }
+  }, [config.ollamaHost]);
 
   const applyThemeStyles = (cfg: typeof DEFAULT_CONFIG) => {
     document.documentElement.setAttribute('data-theme', cfg.theme)
@@ -758,16 +784,19 @@ export default function SettingsWindow() {
                       <div className="setting-row">
                         <label>Ollama Model</label>
                         <select 
-                          value={OLLAMA_MODELS.includes(config.ollamaModel) ? config.ollamaModel : 'custom'} 
+                          value={dynamicOllamaModels.includes(config.ollamaModel) ? config.ollamaModel : 'custom'} 
                           onChange={(e) => updateField('ollamaModel', e.target.value)}
                         >
-                          {OLLAMA_MODELS.map(model => (
+                          {dynamicOllamaModels.map(model => (
                             <option key={model} value={model}>{model}</option>
                           ))}
+                          {!dynamicOllamaModels.includes(config.ollamaModel) && config.ollamaModel && config.ollamaModel !== 'custom' && (
+                            <option value={config.ollamaModel}>{config.ollamaModel}</option>
+                          )}
                           <option value="custom">Custom...</option>
                         </select>
                       </div>
-                      {(!OLLAMA_MODELS.includes(config.ollamaModel) || config.ollamaModel === 'custom') && (
+                      {(!dynamicOllamaModels.includes(config.ollamaModel) || config.ollamaModel === 'custom') && (
                         <div className="setting-row">
                           <label>Custom Ollama Model</label>
                           <input 

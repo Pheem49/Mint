@@ -16,6 +16,7 @@ interface Window {
     getChatHistory: () => Promise<any>;
     listSavedPictures: () => Promise<any>;
     openSettings: () => Promise<any>;
+    openWorkflows: () => Promise<any>;
     readClipboard: () => Promise<string>;
     writeClipboard: (text: string) => Promise<void>;
     getSystemInfo: () => Promise<any>;
@@ -51,6 +52,7 @@ interface Window {
     openFolder: (path: string) => Promise<void>;
     openCustomWorkflows: () => Promise<any>;
     reloadCustomWorkflows: () => Promise<any>;
+    saveCustomWorkflows: (workflows: any[]) => Promise<any>;
   };
   spotlightAPI: {
     submit: (query: string) => void;

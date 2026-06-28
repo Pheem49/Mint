@@ -35,7 +35,7 @@ use mint_core::{
     ChatSession, CodeEdit, CodeEditProposal, ImageGenRequest, InteractionMemory, MemoryStore,
     MintConfig, PictureEntry, TtsUrl, WeatherReport, apply_code_edits, classify_shell_command,
     config_path, extract_document_text, google_tts_urls, list_saved_pictures, load_config,
-    load_workflows, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
+    load_workflows, save_workflows, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
     orchestrate_chat_with_fallback, propose_code_edits, save_chat_images, save_config,
     start_channels, weather, workflows_path,
 };
@@ -563,6 +563,20 @@ fn save_interaction_agent_activity(
 }
 
 #[tauri::command]
+fn save_system_interaction(
+    chat_id: String,
+    user_text: String,
+    provider: String,
+    model: String,
+) -> Result<i64, String> {
+    MemoryStore::open_default()
+        .and_then(|memory| {
+            memory.add_interaction_for_chat(&chat_id, &user_text, "", &provider, &model)
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_recent_interactions(
     limit: Option<usize>,
     chat_id: Option<String>,
@@ -929,6 +943,15 @@ fn reload_custom_workflows() -> Result<Value, String> {
     }))
 }
 
+#[tauri::command]
+fn save_custom_workflows(workflows: Vec<serde_json::Value>) -> Result<ActionResult, String> {
+    save_workflows(&workflows).map_err(|error| error.to_string())?;
+    Ok(ActionResult {
+        success: true,
+        message: "workflows saved successfully".into(),
+    })
+}
+
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show Mint", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
@@ -1085,7 +1108,9 @@ pub fn run() {
             run_next_queued_task,
             exit_app,
             open_workflows_file,
-            reload_custom_workflows
+            reload_custom_workflows,
+            save_custom_workflows,
+            save_system_interaction
         ])
         .run(tauri::generate_context!())
         .expect("error while running Mint desktop");

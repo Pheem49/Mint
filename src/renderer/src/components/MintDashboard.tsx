@@ -5,6 +5,7 @@ import {
   deleteChatSession,
   renameChatSession,
   getRecentInteractions,
+  saveSystemInteraction,
   getRuntimeStatus,
   listChatSessions,
   listSavedPictures,
@@ -28,6 +29,7 @@ import ModelPanel from './ModelPanel'
 import type { ModelInteraction } from './ModelPanel'
 import PicturesLibrary from './PicturesLibrary'
 import WorkspacePanel from './WorkspacePanel'
+import WorkflowBuilderPanel from './WorkflowBuilderPanel'
 
 const EXPRESSIONS = [
   "Default",
@@ -781,6 +783,37 @@ export default function MintDashboard() {
     }
   }
 
+  function formatProviderChangeText(provider: string, model: string) {
+    let providerName = provider
+    if (provider === 'gemini') providerName = 'Gemini'
+    else if (provider === 'openai') providerName = 'OpenAI'
+    else if (provider === 'openrouter') providerName = 'OpenRouter'
+    else if (provider === 'deepseek') providerName = 'DeepSeek'
+    else if (provider === 'anthropic') providerName = 'Claude'
+    else if (provider === 'huggingface') providerName = 'HF'
+    else if (provider === 'local_openai') providerName = 'Local'
+    else if (provider === 'ollama') providerName = 'Ollama'
+
+    if (providerName && providerName === provider) {
+      providerName = providerName.charAt(0).toUpperCase() + providerName.slice(1)
+    }
+    return [providerName, model].filter(Boolean).join(' • ')
+  }
+
+  function getActiveModelName(config: any, provider: string) {
+    switch (provider) {
+      case 'gemini': return config.geminiModel || 'gemini-1.5-flash'
+      case 'openai': return config.openaiModel || 'gpt-4o'
+      case 'openrouter': return config.openrouterModel || 'anthropic/claude-3.5-sonnet'
+      case 'deepseek': return config.deepseekModel || 'deepseek-chat'
+      case 'anthropic': return config.anthropicModel || 'claude-3-5-sonnet-20240620'
+      case 'huggingface': return config.hfModel || 'meta-llama/Meta-Llama-3-8B-Instruct'
+      case 'local_openai': return config.localModelName || 'llama3'
+      case 'ollama': return config.ollamaModel || 'llama3:latest'
+      default: return ''
+    }
+  }
+
   async function changeProvider(provider: string) {
     try {
       const config = await window.settingsApi.getSettings()
@@ -788,6 +821,12 @@ export default function MintDashboard() {
       await window.settingsApi.saveSettings(config)
       setSettingsConfig(config)
       setStatus(await getRuntimeStatus())
+
+      // Record system event in chat history
+      const activeModel = getActiveModelName(config, provider)
+      const displayName = formatProviderChangeText(provider, activeModel)
+      await saveSystemInteraction(conversationId, displayName, 'system', 'provider_change')
+      await refreshHistory()
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -817,6 +856,11 @@ export default function MintDashboard() {
       await window.settingsApi.saveSettings(config)
       setSettingsConfig(config)
       setStatus(await getRuntimeStatus())
+
+      // Record system event in chat history
+      const displayName = formatProviderChangeText(provider, modelName)
+      await saveSystemInteraction(conversationId, displayName, 'system', 'provider_change')
+      await refreshHistory()
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -914,7 +958,7 @@ export default function MintDashboard() {
             expressionIndex={expressionIndex}
             accessoryIndex={accessoryIndex}
             isLocked={isLocked}
-            isActive={modelVisible && view !== 'pictures' && view !== 'workspeac'}
+            isActive={modelVisible && view !== 'pictures' && view !== 'workspeac' && view !== 'workflows'}
             layoutPreset={layoutPreset}
             sending={sending}
             interactionEnabled={interactionEnabled}
@@ -979,6 +1023,10 @@ export default function MintDashboard() {
             setView('chat')
             setMessage(imgPrompt)
           }}
+        />
+        <WorkflowBuilderPanel
+          view={view}
+          onShowToast={showToast}
         />
       </div>
       <div className={`startup-loading ${startupReady ? 'is-hidden' : ''}`} aria-live="polite" aria-busy={!startupReady}>

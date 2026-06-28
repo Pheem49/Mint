@@ -79,3 +79,15 @@ fn save_default_workflows(path: &PathBuf) -> Result<(), WorkflowError> {
         source,
     })
 }
+
+pub fn save_workflows(workflows: &[Value]) -> Result<(), WorkflowError> {
+    let path = workflows_path()?;
+    let directory = path.parent().ok_or(WorkflowError::MissingDirectory)?;
+    fs::create_dir_all(directory).map_err(WorkflowError::CreateDirectory)?;
+    let raw = serde_json::to_string_pretty(workflows).map_err(WorkflowError::Serialize)?;
+    fs::write(&path, format!("{raw}\n")).map_err(|source| WorkflowError::Write {
+        path,
+        source,
+    })
+}
+

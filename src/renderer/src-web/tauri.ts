@@ -293,6 +293,30 @@ export async function getRecentInteractions(limit = 50, chatId?: string | null):
   return invoke<InteractionMemory[]>('get_recent_interactions', { limit, chatId })
 }
 
+export async function saveSystemInteraction(
+  chatId: string,
+  userText: string,
+  provider: string,
+  model: string,
+): Promise<any> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    try {
+      const res = await fetch(`${API_BASE}/interactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, userText, provider, model }),
+      });
+      return await res.json();
+    } catch (e) {
+      console.error("Failed to save system interaction on local server:", e);
+      return { success: false };
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('save_system_interaction', { chatId, userText, provider, model })
+}
+
 export async function saveInteractionAgentActivity(
   interactionId: number,
   activity: AgentProgress[],
@@ -638,6 +662,7 @@ export function installTauriAdapters() {
       openFolder: async () => ({ success: false, message: 'Opening local folders is only available in the desktop app.' }),
       openCustomWorkflows: async () => ({ success: false, message: 'Opening workflow files is only available in the desktop app.' }),
       reloadCustomWorkflows: async () => ({ success: false, message: 'Reloading workflow files is only available in the desktop app.' }),
+      saveCustomWorkflows: async () => ({ success: false, message: 'Saving workflow files is only available in the desktop app.' }),
     };
 
     (window as any).spotlightAPI = {
@@ -732,6 +757,9 @@ export function installTauriAdapters() {
       listSavedPictures,
       openSettings: () => {
         window.location.hash = '#/settings';
+      },
+      openWorkflows: () => {
+        window.location.hash = '#/workflows';
       },
       readClipboard: async () => '',
       writeClipboard: async () => {},
@@ -877,6 +905,10 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('reload_custom_workflows')
     },
+    saveCustomWorkflows: async (workflows) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('save_custom_workflows', { workflows })
+    },
   }
 
   window.spotlightAPI = {
@@ -1002,6 +1034,10 @@ export function installTauriAdapters() {
     openSettings: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('open_window', { kind: 'settings' })
+    },
+    openWorkflows: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('open_window', { kind: 'workflows' })
     },
     readClipboard: () => navigator.clipboard.readText(),
     writeClipboard: (text) => navigator.clipboard.writeText(text),

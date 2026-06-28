@@ -3,6 +3,7 @@
 @import './css/spotlight.css';
 @import './css/widget.css';
 @import './css/image-studio.css';
+@import './css/workflows.css';
 
 * {
   box-sizing: border-box;
