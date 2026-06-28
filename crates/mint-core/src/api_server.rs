@@ -291,12 +291,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                         )
                                         .is_ok()
                                     {
-                                        send_json_response(
-                                            socket,
-                                            "200 OK",
-                                            "{\"status\":\"ok\"}",
-                                        )
-                                        .await;
+                                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}")
+                                            .await;
                                         return;
                                     }
                                 }

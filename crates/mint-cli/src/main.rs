@@ -1109,7 +1109,9 @@ fn process_inline_bold(s: &str) -> String {
 fn format_line(line: &str) -> String {
     let mut formatted = line.to_string();
     let trimmed = line.trim_start();
-    if (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ")) && trimmed.len() >= 2 {
+    if (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ "))
+        && trimmed.len() >= 2
+    {
         let leading_len = line.len() - trimmed.len();
         let leading_spaces = &line[..leading_len];
         formatted = format!("{}•{}", leading_spaces, &trimmed[1..]);
@@ -1169,7 +1171,11 @@ fn render_markdown_table(table_lines: &[String]) -> String {
     let mut has_separator = false;
     let mut separator_idx = None;
     for (i, row) in rows.iter().enumerate() {
-        if row.iter().all(|col| col.chars().all(|c| c == '-' || c == ':' || c == ' ' || c == '\t')) && !row.is_empty() {
+        if row.iter().all(|col| {
+            col.chars()
+                .all(|c| c == '-' || c == ':' || c == ' ' || c == '\t')
+        }) && !row.is_empty()
+        {
             has_separator = true;
             separator_idx = Some(i);
             break;
@@ -1202,7 +1208,7 @@ fn render_markdown_table(table_lines: &[String]) -> String {
 
     let num_cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
     let mut col_widths = vec![0; num_cols];
-    
+
     if let Some(ref header) = header_row {
         for (i, col) in header.iter().enumerate() {
             if i < num_cols {
@@ -1220,18 +1226,19 @@ fn render_markdown_table(table_lines: &[String]) -> String {
 
     let mut rendered = String::new();
 
-    let draw_border = |left: &str, mid: &str, right: &str, fill: &str, widths: &[usize]| -> String {
-        let mut s = left.to_string();
-        for (i, &w) in widths.iter().enumerate() {
-            s.push_str(&fill.repeat(w + 2));
-            if i < widths.len() - 1 {
-                s.push_str(mid);
+    let draw_border =
+        |left: &str, mid: &str, right: &str, fill: &str, widths: &[usize]| -> String {
+            let mut s = left.to_string();
+            for (i, &w) in widths.iter().enumerate() {
+                s.push_str(&fill.repeat(w + 2));
+                if i < widths.len() - 1 {
+                    s.push_str(mid);
+                }
             }
-        }
-        s.push_str(right);
-        s.push('\n');
-        s
-    };
+            s.push_str(right);
+            s.push('\n');
+            s
+        };
 
     rendered.push_str(&draw_border("┌", "┬", "┐", "─", &col_widths));
 
@@ -1240,7 +1247,11 @@ fn render_markdown_table(table_lines: &[String]) -> String {
         for (i, col) in header.iter().enumerate() {
             let width = unicode_width(col);
             let padding = col_widths[i] - width;
-            rendered.push_str(&format!(" \x1b[1;36m{}\x1b[0m{}", col, " ".repeat(padding + 1)));
+            rendered.push_str(&format!(
+                " \x1b[1;36m{}\x1b[0m{}",
+                col,
+                " ".repeat(padding + 1)
+            ));
             rendered.push_str("│");
         }
         rendered.push('\n');
@@ -1571,7 +1582,10 @@ async fn handle_slash_command(
                 ("/paste [prompt]", "Attach image from clipboard"),
                 ("Ctrl+V", "Paste clipboard image as [Image #1]"),
                 ("/learn <path>", "Import a persistent .md or .txt skill"),
-                ("/plugins <name> [prompt]", "Generate a skill.md file for a plugin/skill"),
+                (
+                    "/plugins <name> [prompt]",
+                    "Generate a skill.md file for a plugin/skill",
+                ),
                 ("/memory list", "Show recent interactions"),
                 ("/memory clear", "Clear all interactions"),
                 ("/memory get <key>", "Read a profile value"),
@@ -1965,23 +1979,25 @@ async fn handle_slash_command(
                 println!("\n{BLUE}────────────────────────────────────────────{RESET}");
                 println!("{MINT}  Available Plugins & Skills{RESET}");
                 println!("{BLUE}────────────────────────────────────────────{RESET}");
-                
+
                 println!("{MINT}Native Plugins:{RESET}");
                 for p in native_plugins() {
                     println!("  - {BLUE}{:<20}{RESET} {}", p.name, p.description);
                 }
-                
+
                 println!("\n{MINT}Custom Skills/Plugins (Active):{RESET}");
                 let mut active_skills = std::collections::HashSet::new();
                 if let Ok(memory) = MemoryStore::open_default() {
                     match memory.learned_skills(100) {
                         Ok(skills) => {
                             if skills.is_empty() {
-                                println!("  {DIM}(No custom skills/plugins learned yet. Use '/learn <path>' to add one.){RESET}");
+                                println!(
+                                    "  {DIM}(No custom skills/plugins learned yet. Use '/learn <path>' to add one.){RESET}"
+                                );
                             } else {
                                 for s in &skills {
                                     println!("  - {BLUE}{:<20}{RESET} {}", s.name, s.source_path);
-                                    
+
                                     // Try to store canonicalized active path
                                     if let Ok(canon) = Path::new(&s.source_path).canonicalize() {
                                         active_skills.insert(canon);
@@ -2005,7 +2021,9 @@ async fn handle_slash_command(
                             if path.is_file() {
                                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                                     if matches!(ext.to_ascii_lowercase().as_str(), "md" | "txt") {
-                                        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                                        if let Some(name) =
+                                            path.file_name().and_then(|n| n.to_str())
+                                        {
                                             if let Ok(canon_path) = path.canonicalize() {
                                                 local_files.push((name.to_owned(), canon_path));
                                             } else {
@@ -2016,7 +2034,7 @@ async fn handle_slash_command(
                                 }
                             }
                         }
-                        
+
                         let inactive_files: Vec<_> = local_files
                             .into_iter()
                             .filter(|(_, full_path)| !active_skills.contains(full_path))
@@ -2024,9 +2042,14 @@ async fn handle_slash_command(
                             .collect();
 
                         if !inactive_files.is_empty() {
-                            println!("\n{MINT}Local Skill Files (Found but not learned/active yet):{RESET}");
+                            println!(
+                                "\n{MINT}Local Skill Files (Found but not learned/active yet):{RESET}"
+                            );
                             for file in inactive_files {
-                                println!("  - {WARN}{:<20}{RESET} skills/{} {DIM}(Type '/learn skills/{}' to activate){RESET}", file, file, file);
+                                println!(
+                                    "  - {WARN}{:<20}{RESET} skills/{} {DIM}(Type '/learn skills/{}' to activate){RESET}",
+                                    file, file, file
+                                );
                             }
                         }
                     }
