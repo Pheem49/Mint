@@ -193,12 +193,16 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
     document.body.removeChild(a)
   }
 
-  if (view !== 'imagine') return null
-
   const modelOptions = PROVIDER_MODELS[selectedProvider] ?? []
 
   return (
-    <div className="img-studio" id="image-studio-panel" role="main" aria-label="Image Studio">
+    <div
+      className={`img-studio ${view === 'imagine' ? 'is-visible' : ''}`}
+      id="image-studio-panel"
+      role="main"
+      aria-label="Image Studio"
+      aria-hidden={view !== 'imagine'}
+    >
       {/* Header */}
       <header className="img-studio-header">
         <div className="img-studio-header-title">

@@ -11,7 +11,16 @@
   grid-template-columns: 280px minmax(0, 1fr);
   overflow: hidden;
   background: var(--bg-gradient);
-  transition: left 0.22s ease;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(12px) scale(0.995);
+  transition: left 0.22s ease, opacity 0.22s cubic-bezier(0.4, 0, 0.2, 1), transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.workflows-builder-container.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
 }
 
 .app-body.sidebar-collapsed .workflows-builder-container {

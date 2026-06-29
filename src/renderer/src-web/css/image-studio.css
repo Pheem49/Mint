@@ -4,7 +4,7 @@
 
 /* Root panel: overlays the main content area, aligned with sidebar */
 .img-studio {
-  display: none;
+  display: flex;
   position: absolute;
   top: 0;
   bottom: 0;
@@ -14,7 +14,10 @@
   overflow: hidden;
   background: var(--bg-gradient, radial-gradient(circle at top left, #064e3b, #111827 52%, #0b1020));
   z-index: 10;
-  transition: left 0.22s ease;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(12px) scale(0.995);
+  transition: left 0.22s ease, opacity 0.22s cubic-bezier(0.4, 0, 0.2, 1), transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Adjust left position when the sidebar is collapsed */
@@ -23,8 +26,10 @@
 }
 
 /* Only visible when view === 'imagine' */
-.img-studio[id="image-studio-panel"]:not([hidden]) {
-  display: flex;
+.img-studio.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
 }
 
 /* MintDashboard renders ImageStudioPanel always, use view prop to show/hide via :not class trick */

@@ -6,6 +6,8 @@ interface ChatSessionItem {
   id: string
   title: string
   kind: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 interface DashboardSidebarProps {
@@ -20,6 +22,8 @@ interface DashboardSidebarProps {
   onDeleteConversation: (id: string) => void
   onRenameConversation?: (id: string, newTitle: string) => void
   onSetView: (view: DashboardView) => void
+  isSearchOpen: boolean
+  onSetSearchOpen: (open: boolean) => void
 }
 
 export default function DashboardSidebar({
@@ -34,6 +38,8 @@ export default function DashboardSidebar({
   onDeleteConversation,
   onRenameConversation,
   onSetView,
+  isSearchOpen,
+  onSetSearchOpen,
 }: DashboardSidebarProps) {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editTitleValue, setEditTitleValue] = useState('')
@@ -75,6 +81,16 @@ export default function DashboardSidebar({
           </svg>
         </span>
         <span>New Chat</span>
+      </button>
+
+      <button className="sidebar-top-action sidebar-search-btn" onClick={() => onSetSearchOpen(true)}>
+        <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </span>
+        <span>Search Chats</span>
       </button>
 
       <button className={`sidebar-top-action ${view === 'chat' ? 'is-active' : ''}`} onClick={() => onSetView('chat')}>

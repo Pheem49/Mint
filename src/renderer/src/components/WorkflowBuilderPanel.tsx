@@ -358,10 +358,8 @@ export default function WorkflowBuilderPanel({ view, onShowToast }: WorkflowBuil
     }
   }
 
-  if (view !== 'workflows') return null
-
   return (
-    <section className="workflows-builder-container">
+    <section className={`workflows-builder-container ${view === 'workflows' ? 'is-visible' : ''}`} aria-hidden={view !== 'workflows'}>
       {/* Sidebar - Master List */}
       <div className="workflows-sidebar">
         <div className="workflows-sidebar-header">

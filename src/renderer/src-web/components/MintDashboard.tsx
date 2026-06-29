@@ -25,7 +25,6 @@ import ChatPanel from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import PicturesLibrary from './PicturesLibrary'
 import ImageStudioPanel from './ImageStudioPanel'
-import WorkflowBuilderPanel from '../../src/components/WorkflowBuilderPanel'
 
 const DEFAULT_CONFIG = {
   theme: 'dark',
@@ -236,6 +235,79 @@ export default function MintDashboard() {
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const startupReady = dashboardDataReady || startupTimedOut
+
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+        event.preventDefault()
+        setIsSearchOpen((prev) => !prev)
+      } else if (event.key === 'Escape') {
+        setIsSearchOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  useEffect(() => {
+    if (!isSearchOpen) {
+      setSearchQuery('')
+    }
+  }, [isSearchOpen])
+
+  const filteredSessions = chatSessions.filter((session) => {
+    if (session.kind === 'cli' || session.id === 'conversation-default') return false
+    return session.title.toLowerCase().includes(searchQuery.toLowerCase())
+  })
+
+  const groupSessionsByDate = (sessions: ChatSession[]) => {
+    const groups: { [key: string]: ChatSession[] } = {}
+    
+    sessions.forEach((session) => {
+      const dateStr = session.updatedAt || session.createdAt
+      if (!dateStr) {
+        const groupName = 'Other'
+        if (!groups[groupName]) groups[groupName] = []
+        groups[groupName].push(session)
+        return
+      }
+
+      const date = new Date(dateStr)
+      const today = new Date()
+      const yesterday = new Date()
+      yesterday.setDate(today.getDate() - 1)
+
+      let groupName = ''
+      if (date.toDateString() === today.toDateString()) {
+        groupName = 'Today'
+      } else if (date.toDateString() === yesterday.toDateString()) {
+        groupName = 'Yesterday'
+      } else {
+        const diffTime = Math.abs(today.getTime() - date.getTime())
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+        if (diffDays <= 7) {
+          groupName = 'Previous 7 days'
+        } else if (diffDays <= 30) {
+          groupName = 'Previous 30 days'
+        } else {
+          groupName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+        }
+      }
+
+      if (!groups[groupName]) {
+        groups[groupName] = []
+      }
+      groups[groupName].push(session)
+    })
+
+    return groups
+  }
+
+  const groupedSearchSessions = groupSessionsByDate(filteredSessions)
+
 
   async function refreshHistory() {
     const history = await getRecentInteractions(50, conversationId)
@@ -782,6 +854,8 @@ export default function MintDashboard() {
           onDeleteConversation={deleteConversation}
           onRenameConversation={renameConversation}
           onSetView={changeView}
+          isSearchOpen={isSearchOpen}
+          onSetSearchOpen={setIsSearchOpen}
         />
         <main className="assistant-workspace model-hidden">
           <ChatPanel
@@ -835,10 +909,6 @@ export default function MintDashboard() {
             setMessage(imgPrompt)
           }}
         />
-        <WorkflowBuilderPanel
-          view={view}
-          onShowToast={showToast}
-        />
       </div>
       <div className={`startup-loading ${startupReady ? 'is-hidden' : ''}`} aria-live="polite" aria-busy={!startupReady}>
         <div className="startup-loading-content">
@@ -850,6 +920,77 @@ export default function MintDashboard() {
         <div className="mint-error" style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 100, margin: 0, boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
           {error}
           <button onClick={() => setError('')} style={{ marginLeft: '12px', background: 'transparent', border: 0, color: 'white', cursor: 'pointer' }}>✕</button>
+        </div>
+      )}
+
+      {isSearchOpen && (
+        <div className="sidebar-search-modal-backdrop" onClick={() => setIsSearchOpen(false)}>
+          <div className="sidebar-search-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="search-modal-header">
+              <span className="search-icon-wrapper">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+              </span>
+              <input
+                type="text"
+                placeholder="Search chats..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                autoFocus
+              />
+              <button className="search-modal-close" onClick={() => setIsSearchOpen(false)}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            
+            <div className="search-modal-body">
+              <button
+                className="search-new-chat-btn"
+                onClick={() => {
+                  clearHistory('New chat')
+                  setIsSearchOpen(false)
+                }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>New Chat</span>
+              </button>
+
+              <div className="search-modal-results">
+                {Object.keys(groupedSearchSessions).length > 0 ? (
+                  Object.entries(groupedSearchSessions).map(([groupName, sessions]) => (
+                    <div key={groupName} className="search-results-group">
+                      <div className="search-group-title">{groupName}</div>
+                      {sessions.map((session) => (
+                        <button
+                          key={session.id}
+                          className={`search-result-item ${session.id === conversationId ? 'active' : ''}`}
+                          onClick={() => {
+                            selectConversation(session.id)
+                            setIsSearchOpen(false)
+                          }}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                          </svg>
+                          <span className="search-result-title">{session.title || 'New chat'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ))
+                ) : (
+                  <div className="search-no-results">No matching chats found</div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
