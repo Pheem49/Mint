@@ -628,6 +628,54 @@ fn set_profile_value(key: String, value: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct LearnedSkillDto {
+    id: i64,
+    name: String,
+    source_path: String,
+    content: String,
+    updated_at: String,
+}
+
+#[tauri::command]
+fn list_learned_skills() -> Result<Vec<LearnedSkillDto>, String> {
+    let store = MemoryStore::open_default().map_err(|e| e.to_string())?;
+    let skills = store.learned_skills(100).map_err(|e| e.to_string())?;
+    let dtos = skills
+        .into_iter()
+        .map(|s| LearnedSkillDto {
+            id: s.id,
+            name: s.name,
+            source_path: s.source_path,
+            content: s.content,
+            updated_at: s.created_at,
+        })
+        .collect();
+    Ok(dtos)
+}
+
+#[tauri::command]
+fn add_learned_skill(name: String, content: String) -> Result<LearnedSkillDto, String> {
+    let store = MemoryStore::open_default().map_err(|e| e.to_string())?;
+    let skill = store
+        .add_learned_skill(&name, "ui_manual", &content)
+        .map_err(|e| e.to_string())?;
+    Ok(LearnedSkillDto {
+        id: skill.id,
+        name: skill.name,
+        source_path: skill.source_path,
+        content: skill.content,
+        updated_at: skill.created_at,
+    })
+}
+
+#[tauri::command]
+fn delete_learned_skill(name: String) -> Result<usize, String> {
+    let store = MemoryStore::open_default().map_err(|e| e.to_string())?;
+    store.delete_learned_skill(&name).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn clear_chat_history(chat_id: Option<String>) -> Result<usize, String> {
     MemoryStore::open_default()
@@ -1077,6 +1125,9 @@ pub fn run() {
             get_profile_value,
             set_profile_value,
             clear_chat_history,
+            list_learned_skills,
+            add_learned_skill,
+            delete_learned_skill,
             list_pictures,
             save_pictures,
             open_folder,
