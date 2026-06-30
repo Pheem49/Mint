@@ -147,7 +147,11 @@ impl ChatRequest {
             .filter(|c| c.is_ascii_alphanumeric() || matches!(*c, '.' | '-' | '_'))
             .take(80)
             .collect();
-        let safe_name = if safe_name.is_empty() { "document".into() } else { safe_name };
+        let safe_name = if safe_name.is_empty() {
+            "document".into()
+        } else {
+            safe_name
+        };
 
         let path = directory.join(format!(
             "mint-pdf-{}-{}.pdf",
@@ -156,10 +160,11 @@ impl ChatRequest {
         ));
         std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
 
-        let extracted = crate::knowledge::extract_document_text(&path, config).map_err(|error| error.to_string());
+        let extracted = crate::knowledge::extract_document_text(&path, config)
+            .map_err(|error| error.to_string());
         let _ = std::fs::remove_file(&path);
         let extracted = extracted?;
-        
+
         let mut context: String = extracted.chars().take(MAX_DOCUMENT_CONTEXT_CHARS).collect();
         if extracted.chars().count() > MAX_DOCUMENT_CONTEXT_CHARS {
             context.push_str("\n\n[PDF text truncated because it is long.]");

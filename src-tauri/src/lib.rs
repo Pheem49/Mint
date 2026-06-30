@@ -11,7 +11,6 @@ mod updater;
 mod webhooks;
 mod workflows;
 
-
 use browser::{
     BrowserTab, click as browser_click, list_tabs as browser_list_tabs,
     navigate as browser_navigate, read_page_text,
@@ -34,10 +33,10 @@ use mint_core::{
     AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, ChatRequest, ChatResponse,
     ChatSession, CodeEdit, CodeEditProposal, ImageGenRequest, InteractionMemory, MemoryStore,
     MintConfig, PictureEntry, TtsUrl, WeatherReport, apply_code_edits, classify_shell_command,
-    config_path, google_tts_urls, list_saved_pictures, load_config,
-    load_workflows, save_workflows, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
-    orchestrate_chat_with_fallback, propose_code_edits, save_chat_images, save_config,
-    start_channels, weather, workflows_path,
+    config_path, google_tts_urls, list_saved_pictures, load_config, load_workflows,
+    orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    propose_code_edits, save_chat_images, save_config, save_workflows, start_channels, weather,
+    workflows_path,
 };
 use plugins::execute_plugin;
 
@@ -110,8 +109,6 @@ const WORKSPACE_TREE_COLLAPSED_DIRS: &[&str] = &[
     "out",
     "target",
 ];
-
-
 
 #[tauri::command]
 fn get_runtime_status() -> Result<RuntimeStatus, String> {
