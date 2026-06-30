@@ -98,6 +98,13 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 - Dynamic local Ollama model fetching in the Settings Window to query and display the actual models installed on your machine.
 - Pill-styled clean horizontal system event dividers for provider and model change notifications in the chat panel.
 
+## What's New in v1.8.0
+
+- **Integrated Web Search Settings**: Easily toggle between **Brave Search API** and **Google Custom Search API** directly from the General settings tab.
+- **Image Generation Providers**: Choose and configure credentials for Stability AI, Ideogram, Replicate, OpenAI DALL-E, and Google NanoBanana (Gemini Images) inside dedicated inline settings cards.
+- **Inline Productivity Settings**: Set up Client IDs, secrets, and API keys for native Gmail, Google Calendar, and Notion integrations inline inside the General settings tab.
+- **Revamped Plugins Layout**: Moved **Learned AI Skills** (equivalent to `mint learn` in CLI) to the top of the Plugins tab, followed by MCP Servers (External tools), and Built-in Plugins (Spotify and Discord RPC) at the bottom.
+
 ## <img src="assets/setup.svg" width="24" height="24" valign="middle" /> Prerequisites
 
 Before you can build or run Mint locally, make sure you have the following system tools installed:

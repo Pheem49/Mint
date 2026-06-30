@@ -284,21 +284,44 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
                     if let Ok(req) = serde_json::from_str::<ApiSaveInteraction>(body) {
                         if let Ok(memory) = MemoryStore::open_default() {
-                            match memory.add_interaction_for_chat(&req.chat_id, &req.user_text, "", &req.provider, &req.model) {
+                            match memory.add_interaction_for_chat(
+                                &req.chat_id,
+                                &req.user_text,
+                                "",
+                                &req.provider,
+                                &req.model,
+                            ) {
                                 Ok(row_id) => {
                                     let res_json = json!({ "success": true, "id": row_id });
-                                    send_json_response(socket, "200 OK", &res_json.to_string()).await;
+                                    send_json_response(socket, "200 OK", &res_json.to_string())
+                                        .await;
                                 }
                                 Err(error) => {
-                                    let err_json = json!({ "success": false, "message": error.to_string() });
-                                    send_json_response(socket, "500 Internal Server Error", &err_json.to_string()).await;
+                                    let err_json =
+                                        json!({ "success": false, "message": error.to_string() });
+                                    send_json_response(
+                                        socket,
+                                        "500 Internal Server Error",
+                                        &err_json.to_string(),
+                                    )
+                                    .await;
                                 }
                             }
                         } else {
-                            send_json_response(socket, "500 Internal Server Error", "{\"success\":false,\"message\":\"db error\"}").await;
+                            send_json_response(
+                                socket,
+                                "500 Internal Server Error",
+                                "{\"success\":false,\"message\":\"db error\"}",
+                            )
+                            .await;
                         }
                     } else {
-                        send_json_response(socket, "400 Bad Request", "{\"success\":false,\"message\":\"invalid body\"}").await;
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"success\":false,\"message\":\"invalid body\"}",
+                        )
+                        .await;
                     }
                 }
                 ("POST", "/api/interactions/agent-activity") => {
@@ -457,7 +480,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             document_attachment: req.document_attachment,
                             workspace_path: None,
                         };
-                        let mut chat_req = chat_req.with_document_context(&config).unwrap_or(chat_req);
+                        let mut chat_req =
+                            chat_req.with_document_context(&config).unwrap_or(chat_req);
                         let sent_image = chat_req.image_data_uri.clone();
                         let sent_message = chat_req.message.clone();
 
@@ -540,7 +564,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             document_attachment: req.document_attachment,
                             workspace_path: None,
                         };
-                        let mut chat_req = chat_req.with_document_context(&config).unwrap_or(chat_req);
+                        let mut chat_req =
+                            chat_req.with_document_context(&config).unwrap_or(chat_req);
                         let sent_image = chat_req.image_data_uri.clone();
                         let sent_message = chat_req.message.clone();
 
