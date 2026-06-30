@@ -94,9 +94,6 @@ enum DesktopStreamEvent {
     Chunk { chunk: String },
     Progress { progress: AgentProgress },
 }
-
-const MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
-const MAX_DOCUMENT_CONTEXT_CHARS: usize = 30_000;
 const WORKSPACE_TREE_MAX_DEPTH: usize = 9;
 const WORKSPACE_TREE_MAX_CHILDREN: usize = 400;
 const WORKSPACE_TREE_COLLAPSED_DIRS: &[&str] = &[

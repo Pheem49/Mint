@@ -81,7 +81,17 @@ export const DEFAULT_CONFIG = {
   gmailRefreshToken: '',
   googleCalendarClientId: '',
   googleCalendarClientSecret: '',
-  googleCalendarRefreshToken: ''
+  googleCalendarRefreshToken: '',
+  // Search
+  searchProvider: 'brave' as 'brave' | 'google',
+  googleSearchApiKey: '',
+  googleSearchCx: '',
+  braveSearchApiKey: '',
+  // Image Generation
+  imageGenProvider: 'gemini' as 'gemini' | 'dalle' | 'stability' | 'ideogram' | 'replicate',
+  stabilityApiKey: '',
+  ideogramApiKey: '',
+  replicateApiKey: ''
 }
 
 type TabType = 'sect-general' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory'
