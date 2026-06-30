@@ -5,6 +5,7 @@ import {
   deleteChatSession,
   renameChatSession,
   getRecentInteractions,
+  saveSystemInteraction,
   getRuntimeStatus,
   listChatSessions,
   listSavedPictures,
@@ -234,6 +235,79 @@ export default function MintDashboard() {
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const startupReady = dashboardDataReady || startupTimedOut
+
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+        event.preventDefault()
+        setIsSearchOpen((prev) => !prev)
+      } else if (event.key === 'Escape') {
+        setIsSearchOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  useEffect(() => {
+    if (!isSearchOpen) {
+      setSearchQuery('')
+    }
+  }, [isSearchOpen])
+
+  const filteredSessions = chatSessions.filter((session) => {
+    if (session.kind === 'cli' || session.id === 'conversation-default') return false
+    return session.title.toLowerCase().includes(searchQuery.toLowerCase())
+  })
+
+  const groupSessionsByDate = (sessions: ChatSession[]) => {
+    const groups: { [key: string]: ChatSession[] } = {}
+    
+    sessions.forEach((session) => {
+      const dateStr = session.updatedAt || session.createdAt
+      if (!dateStr) {
+        const groupName = 'Other'
+        if (!groups[groupName]) groups[groupName] = []
+        groups[groupName].push(session)
+        return
+      }
+
+      const date = new Date(dateStr)
+      const today = new Date()
+      const yesterday = new Date()
+      yesterday.setDate(today.getDate() - 1)
+
+      let groupName = ''
+      if (date.toDateString() === today.toDateString()) {
+        groupName = 'Today'
+      } else if (date.toDateString() === yesterday.toDateString()) {
+        groupName = 'Yesterday'
+      } else {
+        const diffTime = Math.abs(today.getTime() - date.getTime())
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+        if (diffDays <= 7) {
+          groupName = 'Previous 7 days'
+        } else if (diffDays <= 30) {
+          groupName = 'Previous 30 days'
+        } else {
+          groupName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+        }
+      }
+
+      if (!groups[groupName]) {
+        groups[groupName] = []
+      }
+      groups[groupName].push(session)
+    })
+
+    return groups
+  }
+
+  const groupedSearchSessions = groupSessionsByDate(filteredSessions)
+
 
   async function refreshHistory() {
     const history = await getRecentInteractions(50, conversationId)
@@ -664,6 +738,37 @@ export default function MintDashboard() {
     }
   }
 
+  function formatProviderChangeText(provider: string, model: string) {
+    let providerName = provider
+    if (provider === 'gemini') providerName = 'Gemini'
+    else if (provider === 'openai') providerName = 'OpenAI'
+    else if (provider === 'openrouter') providerName = 'OpenRouter'
+    else if (provider === 'deepseek') providerName = 'DeepSeek'
+    else if (provider === 'anthropic') providerName = 'Claude'
+    else if (provider === 'huggingface') providerName = 'HF'
+    else if (provider === 'local_openai') providerName = 'Local'
+    else if (provider === 'ollama') providerName = 'Ollama'
+
+    if (providerName && providerName === provider) {
+      providerName = providerName.charAt(0).toUpperCase() + providerName.slice(1)
+    }
+    return [providerName, model].filter(Boolean).join(' • ')
+  }
+
+  function getActiveModelName(config: any, provider: string) {
+    switch (provider) {
+      case 'gemini': return config.geminiModel || 'gemini-1.5-flash'
+      case 'openai': return config.openaiModel || 'gpt-4o'
+      case 'openrouter': return config.openrouterModel || 'anthropic/claude-3.5-sonnet'
+      case 'deepseek': return config.deepseekModel || 'deepseek-chat'
+      case 'anthropic': return config.anthropicModel || 'claude-3-5-sonnet-20240620'
+      case 'huggingface': return config.hfModel || 'meta-llama/Meta-Llama-3-8B-Instruct'
+      case 'local_openai': return config.localModelName || 'llama3'
+      case 'ollama': return config.ollamaModel || 'llama3:latest'
+      default: return ''
+    }
+  }
+
   async function changeProvider(provider: string) {
     try {
       const config = await window.settingsApi.getSettings()
@@ -671,6 +776,12 @@ export default function MintDashboard() {
       await window.settingsApi.saveSettings(config)
       setSettingsConfig(config)
       setStatus(await getRuntimeStatus())
+
+      // Record system event in chat history
+      const activeModel = getActiveModelName(config, provider)
+      const displayName = formatProviderChangeText(provider, activeModel)
+      await saveSystemInteraction(conversationId, displayName, 'system', 'provider_change')
+      await refreshHistory()
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -700,6 +811,11 @@ export default function MintDashboard() {
       await window.settingsApi.saveSettings(config)
       setSettingsConfig(config)
       setStatus(await getRuntimeStatus())
+
+      // Record system event in chat history
+      const displayName = formatProviderChangeText(provider, modelName)
+      await saveSystemInteraction(conversationId, displayName, 'system', 'provider_change')
+      await refreshHistory()
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -738,6 +854,8 @@ export default function MintDashboard() {
           onDeleteConversation={deleteConversation}
           onRenameConversation={renameConversation}
           onSetView={changeView}
+          isSearchOpen={isSearchOpen}
+          onSetSearchOpen={setIsSearchOpen}
         />
         <main className="assistant-workspace model-hidden">
           <ChatPanel
@@ -802,6 +920,77 @@ export default function MintDashboard() {
         <div className="mint-error" style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 100, margin: 0, boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
           {error}
           <button onClick={() => setError('')} style={{ marginLeft: '12px', background: 'transparent', border: 0, color: 'white', cursor: 'pointer' }}>✕</button>
+        </div>
+      )}
+
+      {isSearchOpen && (
+        <div className="sidebar-search-modal-backdrop" onClick={() => setIsSearchOpen(false)}>
+          <div className="sidebar-search-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="search-modal-header">
+              <span className="search-icon-wrapper">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+              </span>
+              <input
+                type="text"
+                placeholder="Search chats..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                autoFocus
+              />
+              <button className="search-modal-close" onClick={() => setIsSearchOpen(false)}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            
+            <div className="search-modal-body">
+              <button
+                className="search-new-chat-btn"
+                onClick={() => {
+                  clearHistory('New chat')
+                  setIsSearchOpen(false)
+                }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span>New Chat</span>
+              </button>
+
+              <div className="search-modal-results">
+                {Object.keys(groupedSearchSessions).length > 0 ? (
+                  Object.entries(groupedSearchSessions).map(([groupName, sessions]) => (
+                    <div key={groupName} className="search-results-group">
+                      <div className="search-group-title">{groupName}</div>
+                      {sessions.map((session) => (
+                        <button
+                          key={session.id}
+                          className={`search-result-item ${session.id === conversationId ? 'active' : ''}`}
+                          onClick={() => {
+                            selectConversation(session.id)
+                            setIsSearchOpen(false)
+                          }}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                          </svg>
+                          <span className="search-result-title">{session.title || 'New chat'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ))
+                ) : (
+                  <div className="search-no-results">No matching chats found</div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

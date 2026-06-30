@@ -1,6 +1,6 @@
 {
   "name": "@pheem49/mint",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
   "scripts": {
     "dev:web": "vite --config vite.config.web.ts",
@@ -58,6 +58,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "@xyflow/react": "^12.11.1",
     "material-icon-theme": "5.34.0",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",

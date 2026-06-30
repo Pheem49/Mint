@@ -78,7 +78,7 @@ pub use symbols::{CodeSymbol, SymbolError, SymbolIndex, build_symbol_index};
 pub use tasks::{Task, TaskError, TaskStore, tasks_path};
 pub use tts::{TtsUrl, google_tts_urls};
 pub use weather::{WeatherError, WeatherReport, weather};
-pub use workflows::{WorkflowError, load_workflows, workflows_path};
+pub use workflows::{WorkflowError, load_workflows, save_workflows, workflows_path};
 pub mod api_server;
 pub use api_server::start_api_server;
 pub mod channels;

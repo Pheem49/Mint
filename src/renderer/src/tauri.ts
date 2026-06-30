@@ -282,6 +282,30 @@ export async function getRecentInteractions(limit = 50, chatId?: string | null):
   return invoke<InteractionMemory[]>('get_recent_interactions', { limit, chatId })
 }
 
+export async function saveSystemInteraction(
+  chatId: string,
+  userText: string,
+  provider: string,
+  model: string,
+): Promise<any> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const API_BASE = "http://localhost:3000/api";
+    try {
+      const res = await fetch(`${API_BASE}/interactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, userText, provider, model }),
+      });
+      return await res.json();
+    } catch (e) {
+      console.error("Failed to save system interaction on local server:", e);
+      return { success: false };
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('save_system_interaction', { chatId, userText, provider, model })
+}
+
 export async function saveInteractionAgentActivity(
   interactionId: number,
   activity: AgentProgress[],
@@ -394,6 +418,71 @@ export async function setProfileValue(key: string, value: string): Promise<boole
   }
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<void>('set_profile_value', { key, value }).then(() => true).catch(() => false)
+}
+
+export interface LearnedSkill {
+  id: number
+  name: string
+  sourcePath: string
+  content: string
+  updatedAt: string
+}
+
+export async function listLearnedSkills(): Promise<LearnedSkill[]> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    try {
+      const val = await getProfileValue('learned-skills-web-mock')
+      if (val) {
+        return JSON.parse(val)
+      }
+      return []
+    } catch (e) {
+      console.error("Failed to load web mock skills:", e)
+      return []
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<LearnedSkill[]>('list_learned_skills')
+}
+
+export async function addLearnedSkill(name: string, content: string): Promise<LearnedSkill> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    try {
+      const list = await listLearnedSkills()
+      const newSkill: LearnedSkill = {
+        id: Date.now(),
+        name,
+        sourcePath: 'ui_manual',
+        content,
+        updatedAt: new Date().toISOString()
+      }
+      list.push(newSkill)
+      await setProfileValue('learned-skills-web-mock', JSON.stringify(list))
+      return newSkill
+    } catch (e) {
+      console.error("Failed to add web mock skill:", e)
+      throw e
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<LearnedSkill>('add_learned_skill', { name, content })
+}
+
+export async function deleteLearnedSkill(name: string): Promise<number> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    try {
+      const list = await listLearnedSkills()
+      const filtered = list.filter(s => s.name !== name)
+      const deletedCount = list.length - filtered.length
+      await setProfileValue('learned-skills-web-mock', JSON.stringify(filtered))
+      return deletedCount
+    } catch (e) {
+      console.error("Failed to delete web mock skill:", e)
+      return 0
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<number>('delete_learned_skill', { name })
 }
 
 export async function clearChatHistory(chatId?: string | null): Promise<number> {
@@ -889,6 +978,10 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('reload_custom_workflows')
     },
+    saveCustomWorkflows: async (workflows) => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('save_custom_workflows', { workflows })
+    },
   }
 
   window.spotlightAPI = {
@@ -1014,6 +1107,10 @@ export function installTauriAdapters() {
     openSettings: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('open_window', { kind: 'settings' })
+    },
+    openWorkflows: async () => {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return invoke('open_window', { kind: 'workflows' })
     },
     readClipboard: () => navigator.clipboard.readText(),
     writeClipboard: (text) => navigator.clipboard.writeText(text),

@@ -546,7 +546,7 @@ input[type="color"] {
     color: var(--text-main);
 }
 
-.toggle-switch {
+.settings-toggle-switch {
     position: relative;
     display: inline-block;
     width: 46px;
@@ -554,13 +554,13 @@ input[type="color"] {
     height: 26px;
 }
 
-.toggle-switch input {
+.settings-toggle-switch input {
     width: 0;
     height: 0;
     opacity: 0;
 }
 
-.toggle-slider {
+.settings-toggle-slider {
     position: absolute;
     inset: 0;
     cursor: pointer;
@@ -570,7 +570,7 @@ input[type="color"] {
     transition: background 0.18s, border-color 0.18s;
 }
 
-.toggle-slider::before {
+.settings-toggle-slider::before {
     position: absolute;
     content: "";
     width: 18px;
@@ -582,12 +582,12 @@ input[type="color"] {
     transition: transform 0.18s, background 0.18s;
 }
 
-input:checked + .toggle-slider {
+input:checked + .settings-toggle-slider {
     background: var(--accent);
     border-color: var(--accent);
 }
 
-input:checked + .toggle-slider::before {
+input:checked + .settings-toggle-slider::before {
     transform: translateX(20px);
     background: #ffffff;
 }
@@ -1063,5 +1063,74 @@ kbd {
     width: 100%;
     align-items: flex-start;
 }
+
+/* Provider Cards styling */
+.provider-cards-container {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.provider-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface-bg);
+    padding: 16px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.provider-card:hover {
+    border-color: var(--border-strong);
+}
+
+.provider-card.active-provider {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+    background: color-mix(in srgb, var(--accent) 2%, var(--surface-bg));
+}
+
+.provider-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.provider-card-title {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.provider-active-badge {
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: var(--accent-hover);
+    border: 1px solid var(--accent);
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.provider-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.provider-card-body .setting-row {
+    border-top: none;
+    padding: 6px 0;
+    grid-template-columns: 180px 1fr;
+}
+
 
 

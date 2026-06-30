@@ -6,7 +6,6 @@ const WidgetWindow = lazy(() => import('./components/WidgetWindow'))
 const ProactiveGlow = lazy(() => import('./components/ProactiveGlow'))
 const ScreenPicker = lazy(() => import('./components/ScreenPicker'))
 const MintDashboard = lazy(() => import('./components/MintDashboard'))
-
 export default function App() {
   const [hash, setHash] = useState(window.location.hash || '#/')
 
@@ -28,6 +27,7 @@ export default function App() {
   if (route.startsWith('/widget')) content = <WidgetWindow />
   if (route.startsWith('/proactive-glow')) content = <ProactiveGlow />
   if (route.startsWith('/screen-picker')) content = <ScreenPicker />
+
 
   return <Suspense fallback={null}>{content}</Suspense>
 }

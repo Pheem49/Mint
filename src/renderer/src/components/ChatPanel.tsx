@@ -1702,21 +1702,33 @@ export default function ChatPanel({
   return (
     <section className={`conversation-panel ${isEmptyChat ? 'is-empty' : ''}`}>
       <div className="chat-container">
-        {interactions.map((interaction) => (
-          <div key={interaction.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-            {interaction.isSystemEvent ? (
-              <div className="system-event" style={{ background: 'rgba(16, 185, 129, 0.06)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '8px', padding: '10px 14px', color: '#a7f3d0', fontSize: '0.82rem', lineHeight: '1.45', alignSelf: 'stretch' }}>
-                {interaction.userText}
-              </div>
-            ) : interaction.userText && (
-              <div className="message user-message">
-                <div className="bubble-wrapper">
-                  <div className="message-bubble">{renderFormattedMessage(interaction.userText)}</div>
-                  <div className="message-time"><span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+        {interactions.map((interaction) => {
+          const isSystemEvent = interaction.provider === 'system' && interaction.model === 'provider_change';
+          if (isSystemEvent) {
+            return (
+              <div key={interaction.id} className="system-event-divider">
+                <div className="system-event-line" />
+                <div className="system-event-pill">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                  </svg>
+                  <span>{interaction.userText}</span>
                 </div>
+                <div className="system-event-line" />
               </div>
-            )}
-            <div className="message ai-message">
+            );
+          }
+          return (
+            <div key={interaction.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+              {interaction.userText && (
+                <div className="message user-message">
+                  <div className="bubble-wrapper">
+                    <div className="message-bubble">{renderFormattedMessage(interaction.userText)}</div>
+                    <div className="message-time"><span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+                  </div>
+                </div>
+              )}
+              <div className="message ai-message">
               <div className="bubble-wrapper">
                 {renderCompletedActivity(interaction)}
                 {renderFileChanges(interaction)}
@@ -1750,7 +1762,8 @@ export default function ChatPanel({
               </div>
             </div>
           </div>
-        ))}
+        );
+      })}
 
         {sending && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>

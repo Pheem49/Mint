@@ -9,10 +9,8 @@ interface PicturesLibraryProps {
 }
 
 export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPictures }: PicturesLibraryProps) {
-  if (view !== 'pictures') return null
-
   return (
-    <section className="pictures-library">
+    <section className={`pictures-library ${view === 'pictures' ? 'is-visible' : ''}`} aria-hidden={view !== 'pictures'}>
       <header className="pictures-header">
         <div><span className="pictures-kicker">Gallery</span><h2>Saved Pictures</h2></div>
         <div className="pictures-header-actions">

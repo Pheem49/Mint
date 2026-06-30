@@ -11,7 +11,7 @@ mod updater;
 mod webhooks;
 mod workflows;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+
 use browser::{
     BrowserTab, click as browser_click, list_tabs as browser_list_tabs,
     navigate as browser_navigate, read_page_text,
@@ -34,8 +34,8 @@ use mint_core::{
     AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, ChatRequest, ChatResponse,
     ChatSession, CodeEdit, CodeEditProposal, ImageGenRequest, InteractionMemory, MemoryStore,
     MintConfig, PictureEntry, TtsUrl, WeatherReport, apply_code_edits, classify_shell_command,
-    config_path, extract_document_text, google_tts_urls, list_saved_pictures, load_config,
-    load_workflows, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
+    config_path, google_tts_urls, list_saved_pictures, load_config,
+    load_workflows, save_workflows, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
     orchestrate_chat_with_fallback, propose_code_edits, save_chat_images, save_config,
     start_channels, weather, workflows_path,
 };
@@ -94,9 +94,6 @@ enum DesktopStreamEvent {
     Chunk { chunk: String },
     Progress { progress: AgentProgress },
 }
-
-const MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
-const MAX_DOCUMENT_CONTEXT_CHARS: usize = 30_000;
 const WORKSPACE_TREE_MAX_DEPTH: usize = 9;
 const WORKSPACE_TREE_MAX_CHILDREN: usize = 400;
 const WORKSPACE_TREE_COLLAPSED_DIRS: &[&str] = &[
@@ -114,84 +111,7 @@ const WORKSPACE_TREE_COLLAPSED_DIRS: &[&str] = &[
     "target",
 ];
 
-fn request_with_document_context(
-    config: &MintConfig,
-    request: &ChatRequest,
-) -> Result<ChatRequest, String> {
-    let Some(document) = &request.document_attachment else {
-        return Ok(request.clone());
-    };
 
-    let (mime_type, encoded) = document
-        .data_uri
-        .strip_prefix("data:")
-        .and_then(|payload| payload.split_once(";base64,"))
-        .ok_or_else(|| "invalid PDF attachment data URI".to_string())?;
-
-    if !mime_type.eq_ignore_ascii_case("application/pdf") {
-        return Err("only PDF document attachments are supported".into());
-    }
-
-    let bytes = BASE64_STANDARD
-        .decode(encoded)
-        .map_err(|error| format!("invalid PDF attachment encoding: {error}"))?;
-    if bytes.len() > MAX_DOCUMENT_BYTES {
-        return Err("PDF attachment is too large (> 10 MiB)".into());
-    }
-
-    let directory = config_path()
-        .map_err(|error| error.to_string())?
-        .with_file_name("Attachments");
-    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
-    let path = directory.join(format!(
-        "mint-pdf-{}-{}.pdf",
-        COUNTER.fetch_add(1, Ordering::SeqCst),
-        sanitize_attachment_name(&document.filename)
-    ));
-    fs::write(&path, bytes).map_err(|error| error.to_string())?;
-
-    let extracted = extract_document_text(&path, config).map_err(|error| error.to_string());
-    let _ = fs::remove_file(&path);
-    let extracted = extracted?;
-    let context = truncate_document_context(&extracted);
-    let filename = document.filename.trim();
-    let filename = if filename.is_empty() {
-        "attached.pdf"
-    } else {
-        filename
-    };
-
-    let mut enriched = request.clone();
-    enriched.document_attachment = None;
-    enriched.message = format!(
-        "{}\n\nAttached PDF: {filename}\nUse the extracted PDF text below when answering. If the user asks for a summary, summarize this document.\n\n--- Extracted PDF text ---\n{context}\n--- End extracted PDF text ---",
-        request.message
-    );
-    Ok(enriched)
-}
-
-fn truncate_document_context(text: &str) -> String {
-    let mut output: String = text.chars().take(MAX_DOCUMENT_CONTEXT_CHARS).collect();
-    if text.chars().count() > MAX_DOCUMENT_CONTEXT_CHARS {
-        output.push_str("\n\n[PDF text truncated because it is long.]");
-    }
-    output
-}
-
-fn sanitize_attachment_name(filename: &str) -> String {
-    let sanitized: String = filename
-        .chars()
-        .filter(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
-        })
-        .take(80)
-        .collect();
-    if sanitized.is_empty() {
-        "document".into()
-    } else {
-        sanitized
-    }
-}
 
 #[tauri::command]
 fn get_runtime_status() -> Result<RuntimeStatus, String> {
@@ -376,7 +296,7 @@ fn inspect_shell_command(command: String) -> mint_core::ShellClassification {
 #[tauri::command]
 async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatResponse, String> {
     let config = load_config().map_err(|error| error.to_string())?;
-    let request = request_with_document_context(&config, &request)?;
+    let request = request.with_document_context(&config)?;
 
     if request.message.starts_with("/chat ") {
         let mut clean_request = request.clone();
@@ -456,7 +376,7 @@ async fn stream_chat_message(
     on_event: Channel<DesktopStreamEvent>,
 ) -> Result<ChatResponse, String> {
     let config = load_config().map_err(|error| error.to_string())?;
-    let request = request_with_document_context(&config, &request)?;
+    let request = request.with_document_context(&config)?;
 
     if request.message.starts_with("/chat ") {
         let mut clean_request = request.clone();
@@ -563,6 +483,20 @@ fn save_interaction_agent_activity(
 }
 
 #[tauri::command]
+fn save_system_interaction(
+    chat_id: String,
+    user_text: String,
+    provider: String,
+    model: String,
+) -> Result<i64, String> {
+    MemoryStore::open_default()
+        .and_then(|memory| {
+            memory.add_interaction_for_chat(&chat_id, &user_text, "", &provider, &model)
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_recent_interactions(
     limit: Option<usize>,
     chat_id: Option<String>,
@@ -612,6 +546,54 @@ fn set_profile_value(key: String, value: String) -> Result<(), String> {
     MemoryStore::open_default()
         .and_then(|memory| memory.set_profile(&key, &value))
         .map_err(|error| error.to_string())
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct LearnedSkillDto {
+    id: i64,
+    name: String,
+    source_path: String,
+    content: String,
+    updated_at: String,
+}
+
+#[tauri::command]
+fn list_learned_skills() -> Result<Vec<LearnedSkillDto>, String> {
+    let store = MemoryStore::open_default().map_err(|e| e.to_string())?;
+    let skills = store.learned_skills(100).map_err(|e| e.to_string())?;
+    let dtos = skills
+        .into_iter()
+        .map(|s| LearnedSkillDto {
+            id: s.id,
+            name: s.name,
+            source_path: s.source_path,
+            content: s.content,
+            updated_at: s.created_at,
+        })
+        .collect();
+    Ok(dtos)
+}
+
+#[tauri::command]
+fn add_learned_skill(name: String, content: String) -> Result<LearnedSkillDto, String> {
+    let store = MemoryStore::open_default().map_err(|e| e.to_string())?;
+    let skill = store
+        .add_learned_skill(&name, "ui_manual", &content)
+        .map_err(|e| e.to_string())?;
+    Ok(LearnedSkillDto {
+        id: skill.id,
+        name: skill.name,
+        source_path: skill.source_path,
+        content: skill.content,
+        updated_at: skill.created_at,
+    })
+}
+
+#[tauri::command]
+fn delete_learned_skill(name: String) -> Result<usize, String> {
+    let store = MemoryStore::open_default().map_err(|e| e.to_string())?;
+    store.delete_learned_skill(&name).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -929,6 +911,15 @@ fn reload_custom_workflows() -> Result<Value, String> {
     }))
 }
 
+#[tauri::command]
+fn save_custom_workflows(workflows: Vec<serde_json::Value>) -> Result<ActionResult, String> {
+    save_workflows(&workflows).map_err(|error| error.to_string())?;
+    Ok(ActionResult {
+        success: true,
+        message: "workflows saved successfully".into(),
+    })
+}
+
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show Mint", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
@@ -1054,6 +1045,9 @@ pub fn run() {
             get_profile_value,
             set_profile_value,
             clear_chat_history,
+            list_learned_skills,
+            add_learned_skill,
+            delete_learned_skill,
             list_pictures,
             save_pictures,
             open_folder,
@@ -1085,7 +1079,9 @@ pub fn run() {
             run_next_queued_task,
             exit_app,
             open_workflows_file,
-            reload_custom_workflows
+            reload_custom_workflows,
+            save_custom_workflows,
+            save_system_interaction
         ])
         .run(tauri::generate_context!())
         .expect("error while running Mint desktop");

@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
-export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspeac' | 'imagine'
+export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'workflows'
 
 interface ChatSessionItem {
   id: string
   title: string
   kind: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 interface DashboardSidebarProps {
@@ -33,6 +35,8 @@ interface DashboardSidebarProps {
   onSetInteractionEnabled: (enabled: boolean) => void
   onSetShowInteractionGuide: (visible: boolean) => void
   onShowToast: (message: string) => void
+  isSearchOpen: boolean
+  onSetSearchOpen: (open: boolean) => void
 }
 
 export default function DashboardSidebar({
@@ -60,9 +64,23 @@ export default function DashboardSidebar({
   onSetInteractionEnabled,
   onSetShowInteractionGuide,
   onShowToast,
+  isSearchOpen,
+  onSetSearchOpen,
 }: DashboardSidebarProps) {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editTitleValue, setEditTitleValue] = useState('')
+  const [isMoreOpen, setIsMoreOpen] = useState(false)
+  const moreContainerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (moreContainerRef.current && !moreContainerRef.current.contains(event.target as Node)) {
+        setIsMoreOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const handleSaveRename = (id: string) => {
     if (editTitleValue.trim() && editTitleValue.trim() !== chatSessions.find(s => s.id === id)?.title) {
@@ -115,6 +133,16 @@ export default function DashboardSidebar({
         <span>New Chat</span>
       </button>
 
+      <button className="sidebar-top-action sidebar-search-btn" onClick={() => onSetSearchOpen(true)}>
+        <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </span>
+        <span>Search Chats</span>
+      </button>
+
       <button className={`sidebar-top-action ${view === 'chat' ? 'is-active' : ''}`} onClick={() => onSetView('chat')}>
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -133,22 +161,14 @@ export default function DashboardSidebar({
         </span>
         <span>Pictures</span>
       </button>
-      <button className={`sidebar-top-action ${view === 'imagine' ? 'is-active' : ''}`} onClick={() => onSetView('imagine')}>
-        <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-          </svg>
-        </span>
-        <span>Image Studio</span>
-      </button>
-      <button className={`sidebar-top-action ${view === 'workspeac' ? 'is-active' : ''}`} onClick={() => onSetView('workspeac')}>
+      <button className={`sidebar-top-action ${view === 'workspace' ? 'is-active' : ''}`} onClick={() => onSetView('workspace')}>
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
             <path d="M3 6v12"></path>
           </svg>
         </span>
-        <span>Workspeac</span>
+        <span>Workspace</span>
       </button>
       <button className={`sidebar-top-action ${modelVisible ? 'is-active' : ''}`} onClick={onToggleModel}>
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
@@ -159,6 +179,45 @@ export default function DashboardSidebar({
         </span>
         <span>Live2D Model</span>
       </button>
+
+      <div className="sidebar-more-container" ref={moreContainerRef}>
+        <button className={`sidebar-top-action ${isMoreOpen || view === 'imagine' || view === 'workflows' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)}>
+          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="1.5"></circle>
+              <circle cx="19" cy="12" r="1.5"></circle>
+              <circle cx="5" cy="12" r="1.5"></circle>
+            </svg>
+          </span>
+          <span>More</span>
+        </button>
+        {isMoreOpen && (
+          <div className="sidebar-more-popover">
+            <button className={`popover-item ${view === 'imagine' ? 'active' : ''}`} onClick={() => { onSetView('imagine'); setIsMoreOpen(false); }}>
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                </svg>
+              </span>
+              <span>Image Studio</span>
+            </button>
+            <button className={`popover-item ${view === 'workflows' ? 'active' : ''}`} onClick={() => { onSetView('workflows'); setIsMoreOpen(false); }}>
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 12h16"></path>
+                  <path d="M12 4v16"></path>
+                  <rect x="2" y="9" width="4" height="6" rx="1"></rect>
+                  <rect x="18" y="9" width="4" height="6" rx="1"></rect>
+                  <rect x="10" y="2" width="4" height="4" rx="1"></rect>
+                  <rect x="10" y="18" width="4" height="4" rx="1"></rect>
+                </svg>
+              </span>
+              <span>Workflow (Beta)</span>
+            </button>
+          </div>
+        )}
+      </div>
+
 
       {modelVisible && (
         <div className="sidebar-model-controls">
