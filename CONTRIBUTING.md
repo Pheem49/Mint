@@ -8,7 +8,7 @@ By contributing, you help make private and autonomous AI agents more accessible 
 
 ## Table of Contents
 1. [Code of Conduct](#code-of-conduct)
-2. [Roadmap & Project Goals](#roadmap--project-goals)
+2. [Areas of Contribution](#areas-of-contribution)
 3. [Security & Secrets Policy](#security--secrets-policy)
 4. [Development Environment Setup](#development-environment-setup)
 5. [Project Architecture](#project-architecture)
@@ -23,23 +23,15 @@ We aim to foster an open, welcoming, and inclusive community. Please be respectf
 
 ---
 
-## Roadmap & Project Goals
+## Areas of Contribution
 
-Our vision is to build the ultimate private workspace assistant. Here is our high-level roadmap:
+We welcome contributions across all areas of the project! Here are some ways you can get involved:
 
-### 🚀 Phase 1: Core Enhancement & Safety (Short-term)
-- [ ] **Custom Live2D Model Import:** Allow users to upload their own `.model3.json` Live2D avatars directly in the settings interface (replacing hardcoded assets).
-- [ ] **Expanded Local LLM Backends:** Seamless support for llama.cpp, KoboldCPP, and Apple MLX (via OpenAI-compatible local API wrapper).
-- [ ] **Advanced Sandboxing:** Add Docker/WebAssembly sandbox options for code execution instead of relying solely on local system constraints.
-
-### 🔌 Phase 2: Integrations & Plugin Ecosystem (Medium-term)
-- [ ] **More MCP Servers:** Native integration with database MCPs (PostgreSQL, SQLite), Slack, and linear tracking.
-- [ ] **Unified Webhooks:** Easier tunneling configuration for LINE and WhatsApp webhook bridges.
-- [ ] **Workflow Builder:** A drag-and-drop node interface in the React dashboard to build custom agent workflows.
-
-### 🌐 Phase 3: Collaborative Agents (Long-term)
-- [ ] **Multi-Agent Swarms:** Allow multiple local agents to communicate and collaborate on complex tasks.
-- [ ] **Local-First Sync:** Secure, end-to-end encrypted synchronization of memory, chats, and configurations between user devices.
+- **Frontend & UI (`src/renderer`)**: Improve user interfaces, polish styles, build interactive widgets, or optimize Live2D rendering and animations.
+- **Core Rust Engine (`crates/mint-core`)**: Enhance agent execution loops, implement new LLM provider integrations, refine local SQLite memory stores, or optimize security checking logic.
+- **Tauri Integration (`src-tauri`)**: Improve OS-level features, tray menu interaction, shortcut triggers, or local device capture integrations.
+- **Documentation & Workflows**: Write guides, document custom workflows, update READMEs, or help translate Mint into multiple languages.
+- **Bug Fixes & Refactoring**: Pick up active issues, optimize memory footprint, or write unit and integration tests.
 
 ---
 
@@ -49,7 +41,7 @@ Our vision is to build the ultimate private workspace assistant. Here is our hig
 > **Never commit private API keys, credentials, tokens, or personal configurations.**
 
 Before pushing code or making a Pull Request:
-1. Ensure your local `.env` and `mint-config.json` files are not tracked by Git (these should be matched by [.gitignore](file:///.gitignore)).
+1. Ensure your local `.env` and `mint-config.json` files are not tracked by Git (these should be matched by [.gitignore](.gitignore)).
 2. Double-check your git staging area (`git status`) to verify that no temporary logs, keys, or credentials are being committed.
 3. If you find a security vulnerability, please do **not** open a public issue. Email the project maintainers directly at `killerpheem13@gmail.com` so we can coordinate a fix.
 
@@ -100,10 +92,10 @@ To build and run Mint locally, you need the following tools:
 ## Project Architecture
 
 Mint shares a single Rust codebase for both its GUI and CLI wrappers:
-- [crates/mint-core](file:///crates/mint-core): Core domain logic (configurations, memory engine, Ollama/Gemini API bridges, MCP integration, Spotify and Notion plugins).
-- [crates/mint-cli](file:///crates/mint-cli): Command Line Interface terminal client.
-- [src-tauri](file:///src-tauri): Tauri desktop wrapper, OS-native window configs, tray, and IPC command routes.
-- [src/renderer](file:///src/renderer): React & TypeScript frontend application.
+- [crates/mint-core](crates/mint-core): Core domain logic (configurations, memory engine, Ollama/Gemini API bridges, MCP integration, Spotify and Notion plugins).
+- [crates/mint-cli](crates/mint-cli): Command Line Interface terminal client.
+- [src-tauri](src-tauri): Tauri desktop wrapper, OS-native window configs, tray, and IPC command routes.
+- [src/renderer](src/renderer): React & TypeScript frontend application.
 
 ---
 
