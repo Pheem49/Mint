@@ -443,19 +443,21 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         chat_id: Option<String>,
                         image_data_uri: Option<String>,
                         audio_data_uri: Option<String>,
+                        document_attachment: Option<crate::chat::DocumentAttachment>,
                     }
 
                     if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
                         let config = load_config().unwrap_or_default();
-                        let mut chat_req = ChatRequest {
+                        let chat_req = ChatRequest {
                             message: req.message,
                             system_instruction: req.system_instruction.unwrap_or_default(),
                             chat_id: req.chat_id,
                             image_data_uri: req.image_data_uri,
                             audio_data_uri: req.audio_data_uri,
-                            document_attachment: None,
+                            document_attachment: req.document_attachment,
                             workspace_path: None,
                         };
+                        let mut chat_req = chat_req.with_document_context(&config).unwrap_or(chat_req);
                         let sent_image = chat_req.image_data_uri.clone();
                         let sent_message = chat_req.message.clone();
 
@@ -524,19 +526,21 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         chat_id: Option<String>,
                         image_data_uri: Option<String>,
                         audio_data_uri: Option<String>,
+                        document_attachment: Option<crate::chat::DocumentAttachment>,
                     }
 
                     if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
                         let config = load_config().unwrap_or_default();
-                        let mut chat_req = ChatRequest {
+                        let chat_req = ChatRequest {
                             message: req.message,
                             system_instruction: req.system_instruction.unwrap_or_default(),
                             chat_id: req.chat_id,
                             image_data_uri: req.image_data_uri,
                             audio_data_uri: req.audio_data_uri,
-                            document_attachment: None,
+                            document_attachment: req.document_attachment,
                             workspace_path: None,
                         };
+                        let mut chat_req = chat_req.with_document_context(&config).unwrap_or(chat_req);
                         let sent_image = chat_req.image_data_uri.clone();
                         let sent_message = chat_req.message.clone();
 

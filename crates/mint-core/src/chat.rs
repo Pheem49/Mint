@@ -108,6 +108,80 @@ pub struct DocumentAttachment {
     pub data_uri: String,
 }
 
+const MAX_DOCUMENT_BYTES: usize = 10 * 1024 * 1024;
+const MAX_DOCUMENT_CONTEXT_CHARS: usize = 400_000;
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+impl ChatRequest {
+    pub fn with_document_context(&self, config: &crate::MintConfig) -> Result<ChatRequest, String> {
+        let Some(document) = &self.document_attachment else {
+            return Ok(self.clone());
+        };
+
+        let (mime_type, encoded) = document
+            .data_uri
+            .strip_prefix("data:")
+            .and_then(|payload| payload.split_once(";base64,"))
+            .ok_or_else(|| "invalid PDF attachment data URI".to_string())?;
+
+        if !mime_type.eq_ignore_ascii_case("application/pdf") {
+            return Err("only PDF document attachments are supported".into());
+        }
+
+        use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+        let bytes = BASE64_STANDARD
+            .decode(encoded)
+            .map_err(|error| format!("invalid PDF attachment encoding: {error}"))?;
+        if bytes.len() > MAX_DOCUMENT_BYTES {
+            return Err("PDF attachment is too large (> 10 MiB)".into());
+        }
+
+        let directory = crate::config::config_path()
+            .map_err(|error| error.to_string())?
+            .with_file_name("Attachments");
+        std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+
+        let safe_name: String = document
+            .filename
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(*c, '.' | '-' | '_'))
+            .take(80)
+            .collect();
+        let safe_name = if safe_name.is_empty() { "document".into() } else { safe_name };
+
+        let path = directory.join(format!(
+            "mint-pdf-{}-{}.pdf",
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+            safe_name
+        ));
+        std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+
+        let extracted = crate::knowledge::extract_document_text(&path, config).map_err(|error| error.to_string());
+        let _ = std::fs::remove_file(&path);
+        let extracted = extracted?;
+        
+        let mut context: String = extracted.chars().take(MAX_DOCUMENT_CONTEXT_CHARS).collect();
+        if extracted.chars().count() > MAX_DOCUMENT_CONTEXT_CHARS {
+            context.push_str("\n\n[PDF text truncated because it is long.]");
+        }
+
+        let filename = document.filename.trim();
+        let filename = if filename.is_empty() {
+            "attached.pdf"
+        } else {
+            filename
+        };
+
+        let mut enriched = self.clone();
+        enriched.document_attachment = None;
+        enriched.message = format!(
+            "{}\n\nAttached PDF: {filename}\nUse the extracted PDF text below when answering. If the user asks for a summary, summarize this document.\n\n--- Extracted PDF text ---\n{context}\n--- End extracted PDF text ---",
+            self.message
+        );
+        Ok(enriched)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatResponse {
