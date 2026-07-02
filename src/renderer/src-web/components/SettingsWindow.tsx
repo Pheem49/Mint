@@ -157,15 +157,7 @@ export const LOCAL_MODELS = [
   'lmstudio-community/gemma-2-9b-it-GGUF'
 ]
 
-export const OLLAMA_MODELS = [
-  'llama3:latest',
-  'llama3.1:latest',
-  'llama3.2:latest',
-  'gemma2:latest',
-  'mistral:latest',
-  'phi3:latest',
-  'qwen2.5:latest'
-]
+export const OLLAMA_MODELS: string[] = []
 
 export default function SettingsWindow() {
   const [activeTab, setActiveTab] = useState<TabType>('sect-general')

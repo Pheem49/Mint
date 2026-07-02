@@ -339,7 +339,7 @@ pub async fn run_code_agent_with_options(
         }
         let formatted_summary = format_markdown_bold(&summary);
         print!("\n  {MINT}Mint:{RESET} ");
-        render_live_summary(&formatted_summary.replace('\n', "\n  "));
+        render_live_summary(&formatted_summary);
         println!();
     };
 
@@ -408,19 +408,26 @@ fn format_elapsed(duration: Duration) -> String {
 }
 
 fn render_live_summary(summary: &str) {
-    let mut chunk = String::new();
-    for character in summary.chars() {
-        chunk.push(character);
-        if chunk.chars().count() >= 96 {
-            print!("{chunk}");
-            let _ = io::stdout().flush();
-            chunk.clear();
+    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let width = tw as usize;
+
+    let mut is_first = true;
+    for line in summary.split('\n') {
+        let indent = if is_first { "" } else { "  " };
+        let options = textwrap::Options::new(width)
+            .initial_indent(indent)
+            .subsequent_indent("  ")
+            .break_words(true);
+        let wrapped = textwrap::fill(line, &options);
+        
+        if is_first {
+            print!("{wrapped}");
+            is_first = false;
+        } else {
+            print!("\n{wrapped}");
         }
     }
-    if !chunk.is_empty() {
-        print!("{chunk}");
-        let _ = io::stdout().flush();
-    }
+    let _ = io::stdout().flush();
 }
 
 fn print_colored_diff(diff: &str) {
@@ -560,10 +567,10 @@ fn render_live_status(status: &mut LiveStatus) {
     lines.extend(activities_lines(&status.activities[activities_start..]));
     lines.extend(explored_lines(&status.explored[explored_start..]));
     if let Some(thinking) = &status.thinking {
-        let frames = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+        let frames = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let frame = frames[status.spinner_tick % frames.len()];
         status.spinner_tick += 1;
-        lines.push(format!("{MINT}{frame}{RESET} {BRIGHT}{thinking}{RESET}"));
+        lines.push(format!("  {MINT}{frame}{RESET} {BRIGHT}{thinking}{RESET}"));
     }
     if lines.is_empty() {
         return;

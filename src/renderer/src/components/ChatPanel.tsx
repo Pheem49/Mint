@@ -68,15 +68,7 @@ const LOCAL_MODELS = [
   'lmstudio-community/gemma-2-9b-it-GGUF'
 ]
 
-const OLLAMA_MODELS = [
-  'llama3:latest',
-  'llama3.1:latest',
-  'llama3.2:latest',
-  'gemma2:latest',
-  'mistral:latest',
-  'phi3:latest',
-  'qwen2.5:latest'
-]
+const OLLAMA_MODELS: string[] = []
 
 interface ApprovalDetails {
   title: string
@@ -153,7 +145,20 @@ function describeTool(action: string, input: Record<string, unknown>): AgentActi
   const command = activityDetail(input, 'command')
   const name = activityDetail(input, 'name')
   const tool = activityDetail(input, 'tool')
-  const target = path || query || command || name || tool || action.replaceAll('_', ' ')
+  const rawTarget = path || query || command || name || tool || action.replaceAll('_', ' ')
+
+  // Append line range for read_file when startLine / endLine are available
+  let target = rawTarget
+  if (action === 'read_file' && path) {
+    const startLine = typeof input.startLine === 'number' ? input.startLine : undefined
+    const endLine = typeof input.endLine === 'number' ? input.endLine : undefined
+    if (startLine !== undefined && endLine !== undefined) {
+      target = `${rawTarget} #L${startLine}-${endLine}`
+    } else if (startLine !== undefined) {
+      target = `${rawTarget} #L${startLine}`
+    }
+  }
+
   const labels: Record<string, string> = {
     apply_patch: 'Applying patch',
     ask_user: 'Asking user',
@@ -977,6 +982,29 @@ export default function ChatPanel({
   const [openFileDiffs, setOpenFileDiffs] = useState<Record<string, boolean>>({})
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
+
+  useEffect(() => {
+    const fetchOllamaModels = async () => {
+      if (status?.activeProvider !== 'ollama') return;
+      const host = settingsConfig?.ollamaHost || 'http://localhost:11434';
+      const cleanHost = host.endsWith('/') ? host.slice(0, -1) : host;
+      try {
+        const res = await fetch(`${cleanHost}/api/tags`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.models)) {
+            setDynamicOllamaModels(data.models.map((m: any) => m.name));
+            return;
+          }
+        }
+      } catch (err) {
+        // fallback to default if fetch fails
+      }
+      setDynamicOllamaModels(OLLAMA_MODELS);
+    }
+    fetchOllamaModels();
+  }, [status?.activeProvider, settingsConfig?.ollamaHost])
 
   useEffect(() => {
     if (!sending) {
@@ -1037,7 +1065,7 @@ export default function ChatPanel({
       case 'local_openai':
         return LOCAL_MODELS
       case 'ollama':
-        return OLLAMA_MODELS
+        return dynamicOllamaModels
       default:
         return []
     }
@@ -2048,7 +2076,7 @@ export default function ChatPanel({
                 return <option key={provider} value={provider}>{displayName}</option>
               })}
             </select>
-            {availableModels.length > 0 && (
+            {(availableModels.length > 0 || activeModel) && (
               <select 
                 value={activeModel} 
                 onChange={(event) => onSetModel(event.target.value)}
