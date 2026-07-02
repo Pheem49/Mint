@@ -1315,6 +1315,9 @@ impl CliStreamFormatter {
                     print_fn(ch);
                 }
                 print_fn('\n');
+                for ch in "  ".chars() {
+                    print_fn(ch);
+                }
             } else {
                 if is_table_line(&line) {
                     self.table_buffer.push(line);
@@ -1327,6 +1330,9 @@ impl CliStreamFormatter {
                         print_fn(ch);
                     }
                     print_fn('\n');
+                    for ch in "  ".chars() {
+                        print_fn(ch);
+                    }
                 }
             }
         }
@@ -2291,7 +2297,7 @@ async fn run_interactive_chat() -> Result<()> {
                 .to_owned();
 
             println!();
-            print!("{MINT}Mint:{RESET} {DIM}Thinking...{RESET}");
+            print!("  {MINT}Mint:{RESET} {DIM}Thinking...{RESET}");
             let _ = io::stdout().flush();
 
             let mut system_instruction = format!(
@@ -2337,7 +2343,7 @@ async fn run_interactive_chat() -> Result<()> {
                 |chunk| {
                     if first_chunk {
                         first_chunk = false;
-                        print!("\r\x1b[2K{MINT}Mint:{RESET} ");
+                        print!("\r\x1b[2K  {MINT}Mint:{RESET} ");
                     }
                     filter.process_chunk(&chunk, |text| {
                         for c in text.chars() {
@@ -2926,7 +2932,7 @@ fn read_line_interactive(
                                 expanded_str = expanded_str.replace(placeholder_str, content);
                             }
 
-                            println!("{BLUE}You ›{RESET} {}", expanded_str);
+                            println!("  {BLUE}You ›{RESET} {}", expanded_str);
                             let _ = io::stdout().flush();
 
                             break Some(InteractiveInput {

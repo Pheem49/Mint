@@ -338,8 +338,8 @@ pub async fn run_code_agent_with_options(
             }
         }
         let formatted_summary = format_markdown_bold(&summary);
-        print!("\n{MINT}Mint:{RESET} ");
-        render_live_summary(&formatted_summary);
+        print!("\n  {MINT}Mint:{RESET} ");
+        render_live_summary(&formatted_summary.replace('\n', "\n  "));
         println!();
     };
 
@@ -377,16 +377,16 @@ pub async fn run_code_agent_with_options(
     let res = res.map_err(|e| anyhow!("{}", e))?;
 
     if should_show_verification(&res.verification) {
-        println!("Verification: {}", res.verification);
+        println!("  Verification: {}", res.verification);
     }
     println!(
-        "{DIM}─ Worked for {}{RESET}",
+        "  {DIM}─ Worked for {}{RESET}",
         format_elapsed(started_at.elapsed())
     );
 
     let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let width = tw as usize;
-    println!("{DIM}{}{RESET}", "─".repeat(width));
+    println!("  {DIM}{}{RESET}", "─".repeat(width.saturating_sub(2)));
 
     Ok(res)
 }
@@ -497,13 +497,21 @@ fn explored_action_label(action: &str, input: &serde_json::Value) -> Option<Expl
                 kind: "[list_files] List",
                 target: display_tool_target(path),
             }),
-        "read_file" => input
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(|path| ExploredAction {
+        "read_file" => {
+            let path = input.get("path").and_then(|v| v.as_str())?;
+            let start = input.get("startLine").and_then(|v| v.as_u64());
+            let end = input.get("endLine").and_then(|v| v.as_u64());
+            let file_name = display_tool_target(path);
+            let target = match (start, end) {
+                (Some(s), Some(e)) => format!("{} #L{}-{}", file_name, s, e),
+                (Some(s), None) => format!("{} #L{}", file_name, s),
+                _ => file_name,
+            };
+            Some(ExploredAction {
                 kind: "[read_file] Read",
-                target: display_tool_target(path),
-            }),
+                target,
+            })
+        }
         "search_code" => {
             let query = input.get("query").and_then(|v| v.as_str())?;
             let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
