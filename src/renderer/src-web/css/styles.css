@@ -3643,9 +3643,14 @@ input:checked + .slider:before {
 
   .assistant-workspace {
     display: flex;
+    flex-direction: column;
     margin-left: 0;
-    padding: 12px;
-    gap: 12px;
+    padding: 0;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
   }
 
   .assistant-workspace.layout-chat {
@@ -3654,6 +3659,10 @@ input:checked + .slider:before {
 
   .app-body {
     grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
   }
 
   .sidebar-toggle {
@@ -3701,14 +3710,27 @@ input:checked + .slider:before {
   .conversation-panel {
     position: static;
     width: 100%;
+    height: 100%;
     max-height: none;
     transform: none;
     flex: 1;
     min-width: 0;
+    min-height: 0;
+    border-radius: 0;
+    overflow: hidden;
   }
 
   .chat-container {
     max-height: none;
+  }
+  
+  .input-area {
+    padding: 10px;
+  }
+  
+  #chat-form {
+    min-height: auto;
+    padding: 6px;
   }
 }
 
@@ -3838,6 +3860,51 @@ input:checked + .slider:before {
 @media (max-width: 760px) {
   .mobile-menu-btn {
     display: flex;
+  }
+
+  /* Override desktop grid layout so chat-header (hamburger) is visible on mobile */
+  .assistant-workspace.model-hidden .conversation-panel,
+  .assistant-workspace.model-hidden .conversation-panel.is-empty {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+    grid-template-rows: none;
+    grid-column: auto;
+  }
+
+  /* Floating header like Gemini — fixed to top, transparent background */
+  .chat-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 200;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-bottom: none;
+    height: 52px;
+    padding: 10px 16px;
+  }
+
+  .assistant-workspace.model-hidden .chat-header {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  /* Push chat content below fixed header */
+  .assistant-workspace.model-hidden .chat-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 64px 12px 8px;
+  }
+
+  .assistant-workspace.model-hidden .input-area {
+    width: 100%;
+    flex-shrink: 0;
   }
 }
 
