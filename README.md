@@ -105,6 +105,15 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
   - Right-click context menu to delete files/folders with confirmation modals.
   - Drag-and-drop file mentions in the chat input with automatic spacing and dynamic accent-colored history bubble highlighting.
 
+## What's New in v1.8.1
+
+- **Advanced Workspace File Tree & Operations**: Manage files directly from the sidebar UI with file/folder creation buttons, right-click deletion modals, and automatic polling + focus-based syncing.
+- **Drag-and-Drop File Mentions**: Drag files from the sidebar to chat input to insert `@filename` with auto-spacing, rendered as outline pills styled with your selected accent color.
+- **CLI Agent Interface Polish & Terminal Line Wrapping Fix**: Indented status blocks and confirmation prompts by 2 spaces to align text. Implemented the *Dynamic Breathing Circle System* (`●` ⇄ `○` pulsing during thinking) and fixed terminal duplicate line bugs by counting physical terminal wrapping width and filtering Thai tone marks.
+- **AskUser Text Input Modal (Desktop & Web)**: When the agent asks questions, a text input field is rendered inside the approval card so users can write and submit typed answers back to the agent backend.
+- **Dynamic Language AI Suggestions**: Auto-translates process suggestions dynamically based on your configured `config.language`.
+- **Mobile & Navigation Optimizations**: Mobile-fit Image Studio layout, hamburger menu access, and headers glass-morphism overlay fixes.
+
 ## What's New in v1.8.0
 
 - **Integrated Web Search Settings**: Easily toggle between **Brave Search API** and **Google Custom Search API** directly from the General settings tab.

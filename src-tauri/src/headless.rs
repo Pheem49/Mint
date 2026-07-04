@@ -8,11 +8,11 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::browser::{click, navigate, read_page_text};
+use mint_core::browser::{click, navigate, read_page_text, type_text};
 
 const MAX_STEPS: usize = 20;
 const SYSTEM_PROMPT: &str = r#"You are Mint's native background task agent. Return only JSON:
-{"thought":"short progress note","action":"done|propose_folder|propose_write_file|open_url|browser_read|browser_click|knowledge_search|propose_bash","target":"path, URL, selector, query, command, or final result","data":"optional file content"}
+{"thought":"short progress note","action":"done|propose_folder|propose_write_file|open_url|browser_read|browser_click|browser_type|knowledge_search|propose_bash","target":"path, URL, selector, query, command, or final result","data":"optional file content"}
 Use only one action per response. Background tasks never mutate the filesystem or execute shell commands. Use propose_folder, propose_write_file, and propose_bash so Mint can record a proposal for explicit user approval."#;
 
 #[derive(Debug, Deserialize)]
@@ -177,6 +177,7 @@ async fn execute_action(
         "open_url" => navigate(config, &action.target).await,
         "browser_read" => read_page_text(config).await,
         "browser_click" => click(config, &action.target).await,
+        "browser_type" => type_text(config, &action.target, &action.data).await,
         "knowledge_search" => {
             let hits = KnowledgeStore::open_default()
                 .map_err(|error| error.to_string())?

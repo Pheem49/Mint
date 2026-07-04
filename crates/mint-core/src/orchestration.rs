@@ -253,6 +253,16 @@ fn request_chat_id(request: &ChatRequest) -> &str {
 
 const MAX_STEPS: usize = 32;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
+fn is_port_9222_open() -> bool {
+    use std::net::TcpStream;
+    use std::time::Duration;
+    if let Ok(addr) = "127.0.0.1:9222".parse() {
+        TcpStream::connect_timeout(&addr, Duration::from_millis(50)).is_ok()
+    } else {
+        false
+    }
+}
+
 pub fn build_system_prompt(config: &MintConfig) -> String {
     let mut allowed_actions = vec![
         "list_files",
@@ -284,6 +294,14 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         "apply_patch",
         "write_file",
     ];
+
+    if is_port_9222_open() {
+        allowed_actions.push("browser_open");
+        allowed_actions.push("browser_click");
+        allowed_actions.push("browser_type");
+        allowed_actions.push("browser_read");
+    }
+
     allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
     allowed_actions.push("finish");
 
@@ -318,6 +336,18 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
     }
     if allowed_actions.contains(&"web_search") {
         input_formats.push("- web_search: {\"query\":\"search terms\",\"limit\":5}");
+    }
+    if allowed_actions.contains(&"browser_open") {
+        input_formats.push("- browser_open: {\"url\":\"https://example.com\"}");
+    }
+    if allowed_actions.contains(&"browser_click") {
+        input_formats.push("- browser_click: {\"selector\":\"button.submit-btn\"}");
+    }
+    if allowed_actions.contains(&"browser_type") {
+        input_formats.push("- browser_type: {\"selector\":\"input.search-bar\", \"text\":\"search query\"}");
+    }
+    if allowed_actions.contains(&"browser_read") {
+        input_formats.push("- browser_read: {}");
     }
     if allowed_actions.contains(&"memory_recall") {
         input_formats.push("- memory_recall: {\"query\":\"what did user say about X\"}");
@@ -419,6 +449,18 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
     }
     if allowed_actions.contains(&"web_search") {
         rules.push("7. Use web_search when the user asks to look something up online or needs current information.");
+    }
+    if allowed_actions.contains(&"browser_open") {
+        rules.push("7a. Use browser_open to navigate the virtual browser to a URL.");
+    }
+    if allowed_actions.contains(&"browser_click") {
+        rules.push("7b. Use browser_click to click elements on the page.");
+    }
+    if allowed_actions.contains(&"browser_type") {
+        rules.push("7c. Use browser_type to enter text/input into form fields or search boxes.");
+    }
+    if allowed_actions.contains(&"browser_read") {
+        rules.push("7d. Use browser_read to read the text content of the active page to analyze it.");
     }
     if allowed_actions.contains(&"memory_recall") {
         rules.push("8. Use memory_recall to search past interactions before asking the user to repeat context.");
@@ -590,6 +632,12 @@ struct AgentInput {
     title: String,
     #[serde(default)]
     status: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    selector: String,
+    #[serde(default)]
+    text: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1075,6 +1123,73 @@ where
                      and then answer their query using your own pre-existing knowledge/database."
                 )),
             }
+        }
+        "browser_open" => {
+            let url = if !input.url.is_empty() {
+                &input.url
+            } else if !input.path.is_empty() {
+                &input.path
+            } else {
+                return Err(OrchestrationError::Agent("browser_open requires 'url'".into()));
+            };
+            if crate::is_browser_running(config).await {
+                let result = crate::browser::navigate(config, url)
+                    .await
+                    .map_err(|e| OrchestrationError::Agent(e))?;
+                Ok(result)
+            } else {
+                let opened = if cfg!(target_os = "macos") {
+                    std::process::Command::new("open").arg(url).spawn().is_ok()
+                } else if cfg!(target_os = "windows") {
+                    std::process::Command::new("cmd").args(&["/C", "start", url]).spawn().is_ok()
+                } else {
+                    std::process::Command::new("xdg-open").arg(url).spawn().is_ok()
+                };
+                if opened {
+                    Ok(format!("Mint Auto is not active. Opened {url} in your default browser instead."))
+                } else {
+                    Err(OrchestrationError::Agent("Failed to open URL in default browser.".into()))
+                }
+            }
+        }
+        "browser_click" => {
+            let selector = if !input.selector.is_empty() {
+                &input.selector
+            } else if !input.path.is_empty() {
+                &input.path
+            } else {
+                return Err(OrchestrationError::Agent("browser_click requires 'selector'".into()));
+            };
+            let result = crate::browser::click(config, selector)
+                .await
+                .map_err(|e| OrchestrationError::Agent(e))?;
+            Ok(result)
+        }
+        "browser_type" => {
+            let selector = if !input.selector.is_empty() {
+                &input.selector
+            } else if !input.path.is_empty() {
+                &input.path
+            } else {
+                return Err(OrchestrationError::Agent("browser_type requires 'selector'".into()));
+            };
+            let text = if !input.text.is_empty() {
+                &input.text
+            } else if !input.query.is_empty() {
+                &input.query
+            } else {
+                return Err(OrchestrationError::Agent("browser_type requires 'text'".into()));
+            };
+            let result = crate::browser::type_text(config, selector, text)
+                .await
+                .map_err(|e| OrchestrationError::Agent(e))?;
+            Ok(result)
+        }
+        "browser_read" => {
+            let result = crate::browser::read_page_text(config)
+                .await
+                .map_err(|e| OrchestrationError::Agent(e))?;
+            Ok(result)
         }
         "memory_recall" => {
             let query = required(&input.query, "query")?;

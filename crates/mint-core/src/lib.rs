@@ -22,6 +22,7 @@ pub mod tts;
 pub mod weather;
 pub mod web_search;
 pub mod workflows;
+pub mod browser;
 
 pub use agent_loop::{AgentActionFuture, AgentLoopError, parse_agent_json, run_agent_loop};
 pub use chat::{
@@ -79,6 +80,7 @@ pub use tasks::{Task, TaskError, TaskStore, tasks_path};
 pub use tts::{TtsUrl, google_tts_urls};
 pub use weather::{WeatherError, WeatherReport, weather};
 pub use workflows::{WorkflowError, load_workflows, save_workflows, workflows_path};
+pub use browser::{BrowserTab, list_tabs, navigate, read_page_text, click, type_text, is_browser_running, spawn_automation_browser};
 pub mod api_server;
 pub use api_server::start_api_server;
 pub mod channels;

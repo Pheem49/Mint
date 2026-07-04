@@ -674,12 +674,12 @@ export async function selectWorkspaceDirectory(): Promise<string | null> {
   return selected?.trim() || null
 }
 
-export async function submitToolApproval(token: string, approved: boolean): Promise<void> {
+export async function submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
     return;
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('submit_tool_approval', { token, approved })
+  return invoke('submit_tool_approval', { token, approved, answer })
 }
 
 export async function proposeCodeEdits(root: string, edits: CodeEdit[]): Promise<CodeEditProposal> {

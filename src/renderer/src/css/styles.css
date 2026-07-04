@@ -1473,7 +1473,7 @@ h1 {
   gap: 8px;
   margin-bottom: 8px;
   margin-top: 0;
-  max-width: min(680px, 100%);
+  max-width: 100%;
 }
 
 .agent-activity-toggle {
@@ -1508,7 +1508,7 @@ h1 {
   border: 0;
   border-radius: 0;
   color: var(--text-main);
-  width: min(680px, 100%);
+  width: 100%;
   max-width: 100%;
   padding: 4px 0;
   box-shadow: none;

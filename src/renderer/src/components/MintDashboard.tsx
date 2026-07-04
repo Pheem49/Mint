@@ -507,14 +507,14 @@ export default function MintDashboard() {
     }
   }, [sending])
 
-  async function handleApproval(approved: boolean, autoApproveSession = false) {
+  async function handleApproval(approved: boolean, autoApproveSession = false, answer?: string) {
     if (!pendingApproval) return
     try {
       if (autoApproveSession) {
         sessionAutoApprovedRef.current = true
         setSessionAutoApproved(true)
       }
-      await submitToolApproval(pendingApproval.token, approved)
+      await submitToolApproval(pendingApproval.token, approved, answer)
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {

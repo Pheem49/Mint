@@ -577,12 +577,12 @@ export async function setDefaultImageProvider(provider: string): Promise<boolean
 
 
 
-export async function submitToolApproval(token: string, approved: boolean): Promise<void> {
+export async function submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     return;
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('submit_tool_approval', { token, approved })
+  return invoke('submit_tool_approval', { token, approved, answer })
 }
 
 export async function proposeCodeEdits(root: string, edits: CodeEdit[]): Promise<CodeEditProposal> {

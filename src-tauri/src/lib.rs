@@ -1,4 +1,3 @@
-mod browser;
 mod desktop;
 mod discord_rpc;
 mod events;
@@ -11,7 +10,7 @@ mod updater;
 mod webhooks;
 mod workflows;
 
-use browser::{
+use mint_core::browser::{
     BrowserTab, click as browser_click, list_tabs as browser_list_tabs,
     navigate as browser_navigate, read_page_text,
 };
@@ -41,7 +40,7 @@ use mint_core::{
 use plugins::execute_plugin;
 
 pub struct ApprovalsState {
-    pub pending: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    pub pending: Mutex<HashMap<String, oneshot::Sender<ApprovalOutcome>>>,
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -350,15 +349,10 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
             )
             .map_err(|e| e.to_string())?;
 
-        let approved =
+        let outcome =
             tokio::task::block_in_place(move || tokio::runtime::Handle::current().block_on(rx))
-                .unwrap_or(false);
-
-        if approved {
-            Ok(ApprovalOutcome::Approved)
-        } else {
-            Ok(ApprovalOutcome::Denied)
-        }
+                .unwrap_or(ApprovalOutcome::Denied);
+        Ok(outcome)
     };
 
     let progress_cb = |_| {};
@@ -433,15 +427,10 @@ async fn stream_chat_message(
             )
             .map_err(|e| e.to_string())?;
 
-        let approved =
+        let outcome =
             tokio::task::block_in_place(move || tokio::runtime::Handle::current().block_on(rx))
-                .unwrap_or(false);
-
-        if approved {
-            Ok(ApprovalOutcome::Approved)
-        } else {
-            Ok(ApprovalOutcome::Denied)
-        }
+                .unwrap_or(ApprovalOutcome::Denied);
+        Ok(outcome)
     };
 
     let on_progress_event = on_event.clone();
@@ -631,10 +620,22 @@ async fn submit_tool_approval(
     state: tauri::State<'_, ApprovalsState>,
     token: String,
     approved: bool,
+    answer: Option<String>,
 ) -> Result<(), String> {
     let mut pending = state.pending.lock().map_err(|error| error.to_string())?;
     if let Some(tx) = pending.remove(&token) {
-        let _ = tx.send(approved);
+        let outcome = if let Some(ans) = answer {
+            if !ans.trim().is_empty() {
+                ApprovalOutcome::Intercepted(ans)
+            } else {
+                ApprovalOutcome::Denied
+            }
+        } else if approved {
+            ApprovalOutcome::Approved
+        } else {
+            ApprovalOutcome::Denied
+        };
+        let _ = tx.send(outcome);
         Ok(())
     } else {
         Err("No pending approval found for this token".into())
@@ -859,7 +860,15 @@ async fn click_browser_selector(selector: String) -> Result<String, String> {
     )
     .await
 }
-
+#[tauri::command]
+async fn type_in_browser(selector: String, text: String) -> Result<String, String> {
+    mint_core::browser::type_text(
+        &load_config().map_err(|error| error.to_string())?,
+        &selector,
+        &text,
+    )
+    .await
+}
 #[tauri::command]
 fn start_screen_capture(app: AppHandle) -> Result<(), String> {
     open_desktop_window(&app, "screen-picker")
@@ -1090,6 +1099,7 @@ pub fn run() {
             navigate_browser,
             read_browser_page,
             click_browser_selector,
+            type_in_browser,
             start_screen_capture,
             submit_screen_selection,
             submit_spotlight,
