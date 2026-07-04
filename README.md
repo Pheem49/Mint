@@ -97,6 +97,13 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 - Signed Tauri update checks with an explicit approval step before installation.
 - Dynamic local Ollama model fetching in the Settings Window to query and display the actual models installed on your machine.
 - Pill-styled clean horizontal system event dividers for provider and model change notifications in the chat panel.
+- Global unrestricted text selection and copying enabled across all application components.
+- Spacious 1100px widescreen layout for the Chat Panel when the interactive model is hidden.
+- Advanced Workspace File Tree featuring:
+  - Automatic directory refreshing upon window focus and 15-second polling.
+  - Quick action buttons to create new files and folders.
+  - Right-click context menu to delete files/folders with confirmation modals.
+  - Drag-and-drop file mentions in the chat input with automatic spacing and dynamic accent-colored history bubble highlighting.
 
 ## What's New in v1.8.0
 
