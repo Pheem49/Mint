@@ -647,6 +647,24 @@ export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceT
   return invoke<WorkspaceTreeEntry>('get_workspace_tree', { path })
 }
 
+export async function createWorkspaceFile(path: string): Promise<void> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('create_workspace_file', { path })
+}
+
+export async function createWorkspaceFolder(path: string): Promise<void> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('create_workspace_folder', { path })
+}
+
+export async function deleteWorkspaceItem(path: string): Promise<void> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('delete_workspace_item', { path })
+}
+
 export async function selectWorkspaceDirectory(): Promise<string | null> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
     return null

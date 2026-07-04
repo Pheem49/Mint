@@ -136,6 +136,26 @@ async fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, 
         .map_err(|error| format!("workspace tree task failed: {error}"))?
 }
 
+#[tauri::command]
+async fn create_workspace_file(path: String) -> Result<(), String> {
+    std::fs::write(&path, "").map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn create_workspace_folder(path: String) -> Result<(), String> {
+    std::fs::create_dir_all(&path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn delete_workspace_item(path: String) -> Result<(), String> {
+    let path_buf = std::path::PathBuf::from(path);
+    if path_buf.is_dir() {
+        std::fs::remove_dir_all(path_buf).map_err(|error| error.to_string())
+    } else {
+        std::fs::remove_file(path_buf).map_err(|error| error.to_string())
+    }
+}
+
 fn build_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String> {
     let root = workspace_root(path.as_deref())?;
     let name = root
@@ -1023,6 +1043,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
             get_workspace_tree,
+            create_workspace_file,
+            create_workspace_folder,
+            delete_workspace_item,
             generate_images,
             select_workspace_directory,
             get_config,

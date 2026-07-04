@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { getWorkspaceTree, type WorkspaceTreeEntry } from '../tauri'
+import React, { useEffect, useState } from 'react'
+import { getWorkspaceTree, type WorkspaceTreeEntry, createWorkspaceFile, createWorkspaceFolder, deleteWorkspaceItem } from '../tauri'
 import folderIcon from 'material-icon-theme/icons/folder.svg?url'
 import folderOpenIcon from 'material-icon-theme/icons/folder-open.svg?url'
 import folderComponentsIcon from 'material-icon-theme/icons/folder-components.svg?url'
@@ -147,7 +147,7 @@ function materialFileIcon(name: string, fileExtension: string) {
   return FILE_ICONS_BY_NAME[name.toLowerCase()] || FILE_ICONS_BY_EXTENSION[fileExtension] || documentIcon
 }
 
-function TreeNode({ entry, level }: { entry: WorkspaceTreeEntry; level: number; key?: string }) {
+function TreeNode({ entry, level, onRefresh, workspacePath }: { entry: WorkspaceTreeEntry; level: number; onRefresh: () => void; workspacePath: string; key?: string }) {
   const [open, setOpen] = useState(level < 1)
   const isDirectory = entry.kind === 'directory'
   const hasChildren = entry.children.length > 0
@@ -156,6 +156,20 @@ function TreeNode({ entry, level }: { entry: WorkspaceTreeEntry; level: number; 
   const materialIcon = isDirectory ? materialFolderIcon(entry.name, open) : materialFileIcon(entry.name, fileExtension)
   const dragText = `@${entry.path}`
 
+  const handleContextMenu = async (event: React.MouseEvent) => {
+    event.preventDefault()
+    const confirmed = confirm(`Are you sure you want to delete "${entry.name}"?`)
+    if (!confirmed) return
+
+    try {
+      const absolutePath = `${workspacePath}/${entry.path}`
+      await deleteWorkspaceItem(absolutePath)
+      onRefresh()
+    } catch (err) {
+      alert(`Failed to delete item: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   return (
     <div className="workspace-tree-node">
       <button
@@ -163,6 +177,7 @@ function TreeNode({ entry, level }: { entry: WorkspaceTreeEntry; level: number; 
         className={`workspace-tree-row ${isDirectory ? 'is-directory' : 'is-file'}`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
         onClick={() => isDirectory && hasChildren && setOpen((current) => !current)}
+        onContextMenu={handleContextMenu}
         title={entry.path}
         draggable
         onDragStart={(event) => {
@@ -186,7 +201,7 @@ function TreeNode({ entry, level }: { entry: WorkspaceTreeEntry; level: number; 
       {isDirectory && open && hasChildren && (
         <div className="workspace-tree-children">
           {entry.children.map((child) => (
-            <TreeNode key={child.path} entry={child} level={level + 1} />
+            <TreeNode key={child.path} entry={child} level={level + 1} onRefresh={onRefresh} workspacePath={workspacePath} />
           ))}
         </div>
       )}
@@ -217,11 +232,52 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
 
   useEffect(() => {
     refresh()
+
+    // Refresh when the window gains focus (e.g., switching back from VS Code)
+    const handleFocus = () => {
+      refresh()
+    }
+    window.addEventListener('focus', handleFocus)
+
+    // Poll every 15 seconds to catch edits/updates in real-time
+    const interval = setInterval(() => {
+      refresh()
+    }, 15000)
+
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      clearInterval(interval)
+    }
   }, [workspacePath])
 
-  const startWorkspacePrompt = () => {
-    onEnableAgentMode()
-    onSetMessage('Review this workspace and help plan next steps')
+  const handleCreateFile = async () => {
+    if (!workspacePath.trim()) return
+    const name = prompt('Enter name of new file:')
+    if (!name || !name.trim()) return
+
+    try {
+      setError('')
+      const fullPath = `${workspacePath}/${name.trim()}`
+      await createWorkspaceFile(fullPath)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleCreateFolder = async () => {
+    if (!workspacePath.trim()) return
+    const name = prompt('Enter name of new folder:')
+    if (!name || !name.trim()) return
+
+    try {
+      setError('')
+      const fullPath = `${workspacePath}/${name.trim()}`
+      await createWorkspaceFolder(fullPath)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   return (
@@ -237,7 +293,8 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
       </header>
 
       <div className="workspace-panel-actions">
-        <button type="button" onClick={startWorkspacePrompt}>Use Agent</button>
+        <button type="button" onClick={handleCreateFile} disabled={!workspacePath.trim()}>New File</button>
+        <button type="button" onClick={handleCreateFolder} disabled={!workspacePath.trim()}>New Folder</button>
         <button type="button" onClick={refresh} disabled={!workspacePath.trim()}>Refresh</button>
       </div>
 
@@ -255,7 +312,7 @@ export default function WorkspacePanel({ agentMode, sending, workspacePath, onEn
             </div>
             <div className="workspace-tree">
               {tree.children.map((entry) => (
-                <TreeNode key={entry.path} entry={entry} level={0} />
+                <TreeNode key={entry.path} entry={entry} level={0} onRefresh={refresh} workspacePath={workspacePath} />
               ))}
             </div>
           </>

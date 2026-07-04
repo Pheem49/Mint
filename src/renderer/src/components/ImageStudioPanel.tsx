@@ -16,6 +16,7 @@ interface ImageStudioPanelProps {
   view: string
   onRefreshPictures?: () => void
   onSendToChat?: (dataUri: string, prompt: string) => void
+  onToggleMobileSidebar?: () => void
 }
 
 const ASPECT_OPTIONS: { value: AspectRatio; label: string; icon: string }[] = [
@@ -85,7 +86,7 @@ function SkeletonCard() {
   )
 }
 
-export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat }: ImageStudioPanelProps) {
+export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat, onToggleMobileSidebar }: ImageStudioPanelProps) {
   const [prompt, setPrompt] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
   const [showNegative, setShowNegative] = useState(false)
@@ -206,6 +207,15 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
       {/* Header */}
       <header className="img-studio-header">
         <div className="img-studio-header-title">
+          <button
+            className="mobile-menu-btn"
+            type="button"
+            onClick={onToggleMobileSidebar}
+            aria-label="Toggle menu"
+            style={{ marginRight: '8px' }}
+          >
+            ☰
+          </button>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
           </svg>
