@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.pheem49.mint</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Mint Agent</name>
+  <summary>A native Tauri desktop AI assistant with a Rust backend and React UI</summary>
+  <description>
+    <p>
+      Mint Agent is a native desktop AI assistant built on Tauri. It features a modern, reactive React UI and a powerful Rust backend to assist you with tasks, run local command orchestrations, perform screen captures, and run workflows seamlessly.
+    </p>
+    <p>
+      Features:
+    </p>
+    <ul>
+      <li>High performance and lightweight memory footprint.</li>
+      <li>Local Rust agent orchestrator.</li>
+      <li>Smart context integration and tool execution.</li>
+      <li>Multi-provider AI chat and image generation tools.</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">com.pheem49.mint.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Mint Agent main chat interface and workspaces</caption>
+      <image>https://raw.githubusercontent.com/pheem49/Mint-CLI/main/assets/Mint_Desktop.png</image>
+    </screenshot>
+  </screenshots>
+  <url type="homepage">https://github.com/pheem49/Mint-CLI</url>
+  <url type="bugtracker">https://github.com/pheem49/Mint-CLI/issues</url>
+  <provides>
+    <binary>mint-desktop</binary>
+  </provides>
+  <developer_name>pheem49</developer_name>
+</component>

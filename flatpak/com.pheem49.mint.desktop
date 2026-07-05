@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Mint Agent
+Comment=A native Tauri desktop AI assistant with a Rust backend and React UI
+Exec=mint-desktop
+Icon=com.pheem49.mint
+Type=Application
+Terminal=false
+Categories=Utility;Development;
+StartupWMClass=mint-desktop
