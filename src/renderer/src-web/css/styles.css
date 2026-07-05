@@ -916,7 +916,7 @@ h1 {
 
 .assistant-workspace.model-hidden .conversation-panel {
   flex: 1;
-  max-width: 900px;
+  max-width: 1100px;
   margin: 0 auto;
 }
 
@@ -1486,7 +1486,7 @@ h1 {
   gap: 8px;
   margin-bottom: 8px;
   margin-top: 0;
-  max-width: min(680px, 100%);
+  max-width: 100%;
 }
 
 .agent-activity-toggle {
@@ -1521,7 +1521,7 @@ h1 {
   border: 0;
   border-radius: 0;
   color: var(--text-main);
-  width: min(680px, 100%);
+  width: 100%;
   max-width: 100%;
   padding: 4px 0;
   box-shadow: none;
@@ -3047,12 +3047,12 @@ input:checked + .slider:before {
 .assistant-workspace.model-hidden .conversation-panel {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  width: min(840px, calc(100% - 64px));
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  width: min(1100px, calc(100% - 64px));
   height: 100%;
   max-width: none;
   margin: 0 auto;
-  padding: 56px 0 28px;
+  padding: 32px 0 8px;
   grid-column: 1 / -1;
   z-index: 1;
 }
@@ -3075,13 +3075,13 @@ input:checked + .slider:before {
 }
 
 .assistant-workspace.model-hidden .conversation-panel.is-empty {
-  grid-template-rows: auto minmax(0, 1fr);
-  align-content: center;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  align-content: stretch;
   justify-content: stretch;
   width: min(840px, calc(100% - 64px));
   margin: 0 auto;
-  padding-top: 56px;
-  padding-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 8px;
 }
 
 .conversation-panel.is-empty .chat-container {
@@ -3643,9 +3643,14 @@ input:checked + .slider:before {
 
   .assistant-workspace {
     display: flex;
+    flex-direction: column;
     margin-left: 0;
-    padding: 12px;
-    gap: 12px;
+    padding: 0;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
   }
 
   .assistant-workspace.layout-chat {
@@ -3654,6 +3659,10 @@ input:checked + .slider:before {
 
   .app-body {
     grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
   }
 
   .sidebar-toggle {
@@ -3701,14 +3710,27 @@ input:checked + .slider:before {
   .conversation-panel {
     position: static;
     width: 100%;
+    height: 100%;
     max-height: none;
     transform: none;
     flex: 1;
     min-width: 0;
+    min-height: 0;
+    border-radius: 0;
+    overflow: hidden;
   }
 
   .chat-container {
     max-height: none;
+  }
+  
+  .input-area {
+    padding: 10px;
+  }
+  
+  #chat-form {
+    min-height: auto;
+    padding: 6px;
   }
 }
 
@@ -3724,6 +3746,19 @@ input:checked + .slider:before {
 
 [data-theme="midnight"] .chat-bold-highlight {
   color: #38bdf8; /* Sky-400 for midnight theme */
+}
+
+/* Input Disclaimer Footer */
+.input-disclaimer {
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  opacity: 0.55;
+  padding: 6px 20px 10px;
+  margin: 0;
+  flex-shrink: 0;
+  line-height: 1.5;
+  user-select: none;
 }
 
 /* Web-Native Chat Header */
@@ -3838,6 +3873,51 @@ input:checked + .slider:before {
 @media (max-width: 760px) {
   .mobile-menu-btn {
     display: flex;
+  }
+
+  /* Override desktop grid layout so chat-header (hamburger) is visible on mobile */
+  .assistant-workspace.model-hidden .conversation-panel,
+  .assistant-workspace.model-hidden .conversation-panel.is-empty {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+    grid-template-rows: none;
+    grid-column: auto;
+  }
+
+  /* Solid header fixed to top with background and blur */
+  .chat-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 200;
+    background: var(--chrome-bg);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border-bottom: 1px solid var(--border);
+    height: 52px;
+    padding: 10px 16px;
+  }
+
+  .assistant-workspace.model-hidden .chat-header {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  /* Push chat content below fixed header */
+  .assistant-workspace.model-hidden .chat-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 64px 12px 8px;
+  }
+
+  .assistant-workspace.model-hidden .input-area {
+    width: 100%;
+    flex-shrink: 0;
   }
 }
 
@@ -4077,5 +4157,13 @@ input:checked + .slider:before {
   text-align: center;
   padding: 30px 0;
   font-size: 0.9rem;
+}
+
+/* Allow global text selection everywhere */
+* {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  -moz-user-select: text !important;
+  -ms-user-select: text !important;
 }
 

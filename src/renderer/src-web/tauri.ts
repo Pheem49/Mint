@@ -134,6 +134,28 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   return invoke<RuntimeStatus>('get_runtime_status')
 }
 
+export interface DetectedTools {
+  docker: boolean
+  git: boolean
+  gh: boolean
+  node: boolean
+}
+
+export async function detectSystemTools(): Promise<DetectedTools> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    try {
+      const res = await fetch(`${API_BASE}/detect-tools`);
+      return await res.json();
+    } catch (e) {
+      console.error("Failed to detect tools from local server:", e);
+      return { docker: false, git: false, gh: false, node: false };
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<DetectedTools>('detect_system_tools')
+}
+
 export async function sendChatMessage(
   message: string,
   imageDataUri?: string | null,
@@ -577,12 +599,12 @@ export async function setDefaultImageProvider(provider: string): Promise<boolean
 
 
 
-export async function submitToolApproval(token: string, approved: boolean): Promise<void> {
+export async function submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     return;
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('submit_tool_approval', { token, approved })
+  return invoke('submit_tool_approval', { token, approved, answer })
 }
 
 export async function proposeCodeEdits(root: string, edits: CodeEdit[]): Promise<CodeEditProposal> {

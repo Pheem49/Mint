@@ -384,6 +384,10 @@ export default function MintDashboard() {
   }
 
   const toggleSidebar = () => {
+    if (window.innerWidth <= 760) {
+      setMobileSidebarOpen(false)
+      return
+    }
     const next = !sidebarCollapsed
     window.localStorage.setItem('mint:sidebar-collapsed', String(next))
     setSidebarCollapsed(next)
@@ -400,10 +404,10 @@ export default function MintDashboard() {
     setAgentMode(enabled)
   }
 
-  async function handleApproval(approved: boolean, _autoApproveSession = false) {
+  async function handleApproval(approved: boolean, _autoApproveSession = false, answer?: string) {
     if (!pendingApproval) return
     try {
-      await submitToolApproval(pendingApproval.token, approved)
+      await submitToolApproval(pendingApproval.token, approved, answer)
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -825,7 +829,7 @@ export default function MintDashboard() {
 
   return (
     <div className={`app-container ${startupReady ? '' : 'is-loading'}`}>
-      <div className={`app-body ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''}`}>
+      <div className={`app-body ${(sidebarCollapsed && window.innerWidth > 760) ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''}`}>
         {mobileSidebarOpen && (
           <div
             className="sidebar-backdrop"
@@ -908,6 +912,7 @@ export default function MintDashboard() {
             setView('chat')
             setMessage(imgPrompt)
           }}
+          onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
         />
       </div>
       <div className={`startup-loading ${startupReady ? 'is-hidden' : ''}`} aria-live="polite" aria-busy={!startupReady}>

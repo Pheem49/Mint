@@ -51,28 +51,7 @@ pub fn load_workflows() -> Result<Vec<Value>, WorkflowError> {
 fn save_default_workflows(path: &PathBuf) -> Result<(), WorkflowError> {
     let directory = path.parent().ok_or(WorkflowError::MissingDirectory)?;
     fs::create_dir_all(directory).map_err(WorkflowError::CreateDirectory)?;
-    let workflows = json!([
-        {
-            "id": "wf-1",
-            "name": "Check Mic on Zoom",
-            "trigger": { "type": "process_running", "processName": "zoom" },
-            "action": {
-                "type": "system_info",
-                "message": "Looks like you opened Zoom. Should I check your system resources?",
-                "target": ""
-            }
-        },
-        {
-            "id": "wf-2",
-            "name": "Coding Time",
-            "trigger": { "type": "process_running", "processName": "code" },
-            "action": {
-                "type": "open_app",
-                "message": "Coding time. Want me to open Spotify?",
-                "target": "spotify"
-            }
-        }
-    ]);
+    let workflows = json!([]);
     let raw = serde_json::to_string_pretty(&workflows).map_err(WorkflowError::Serialize)?;
     fs::write(path, format!("{raw}\n")).map_err(|source| WorkflowError::Write {
         path: path.clone(),

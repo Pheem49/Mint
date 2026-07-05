@@ -268,6 +268,7 @@ export default function MintDashboard() {
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const startupReady = (dashboardDataReady && modelReady) || startupTimedOut
+  const [proactiveSuggestion, setProactiveSuggestion] = useState<any>(null)
 
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -419,10 +420,14 @@ export default function MintDashboard() {
         setPendingApproval(event.payload)
       }
     })
+    const unlistenProactive = window.api.onProactiveSuggestion?.((suggestion: any) => {
+      setProactiveSuggestion(suggestion)
+    })
     return () => {
       unlistenPromise?.then?.((unlisten) => unlisten?.())
       unlistenSpotlight?.then?.((unlisten) => unlisten?.())
       unlistenVision?.then?.((unlisten) => unlisten?.())
+      unlistenProactive?.then?.((unlisten) => unlisten?.())
     }
   }, [])
 
@@ -502,14 +507,14 @@ export default function MintDashboard() {
     }
   }, [sending])
 
-  async function handleApproval(approved: boolean, autoApproveSession = false) {
+  async function handleApproval(approved: boolean, autoApproveSession = false, answer?: string) {
     if (!pendingApproval) return
     try {
       if (autoApproveSession) {
         sessionAutoApprovedRef.current = true
         setSessionAutoApproved(true)
       }
-      await submitToolApproval(pendingApproval.token, approved)
+      await submitToolApproval(pendingApproval.token, approved, answer)
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -605,6 +610,17 @@ export default function MintDashboard() {
       setStreamingConversationId(null)
       setSendingMessage('')
       setSendingImageCount(0)
+    }
+  }
+
+  const handleProactiveAction = async (action: any) => {
+    setProactiveSuggestion(null)
+    if (action && action.type !== 'none') {
+      try {
+        await window.api.executeProactiveAction(action)
+      } catch (err) {
+        setError(String(err))
+      }
     }
   }
 
@@ -1018,6 +1034,28 @@ export default function MintDashboard() {
           onSetSearchOpen={setIsSearchOpen}
         />
         <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspace' ? '' : 'model-hidden'} ${view === 'workspace' ? 'workspace-open' : ''}`}>
+          {proactiveSuggestion && (
+            <div className="proactive-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
+              <div className="proactive-header">
+                <span className="proactive-icon">✨</span>
+                <div className="proactive-message">{proactiveSuggestion.message}</div>
+                <button className="proactive-dismiss-btn" onClick={() => setProactiveSuggestion(null)}>
+                  Dismiss
+                </button>
+              </div>
+              <div className="proactive-chips">
+                {proactiveSuggestion.suggestions?.map((sug: any, i: number) => (
+                  <button
+                    key={i}
+                    className="suggestion-chip"
+                    onClick={() => handleProactiveAction(sug.action)}
+                  >
+                    {sug.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {view === 'workspace' && (
             <WorkspacePanel
               agentMode={agentMode}

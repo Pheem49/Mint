@@ -21,3 +21,4 @@ sha2.workspace = true
 tokio.workspace = true
 crossterm = "0.28"
 chrono.workspace = true
+textwrap = "0.16"

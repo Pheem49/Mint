@@ -338,7 +338,7 @@ pub async fn run_code_agent_with_options(
             }
         }
         let formatted_summary = format_markdown_bold(&summary);
-        print!("\n{MINT}Mint:{RESET} ");
+        print!("\n  {MINT}Mint:{RESET} ");
         render_live_summary(&formatted_summary);
         println!();
     };
@@ -377,16 +377,16 @@ pub async fn run_code_agent_with_options(
     let res = res.map_err(|e| anyhow!("{}", e))?;
 
     if should_show_verification(&res.verification) {
-        println!("Verification: {}", res.verification);
+        println!("  Verification: {}", res.verification);
     }
     println!(
-        "{DIM}─ Worked for {}{RESET}",
+        "  {DIM}─ Worked for {}{RESET}",
         format_elapsed(started_at.elapsed())
     );
 
     let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let width = tw as usize;
-    println!("{DIM}{}{RESET}", "─".repeat(width));
+    println!("  {DIM}{}{RESET}", "─".repeat(width.saturating_sub(2)));
 
     Ok(res)
 }
@@ -408,19 +408,26 @@ fn format_elapsed(duration: Duration) -> String {
 }
 
 fn render_live_summary(summary: &str) {
-    let mut chunk = String::new();
-    for character in summary.chars() {
-        chunk.push(character);
-        if chunk.chars().count() >= 96 {
-            print!("{chunk}");
-            let _ = io::stdout().flush();
-            chunk.clear();
+    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let width = tw as usize;
+
+    let mut is_first = true;
+    for line in summary.split('\n') {
+        let indent = if is_first { "" } else { "  " };
+        let options = textwrap::Options::new(width)
+            .initial_indent(indent)
+            .subsequent_indent("  ")
+            .break_words(true);
+        let wrapped = textwrap::fill(line, &options);
+
+        if is_first {
+            print!("{wrapped}");
+            is_first = false;
+        } else {
+            print!("\n{wrapped}");
         }
     }
-    if !chunk.is_empty() {
-        print!("{chunk}");
-        let _ = io::stdout().flush();
-    }
+    let _ = io::stdout().flush();
 }
 
 fn print_colored_diff(diff: &str) {
@@ -497,13 +504,21 @@ fn explored_action_label(action: &str, input: &serde_json::Value) -> Option<Expl
                 kind: "[list_files] List",
                 target: display_tool_target(path),
             }),
-        "read_file" => input
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(|path| ExploredAction {
+        "read_file" => {
+            let path = input.get("path").and_then(|v| v.as_str())?;
+            let start = input.get("startLine").and_then(|v| v.as_u64());
+            let end = input.get("endLine").and_then(|v| v.as_u64());
+            let file_name = display_tool_target(path);
+            let target = match (start, end) {
+                (Some(s), Some(e)) => format!("{} #L{}-{}", file_name, s, e),
+                (Some(s), None) => format!("{} #L{}", file_name, s),
+                _ => file_name,
+            };
+            Some(ExploredAction {
                 kind: "[read_file] Read",
-                target: display_tool_target(path),
-            }),
+                target,
+            })
+        }
         "search_code" => {
             let query = input.get("query").and_then(|v| v.as_str())?;
             let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
@@ -540,6 +555,30 @@ fn display_tool_target(path: &str) -> String {
     }
 }
 
+fn strip_ansi_escapes(s: &str) -> String {
+    let mut result = String::new();
+    let mut in_escape = false;
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c.is_ascii_alphabetic() {
+                in_escape = false;
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+fn is_thai_combining(c: char) -> bool {
+    matches!(c,
+        '\u{0e31}' | '\u{0e34}'..='\u{0e37}' | '\u{0e38}'..='\u{0e39}' |
+        '\u{0e47}'..='\u{0e4e}'
+    )
+}
+
 fn render_live_status(status: &mut LiveStatus) {
     clear_live_status(status);
     let mut lines = Vec::new();
@@ -547,23 +586,48 @@ fn render_live_status(status: &mut LiveStatus) {
     let activities_start = status.committed_activities.min(status.activities.len());
     let tasks_start = status.committed_tasks.min(status.tasks.len());
 
-    lines.extend(plan_lines(&status.plan_steps));
-    lines.extend(tasks_lines(&status.tasks[tasks_start..]));
-    lines.extend(activities_lines(&status.activities[activities_start..]));
-    lines.extend(explored_lines(&status.explored[explored_start..]));
+    let is_thinking = status.thinking.is_some();
+    let tick = status.spinner_tick;
+
+    lines.extend(plan_lines(&status.plan_steps, is_thinking, tick));
+    lines.extend(tasks_lines(&status.tasks[tasks_start..], is_thinking, tick));
+    lines.extend(activities_lines(
+        &status.activities[activities_start..],
+        is_thinking,
+        tick,
+    ));
+    lines.extend(explored_lines(
+        &status.explored[explored_start..],
+        is_thinking,
+        tick,
+    ));
     if let Some(thinking) = &status.thinking {
-        let frames = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
+        let frames = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let frame = frames[status.spinner_tick % frames.len()];
         status.spinner_tick += 1;
-        lines.push(format!("{MINT}{frame}{RESET} {BRIGHT}{thinking}{RESET}"));
+        lines.push(format!("  {MINT}{frame}{RESET} {BRIGHT}{thinking}{RESET}"));
     }
     if lines.is_empty() {
         return;
     }
+
+    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let width = tw as usize;
+
+    let mut physical_lines_count = 0;
     for line in &lines {
+        let stripped = strip_ansi_escapes(line);
+        let line_len = stripped.chars().filter(|&c| !is_thai_combining(c)).count();
+        let physical_lines = if width > 0 {
+            (line_len + width - 1) / width
+        } else {
+            1
+        }
+        .max(1);
+        physical_lines_count += physical_lines;
         println!("{line}");
     }
-    status.rendered_lines = lines.len();
+    status.rendered_lines = physical_lines_count;
     let _ = io::stdout().flush();
 }
 
@@ -573,9 +637,13 @@ fn commit_activity_snapshot(status: &mut LiveStatus) {
     let activities_start = status.committed_activities.min(status.activities.len());
     let tasks_start = status.committed_tasks.min(status.tasks.len());
 
-    let mut lines = explored_lines(&status.explored[explored_start..]);
-    lines.extend(activities_lines(&status.activities[activities_start..]));
-    lines.extend(tasks_lines(&status.tasks[tasks_start..]));
+    let mut lines = explored_lines(&status.explored[explored_start..], false, 0);
+    lines.extend(activities_lines(
+        &status.activities[activities_start..],
+        false,
+        0,
+    ));
+    lines.extend(tasks_lines(&status.tasks[tasks_start..], false, 0));
     if lines.is_empty() {
         return;
     }
@@ -594,7 +662,14 @@ fn print_timeline_note(thought: &str) {
     if thought.is_empty() {
         return;
     }
-    println!("{DIM}• {thought}{RESET}");
+    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let width = tw as usize;
+    let options = textwrap::Options::new(width)
+        .initial_indent("  • ")
+        .subsequent_indent("    ")
+        .break_words(true);
+    let wrapped = textwrap::fill(thought, &options);
+    println!("{DIM}{wrapped}{RESET}");
 }
 
 fn print_timeline_separator() {
@@ -615,18 +690,34 @@ fn clear_live_status(status: &mut LiveStatus) {
     let _ = io::stdout().flush();
 }
 
-fn explored_lines(actions: &[ExploredAction]) -> Vec<String> {
+fn get_bullet(name: &str, is_thinking: bool, tick: usize) -> String {
+    let char_str = if is_thinking {
+        if (tick / 4) % 2 == 0 { "●" } else { "○" }
+    } else {
+        "●"
+    };
+
+    match name {
+        "plan" => format!("{BLUE}{char_str}{RESET} plan"),
+        "tasks" => format!("{MINT}{char_str}{RESET} tasks"),
+        "activity" => format!("{BLUE}{char_str}{RESET} activity"),
+        "explored" => format!("{DIM}{char_str}{RESET} explored"),
+        _ => char_str.to_string(),
+    }
+}
+
+fn explored_lines(actions: &[ExploredAction], is_thinking: bool, tick: usize) -> Vec<String> {
     if actions.is_empty() {
         return Vec::new();
     }
     let grouped = grouped_explored_actions(actions);
-    let mut lines = vec![format!("{BLUE}○ explored{RESET}")];
+    let mut lines = vec![format!("  {}", get_bullet("explored", is_thinking, tick))];
     lines.extend(grouped.iter().take(24).enumerate().map(|(index, action)| {
-        let prefix = if index == 0 { "  └" } else { "   " };
+        let prefix = if index == 0 { "    └" } else { "     " };
         format!("{DIM}{prefix} {action}{RESET}")
     }));
     if grouped.len() > 24 {
-        lines.push(format!("{DIM}   ... {} more{RESET}", grouped.len() - 24));
+        lines.push(format!("{DIM}     ... {} more{RESET}", grouped.len() - 24));
     }
     lines
 }
@@ -658,17 +749,20 @@ fn command_was_run(result: &str) -> bool {
     result.lines().any(|line| line.starts_with("exit: "))
 }
 
-fn activities_lines(activities: &[String]) -> Vec<String> {
+fn activities_lines(activities: &[String], is_thinking: bool, tick: usize) -> Vec<String> {
     if activities.is_empty() {
         return Vec::new();
     }
-    let mut lines = vec![format!("{BLUE}◇ activity{RESET}")];
+    let mut lines = vec![format!("  {}", get_bullet("activity", is_thinking, tick))];
     lines.extend(activities.iter().take(24).enumerate().map(|(index, act)| {
-        let prefix = if index == 0 { "  └" } else { "   " };
+        let prefix = if index == 0 { "    └" } else { "     " };
         format!("{DIM}{prefix} {act}{RESET}")
     }));
     if activities.len() > 24 {
-        lines.push(format!("{DIM}   ... {} more{RESET}", activities.len() - 24));
+        lines.push(format!(
+            "{DIM}     ... {} more{RESET}",
+            activities.len() - 24
+        ));
     }
     lines
 }
@@ -685,16 +779,16 @@ fn extract_plan_steps(input: &serde_json::Value) -> Option<Vec<String>> {
     Some(steps)
 }
 
-fn plan_lines(steps: &[String]) -> Vec<String> {
+fn plan_lines(steps: &[String], is_thinking: bool, tick: usize) -> Vec<String> {
     if steps.is_empty() {
         return Vec::new();
     }
-    let mut lines = vec![format!("{BLUE}● plan{RESET}")];
+    let mut lines = vec![format!("  {}", get_bullet("plan", is_thinking, tick))];
     for (index, step) in steps.iter().enumerate() {
         let prefix = if index == steps.len() - 1 {
-            "  └"
+            "    └"
         } else {
-            "  ├"
+            "    ├"
         };
         let (checked, text) = if step.to_lowercase().starts_with("done:") {
             (format!("{MINT}[x]{RESET}"), step["done:".len()..].trim())
@@ -722,17 +816,17 @@ fn plan_lines(steps: &[String]) -> Vec<String> {
     lines
 }
 
-fn tasks_lines(tasks: &[String]) -> Vec<String> {
+fn tasks_lines(tasks: &[String], is_thinking: bool, tick: usize) -> Vec<String> {
     if tasks.is_empty() {
         return Vec::new();
     }
-    let mut lines = vec![format!("{BLUE}● tasks{RESET}")];
+    let mut lines = vec![format!("  {}", get_bullet("tasks", is_thinking, tick))];
     lines.extend(tasks.iter().take(24).enumerate().map(|(index, task)| {
-        let prefix = if index == 0 { "  └" } else { "   " };
+        let prefix = if index == 0 { "    └" } else { "     " };
         format!("{DIM}{prefix} {task}{RESET}")
     }));
     if tasks.len() > 24 {
-        lines.push(format!("{DIM}   ... {} more{RESET}", tasks.len() - 24));
+        lines.push(format!("{DIM}     ... {} more{RESET}", tasks.len() - 24));
     }
     lines
 }

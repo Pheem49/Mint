@@ -1,4 +1,3 @@
-mod browser;
 mod desktop;
 mod discord_rpc;
 mod events;
@@ -11,7 +10,7 @@ mod updater;
 mod webhooks;
 mod workflows;
 
-use browser::{
+use mint_core::browser::{
     BrowserTab, click as browser_click, list_tabs as browser_list_tabs,
     navigate as browser_navigate, read_page_text,
 };
@@ -41,7 +40,7 @@ use mint_core::{
 use plugins::execute_plugin;
 
 pub struct ApprovalsState {
-    pub pending: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    pub pending: Mutex<HashMap<String, oneshot::Sender<ApprovalOutcome>>>,
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -136,6 +135,26 @@ async fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, 
         .map_err(|error| format!("workspace tree task failed: {error}"))?
 }
 
+#[tauri::command]
+async fn create_workspace_file(path: String) -> Result<(), String> {
+    std::fs::write(&path, "").map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn create_workspace_folder(path: String) -> Result<(), String> {
+    std::fs::create_dir_all(&path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn delete_workspace_item(path: String) -> Result<(), String> {
+    let path_buf = std::path::PathBuf::from(path);
+    if path_buf.is_dir() {
+        std::fs::remove_dir_all(path_buf).map_err(|error| error.to_string())
+    } else {
+        std::fs::remove_file(path_buf).map_err(|error| error.to_string())
+    }
+}
+
 fn build_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, String> {
     let root = workspace_root(path.as_deref())?;
     let name = root
@@ -191,6 +210,11 @@ fn workspace_root(path: Option<&str>) -> Result<PathBuf, String> {
         None => std::env::current_dir().map_err(|error| error.to_string())?,
     };
     let root = root.canonicalize().map_err(|error| error.to_string())?;
+    let root = if root.ends_with("src-tauri") {
+        root.parent().unwrap_or(&root).to_path_buf()
+    } else {
+        root
+    };
     if !root.is_dir() {
         return Err(format!("workspace is not a directory: {}", root.display()));
     }
@@ -330,15 +354,10 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
             )
             .map_err(|e| e.to_string())?;
 
-        let approved =
+        let outcome =
             tokio::task::block_in_place(move || tokio::runtime::Handle::current().block_on(rx))
-                .unwrap_or(false);
-
-        if approved {
-            Ok(ApprovalOutcome::Approved)
-        } else {
-            Ok(ApprovalOutcome::Denied)
-        }
+                .unwrap_or(ApprovalOutcome::Denied);
+        Ok(outcome)
     };
 
     let progress_cb = |_| {};
@@ -413,15 +432,10 @@ async fn stream_chat_message(
             )
             .map_err(|e| e.to_string())?;
 
-        let approved =
+        let outcome =
             tokio::task::block_in_place(move || tokio::runtime::Handle::current().block_on(rx))
-                .unwrap_or(false);
-
-        if approved {
-            Ok(ApprovalOutcome::Approved)
-        } else {
-            Ok(ApprovalOutcome::Denied)
-        }
+                .unwrap_or(ApprovalOutcome::Denied);
+        Ok(outcome)
     };
 
     let on_progress_event = on_event.clone();
@@ -553,20 +567,52 @@ struct LearnedSkillDto {
     source_path: String,
     content: String,
     updated_at: String,
+    location: String,
 }
 
 #[tauri::command]
-fn list_learned_skills() -> Result<Vec<LearnedSkillDto>, String> {
+fn list_learned_skills(workspace_path: Option<String>) -> Result<Vec<LearnedSkillDto>, String> {
     let store = MemoryStore::open_default().map_err(|e| e.to_string())?;
-    let skills = store.learned_skills(100).map_err(|e| e.to_string())?;
-    let dtos = skills
-        .into_iter()
-        .map(|s| LearnedSkillDto {
+    let db_skills = store.learned_skills(100).map_err(|e| e.to_string())?;
+
+    let mut global_skills = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        let global_skills_path = home.join(".config").join("mint").join("mint-skills");
+        if !global_skills_path.exists() {
+            let _ = std::fs::create_dir_all(&global_skills_path);
+        }
+        mint_core::skills::load_skills_from_dir(&global_skills_path, &mut global_skills);
+    }
+
+    let mut workspace_skills = Vec::new();
+    if let Ok(root) = workspace_root(workspace_path.as_deref()) {
+        let workspace_skills_path1 = root.join(".agents").join("skills");
+        mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut workspace_skills);
+
+        let workspace_skills_path2 = root.join("skills");
+        mint_core::skills::load_skills_from_dir(&workspace_skills_path2, &mut workspace_skills);
+    }
+
+    let mut unique_skills = std::collections::BTreeMap::new();
+    for s in db_skills {
+        unique_skills.insert(s.name.clone(), (s, "database"));
+    }
+    for s in global_skills {
+        unique_skills.insert(s.name.clone(), (s, "global"));
+    }
+    for s in workspace_skills {
+        unique_skills.insert(s.name.clone(), (s, "workspace"));
+    }
+
+    let dtos = unique_skills
+        .into_values()
+        .map(|(s, loc)| LearnedSkillDto {
             id: s.id,
             name: s.name,
             source_path: s.source_path,
             content: s.content,
             updated_at: s.created_at,
+            location: loc.to_string(),
         })
         .collect();
     Ok(dtos)
@@ -584,6 +630,7 @@ fn add_learned_skill(name: String, content: String) -> Result<LearnedSkillDto, S
         source_path: skill.source_path,
         content: skill.content,
         updated_at: skill.created_at,
+        location: "database".to_string(),
     })
 }
 
@@ -611,14 +658,45 @@ async fn submit_tool_approval(
     state: tauri::State<'_, ApprovalsState>,
     token: String,
     approved: bool,
+    answer: Option<String>,
 ) -> Result<(), String> {
     let mut pending = state.pending.lock().map_err(|error| error.to_string())?;
     if let Some(tx) = pending.remove(&token) {
-        let _ = tx.send(approved);
+        let outcome = if let Some(ans) = answer {
+            if !ans.trim().is_empty() {
+                ApprovalOutcome::Intercepted(ans)
+            } else {
+                ApprovalOutcome::Denied
+            }
+        } else if approved {
+            ApprovalOutcome::Approved
+        } else {
+            ApprovalOutcome::Denied
+        };
+        let _ = tx.send(outcome);
         Ok(())
     } else {
         Err("No pending approval found for this token".into())
     }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectedTools {
+    pub docker: bool,
+    pub git: bool,
+    pub gh: bool,
+    pub node: bool,
+}
+
+#[tauri::command]
+async fn detect_system_tools() -> Result<DetectedTools, String> {
+    Ok(DetectedTools {
+        docker: mint_core::config::which("docker"),
+        git: mint_core::config::which("git"),
+        gh: mint_core::config::which("gh"),
+        node: mint_core::config::which("node"),
+    })
 }
 
 #[derive(serde::Serialize)]
@@ -839,7 +917,15 @@ async fn click_browser_selector(selector: String) -> Result<String, String> {
     )
     .await
 }
-
+#[tauri::command]
+async fn type_in_browser(selector: String, text: String) -> Result<String, String> {
+    mint_core::browser::type_text(
+        &load_config().map_err(|error| error.to_string())?,
+        &selector,
+        &text,
+    )
+    .await
+}
 #[tauri::command]
 fn start_screen_capture(app: AppHandle) -> Result<(), String> {
     open_desktop_window(&app, "screen-picker")
@@ -1022,7 +1108,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
+            detect_system_tools,
             get_workspace_tree,
+            create_workspace_file,
+            create_workspace_folder,
+            delete_workspace_item,
             generate_images,
             select_workspace_directory,
             get_config,
@@ -1067,6 +1157,7 @@ pub fn run() {
             navigate_browser,
             read_browser_page,
             click_browser_selector,
+            type_in_browser,
             start_screen_capture,
             submit_screen_selection,
             submit_spotlight,

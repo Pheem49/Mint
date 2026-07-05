@@ -380,7 +380,6 @@ button {
   }
 }
 
-/* Premium Markdown Styles for Chat Messages */
 .chat-inline-code {
   background: rgba(16, 185, 129, 0.15);
   border: 1px solid rgba(16, 185, 129, 0.25);
@@ -389,6 +388,18 @@ button {
   border-radius: 6px;
   font-family: 'Fira Code', 'Courier New', Courier, monospace;
   font-size: 0.88em;
+}
+
+.chat-mention {
+  background: color-mix(in srgb, var(--accent, #10b981) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #10b981) 25%, transparent);
+  color: var(--accent, #34d399);
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 0.9em;
+  display: inline-block;
+  margin: 0 2px;
 }
 
 .chat-code-block-container {

@@ -128,6 +128,28 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   return invoke<RuntimeStatus>('get_runtime_status')
 }
 
+export interface DetectedTools {
+  docker: boolean
+  git: boolean
+  gh: boolean
+  node: boolean
+}
+
+export async function detectSystemTools(): Promise<DetectedTools> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const API_BASE = "http://localhost:3000/api";
+    try {
+      const res = await fetch(`${API_BASE}/detect-tools`);
+      return await res.json();
+    } catch (e) {
+      console.error("Failed to detect tools from local server:", e);
+      return { docker: false, git: false, gh: false, node: false };
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<DetectedTools>('detect_system_tools')
+}
+
 export async function sendChatMessage(
   message: string,
   imageDataUri?: string | null,
@@ -426,9 +448,10 @@ export interface LearnedSkill {
   sourcePath: string
   content: string
   updatedAt: string
+  location?: string
 }
 
-export async function listLearnedSkills(): Promise<LearnedSkill[]> {
+export async function listLearnedSkills(workspacePath?: string): Promise<LearnedSkill[]> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
     try {
       const val = await getProfileValue('learned-skills-web-mock')
@@ -442,7 +465,7 @@ export async function listLearnedSkills(): Promise<LearnedSkill[]> {
     }
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<LearnedSkill[]>('list_learned_skills')
+  return invoke<LearnedSkill[]>('list_learned_skills', { workspacePath })
 }
 
 export async function addLearnedSkill(name: string, content: string): Promise<LearnedSkill> {
@@ -647,6 +670,24 @@ export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceT
   return invoke<WorkspaceTreeEntry>('get_workspace_tree', { path })
 }
 
+export async function createWorkspaceFile(path: string): Promise<void> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('create_workspace_file', { path })
+}
+
+export async function createWorkspaceFolder(path: string): Promise<void> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('create_workspace_folder', { path })
+}
+
+export async function deleteWorkspaceItem(path: string): Promise<void> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('delete_workspace_item', { path })
+}
+
 export async function selectWorkspaceDirectory(): Promise<string | null> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
     return null
@@ -656,12 +697,12 @@ export async function selectWorkspaceDirectory(): Promise<string | null> {
   return selected?.trim() || null
 }
 
-export async function submitToolApproval(token: string, approved: boolean): Promise<void> {
+export async function submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
     return;
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('submit_tool_approval', { token, approved })
+  return invoke('submit_tool_approval', { token, approved, answer })
 }
 
 export async function proposeCodeEdits(root: string, edits: CodeEdit[]): Promise<CodeEditProposal> {

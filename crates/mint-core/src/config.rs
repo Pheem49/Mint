@@ -208,7 +208,20 @@ pub fn set_config_value(key: &str, value: Value) -> Result<MintConfig, ConfigErr
 
 fn load_config_from(path: &Path) -> Result<MintConfig, ConfigError> {
     if !path.exists() {
-        let config = MintConfig::default();
+        let mut config = MintConfig::default();
+        if which("gk") {
+            let mut servers = BTreeMap::new();
+            servers.insert(
+                "gitkraken".to_string(),
+                serde_json::json!({
+                    "command": "gk",
+                    "args": ["mcp"]
+                }),
+            );
+            config
+                .extra
+                .insert("mcpServers".into(), serde_json::to_value(servers).unwrap());
+        }
         save_config_to(path, &config)?;
         return Ok(config);
     }
@@ -225,6 +238,32 @@ fn load_config_from(path: &Path) -> Result<MintConfig, ConfigError> {
     for (key, value) in runtime_extra_defaults() {
         config.extra.entry(key).or_insert(value);
     }
+
+    let has_gitkraken = config
+        .extra
+        .get("mcpServers")
+        .and_then(|v| v.get("gitkraken"))
+        .is_some();
+    if !has_gitkraken && which("gk") {
+        let mut servers: BTreeMap<String, Value> = config
+            .extra
+            .get("mcpServers")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
+        servers.insert(
+            "gitkraken".to_string(),
+            serde_json::json!({
+                "command": "gk",
+                "args": ["mcp"]
+            }),
+        );
+        config
+            .extra
+            .insert("mcpServers".into(), serde_json::to_value(servers).unwrap());
+        let _ = save_config_to(path, &config);
+    }
+
     Ok(config)
 }
 
@@ -317,6 +356,21 @@ fn runtime_extra_defaults() -> BTreeMap<String, Value> {
     .expect("runtime config defaults must be a JSON object")
 }
 
+pub fn which(cmd: &str) -> bool {
+    #[cfg(windows)]
+    let check_cmd = "where";
+    #[cfg(not(windows))]
+    let check_cmd = "which";
+
+    std::process::Command::new(check_cmd)
+        .arg(cmd)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,5 +437,19 @@ mod tests {
             serde_json::json!(["dev_tools", "system_metrics", "github"])
         );
         assert_eq!(config.extra["allowedMcpTools"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_gitkraken_auto_detection() {
+        let path = std::env::temp_dir().join("mint-test-config.json");
+        let _ = std::fs::remove_file(&path);
+
+        let initial_config = MintConfig::default();
+        save_config_to(&path, &initial_config).unwrap();
+
+        let loaded = load_config_from(&path).unwrap();
+        assert!(loaded.theme.len() > 0);
+
+        let _ = std::fs::remove_file(&path);
     }
 }

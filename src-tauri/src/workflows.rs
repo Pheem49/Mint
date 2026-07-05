@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mint_core::{load_config, load_workflows};
+use mint_core::{ChatRequest, load_config, load_workflows, send_chat};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -53,10 +53,62 @@ pub fn start_monitor(app: AppHandle) {
                 }
                 last_triggered.insert(id.into(), Instant::now());
                 if let Some(main) = app.get_webview_window("main") {
+                    let static_message = workflow["action"]["message"]
+                        .as_str()
+                        .unwrap_or("Automation workflow triggered");
+
+                    let final_message = if let Ok(config) = load_config() {
+                        let prompt = format!(
+                            "You are Mint, a friendly desktop AI assistant. The user has triggered a workflow called '{}'. \
+                            The original notification message is: '{}'. \
+                            Please rewrite this notification message to be extremely friendly, cute, and natural. \
+                            Write in the language matching the user's configured language: '{}'. \
+                            Keep the length under 20 words and always end with a question (e.g. asking if they want to launch the action). \
+                            Only reply with the rewritten message itself, do not include any quotes, markdown formatting, or extra explanations.",
+                            workflow["name"].as_str().unwrap_or(""),
+                            static_message,
+                            config.language
+                        );
+
+                        let chat_req = ChatRequest {
+                            message: prompt,
+                            system_instruction: format!(
+                                "You are Mint, a helpful desktop assistant. Write only the friendly suggestion in the language matching '{}'. No quotes, no markdown, no other text.",
+                                config.language
+                            ),
+                            chat_id: None,
+                            image_data_uri: None,
+                            audio_data_uri: None,
+                            document_attachment: None,
+                            workspace_path: None,
+                        };
+
+                        tauri::async_runtime::block_on(async {
+                            match send_chat(&config, &chat_req).await {
+                                Ok(response) => {
+                                    let cleaned =
+                                        response.text.trim().trim_matches('"').to_string();
+                                    if !cleaned.is_empty() {
+                                        cleaned
+                                    } else {
+                                        static_message.to_string()
+                                    }
+                                }
+                                Err(err) => {
+                                    eprintln!(
+                                        "Failed to generate dynamic suggestion via AI: {:?}",
+                                        err
+                                    );
+                                    static_message.to_string()
+                                }
+                            }
+                        })
+                    } else {
+                        static_message.to_string()
+                    };
+
                     let payload = json!({
-                        "message": workflow["action"]["message"]
-                            .as_str()
-                            .unwrap_or("Automation workflow triggered"),
+                        "message": final_message,
                         "suggestions": [
                             { "label": "Yes, please", "action": workflow["action"] },
                             { "label": "Dismiss", "action": { "type": "none" } }

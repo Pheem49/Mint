@@ -110,6 +110,8 @@ enum Command {
     },
     /// Run one queued or supplied task through the native CLI agent.
     Agent { task: Option<String> },
+    /// Start the browser automation environment and enable browser actions.
+    Auto,
     /// Launch the web UI and local API server.
     Web,
     /// Start only the local API server.
@@ -453,6 +455,21 @@ enum MemoryCommand {
     },
 }
 
+fn print_mcp_servers(servers: &std::collections::BTreeMap<String, mint_core::mcp::McpServer>) {
+    if servers.is_empty() {
+        println!("{DIM}(No MCP servers configured.){RESET}\n");
+        return;
+    }
+    for (name, srv) in servers {
+        let args_str = srv.args.join(" ");
+        println!(
+            "  {BLUE}●{RESET} {name} {DIM}({} {}){RESET}",
+            srv.command, args_str
+        );
+    }
+    println!();
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
@@ -523,6 +540,99 @@ async fn main() -> Result<()> {
             Command::Agent { task } => {
                 run_cli_agent_task(task).await?;
             }
+            Command::Auto => {
+                println!("🚀 Starting Mint Browser Automation Environment...");
+                let config = mint_core::load_config()?;
+                mint_core::spawn_automation_browser(&config)
+                    .await
+                    .map_err(anyhow::Error::msg)?;
+
+                // Enable the browser tools if they are disabled
+                let mut config_mut = config.clone();
+                let mut changed = false;
+                for tool in &[
+                    "browser_open",
+                    "browser_click",
+                    "browser_type",
+                    "browser_read",
+                ] {
+                    if config_mut.disabled_tools.contains(&tool.to_string()) {
+                        config_mut.disabled_tools.retain(|x| x != *tool);
+                        changed = true;
+                    }
+                }
+                if changed {
+                    mint_core::save_config(&config_mut)?;
+                    println!(
+                        "✅ Enabled browser automation tools in config: browser_open, browser_click, browser_type, browser_read"
+                    );
+                }
+
+                println!(
+                    "🌐 Isolated browser running with remote debugging on http://127.0.0.1:9222"
+                );
+                println!(
+                    "💬 Keep this terminal open while you want Mint to automate browser tasks."
+                );
+                println!("Press Ctrl+C to terminate the automation browser session.");
+                println!("----------------------------------------------------------------------");
+
+                // Start tailing the log file in a background task
+                let log_dir = dirs::config_dir()
+                    .unwrap_or_else(|| std::env::temp_dir())
+                    .join("mint");
+                let log_file = log_dir.join("browser-automation.log");
+
+                // Clear existing log file on startup
+                let _ = std::fs::remove_file(&log_file);
+
+                let log_file_clone = log_file.clone();
+                tokio::spawn(async move {
+                    use std::io::{BufRead, BufReader, Seek, SeekFrom};
+                    let mut file_pos = 0;
+                    loop {
+                        if log_file_clone.exists() {
+                            if let Ok(mut file) = std::fs::File::open(&log_file_clone) {
+                                if let Ok(_) = file.seek(SeekFrom::Start(file_pos)) {
+                                    let reader = BufReader::new(file);
+                                    for line in reader.lines() {
+                                        if let Ok(line_str) = line {
+                                            if line_str.contains("[NAVIGATE]")
+                                                || line_str.contains("[NAVIGATE_SUCCESS]")
+                                            {
+                                                println!("🌐 {line_str}");
+                                            } else if line_str.contains("[CLICK]")
+                                                || line_str.contains("[CLICK_SUCCESS]")
+                                            {
+                                                println!("🖱️ {line_str}");
+                                            } else if line_str.contains("[TYPE]")
+                                                || line_str.contains("[TYPE_SUCCESS]")
+                                            {
+                                                println!("⌨️ {line_str}");
+                                            } else if line_str.contains("[READ]")
+                                                || line_str.contains("[READ_SUCCESS]")
+                                            {
+                                                println!("📖 {line_str}");
+                                            } else if line_str.contains("_ERROR]") {
+                                                println!("❌ {line_str}");
+                                            } else {
+                                                println!("📝 {line_str}");
+                                            }
+                                        }
+                                    }
+                                    if let Ok(pos) = log_file_clone.metadata().map(|m| m.len()) {
+                                        file_pos = pos;
+                                    }
+                                }
+                            }
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                });
+
+                tokio::signal::ctrl_c().await.ok();
+                println!("\n👋 Terminating Mint Browser Automation Environment...");
+            }
             Command::Web => {
                 launch_mint_target("web".into()).await?;
             }
@@ -539,7 +649,10 @@ async fn main() -> Result<()> {
                     mcp::add(&name, &command, args, env)?;
                     println!("Added MCP server: {name}");
                 }
-                McpCommand::List => println!("{}", serde_json::to_string_pretty(&mcp::list()?)?),
+                McpCommand::List => {
+                    println!("\n{BLUE}MCP servers:{RESET}");
+                    print_mcp_servers(&mcp::list()?);
+                }
                 McpCommand::Remove { name } => {
                     println!(
                         "{}",
@@ -585,10 +698,55 @@ async fn main() -> Result<()> {
             Command::Learn { path, list, delete } => {
                 let memory = MemoryStore::open_default()?;
                 if list {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&memory.learned_skills(100)?)?
-                    );
+                    let mut skills = memory.learned_skills(100)?;
+
+                    if let Some(home) = dirs::home_dir() {
+                        let global_skills_path =
+                            home.join(".config").join("mint").join("mint-skills");
+                        mint_core::skills::load_skills_from_dir(&global_skills_path, &mut skills);
+                    }
+                    if let Ok(root) = std::env::current_dir() {
+                        if let Ok(root) = root.canonicalize() {
+                            let workspace_skills_path1 = root.join(".agents").join("skills");
+                            mint_core::skills::load_skills_from_dir(
+                                &workspace_skills_path1,
+                                &mut skills,
+                            );
+
+                            let workspace_skills_path2 = root.join("skills");
+                            mint_core::skills::load_skills_from_dir(
+                                &workspace_skills_path2,
+                                &mut skills,
+                            );
+                        }
+                    }
+
+                    let mut unique_skills = std::collections::BTreeMap::new();
+                    for skill in skills {
+                        let loc = if skill.source_path.contains("/.config/mint/mint-skills") {
+                            "Global"
+                        } else if skill.source_path.contains("/skills")
+                            || skill.source_path.contains("/.agents/skills")
+                        {
+                            "Workspace"
+                        } else {
+                            "Taught"
+                        };
+                        unique_skills.insert(skill.name.clone(), (skill, loc));
+                    }
+
+                    if unique_skills.is_empty() {
+                        println!("No learned skills found.");
+                    } else {
+                        println!("Learned AI Skills:");
+                        for (name, (skill, loc)) in &unique_skills {
+                            if *loc == "Taught" {
+                                println!("  ● [{}] {}", loc, name);
+                            } else {
+                                println!("  ● [{}] {} (Source: {})", loc, name, skill.source_path);
+                            }
+                        }
+                    }
                 } else if let Some(identifier) = delete {
                     println!("{}", memory.delete_learned_skill(&identifier)?);
                 } else if let Some(path) = path {
@@ -1315,6 +1473,9 @@ impl CliStreamFormatter {
                     print_fn(ch);
                 }
                 print_fn('\n');
+                for ch in "  ".chars() {
+                    print_fn(ch);
+                }
             } else {
                 if is_table_line(&line) {
                     self.table_buffer.push(line);
@@ -1327,6 +1488,9 @@ impl CliStreamFormatter {
                         print_fn(ch);
                     }
                     print_fn('\n');
+                    for ch in "  ".chars() {
+                        print_fn(ch);
+                    }
                 }
             }
         }
@@ -1792,7 +1956,56 @@ async fn handle_slash_command(
 
         "/learn" => {
             if rest.is_empty() {
-                println!("{WARN}/learn usage: /learn <path>{RESET}\n");
+                let mut skills = match MemoryStore::open_default() {
+                    Ok(m) => match m.learned_skills(100) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            println!("{ERROR}Error loading custom skills: {e}{RESET}\n");
+                            return Some(SlashResult::Handled);
+                        }
+                    },
+                    Err(e) => {
+                        println!("{ERROR}Memory error: {e}{RESET}\n");
+                        return Some(SlashResult::Handled);
+                    }
+                };
+
+                if let Some(home) = dirs::home_dir() {
+                    let global_skills_path = home.join(".config").join("mint").join("mint-skills");
+                    mint_core::skills::load_skills_from_dir(&global_skills_path, &mut skills);
+                }
+                let workspace_skills_path1 = session.current_dir.join(".agents").join("skills");
+                mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
+                let workspace_skills_path2 = session.current_dir.join("skills");
+                mint_core::skills::load_skills_from_dir(&workspace_skills_path2, &mut skills);
+
+                let mut unique_skills = std::collections::BTreeMap::new();
+                for skill in skills {
+                    let loc = if skill.source_path.contains("/.config/mint/mint-skills") {
+                        "Global"
+                    } else if skill.source_path.contains("/skills")
+                        || skill.source_path.contains("/.agents/skills")
+                    {
+                        "Workspace"
+                    } else {
+                        "Taught"
+                    };
+                    unique_skills.insert(skill.name.clone(), (skill, loc));
+                }
+
+                if unique_skills.is_empty() {
+                    println!("No learned skills found. Use '/learn <path>' to add one.\n");
+                } else {
+                    println!("Learned AI Skills:");
+                    for (name, (skill, loc)) in &unique_skills {
+                        if *loc == "Taught" {
+                            println!("  ● [{}] {}", loc, name);
+                        } else {
+                            println!("  ● [{}] {} (Source: {})", loc, name, skill.source_path);
+                        }
+                    }
+                    println!();
+                }
             } else {
                 let path = PathBuf::from(rest);
                 let path = if path.is_absolute() {
@@ -1834,8 +2047,10 @@ async fn handle_slash_command(
                                 println!(
                                     "  {DIM}[{}]{RESET} {BLUE}You:{RESET} {}",
                                     &item.created_at[..16.min(item.created_at.len())],
-                                    if item.user_text.len() > 80 {
-                                        format!("{}…", &item.user_text[..80])
+                                    if item.user_text.chars().count() > 80 {
+                                        let short: String =
+                                            item.user_text.chars().take(80).collect();
+                                        format!("{}…", short)
                                     } else {
                                         item.user_text.clone()
                                     }
@@ -1903,15 +2118,9 @@ async fn handle_slash_command(
                 .unwrap_or((rest, ""));
             match subcmd {
                 "list" | "" => match mcp::list() {
-                    Ok(servers) if servers.is_empty() => {
-                        println!("{DIM}No MCP servers configured.{RESET}\n");
-                    }
                     Ok(servers) => {
                         println!("\n{BLUE}MCP servers:{RESET}");
-                        match serde_json::to_string_pretty(&servers) {
-                            Ok(json) => println!("{json}\n"),
-                            Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
-                        }
+                        print_mcp_servers(&servers);
                     }
                     Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
                 },
@@ -2291,7 +2500,7 @@ async fn run_interactive_chat() -> Result<()> {
                 .to_owned();
 
             println!();
-            print!("{MINT}Mint:{RESET} {DIM}Thinking...{RESET}");
+            print!("  {MINT}Mint:{RESET} {DIM}Thinking...{RESET}");
             let _ = io::stdout().flush();
 
             let mut system_instruction = format!(
@@ -2337,7 +2546,7 @@ async fn run_interactive_chat() -> Result<()> {
                 |chunk| {
                     if first_chunk {
                         first_chunk = false;
-                        print!("\r\x1b[2K{MINT}Mint:{RESET} ");
+                        print!("\r\x1b[2K  {MINT}Mint:{RESET} ");
                     }
                     filter.process_chunk(&chunk, |text| {
                         for c in text.chars() {
@@ -2926,7 +3135,7 @@ fn read_line_interactive(
                                 expanded_str = expanded_str.replace(placeholder_str, content);
                             }
 
-                            println!("{BLUE}You ›{RESET} {}", expanded_str);
+                            println!("  {BLUE}You ›{RESET} {}", expanded_str);
                             let _ = io::stdout().flush();
 
                             break Some(InteractiveInput {
@@ -3157,7 +3366,7 @@ pub fn confirm(prompt: &str) -> Result<bool> {
         .to_string();
 
     if SESSION_APPROVED.load(std::sync::atomic::Ordering::Relaxed) {
-        println!("{} {MINT}Approve (session-wide){RESET}", clean_prompt);
+        println!("  {} {MINT}Approve (session-wide){RESET}", clean_prompt);
         return Ok(true);
     }
 
@@ -3166,7 +3375,7 @@ pub fn confirm(prompt: &str) -> Result<bool> {
     use crossterm::tty::IsTty;
 
     if !io::stdout().is_tty() || enable_raw_mode().is_err() {
-        print!("{} [y/N] ", clean_prompt);
+        print!("  {} [y/N] ", clean_prompt);
         let _ = io::stdout().flush();
         let mut answer = String::new();
         io::stdin().read_line(&mut answer)?;
@@ -3177,7 +3386,7 @@ pub fn confirm(prompt: &str) -> Result<bool> {
     }
 
     let _ = disable_raw_mode();
-    println!("{}", clean_prompt);
+    println!("  {}", clean_prompt);
 
     let options = ["Approve", "Approve this session", "No"];
     let mut selected = 0;
@@ -3284,7 +3493,7 @@ pub fn confirm(prompt: &str) -> Result<bool> {
         1 => format!("{MINT}Approve this session{RESET}"),
         _ => format!("{ERROR}No{RESET}"),
     };
-    println!("{} {}", clean_prompt, result_str);
+    println!("  {} {}", clean_prompt, result_str);
     let _ = io::stdout().flush();
 
     match choice {

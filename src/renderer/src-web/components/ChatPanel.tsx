@@ -68,15 +68,7 @@ const LOCAL_MODELS = [
   'lmstudio-community/gemma-2-9b-it-GGUF'
 ]
 
-const OLLAMA_MODELS = [
-  'llama3:latest',
-  'llama3.1:latest',
-  'llama3.2:latest',
-  'gemma2:latest',
-  'mistral:latest',
-  'phi3:latest',
-  'qwen2.5:latest'
-]
+const OLLAMA_MODELS: string[] = []
 
 interface ApprovalDetails {
   title: string
@@ -122,6 +114,7 @@ interface AgentActivity {
   target: string
   kind: 'file' | 'folder' | 'search' | 'terminal' | 'tool'
   state: 'active' | 'done' | 'error'
+  action?: string
 }
 
 interface AgentActivityView {
@@ -153,7 +146,20 @@ function describeTool(action: string, input: Record<string, unknown>): AgentActi
   const command = activityDetail(input, 'command')
   const name = activityDetail(input, 'name')
   const tool = activityDetail(input, 'tool')
-  const target = path || query || command || name || tool || action.replaceAll('_', ' ')
+  const rawTarget = path || query || command || name || tool || action.replaceAll('_', ' ')
+
+  // Append line range for read_file when startLine / endLine are available
+  let target = rawTarget
+  if (action === 'read_file' && path) {
+    const startLine = typeof input.startLine === 'number' ? input.startLine : undefined
+    const endLine = typeof input.endLine === 'number' ? input.endLine : undefined
+    if (startLine !== undefined && endLine !== undefined) {
+      target = `${rawTarget} #L${startLine}-${endLine}`
+    } else if (startLine !== undefined) {
+      target = `${rawTarget} #L${startLine}`
+    }
+  }
+
   const labels: Record<string, string> = {
     apply_patch: 'Applying patch',
     ask_user: 'Asking user',
@@ -189,6 +195,7 @@ function describeTool(action: string, input: Record<string, unknown>): AgentActi
     target: formatActivityTarget(target),
     kind: activityKind(action, target),
     state: 'active',
+    action,
   }
 }
 
@@ -215,7 +222,13 @@ function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
       for (let index = activities.length - 1; index >= 0; index -= 1) {
         if (activities[index].state !== 'active') continue
         activities[index].state = event.data.result.startsWith('Error:') ? 'error' : 'done'
-        if (activities[index].state === 'error') activities[index].label = 'Failed'
+        if (activities[index].state === 'error') {
+          activities[index].label = 'Failed'
+        }
+        if (activities[index].action === 'ask_user' && event.data.result.startsWith('User answered:')) {
+          const answer = event.data.result.replace('User answered:', '').trim()
+          activities[index].target = `(Answered: "${answer}") ${activities[index].target}`
+        }
         break
       }
     }
@@ -224,7 +237,16 @@ function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
   return { summary: activitySummary(activities), items }
 }
 
-function renderAgentActivityTable(activityView: AgentActivityView) {
+function AgentActivityTable({ activityView }: { activityView: AgentActivityView }) {
+  const [expandedIndices, setExpandedIndices] = useState<Record<number, boolean>>({})
+
+  const toggleExpand = (index: number) => {
+    setExpandedIndices(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }))
+  }
+
   return (
     <div className="agent-activity-list">
       <div className="agent-activity-table-head" aria-hidden="true">
@@ -233,14 +255,39 @@ function renderAgentActivityTable(activityView: AgentActivityView) {
         <span>Target</span>
         <span />
       </div>
-      {activityView.items.map((activity, index) => (
-        <div className="agent-activity-item" data-kind={activity.kind} data-state={activity.state} key={`${index}-${activity.label}-${activity.target}`}>
-          <span className="agent-activity-label">{activity.label}</span>
-          <span className="agent-activity-icon" aria-hidden="true" />
-          <span className="agent-activity-text">{activity.target}</span>
-          <span className="agent-activity-chevron" aria-hidden="true">&gt;</span>
-        </div>
-      ))}
+      {activityView.items.map((activity, index) => {
+        const isExpanded = !!expandedIndices[index]
+        return (
+          <div 
+            className="agent-activity-item" 
+            data-kind={activity.kind} 
+            data-state={activity.state} 
+            key={`${index}-${activity.label}-${activity.target}`}
+            style={{ cursor: 'pointer' }}
+            onClick={() => toggleExpand(index)}
+          >
+            <span className="agent-activity-label">{activity.label}</span>
+            <span className="agent-activity-icon" aria-hidden="true" />
+            <span 
+              className="agent-activity-text" 
+              style={isExpanded ? { whiteSpace: 'normal', wordBreak: 'break-all', overflow: 'visible', textOverflow: 'clip' } : undefined}
+            >
+              {activity.target}
+            </span>
+            <span 
+              className="agent-activity-chevron" 
+              style={{ 
+                transform: isExpanded ? 'rotate(90deg)' : 'none', 
+                transition: 'transform 0.2s ease',
+                display: 'inline-block'
+              }}
+              aria-hidden="true"
+            >
+              &gt;
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -257,7 +304,7 @@ function renderApprovalDetails(approval: any): ApprovalDetails {
     return { title: `Run MCP Tool: ${server}/${tool}`, body: typeof args === 'string' ? args : JSON.stringify(args, null, 2), reason: 'Running external MCP tool.', isDangerous: false }
   }
   if (approval.UserApproval) return { title: approval.UserApproval.title, body: approval.UserApproval.prompt, reason: 'The agent requested explicit approval.', isDangerous: false }
-  if (approval.AskUser) return { title: 'Question From Agent', body: approval.AskUser.question, reason: 'Approve to continue without a typed answer, or cancel to decline.', isDangerous: false }
+  if (approval.AskUser) return { title: 'Question From Agent', body: approval.AskUser.question, reason: 'Type your answer below and submit to respond to the agent.', isDangerous: false }
   return { title: 'Unknown Action', body: JSON.stringify(approval, null, 2), reason: 'Requires approval to proceed.', isDangerous: false }
 }
 
@@ -353,7 +400,7 @@ interface ChatPanelProps {
   onSetSmartContext: (enabled: boolean) => void
   onSetAgentMode: (enabled: boolean) => void
   onSetProvider: (provider: string) => void
-  onApproval: (approved: boolean, autoApproveSession?: boolean) => void
+  onApproval: (approved: boolean, autoApproveSession?: boolean, answer?: string) => void
   onToggleMobileSidebar: () => void
   settingsConfig: any
   onSetModel: (model: string) => void
@@ -449,7 +496,17 @@ function renderFormattedMessage(text: string) {
             </strong>
           )
         }
-        return boldPart
+        const mentionParts = boldPart.split(/(@[\w\-\.\/]+)/g)
+        return mentionParts.map((mentionPart, mentionIndex) => {
+          if (mentionIndex % 2 === 1) {
+            return (
+              <span key={`mention-${mentionIndex}`} className="chat-mention">
+                {mentionPart}
+              </span>
+            )
+          }
+          return mentionPart
+        })
       })
     })
   }
@@ -975,6 +1032,34 @@ export default function ChatPanel({
   const [openFileDiffs, setOpenFileDiffs] = useState<Record<string, boolean>>({})
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const toolMenuRef = useRef<HTMLDivElement | null>(null)
+  const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
+  const [askAnswer, setAskAnswer] = useState('')
+
+  useEffect(() => {
+    setAskAnswer('')
+  }, [pendingApproval])
+
+  useEffect(() => {
+    const fetchOllamaModels = async () => {
+      if (status?.activeProvider !== 'ollama') return;
+      const host = settingsConfig?.ollamaHost || 'http://localhost:11434';
+      const cleanHost = host.endsWith('/') ? host.slice(0, -1) : host;
+      try {
+        const res = await fetch(`${cleanHost}/api/tags`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.models)) {
+            setDynamicOllamaModels(data.models.map((m: any) => m.name));
+            return;
+          }
+        }
+      } catch (err) {
+        // fallback to default if fetch fails
+      }
+      setDynamicOllamaModels(OLLAMA_MODELS);
+    }
+    fetchOllamaModels();
+  }, [status?.activeProvider, settingsConfig?.ollamaHost])
   const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || documentName)
   const sendingImageMarkers = Array.from({ length: sendingImageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
 
@@ -995,7 +1080,7 @@ export default function ChatPanel({
       case 'local_openai':
         return LOCAL_MODELS
       case 'ollama':
-        return OLLAMA_MODELS
+        return dynamicOllamaModels
       default:
         return []
     }
@@ -1543,7 +1628,7 @@ export default function ChatPanel({
         </button>
         {isOpen && (
           <div className="agent-activity-card agent-activity-card-history">
-            {renderAgentActivityTable(activityView)}
+            <AgentActivityTable activityView={activityView} />
           </div>
         )}
       </div>
@@ -1885,7 +1970,7 @@ export default function ChatPanel({
                       {pendingApproval ? 'Waiting for approval' : 'Working'}
                     </span>
                   </div>
-                  {renderAgentActivityTable(agentActivities)}
+                  <AgentActivityTable activityView={agentActivities} />
                 </div>
               </div>
             )}
@@ -1967,6 +2052,7 @@ export default function ChatPanel({
           const writeFile = pendingApproval.approval?.WriteFile
           const applyPatch = pendingApproval.approval?.ApplyPatch
           const diffText = writeFile?.diff || applyPatch?.diff
+          const isAskUser = !!pendingApproval.approval?.AskUser
 
           return (
             <div className="message ai-message" style={{ width: '100%' }}>
@@ -1983,12 +2069,54 @@ export default function ChatPanel({
                     ) : (
                       details.reason && <div className="approval-card-reason" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{details.reason}</div>
                     )}
+                    {isAskUser && (
+                      <div className="approval-card-input-container" style={{ marginTop: '12px', width: '100%' }}>
+                        <textarea
+                          style={{
+                            width: '100%',
+                            minHeight: '70px',
+                            padding: '10px',
+                            background: 'rgba(0, 0, 0, 0.2)',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            borderRadius: '6px',
+                            color: 'var(--text-main, #f8fafc)',
+                            fontSize: '0.9rem',
+                            fontFamily: 'inherit',
+                            resize: 'vertical',
+                            outline: 'none',
+                          }}
+                          placeholder="Type your answer here..."
+                          value={askAnswer}
+                          onChange={(e) => setAskAnswer(e.target.value)}
+                        />
+                      </div>
+                    )}
                   </div>
-                  <div className="approval-card-actions">
-                    <button type="button" className="approval-btn approval-btn-approve" onClick={() => onApproval(true)}>Approve</button>
-                    <button type="button" className="approval-btn" style={{ backgroundColor: 'rgba(16, 185, 129, 0.22)', borderColor: 'rgba(16, 185, 129, 0.4)', color: '#a7f3d0' }} onClick={() => onApproval(true, true)}>Approve this session</button>
-                    <button type="button" className="approval-btn approval-btn-cancel" onClick={() => onApproval(false)}>Cancel</button>
-                  </div>
+                  {isAskUser ? (
+                    <div className="approval-card-actions">
+                      <button 
+                        type="button" 
+                        className="approval-btn approval-btn-approve" 
+                        disabled={!askAnswer.trim()} 
+                        onClick={() => onApproval(true, false, askAnswer)}
+                      >
+                        Submit Answer
+                      </button>
+                      <button 
+                        type="button" 
+                        className="approval-btn approval-btn-cancel" 
+                        onClick={() => onApproval(false)}
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="approval-card-actions">
+                      <button type="button" className="approval-btn approval-btn-approve" onClick={() => onApproval(true)}>Approve</button>
+                      <button type="button" className="approval-btn" style={{ backgroundColor: 'rgba(16, 185, 129, 0.22)', borderColor: 'rgba(16, 185, 129, 0.4)', color: '#a7f3d0' }} onClick={() => onApproval(true, true)}>Approve this session</button>
+                      <button type="button" className="approval-btn approval-btn-cancel" onClick={() => onApproval(false)}>Cancel</button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -2134,7 +2262,7 @@ export default function ChatPanel({
                 return <option key={provider} value={provider}>{displayName}</option>
               })}
             </select>
-            {availableModels.length > 0 && (
+            {(availableModels.length > 0 || activeModel) && (
               <select 
                 value={activeModel} 
                 onChange={(event) => onSetModel(event.target.value)}
@@ -2192,6 +2320,9 @@ export default function ChatPanel({
           </button>
         </form>
       </div>
+      <p className="input-disclaimer">
+        Mint Agent is an AI gateway. Responses via third-party APIs. Verify critical info.
+      </p>
     </section>
   )
 }

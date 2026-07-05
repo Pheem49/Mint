@@ -147,6 +147,15 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     });
                     send_json_response(socket, "200 OK", &status_json.to_string()).await;
                 }
+                ("GET", "/api/detect-tools") => {
+                    let tools_json = serde_json::json!({
+                        "docker": crate::config::which("docker"),
+                        "git": crate::config::which("git"),
+                        "gh": crate::config::which("gh"),
+                        "node": crate::config::which("node")
+                    });
+                    send_json_response(socket, "200 OK", &tools_json.to_string()).await;
+                }
                 ("GET", "/api/system-info") => {
                     send_json_response(socket, "200 OK", &system_info().to_string()).await;
                 }

@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 pub mod agent_loop;
+pub mod browser;
 pub mod chat;
 pub mod code_tools;
 pub mod config;
@@ -29,6 +30,10 @@ pub use chat::{
     stream_chat_with_fallback,
 };
 
+pub use browser::{
+    BrowserTab, click, is_browser_running, list_tabs, navigate, read_page_text,
+    spawn_automation_browser, type_text,
+};
 pub use code_tools::{
     AppliedCodeEdit, CodeEdit, CodeEditPreview, CodeEditProposal, CodeFile, CodeInspectionError,
     CodePatchHunk, CodePlan, CodeSearchHit, RepositorySummary, apply_code_edits, build_code_patch,
