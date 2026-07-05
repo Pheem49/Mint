@@ -1,8 +1,8 @@
+use crate::MintConfig;
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use crate::MintConfig;
 
 fn log_action(action: &str, details: &str) {
     if let Some(config_dir) = dirs::config_dir() {
@@ -48,7 +48,10 @@ pub async fn list_tabs(config: &MintConfig) -> Result<Vec<BrowserTab>, String> {
 
 pub async fn navigate(config: &MintConfig, url: &str) -> Result<String, String> {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
-        log_action("NAVIGATE_ERROR", "Browser navigation only supports http and https URLs");
+        log_action(
+            "NAVIGATE_ERROR",
+            "Browser navigation only supports http and https URLs",
+        );
         return Err("browser navigation only supports http and https URLs".into());
     }
     log_action("NAVIGATE", &format!("Navigating to {url}"));
@@ -56,7 +59,10 @@ pub async fn navigate(config: &MintConfig, url: &str) -> Result<String, String> 
     match cdp_call(config, "Page.navigate", json!({ "url": url })).await {
         Ok(response) => {
             if response["result"]["frameId"].as_str().is_some() {
-                log_action("NAVIGATE_SUCCESS", &format!("Successfully navigated to {url}"));
+                log_action(
+                    "NAVIGATE_SUCCESS",
+                    &format!("Successfully navigated to {url}"),
+                );
                 Ok(format!("navigating to {url}"))
             } else {
                 let err = response_error(&response);
@@ -82,10 +88,14 @@ pub async fn read_page_text(config: &MintConfig) -> Result<String, String> {
             "returnByValue": true
         }),
     )
-    .await {
+    .await
+    {
         Ok(response) => {
             if let Some(val) = response["result"]["result"]["value"].as_str() {
-                log_action("READ_SUCCESS", &format!("Successfully read {} characters", val.len()));
+                log_action(
+                    "READ_SUCCESS",
+                    &format!("Successfully read {} characters", val.len()),
+                );
                 Ok(val.to_owned())
             } else {
                 let err = response_error(&response);
@@ -103,7 +113,10 @@ pub async fn read_page_text(config: &MintConfig) -> Result<String, String> {
 pub async fn click(config: &MintConfig, selector: &str) -> Result<String, String> {
     let selector = selector.trim();
     if selector.is_empty() || selector.len() > 500 {
-        log_action("CLICK_ERROR", "Browser selector must contain between 1 and 500 characters");
+        log_action(
+            "CLICK_ERROR",
+            "Browser selector must contain between 1 and 500 characters",
+        );
         return Err("browser selector must contain between 1 and 500 characters".into());
     }
     log_action("CLICK", &format!("Clicking element '{selector}'"));
@@ -148,7 +161,10 @@ pub async fn click(config: &MintConfig, selector: &str) -> Result<String, String
 pub async fn type_text(config: &MintConfig, selector: &str, text: &str) -> Result<String, String> {
     let selector = selector.trim();
     if selector.is_empty() || selector.len() > 500 {
-        log_action("TYPE_ERROR", "Browser selector must contain between 1 and 500 characters");
+        log_action(
+            "TYPE_ERROR",
+            "Browser selector must contain between 1 and 500 characters",
+        );
         return Err("browser selector must contain between 1 and 500 characters".into());
     }
     log_action("TYPE", &format!("Typing text into element '{selector}'"));
@@ -172,25 +188,27 @@ pub async fn type_text(config: &MintConfig, selector: &str, text: &str) -> Resul
             "returnByValue": true
         }),
     )
-    .await {
-        Ok(response) => {
-            match response["result"]["result"]["value"].as_str() {
-                Some("typed") => {
-                    log_action("TYPE_SUCCESS", &format!("Successfully typed into element '{selector}'"));
-                    Ok("typed".into())
-                }
-                Some("not-found") => {
-                    let err = format!("browser selector not found: {selector}");
-                    log_action("TYPE_ERROR", &err);
-                    Err(err)
-                }
-                _ => {
-                    let err = response_error(&response);
-                    log_action("TYPE_ERROR", &err);
-                    Err(err)
-                }
+    .await
+    {
+        Ok(response) => match response["result"]["result"]["value"].as_str() {
+            Some("typed") => {
+                log_action(
+                    "TYPE_SUCCESS",
+                    &format!("Successfully typed into element '{selector}'"),
+                );
+                Ok("typed".into())
             }
-        }
+            Some("not-found") => {
+                let err = format!("browser selector not found: {selector}");
+                log_action("TYPE_ERROR", &err);
+                Err(err)
+            }
+            _ => {
+                let err = response_error(&response);
+                log_action("TYPE_ERROR", &err);
+                Err(err)
+            }
+        },
         Err(e) => {
             log_action("TYPE_ERROR", &format!("Websocket error: {e}"));
             Err(e)
@@ -301,7 +319,8 @@ pub async fn ensure_page_open(config: &MintConfig) -> Result<(), String> {
     if !has_page {
         let base_url = endpoint.replace("/json/list", "/json/new");
         let client = crate::HTTP_CLIENT.clone();
-        let _ = client.put(&base_url)
+        let _ = client
+            .put(&base_url)
             .send()
             .await
             .map_err(|e| format!("failed to open new tab: {e}"))?;

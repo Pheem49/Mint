@@ -344,7 +344,8 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         input_formats.push("- browser_click: {\"selector\":\"button.submit-btn\"}");
     }
     if allowed_actions.contains(&"browser_type") {
-        input_formats.push("- browser_type: {\"selector\":\"input.search-bar\", \"text\":\"search query\"}");
+        input_formats
+            .push("- browser_type: {\"selector\":\"input.search-bar\", \"text\":\"search query\"}");
     }
     if allowed_actions.contains(&"browser_read") {
         input_formats.push("- browser_read: {}");
@@ -460,7 +461,9 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         rules.push("7c. Use browser_type to enter text/input into form fields or search boxes.");
     }
     if allowed_actions.contains(&"browser_read") {
-        rules.push("7d. Use browser_read to read the text content of the active page to analyze it.");
+        rules.push(
+            "7d. Use browser_read to read the text content of the active page to analyze it.",
+        );
     }
     if allowed_actions.contains(&"memory_recall") {
         rules.push("8. Use memory_recall to search past interactions before asking the user to repeat context.");
@@ -680,7 +683,7 @@ where
         ))
     })?;
     let resolved_task = resolve_github_links(task, config).await;
-    let skills = crate::skills::learned_skills_context().unwrap_or_default();
+    let skills = crate::skills::learned_skills_context(Some(&root)).unwrap_or_default();
     let mut observation = initial_observation(&resolved_task, &root, &skills);
     let mut pending_image = image_data_uri;
 
@@ -1130,7 +1133,9 @@ where
             } else if !input.path.is_empty() {
                 &input.path
             } else {
-                return Err(OrchestrationError::Agent("browser_open requires 'url'".into()));
+                return Err(OrchestrationError::Agent(
+                    "browser_open requires 'url'".into(),
+                ));
             };
             if crate::is_browser_running(config).await {
                 let result = crate::browser::navigate(config, url)
@@ -1141,14 +1146,24 @@ where
                 let opened = if cfg!(target_os = "macos") {
                     std::process::Command::new("open").arg(url).spawn().is_ok()
                 } else if cfg!(target_os = "windows") {
-                    std::process::Command::new("cmd").args(&["/C", "start", url]).spawn().is_ok()
+                    std::process::Command::new("cmd")
+                        .args(&["/C", "start", url])
+                        .spawn()
+                        .is_ok()
                 } else {
-                    std::process::Command::new("xdg-open").arg(url).spawn().is_ok()
+                    std::process::Command::new("xdg-open")
+                        .arg(url)
+                        .spawn()
+                        .is_ok()
                 };
                 if opened {
-                    Ok(format!("Mint Auto is not active. Opened {url} in your default browser instead."))
+                    Ok(format!(
+                        "Mint Auto is not active. Opened {url} in your default browser instead."
+                    ))
                 } else {
-                    Err(OrchestrationError::Agent("Failed to open URL in default browser.".into()))
+                    Err(OrchestrationError::Agent(
+                        "Failed to open URL in default browser.".into(),
+                    ))
                 }
             }
         }
@@ -1158,7 +1173,9 @@ where
             } else if !input.path.is_empty() {
                 &input.path
             } else {
-                return Err(OrchestrationError::Agent("browser_click requires 'selector'".into()));
+                return Err(OrchestrationError::Agent(
+                    "browser_click requires 'selector'".into(),
+                ));
             };
             let result = crate::browser::click(config, selector)
                 .await
@@ -1171,14 +1188,18 @@ where
             } else if !input.path.is_empty() {
                 &input.path
             } else {
-                return Err(OrchestrationError::Agent("browser_type requires 'selector'".into()));
+                return Err(OrchestrationError::Agent(
+                    "browser_type requires 'selector'".into(),
+                ));
             };
             let text = if !input.text.is_empty() {
                 &input.text
             } else if !input.query.is_empty() {
                 &input.query
             } else {
-                return Err(OrchestrationError::Agent("browser_type requires 'text'".into()));
+                return Err(OrchestrationError::Agent(
+                    "browser_type requires 'text'".into(),
+                ));
             };
             let result = crate::browser::type_text(config, selector, text)
                 .await

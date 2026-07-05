@@ -134,6 +134,28 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   return invoke<RuntimeStatus>('get_runtime_status')
 }
 
+export interface DetectedTools {
+  docker: boolean
+  git: boolean
+  gh: boolean
+  node: boolean
+}
+
+export async function detectSystemTools(): Promise<DetectedTools> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    try {
+      const res = await fetch(`${API_BASE}/detect-tools`);
+      return await res.json();
+    } catch (e) {
+      console.error("Failed to detect tools from local server:", e);
+      return { docker: false, git: false, gh: false, node: false };
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<DetectedTools>('detect_system_tools')
+}
+
 export async function sendChatMessage(
   message: string,
   imageDataUri?: string | null,

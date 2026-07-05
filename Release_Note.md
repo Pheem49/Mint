@@ -46,14 +46,35 @@ Brought parity to the interactive questioning feature between the CLI and GUI ve
 - **Answer Submission Backend:** Updated the Tauri backend to handle `ApprovalOutcome::Intercepted(answer)` channels, sending user-typed answers back to the orchestration layer.
 - **Activity Log Integration:** Once submitted, the user's typed answer is appended directly to the tool's execution target within the expandable "Working through task" drawer (e.g. `คุณภีมชอบสีอะไรคะ? (Answered: "สีเขียวมิ้นต์")`), maintaining a clear visual history of interactions.
 
+### 🐙 8. GitKraken MCP Auto-Detection
+Enabled a seamless developer onboarding experience by auto-discovering GitKraken on the host machine:
+- **Automatic Discovery:** Scans the user's local PATH during configuration load to check if `gk` (GitKraken CLI) is available on the system.
+- **Auto-Config Injection:** If detected, automatically configures and adds the GitKraken MCP server (`gk mcp`) to the user's `mint-config.json` file.
+- **Github Release Integration:** Updated the CI/CD `.github/workflows/release.yml` file to parse and use `Release_Note.md` directly for the body description of GitHub Releases.
+
+### 🏷️ 9. File-System Based AI Skills & Source Badges
+Upgraded the AI skills loading pipeline and settings interface:
+- **Dual Workspace Scanning:** Automatically discovers and loads `.md` / `.txt` skills from both `.agents/skills/` and `skills/` folders in the active workspace.
+- **Location Color Badges:** Displays tags indicating whether skills come from Workspace (🟢 green), Global (🔵 blue), or Taught database (🟣 purple) in settings UI and CLI list output (`mint learn --list` and `/learn`).
+- **Clean List UI:** Hides the lengthy file content preview block under each skill, rendering a much cleaner and concise layout.
+
+### 🛠️ 10. Unified MCP Servers & Toggle Management
+- **Consolidated List:** Merged all system-discovered tools (Docker, Git, GitHub, Node) into the unified MCP Servers list.
+- **Individual Toggle Switches:** Enables/disables or installs MCP servers dynamically with instant toggle state styling.
+- **Red Trash Can Buttons:** Added a red trash icon button to easily remove custom/manually configured MCP servers.
+
 ---
 
 ## 🛠️ Codebase Changes
 
 ### Tauri Backend (`src-tauri` & `crates/mint-core`)
 - Register Tauri commands: `create_workspace_file`, `create_workspace_folder`, and `delete_workspace_item` in `src-tauri/src/lib.rs`.
+- Add `location` field to `LearnedSkillDto` and populate it based on workspace, global config, or database sources in `src-tauri/src/lib.rs`.
+- Update `workspace_root` path resolver in `src-tauri/src/lib.rs` to strip `src-tauri` from the active directory during dev mode.
 - Standardize process suggestion monitor logic to run AI prompt translations in the background thread inside `src-tauri/src/workflows.rs`.
 - Change `submit_tool_approval` signature and `ApprovalsState` pending channel type to support `ApprovalOutcome` in `src-tauri/src/lib.rs`.
+- Add executable search helper `which` and GitKraken auto-detection hooks to `load_config_from` in `crates/mint-core/src/config.rs`.
+- Support multiple source directory scanning and deduplication of learned skills in `crates/mint-core/src/skills.rs`.
 
 ### Desktop/Web Frontend (`src/renderer`)
 - Integrate creation/deletion actions and focus/polling lifecycle listeners inside `WorkspacePanel.tsx`.
@@ -61,8 +82,14 @@ Brought parity to the interactive questioning feature between the CLI and GUI ve
 - Update inline markdown parser inside `ChatPanel.tsx` to wrap `@` mentions, and style `.chat-mention` in `index.css`.
 - Update `submitToolApproval` API and component state handlers (`MintDashboard.tsx`, `ChatPanel.tsx`) in both desktop and web directories to render and submit custom answers.
 - Update `activitiesFrom` and `AgentActivity` structure to parse and append the user's answer into the active `ask_user` tool target block upon `ToolEnd`.
+- Update `LearnedSkill` TypeScript interface in `src/renderer/src/tauri.ts` to include optional `location`.
+- Render colored location badges, strip lengthy content text boxes, and unify MCP toggles/delete controls in `src/renderer/src/components/Settings/PluginsTab.tsx` and `src/renderer/src-web/components/Settings/PluginsTab.tsx`.
 
 ### CLI Agent (`crates/mint-cli`)
 - Redefine live status print lines (`plan_lines`, `tasks_lines`, `activities_lines`, `explored_lines`) to accept progress tick state and apply the `get_bullet` helper.
 - Update `render_live_status` in `crates/mint-cli/src/agent.rs` to compute true physical lines of terminal wrapped text, using a new `is_thai_combining` filter.
 - Modify `confirm` in `crates/mint-cli/src/main.rs` to indent confirmation prompts.
+- Format `mint learn --list` and `/learn` CLI output into a bullet-point summary showing active skill locations and source paths.
+
+### Github CI/CD Workflows
+- Modify `Publish GitHub release` step in `.github/workflows/release.yml` to use `body_path: Release_Note.md`.

@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 pub mod agent_loop;
+pub mod browser;
 pub mod chat;
 pub mod code_tools;
 pub mod config;
@@ -22,7 +23,6 @@ pub mod tts;
 pub mod weather;
 pub mod web_search;
 pub mod workflows;
-pub mod browser;
 
 pub use agent_loop::{AgentActionFuture, AgentLoopError, parse_agent_json, run_agent_loop};
 pub use chat::{
@@ -30,6 +30,10 @@ pub use chat::{
     stream_chat_with_fallback,
 };
 
+pub use browser::{
+    BrowserTab, click, is_browser_running, list_tabs, navigate, read_page_text,
+    spawn_automation_browser, type_text,
+};
 pub use code_tools::{
     AppliedCodeEdit, CodeEdit, CodeEditPreview, CodeEditProposal, CodeFile, CodeInspectionError,
     CodePatchHunk, CodePlan, CodeSearchHit, RepositorySummary, apply_code_edits, build_code_patch,
@@ -80,7 +84,6 @@ pub use tasks::{Task, TaskError, TaskStore, tasks_path};
 pub use tts::{TtsUrl, google_tts_urls};
 pub use weather::{WeatherError, WeatherReport, weather};
 pub use workflows::{WorkflowError, load_workflows, save_workflows, workflows_path};
-pub use browser::{BrowserTab, list_tabs, navigate, read_page_text, click, type_text, is_browser_running, spawn_automation_browser};
 pub mod api_server;
 pub use api_server::start_api_server;
 pub mod channels;

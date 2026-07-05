@@ -78,6 +78,14 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ---
 
+### 9. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Browser Automation (`mint auto`)
+- Control and automate web pages directly from either the terminal or the GUI desktop chat.
+- Runs a dedicated, isolated Chromium instance on port `9222` with state separation using the command `mint auto`.
+- Supports opening URLs (`browser_open`), clicking buttons/elements (`browser_click`), typing text (`browser_type`), and extracting content (`browser_read`).
+- **Dynamic Tool Injection:** The agent automatically registers these browser capability tools only when it detects that the automation browser is active on port `9222`.
+
+---
+
 ## Highlights
 
 - Multi-provider chat with Gemini, OpenAI, Anthropic, Ollama, Hugging Face, and
@@ -107,6 +115,8 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ## What's New in v1.8.1
 
+- **File-System Based AI Skills & UI Badges**: Scan and load AI skills from the Global folder (`~/.config/mint/mint-skills/`) and Workspace folders (`.agents/skills/` & `skills/`). Shows source badges (`Workspace` 🟢, `Global` 🔵, `Taught` 🟣) in settings UI and CLI listings (`mint learn --list` and `/learn`) with a clean hidden-content list view.
+- **Unified MCP Servers UI & Toggle Controls**: Merged system-discovered servers into a unified list with toggles to enable/disable or install, and red trash can buttons to remove custom servers.
 - **Advanced Workspace File Tree & Operations**: Manage files directly from the sidebar UI with file/folder creation buttons, right-click deletion modals, and automatic polling + focus-based syncing.
 - **Drag-and-Drop File Mentions**: Drag files from the sidebar to chat input to insert `@filename` with auto-spacing, rendered as outline pills styled with your selected accent color.
 - **CLI Agent Interface Polish & Terminal Line Wrapping Fix**: Indented status blocks and confirmation prompts by 2 spaces to align text. Implemented the *Dynamic Breathing Circle System* (`●` ⇄ `○` pulsing during thinking) and fixed terminal duplicate line bugs by counting physical terminal wrapping width and filtering Thai tone marks.
@@ -355,6 +365,7 @@ mint setup
 mint status
 mint web
 mint api
+mint auto
 mint chat "<message>"
 ```
 
@@ -367,6 +378,7 @@ mint chat "<message>"
 | `mint setup` | Interactively manage enabled agent tools |
 | `mint web` | Launch the web UI and local API server |
 | `mint api` | Start only the local API server |
+| `mint auto` | Launch the GUI browser automation isolated port |
 | `mint status` | Show runtime status |
 | `mint config init` | Create the local configuration file |
 | `mint config path` | Print the configuration file path |
@@ -444,15 +456,18 @@ mint mcp call filesystem list_directory \
 | `/help` | Show interactive help |
 | `/fast [on\|off]` | Toggle fast response mode |
 | `/models [name]` | List or select a model |
+| `/image-provider [name]` | List or select default image generation provider |
 | `/clear` or `/reset` | Clear the active conversation |
 | `/cd <path>` | Change workspace directory |
 | `/image <path> [prompt]` | Send an image with an optional prompt |
 | `/paste [prompt]` | Use an image from the clipboard |
 | `/learn <path>` | Import a local skill |
+| `/plugins [name]` | List or interact with available plugins/skills |
 | `/memory list` | List stored memories |
 | `/memory clear` | Clear stored memories |
 | `/memory get <key>` | Read one memory value |
 | `/memory set <key> <value>` | Store one memory value |
+| `/mcp [subcmd]` | Manage configured MCP servers (list, allow, disallow) |
 | `/stats` | Show session statistics |
 | `/code <task>` | Start a code-agent task |
 | `/exit` or `/quit` | Leave interactive mode |

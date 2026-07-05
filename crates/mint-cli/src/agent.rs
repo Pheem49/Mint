@@ -419,7 +419,7 @@ fn render_live_summary(summary: &str) {
             .subsequent_indent("  ")
             .break_words(true);
         let wrapped = textwrap::fill(line, &options);
-        
+
         if is_first {
             print!("{wrapped}");
             is_first = false;
@@ -573,7 +573,7 @@ fn strip_ansi_escapes(s: &str) -> String {
 }
 
 fn is_thai_combining(c: char) -> bool {
-    matches!(c, 
+    matches!(c,
         '\u{0e31}' | '\u{0e34}'..='\u{0e37}' | '\u{0e38}'..='\u{0e39}' |
         '\u{0e47}'..='\u{0e4e}'
     )
@@ -591,8 +591,16 @@ fn render_live_status(status: &mut LiveStatus) {
 
     lines.extend(plan_lines(&status.plan_steps, is_thinking, tick));
     lines.extend(tasks_lines(&status.tasks[tasks_start..], is_thinking, tick));
-    lines.extend(activities_lines(&status.activities[activities_start..], is_thinking, tick));
-    lines.extend(explored_lines(&status.explored[explored_start..], is_thinking, tick));
+    lines.extend(activities_lines(
+        &status.activities[activities_start..],
+        is_thinking,
+        tick,
+    ));
+    lines.extend(explored_lines(
+        &status.explored[explored_start..],
+        is_thinking,
+        tick,
+    ));
     if let Some(thinking) = &status.thinking {
         let frames = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         let frame = frames[status.spinner_tick % frames.len()];
@@ -614,7 +622,8 @@ fn render_live_status(status: &mut LiveStatus) {
             (line_len + width - 1) / width
         } else {
             1
-        }.max(1);
+        }
+        .max(1);
         physical_lines_count += physical_lines;
         println!("{line}");
     }
@@ -629,7 +638,11 @@ fn commit_activity_snapshot(status: &mut LiveStatus) {
     let tasks_start = status.committed_tasks.min(status.tasks.len());
 
     let mut lines = explored_lines(&status.explored[explored_start..], false, 0);
-    lines.extend(activities_lines(&status.activities[activities_start..], false, 0));
+    lines.extend(activities_lines(
+        &status.activities[activities_start..],
+        false,
+        0,
+    ));
     lines.extend(tasks_lines(&status.tasks[tasks_start..], false, 0));
     if lines.is_empty() {
         return;
@@ -683,7 +696,7 @@ fn get_bullet(name: &str, is_thinking: bool, tick: usize) -> String {
     } else {
         "●"
     };
-    
+
     match name {
         "plan" => format!("{BLUE}{char_str}{RESET} plan"),
         "tasks" => format!("{MINT}{char_str}{RESET} tasks"),
@@ -746,7 +759,10 @@ fn activities_lines(activities: &[String], is_thinking: bool, tick: usize) -> Ve
         format!("{DIM}{prefix} {act}{RESET}")
     }));
     if activities.len() > 24 {
-        lines.push(format!("{DIM}     ... {} more{RESET}", activities.len() - 24));
+        lines.push(format!(
+            "{DIM}     ... {} more{RESET}",
+            activities.len() - 24
+        ));
     }
     lines
 }

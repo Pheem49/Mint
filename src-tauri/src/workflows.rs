@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mint_core::{load_config, load_workflows, ChatRequest, send_chat};
+use mint_core::{ChatRequest, load_config, load_workflows, send_chat};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -72,7 +72,10 @@ pub fn start_monitor(app: AppHandle) {
 
                         let chat_req = ChatRequest {
                             message: prompt,
-                            system_instruction: format!("You are Mint, a helpful desktop assistant. Write only the friendly suggestion in the language matching '{}'. No quotes, no markdown, no other text.", config.language),
+                            system_instruction: format!(
+                                "You are Mint, a helpful desktop assistant. Write only the friendly suggestion in the language matching '{}'. No quotes, no markdown, no other text.",
+                                config.language
+                            ),
                             chat_id: None,
                             image_data_uri: None,
                             audio_data_uri: None,
@@ -83,7 +86,8 @@ pub fn start_monitor(app: AppHandle) {
                         tauri::async_runtime::block_on(async {
                             match send_chat(&config, &chat_req).await {
                                 Ok(response) => {
-                                    let cleaned = response.text.trim().trim_matches('"').to_string();
+                                    let cleaned =
+                                        response.text.trim().trim_matches('"').to_string();
                                     if !cleaned.is_empty() {
                                         cleaned
                                     } else {
@@ -91,7 +95,10 @@ pub fn start_monitor(app: AppHandle) {
                                     }
                                 }
                                 Err(err) => {
-                                    eprintln!("Failed to generate dynamic suggestion via AI: {:?}", err);
+                                    eprintln!(
+                                        "Failed to generate dynamic suggestion via AI: {:?}",
+                                        err
+                                    );
                                     static_message.to_string()
                                 }
                             }

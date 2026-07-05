@@ -210,6 +210,11 @@ fn workspace_root(path: Option<&str>) -> Result<PathBuf, String> {
         None => std::env::current_dir().map_err(|error| error.to_string())?,
     };
     let root = root.canonicalize().map_err(|error| error.to_string())?;
+    let root = if root.ends_with("src-tauri") {
+        root.parent().unwrap_or(&root).to_path_buf()
+    } else {
+        root
+    };
     if !root.is_dir() {
         return Err(format!("workspace is not a directory: {}", root.display()));
     }
@@ -562,20 +567,52 @@ struct LearnedSkillDto {
     source_path: String,
     content: String,
     updated_at: String,
+    location: String,
 }
 
 #[tauri::command]
-fn list_learned_skills() -> Result<Vec<LearnedSkillDto>, String> {
+fn list_learned_skills(workspace_path: Option<String>) -> Result<Vec<LearnedSkillDto>, String> {
     let store = MemoryStore::open_default().map_err(|e| e.to_string())?;
-    let skills = store.learned_skills(100).map_err(|e| e.to_string())?;
-    let dtos = skills
-        .into_iter()
-        .map(|s| LearnedSkillDto {
+    let db_skills = store.learned_skills(100).map_err(|e| e.to_string())?;
+
+    let mut global_skills = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        let global_skills_path = home.join(".config").join("mint").join("mint-skills");
+        if !global_skills_path.exists() {
+            let _ = std::fs::create_dir_all(&global_skills_path);
+        }
+        mint_core::skills::load_skills_from_dir(&global_skills_path, &mut global_skills);
+    }
+
+    let mut workspace_skills = Vec::new();
+    if let Ok(root) = workspace_root(workspace_path.as_deref()) {
+        let workspace_skills_path1 = root.join(".agents").join("skills");
+        mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut workspace_skills);
+
+        let workspace_skills_path2 = root.join("skills");
+        mint_core::skills::load_skills_from_dir(&workspace_skills_path2, &mut workspace_skills);
+    }
+
+    let mut unique_skills = std::collections::BTreeMap::new();
+    for s in db_skills {
+        unique_skills.insert(s.name.clone(), (s, "database"));
+    }
+    for s in global_skills {
+        unique_skills.insert(s.name.clone(), (s, "global"));
+    }
+    for s in workspace_skills {
+        unique_skills.insert(s.name.clone(), (s, "workspace"));
+    }
+
+    let dtos = unique_skills
+        .into_values()
+        .map(|(s, loc)| LearnedSkillDto {
             id: s.id,
             name: s.name,
             source_path: s.source_path,
             content: s.content,
             updated_at: s.created_at,
+            location: loc.to_string(),
         })
         .collect();
     Ok(dtos)
@@ -593,6 +630,7 @@ fn add_learned_skill(name: String, content: String) -> Result<LearnedSkillDto, S
         source_path: skill.source_path,
         content: skill.content,
         updated_at: skill.created_at,
+        location: "database".to_string(),
     })
 }
 
@@ -640,6 +678,25 @@ async fn submit_tool_approval(
     } else {
         Err("No pending approval found for this token".into())
     }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectedTools {
+    pub docker: bool,
+    pub git: bool,
+    pub gh: bool,
+    pub node: bool,
+}
+
+#[tauri::command]
+async fn detect_system_tools() -> Result<DetectedTools, String> {
+    Ok(DetectedTools {
+        docker: mint_core::config::which("docker"),
+        git: mint_core::config::which("git"),
+        gh: mint_core::config::which("gh"),
+        node: mint_core::config::which("node"),
+    })
 }
 
 #[derive(serde::Serialize)]
@@ -1051,6 +1108,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
+            detect_system_tools,
             get_workspace_tree,
             create_workspace_file,
             create_workspace_folder,
