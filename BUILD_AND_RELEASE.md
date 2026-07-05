@@ -59,3 +59,39 @@ To publish the repository package to the npm registry as a public scoped package
    ```
 
 *Note: You must bump the version number in `package.json` before publishing a new version.*
+
+## Publish to Flathub (Flatpak)
+
+Flathub packages are managed via the [flatpak/](file:///home/pheem49/vscode/Project/Mint-CLI/flatpak/) files. To build and test your Flatpak locally:
+
+1. **Install Flatpak builder tools**:
+   ```bash
+   sudo apt install flatpak-builder
+   flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+   flatpak install flathub org.gnome.Platform//47 org.gnome.Sdk//47 org.freedesktop.Sdk.Extension.rust-stable//24.08
+   ```
+
+2. **Build the React Frontend UI on host machine**:
+   ```bash
+   npm install
+   npm run build:desktop:ui
+   ```
+
+3. **Clone Flathub Shared Modules (needed for System Tray Icon support)**:
+   ```bash
+   git clone https://github.com/flathub/shared-modules.git
+   ```
+
+4. **Build the Flatpak locally**:
+   ```bash
+   flatpak-builder --force-clean build-dir flatpak/com.pheem49.mint.yaml
+   ```
+
+5. **Run the built Flatpak**:
+   ```bash
+   flatpak-builder --run build-dir flatpak/com.pheem49.mint.yaml mint-desktop
+   ```
+
+*Note: For official Flathub submission, you must generate offline dependencies using `flatpak-node-generator` and `flatpak-cargo-generator` and reference them in the manifest.*
+
+
