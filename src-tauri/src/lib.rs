@@ -389,6 +389,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
     let root_clone = root.clone();
     let image_data_uri_clone = request.image_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
+    let agent_id_clone = request.agent_id.clone();
 
     let join_handle = tokio::spawn(async move {
         orchestrate_agent_loop(
@@ -397,6 +398,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
             &root_clone,
             image_data_uri_clone,
             chat_id_clone.as_deref(),
+            agent_id_clone.as_deref(),
             fast_mode,
             approve_cb,
             progress_cb,
@@ -529,6 +531,7 @@ async fn stream_chat_message(
     let root_clone = root.clone();
     let image_data_uri_clone = request.image_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
+    let agent_id_clone = request.agent_id.clone();
 
     let join_handle = tokio::spawn(async move {
         orchestrate_agent_loop(
@@ -537,6 +540,7 @@ async fn stream_chat_message(
             &root_clone,
             image_data_uri_clone,
             chat_id_clone.as_deref(),
+            agent_id_clone.as_deref(),
             fast_mode,
             approve_cb,
             progress_cb,

@@ -476,6 +476,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         image_data_uri: Option<String>,
                         audio_data_uri: Option<String>,
                         document_attachment: Option<crate::chat::DocumentAttachment>,
+                        agent_id: Option<String>,
                     }
 
                     if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
@@ -488,6 +489,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             audio_data_uri: req.audio_data_uri,
                             document_attachment: req.document_attachment,
                             workspace_path: None,
+                            agent_id: req.agent_id,
                         };
                         let mut chat_req =
                             chat_req.with_document_context(&config).unwrap_or(chat_req);
@@ -578,6 +580,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         image_data_uri: Option<String>,
                         audio_data_uri: Option<String>,
                         document_attachment: Option<crate::chat::DocumentAttachment>,
+                        agent_id: Option<String>,
                     }
 
                     if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
@@ -590,6 +593,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             audio_data_uri: req.audio_data_uri,
                             document_attachment: req.document_attachment,
                             workspace_path: None,
+                            agent_id: req.agent_id,
                         };
                         let mut chat_req =
                             chat_req.with_document_context(&config).unwrap_or(chat_req);
@@ -721,6 +725,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     let chat_id_str = chat_id.clone().unwrap_or_default();
                                     let message = chat_req.message.clone();
                                     let image_data_uri = chat_req.image_data_uri.clone();
+                                    let agent_id = chat_req.agent_id.clone();
 
                                     let join_handle = tokio::spawn(async move {
                                         let result = orchestrate_agent_loop(
@@ -729,6 +734,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                             &root,
                                             image_data_uri,
                                             chat_id.as_deref(),
+                                            agent_id.as_deref(),
                                             fast_mode,
                                             |_| Ok(ApprovalOutcome::Denied),
                                             progress_cb,
@@ -940,6 +946,7 @@ async fn run_web_agent_loop(
         &root,
         request.image_data_uri.clone(),
         request.chat_id.as_deref(),
+        request.agent_id.as_deref(),
         fast_mode,
         |_| Ok(ApprovalOutcome::Denied),
         |_| {},

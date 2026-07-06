@@ -1031,6 +1031,13 @@ export default function ChatPanel({
 }: ChatPanelProps) {
   const agentActivities = activitiesFrom(agentProgress)
   const activeFallbackNotice = fallbackNotice(streamedResponse)
+  const lastThinkingProgress = [...agentProgress].reverse().find(p => p.type === 'Thinking')
+  let activeAgentName: string | null = null
+  let activeModelName: string | null = null
+  if (lastThinkingProgress && lastThinkingProgress.type === 'Thinking') {
+    activeAgentName = (lastThinkingProgress.data as any).agent_name || null
+    activeModelName = (lastThinkingProgress.data as any).model_name || null
+  }
   const [openActivityIds, setOpenActivityIds] = useState<Record<string, boolean>>({})
   const [openReviewIds, setOpenReviewIds] = useState<Record<string, boolean>>({})
   const [openFileDiffs, setOpenFileDiffs] = useState<Record<string, boolean>>({})
@@ -1919,7 +1926,12 @@ export default function ChatPanel({
                             />
                           </path>
                         </svg>
-                        <span>Thinking for {elapsedSeconds}s (Esc to cancel)</span>
+                         <span>
+                           {activeAgentName && activeModelName 
+                             ? `${activeAgentName} (${activeModelName}) is thinking... (${elapsedSeconds}s)`
+                             : `Thinking for ${elapsedSeconds}s (Esc to cancel)`
+                           }
+                         </span>
                       </div>
                     )}
                   </span>

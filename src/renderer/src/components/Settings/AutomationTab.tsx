@@ -168,28 +168,6 @@ export default function AutomationTab({
         </div>
       </section>
 
-      <section className="setting-section">
-        <div className="section-heading">
-          <div>
-            <p className="section-kicker">Code mode</p>
-            <h2 className="section-title">Agent Collaboration</h2>
-          </div>
-        </div>
-        <div className="toggle-row">
-          <div>
-            <label>Enable Multi-Agent Review</label>
-            <p className="hint">Allow a secondary model to review code written by the primary model.</p>
-          </div>
-          <label className="settings-toggle-switch">
-            <input 
-              type="checkbox" 
-              checked={config.enableAgentCollaboration} 
-              onChange={(e) => updateField('enableAgentCollaboration', e.target.checked)} 
-            />
-            <span className="settings-toggle-slider"></span>
-          </label>
-        </div>
-      </section>
     </div>
   )
 }

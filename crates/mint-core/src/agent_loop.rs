@@ -61,6 +61,7 @@ where
                 audio_data_uri: None,
                 document_attachment: None,
                 workspace_path: None,
+                agent_id: None,
             },
         )
         .await?;

@@ -81,6 +81,7 @@ pub fn start_monitor(app: AppHandle) {
                             audio_data_uri: None,
                             document_attachment: None,
                             workspace_path: None,
+                            agent_id: None,
                         };
 
                         tauri::async_runtime::block_on(async {

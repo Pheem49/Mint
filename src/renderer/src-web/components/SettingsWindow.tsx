@@ -6,6 +6,7 @@ import AudioTab from './Settings/AudioTab'
 import AutomationTab from './Settings/AutomationTab'
 import ThemeTab from './Settings/ThemeTab'
 import PluginsTab from './Settings/PluginsTab'
+import AgentsTab from './Settings/AgentsTab'
 
 export const DEFAULT_CONFIG = {
   theme: 'dark',
@@ -30,7 +31,7 @@ export const DEFAULT_CONFIG = {
   proactiveCooldown: 120,
   enableVoiceReply: true,
   enableCustomWorkflows: true,
-  enableAgentCollaboration: true,
+  enableAgentCollaboration: false,
   ttsProvider: 'google',
   ttsVolume: 1.0,
   ttsSpeed: 1.0,
@@ -91,10 +92,40 @@ export const DEFAULT_CONFIG = {
   imageGenProvider: 'gemini' as 'gemini' | 'dalle' | 'stability' | 'ideogram' | 'replicate',
   stabilityApiKey: '',
   ideogramApiKey: '',
-  replicateApiKey: ''
+  replicateApiKey: '',
+  // Multi-Agent Configuration
+  agents: [
+    {
+      id: 'planner',
+      name: 'Planner',
+      provider: 'gemini',
+      model: 'gemini-2.5-flash',
+      apiKey: '',
+      systemInstruction: 'You are the Planner agent. Your task is to analyze the user request, inspect the workspace structure, and design a step-by-step implementation plan. Create or update the implementation_plan.md file to document your proposal.',
+      enabled: true
+    },
+    {
+      id: 'coder',
+      name: 'Coder',
+      provider: 'gemini',
+      model: 'gemini-2.5-flash',
+      apiKey: '',
+      systemInstruction: 'You are the Coder agent. Your task is to implement the changes specified in the approved implementation plan. Read relevant files, write clean and efficient code, and run terminal commands to build or verify. Stay focused on execution.',
+      enabled: true
+    },
+    {
+      id: 'reviewer',
+      name: 'Reviewer',
+      provider: 'gemini',
+      model: 'gemini-2.5-flash',
+      apiKey: '',
+      systemInstruction: 'You are the Reviewer agent. Your task is to verify the code modifications made by the Coder. Run the automated tests, check lint errors, and ensure the implementation is correct and complete.',
+      enabled: true
+    }
+  ]
 }
 
-type TabType = 'sect-general' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory'
+type TabType = 'sect-general' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
 
 export const GEMINI_MODELS = [
   'gemini-2.5-flash',
@@ -616,6 +647,17 @@ export default function SettingsWindow() {
             </span>
             <strong>Plugins</strong>
           </button>
+          <button className={`tab-btn ${activeTab === 'sect-agents' ? 'active' : ''}`} onClick={() => setActiveTab('sect-agents')}>
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+            </span>
+            <strong>Multi-Agent (Beta)</strong>
+          </button>
         </nav>
 
         <div className="settings-content">
@@ -703,6 +745,14 @@ export default function SettingsWindow() {
               handleAddMcpServer={handleAddMcpServer}
               handleRemoveMcpServer={handleRemoveMcpServer}
               handleConnectPlugin={handleConnectPlugin}
+            />
+          )}
+
+          {activeTab === 'sect-agents' && (
+            <AgentsTab
+              config={config}
+              updateField={updateField}
+              dynamicOllamaModels={dynamicOllamaModels}
             />
           )}
         </div>

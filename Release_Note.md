@@ -1,6 +1,6 @@
 # Release Notes - Mint Agent v1.8.2
 
-We are excited to release **Mint Agent v1.8.2**! This release introduces powerful local workspace file management features, real-time AI-generated workflow suggestions in the user's active language, mobile layout optimization, and general UI/UX polish.
+We are excited to release **Mint Agent v1.8.2**! This release introduces a configurable Multi-Agent system for sequential collaboration, powerful local workspace file management features, real-time AI-generated workflow suggestions in the user's active language, mobile layout optimization, and general UI/UX polish.
 
 ---
 
@@ -72,6 +72,20 @@ You can now cancel or stop an active AI stream or agent loop at any point in the
 ### 🎙️ 12. Microphone Active Breathing Aura Glow
 When the microphone/voice mode is active, the boundaries of the chat composer box and the voice status bar light up with a dynamic, breathing green aura, providing intuitive visual feedback.
 
+### 🤖 13. Configurable Multi-Agent System & Collaboration Pipeline
+Users can now configure and run multiple specialized AI agents (e.g. Planner, Coder, Reviewer) within the desktop and web settings panel, allocating custom models, providers, and instructions to each agent:
+- **Global Toggle Switch:** Added a main "Enable Multi-Agent Collaboration" toggle switch at the top of the new "Multi-Agent (Beta)" settings tab to globally turn on/off the agent routing pipeline.
+- **Provider-Specific Dropdowns:** Replaced the text input for model selection with provider-specific dropdown select lists matching the models available in General settings.
+- **Disable All Button:** Added a "Disable All" button allowing users to disable all configured agents instantly in one click.
+- **Real-Time Agent & Model Indicators:** The live thinking message bubble in the chat panel dynamically displays the active agent's name and model in real-time (e.g. `Planner (gemini-2.5-flash) is thinking...`).
+
+### 🖥️ 14. CLI Suggestions Pagination & Ordering
+Improved the autocomplete experience in the terminal:
+- **Pagination (5 Items Max):** Autocomplete suggestions now display a maximum of 5 commands at a time with a page indicator (e.g., `Suggestions (1/4)`), preventing long list clutter.
+- **Alphabetical Sorting:** Autocomplete suggestions are sorted alphabetically at source.
+- **Simplified Exit Options:** Removed `/quit` from the autocomplete suggestions and help output (while retaining hidden execution support) to clean up the interface.
+- **Real-Time Agent & Model Status:** The CLI live thinking status bar dynamically displays which agent and model is executing.
+
 ---
 
 ## 🛠️ Codebase Changes
@@ -87,6 +101,9 @@ When the microphone/voice mode is active, the boundaries of the chat composer bo
 - Introduce a global `ACTIVE_AGENTS` thread-safe hash map registry and `cancel_agent` API in `crates/mint-core/src/lib.rs` to track active tokio tasks.
 - Register Tauri command `cancel_chat_message` in `src-tauri/src/lib.rs`.
 - Implement `POST /api/cancel-chat` in `crates/mint-core/src/api_server.rs` to cancel running web agent tasks.
+- Add `enable_agent_collaboration` config parameter (defaulting to `false`) in `crates/mint-core/src/config.rs`.
+- Update `resolve_agent_config` in `crates/mint-core/src/orchestration.rs` to return a tuple containing the active agent name and model, and check `enable_agent_collaboration`.
+- Expand `AgentProgress::Thinking` in `crates/mint-core/src/orchestration.rs` to optionally contain `agent_name` and `model_name`.
 
 ### Desktop/Web Frontend (`src/renderer`)
 - Integrate creation/deletion actions and focus/polling lifecycle listeners inside `WorkspacePanel.tsx`.
@@ -101,12 +118,20 @@ When the microphone/voice mode is active, the boundaries of the chat composer bo
 - Enhance microphone connection/permission alert dialogs in `ChatPanel.tsx` to print the exact Web API error message for easier debugging.
 - Add voice-active class state and breathing keyframe animation effects around the chat input boundaries when microphone mode is active.
 - Refine the voice status bar rendering logic to prevent displaying redundant text (such as "Listening Listening...") and display actual user speech transcripts wrapped inside quotes instead.
+- Create new settings tab `AgentsTab.tsx` in desktop and web source directories supporting CRUD operations, provider-specific model dropdown selects, "Disable All" button, and global collaboration toggle.
+- Register the `Multi-Agent (Beta)` tab in the sidebar of `SettingsWindow.tsx`.
+- Update `ChatPanel.tsx` in desktop and web source directories to render the active agent and model names inside the live thinking status message.
+- Remove duplicate "Enable Multi-Agent Review" checkbox from `AutomationTab.tsx`.
 
 ### CLI Agent (`crates/mint-cli`)
 - Redefine live status print lines (`plan_lines`, `tasks_lines`, `activities_lines`, `explored_lines`) to accept progress tick state and apply the `get_bullet` helper.
 - Update `render_live_status` in `crates/mint-cli/src/agent.rs` to compute true physical lines of terminal wrapped text, using a new `is_thai_combining` filter.
 - Modify `confirm` in `crates/mint-cli/src/main.rs` to indent confirmation prompts.
 - Format `mint learn --list` and `/learn` CLI output into a bullet-point summary showing active skill locations and source paths.
+- Register `/multi-agent` slash command to display configured agents and toggle collaboration status via `/multi-agent on` and `/multi-agent off` in `crates/mint-cli/src/main.rs`.
+- Reorder `AUTOCOMPLETE_COMMANDS` alphabetically and simplify exit suggestions by keeping only `/exit`.
+- Paginate suggestions to display at most 5 items per page with page numbers.
+- Fixed `AgentProgress::Thinking` pattern matching compiler error (E0027) in `crates/mint-cli/src/agent.rs` and render active agent and model names in the live thinking terminal status bar.
 
 ### Github CI/CD Workflows
 - Modify `Publish GitHub release` step in `.github/workflows/release.yml` to use `body_path: Release_Note.md`.

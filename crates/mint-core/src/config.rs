@@ -79,8 +79,22 @@ pub struct MintConfig {
     pub blocked_paths: Vec<PathBuf>,
     pub blocked_file_names: Vec<String>,
     pub disabled_tools: Vec<String>,
+    pub agents: Vec<AgentConfig>,
+    pub enable_agent_collaboration: bool,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentConfig {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub model: String,
+    pub api_key: Option<String>,
+    pub system_instruction: String,
+    pub enabled: bool,
 }
 
 impl Default for MintConfig {
@@ -142,9 +156,43 @@ impl Default for MintConfig {
             ],
             blocked_file_names: vec![".env".into(), "id_rsa".into(), "id_ed25519".into()],
             disabled_tools: Vec::new(),
+            agents: default_agents(),
+            enable_agent_collaboration: false,
             extra: runtime_extra_defaults(),
         }
     }
+}
+
+fn default_agents() -> Vec<AgentConfig> {
+    vec![
+        AgentConfig {
+            id: "planner".into(),
+            name: "Planner".into(),
+            provider: "gemini".into(),
+            model: "gemini-2.5-flash".into(),
+            api_key: None,
+            system_instruction: "You are the Planner agent. Your task is to analyze the user request, inspect the workspace structure, and design a step-by-step implementation plan. Create or update the implementation_plan.md file to document your proposal.".into(),
+            enabled: true,
+        },
+        AgentConfig {
+            id: "coder".into(),
+            name: "Coder".into(),
+            provider: "gemini".into(),
+            model: "gemini-2.5-flash".into(),
+            api_key: None,
+            system_instruction: "You are the Coder agent. Your task is to implement the changes specified in the approved implementation plan. Read relevant files, write clean and efficient code, and run terminal commands to build or verify. Stay focused on execution.".into(),
+            enabled: true,
+        },
+        AgentConfig {
+            id: "reviewer".into(),
+            name: "Reviewer".into(),
+            provider: "gemini".into(),
+            model: "gemini-2.5-flash".into(),
+            api_key: None,
+            system_instruction: "You are the Reviewer agent. Your task is to verify the code modifications made by the Coder. Run the automated tests, check lint errors, and ensure the implementation is correct and complete.".into(),
+            enabled: true,
+        },
+    ]
 }
 
 impl MintConfig {
