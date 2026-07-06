@@ -11,6 +11,7 @@ import {
   listSavedPictures,
   saveInteractionAgentActivity,
   streamChatMessage,
+  cancelChatMessage,
   submitToolApproval,
   listen,
   readClipboardImage as readTauriClipboardImage,
@@ -412,6 +413,20 @@ export default function MintDashboard() {
       setError(errorMessage(reason))
     } finally {
       setPendingApproval(null)
+    }
+  }
+
+  async function handleCancelMessage() {
+    if (!sending || !streamingConversationId) return
+    try {
+      await cancelChatMessage(streamingConversationId)
+    } catch (e) {
+      console.error("Failed to cancel message stream:", e)
+    } finally {
+      setSending(false)
+      setStreamingConversationId(null)
+      setSendingMessage('')
+      setSendingImageCount(0)
     }
   }
 
@@ -901,6 +916,7 @@ export default function MintDashboard() {
             settingsConfig={settingsConfig}
             onSetModel={changeModel}
             onApproval={handleApproval}
+            onCancelMessage={handleCancelMessage}
             onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
           />
         </main>

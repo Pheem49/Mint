@@ -1,6 +1,6 @@
-# Release Notes - Mint Agent v1.8.1
+# Release Notes - Mint Agent v1.8.2
 
-We are excited to release **Mint Agent v1.8.1**! This release introduces powerful local workspace file management features, real-time AI-generated workflow suggestions in the user's active language, mobile layout optimization, and general UI/UX polish.
+We are excited to release **Mint Agent v1.8.2**! This release introduces powerful local workspace file management features, real-time AI-generated workflow suggestions in the user's active language, mobile layout optimization, and general UI/UX polish.
 
 ---
 
@@ -63,6 +63,15 @@ Upgraded the AI skills loading pipeline and settings interface:
 - **Individual Toggle Switches:** Enables/disables or installs MCP servers dynamically with instant toggle state styling.
 - **Red Trash Can Buttons:** Added a red trash icon button to easily remove custom/manually configured MCP servers.
 
+### 🛑 11. Escape (Esc) Key & Stop Button to Cancel AI Agent / Chat
+You can now cancel or stop an active AI stream or agent loop at any point in the web and desktop applications:
+- **Escape Key Press:** Pressing the `Esc` key while the AI is thinking or executing automatically aborts the active stream.
+- **Red Stop Composer Button:** When the AI is running, the composer "Send" button turns into a red "Stop" square icon button, allowing users to stop the generation instantly.
+- **Thinking Label Hints:** Updated the progress indicator label to explicitly display "Thinking for Xs (Esc to cancel)" so users are aware of the shortcut.
+
+### 🎙️ 12. Microphone Active Breathing Aura Glow
+When the microphone/voice mode is active, the boundaries of the chat composer box and the voice status bar light up with a dynamic, breathing green aura, providing intuitive visual feedback.
+
 ---
 
 ## 🛠️ Codebase Changes
@@ -75,6 +84,9 @@ Upgraded the AI skills loading pipeline and settings interface:
 - Change `submit_tool_approval` signature and `ApprovalsState` pending channel type to support `ApprovalOutcome` in `src-tauri/src/lib.rs`.
 - Add executable search helper `which` and GitKraken auto-detection hooks to `load_config_from` in `crates/mint-core/src/config.rs`.
 - Support multiple source directory scanning and deduplication of learned skills in `crates/mint-core/src/skills.rs`.
+- Introduce a global `ACTIVE_AGENTS` thread-safe hash map registry and `cancel_agent` API in `crates/mint-core/src/lib.rs` to track active tokio tasks.
+- Register Tauri command `cancel_chat_message` in `src-tauri/src/lib.rs`.
+- Implement `POST /api/cancel-chat` in `crates/mint-core/src/api_server.rs` to cancel running web agent tasks.
 
 ### Desktop/Web Frontend (`src/renderer`)
 - Integrate creation/deletion actions and focus/polling lifecycle listeners inside `WorkspacePanel.tsx`.
@@ -84,6 +96,11 @@ Upgraded the AI skills loading pipeline and settings interface:
 - Update `activitiesFrom` and `AgentActivity` structure to parse and append the user's answer into the active `ask_user` tool target block upon `ToolEnd`.
 - Update `LearnedSkill` TypeScript interface in `src/renderer/src/tauri.ts` to include optional `location`.
 - Render colored location badges, strip lengthy content text boxes, and unify MCP toggles/delete controls in `src/renderer/src/components/Settings/PluginsTab.tsx` and `src/renderer/src-web/components/Settings/PluginsTab.tsx`.
+- Implement `cancelChatMessage` API helpers in `tauri.ts` for desktop and web.
+- Bind global Window keydown listeners for `Escape` key and dynamic "Stop" buttons in `ChatPanel.tsx` and `MintDashboard.tsx` under desktop and web source directories.
+- Enhance microphone connection/permission alert dialogs in `ChatPanel.tsx` to print the exact Web API error message for easier debugging.
+- Add voice-active class state and breathing keyframe animation effects around the chat input boundaries when microphone mode is active.
+- Refine the voice status bar rendering logic to prevent displaying redundant text (such as "Listening Listening...") and display actual user speech transcripts wrapped inside quotes instead.
 
 ### CLI Agent (`crates/mint-cli`)
 - Redefine live status print lines (`plan_lines`, `tasks_lines`, `activities_lines`, `explored_lines`) to accept progress tick state and apply the `get_bullet` helper.

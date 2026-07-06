@@ -4167,3 +4167,51 @@ input:checked + .slider:before {
   -ms-user-select: text !important;
 }
 
+/* Stop button styling overrides for ChatPanel */
+#send-btn.stop-btn {
+  background: #ef4444 !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 18px rgba(239, 68, 68, 0.28) !important;
+}
+
+#send-btn.stop-btn:hover {
+  background: #dc2626 !important;
+}
+
+/* Breathing voice-active aura glow */
+@keyframes aura-breathe-form {
+  0% {
+    box-shadow: 0 4px 15px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  50% {
+    box-shadow: 0 4px 25px color-mix(in srgb, var(--accent) 42%, transparent);
+  }
+  100% {
+    box-shadow: 0 4px 15px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+}
+
+@keyframes aura-breathe-bar {
+  0% {
+    box-shadow: 0 -4px 15px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  50% {
+    box-shadow: 0 -4px 25px color-mix(in srgb, var(--accent) 42%, transparent);
+  }
+  100% {
+    box-shadow: 0 -4px 15px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+}
+
+.input-area.voice-active #chat-form {
+  border-color: var(--accent) !important;
+  animation: aura-breathe-form 2s infinite ease-in-out;
+  transition: border-color 0.3s ease;
+}
+
+.input-area.voice-active .voice-mode-bar {
+  border-color: var(--accent) !important;
+  animation: aura-breathe-bar 2s infinite ease-in-out;
+  transition: border-color 0.3s ease;
+}
+

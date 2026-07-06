@@ -287,6 +287,20 @@ export async function getTtsUrls(text: string): Promise<TtsUrl[]> {
   return invoke<TtsUrl[]>('get_tts_urls', { text })
 }
 
+export async function cancelChatMessage(chatId: string): Promise<void> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const API_BASE = "http://localhost:3000/api";
+    await fetch(`${API_BASE}/cancel-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId })
+    });
+    return;
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('cancel_chat_message', { chatId })
+}
+
 export async function getRecentInteractions(limit = 50, chatId?: string | null): Promise<InteractionMemory[]> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
     const API_BASE = "http://localhost:3000/api";

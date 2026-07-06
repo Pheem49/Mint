@@ -550,6 +550,24 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
+                ("POST", "/api/cancel-chat") => {
+                    #[derive(Deserialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct CancelRequest {
+                        chat_id: String,
+                    }
+                    if let Ok(req) = serde_json::from_str::<CancelRequest>(body) {
+                        crate::cancel_agent(&req.chat_id);
+                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
+                    } else {
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"status\":\"invalid cancel body\"}",
+                        )
+                        .await;
+                    }
+                }
                 ("POST", "/api/chat-stream") => {
                     #[derive(Deserialize)]
                     #[serde(rename_all = "camelCase")]
@@ -631,7 +649,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     let config_clone = config.clone();
                                     let chat_req_clone = chat_req.clone();
                                     let tx_done = tx.clone();
-                                    tokio::spawn(async move {
+                                    let chat_id_str = chat_req.chat_id.clone().unwrap_or_default();
+                                    let join_handle = tokio::spawn(async move {
                                         let result = orchestrate_chat_stream_with_fallback(
                                             &config_clone,
                                             &chat_req_clone,
@@ -675,6 +694,19 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                             }
                                         }
                                     });
+
+                                    let abort_handle = join_handle.abort_handle();
+                                    if !chat_id_str.is_empty() {
+                                        crate::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+                                    }
+
+                                    let chat_id_str_cleanup = chat_id_str.clone();
+                                    tokio::spawn(async move {
+                                        let _ = join_handle.await;
+                                        if !chat_id_str_cleanup.is_empty() {
+                                            crate::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str_cleanup);
+                                        }
+                                    });
                                 } else {
                                     let root = std::env::current_dir().unwrap_or_default();
                                     let fast_mode = config
@@ -686,10 +718,11 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     let tx_done = tx.clone();
                                     let config_clone = config.clone();
                                     let chat_id = chat_req.chat_id.clone();
+                                    let chat_id_str = chat_id.clone().unwrap_or_default();
                                     let message = chat_req.message.clone();
                                     let image_data_uri = chat_req.image_data_uri.clone();
 
-                                    tokio::spawn(async move {
+                                    let join_handle = tokio::spawn(async move {
                                         let result = orchestrate_agent_loop(
                                             &config_clone,
                                             &message,
@@ -732,6 +765,19 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                                 let _ = tx_done
                                                     .send(format!("{}\n", err_json.to_string()));
                                             }
+                                        }
+                                    });
+
+                                    let abort_handle = join_handle.abort_handle();
+                                    if !chat_id_str.is_empty() {
+                                        crate::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+                                    }
+
+                                    let chat_id_str_cleanup = chat_id_str.clone();
+                                    tokio::spawn(async move {
+                                        let _ = join_handle.await;
+                                        if !chat_id_str_cleanup.is_empty() {
+                                            crate::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str_cleanup);
                                         }
                                     });
                                 }
