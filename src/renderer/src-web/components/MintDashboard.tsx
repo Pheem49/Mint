@@ -11,9 +11,9 @@ import {
   listSavedPictures,
   saveInteractionAgentActivity,
   streamChatMessage,
+  cancelChatMessage,
   submitToolApproval,
   listen,
-  readClipboardImage as readTauriClipboardImage,
   type AgentProgress,
   type ChatResponse,
   type ChatSession,
@@ -415,6 +415,20 @@ export default function MintDashboard() {
     }
   }
 
+  async function handleCancelMessage() {
+    if (!sending || !streamingConversationId) return
+    try {
+      await cancelChatMessage(streamingConversationId)
+    } catch (e) {
+      console.error("Failed to cancel message stream:", e)
+    } finally {
+      setSending(false)
+      setStreamingConversationId(null)
+      setSendingMessage('')
+      setSendingImageCount(0)
+    }
+  }
+
   async function sendPrompt(
     promptText: string,
     options: {
@@ -587,37 +601,6 @@ export default function MintDashboard() {
     return true
   }
 
-  async function readClipboardImage() {
-    try {
-      const dataUri = await readTauriClipboardImage()
-      if (dataUri) {
-        const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
-        setImageAttachments((current) => [...current, { dataUri, previewDataUri, name: 'Pasted image' }])
-        return true
-      }
-    } catch (err) {
-      console.warn('Tauri clipboard fallback error:', err)
-    }
-
-    try {
-      if (!navigator.clipboard?.read) return false
-      const items = await navigator.clipboard.read()
-      for (const item of items) {
-        const imageType = item.types.find((type) => type.startsWith('image/'))
-        if (!imageType) continue
-        const blob = await item.getType(imageType)
-        const file = new File([blob], 'Pasted image', { type: imageType })
-        const dataUri = await readImage(file)
-        const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
-        setImageAttachments((current) => [...current, { dataUri, previewDataUri, name: 'Pasted image' }])
-        return true
-      }
-      return false
-    } catch {
-      // Some environments expose pasted images only through ClipboardEvent.
-      return false
-    }
-  }
 
   async function selectDocument(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -886,7 +869,6 @@ export default function MintDashboard() {
             onSelectImage={selectImage}
             onSelectDocument={selectDocument}
             onPasteImage={pasteImage}
-            onReadClipboardImage={readClipboardImage}
             onSetMessage={setMessage}
             onSendVoiceMessage={sendVoiceMessage}
             onRemoveImage={(idx: number) => {
@@ -901,6 +883,7 @@ export default function MintDashboard() {
             settingsConfig={settingsConfig}
             onSetModel={changeModel}
             onApproval={handleApproval}
+            onCancelMessage={handleCancelMessage}
             onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
           />
         </main>

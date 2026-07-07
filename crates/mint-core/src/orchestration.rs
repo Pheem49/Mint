@@ -549,6 +549,10 @@ pub enum ApprovalOutcome {
 pub enum AgentProgress {
     Thinking {
         elapsed_secs: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        agent_name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model_name: Option<String>,
     },
     Thought {
         thought: String,
@@ -658,12 +662,95 @@ where
     Ok(Option::<AgentInput>::deserialize(deserializer)?.unwrap_or_default())
 }
 
+fn resolve_agent_config(
+    config: &MintConfig,
+    agent_id: Option<&str>,
+    trajectory: &[String],
+) -> (MintConfig, String, Option<String>, Option<String>) {
+    if !config.enable_agent_collaboration {
+        return (config.clone(), "".to_string(), None, None);
+    }
+
+    let enabled_agents: Vec<&crate::config::AgentConfig> = config.agents.iter().filter(|a| a.enabled).collect();
+    if enabled_agents.is_empty() {
+        return (config.clone(), "".to_string(), None, None);
+    }
+
+    let active_agent = if let Some(id) = agent_id {
+        enabled_agents.iter().find(|a| a.id == id).copied()
+    } else {
+        // Multi-Agent Pipeline Collaboration (Planner -> Coder -> Reviewer)
+        let plan_created = trajectory.iter().any(|step| step.contains("- Action: create_plan"));
+        if !plan_created {
+            if let Some(planner) = enabled_agents.iter().find(|a| a.id == "planner") {
+                Some(*planner)
+            } else {
+                enabled_agents.iter().find(|a| a.id == "coder").copied()
+            }
+        } else {
+            // Check if edits have been made to verify
+            let edits_made = trajectory.iter().any(|step| {
+                step.contains("- Action: write_file") || step.contains("- Action: apply_patch")
+            });
+            if edits_made {
+                if let Some(last_step) = trajectory.last() {
+                    if last_step.contains("- Action: write_file") || last_step.contains("- Action: apply_patch") {
+                        if let Some(reviewer) = enabled_agents.iter().find(|a| a.id == "reviewer") {
+                            Some(*reviewer)
+                        } else {
+                            enabled_agents.iter().find(|a| a.id == "coder").copied()
+                        }
+                    } else {
+                        enabled_agents.iter().find(|a| a.id == "coder").copied()
+                    }
+                } else {
+                    enabled_agents.iter().find(|a| a.id == "coder").copied()
+                }
+            } else {
+                enabled_agents.iter().find(|a| a.id == "coder").copied()
+            }
+        }
+    };
+
+    let Some(agent) = active_agent else {
+        return (config.clone(), "".to_string(), None, None);
+    };
+
+    let mut cfg_clone = config.clone();
+    cfg_clone.ai_provider = agent.provider.clone();
+    cfg_clone.gemini_model = agent.model.clone();
+    cfg_clone.openai_model = agent.model.clone();
+    cfg_clone.anthropic_model = agent.model.clone();
+    cfg_clone.openrouter_model = agent.model.clone();
+    cfg_clone.deepseek_model = agent.model.clone();
+    cfg_clone.hf_model = agent.model.clone();
+    cfg_clone.local_model_name = agent.model.clone();
+    cfg_clone.ollama_model = agent.model.clone();
+
+    if let Some(key) = &agent.api_key {
+        if !key.trim().is_empty() {
+            match agent.provider.as_str() {
+                "gemini" => cfg_clone.api_key = key.clone(),
+                "openai" => cfg_clone.openai_api_key = key.clone(),
+                "anthropic" => cfg_clone.anthropic_api_key = key.clone(),
+                "openrouter" => cfg_clone.openrouter_api_key = key.clone(),
+                "deepseek" => cfg_clone.deepseek_api_key = key.clone(),
+                "huggingface" => cfg_clone.hf_api_key = key.clone(),
+                _ => {}
+            }
+        }
+    }
+
+    (cfg_clone, agent.system_instruction.clone(), Some(agent.name.clone()), Some(agent.model.clone()))
+}
+
 pub async fn orchestrate_agent_loop<Approve, Progress, Chunk>(
     config: &MintConfig,
     task: &str,
     root: &Path,
     image_data_uri: Option<String>,
     chat_id: Option<&str>,
+    agent_id: Option<&str>,
     fast_mode: bool,
     mut approve: Approve,
     mut progress: Progress,
@@ -743,20 +830,30 @@ where
     let mut trajectory: Vec<String> = Vec::new();
 
     for step in 1..=MAX_STEPS {
+        let (active_config, agent_instruction, active_agent_name, active_model_name) = resolve_agent_config(config, agent_id, &trajectory);
+
         progress(AgentProgress::Thinking {
             elapsed_secs: started_at.elapsed().as_secs(),
+            agent_name: active_agent_name,
+            model_name: active_model_name,
         });
 
+        let mut active_system_prompt = system_prompt.clone();
+        if !agent_instruction.is_empty() {
+            active_system_prompt.push_str(&format!("\n\nYour Current Role & System Instructions:\n{}", agent_instruction));
+        }
+
         let (response, fallback) = send_chat_with_fallback(
-            config,
+            &active_config,
             &ChatRequest {
                 message: observation.clone(),
-                system_instruction: system_prompt.clone(),
+                system_instruction: active_system_prompt.clone(),
                 chat_id: Some(chat_id.to_owned()),
                 image_data_uri: pending_image.take(),
                 audio_data_uri: None,
                 document_attachment: None,
                 workspace_path: None,
+                agent_id: None,
             },
         )
         .await?;
@@ -771,7 +868,7 @@ where
             Ok(decision) => decision,
             Err(_) => {
                 let (repaired, _) = send_chat_with_fallback(
-                    config,
+                    &active_config,
                     &ChatRequest {
                         message: format!(
                             "Your previous response was not valid Mint agent JSON.\n\
@@ -779,12 +876,13 @@ where
                              Do not use markdown.\n\nPrevious response:\n{}",
                             truncate(&response.text)
                         ),
-                        system_instruction: system_prompt.clone(),
+                        system_instruction: active_system_prompt.clone(),
                         chat_id: Some(chat_id.to_owned()),
                         image_data_uri: None,
                         audio_data_uri: None,
                         document_attachment: None,
                         workspace_path: None,
+                        agent_id: None,
                     },
                 )
                 .await?;
@@ -2127,6 +2225,7 @@ Example response:
         audio_data_uri: None,
         document_attachment: None,
         workspace_path: None,
+        agent_id: None,
     };
 
     // Send the chat request to LLM
@@ -2185,6 +2284,7 @@ mod tests {
             audio_data_uri: None,
             document_attachment: None,
             workspace_path: None,
+            agent_id: None,
         };
         assert_eq!(
             enrich_request(&store, &request).unwrap().system_instruction,
@@ -2289,5 +2389,50 @@ mod tests {
         let classification = classify_shell_command("ls ~/Downloads | grep -F \"Bunny Girl\"");
 
         assert_eq!(classification.mode.as_str(), "readOnly");
+    }
+
+    #[test]
+    fn test_resolve_agent_config() {
+        let mut config = MintConfig::default();
+        config.agents = vec![
+            AgentConfig {
+                id: "planner".into(),
+                name: "Planner".into(),
+                provider: "openai".into(),
+                model: "gpt-4o".into(),
+                api_key: Some("test-key".into()),
+                system_instruction: "Planner instruction".into(),
+                enabled: true,
+            },
+            AgentConfig {
+                id: "coder".into(),
+                name: "Coder".into(),
+                provider: "gemini".into(),
+                model: "gemini-2.5-flash".into(),
+                api_key: None,
+                system_instruction: "Coder instruction".into(),
+                enabled: true,
+            },
+        ];
+
+        let (cfg, instr, name, model) = resolve_agent_config(&config, Some("planner"), &[]);
+        assert_eq!(cfg.ai_provider, "openai");
+        assert_eq!(cfg.openai_model, "gpt-4o");
+        assert_eq!(cfg.openai_api_key, "test-key");
+        assert_eq!(instr, "Planner instruction");
+        assert_eq!(name, Some("Planner".to_string()));
+        assert_eq!(model, Some("gpt-4o".to_string()));
+
+        let (cfg, instr, name, model) = resolve_agent_config(&config, None, &[]);
+        assert_eq!(cfg.ai_provider, "openai");
+        assert_eq!(instr, "Planner instruction");
+        assert_eq!(name, Some("Planner".to_string()));
+
+        let trajectory = vec!["Step 1:\n- Action: create_plan\n- Observation: all planned".to_string()];
+        let (cfg, instr, name, model) = resolve_agent_config(&config, None, &trajectory);
+        assert_eq!(cfg.ai_provider, "gemini");
+        assert_eq!(instr, "Coder instruction");
+        assert_eq!(name, Some("Coder".to_string()));
+        assert_eq!(model, Some("gemini-2.5-flash".to_string()));
     }
 }

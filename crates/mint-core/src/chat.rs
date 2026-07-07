@@ -99,6 +99,8 @@ pub struct ChatRequest {
     pub document_attachment: Option<DocumentAttachment>,
     #[serde(default)]
     pub workspace_path: Option<String>,
+    #[serde(default)]
+    pub agent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -965,6 +967,7 @@ mod tests {
             audio_data_uri: None,
             document_attachment: None,
             workspace_path: None,
+            agent_id: None,
         })
         .unwrap();
         assert_eq!(parts.len(), 3);

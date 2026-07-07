@@ -322,10 +322,30 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
     if request.message.starts_with("/chat ") {
         let mut clean_request = request.clone();
         clean_request.message = request.message.strip_prefix("/chat ").unwrap().to_owned();
+        let config_clone = config.clone();
+        let chat_id_str = request.chat_id.clone().unwrap_or_default();
 
-        let (response, _) = orchestrate_chat_with_fallback(&config, &clean_request)
-            .await
-            .map_err(|error| error.to_string())?;
+        let join_handle = tokio::spawn(async move {
+            orchestrate_chat_with_fallback(&config_clone, &clean_request).await
+        });
+
+        let abort_handle = join_handle.abort_handle();
+        if !chat_id_str.is_empty() {
+            mint_core::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+        }
+
+        let res = join_handle.await;
+
+        if !chat_id_str.is_empty() {
+            mint_core::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str);
+        }
+
+        let (response, _) = match res {
+            Ok(Ok(val)) => val,
+            Ok(Err(e)) => return Err(e.to_string()),
+            Err(e) if e.is_cancelled() => return Err("Chat execution cancelled by user".to_string()),
+            Err(e) => return Err(format!("Task panicked: {}", e)),
+        };
         return Ok(response);
     }
 
@@ -363,19 +383,47 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
     let progress_cb = |_| {};
     let on_chunk = |_| {};
 
-    let res = orchestrate_agent_loop(
-        &config,
-        &request.message,
-        &root,
-        request.image_data_uri.clone(),
-        request.chat_id.as_deref(),
-        fast_mode,
-        approve_cb,
-        progress_cb,
-        on_chunk,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let chat_id_str = request.chat_id.clone().unwrap_or_default();
+    let config_clone = config.clone();
+    let message_clone = request.message.clone();
+    let root_clone = root.clone();
+    let image_data_uri_clone = request.image_data_uri.clone();
+    let chat_id_clone = request.chat_id.clone();
+    let agent_id_clone = request.agent_id.clone();
+
+    let join_handle = tokio::spawn(async move {
+        orchestrate_agent_loop(
+            &config_clone,
+            &message_clone,
+            &root_clone,
+            image_data_uri_clone,
+            chat_id_clone.as_deref(),
+            agent_id_clone.as_deref(),
+            fast_mode,
+            approve_cb,
+            progress_cb,
+            on_chunk,
+        )
+        .await
+    });
+
+    let abort_handle = join_handle.abort_handle();
+    if !chat_id_str.is_empty() {
+        mint_core::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+    }
+
+    let res = join_handle.await;
+
+    if !chat_id_str.is_empty() {
+        mint_core::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str);
+    }
+
+    let res = match res {
+        Ok(Ok(val)) => val,
+        Ok(Err(e)) => return Err(e.to_string()),
+        Err(e) if e.is_cancelled() => return Err("Agent execution cancelled by user".to_string()),
+        Err(e) => return Err(format!("Task panicked: {}", e)),
+    };
 
     Ok(ChatResponse {
         provider: res.provider,
@@ -397,13 +445,34 @@ async fn stream_chat_message(
     if request.message.starts_with("/chat ") {
         let mut clean_request = request.clone();
         clean_request.message = request.message.strip_prefix("/chat ").unwrap().to_owned();
+        let config_clone = config.clone();
+        let on_event_clone = on_event.clone();
+        let chat_id_str = request.chat_id.clone().unwrap_or_default();
 
-        let (response, _) =
-            orchestrate_chat_stream_with_fallback(&config, &clean_request, |chunk| {
-                let _ = on_event.send(DesktopStreamEvent::Chunk { chunk });
+        let join_handle = tokio::spawn(async move {
+            orchestrate_chat_stream_with_fallback(&config_clone, &clean_request, move |chunk| {
+                let _ = on_event_clone.send(DesktopStreamEvent::Chunk { chunk });
             })
             .await
-            .map_err(|error| error.to_string())?;
+        });
+
+        let abort_handle = join_handle.abort_handle();
+        if !chat_id_str.is_empty() {
+            mint_core::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+        }
+
+        let res = join_handle.await;
+
+        if !chat_id_str.is_empty() {
+            mint_core::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str);
+        }
+
+        let (response, _) = match res {
+            Ok(Ok(val)) => val,
+            Ok(Err(e)) => return Err(e.to_string()),
+            Err(e) if e.is_cancelled() => return Err("Chat execution cancelled by user".to_string()),
+            Err(e) => return Err(format!("Task panicked: {}", e)),
+        };
         return Ok(response);
     }
 
@@ -456,19 +525,47 @@ async fn stream_chat_message(
         }
     };
 
-    let res = orchestrate_agent_loop(
-        &config,
-        &request.message,
-        &root,
-        request.image_data_uri.clone(),
-        request.chat_id.as_deref(),
-        fast_mode,
-        approve_cb,
-        progress_cb,
-        on_chunk,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let chat_id_str = request.chat_id.clone().unwrap_or_default();
+    let config_clone = config.clone();
+    let message_clone = request.message.clone();
+    let root_clone = root.clone();
+    let image_data_uri_clone = request.image_data_uri.clone();
+    let chat_id_clone = request.chat_id.clone();
+    let agent_id_clone = request.agent_id.clone();
+
+    let join_handle = tokio::spawn(async move {
+        orchestrate_agent_loop(
+            &config_clone,
+            &message_clone,
+            &root_clone,
+            image_data_uri_clone,
+            chat_id_clone.as_deref(),
+            agent_id_clone.as_deref(),
+            fast_mode,
+            approve_cb,
+            progress_cb,
+            on_chunk,
+        )
+        .await
+    });
+
+    let abort_handle = join_handle.abort_handle();
+    if !chat_id_str.is_empty() {
+        mint_core::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+    }
+
+    let res = join_handle.await;
+
+    if !chat_id_str.is_empty() {
+        mint_core::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str);
+    }
+
+    let res = match res {
+        Ok(Ok(val)) => val,
+        Ok(Err(e)) => return Err(e.to_string()),
+        Err(e) if e.is_cancelled() => return Err("Agent execution cancelled by user".to_string()),
+        Err(e) => return Err(format!("Task panicked: {}", e)),
+    };
 
     Ok(ChatResponse {
         provider: res.provider,
@@ -476,6 +573,12 @@ async fn stream_chat_message(
         text: res.summary,
         fallback_provider: res.fallback,
     })
+}
+
+#[tauri::command]
+async fn cancel_chat_message(chat_id: String) -> Result<(), String> {
+    mint_core::cancel_agent(&chat_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1123,6 +1226,7 @@ pub fn run() {
             inspect_shell_command,
             send_chat_message,
             stream_chat_message,
+            cancel_chat_message,
             submit_tool_approval,
             get_recent_interactions,
             save_interaction_agent_activity,

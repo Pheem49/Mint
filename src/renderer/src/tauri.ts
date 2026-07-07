@@ -157,6 +157,7 @@ export async function sendChatMessage(
   documentAttachment?: DocumentAttachment | null,
   workspacePath?: string | null,
   chatId?: string | null,
+  agentId?: string | null,
 ): Promise<ChatResponse> {
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
@@ -165,7 +166,7 @@ export async function sendChatMessage(
       const res = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, documentAttachment })
+        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, documentAttachment, agentId })
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
@@ -186,7 +187,7 @@ export async function sendChatMessage(
   }
   const { invoke } = await import('@tauri-apps/api/core')
   const response = await invoke<ChatResponse>('send_chat_message', {
-    request: { message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, documentAttachment, workspacePath },
+    request: { message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, documentAttachment, workspacePath, agentId },
   })
   if (imageDataUri) {
     await invoke('save_pictures', {
@@ -208,6 +209,7 @@ export async function streamChatMessage(
   documentAttachment?: DocumentAttachment | null,
   workspacePath?: string | null,
   chatId?: string | null,
+  agentId?: string | null,
 ): Promise<ChatResponse> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
     const API_BASE = "http://localhost:3000/api";
@@ -215,7 +217,7 @@ export async function streamChatMessage(
     const res = await fetch(`${API_BASE}/chat-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, documentAttachment })
+      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, documentAttachment, agentId })
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -261,7 +263,7 @@ export async function streamChatMessage(
     else onProgress?.(event.progress)
   }
   const response = await invoke<ChatResponse>('stream_chat_message', {
-    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, documentAttachment, workspacePath },
+    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, documentAttachment, workspacePath, agentId },
     onEvent,
   })
   if (imageDataUri) {
@@ -285,6 +287,20 @@ export async function getTtsUrls(text: string): Promise<TtsUrl[]> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) return []
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<TtsUrl[]>('get_tts_urls', { text })
+}
+
+export async function cancelChatMessage(chatId: string): Promise<void> {
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    const API_BASE = "http://localhost:3000/api";
+    await fetch(`${API_BASE}/cancel-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId })
+    });
+    return;
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('cancel_chat_message', { chatId })
 }
 
 export async function getRecentInteractions(limit = 50, chatId?: string | null): Promise<InteractionMemory[]> {

@@ -184,13 +184,19 @@ pub async fn run_code_agent_with_options(
     }
     let progress_live_status = Arc::clone(&live_status);
     let progress_cb = |progress: AgentProgress| match progress {
-        AgentProgress::Thinking { elapsed_secs } => {
+        AgentProgress::Thinking {
+            elapsed_secs,
+            agent_name,
+            model_name,
+        } => {
             if !options.fast_mode {
                 if let Ok(mut status) = progress_live_status.lock() {
-                    status.thinking = Some(format!(
-                        "Thinking ({} • Esc to interrupt)",
-                        format_elapsed(Duration::from_secs(elapsed_secs))
-                    ));
+                    let label = if let (Some(a), Some(m)) = (agent_name, model_name) {
+                        format!("{} ({}) is thinking ({} • Esc to interrupt)", a, m, format_elapsed(Duration::from_secs(elapsed_secs)))
+                    } else {
+                        format!("Thinking ({} • Esc to interrupt)", format_elapsed(Duration::from_secs(elapsed_secs)))
+                    };
+                    status.thinking = Some(label);
                     render_live_status(&mut status);
                 }
             }
@@ -349,6 +355,7 @@ pub async fn run_code_agent_with_options(
         root,
         image_data_uri,
         Some(CHAT_CLI_ID),
+        None,
         options.fast_mode,
         approve_cb,
         progress_cb,

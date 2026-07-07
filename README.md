@@ -113,23 +113,6 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
   - Right-click context menu to delete files/folders with confirmation modals.
   - Drag-and-drop file mentions in the chat input with automatic spacing and dynamic accent-colored history bubble highlighting.
 
-## What's New in v1.8.1
-
-- **File-System Based AI Skills & UI Badges**: Scan and load AI skills from the Global folder (`~/.config/mint/mint-skills/`) and Workspace folders (`.agents/skills/` & `skills/`). Shows source badges (`Workspace` 🟢, `Global` 🔵, `Taught` 🟣) in settings UI and CLI listings (`mint learn --list` and `/learn`) with a clean hidden-content list view.
-- **Unified MCP Servers UI & Toggle Controls**: Merged system-discovered servers into a unified list with toggles to enable/disable or install, and red trash can buttons to remove custom servers.
-- **Advanced Workspace File Tree & Operations**: Manage files directly from the sidebar UI with file/folder creation buttons, right-click deletion modals, and automatic polling + focus-based syncing.
-- **Drag-and-Drop File Mentions**: Drag files from the sidebar to chat input to insert `@filename` with auto-spacing, rendered as outline pills styled with your selected accent color.
-- **CLI Agent Interface Polish & Terminal Line Wrapping Fix**: Indented status blocks and confirmation prompts by 2 spaces to align text. Implemented the *Dynamic Breathing Circle System* (`●` ⇄ `○` pulsing during thinking) and fixed terminal duplicate line bugs by counting physical terminal wrapping width and filtering Thai tone marks.
-- **AskUser Text Input Modal (Desktop & Web)**: When the agent asks questions, a text input field is rendered inside the approval card so users can write and submit typed answers back to the agent backend.
-- **Dynamic Language AI Suggestions**: Auto-translates process suggestions dynamically based on your configured `config.language`.
-- **Mobile & Navigation Optimizations**: Mobile-fit Image Studio layout, hamburger menu access, and headers glass-morphism overlay fixes.
-
-## What's New in v1.8.0
-
-- **Integrated Web Search Settings**: Easily toggle between **Brave Search API** and **Google Custom Search API** directly from the General settings tab.
-- **Image Generation Providers**: Choose and configure credentials for Stability AI, Ideogram, Replicate, OpenAI DALL-E, and Google NanoBanana (Gemini Images) inside dedicated inline settings cards.
-- **Inline Productivity Settings**: Set up Client IDs, secrets, and API keys for native Gmail, Google Calendar, and Notion integrations inline inside the General settings tab.
-- **Revamped Plugins Layout**: Moved **Learned AI Skills** (equivalent to `mint learn` in CLI) to the top of the Plugins tab, followed by MCP Servers (External tools), and Built-in Plugins (Spotify and Discord RPC) at the bottom.
 
 ## <img src="assets/setup.svg" width="24" height="24" valign="middle" /> Prerequisites
 

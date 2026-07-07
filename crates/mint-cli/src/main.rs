@@ -803,6 +803,7 @@ async fn main() -> Result<()> {
                             audio_data_uri: None,
                             document_attachment: None,
                             workspace_path: None,
+                            agent_id: None,
                         },
                     )
                     .await?;
@@ -1761,8 +1762,12 @@ async fn handle_slash_command(
                 ("/mcp list", "List configured MCP servers"),
                 ("/mcp allow <server> <tool>", "Allow an MCP tool"),
                 ("/stats", "Show session statistics"),
-                ("/exit | /quit", "Exit Mint"),
+                ("/exit", "Exit Mint"),
                 ("/code <task>", "Run in code-agent mode"),
+                (
+                    "/multi-agent [on|off]",
+                    "Show or toggle Multi-Agent Collaboration system",
+                ),
             ];
             for (cmd_name, desc) in &commands {
                 println!("  {MINT}{:<30}{RESET} {DIM}{}{RESET}", cmd_name, desc);
@@ -1810,6 +1815,53 @@ async fn handle_slash_command(
                     ),
                     Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
                 }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/multi-agent" => {
+            if rest == "on" || rest == "off" {
+                session.config.enable_agent_collaboration = rest == "on";
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => println!(
+                        "{DIM}Multi-Agent collaboration set to: {}{RESET}\n",
+                        if session.config.enable_agent_collaboration { "Enabled" } else { "Disabled" }
+                    ),
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                }
+            } else if !rest.is_empty() {
+                println!("{WARN}Usage: /multi-agent [on|off]{RESET}\n");
+            } else {
+                println!("\n{BLUE}Multi-Agent System Settings:{RESET}");
+                let collab_status = if session.config.enable_agent_collaboration {
+                    format!("{MINT}Enabled (on){RESET}")
+                } else {
+                    format!("{DIM}Disabled (off){RESET}")
+                };
+                println!("  Global Collaboration: {collab_status}");
+                println!("\n{BLUE}Configured Agents:{RESET}");
+                if session.config.agents.is_empty() {
+                    println!("  No agents configured.");
+                } else {
+                    for agent in &session.config.agents {
+                        let status_label = if agent.enabled {
+                            format!("{MINT}[Enabled]{RESET}")
+                        } else {
+                            format!("{DIM}[Disabled]{RESET}")
+                        };
+                        println!(
+                            "  {:<15} {}  Provider: {:<12} Model: {}",
+                            agent.name, status_label, agent.provider, agent.model
+                        );
+                        let truncated_instruction = if agent.system_instruction.len() > 60 {
+                            format!("{}...", &agent.system_instruction[..60].replace('\n', " "))
+                        } else {
+                            agent.system_instruction.replace('\n', " ")
+                        };
+                        println!("    {DIM}Instruction: {truncated_instruction}{RESET}");
+                    }
+                }
+                println!();
             }
             Some(SlashResult::Handled)
         }
@@ -2542,6 +2594,7 @@ async fn run_interactive_chat() -> Result<()> {
                     audio_data_uri: None,
                     document_attachment: None,
                     workspace_path: None,
+                    agent_id: None,
                 },
                 |chunk| {
                     if first_chunk {
@@ -2635,25 +2688,25 @@ fn print_exit_message(session: &InteractiveSession) {
 }
 
 const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
-    ("/help", "Show help menu"),
+    ("/cd", "Change active workspace directory"),
+    ("/clear", "Clear conversation history"),
+    ("/code", "Run in code-agent mode"),
+    ("/exit", "Exit Mint CLI"),
     ("/fast", "Toggle fast mode (hide thinking traces)"),
-    ("/models", "List AI providers or switch active provider"),
+    ("/help", "Show help menu"),
+    ("/image", "Attach image from disk"),
     (
         "/image-provider",
         "List image gen providers or switch default provider",
     ),
-    ("/clear", "Clear conversation history"),
-    ("/cd", "Change active workspace directory"),
-    ("/image", "Attach image from disk"),
-    ("/paste", "Attach image from clipboard"),
     ("/learn", "Import persistent skill/instruction"),
-    ("/plugins", "List or generate plugins/skills"),
-    ("/memory", "Manage long-term memory store"),
     ("/mcp", "List configured MCP servers"),
+    ("/memory", "Manage long-term memory store"),
+    ("/models", "List AI providers or switch active provider"),
+    ("/multi-agent", "Show or toggle Multi-Agent Collaboration system"),
+    ("/paste", "Attach image from clipboard"),
+    ("/plugins", "List or generate plugins/skills"),
     ("/stats", "Show session statistics"),
-    ("/exit", "Exit Mint CLI"),
-    ("/quit", "Exit Mint CLI"),
-    ("/code", "Run in code-agent mode"),
 ];
 
 fn draw_input_box(
@@ -2716,11 +2769,18 @@ fn draw_input_box(
             .collect();
 
         if !matches.is_empty() {
-            match_count = matches.len();
-            println!();
-            println!(" {BLUE}Suggestions{RESET}");
+            let total_pages = (matches.len() + 4) / 5;
             let highlight_idx = tab_index.map(|idx| idx % matches.len());
-            for (i, (cmd, desc)) in matches.iter().enumerate() {
+            let selected_idx = highlight_idx.unwrap_or(0);
+            let current_page = selected_idx / 5;
+            let start_idx = current_page * 5;
+            let end_idx = std::cmp::min(start_idx + 5, matches.len());
+            match_count = end_idx - start_idx;
+
+            println!();
+            println!(" {BLUE}Suggestions ({}/{}){RESET}", current_page + 1, total_pages);
+            for i in start_idx..end_idx {
+                let (cmd, desc) = matches[i];
                 if Some(i) == highlight_idx {
                     println!("  {BLUE}▶ {:<16}{RESET} {DIM}- {}{RESET}", cmd, desc);
                 } else {
@@ -3566,6 +3626,7 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
             audio_data_uri: None,
             document_attachment: None,
             workspace_path: None,
+            agent_id: None,
         },
     )
     .await?;

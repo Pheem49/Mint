@@ -390,7 +390,6 @@ interface ChatPanelProps {
   onSelectImage: (event: ChangeEvent<HTMLInputElement>) => void
   onSelectDocument: (event: ChangeEvent<HTMLInputElement>) => void
   onPasteImage: (clipboardData: DataTransfer) => boolean
-  onReadClipboardImage: () => Promise<boolean>
   onSetMessage: (message: string) => void
   onSendVoiceMessage: (message: string, audioDataUri?: string | null) => Promise<void>
   onRemoveImage: (idx: number) => void
@@ -404,6 +403,7 @@ interface ChatPanelProps {
   onToggleMobileSidebar: () => void
   settingsConfig: any
   onSetModel: (model: string) => void
+  onCancelMessage: () => void
 }
 
 function ChatCodeBlock({ code, language }: { code: string; language: string; key?: any }) {
@@ -1010,7 +1010,6 @@ export default function ChatPanel({
   onSelectImage,
   onSelectDocument,
   onPasteImage,
-  onReadClipboardImage,
   onSetMessage,
   onSendVoiceMessage,
   onRemoveImage,
@@ -1024,9 +1023,17 @@ export default function ChatPanel({
   onToggleMobileSidebar,
   settingsConfig,
   onSetModel,
+  onCancelMessage,
 }: ChatPanelProps) {
   const agentActivities = activitiesFrom(agentProgress)
   const activeFallbackNotice = fallbackNotice(streamedResponse)
+  const lastThinkingProgress = [...agentProgress].reverse().find(p => p.type === 'Thinking')
+  let activeAgentName: string | null = null
+  let activeModelName: string | null = null
+  if (lastThinkingProgress && lastThinkingProgress.type === 'Thinking') {
+    activeAgentName = (lastThinkingProgress.data as any).agent_name || null
+    activeModelName = (lastThinkingProgress.data as any).model_name || null
+  }
   const [openActivityIds, setOpenActivityIds] = useState<Record<string, boolean>>({})
   const [openReviewIds, setOpenReviewIds] = useState<Record<string, boolean>>({})
   const [openFileDiffs, setOpenFileDiffs] = useState<Record<string, boolean>>({})
@@ -1359,7 +1366,8 @@ export default function ChatPanel({
       setIsRecording(false)
       voiceModeRef.current = false
       setVoiceMode(false)
-      alert('Failed to open microphone. Please check microphone permissions in your browser')
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      alert(`Failed to open microphone (${errorMsg}). Please check microphone connection and permissions in your browser.`)
     }
   }
   const startRecognition = (autoSend: boolean) => {
@@ -1576,21 +1584,20 @@ export default function ChatPanel({
       if (onPasteImage(event.clipboardData)) {
         event.preventDefault()
         event.stopPropagation()
-      } else {
-        window.setTimeout(() => void onReadClipboardImage(), 0)
       }
     }
     window.addEventListener('paste', handleWindowPaste, true)
     return () => window.removeEventListener('paste', handleWindowPaste, true)
-  }, [onPasteImage, onReadClipboardImage])
+  }, [onPasteImage])
   useEffect(() => {
-    const handleWindowKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'v') return
-      window.setTimeout(() => void onReadClipboardImage(), 0)
+    const handleEscapeKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && sending) {
+        onCancelMessage()
+      }
     }
-    window.addEventListener('keydown', handleWindowKeyDown, true)
-    return () => window.removeEventListener('keydown', handleWindowKeyDown, true)
-  }, [onReadClipboardImage])
+    window.addEventListener('keydown', handleEscapeKeyDown, true)
+    return () => window.removeEventListener('keydown', handleEscapeKeyDown, true)
+  }, [sending, onCancelMessage])
   useEffect(() => {
     if (message) return
     const input = document.getElementById('chat-input') as HTMLTextAreaElement | null
@@ -2009,7 +2016,12 @@ export default function ChatPanel({
                             />
                           </path>
                         </svg>
-                        <span>Thinking for {elapsedSeconds}s</span>
+                         <span>
+                           {activeAgentName && activeModelName 
+                             ? `${activeAgentName} (${activeModelName}) is thinking... (${elapsedSeconds}s)`
+                             : `Thinking for ${elapsedSeconds}s (Esc to cancel)`
+                           }
+                         </span>
                       </div>
                     )}
                   </span>
@@ -2125,7 +2137,7 @@ export default function ChatPanel({
         <div ref={chatEnd} />
       </div>
 
-      <div className="input-area">
+      <div className={`input-area ${voiceMode ? 'voice-active' : ''}`}>
         {isEmptyChat && <div className="empty-chat-prompt">Mint Agent is ready to work</div>}
         <div className="smart-context-bar">
           <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2139,8 +2151,21 @@ export default function ChatPanel({
         {voiceMode && (
           <div className="voice-mode-bar" data-state={voiceStatus}>
             <span className="voice-mode-dot" />
-            <span>{voiceStatusLabel}</span>
-            {voiceTranscript && <span className="voice-mode-transcript">{voiceTranscript}</span>}
+            {voiceTranscript ? (
+              voiceTranscript === 'Listening to microphone...' ||
+              voiceTranscript === 'Listening...' ||
+              voiceTranscript === 'No speech detected' ||
+              voiceTranscript === 'Sent audio to AI' ? (
+                <span>{voiceTranscript}</span>
+              ) : (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0, overflow: 'hidden' }}>
+                  <span>{voiceStatusLabel}:</span>
+                  <span className="voice-mode-transcript">"{voiceTranscript}"</span>
+                </span>
+              )
+            ) : (
+              <span>{voiceStatusLabel}</span>
+            )}
           </div>
         )}
 
@@ -2312,12 +2337,27 @@ export default function ChatPanel({
               </svg>
             )}
           </button>
-          <button id="send-btn" type="submit" disabled={sending || !canSubmit} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
-          </button>
+          {sending ? (
+            <button
+              id="send-btn"
+              className="stop-btn"
+              type="button"
+              onClick={onCancelMessage}
+              title="Stop generating"
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+              </svg>
+            </button>
+          ) : (
+            <button id="send-btn" type="submit" disabled={!canSubmit} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          )}
         </form>
       </div>
       <p className="input-disclaimer">

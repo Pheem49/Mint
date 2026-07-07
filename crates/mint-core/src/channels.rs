@@ -194,6 +194,7 @@ async fn answer(text: &str, system_instruction: &str) -> String {
             audio_data_uri: None,
             document_attachment: None,
             workspace_path: None,
+            agent_id: None,
         },
     )
     .await
