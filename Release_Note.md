@@ -86,6 +86,10 @@ Improved the autocomplete experience in the terminal:
 - **Simplified Exit Options:** Removed `/quit` from the autocomplete suggestions and help output (while retaining hidden execution support) to clean up the interface.
 - **Real-Time Agent & Model Status:** The CLI live thinking status bar dynamically displays which agent and model is executing.
 
+### 📋 15. Fix Clipboard Permission Popup on Text Paste (Ctrl+V)
+- Fixed a bug where pasting text (or pressing `Ctrl + V`) would trigger a browser-level clipboard permission warning popup (asking to "Allow Paste").
+- Removed the redundant global `keydown` Ctrl+V listener and the async `navigator.clipboard.read()` fallback on text paste events. The application now correctly relies on standard, synchronous `event.clipboardData` values during paste events, ensuring seamless pasting of both images and text without prompting the user.
+
 ---
 
 ## 🛠️ Codebase Changes
@@ -122,6 +126,7 @@ Improved the autocomplete experience in the terminal:
 - Register the `Multi-Agent (Beta)` tab in the sidebar of `SettingsWindow.tsx`.
 - Update `ChatPanel.tsx` in desktop and web source directories to render the active agent and model names inside the live thinking status message.
 - Remove duplicate "Enable Multi-Agent Review" checkbox from `AutomationTab.tsx`.
+- Remove redundant `handleWindowKeyDown` Ctrl+V listeners, unused `onReadClipboardImage` prop, and `navigator.clipboard.read()` async fallback routines from `ChatPanel.tsx` and `MintDashboard.tsx` in both desktop and web directories to resolve browser clipboard permission warning popups during text pasting.
 
 ### CLI Agent (`crates/mint-cli`)
 - Redefine live status print lines (`plan_lines`, `tasks_lines`, `activities_lines`, `explored_lines`) to accept progress tick state and apply the `get_bullet` helper.

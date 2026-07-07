@@ -390,7 +390,6 @@ interface ChatPanelProps {
   onSelectImage: (event: ChangeEvent<HTMLInputElement>) => void
   onSelectDocument: (event: ChangeEvent<HTMLInputElement>) => void
   onPasteImage: (clipboardData: DataTransfer) => boolean
-  onReadClipboardImage: () => Promise<boolean>
   onSetMessage: (message: string) => void
   onSendVoiceMessage: (message: string, audioDataUri?: string | null) => Promise<void>
   onRemoveImage: (idx: number) => void
@@ -1011,7 +1010,6 @@ export default function ChatPanel({
   onSelectImage,
   onSelectDocument,
   onPasteImage,
-  onReadClipboardImage,
   onSetMessage,
   onSendVoiceMessage,
   onRemoveImage,
@@ -1586,21 +1584,11 @@ export default function ChatPanel({
       if (onPasteImage(event.clipboardData)) {
         event.preventDefault()
         event.stopPropagation()
-      } else {
-        window.setTimeout(() => void onReadClipboardImage(), 0)
       }
     }
     window.addEventListener('paste', handleWindowPaste, true)
     return () => window.removeEventListener('paste', handleWindowPaste, true)
-  }, [onPasteImage, onReadClipboardImage])
-  useEffect(() => {
-    const handleWindowKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'v') return
-      window.setTimeout(() => void onReadClipboardImage(), 0)
-    }
-    window.addEventListener('keydown', handleWindowKeyDown, true)
-    return () => window.removeEventListener('keydown', handleWindowKeyDown, true)
-  }, [onReadClipboardImage])
+  }, [onPasteImage])
   useEffect(() => {
     const handleEscapeKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape' && sending) {
