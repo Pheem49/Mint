@@ -4,9 +4,18 @@ We are excited to release **Mint Agent v1.8.2**! This release introduces a confi
 
 ---
 
+## 🔍 Web Search Source Cards
+- **Favicon Source Cards:** After a web search, compact clickable source cards now appear above the AI response bubble — each showing the website's favicon, domain name, and a tooltip with the page snippet. Clicking a card opens the source in the browser.
+- **Frontend-only change:** Parsed directly from existing `AgentProgress` `ToolEnd` events — no backend changes required.
+- The AI response also includes a plain-text `Sources:` section listing title and URL for each result used.
+
+---
+
+
 ## 🚀 Key Features & Enhancements
 
 ### 📂 1. Native Workspace File Explorer Operations
+
 You can now manage your workspace directory directly from the sidebar without switching to an external editor or using the terminal:
 - **New File & New Folder Buttons:** Replaced the legacy "Use Agent" action button with dedicated creation triggers. Inputting a name will immediately create the empty file/folder on disk.
 - **Right-Click Deletion:** Right-clicking on any file or directory in the tree view prompts a safety confirmation modal. Upon approval, the item is securely removed from your filesystem.

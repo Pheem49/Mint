@@ -1213,7 +1213,7 @@ where
                             .collect::<Vec<_>>()
                             .join("\n");
                         Ok(format!(
-                            "{formatted}\n\nNote: Web search succeeded using {provider} Search. In your finish summary, you MUST state that you found this information using the {provider} Search API (e.g. \"มิ้นท์ค้นหาข้อมูลนี้มาจาก {provider} Search นะคะ\")."
+                            "{formatted}\n\nNote: Web search succeeded using {provider} Search. In your finish summary, you MUST:\n1. Answer the user's question using the information above.\n2. Mention that you found this information via {provider} Search (e.g. \"I found this information using {provider} Search.\").\nDo NOT list sources manually — the UI will display them automatically."
                         ))
                     }
                 }

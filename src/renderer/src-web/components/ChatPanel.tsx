@@ -1,370 +1,36 @@
 import { useEffect, useRef, useState, Fragment, type ChangeEvent, type ClipboardEvent, type FormEvent, type KeyboardEvent, type RefObject, type DragEvent } from 'react'
 import { hasAgentToolActivity, thoughtsFrom } from '../agentProgress'
 import {
+  GEMINI_MODELS,
+  OPENAI_MODELS,
+  ANTHROPIC_MODELS,
+  OPENROUTER_MODELS,
+  DEEPSEEK_MODELS,
+  HF_MODELS,
+  LOCAL_MODELS,
+  OLLAMA_MODELS,
+} from '../../shared/constants/models'
+import { badge, providerLabel, fallbackNotice } from '../../shared/utils/providers'
+import { activitiesFrom, parseWebSearchSources, type AgentActivity, type AgentActivityView } from '../../shared/utils/agentActivity'
+import { AgentActivityTable } from '../../shared/components/AgentActivityTable'
+import { ChatCodeBlock } from '../../shared/components/ChatCodeBlock'
+import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../../shared/utils/approval'
+import { ApprovalCard } from '../../shared/components/ApprovalCard'
+import { renderFormattedMessage, readableAssistantText, cleanSpeechText, renderSpeakerIcon } from '../../shared/utils/markdown'
+import { ThinkingBlock } from '../../shared/components/ThinkingBlock'
+import { AgentActivityDrawer } from '../../shared/components/AgentActivityDrawer'
+
+
+
+import {
   type AgentProgress,
   type ChatResponse,
   type RuntimeStatus,
   getTtsUrls,
 } from '../tauri'
 
-const GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
-  'gemini-3.1-flash-lite',
-  'gemini-3.1-flash-lite-preview'
-]
 
-const OPENAI_MODELS = [
-  'gpt-4o',
-  'gpt-4o-mini',
-  'o1',
-  'o3-mini',
-  'o1-preview',
-  'o1-mini',
-  'gpt-4-turbo'
-]
 
-const OPENROUTER_MODELS = [
-  'openai/gpt-4o-mini',
-  'openai/gpt-4o',
-  'anthropic/claude-3.5-sonnet',
-  'anthropic/claude-3.5-haiku',
-  'google/gemini-2.5-flash',
-  'meta-llama/llama-3.3-70b-instruct',
-  'mistralai/mistral-large'
-]
-
-const DEEPSEEK_MODELS = [
-  'deepseek-v4-flash',
-  'deepseek-v4-pro',
-  'deepseek-chat',
-  'deepseek-reasoner'
-]
-
-const ANTHROPIC_MODELS = [
-  'claude-3-7-sonnet-latest',
-  'claude-3-5-sonnet-latest',
-  'claude-3-5-haiku-latest',
-  'claude-3-opus-latest'
-]
-
-const HF_MODELS = [
-  'meta-llama/Llama-3.3-70B-Instruct',
-  'meta-llama/Meta-Llama-3-8B-Instruct',
-  'meta-llama/Llama-3.2-3B-Instruct',
-  'Qwen/Qwen2.5-72B-Instruct',
-  'Qwen/Qwen2.5-Coder-32B-Instruct',
-  'mistralai/Mistral-7B-Instruct-v0.3',
-  'google/gemma-2-9b-it'
-]
-
-const LOCAL_MODELS = [
-  'local-model',
-  'Qwen/Qwen2.5-7B-Instruct-GGUF',
-  'meta-llama/Llama-3.2-3B-Instruct-GGUF',
-  'lmstudio-community/gemma-2-9b-it-GGUF'
-]
-
-const OLLAMA_MODELS: string[] = []
-
-interface ApprovalDetails {
-  title: string
-  body: string
-  reason?: string
-  isDangerous: boolean
-}
-
-function badge(provider: string, model: string) {
-  return [provider, model].filter(Boolean).join(' / ')
-}
-
-function providerLabel(provider: string) {
-  switch (provider) {
-    case 'gemini':
-      return 'Gemini'
-    case 'openai':
-      return 'OpenAI'
-    case 'openrouter':
-      return 'OpenRouter'
-    case 'deepseek':
-      return 'DeepSeek'
-    case 'anthropic':
-      return 'Claude'
-    case 'huggingface':
-      return 'Hugging Face'
-    case 'local_openai':
-      return 'Local OpenAI'
-    case 'ollama':
-      return 'Ollama'
-    default:
-      return provider || 'Primary provider'
-  }
-}
-
-function fallbackNotice(response: Pick<ChatResponse, 'provider' | 'fallbackProvider'> | null | undefined) {
-  if (!response?.fallbackProvider) return ''
-  return `${providerLabel(response.fallbackProvider)} unavailable, fell back to ${providerLabel(response.provider)}.`
-}
-
-interface AgentActivity {
-  label: string
-  target: string
-  kind: 'file' | 'folder' | 'search' | 'terminal' | 'tool'
-  state: 'active' | 'done' | 'error'
-  action?: string
-}
-
-interface AgentActivityView {
-  summary: string
-  items: AgentActivity[]
-}
-
-function activityDetail(input: Record<string, unknown>, key: string) {
-  const value = input[key]
-  return typeof value === 'string' && value.trim() ? value : ''
-}
-
-function formatActivityTarget(value: string) {
-  const compact = value.replace(/^\/home\/([^/]+)/, '~')
-  return compact || 'workspace'
-}
-
-function activityKind(action: string, target: string): AgentActivity['kind'] {
-  if (['search_code', 'semantic_search', 'knowledge_search', 'web_search', 'memory_recall'].includes(action)) return 'search'
-  if (['run_shell', 'verify'].includes(action)) return 'terminal'
-  if (['list_files', 'detect_project'].includes(action)) return 'folder'
-  if (['read_file', 'symbols', 'read_diagnostics', 'git_diff', 'apply_patch', 'write_file', 'note_write', 'view_image'].includes(action)) return 'file'
-  return target.includes('/') && !/\.[^/]+$/.test(target) ? 'folder' : 'tool'
-}
-
-function describeTool(action: string, input: Record<string, unknown>): AgentActivity {
-  const path = activityDetail(input, 'path')
-  const query = activityDetail(input, 'query')
-  const command = activityDetail(input, 'command')
-  const name = activityDetail(input, 'name')
-  const tool = activityDetail(input, 'tool')
-  const rawTarget = path || query || command || name || tool || action.replaceAll('_', ' ')
-
-  // Append line range for read_file when startLine / endLine are available
-  let target = rawTarget
-  if (action === 'read_file' && path) {
-    const startLine = typeof input.startLine === 'number' ? input.startLine : undefined
-    const endLine = typeof input.endLine === 'number' ? input.endLine : undefined
-    if (startLine !== undefined && endLine !== undefined) {
-      target = `${rawTarget} #L${startLine}-${endLine}`
-    } else if (startLine !== undefined) {
-      target = `${rawTarget} #L${startLine}`
-    }
-  }
-
-  const labels: Record<string, string> = {
-    apply_patch: 'Applying patch',
-    ask_user: 'Asking user',
-    create_plan: 'Creating plan',
-    detect_project: 'Detecting project',
-    git_branch: 'Reading branch',
-    git_diff: 'Reading diff',
-    git_log: 'Reading log',
-    git_status: 'Reading git status',
-    knowledge_search: 'Searching knowledge',
-    list_files: 'Listing files',
-    list_tests: 'Listing tests',
-    mcp_tool: 'Calling MCP tool',
-    memory_recall: 'Recalling memory',
-    note_write: 'Writing note',
-    read_diagnostics: 'Reading diagnostics',
-    read_file: 'Reading file',
-    request_user_approval: 'Requesting approval',
-    run_plugin: 'Running plugin',
-    run_shell: 'Running command',
-    search_code: 'Searching code',
-    semantic_index: 'Indexing code',
-    semantic_search: 'Searching code',
-    symbols: 'Inspecting symbols',
-    update_plan: 'Updating plan',
-    verify: 'Verifying',
-    view_image: 'Viewing image',
-    web_search: 'Searching web',
-    write_file: 'Writing file',
-  }
-  return {
-    label: labels[action] ?? 'Using tool',
-    target: formatActivityTarget(target),
-    kind: activityKind(action, target),
-    state: 'active',
-    action,
-  }
-}
-
-function activitySummary(items: AgentActivity[]) {
-  const files = new Set<string>()
-  const folders = new Set<string>()
-  for (const item of items) {
-    if (item.kind === 'file') files.add(item.target)
-    if (item.kind === 'folder') folders.add(item.target)
-  }
-  const parts = [
-    files.size ? `${files.size} ${files.size === 1 ? 'file' : 'files'}` : '',
-    folders.size ? `${folders.size} ${folders.size === 1 ? 'folder' : 'folders'}` : '',
-  ].filter(Boolean)
-  return parts.length ? `Exploring ${parts.join(', ')}` : 'Working through task'
-}
-
-function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
-  const activities: AgentActivity[] = []
-  for (const event of progress) {
-    if (event.type === 'ToolStart') {
-      activities.push(describeTool(event.data.action, event.data.input))
-    } else if (event.type === 'ToolEnd') {
-      for (let index = activities.length - 1; index >= 0; index -= 1) {
-        if (activities[index].state !== 'active') continue
-        activities[index].state = event.data.result.startsWith('Error:') ? 'error' : 'done'
-        if (activities[index].state === 'error') {
-          activities[index].label = 'Failed'
-        }
-        if (activities[index].action === 'ask_user' && event.data.result.startsWith('User answered:')) {
-          const answer = event.data.result.replace('User answered:', '').trim()
-          activities[index].target = `(Answered: "${answer}") ${activities[index].target}`
-        }
-        break
-      }
-    }
-  }
-  const items = activities.slice(-12)
-  return { summary: activitySummary(activities), items }
-}
-
-function AgentActivityTable({ activityView }: { activityView: AgentActivityView }) {
-  const [expandedIndices, setExpandedIndices] = useState<Record<number, boolean>>({})
-
-  const toggleExpand = (index: number) => {
-    setExpandedIndices(prev => ({
-      ...prev,
-      [index]: !prev[index]
-    }))
-  }
-
-  return (
-    <div className="agent-activity-list">
-      <div className="agent-activity-table-head" aria-hidden="true">
-        <span>Tool</span>
-        <span />
-        <span>Target</span>
-        <span />
-      </div>
-      {activityView.items.map((activity, index) => {
-        const isExpanded = !!expandedIndices[index]
-        return (
-          <div 
-            className="agent-activity-item" 
-            data-kind={activity.kind} 
-            data-state={activity.state} 
-            key={`${index}-${activity.label}-${activity.target}`}
-            style={{ cursor: 'pointer' }}
-            onClick={() => toggleExpand(index)}
-          >
-            <span className="agent-activity-label">{activity.label}</span>
-            <span className="agent-activity-icon" aria-hidden="true" />
-            <span 
-              className="agent-activity-text" 
-              style={isExpanded ? { whiteSpace: 'normal', wordBreak: 'break-all', overflow: 'visible', textOverflow: 'clip' } : undefined}
-            >
-              {activity.target}
-            </span>
-            <span 
-              className="agent-activity-chevron" 
-              style={{ 
-                transform: isExpanded ? 'rotate(90deg)' : 'none', 
-                transition: 'transform 0.2s ease',
-                display: 'inline-block'
-              }}
-              aria-hidden="true"
-            >
-              &gt;
-            </span>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function renderApprovalDetails(approval: any): ApprovalDetails {
-  if (!approval) return { title: 'Action Pending Approval', body: 'No action details available.', isDangerous: false }
-  if (approval.WriteFile) return { title: 'Write File', body: `Path: ${approval.WriteFile.path}`, reason: approval.WriteFile.diff ? `Diff:\n${approval.WriteFile.diff}` : 'Writing new file content.', isDangerous: false }
-  if (approval.ApplyPatch) return { title: 'Apply Patch', body: `Path: ${approval.ApplyPatch.path}`, reason: approval.ApplyPatch.diff ? `Diff:\n${approval.ApplyPatch.diff}` : 'Applying code patch.', isDangerous: false }
-  if (approval.RunShell) return { title: 'Run Shell Command', body: approval.RunShell.command, reason: 'Executing shell commands can modify your system.', isDangerous: true }
-  if (approval.NoteWrite) return { title: 'Write Note', body: `Path: ${approval.NoteWrite.path}`, reason: 'Creating or updating workspace notes.', isDangerous: false }
-  if (approval.RunPlugin) return { title: `Run Plugin: ${approval.RunPlugin.name}`, body: approval.RunPlugin.instruction, reason: 'Executing a native plugin action.', isDangerous: false }
-  if (approval.McpTool) {
-    const { server, tool, arguments: args } = approval.McpTool
-    return { title: `Run MCP Tool: ${server}/${tool}`, body: typeof args === 'string' ? args : JSON.stringify(args, null, 2), reason: 'Running external MCP tool.', isDangerous: false }
-  }
-  if (approval.UserApproval) return { title: approval.UserApproval.title, body: approval.UserApproval.prompt, reason: 'The agent requested explicit approval.', isDangerous: false }
-  if (approval.AskUser) return { title: 'Question From Agent', body: approval.AskUser.question, reason: 'Type your answer below and submit to respond to the agent.', isDangerous: false }
-  return { title: 'Unknown Action', body: JSON.stringify(approval, null, 2), reason: 'Requires approval to proceed.', isDangerous: false }
-}
-
-function renderDiff(diffText: string) {
-  if (!diffText) return null
-  const lines = diffText.split('\n')
-  return (
-    <div style={{ 
-      background: '#0b0f19', 
-      borderRadius: '6px', 
-      padding: '8px', 
-      border: '1px solid rgba(255, 255, 255, 0.08)', 
-      overflowX: 'auto', 
-      maxHeight: '400px',
-      fontFamily: 'monospace',
-      fontSize: '0.74rem',
-      lineHeight: '1.4',
-    }}>
-      {lines.map((line, idx) => {
-        let style: any = {
-          whiteSpace: 'pre-wrap',
-          padding: '2px 6px',
-        }
-        
-        if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) {
-          style = {
-            ...style,
-            color: '#64748b',
-            fontWeight: 'bold',
-          }
-        } else if (line.startsWith('+')) {
-          style = {
-            ...style,
-            background: 'rgba(16, 185, 129, 0.12)',
-            borderLeft: '3px solid #10b981',
-            color: '#a7f3d0'
-          }
-        } else if (line.startsWith('-')) {
-          style = {
-            ...style,
-            background: 'rgba(239, 68, 68, 0.12)',
-            borderLeft: '3px solid #ef4444',
-            color: '#fca5a5'
-          }
-        } else {
-          style = {
-            ...style,
-            color: '#e2e8f0',
-          }
-        }
-        
-        return (
-          <div key={idx} style={style}>
-            {line}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
 
 interface ChatPanelProps {
   interactions: any[]
@@ -406,467 +72,9 @@ interface ChatPanelProps {
   onCancelMessage: () => void
 }
 
-function ChatCodeBlock({ code, language }: { code: string; language: string; key?: any }) {
-  const [copied, setCopied] = useState(false)
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
-      console.error('Failed to copy code: ', err)
-    }
-  }
 
-  const handleDownload = () => {
-    try {
-      const blob = new Blob([code], { type: 'text/plain;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `code.${language === 'plaintext' ? 'txt' : language}`
-      link.click()
-      URL.revokeObjectURL(url)
-    } catch (err) {
-      console.error('Failed to download code: ', err)
-    }
-  }
 
-  const displayLang = language.charAt(0).toUpperCase() + language.slice(1).toLowerCase()
-
-  return (
-    <div className="chat-code-block-container" style={{ whiteSpace: 'normal' }}>
-      <div className="chat-code-block-header">
-        <span className="chat-code-block-lang">{displayLang}</span>
-        <div className="chat-code-block-actions">
-          <button type="button" onClick={handleDownload} title="Download code" className="chat-code-action-btn">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-          </button>
-          <button type="button" onClick={handleCopy} title="Copy code" className="chat-code-action-btn">
-            {copied ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-            )}
-          </button>
-        </div>
-      </div>
-      <pre className="chat-code-block-body">
-        <code>{code}</code>
-      </pre>
-    </div>
-  )
-}
-
-const isTableLine = (line: string): boolean => {
-  const trimmed = line.trim()
-  return trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 1
-}
-
-function renderFormattedMessage(text: string) {
-  const displayText = readableAssistantText(text)
-  if (!displayText) return null
-
-  const formatInline = (str: string) => {
-    const codeParts = str.split(/`([\s\S]*?)`/g)
-    return codeParts.map((codePart, codeIndex) => {
-      if (codeIndex % 2 === 1) {
-        return (
-          <code key={`code-${codeIndex}`} className="chat-inline-code">
-            {codePart}
-          </code>
-        )
-      }
-      const boldParts = codePart.split(/\*\*([\s\S]*?)\*\*/g)
-      return boldParts.map((boldPart, boldIndex) => {
-        if (boldIndex % 2 === 1) {
-          return (
-            <strong key={`bold-${boldIndex}`} className="chat-bold-highlight">
-              {boldPart}
-            </strong>
-          )
-        }
-        const mentionParts = boldPart.split(/(@[\w\-\.\/]+)/g)
-        return mentionParts.map((mentionPart, mentionIndex) => {
-          if (mentionIndex % 2 === 1) {
-            return (
-              <span key={`mention-${mentionIndex}`} className="chat-mention">
-                {mentionPart}
-              </span>
-            )
-          }
-          return mentionPart
-        })
-      })
-    })
-  }
-
-  const renderHtmlTable = (tableLines: string[], key: string) => {
-    const rows: string[][] = []
-    for (const line of tableLines) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      const content = trimmed.slice(1, -1)
-      const contentEscaped = content.replace(/\\\|/g, '\u0000')
-      const cols = contentEscaped.split('|').map(s => s.replace(/\u0000/g, '|').trim())
-      rows.push(cols)
-    }
-
-    if (rows.length === 0) return null
-
-    let hasSeparator = false
-    let separatorIdx = -1
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i]
-      if (row.length > 0 && row.every(col => /^[-\s:]+$/.test(col))) {
-        hasSeparator = true
-        separatorIdx = i
-        break
-      }
-    }
-
-    let headerRow: string[] | null = null
-    const dataRows: string[][] = []
-
-    if (hasSeparator) {
-      if (separatorIdx > 0) {
-        headerRow = rows[separatorIdx - 1]
-        for (let i = 0; i < rows.length; i++) {
-          if (i !== separatorIdx && i !== separatorIdx - 1) {
-            dataRows.push(rows[i])
-          }
-        }
-      } else {
-        for (let i = 0; i < rows.length; i++) {
-          if (i !== separatorIdx) {
-            dataRows.push(rows[i])
-          }
-        }
-      }
-    } else {
-      headerRow = rows[0]
-      for (let i = 1; i < rows.length; i++) {
-        dataRows.push(rows[i])
-      }
-    }
-
-    return (
-      <div key={key} className="chat-table-container" style={{
-        overflowX: 'auto',
-        margin: '14px 0',
-        width: '100%',
-        borderRadius: '8px',
-        border: '1px solid rgba(255, 255, 255, 0.12)',
-        background: 'rgba(30, 41, 59, 0.35)',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-      }}>
-        <table className="chat-table" style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          fontSize: '0.86rem',
-          textAlign: 'left',
-          lineHeight: '1.5',
-        }}>
-          {headerRow && (
-            <thead>
-              <tr style={{
-                background: 'rgba(255, 255, 255, 0.04)',
-                borderBottom: '2px solid rgba(255, 255, 255, 0.15)',
-              }}>
-                {headerRow.map((col, idx) => (
-                  <th key={`th-${idx}`} style={{
-                    padding: '12px 16px',
-                    fontWeight: 700,
-                    color: 'var(--accent, #38bdf8)',
-                    fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-                  }}>
-                    {formatInline(col)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-          )}
-          <tbody>
-            {dataRows.map((row, rIdx) => (
-              <tr key={`tr-${rIdx}`} style={{
-                background: rIdx % 2 === 1 ? 'rgba(255, 255, 255, 0.015)' : 'transparent',
-                borderBottom: rIdx < dataRows.length - 1 ? '1px solid rgba(255, 255, 255, 0.08)' : 'none',
-              }}>
-                {row.map((col, cIdx) => (
-                  <td key={`td-${cIdx}`} style={{
-                    padding: '12px 16px',
-                    color: 'var(--text-main, #e2e8f0)',
-                  }}>
-                    {formatInline(col)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )
-  }
-
-  const lines = displayText.split('\n')
-  const items: any[] = []
-
-  let inCodeBlock = false
-  let codeBlockLang = ''
-  let codeBlockLines: string[] = []
-
-  let inTable = false
-  let tableLines: string[] = []
-
-  const flushTable = (index: number) => {
-    if (tableLines.length > 0) {
-      items.push(renderHtmlTable(tableLines, `table-${index}`))
-      tableLines = []
-      inTable = false
-    }
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-
-    if (line.trim().startsWith('```')) {
-      if (inTable) {
-        flushTable(i)
-      }
-      if (inCodeBlock) {
-        const codeText = codeBlockLines.join('\n')
-        items.push(
-          <ChatCodeBlock
-            key={`code-block-${i}`}
-            code={codeText}
-            language={codeBlockLang}
-          />
-        )
-        inCodeBlock = false
-        codeBlockLines = []
-      } else {
-        inCodeBlock = true
-        codeBlockLang = line.trim().slice(3).trim() || 'plaintext'
-      }
-      continue
-    }
-
-    if (inCodeBlock) {
-      codeBlockLines.push(line)
-      continue
-    }
-
-    if (isTableLine(line)) {
-      inTable = true
-      tableLines.push(line)
-    } else {
-      if (inTable) {
-        flushTable(i)
-      }
-
-      const headerMatch = line.match(/^(#{1,6})\s+(.*)$/)
-      if (headerMatch) {
-        const level = headerMatch[1].length
-        const content = headerMatch[2]
-
-        const style = {
-          fontWeight: 'bold',
-          display: 'block',
-          marginTop: level === 1 ? '16px' : level === 2 ? '14px' : '10px',
-          marginBottom: '6px',
-          fontSize: level === 1 ? '1.25em' : level === 2 ? '1.15em' : '1.05em',
-          color: 'var(--text-main)',
-        }
-
-        items.push(
-          <span key={`line-${i}`} style={style}>
-            {formatInline(content)}
-          </span>
-        )
-      } else {
-        const listMatch = line.match(/^(\s*)([-*+])\s+(.*)$/)
-        if (listMatch) {
-          const indent = listMatch[1]
-          const content = listMatch[3]
-          items.push(
-            <Fragment key={`line-${i}`}>
-              {indent}• {formatInline(content)}
-              {i < lines.length - 1 && '\n'}
-            </Fragment>
-          )
-        } else {
-          items.push(
-            <Fragment key={`line-${i}`}>
-              {formatInline(line)}
-              {i < lines.length - 1 && '\n'}
-            </Fragment>
-          )
-        }
-      }
-    }
-  }
-
-  if (inTable) {
-    flushTable(lines.length)
-  }
-
-  if (inCodeBlock && codeBlockLines.length > 0) {
-    const codeText = codeBlockLines.join('\n')
-    items.push(
-      <ChatCodeBlock
-        key={`code-block-end`}
-        code={codeText}
-        language={codeBlockLang}
-      />
-    )
-  }
-
-  return items
-}
-
-const THINKING_LABELS = {
-  live: 'Thinking…',
-  completed: (count: number) => `Thinking process (${count} steps)`,
-  step: (index: number) => `Step ${index}`,
-  emptyHint: 'Model didn\'t send thinking steps this time',
-} as const
-
-function ThinkingBlock({
-  thoughts,
-  isLive = false,
-  blockKey,
-  expanded,
-  onExpandedChange,
-  showEmptyHint = false,
-}: {
-  thoughts: string[]
-  isLive?: boolean
-  blockKey: string
-  expanded?: boolean
-  onExpandedChange?: (key: string, open: boolean) => void
-  showEmptyHint?: boolean
-}) {
-  const contentRef = useRef<HTMLDivElement>(null)
-  const isControlled = expanded !== undefined && Boolean(onExpandedChange)
-  const [localOpen, setLocalOpen] = useState(isLive)
-  const isOpen = isControlled ? Boolean(expanded) : localOpen
-
-  const setOpen = (open: boolean) => {
-    if (isControlled && onExpandedChange) onExpandedChange(blockKey, open)
-    else setLocalOpen(open)
-  }
-
-  useEffect(() => {
-    if (isLive && !isControlled) setLocalOpen(true)
-  }, [isLive, isControlled])
-
-  useEffect(() => {
-    if (!isLive || !isOpen || !contentRef.current) return
-    contentRef.current.scrollTop = contentRef.current.scrollHeight
-  }, [thoughts, isLive, isOpen])
-
-  if (thoughts.length === 0 && !showEmptyHint) return null
-
-  if (thoughts.length === 0) {
-    return (
-      <div className="thinking-block thinking-block-empty-state" data-live={isLive ? 'true' : 'false'}>
-        <span className="thinking-block-empty">{THINKING_LABELS.emptyHint}</span>
-      </div>
-    )
-  }
-
-  return (
-    <div className={`thinking-block${isLive ? ' is-live' : ''}`}>
-      <button
-        type="button"
-        className="thinking-block-header"
-        onClick={() => setOpen(!isOpen)}
-        aria-expanded={isOpen}
-      >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-          <line x1="12" y1="17" x2="12.01" y2="17" />
-          <circle cx="12" cy="12" r="10" />
-        </svg>
-        <span className="thinking-block-label">
-          {isLive ? THINKING_LABELS.live : THINKING_LABELS.completed(thoughts.length)}
-        </span>
-        {isLive && <span className="thinking-block-live-dot" aria-hidden="true" />}
-        <span className={`thinking-block-chevron${isOpen ? ' is-open' : ''}`} aria-hidden="true">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </span>
-      </button>
-      {isOpen && (
-        <div className="thinking-block-body">
-          <div className="thinking-block-content" ref={contentRef}>
-            {thoughts.map((thought, index) => (
-              <div className="thinking-block-step" key={`${blockKey}-${index}`}>
-                {thoughts.length > 1 && (
-                  <div className="thinking-block-step-label">{THINKING_LABELS.step(index + 1)}</div>
-                )}
-                <div className="thinking-block-step-body">{renderFormattedMessage(thought)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function readableAssistantText(text: string) {
-  if (typeof text !== 'string') return ''
-  const trimmed = text.trim()
-  if (!trimmed.startsWith('{')) return text
-  try {
-    const value = JSON.parse(trimmed)
-    if (value?.action === 'finish' && typeof value?.input?.summary === 'string' && value.input.summary.trim()) {
-      return value.input.summary
-    }
-    if (typeof value?.finish?.summary === 'string' && value.finish.summary.trim()) {
-      return value.finish.summary
-    }
-  } catch {
-    return text
-  }
-  return text
-}
-
-function renderSpeakerIcon(isSpeaking: boolean) {
-  if (isSpeaking) {
-    return (
-      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-      </svg>
-    )
-  }
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-    </svg>
-  )
-}
-
-function cleanSpeechText(text: string) {
-  return readableAssistantText(text)
-    .replace(/\*\*([\s\S]*?)\*\*/g, '$1')
-    .replace(/[*_`#]/g, '')
-    .trim()
-}
 
 function numericSetting(value: unknown, fallback: number) {
   const numeric = Number(value)
@@ -1040,11 +248,6 @@ export default function ChatPanel({
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const toolMenuRef = useRef<HTMLDivElement | null>(null)
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
-  const [askAnswer, setAskAnswer] = useState('')
-
-  useEffect(() => {
-    setAskAnswer('')
-  }, [pendingApproval])
 
   useEffect(() => {
     const fetchOllamaModels = async () => {
@@ -1620,24 +823,72 @@ export default function ChatPanel({
   const renderCompletedActivity = (interaction: any) => {
     const interactionId = String(interaction.id)
     const activityView = activitiesFrom(agentActivitySnapshots[interactionId] ?? [])
-    if (activityView.items.length === 0) return null
     const isOpen = Boolean(openActivityIds[interactionId])
     return (
-      <div className="agent-activity-history">
-        <button
-          type="button"
-          className="agent-activity-toggle"
-          aria-expanded={isOpen}
-          onClick={() => setOpenActivityIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
-        >
-          <span>{activityView.summary}</span>
-          <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
-        </button>
-        {isOpen && (
-          <div className="agent-activity-card agent-activity-card-history">
-            <AgentActivityTable activityView={activityView} />
-          </div>
-        )}
+      <AgentActivityDrawer
+        activityView={activityView}
+        isOpen={isOpen}
+        onToggle={() => setOpenActivityIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
+        isHistorical={true}
+      />
+    )
+  }
+
+  const renderWebSearchSources = (interaction: any) => {
+    const interactionId = String(interaction.id)
+    const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
+    const sources = parseWebSearchSources(progress)
+    if (sources.length === 0) return null
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
+        <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sources</span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {sources.map((src, i) => (
+            <a
+              key={i}
+              href={src.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={src.snippet || src.title}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '5px 10px',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '8px',
+                textDecoration: 'none',
+                color: '#cbd5e1',
+                fontSize: '0.78rem',
+                maxWidth: '220px',
+                overflow: 'hidden',
+                cursor: 'pointer',
+                transition: 'background 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.08)'
+                ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(255,255,255,0.18)'
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.04)'
+                ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(255,255,255,0.08)'
+              }}
+            >
+              <img
+                src={src.faviconUrl}
+                alt=""
+                width={14}
+                height={14}
+                style={{ borderRadius: '2px', flexShrink: 0 }}
+                onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+              />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {src.domain}
+              </span>
+            </a>
+          ))}
+        </div>
       </div>
     )
   }
@@ -1934,6 +1185,7 @@ export default function ChatPanel({
                   )
                 })()}
                 <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(interaction.aiText)}</div>
+                {renderWebSearchSources(interaction)}
                 <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
                   {fallbackNotice(interaction) && <span className="provider-fallback-notice">{fallbackNotice(interaction)}</span>}
@@ -1968,18 +1220,13 @@ export default function ChatPanel({
         {sending && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
             <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{sendingImageMarkers ? renderFormattedMessage(`${sendingMessage} ${sendingImageMarkers}`) : renderFormattedMessage(sendingMessage)}</div></div></div>
-            {agentMode && agentActivities.items.length > 0 && (
-              <div className="message ai-message agent-activity-message">
-                <div className="agent-activity-card">
-                  <div className="agent-activity-header">
-                    <span>{agentActivities.summary}</span>
-                    <span className="agent-activity-status" data-state={pendingApproval ? 'approval' : 'active'}>
-                      {pendingApproval ? 'Waiting for approval' : 'Working'}
-                    </span>
-                  </div>
-                  <AgentActivityTable activityView={agentActivities} />
-                </div>
-              </div>
+            {agentMode && (
+              <AgentActivityDrawer
+                activityView={agentActivities}
+                isOpen={openActivityIds['live'] ?? true}
+                onToggle={() => setOpenActivityIds((current) => ({ ...current, live: !(current['live'] ?? true) }))}
+                pendingApproval={!!pendingApproval}
+              />
             )}
             {renderActiveFileChanges()}
             <div className="message ai-message thinking-message">
@@ -2059,81 +1306,13 @@ export default function ChatPanel({
           </div>
         )}
 
-        {pendingApproval && (() => {
-          const details = renderApprovalDetails(pendingApproval.approval)
-          const writeFile = pendingApproval.approval?.WriteFile
-          const applyPatch = pendingApproval.approval?.ApplyPatch
-          const diffText = writeFile?.diff || applyPatch?.diff
-          const isAskUser = !!pendingApproval.approval?.AskUser
-
-          return (
-            <div className="message ai-message" style={{ width: '100%' }}>
-              <div className="bubble-wrapper" style={{ width: '100%' }}>
-                <div className="action-card approval-card" data-tier={details.isDangerous ? 'dangerous' : undefined} style={{ width: '100%' }}>
-                  <div className="approval-card-content" style={{ width: '100%' }}>
-                    <div className="approval-card-title">{details.title}</div>
-                    <div className="approval-card-body" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{details.body}</div>
-                    {diffText ? (
-                      <div className="approval-card-diff-container" style={{ marginTop: '8px', width: '100%' }}>
-                        <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-soft, #94a3b8)', marginBottom: '4px' }}>Diff:</div>
-                        {renderDiff(diffText)}
-                      </div>
-                    ) : (
-                      details.reason && <div className="approval-card-reason" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{details.reason}</div>
-                    )}
-                    {isAskUser && (
-                      <div className="approval-card-input-container" style={{ marginTop: '12px', width: '100%' }}>
-                        <textarea
-                          style={{
-                            width: '100%',
-                            minHeight: '70px',
-                            padding: '10px',
-                            background: 'rgba(0, 0, 0, 0.2)',
-                            border: '1px solid rgba(255, 255, 255, 0.1)',
-                            borderRadius: '6px',
-                            color: 'var(--text-main, #f8fafc)',
-                            fontSize: '0.9rem',
-                            fontFamily: 'inherit',
-                            resize: 'vertical',
-                            outline: 'none',
-                          }}
-                          placeholder="Type your answer here..."
-                          value={askAnswer}
-                          onChange={(e) => setAskAnswer(e.target.value)}
-                        />
-                      </div>
-                    )}
-                  </div>
-                  {isAskUser ? (
-                    <div className="approval-card-actions">
-                      <button 
-                        type="button" 
-                        className="approval-btn approval-btn-approve" 
-                        disabled={!askAnswer.trim()} 
-                        onClick={() => onApproval(true, false, askAnswer)}
-                      >
-                        Submit Answer
-                      </button>
-                      <button 
-                        type="button" 
-                        className="approval-btn approval-btn-cancel" 
-                        onClick={() => onApproval(false)}
-                      >
-                        Decline
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="approval-card-actions">
-                      <button type="button" className="approval-btn approval-btn-approve" onClick={() => onApproval(true)}>Approve</button>
-                      <button type="button" className="approval-btn" style={{ backgroundColor: 'rgba(16, 185, 129, 0.22)', borderColor: 'rgba(16, 185, 129, 0.4)', color: '#a7f3d0' }} onClick={() => onApproval(true, true)}>Approve this session</button>
-                      <button type="button" className="approval-btn approval-btn-cancel" onClick={() => onApproval(false)}>Cancel</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )
-        })()}
+        {pendingApproval && (
+          <ApprovalCard
+            key={pendingApproval.id || JSON.stringify(pendingApproval)}
+            pendingApproval={pendingApproval}
+            onApproval={onApproval}
+          />
+        )}
         <div ref={chatEnd} />
       </div>
 
