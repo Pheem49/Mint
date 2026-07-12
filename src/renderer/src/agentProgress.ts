@@ -7,4 +7,5 @@ export {
   hasAgentToolActivity,
   mergeActivitySnapshots,
   parseAgentActivity,
+  parseFileChangesFromProgress,
 } from '../shared/agentProgress'

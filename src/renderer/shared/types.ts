@@ -125,3 +125,16 @@ export interface LearnedSkill {
   location?: string
 }
 
+export interface DiffHunk {
+  oldText: string
+  newText: string
+}
+
+export interface FileChange {
+  path: string
+  created: boolean
+  additions: number
+  deletions: number
+  hunks: DiffHunk[]
+}
+

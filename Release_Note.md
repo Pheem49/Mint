@@ -99,6 +99,19 @@ Improved the autocomplete experience in the terminal:
 - Fixed a bug where pasting text (or pressing `Ctrl + V`) would trigger a browser-level clipboard permission warning popup (asking to "Allow Paste").
 - Removed the redundant global `keydown` Ctrl+V listener and the async `navigator.clipboard.read()` fallback on text paste events. The application now correctly relies on standard, synchronous `event.clipboardData` values during paste events, ensuring seamless pasting of both images and text without prompting the user.
 
+### 📦 16. Codebase Refactoring & Shared Utilities
+- **Shared UI & Progress Helpers:** Refactored duplicate helper functions and TypeScript interfaces from the desktop renderer (`src/renderer/src`) and web renderer (`src/renderer/src-web`) into the unified `shared` codebase.
+- **Maintainability:** Standardized helper functions across both application targets to prevent future regressions.
+
+### 🖥️ 17. Horizontal Scrolling for CLI Input Box
+- **Arbitrary Input Length:** Removed the single-line input constraint (previously restricted to `term_width - 4`) in the CLI interactive prompt, allowing users to type or edit long prompt instructions.
+- **Dynamic Sliding Window:** Implemented a horizontal scrolling viewport for the single-line prompt box. It dynamically slices and displays a subset of characters surrounding the cursor position to preserve console alignment and layout integrity.
+- **Interactive Cursor Navigation:** Bounded the arrow keys (`Left` and `Right` navigation) to trigger full box redraws, enabling the visible text window to scroll back and forward dynamically as the cursor moves.
+
+### 🖥️ 18. Browser Automation Visual Indicator (Green Aura)
+- **Visual Feedback:** Injects a breathing green glowing border overlay around the viewport of any browser page under active AI control.
+- **Non-Intrusive Design:** Built with `pointer-events: none` and a high z-index to ensure it sits on top of all page elements without blocking clicks, scrolling, or user interactions.
+
 ---
 
 ## 🛠️ Codebase Changes
@@ -117,6 +130,8 @@ Improved the autocomplete experience in the terminal:
 - Add `enable_agent_collaboration` config parameter (defaulting to `false`) in `crates/mint-core/src/config.rs`.
 - Update `resolve_agent_config` in `crates/mint-core/src/orchestration.rs` to return a tuple containing the active agent name and model, and check `enable_agent_collaboration`.
 - Expand `AgentProgress::Thinking` in `crates/mint-core/src/orchestration.rs` to optionally contain `agent_name` and `model_name`.
+- Inject a green aura viewport border style and DOM overlay (`#mint-browser-aura`) into the active browser page before executing CDP automation actions in `crates/mint-core/src/browser.rs` to visually notify users of active AI control.
+
 
 ### Desktop/Web Frontend (`src/renderer`)
 - Integrate creation/deletion actions and focus/polling lifecycle listeners inside `WorkspacePanel.tsx`.
@@ -136,6 +151,7 @@ Improved the autocomplete experience in the terminal:
 - Update `ChatPanel.tsx` in desktop and web source directories to render the active agent and model names inside the live thinking status message.
 - Remove duplicate "Enable Multi-Agent Review" checkbox from `AutomationTab.tsx`.
 - Remove redundant `handleWindowKeyDown` Ctrl+V listeners, unused `onReadClipboardImage` prop, and `navigator.clipboard.read()` async fallback routines from `ChatPanel.tsx` and `MintDashboard.tsx` in both desktop and web directories to resolve browser clipboard permission warning popups during text pasting.
+- Refactor duplicated types (`DiffHunk`, `FileChange`), helper functions (`numericSetting`, `errorMessage`, `readImage`, `readDocument`, `createTrimmedImagePreview`, `lightenColor`, `hexToRgb`, `applyThemeStyles`), and progress parsers (`parseFileChangesFromProgress`) from the desktop and web components to a central `src/renderer/shared` repository. Corrected a type checking issue by exporting `AgentProgress` and `InteractionMemory` from `shared/agentProgress.ts`.
 
 ### CLI Agent (`crates/mint-cli`)
 - Redefine live status print lines (`plan_lines`, `tasks_lines`, `activities_lines`, `explored_lines`) to accept progress tick state and apply the `get_bullet` helper.
@@ -146,6 +162,8 @@ Improved the autocomplete experience in the terminal:
 - Reorder `AUTOCOMPLETE_COMMANDS` alphabetically and simplify exit suggestions by keeping only `/exit`.
 - Paginate suggestions to display at most 5 items per page with page numbers.
 - Fixed `AgentProgress::Thinking` pattern matching compiler error (E0027) in `crates/mint-cli/src/agent.rs` and render active agent and model names in the live thinking terminal status bar.
+- Implement horizontal scrolling viewport for the CLI prompt input box in `crates/mint-cli/src/main.rs`, slicing the visible text to fit the terminal screen and adjusting the cursor column offset accordingly, allowing arbitrary length instructions.
+
 
 ### Github CI/CD Workflows
 - Modify `Publish GitHub release` step in `.github/workflows/release.yml` to use `body_path: Release_Note.md`.

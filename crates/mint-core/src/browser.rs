@@ -340,6 +340,61 @@ async fn cdp_call(config: &MintConfig, method: &str, params: Value) -> Result<Va
     let (mut socket, _) = connect_async(socket_url)
         .await
         .map_err(|error| format!("unable to connect to Chrome DevTools websocket: {error}"))?;
+    let is_aura_script = method == "Runtime.evaluate"
+        && params["expression"]
+            .as_str()
+            .map(|s| s.contains("mint-browser-aura"))
+            .unwrap_or(false);
+
+    if !is_aura_script {
+        let aura_script = r#"
+            (() => {
+                if (document.getElementById('mint-browser-aura')) return;
+                const aura = document.createElement('div');
+                aura.id = 'mint-browser-aura';
+                
+                const style = document.createElement('style');
+                style.id = 'mint-browser-aura-style';
+                style.textContent = `
+                    @keyframes mint-pulse {
+                        0% { box-shadow: inset 0 0 15px rgba(16, 185, 129, 0.4); border-color: rgba(16, 185, 129, 0.6); }
+                        100% { box-shadow: inset 0 0 30px rgba(16, 185, 129, 0.8); border-color: rgba(16, 185, 129, 1); }
+                    }
+                `;
+                document.head.appendChild(style);
+                
+                aura.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100vw;
+                    height: 100vh;
+                    border: 5px solid rgba(16, 185, 129, 0.6);
+                    pointer-events: none;
+                    z-index: 2147483647;
+                    box-sizing: border-box;
+                    animation: mint-pulse 1.5s infinite alternate;
+                `;
+                document.body.appendChild(aura);
+            })()
+        "#;
+
+        let _ = socket
+            .send(Message::Text(
+                json!({
+                    "id": 999,
+                    "method": "Runtime.evaluate",
+                    "params": {
+                        "expression": aura_script,
+                        "returnByValue": true
+                    }
+                })
+                .to_string()
+                .into(),
+            ))
+            .await;
+    }
+
     socket
         .send(Message::Text(
             json!({ "id": 1, "method": method, "params": params })
