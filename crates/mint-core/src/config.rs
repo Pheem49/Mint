@@ -196,6 +196,19 @@ fn default_agents() -> Vec<AgentConfig> {
 }
 
 impl MintConfig {
+    pub fn active_model(&self) -> &str {
+        match self.ai_provider.as_str() {
+            "anthropic" => &self.anthropic_model,
+            "openai" => &self.openai_model,
+            "openrouter" => &self.openrouter_model,
+            "deepseek" => &self.deepseek_model,
+            "huggingface" => &self.hf_model,
+            "local_openai" => &self.local_model_name,
+            "ollama" => &self.ollama_model,
+            _ => &self.gemini_model,
+        }
+    }
+
     pub fn available_providers(&self) -> Vec<&'static str> {
         let mut providers = Vec::new();
         if has_value(&self.anthropic_api_key) {

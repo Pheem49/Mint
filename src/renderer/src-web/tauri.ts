@@ -16,7 +16,6 @@ import type {
   WorkspaceTreeEntry,
   CodeEdit,
   CodeEditProposal,
-  DetectedTools,
   LearnedSkill,
 } from '../shared/types'
 
@@ -416,11 +415,12 @@ export async function listSavedPictures(): Promise<PictureEntry[]> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/pictures`);
+      const res = await fetch(`${API_BASE}/pictures?_t=${Date.now()}`);
       const pictures = await res.json();
+      const timestamp = Date.now();
       return Array.isArray(pictures)
         ? pictures.map((picture) => {
-            const pictureUrl = picture.url ? `${API_BASE.replace('/api', '')}${picture.url}` : undefined
+            const pictureUrl = picture.url ? `${API_BASE.replace('/api', '')}${picture.url}?_t=${timestamp}` : undefined
             return {
               ...picture,
               path: pictureUrl || picture.path,

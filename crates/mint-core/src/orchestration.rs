@@ -93,7 +93,7 @@ pub async fn orchestrate_chat(
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
     let memory = MemoryStore::open_default()?;
-    let enriched = enrich_request(&memory, &resolved_request)?;
+    let enriched = enrich_request(config, &memory, &resolved_request)?;
     let response = send_chat(config, &enriched).await?;
     memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
@@ -122,7 +122,7 @@ where
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
     let memory = MemoryStore::open_default()?;
-    let enriched = enrich_request(&memory, &resolved_request)?;
+    let enriched = enrich_request(config, &memory, &resolved_request)?;
     let response = stream_chat(config, &enriched, on_chunk).await?;
     memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
@@ -147,7 +147,7 @@ pub async fn orchestrate_chat_with_fallback(
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
     let memory = MemoryStore::open_default()?;
-    let enriched = enrich_request(&memory, &resolved_request)?;
+    let enriched = enrich_request(config, &memory, &resolved_request)?;
     let (response, fallback) = send_chat_with_fallback(config, &enriched).await?;
     memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
@@ -176,7 +176,7 @@ where
     let mut resolved_request = request.clone();
     resolved_request.message = resolve_github_links(&request.message, config).await;
     let memory = MemoryStore::open_default()?;
-    let enriched = enrich_request(&memory, &resolved_request)?;
+    let enriched = enrich_request(config, &memory, &resolved_request)?;
     let (response, fallback) = stream_chat_with_fallback(config, &enriched, on_chunk).await?;
     memory.add_interaction_for_chat_with_fallback(
         request_chat_id(request),
@@ -194,7 +194,11 @@ where
     Ok((response, fallback))
 }
 
-fn enrich_request(memory: &MemoryStore, request: &ChatRequest) -> Result<ChatRequest, MemoryError> {
+fn enrich_request(
+    config: &MintConfig,
+    memory: &MemoryStore,
+    request: &ChatRequest,
+) -> Result<ChatRequest, MemoryError> {
     let mut interactions =
         memory.recent_interactions_for_chat(request_chat_id(request), CONTEXT_LIMIT)?;
     interactions.reverse();
@@ -229,6 +233,16 @@ fn enrich_request(memory: &MemoryStore, request: &ChatRequest) -> Result<ChatReq
         .trim()
         .to_owned();
     }
+
+    // Inject active AI model/provider context to system instructions
+    let active_model_info = format!(
+        "\n\n[Active Environment Context]\n\
+         You are running on: {}\n\
+         Using AI Model: {}\n",
+         config.ai_provider,
+         config.active_model()
+    );
+    enriched.system_instruction.push_str(&active_model_info);
 
     if !transcript.is_empty() {
         enriched.system_instruction = format!(
@@ -835,10 +849,19 @@ where
         progress(AgentProgress::Thinking {
             elapsed_secs: started_at.elapsed().as_secs(),
             agent_name: active_agent_name,
-            model_name: active_model_name,
+            model_name: active_model_name.clone(),
         });
 
         let mut active_system_prompt = system_prompt.clone();
+        if let Some(ref model_name) = active_model_name {
+            active_system_prompt.push_str(&format!(
+                "\n\n[Active Environment Context]\n\
+                 You are running on: {}\n\
+                 Using AI Model: {}\n",
+                 active_config.ai_provider,
+                 model_name
+            ));
+        }
         if !agent_instruction.is_empty() {
             active_system_prompt.push_str(&format!("\n\nYour Current Role & System Instructions:\n{}", agent_instruction));
         }
@@ -1874,8 +1897,9 @@ fn action_fingerprint(decision: &AgentDecision) -> String {
 }
 
 fn initial_observation(task: &str, root: &Path, skills: &str) -> String {
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
     let mut observation = format!(
-        "Task: {task}\nWorkspace: {}\nLearned skills:\n{}\n",
+        "Current Time: {now}\nTask: {task}\nWorkspace: {}\nLearned skills:\n{}\n",
         root.display(),
         if skills.trim().is_empty() {
             "(none)"

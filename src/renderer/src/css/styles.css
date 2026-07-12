@@ -4340,3 +4340,39 @@ input:checked + .slider:before {
   transition: border-color 0.3s ease;
 }
 
+/* Saved Pictures Gallery Load More styles */
+.pictures-load-more-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 36px;
+  margin-bottom: 24px;
+}
+
+.pictures-load-more-btn {
+  height: 40px;
+  padding: 0 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg, rgba(255, 255, 255, 0.04));
+  color: var(--text-main);
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pictures-load-more-btn:hover {
+  background: var(--border);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.pictures-load-more-btn:active {
+  transform: scale(0.98);
+}
+
+

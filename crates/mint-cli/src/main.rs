@@ -1809,10 +1809,27 @@ async fn handle_slash_command(
             } else {
                 session.config.ai_provider = rest.to_owned();
                 match mint_core::save_config(&session.config) {
-                    Ok(()) => println!(
-                        "{DIM}Switched to provider: {}{RESET}\n",
-                        session.config.ai_provider
-                    ),
+                    Ok(()) => {
+                        let active_model = active_model(&session.config.ai_provider, &session.config);
+                        let display_name = format!("Changed model to {} • {}", session.config.ai_provider, active_model);
+
+                        // Save system event interaction in memory
+                        if let Ok(memory) = MemoryStore::open_default() {
+                            let _ = memory.add_interaction_for_chat_with_fallback(
+                                CHAT_CLI_ID,
+                                &display_name,
+                                "",
+                                "system",
+                                "provider_change",
+                                None,
+                            );
+                        }
+
+                        println!(
+                            "\n{DIM}───{RESET} {MINT}{}{RESET} {DIM}───{RESET}\n",
+                            display_name
+                        );
+                    }
                     Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
                 }
             }

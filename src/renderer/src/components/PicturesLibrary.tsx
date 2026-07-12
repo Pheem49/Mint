@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import { type PictureEntry, convertFileSrc } from '../tauri'
 import type { DashboardView } from './DashboardSidebar'
 
@@ -9,6 +10,16 @@ interface PicturesLibraryProps {
 }
 
 export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPictures }: PicturesLibraryProps) {
+  const [visibleCount, setVisibleCount] = useState(24)
+  const visiblePictures = useMemo(
+    () => pictures.slice(0, visibleCount),
+    [pictures, visibleCount],
+  )
+
+  useEffect(() => {
+    setVisibleCount(24)
+  }, [view, pictures])
+
   return (
     <section className={`pictures-library ${view === 'pictures' ? 'is-visible' : ''}`} aria-hidden={view !== 'pictures'}>
       <header className="pictures-header">
@@ -34,14 +45,27 @@ export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPi
           <span>Images appear here after a message with an attachment is sent successfully.</span>
         </div>
       ) : (
-        <div className="pictures-grid">
-          {pictures.map((picture, index) => (
-            <article className="picture-card" key={picture.id}>
-              <img src={convertFileSrc(picture.thumbnailPath || picture.thumbnailUrl || picture.path)} alt={picture.message || picture.filename} loading={index < 6 ? 'eager' : 'lazy'} decoding="async" />
-              <div className="picture-card-meta"><span>{picture.message || picture.filename}</span></div>
-            </article>
-          ))}
-        </div>
+        <>
+          <div className="pictures-grid">
+            {visiblePictures.map((picture, index) => (
+              <article className="picture-card" key={picture.id}>
+                <img src={convertFileSrc(picture.thumbnailPath || picture.thumbnailUrl || picture.path)} alt={picture.message || picture.filename} loading={index < 6 ? 'eager' : 'lazy'} decoding="async" />
+                <div className="picture-card-meta"><span>{picture.message || picture.filename}</span></div>
+              </article>
+            ))}
+          </div>
+          {visibleCount < pictures.length && (
+            <div className="pictures-load-more-container">
+              <button
+                type="button"
+                className="pictures-load-more-btn"
+                onClick={() => setVisibleCount((prev) => prev + 24)}
+              >
+                Load More ({pictures.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
+        </>
       )}
     </section>
   )

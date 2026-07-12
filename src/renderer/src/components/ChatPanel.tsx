@@ -21,6 +21,7 @@ import { ThinkingBlock } from '../../shared/components/ThinkingBlock'
 import { AgentActivityDrawer } from '../../shared/components/AgentActivityDrawer'
 import type { DiffHunk, FileChange } from '../../shared/types'
 import { numericSetting } from '../../shared/utils/ui'
+import { useSpeechToText } from '../../shared/utils/speech'
 
 
 
@@ -168,27 +169,37 @@ export default function ChatPanel({
 
     return () => clearInterval(timer)
   }, [sending])
-  const [isRecording, setIsRecording] = useState(false)
-  const [voiceMode, setVoiceMode] = useState(false)
-  const [voiceTranscript, setVoiceTranscript] = useState('')
-  const [voiceAwaitingResponse, setVoiceAwaitingResponse] = useState(false)
   const [speakingText, setSpeakingText] = useState<string | null>(null)
   const toolMenuRef = useRef<HTMLDivElement | null>(null)
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const mediaStreamRef = useRef<MediaStream | null>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const vadTimerRef = useRef<number | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const speechRunRef = useRef(0)
   const historyReadyRef = useRef(false)
   const submittedDuringSessionRef = useRef(false)
   const lastAutoSpokenIdRef = useRef<number | string | null>(null)
-  const voiceModeRef = useRef(false)
-  const sendingRef = useRef(false)
-  const voiceAwaitingResponseRef = useRef(false)
   const speakingRef = useRef<string | null>(null)
-  const restartTimerRef = useRef<number | null>(null)
+
+  const {
+    isRecording,
+    voiceMode,
+    setVoiceMode,
+    voiceTranscript,
+    setVoiceTranscript,
+    voiceAwaitingResponse,
+    voiceAwaitingResponseRef,
+    voiceModeRef,
+    startRecognition,
+    stopRecognition,
+    scheduleVoiceListen,
+    clearRestartTimer
+  } = useSpeechToText({
+    language: settingsConfig?.language,
+    message,
+    sending,
+    isSpeaking: Boolean(speakingText),
+    onSendVoiceMessage,
+    onSetMessage: (val) => onSetMessage(val)
+  })
+
   const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || documentName)
   const sendingImageMarkers = Array.from({ length: sendingImageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
   const voiceStatus = speakingText ? 'speaking' : (sending || voiceAwaitingResponse) ? 'thinking' : isRecording ? 'listening' : voiceMode ? 'ready' : 'off'
@@ -255,39 +266,7 @@ export default function ChatPanel({
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     submitOnEnter(event)
   }
-  const clearRestartTimer = () => {
-    if (restartTimerRef.current === null) return
-    window.clearTimeout(restartTimerRef.current)
-    restartTimerRef.current = null
-  }
-  const clearVadTimer = () => {
-    if (vadTimerRef.current === null) return
-    window.clearInterval(vadTimerRef.current)
-    vadTimerRef.current = null
-  }
-  const stopRecognition = () => {
-    clearRestartTimer()
-    recognitionRef.current?.stop()
-    recognitionRef.current = null
-    clearVadTimer()
-    if (mediaRecorderRef.current?.state === 'recording') {
-      mediaRecorderRef.current.stop()
-    }
-    mediaRecorderRef.current = null
-    mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
-    mediaStreamRef.current = null
-    audioContextRef.current?.close().catch(() => {})
-    audioContextRef.current = null
-    setIsRecording(false)
-  }
-  const scheduleVoiceListen = (delayMs = 350) => {
-    clearRestartTimer()
-    if (!voiceModeRef.current || sendingRef.current || voiceAwaitingResponseRef.current || speakingRef.current) return
-    restartTimerRef.current = window.setTimeout(() => {
-      restartTimerRef.current = null
-      startRecognition(true)
-    }, delayMs)
-  }
+
   const cancelSpeech = () => {
     speechRunRef.current += 1
     audioRef.current?.pause()
@@ -309,7 +288,11 @@ export default function ChatPanel({
     utterance.volume = Math.max(0, Math.min(1, numericSetting(settingsConfig?.ttsVolume, 1)))
     utterance.rate = Math.max(0.1, Math.min(10, numericSetting(settingsConfig?.ttsSpeed, 1)))
     utterance.pitch = Math.max(0, Math.min(2, numericSetting(settingsConfig?.ttsPitch, 1)))
-    const voice = window.speechSynthesis.getVoices().find((item) => item.lang.startsWith(hasThai ? 'th' : 'en'))
+    const voice = window.speechSynthesis.getVoices().find((item) => {
+      const lang = item.lang.toLowerCase()
+      const target = hasThai ? 'th' : 'en'
+      return lang.startsWith(target) || lang.includes(target)
+    })
     if (voice) utterance.voice = voice
     const finishSpeech = () => {
       setSpeakingText((current) => (current === displayText ? null : current))
@@ -364,184 +347,16 @@ export default function ChatPanel({
     }
     speakNative(speechText, text)
   }
-  const blobToDataUri = (blob: Blob) => new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(reader.error ?? new Error('Failed to read audio recording'))
-    reader.onload = () => resolve(String(reader.result))
-    reader.readAsDataURL(blob)
-  })
-  const preferredAudioMimeType = () => {
-    const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg']
-    return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? ''
-  }
-  const startAudioRecording = async (autoSend: boolean) => {
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      alert('Sorry, this system cannot access the microphone or record audio in this WebView')
-      voiceModeRef.current = false
-      setVoiceMode(false)
-      return
-    }
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mimeType = preferredAudioMimeType()
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
-      const chunks: Blob[] = []
-      let heardVoice = false
-      let quietSince = 0
-      const startedAt = Date.now()
-      const audioContext = new AudioContext()
-      const source = audioContext.createMediaStreamSource(stream)
-      const analyser = audioContext.createAnalyser()
-      const samples = new Uint8Array(analyser.fftSize)
-      source.connect(analyser)
-
-      mediaStreamRef.current = stream
-      mediaRecorderRef.current = recorder
-      audioContextRef.current = audioContext
-      setVoiceTranscript('Listening to microphone...')
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunks.push(event.data)
-      }
-      recorder.onstop = async () => {
-        clearVadTimer()
-        mediaRecorderRef.current = null
-        mediaStreamRef.current?.getTracks().forEach((track) => track.stop())
-        mediaStreamRef.current = null
-        audioContextRef.current?.close().catch(() => {})
-        audioContextRef.current = null
-        setIsRecording(false)
-        if (!autoSend || !voiceModeRef.current || chunks.length === 0) return
-        if (!heardVoice) {
-          setVoiceTranscript('No speech detected')
-          scheduleVoiceListen(700)
-          return
-        }
-        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' })
-        const audioDataUri = await blobToDataUri(blob)
-        setVoiceTranscript('Sent audio to AI')
-        voiceAwaitingResponseRef.current = true
-        setVoiceAwaitingResponse(true)
-        onSendVoiceMessage('', audioDataUri)
-          .catch((error) => console.error('Voice audio message failed', error))
-          .finally(() => {
-            voiceAwaitingResponseRef.current = false
-            setVoiceAwaitingResponse(false)
-            scheduleVoiceListen()
-          })
-      }
-
-      recorder.start()
-      setIsRecording(true)
-      vadTimerRef.current = window.setInterval(() => {
-        analyser.getByteTimeDomainData(samples)
-        let peak = 0
-        for (const sample of samples) {
-          peak = Math.max(peak, Math.abs(sample - 128))
-        }
-        const now = Date.now()
-        if (peak > 12) {
-          heardVoice = true
-          quietSince = 0
-          setVoiceTranscript('Listening...')
-        } else if (heardVoice) {
-          quietSince = quietSince || now
-        }
-        const silenceElapsed = quietSince ? now - quietSince : 0
-        const totalElapsed = now - startedAt
-        if ((heardVoice && silenceElapsed > 1300) || totalElapsed > 12000) {
-          recorder.stop()
-        }
-      }, 120)
-    } catch (error) {
-      console.error('Failed to record microphone audio', error)
-      setIsRecording(false)
-      voiceModeRef.current = false
-      setVoiceMode(false)
-      const errorMsg = error instanceof Error ? error.message : String(error)
-      alert(`Failed to open microphone (${errorMsg}). Please check microphone connection and permissions for this app.`)
-    }
-  }
-  const startRecognition = (autoSend: boolean) => {
-    if (recognitionRef.current || sendingRef.current || voiceAwaitingResponseRef.current || speakingRef.current) return
-
-    const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognitionApi) {
-      startAudioRecording(autoSend)
-      return
-    }
-
-    let sentTranscript = false
-
-    try {
-      const recognition = new SpeechRecognitionApi()
-      recognition.continuous = false
-      recognition.interimResults = true
-      recognition.lang = settingsConfig?.language === 'en' ? 'en-US' : 'th-TH'
-      recognition.onstart = () => setIsRecording(true)
-      recognition.onresult = (event: SpeechRecognitionEvent) => {
-        let interimText = ''
-        let finalText = ''
-        for (let index = event.resultIndex; index < event.results.length; index += 1) {
-          const transcript = event.results[index]?.[0]?.transcript ?? ''
-          if (event.results[index]?.isFinal) finalText += transcript
-          else interimText += transcript
-        }
-        const displayText = (finalText || interimText).trim()
-        if (displayText) setVoiceTranscript(displayText)
-        const resultText = finalText.trim()
-        if (!resultText) return
-        sentTranscript = true
-        recognition.stop()
-        setVoiceTranscript(resultText)
-        if (autoSend) {
-          voiceAwaitingResponseRef.current = true
-          setVoiceAwaitingResponse(true)
-          onSendVoiceMessage(resultText)
-            .catch((error) => console.error('Voice message failed', error))
-            .finally(() => {
-              voiceAwaitingResponseRef.current = false
-              setVoiceAwaitingResponse(false)
-              scheduleVoiceListen()
-            })
-        } else {
-          onSetMessage(message.trim() ? `${message.trimEnd()} ${resultText}` : resultText)
-        }
-      }
-      recognition.onerror = (event: Event) => {
-        console.error('Speech recognition error', event)
-        setIsRecording(false)
-      }
-      recognition.onend = () => {
-        recognitionRef.current = null
-        setIsRecording(false)
-        if (autoSend && voiceModeRef.current && !sentTranscript) scheduleVoiceListen()
-      }
-      recognitionRef.current = recognition
-      recognition.start()
-    } catch (error) {
-      console.error('Failed to start speech recognition', error)
-      recognitionRef.current = null
-      setIsRecording(false)
-    }
-  }
   const toggleRecording = () => {
     if (voiceMode) {
-      voiceModeRef.current = false
-      voiceAwaitingResponseRef.current = false
       setVoiceMode(false)
-      setVoiceAwaitingResponse(false)
-      setVoiceTranscript('')
       stopRecognition()
       cancelSpeech()
       return
     }
 
-    voiceModeRef.current = true
     setVoiceMode(true)
-    setVoiceAwaitingResponse(false)
-    setVoiceTranscript('')
     startRecognition(true)
   }
   const resizeInput = (element: HTMLTextAreaElement) => {
@@ -550,31 +365,9 @@ export default function ChatPanel({
   }
   useEffect(() => {
     return () => {
-      clearRestartTimer()
       cancelSpeech()
-      stopRecognition()
     }
   }, [])
-  useEffect(() => {
-    voiceModeRef.current = voiceMode
-    if (!voiceMode) {
-      clearRestartTimer()
-      setVoiceTranscript('')
-    }
-  }, [voiceMode])
-  useEffect(() => {
-    sendingRef.current = sending
-  }, [sending])
-  useEffect(() => {
-    voiceAwaitingResponseRef.current = voiceAwaitingResponse
-  }, [voiceAwaitingResponse])
-  useEffect(() => {
-    speakingRef.current = speakingText
-  }, [speakingText])
-  useEffect(() => {
-    if (!voiceMode || sending || voiceAwaitingResponse || speakingText || isRecording) return
-    scheduleVoiceListen()
-  }, [voiceMode, sending, voiceAwaitingResponse, speakingText, isRecording])
   useEffect(() => {
     if (sending) submittedDuringSessionRef.current = true
   }, [sending])

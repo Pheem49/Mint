@@ -10,6 +10,8 @@ pub struct TtsUrl {
 }
 
 pub fn google_tts_urls(text: &str, language: &str) -> Vec<TtsUrl> {
+    let has_thai = text.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
+    let tl = if has_thai { "th" } else { language };
     let chunks = split_text(text, MAX_GOOGLE_TTS_CHARS);
     let total = chunks.len();
     chunks
@@ -19,7 +21,7 @@ pub fn google_tts_urls(text: &str, language: &str) -> Vec<TtsUrl> {
             url: format!(
                 "https://translate.google.com/translate_tts?ie=UTF-8&q={}&tl={}&client=tw-ob&idx={index}&total={total}&textlen={}",
                 encode_component(&chunk),
-                encode_component(language),
+                encode_component(tl),
                 chunk.chars().count()
             ),
             short_text: chunk,

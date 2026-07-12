@@ -2,10 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { type PictureEntry, convertFileSrc } from '../tauri'
 import type { DashboardView } from './DashboardSidebar'
 
-const INITIAL_VISIBLE_PICTURES = 18
-const PICTURE_RENDER_BATCH_SIZE = 18
-const PICTURE_RENDER_BATCH_DELAY_MS = 80
-
 interface PicturesLibraryProps {
   view: DashboardView
   pictures: PictureEntry[]
@@ -14,30 +10,15 @@ interface PicturesLibraryProps {
 }
 
 export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPictures }: PicturesLibraryProps) {
-  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_PICTURES)
+  const [visibleCount, setVisibleCount] = useState(24)
   const visiblePictures = useMemo(
     () => pictures.slice(0, visibleCount),
     [pictures, visibleCount],
   )
 
   useEffect(() => {
-    if (view !== 'pictures') {
-      setVisibleCount(INITIAL_VISIBLE_PICTURES)
-      return
-    }
-
-    setVisibleCount(INITIAL_VISIBLE_PICTURES)
+    setVisibleCount(24)
   }, [view, pictures])
-
-  useEffect(() => {
-    if (view !== 'pictures' || visibleCount >= pictures.length) return
-
-    const timer = window.setTimeout(() => {
-      setVisibleCount((current) => Math.min(current + PICTURE_RENDER_BATCH_SIZE, pictures.length))
-    }, PICTURE_RENDER_BATCH_DELAY_MS)
-
-    return () => window.clearTimeout(timer)
-  }, [view, pictures.length, visibleCount])
 
   return (
     <section className={`pictures-library ${view === 'pictures' ? 'is-visible' : ''}`} aria-hidden={view !== 'pictures'}>
@@ -61,14 +42,27 @@ export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPi
           <span>Images appear here after a message with an attachment is sent successfully.</span>
         </div>
       ) : (
-        <div className="pictures-grid">
-          {visiblePictures.map((picture, index) => (
-            <article className="picture-card" key={picture.id}>
-              <img src={convertFileSrc(picture.thumbnailPath || picture.thumbnailUrl || picture.path)} alt={picture.message || picture.filename} loading={index < 6 ? 'eager' : 'lazy'} decoding="async" />
-              <div className="picture-card-meta"><span>{picture.message || picture.filename}</span></div>
-            </article>
-          ))}
-        </div>
+        <>
+          <div className="pictures-grid">
+            {visiblePictures.map((picture, index) => (
+              <article className="picture-card" key={picture.id}>
+                <img src={convertFileSrc(picture.thumbnailPath || picture.thumbnailUrl || picture.path)} alt={picture.message || picture.filename} loading={index < 6 ? 'eager' : 'lazy'} decoding="async" />
+                <div className="picture-card-meta"><span>{picture.message || picture.filename}</span></div>
+              </article>
+            ))}
+          </div>
+          {visibleCount < pictures.length && (
+            <div className="pictures-load-more-container">
+              <button
+                type="button"
+                className="pictures-load-more-btn"
+                onClick={() => setVisibleCount((prev) => prev + 24)}
+              >
+                Load More ({pictures.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
+        </>
       )}
     </section>
   )
