@@ -15,6 +15,7 @@ import {
   cancelChatMessage,
   submitToolApproval,
   listen,
+  readClipboardImage,
   type AgentProgress,
   type ChatResponse,
   type ChatSession,
@@ -22,6 +23,7 @@ import {
   type PictureEntry,
   type RuntimeStatus,
 } from '../tauri'
+
 import ChatPanel from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import ImageStudioPanel from './ImageStudioPanel'
@@ -138,6 +140,7 @@ export default function MintDashboard() {
   const [conversationId, setConversationId] = useState(activeConversationId)
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const chatEnd = useRef<HTMLDivElement | null>(null)
+  const lastNativePasteTimeRef = useRef(0)
   const startupReady = (dashboardDataReady && modelReady) || startupTimedOut
   const [proactiveSuggestion, setProactiveSuggestion] = useState<any>(null)
 
@@ -575,7 +578,28 @@ export default function MintDashboard() {
       }
     }
 
-    if (!file) return false
+    if (!file) {
+      // Fallback for Tauri desktop app where WebKitGTK/WebView clipboard paste events do not provide file handles
+      const now = Date.now()
+      if (now - lastNativePasteTimeRef.current > 100) {
+        lastNativePasteTimeRef.current = now
+        readClipboardImage().then((dataUri) => {
+          if (dataUri) {
+            const name = 'Pasted image'
+            createTrimmedImagePreview(dataUri)
+              .catch(() => dataUri)
+              .then((previewDataUri) => {
+                setImageAttachments((current) => [...current, { dataUri, previewDataUri, name }])
+              })
+          }
+        }).catch((err) => {
+          console.warn('Failed to read clipboard image via Tauri API:', err)
+        })
+      }
+      return false
+    }
+
+
 
     readImage(file)
       .then((dataUri) => {
@@ -589,6 +613,7 @@ export default function MintDashboard() {
       .catch((reason) => setError(errorMessage(reason)))
     return true
   }
+
 
 
   async function selectDocument(event: ChangeEvent<HTMLInputElement>) {

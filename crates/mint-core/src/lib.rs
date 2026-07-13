@@ -92,8 +92,9 @@ pub use channels::start_channels;
 pub static HTTP_CLIENT: std::sync::LazyLock<reqwest::Client> =
     std::sync::LazyLock::new(reqwest::Client::new);
 
-pub static ACTIVE_AGENTS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>>> =
-    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+pub static ACTIVE_AGENTS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 pub fn cancel_agent(chat_id: &str) -> bool {
     let mut agents = ACTIVE_AGENTS.lock().unwrap();
@@ -104,4 +105,3 @@ pub fn cancel_agent(chat_id: &str) -> bool {
         false
     }
 }
-

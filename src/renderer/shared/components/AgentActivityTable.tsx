@@ -1,13 +1,28 @@
-/**
- * shared/components/AgentActivityTable.tsx
- * Renders the "Working through task" activity drawer rows.
- * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
- */
 import { useState } from 'react'
 import type { AgentActivityView } from '../utils/agentActivity'
+import { materialFileIcon, materialFolderIcon, getExtension } from '../utils/fileIcons'
 
 interface Props {
   activityView: AgentActivityView
+}
+
+function getFilename(target: string): string {
+  const clean = target.split(' #')[0].trim()
+  const segments = clean.split('/')
+  return segments[segments.length - 1]
+}
+
+function resolveActivityIcon(kind: string, target: string): string | null {
+  if (kind === 'file') {
+    const filename = getFilename(target)
+    const ext = getExtension(filename)
+    return materialFileIcon(filename, ext)
+  }
+  if (kind === 'folder') {
+    const foldername = getFilename(target)
+    return materialFolderIcon(foldername, false)
+  }
+  return null
 }
 
 export function AgentActivityTable({ activityView }: Props) {
@@ -30,6 +45,7 @@ export function AgentActivityTable({ activityView }: Props) {
       </div>
       {activityView.items.map((activity, index) => {
         const isExpanded = !!expandedIndices[index]
+        const icon = resolveActivityIcon(activity.kind, activity.target)
         return (
           <div
             className="agent-activity-item"
@@ -40,7 +56,9 @@ export function AgentActivityTable({ activityView }: Props) {
             onClick={() => toggleExpand(index)}
           >
             <span className="agent-activity-label">{activity.label}</span>
-            <span className="agent-activity-icon" aria-hidden="true" />
+            <span className="agent-activity-icon" aria-hidden="true" data-has-img={!!icon}>
+              {icon && <img src={icon} alt="" draggable={false} />}
+            </span>
             <span
               className="agent-activity-text"
               style={isExpanded ? { whiteSpace: 'normal', wordBreak: 'break-all', overflow: 'visible', textOverflow: 'clip' } : undefined}
@@ -64,3 +82,4 @@ export function AgentActivityTable({ activityView }: Props) {
     </div>
   )
 }
+

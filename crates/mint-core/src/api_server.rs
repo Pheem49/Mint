@@ -701,14 +701,20 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
                                     let abort_handle = join_handle.abort_handle();
                                     if !chat_id_str.is_empty() {
-                                        crate::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+                                        crate::ACTIVE_AGENTS
+                                            .lock()
+                                            .unwrap()
+                                            .insert(chat_id_str.clone(), abort_handle);
                                     }
 
                                     let chat_id_str_cleanup = chat_id_str.clone();
                                     tokio::spawn(async move {
                                         let _ = join_handle.await;
                                         if !chat_id_str_cleanup.is_empty() {
-                                            crate::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str_cleanup);
+                                            crate::ACTIVE_AGENTS
+                                                .lock()
+                                                .unwrap()
+                                                .remove(&chat_id_str_cleanup);
                                         }
                                     });
                                 } else {
@@ -776,14 +782,20 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
                                     let abort_handle = join_handle.abort_handle();
                                     if !chat_id_str.is_empty() {
-                                        crate::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+                                        crate::ACTIVE_AGENTS
+                                            .lock()
+                                            .unwrap()
+                                            .insert(chat_id_str.clone(), abort_handle);
                                     }
 
                                     let chat_id_str_cleanup = chat_id_str.clone();
                                     tokio::spawn(async move {
                                         let _ = join_handle.await;
                                         if !chat_id_str_cleanup.is_empty() {
-                                            crate::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str_cleanup);
+                                            crate::ACTIVE_AGENTS
+                                                .lock()
+                                                .unwrap()
+                                                .remove(&chat_id_str_cleanup);
                                         }
                                     });
                                 }

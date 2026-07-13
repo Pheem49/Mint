@@ -1683,11 +1683,27 @@ h1 {
   width: 15px;
 }
 
+.agent-activity-icon[data-has-img="true"]::before,
+.agent-activity-icon[data-has-img="true"]::after {
+  display: none !important;
+}
+
+.agent-activity-icon img {
+  width: 14px;
+  height: 14px;
+  display: block;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.12));
+  pointer-events: none;
+  user-select: none;
+}
+
 .agent-activity-icon::before,
 .agent-activity-icon::after {
   content: "";
   position: absolute;
 }
+
 
 .agent-activity-item[data-kind="folder"] .agent-activity-icon::before {
   background: var(--text-muted);
