@@ -239,8 +239,8 @@ fn enrich_request(
         "\n\n[Active Environment Context]\n\
          You are running on: {}\n\
          Using AI Model: {}\n",
-         config.ai_provider,
-         config.active_model()
+        config.ai_provider,
+        config.active_model()
     );
     enriched.system_instruction.push_str(&active_model_info);
 
@@ -685,7 +685,8 @@ fn resolve_agent_config(
         return (config.clone(), "".to_string(), None, None);
     }
 
-    let enabled_agents: Vec<&crate::config::AgentConfig> = config.agents.iter().filter(|a| a.enabled).collect();
+    let enabled_agents: Vec<&crate::config::AgentConfig> =
+        config.agents.iter().filter(|a| a.enabled).collect();
     if enabled_agents.is_empty() {
         return (config.clone(), "".to_string(), None, None);
     }
@@ -694,7 +695,9 @@ fn resolve_agent_config(
         enabled_agents.iter().find(|a| a.id == id).copied()
     } else {
         // Multi-Agent Pipeline Collaboration (Planner -> Coder -> Reviewer)
-        let plan_created = trajectory.iter().any(|step| step.contains("- Action: create_plan"));
+        let plan_created = trajectory
+            .iter()
+            .any(|step| step.contains("- Action: create_plan"));
         if !plan_created {
             if let Some(planner) = enabled_agents.iter().find(|a| a.id == "planner") {
                 Some(*planner)
@@ -708,7 +711,9 @@ fn resolve_agent_config(
             });
             if edits_made {
                 if let Some(last_step) = trajectory.last() {
-                    if last_step.contains("- Action: write_file") || last_step.contains("- Action: apply_patch") {
+                    if last_step.contains("- Action: write_file")
+                        || last_step.contains("- Action: apply_patch")
+                    {
                         if let Some(reviewer) = enabled_agents.iter().find(|a| a.id == "reviewer") {
                             Some(*reviewer)
                         } else {
@@ -755,7 +760,12 @@ fn resolve_agent_config(
         }
     }
 
-    (cfg_clone, agent.system_instruction.clone(), Some(agent.name.clone()), Some(agent.model.clone()))
+    (
+        cfg_clone,
+        agent.system_instruction.clone(),
+        Some(agent.name.clone()),
+        Some(agent.model.clone()),
+    )
 }
 
 pub async fn orchestrate_agent_loop<Approve, Progress, Chunk>(
@@ -844,7 +854,8 @@ where
     let mut trajectory: Vec<String> = Vec::new();
 
     for step in 1..=MAX_STEPS {
-        let (active_config, agent_instruction, active_agent_name, active_model_name) = resolve_agent_config(config, agent_id, &trajectory);
+        let (active_config, agent_instruction, active_agent_name, active_model_name) =
+            resolve_agent_config(config, agent_id, &trajectory);
 
         progress(AgentProgress::Thinking {
             elapsed_secs: started_at.elapsed().as_secs(),
@@ -858,12 +869,14 @@ where
                 "\n\n[Active Environment Context]\n\
                  You are running on: {}\n\
                  Using AI Model: {}\n",
-                 active_config.ai_provider,
-                 model_name
+                active_config.ai_provider, model_name
             ));
         }
         if !agent_instruction.is_empty() {
-            active_system_prompt.push_str(&format!("\n\nYour Current Role & System Instructions:\n{}", agent_instruction));
+            active_system_prompt.push_str(&format!(
+                "\n\nYour Current Role & System Instructions:\n{}",
+                agent_instruction
+            ));
         }
 
         let (response, fallback) = send_chat_with_fallback(
@@ -1897,7 +1910,9 @@ fn action_fingerprint(decision: &AgentDecision) -> String {
 }
 
 fn initial_observation(task: &str, root: &Path, skills: &str) -> String {
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
+    let now = chrono::Local::now()
+        .format("%Y-%m-%d %H:%M:%S %Z")
+        .to_string();
     let mut observation = format!(
         "Current Time: {now}\nTask: {task}\nWorkspace: {}\nLearned skills:\n{}\n",
         root.display(),
@@ -2452,7 +2467,8 @@ mod tests {
         assert_eq!(instr, "Planner instruction");
         assert_eq!(name, Some("Planner".to_string()));
 
-        let trajectory = vec!["Step 1:\n- Action: create_plan\n- Observation: all planned".to_string()];
+        let trajectory =
+            vec!["Step 1:\n- Action: create_plan\n- Observation: all planned".to_string()];
         let (cfg, instr, name, model) = resolve_agent_config(&config, None, &trajectory);
         assert_eq!(cfg.ai_provider, "gemini");
         assert_eq!(instr, "Coder instruction");

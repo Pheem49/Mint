@@ -1810,8 +1810,12 @@ async fn handle_slash_command(
                 session.config.ai_provider = rest.to_owned();
                 match mint_core::save_config(&session.config) {
                     Ok(()) => {
-                        let active_model = active_model(&session.config.ai_provider, &session.config);
-                        let display_name = format!("Changed model to {} • {}", session.config.ai_provider, active_model);
+                        let active_model =
+                            active_model(&session.config.ai_provider, &session.config);
+                        let display_name = format!(
+                            "Changed model to {} • {}",
+                            session.config.ai_provider, active_model
+                        );
 
                         // Save system event interaction in memory
                         if let Ok(memory) = MemoryStore::open_default() {
@@ -1842,7 +1846,11 @@ async fn handle_slash_command(
                 match mint_core::save_config(&session.config) {
                     Ok(()) => println!(
                         "{DIM}Multi-Agent collaboration set to: {}{RESET}\n",
-                        if session.config.enable_agent_collaboration { "Enabled" } else { "Disabled" }
+                        if session.config.enable_agent_collaboration {
+                            "Enabled"
+                        } else {
+                            "Disabled"
+                        }
                     ),
                     Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
                 }
@@ -2720,7 +2728,10 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/mcp", "List configured MCP servers"),
     ("/memory", "Manage long-term memory store"),
     ("/models", "List AI providers or switch active provider"),
-    ("/multi-agent", "Show or toggle Multi-Agent Collaboration system"),
+    (
+        "/multi-agent",
+        "Show or toggle Multi-Agent Collaboration system",
+    ),
     ("/paste", "Attach image from clipboard"),
     ("/plugins", "List or generate plugins/skills"),
     ("/stats", "Show session statistics"),
@@ -2814,7 +2825,11 @@ fn draw_input_box(
             match_count = end_idx - start_idx;
 
             println!();
-            println!(" {BLUE}Suggestions ({}/{}){RESET}", current_page + 1, total_pages);
+            println!(
+                " {BLUE}Suggestions ({}/{}){RESET}",
+                current_page + 1,
+                total_pages
+            );
             for i in start_idx..end_idx {
                 let (cmd, desc) = matches[i];
                 if Some(i) == highlight_idx {
@@ -2913,7 +2928,15 @@ fn read_line_interactive(
     let mut tab_base_input: Option<String> = None;
     let mut tab_index: Option<usize> = None;
 
-    let (match_count, _) = draw_input_box(&input_chars, cursor_pos, placeholder, model, path_str, None, None);
+    let (match_count, _) = draw_input_box(
+        &input_chars,
+        cursor_pos,
+        placeholder,
+        model,
+        path_str,
+        None,
+        None,
+    );
     position_input_cursor(&input_chars, cursor_pos, match_count);
     let _ = io::stdout().flush();
 

@@ -22,8 +22,8 @@ Tauri writes platform bundles under `target/release/bundle/`.
 Pushing a semver tag starts the release workflow:
 
 ```bash
-git tag v1.7.0
-git push origin v1.7.0
+git tag v1.8.3
+git push origin v1.8.3
 ```
 
 The workflow builds Linux release artifacts on GitHub Actions and publishes them

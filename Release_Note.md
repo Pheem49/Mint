@@ -37,9 +37,13 @@ Improved the autocomplete experience in the terminal:
 - **Simplified Exit Options:** Removed `/quit` from the autocomplete suggestions and help output (while retaining hidden execution support) to clean up the interface.
 - **Real-Time Agent & Model Status:** The CLI live thinking status bar dynamically displays which agent and model is executing.
 
-### 📋 5. Fix Clipboard Permission Popup on Text Paste (Ctrl+V)
+### 📋 5. Fix Clipboard Permission Popup on Text Paste (Ctrl+V) & Desktop Image Paste Fallback
 - Fixed a bug where pasting text (or pressing `Ctrl + V`) would trigger a browser-level clipboard permission warning popup (asking to "Allow Paste").
 - Removed the redundant global `keydown` Ctrl+V listener and the async `navigator.clipboard.read()` fallback on text paste events. The application now correctly relies on standard, synchronous `event.clipboardData` values during paste events, ensuring seamless pasting of both images and text without prompting the user.
+- **Tauri Native Fallback:** Restored an asynchronous fallback using Tauri's native backend `readClipboardImage` command specifically for the desktop application. This solves the Linux/Windows WebView limitations where WebKitGTK and standard web APIs fail to expose file handles in standard paste events.
+- **Double Paste Throttling:** Implemented a 100ms throttle wrapper around the native clipboard read callback, preventing duplicate image attachments caused by concurrent window-level capture and element-level paste event propagation.
+
+
 
 ### 📦 6. Codebase Refactoring & Shared Utilities
 - **Shared UI & Progress Helpers:** Refactored duplicate helper functions and TypeScript interfaces from the desktop renderer (`src/renderer/src`) and web renderer (`src/renderer/src-web`) into the unified `shared` codebase.
@@ -68,7 +72,11 @@ Improved the autocomplete experience in the terminal:
 ### 🤖 11. AI Model Self-Awareness Context Injection
 - **Dynamic Context Injection**: Updated the core prompt compilation layer to automatically append an `[Active Environment Context]` block to the system instructions. This supplies the active AI model name and provider to the AI model itself, allowing the AI to successfully know its own model configurations in real-time when queried by the user.
 
+### 🎨 12. Material Icon Theme in Agent Activity Tracker
+- **Visual File & Folder Tracking**: The agent activity tracker (e.g. "Exploring file" progress log) now resolves target filenames/foldernames to display specific Material Icon Theme SVGs (e.g. JavaScript icon for `.js`, Rust icon for `.rs` / Cargo directories). This replaces the generic wireframe outline icons, resulting in a cleaner and more polished UI.
+
 ---
+
 
 ## 🛠️ Codebase Changes
 
@@ -111,6 +119,9 @@ Improved the autocomplete experience in the terminal:
 - Refactor duplicated types (`DiffHunk`, `FileChange`), helper functions (`numericSetting`, `errorMessage`, `readImage`, `readDocument`, `createTrimmedImagePreview`, `lightenColor`, `hexToRgb`, `applyThemeStyles`), and progress parsers (`parseFileChangesFromProgress`) from the desktop and web components to a central `src/renderer/shared` repository. Corrected a type checking issue by exporting `AgentProgress` and `InteractionMemory` from `shared/agentProgress.ts`.
 - Consolidate microphone interface to client-side Speech-to-Text (`SpeechRecognition`), extract STT states, silence-detection timers, and event listeners into a reusable React hook `useSpeechToText` in [speech.ts](file:///home/pheem49/vscode/Project/Mint-CLI/src/renderer/shared/utils/speech.ts), and clean up both desktop (`src/renderer/src/components/ChatPanel.tsx`) and web (`src/renderer/src-web/components/ChatPanel.tsx`) `ChatPanel` components.
 - Implement 24-picture pagination, a manual "Load More" button, and API/image fetch cache-busters in `PicturesLibrary.tsx` and `tauri.ts` across desktop and web directories.
+- Refactor file and folder icon mappings from `WorkspacePanel.tsx` into a central, reusable utility `src/renderer/shared/utils/fileIcons.ts`.
+- Update `AgentActivityTable.tsx` to resolve target filenames/foldernames and display their respective Material Icon Theme SVGs instead of default wireframe outlines.
+- Update Desktop and Web CSS stylesheets (`styles.css`) to support rendering and scaling Material Icon SVGs inside the agent activity tracker.
 
 ### CLI Agent (`crates/mint-cli`)
 - Redefine live status print lines (`plan_lines`, `tasks_lines`, `activities_lines`, `explored_lines`) to accept progress tick state and apply the `get_bullet` helper.

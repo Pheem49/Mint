@@ -331,19 +331,27 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
 
         let abort_handle = join_handle.abort_handle();
         if !chat_id_str.is_empty() {
-            mint_core::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+            mint_core::ACTIVE_AGENTS
+                .lock()
+                .unwrap()
+                .insert(chat_id_str.clone(), abort_handle);
         }
 
         let res = join_handle.await;
 
         if !chat_id_str.is_empty() {
-            mint_core::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str);
+            mint_core::ACTIVE_AGENTS
+                .lock()
+                .unwrap()
+                .remove(&chat_id_str);
         }
 
         let (response, _) = match res {
             Ok(Ok(val)) => val,
             Ok(Err(e)) => return Err(e.to_string()),
-            Err(e) if e.is_cancelled() => return Err("Chat execution cancelled by user".to_string()),
+            Err(e) if e.is_cancelled() => {
+                return Err("Chat execution cancelled by user".to_string());
+            }
             Err(e) => return Err(format!("Task panicked: {}", e)),
         };
         return Ok(response);
@@ -409,13 +417,19 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
 
     let abort_handle = join_handle.abort_handle();
     if !chat_id_str.is_empty() {
-        mint_core::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+        mint_core::ACTIVE_AGENTS
+            .lock()
+            .unwrap()
+            .insert(chat_id_str.clone(), abort_handle);
     }
 
     let res = join_handle.await;
 
     if !chat_id_str.is_empty() {
-        mint_core::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str);
+        mint_core::ACTIVE_AGENTS
+            .lock()
+            .unwrap()
+            .remove(&chat_id_str);
     }
 
     let res = match res {
@@ -458,19 +472,27 @@ async fn stream_chat_message(
 
         let abort_handle = join_handle.abort_handle();
         if !chat_id_str.is_empty() {
-            mint_core::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+            mint_core::ACTIVE_AGENTS
+                .lock()
+                .unwrap()
+                .insert(chat_id_str.clone(), abort_handle);
         }
 
         let res = join_handle.await;
 
         if !chat_id_str.is_empty() {
-            mint_core::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str);
+            mint_core::ACTIVE_AGENTS
+                .lock()
+                .unwrap()
+                .remove(&chat_id_str);
         }
 
         let (response, _) = match res {
             Ok(Ok(val)) => val,
             Ok(Err(e)) => return Err(e.to_string()),
-            Err(e) if e.is_cancelled() => return Err("Chat execution cancelled by user".to_string()),
+            Err(e) if e.is_cancelled() => {
+                return Err("Chat execution cancelled by user".to_string());
+            }
             Err(e) => return Err(format!("Task panicked: {}", e)),
         };
         return Ok(response);
@@ -551,13 +573,19 @@ async fn stream_chat_message(
 
     let abort_handle = join_handle.abort_handle();
     if !chat_id_str.is_empty() {
-        mint_core::ACTIVE_AGENTS.lock().unwrap().insert(chat_id_str.clone(), abort_handle);
+        mint_core::ACTIVE_AGENTS
+            .lock()
+            .unwrap()
+            .insert(chat_id_str.clone(), abort_handle);
     }
 
     let res = join_handle.await;
 
     if !chat_id_str.is_empty() {
-        mint_core::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id_str);
+        mint_core::ACTIVE_AGENTS
+            .lock()
+            .unwrap()
+            .remove(&chat_id_str);
     }
 
     let res = match res {

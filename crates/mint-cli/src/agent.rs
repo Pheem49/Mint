@@ -192,9 +192,17 @@ pub async fn run_code_agent_with_options(
             if !options.fast_mode {
                 if let Ok(mut status) = progress_live_status.lock() {
                     let label = if let (Some(a), Some(m)) = (agent_name, model_name) {
-                        format!("{} ({}) is thinking ({} • Esc to interrupt)", a, m, format_elapsed(Duration::from_secs(elapsed_secs)))
+                        format!(
+                            "{} ({}) is thinking ({} • Esc to interrupt)",
+                            a,
+                            m,
+                            format_elapsed(Duration::from_secs(elapsed_secs))
+                        )
                     } else {
-                        format!("Thinking ({} • Esc to interrupt)", format_elapsed(Duration::from_secs(elapsed_secs)))
+                        format!(
+                            "Thinking ({} • Esc to interrupt)",
+                            format_elapsed(Duration::from_secs(elapsed_secs))
+                        )
                     };
                     status.thinking = Some(label);
                     render_live_status(&mut status);
@@ -1043,27 +1051,27 @@ fn sanitize_latex(text: &str) -> String {
     let mut s = text.to_owned();
     for (pat, uni) in [
         // arrows
-        ("$\\rightarrow$",     "→"),
-        ("$\\leftarrow$",      "←"),
-        ("$\\Rightarrow$",     "⇒"),
-        ("$\\Leftarrow$",      "⇐"),
+        ("$\\rightarrow$", "→"),
+        ("$\\leftarrow$", "←"),
+        ("$\\Rightarrow$", "⇒"),
+        ("$\\Leftarrow$", "⇐"),
         ("$\\leftrightarrow$", "↔"),
         // comparison
-        ("$\\leq$",    "≤"),
-        ("$\\geq$",    "≥"),
-        ("$\\neq$",    "≠"),
+        ("$\\leq$", "≤"),
+        ("$\\geq$", "≥"),
+        ("$\\neq$", "≠"),
         ("$\\approx$", "≈"),
         // math
         ("$\\times$", "×"),
-        ("$\\div$",   "÷"),
-        ("$\\pm$",    "±"),
+        ("$\\div$", "÷"),
+        ("$\\pm$", "±"),
         ("$\\infty$", "∞"),
-        ("$\\cdot$",  "·"),
+        ("$\\cdot$", "·"),
         // sets
-        ("$\\in$",     "∈"),
+        ("$\\in$", "∈"),
         ("$\\subset$", "⊂"),
-        ("$\\cup$",    "∪"),
-        ("$\\cap$",    "∩"),
+        ("$\\cup$", "∪"),
+        ("$\\cap$", "∩"),
     ] {
         s = s.replace(pat, uni);
     }
