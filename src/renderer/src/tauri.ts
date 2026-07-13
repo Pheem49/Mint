@@ -1,115 +1,46 @@
-export interface RuntimeStatus {
-  backend: string
-  configPath: string
-  activeProvider: string
-  availableProviders: string[]
-  integrations: Record<string, unknown>
+/** Returns true when running inside the Tauri webview (desktop app). */
+export const isTauriRuntime = (): boolean =>
+  typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__)
+
+/**
+ * Returns the local API base URL.
+ * Uses the current hostname so LAN access (e.g. from another device) works correctly.
+ * Mirrors the same helper in src-web/tauri.ts.
+ */
+export const getLocalApiBase = (): string => {
+  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+  return `http://${host}:3000/api`
 }
 
-export interface ChatResponse {
-  provider: string
-  model: string
-  text: string
-  fallbackProvider?: string | null
-}
+export * from '../shared/types'
+import type { MintPlatformApi } from '../shared/platform'
+import type {
 
-export interface TtsUrl {
-  shortText: string
-  url: string
-}
+  RuntimeStatus,
+  ChatResponse,
+  TtsUrl,
+  DocumentAttachment,
+  AgentProgress,
+  InteractionMemory,
+  ChatSession,
+  PictureEntry,
+  ImageGenRequest,
+  ImageGenProviders,
+  ImageGenResponse,
+  WorkspaceTreeEntry,
+  CodeEdit,
+  CodeEditProposal,
+} from '../shared/types'
 
-export interface DocumentAttachment {
-  filename: string
-  dataUri: string
-}
-
-export type AgentProgress =
-  | { type: 'Thinking'; data: { elapsed_secs: number } }
-  | { type: 'Thought'; data: { thought: string } }
-  | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown> } }
-  | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string } }
 
 type DesktopStreamEvent =
   | { type: 'chunk'; chunk: string }
   | { type: 'progress'; progress: AgentProgress }
 
-export interface InteractionMemory {
-  id: number
-  chatId: string
-  userText: string
-  aiText: string
-  provider: string
-  model: string
-  fallbackProvider?: string | null
-  createdAt: string
-  agentActivity?: AgentProgress[] | null
-}
-
-export interface ChatSession {
-  id: string
-  title: string
-  kind: string
-  createdAt: string
-  updatedAt: string
-}
-
-export interface PictureEntry {
-  id: string
-  filename: string
-  path: string
-  mimeType: string
-  createdAt: string
-  source: string
-  message: string
-  thumbnailPath?: string
-  url?: string
-  thumbnailUrl?: string
-}
-
-export interface ImageGenRequest {
-  prompt: string
-  negativePrompt?: string
-  aspectRatio?: '1:1' | '16:9' | '9:16' | '4:3'
-  numImages?: number
-  model?: string
-  /** Which image generation provider to use. Falls back to config default when omitted. */
-  provider?: string
-}
-
-export interface ImageGenProviders {
-  active: string
-  available: string[]
-}
-
-export interface ImageGenResponse {
-  images: PictureEntry[]
-  model: string
-  provider: string
-  prompt: string
-  description?: string | null
-}
-
-export interface WorkspaceTreeEntry {
-  name: string
-  path: string
-  kind: 'file' | 'directory'
-  children: WorkspaceTreeEntry[]
-}
-
-export interface CodeEdit {
-  path: string
-  content: string
-}
-
-export interface CodeEditProposal {
-  approvalRequired: boolean
-  approvalToken: string
-  edits: Array<{ path: string; existed: boolean; diff: string }>
-}
 
 export async function getRuntimeStatus(): Promise<RuntimeStatus> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const res = await fetch(`${API_BASE}/status`);
       return await res.json();
@@ -136,8 +67,8 @@ export interface DetectedTools {
 }
 
 export async function detectSystemTools(): Promise<DetectedTools> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const res = await fetch(`${API_BASE}/detect-tools`);
       return await res.json();
@@ -160,8 +91,8 @@ export async function sendChatMessage(
   agentId?: string | null,
 ): Promise<ChatResponse> {
   const outgoingMessage = withImagePlaceholder(message, imageDataUri)
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const res = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
@@ -211,8 +142,8 @@ export async function streamChatMessage(
   chatId?: string | null,
   agentId?: string | null,
 ): Promise<ChatResponse> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     const outgoingMessage = withImagePlaceholder(message, imageDataUri);
     const res = await fetch(`${API_BASE}/chat-stream`, {
       method: 'POST',
@@ -290,8 +221,8 @@ export async function getTtsUrls(text: string): Promise<TtsUrl[]> {
 }
 
 export async function cancelChatMessage(chatId: string): Promise<void> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     await fetch(`${API_BASE}/cancel-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -304,8 +235,8 @@ export async function cancelChatMessage(chatId: string): Promise<void> {
 }
 
 export async function getRecentInteractions(limit = 50, chatId?: string | null): Promise<InteractionMemory[]> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const params = new URLSearchParams({ limit: String(limit) });
       if (chatId) params.set('chatId', chatId);
@@ -326,8 +257,8 @@ export async function saveSystemInteraction(
   provider: string,
   model: string,
 ): Promise<any> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const res = await fetch(`${API_BASE}/interactions`, {
         method: 'POST',
@@ -348,8 +279,8 @@ export async function saveInteractionAgentActivity(
   interactionId: number,
   activity: AgentProgress[],
 ): Promise<void> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const res = await fetch(`${API_BASE}/interactions/agent-activity`, {
         method: 'POST',
@@ -369,8 +300,8 @@ export async function saveInteractionAgentActivity(
 }
 
 export async function listChatSessions(): Promise<ChatSession[]> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const res = await fetch(`${API_BASE}/chat-sessions`);
       const data = await res.json();
@@ -385,8 +316,8 @@ export async function listChatSessions(): Promise<ChatSession[]> {
 }
 
 export async function deleteChatSession(chatId: string): Promise<number> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const params = new URLSearchParams({ chatId });
       const res = await fetch(`${API_BASE}/chat-sessions/delete?${params.toString()}`, { method: 'POST' });
@@ -402,8 +333,8 @@ export async function deleteChatSession(chatId: string): Promise<number> {
 }
 
 export async function renameChatSession(chatId: string, newTitle: string): Promise<number> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const res = await fetch(`${API_BASE}/chat-sessions/rename`, {
         method: 'POST',
@@ -422,8 +353,8 @@ export async function renameChatSession(chatId: string, newTitle: string): Promi
 }
 
 export async function getProfileValue(key: string): Promise<string> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const params = new URLSearchParams({ key });
       const res = await fetch(`${API_BASE}/profile?${params.toString()}`);
@@ -439,8 +370,8 @@ export async function getProfileValue(key: string): Promise<string> {
 }
 
 export async function setProfileValue(key: string, value: string): Promise<boolean> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const res = await fetch(`${API_BASE}/profile`, {
         method: 'POST',
@@ -525,8 +456,8 @@ export async function deleteLearnedSkill(name: string): Promise<number> {
 }
 
 export async function clearChatHistory(chatId?: string | null): Promise<number> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const params = new URLSearchParams();
       if (chatId) params.set('chatId', chatId);
@@ -544,14 +475,15 @@ export async function clearChatHistory(chatId?: string | null): Promise<number> 
 }
 
 export async function listSavedPictures(): Promise<PictureEntry[]> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
-      const res = await fetch(`${API_BASE}/pictures`);
+      const res = await fetch(`${API_BASE}/pictures?_t=${Date.now()}`);
       const pictures = await res.json();
+      const timestamp = Date.now();
       return Array.isArray(pictures)
         ? pictures.map((picture) => {
-            const pictureUrl = picture.url ? `${API_BASE.replace('/api', '')}${picture.url}` : undefined
+            const pictureUrl = picture.url ? `${API_BASE.replace('/api', '')}${picture.url}?_t=${timestamp}` : undefined
             return {
               ...picture,
               path: pictureUrl || picture.path,
@@ -573,8 +505,8 @@ export async function listSavedPictures(): Promise<PictureEntry[]> {
 export async function generateImages(
   request: ImageGenRequest
 ): Promise<ImageGenResponse> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = 'http://localhost:3000/api'
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase()
     const res = await fetch(`${API_BASE}/image-generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -608,8 +540,8 @@ export async function generateImages(
 
 /** Fetch which image-generation providers are currently configured on the backend. */
 export async function getImageGenProviders(): Promise<ImageGenProviders> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = 'http://localhost:3000/api'
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase()
     try {
       const res = await fetch(`${API_BASE}/image-gen/providers`)
       if (res.ok) return await res.json()
@@ -638,8 +570,8 @@ export async function getImageGenProviders(): Promise<ImageGenProviders> {
 
 /** Updates the default image generation provider in the configuration. */
 export async function setDefaultImageProvider(provider: string): Promise<boolean> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
     try {
       const getRes = await fetch(`${API_BASE}/config`)
       if (!getRes.ok) return false
@@ -758,9 +690,9 @@ export function convertFileSrc(filePath: string, protocol = 'asset'): string {
 }
 
 export function installTauriAdapters() {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    console.warn("Not running inside Tauri. Connecting to local API server fallback at http://localhost:3000/api.");
-    const API_BASE = "http://localhost:3000/api";
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
+    console.warn(`Not running inside Tauri. Connecting to local API server fallback at ${API_BASE}.`);
 
     (window as any).settingsApi = {
       getSettings: async () => {
@@ -1296,3 +1228,40 @@ export async function readClipboardImage(): Promise<string | null> {
     return null
   }
 }
+
+// Enforce compile-time check against the shared platform interface
+const _apiCheck: MintPlatformApi = {
+  getRuntimeStatus,
+  detectSystemTools,
+  sendChatMessage,
+  streamChatMessage,
+  getTtsUrls,
+  cancelChatMessage,
+  getRecentInteractions,
+  saveSystemInteraction,
+  saveInteractionAgentActivity,
+  listChatSessions,
+  deleteChatSession,
+  renameChatSession,
+  getProfileValue,
+  setProfileValue,
+  listLearnedSkills,
+  addLearnedSkill,
+  deleteLearnedSkill,
+  clearChatHistory,
+  listSavedPictures,
+  generateImages,
+  getImageGenProviders,
+  setDefaultImageProvider,
+  getWorkspaceTree,
+  createWorkspaceFile,
+  createWorkspaceFolder,
+  deleteWorkspaceItem,
+  selectWorkspaceDirectory,
+  submitToolApproval,
+  proposeCodeEdits,
+  applyCodeEdits,
+  listen,
+  readClipboardImage,
+}
+

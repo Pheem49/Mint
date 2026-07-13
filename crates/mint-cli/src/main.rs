@@ -1809,10 +1809,27 @@ async fn handle_slash_command(
             } else {
                 session.config.ai_provider = rest.to_owned();
                 match mint_core::save_config(&session.config) {
-                    Ok(()) => println!(
-                        "{DIM}Switched to provider: {}{RESET}\n",
-                        session.config.ai_provider
-                    ),
+                    Ok(()) => {
+                        let active_model = active_model(&session.config.ai_provider, &session.config);
+                        let display_name = format!("Changed model to {} • {}", session.config.ai_provider, active_model);
+
+                        // Save system event interaction in memory
+                        if let Ok(memory) = MemoryStore::open_default() {
+                            let _ = memory.add_interaction_for_chat_with_fallback(
+                                CHAT_CLI_ID,
+                                &display_name,
+                                "",
+                                "system",
+                                "provider_change",
+                                None,
+                            );
+                        }
+
+                        println!(
+                            "\n{DIM}───{RESET} {MINT}{}{RESET} {DIM}───{RESET}\n",
+                            display_name
+                        );
+                    }
                     Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
                 }
             }
@@ -2710,29 +2727,47 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
 ];
 
 fn draw_input_box(
-    input: &str,
+    input_chars: &[char],
+    cursor_pos: usize,
     placeholder: &str,
     model: &str,
     path_str: &str,
     tab_base_input: Option<&str>,
     tab_index: Option<usize>,
-) -> usize {
+) -> (usize, usize) {
     let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let width = term_width as usize;
     let prefix = "› ";
     let input_width = width.saturating_sub(2);
     let content_max_len = input_width.saturating_sub(prefix.chars().count());
 
-    let display_str = if input.is_empty() {
+    let mut start_idx = 0;
+    if input_chars.len() > content_max_len {
+        if cursor_pos >= content_max_len {
+            start_idx = (cursor_pos + 5).saturating_sub(content_max_len);
+            if start_idx + content_max_len > input_chars.len() {
+                start_idx = input_chars.len() - content_max_len;
+            }
+        }
+    }
+
+    let slice_chars = if input_chars.len() > content_max_len {
+        &input_chars[start_idx..std::cmp::min(start_idx + content_max_len, input_chars.len())]
+    } else {
+        input_chars
+    };
+    let displayed_input: String = slice_chars.iter().collect();
+
+    let display_str = if displayed_input.is_empty() {
         format!("{DIM}{}\x1b[39m", placeholder)
     } else {
-        format_placeholders(input)
+        format_placeholders(&displayed_input)
     };
 
-    let visible_len = if input.is_empty() {
+    let visible_len = if displayed_input.is_empty() {
         placeholder.chars().count()
     } else {
-        string_visual_width(input)
+        string_visual_width(&displayed_input)
     };
 
     let pad_len = content_max_len.saturating_sub(visible_len);
@@ -2760,7 +2795,8 @@ fn draw_input_box(
     );
 
     // Compute and draw suggestions
-    let search_query = tab_base_input.unwrap_or(input);
+    let raw_input: String = input_chars.iter().collect();
+    let search_query = tab_base_input.unwrap_or(&raw_input);
     let mut match_count = 0;
     if search_query.starts_with('/') {
         let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
@@ -2791,11 +2827,29 @@ fn draw_input_box(
     }
 
     let _ = io::stdout().flush();
-    match_count
+    (match_count, start_idx)
 }
 
 fn input_cursor_column(input_chars: &[char], cursor_pos: usize) -> usize {
-    let visual_cursor_pos: usize = input_chars[..cursor_pos]
+    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let width = term_width as usize;
+    let prefix = "› ";
+    let input_width = width.saturating_sub(2);
+    let content_max_len = input_width.saturating_sub(prefix.chars().count());
+
+    let mut start_idx = 0;
+    if input_chars.len() > content_max_len {
+        if cursor_pos >= content_max_len {
+            start_idx = (cursor_pos + 5).saturating_sub(content_max_len);
+            if start_idx + content_max_len > input_chars.len() {
+                start_idx = input_chars.len() - content_max_len;
+            }
+        }
+    }
+
+    let cursor_pos_clamped = std::cmp::min(cursor_pos, input_chars.len());
+    let start_idx_clamped = std::cmp::min(start_idx, cursor_pos_clamped);
+    let visual_cursor_pos: usize = input_chars[start_idx_clamped..cursor_pos_clamped]
         .iter()
         .copied()
         .map(char_visual_width)
@@ -2826,9 +2880,9 @@ fn redraw_input_box(
     tab_index: Option<usize>,
 ) {
     clear_input_box();
-    let input: String = input_chars.iter().collect();
-    let match_count = draw_input_box(
-        &input,
+    let (match_count, _) = draw_input_box(
+        input_chars,
+        cursor_pos,
         placeholder,
         model,
         path_str,
@@ -2859,7 +2913,7 @@ fn read_line_interactive(
     let mut tab_base_input: Option<String> = None;
     let mut tab_index: Option<usize> = None;
 
-    let match_count = draw_input_box("", placeholder, model, path_str, None, None);
+    let (match_count, _) = draw_input_box(&input_chars, cursor_pos, placeholder, model, path_str, None, None);
     position_input_cursor(&input_chars, cursor_pos, match_count);
     let _ = io::stdout().flush();
 
@@ -2978,12 +3032,7 @@ fn read_line_interactive(
                             }
                         }
                         KeyCode::Char(c) => {
-                            let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
-                            let max_width = (term_width as usize).saturating_sub(4);
-                            let current_visual_width: usize =
-                                input_chars.iter().copied().map(char_visual_width).sum();
-
-                            if current_visual_width < max_width {
+                            if input_chars.len() < 10000 {
                                 input_chars.insert(cursor_pos, c);
                                 cursor_pos += 1;
 
@@ -3152,13 +3201,15 @@ fn read_line_interactive(
                                 }
                             }
                             disable_raw_mode()?;
-                            let visual_cursor_pos: usize = input_chars[..cursor_pos]
-                                .iter()
-                                .copied()
-                                .map(char_visual_width)
-                                .sum();
-                            print!("\x1b[{}G", 4 + visual_cursor_pos);
-                            let _ = io::stdout().flush();
+                            redraw_input_box(
+                                &input_chars,
+                                cursor_pos,
+                                placeholder,
+                                model,
+                                path_str,
+                                None,
+                                None,
+                            );
                             enable_raw_mode()?;
                         }
                         KeyCode::Right => {
@@ -3171,13 +3222,15 @@ fn read_line_interactive(
                                 }
                             }
                             disable_raw_mode()?;
-                            let visual_cursor_pos: usize = input_chars[..cursor_pos]
-                                .iter()
-                                .copied()
-                                .map(char_visual_width)
-                                .sum();
-                            print!("\x1b[{}G", 4 + visual_cursor_pos);
-                            let _ = io::stdout().flush();
+                            redraw_input_box(
+                                &input_chars,
+                                cursor_pos,
+                                placeholder,
+                                model,
+                                path_str,
+                                None,
+                                None,
+                            );
                             enable_raw_mode()?;
                         }
                         KeyCode::Enter => {

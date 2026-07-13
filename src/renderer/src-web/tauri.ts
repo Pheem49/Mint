@@ -1,106 +1,29 @@
-export interface RuntimeStatus {
-  backend: string
-  configPath: string
-  activeProvider: string
-  availableProviders: string[]
-  integrations: Record<string, unknown>
-  localIp?: string
-}
+export * from '../shared/types'
+import type { MintPlatformApi } from '../shared/platform'
+import type {
 
-export interface ChatResponse {
-  provider: string
-  model: string
-  text: string
-  fallbackProvider?: string | null
-}
+  RuntimeStatus,
+  ChatResponse,
+  TtsUrl,
+  DocumentAttachment,
+  AgentProgress,
+  InteractionMemory,
+  ChatSession,
+  PictureEntry,
+  ImageGenRequest,
+  ImageGenProviders,
+  ImageGenResponse,
+  WorkspaceTreeEntry,
+  CodeEdit,
+  CodeEditProposal,
+  LearnedSkill,
+} from '../shared/types'
 
-export interface TtsUrl {
-  shortText: string
-  url: string
-}
-
-export interface DocumentAttachment {
-  filename: string
-  dataUri: string
-}
-
-export type AgentProgress =
-  | { type: 'Thinking'; data: { elapsed_secs: number } }
-  | { type: 'Thought'; data: { thought: string } }
-  | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown> } }
-  | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string } }
 
 type DesktopStreamEvent =
   | { type: 'chunk'; chunk: string }
   | { type: 'progress'; progress: AgentProgress }
 
-export interface InteractionMemory {
-  id: number
-  chatId: string
-  userText: string
-  aiText: string
-  provider: string
-  model: string
-  fallbackProvider?: string | null
-  createdAt: string
-  agentActivity?: AgentProgress[] | null
-}
-
-export interface ChatSession {
-  id: string
-  title: string
-  kind: string
-  createdAt: string
-  updatedAt: string
-}
-
-export interface PictureEntry {
-  id: string
-  filename: string
-  path: string
-  mimeType: string
-  createdAt: string
-  source: string
-  message: string
-  thumbnailPath?: string
-  url?: string
-  thumbnailUrl?: string
-}
-
-export interface ImageGenRequest {
-  prompt: string
-  negativePrompt?: string
-  aspectRatio?: '1:1' | '16:9' | '9:16' | '4:3'
-  numImages?: number
-  model?: string
-  /** Which image generation provider to use. Falls back to config default when omitted. */
-  provider?: string
-}
-
-export interface ImageGenProviders {
-  active: string
-  available: string[]
-}
-
-export interface ImageGenResponse {
-  images: PictureEntry[]
-  model: string
-  provider: string
-  prompt: string
-  description?: string | null
-}
-
-
-export interface CodeEdit {
-  path: string
-  content: string
-}
-
-export interface CodeEditProposal {
-  approvalRequired: boolean
-  approvalToken: string
-  edits: Array<{ path: string; existed: boolean; diff: string }>
-}
 
 export const isTauriRuntime = () => (
   typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__)
@@ -492,11 +415,12 @@ export async function listSavedPictures(): Promise<PictureEntry[]> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/pictures`);
+      const res = await fetch(`${API_BASE}/pictures?_t=${Date.now()}`);
       const pictures = await res.json();
+      const timestamp = Date.now();
       return Array.isArray(pictures)
         ? pictures.map((picture) => {
-            const pictureUrl = picture.url ? `${API_BASE.replace('/api', '')}${picture.url}` : undefined
+            const pictureUrl = picture.url ? `${API_BASE.replace('/api', '')}${picture.url}?_t=${timestamp}` : undefined
             return {
               ...picture,
               path: pictureUrl || picture.path,
@@ -1192,8 +1116,109 @@ async function captureSharedScreen(): Promise<string> {
   }
 }
 
+export async function listLearnedSkills(workspacePath?: string): Promise<LearnedSkill[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    try {
+      const val = await getProfileValue('learned-skills-web-mock')
+      if (val) {
+        return JSON.parse(val)
+      }
+      return []
+    } catch (e) {
+      console.error("Failed to load web mock skills:", e)
+      return []
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<LearnedSkill[]>('list_learned_skills', { workspacePath })
+}
+
+export async function addLearnedSkill(name: string, content: string): Promise<LearnedSkill> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    try {
+      const list = await listLearnedSkills()
+      const newSkill: LearnedSkill = {
+        id: Date.now(),
+        name,
+        sourcePath: 'ui_manual',
+        content,
+        updatedAt: new Date().toISOString()
+      }
+      list.push(newSkill)
+      await setProfileValue('learned-skills-web-mock', JSON.stringify(list))
+      return newSkill
+    } catch (e) {
+      console.error("Failed to add web mock skill:", e)
+      throw e
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<LearnedSkill>('add_learned_skill', { name, content })
+}
+
+export async function deleteLearnedSkill(name: string): Promise<number> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    try {
+      const list = await listLearnedSkills()
+      const filtered = list.filter(s => s.name !== name)
+      const deletedCount = list.length - filtered.length
+      await setProfileValue('learned-skills-web-mock', JSON.stringify(filtered))
+      return deletedCount
+    } catch (e) {
+      console.error("Failed to delete web mock skill:", e)
+      return 0
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<number>('delete_learned_skill', { name })
+}
+
+export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceTreeEntry> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    return {
+      name: 'Workspace',
+      path: '.',
+      kind: 'directory',
+      children: [
+        { name: 'src', path: 'src', kind: 'directory', children: [] },
+        { name: 'package.json', path: 'package.json', kind: 'file', children: [] },
+      ],
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<WorkspaceTreeEntry>('get_workspace_tree', { path })
+}
+
+export async function createWorkspaceFile(path: string): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('create_workspace_file', { path })
+}
+
+export async function createWorkspaceFolder(path: string): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('create_workspace_folder', { path })
+}
+
+export async function deleteWorkspaceItem(path: string): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('delete_workspace_item', { path })
+}
+
+export async function selectWorkspaceDirectory(): Promise<string | null> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    return null
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  const selected = await invoke<string | null>('select_workspace_directory')
+  return selected
+}
+
 export async function readClipboardImage(): Promise<string | null> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
+
     return null
   }
   const { invoke } = await import('@tauri-apps/api/core')
@@ -1204,3 +1229,40 @@ export async function readClipboardImage(): Promise<string | null> {
     return null
   }
 }
+
+// Enforce compile-time check against the shared platform interface
+const _apiCheck: MintPlatformApi = {
+  getRuntimeStatus,
+  detectSystemTools,
+  sendChatMessage,
+  streamChatMessage,
+  getTtsUrls,
+  cancelChatMessage,
+  getRecentInteractions,
+  saveSystemInteraction,
+  saveInteractionAgentActivity,
+  listChatSessions,
+  deleteChatSession,
+  renameChatSession,
+  getProfileValue,
+  setProfileValue,
+  listLearnedSkills,
+  addLearnedSkill,
+  deleteLearnedSkill,
+  clearChatHistory,
+  listSavedPictures,
+  generateImages,
+  getImageGenProviders,
+  setDefaultImageProvider,
+  getWorkspaceTree,
+  createWorkspaceFile,
+  createWorkspaceFolder,
+  deleteWorkspaceItem,
+  selectWorkspaceDirectory,
+  submitToolApproval,
+  proposeCodeEdits,
+  applyCodeEdits,
+  listen,
+  readClipboardImage,
+}
+

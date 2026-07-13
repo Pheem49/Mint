@@ -331,6 +331,16 @@ pub async fn run_code_agent_with_options(
                     render_live_status(&mut status);
                 }
             }
+            // Parse web search sources from the result and store them for display
+            if action == "web_search"
+                && !result.starts_with("Web search error:")
+                && result != "No web search results found."
+            {
+                if let Ok(mut status) = progress_live_status.lock() {
+                    let sources = parse_web_search_sources(&result);
+                    status.web_sources.extend(sources);
+                }
+            }
         }
     };
 
@@ -343,9 +353,23 @@ pub async fn run_code_agent_with_options(
                 clear_live_status(&mut status);
             }
         }
-        let formatted_summary = format_markdown_bold(&summary);
+        let formatted_summary = format_markdown_bold(&sanitize_latex(&summary));
         print!("\n  {MINT}Mint:{RESET} ");
         render_live_summary(&formatted_summary);
+
+        // Print web search sources if any were collected
+        if let Ok(mut status) = chunk_live_status.lock() {
+            if !status.web_sources.is_empty() {
+                println!();
+                println!("  {DIM}Sources:{RESET}");
+                for (i, (title, url)) in status.web_sources.iter().enumerate() {
+                    println!("  {DIM}{}.{RESET} {BLUE}{}{RESET}", i + 1, title);
+                    println!("     {DIM}{}{RESET}", url);
+                }
+                status.web_sources.clear();
+            }
+        }
+
         println!();
     };
 
@@ -401,6 +425,34 @@ pub async fn run_code_agent_with_options(
 fn clear_working_status() {
     print!("\r\x1b[2K");
     let _ = io::stdout().flush();
+}
+
+/// Parse (title, url) pairs from the formatted `web_search` ToolEnd result text.
+/// The format produced by orchestration.rs is:
+///   1. Title\n   URL: https://...\n   Snippet\n
+fn parse_web_search_sources(result: &str) -> Vec<(String, String)> {
+    let mut sources = Vec::new();
+    let mut current_title: Option<String> = None;
+    for line in result.lines() {
+        let trimmed = line.trim();
+        // Match numbered title lines: "1. Title text"
+        if let Some(rest) = trimmed.split_once(". ") {
+            if rest.0.parse::<usize>().is_ok() {
+                current_title = Some(rest.1.trim().to_owned());
+                continue;
+            }
+        }
+        // Match URL lines: "URL: https://..."
+        if let Some(url) = trimmed.strip_prefix("URL: ") {
+            if let Some(title) = current_title.take() {
+                let url = url.trim().to_owned();
+                if !url.is_empty() {
+                    sources.push((title, url));
+                }
+            }
+        }
+    }
+    sources
 }
 
 fn format_elapsed(duration: Duration) -> String {
@@ -494,6 +546,8 @@ struct LiveStatus {
     committed_tasks: usize,
     rendered_lines: usize,
     spinner_tick: usize,
+    /// Sources collected from web_search ToolEnd results (title, url)
+    web_sources: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -981,4 +1035,37 @@ fn process_inline_bold(text: &str) -> String {
         is_bold = !is_bold;
     }
     result
+}
+
+/// Replace common LaTeX math symbols with Unicode equivalents.
+/// Fixes garbled output like "ightarrow$" from models that emit LaTeX notation.
+fn sanitize_latex(text: &str) -> String {
+    let mut s = text.to_owned();
+    for (pat, uni) in [
+        // arrows
+        ("$\\rightarrow$",     "→"),
+        ("$\\leftarrow$",      "←"),
+        ("$\\Rightarrow$",     "⇒"),
+        ("$\\Leftarrow$",      "⇐"),
+        ("$\\leftrightarrow$", "↔"),
+        // comparison
+        ("$\\leq$",    "≤"),
+        ("$\\geq$",    "≥"),
+        ("$\\neq$",    "≠"),
+        ("$\\approx$", "≈"),
+        // math
+        ("$\\times$", "×"),
+        ("$\\div$",   "÷"),
+        ("$\\pm$",    "±"),
+        ("$\\infty$", "∞"),
+        ("$\\cdot$",  "·"),
+        // sets
+        ("$\\in$",     "∈"),
+        ("$\\subset$", "⊂"),
+        ("$\\cup$",    "∪"),
+        ("$\\cap$",    "∩"),
+    ] {
+        s = s.replace(pat, uni);
+    }
+    s
 }
