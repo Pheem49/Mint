@@ -81,6 +81,8 @@ pub struct MintConfig {
     pub disabled_tools: Vec<String>,
     pub agents: Vec<AgentConfig>,
     pub enable_agent_collaboration: bool,
+    /// User-defined OpenAI-compatible providers.
+    pub custom_providers: Vec<CustomProvider>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -95,6 +97,45 @@ pub struct AgentConfig {
     pub api_key: Option<String>,
     pub system_instruction: String,
     pub enabled: bool,
+}
+
+/// A single model entry inside a [`CustomProvider`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomProviderModel {
+    /// The model identifier sent to the API, e.g. `"llama-3.1-8b"`.
+    pub model_id: String,
+    /// Human-readable label shown in the UI, e.g. `"Llama 3.1 8B"`.
+    pub display_name: String,
+}
+
+/// An extra HTTP header to include with every request to a [`CustomProvider`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomProviderHeader {
+    pub name: String,
+    pub value: String,
+}
+
+/// A fully user-defined, OpenAI-compatible AI provider.
+///
+/// When this provider is active the `ai_provider` config field is set to
+/// `"custom:<id>"` where `<id>` is [`CustomProvider::id`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomProvider {
+    /// Slug identifier (lowercase letters, numbers, hyphens, underscores).
+    pub id: String,
+    /// Human-readable name shown in the UI.
+    pub display_name: String,
+    /// Base URL of the OpenAI-compatible endpoint, e.g. `"http://localhost:20128/v1"`.
+    pub base_url: String,
+    /// API key sent as `Authorization: Bearer <key>`. Empty = no auth header.
+    pub api_key: String,
+    /// Models offered by this provider.
+    pub models: Vec<CustomProviderModel>,
+    /// Optional extra HTTP headers sent with every request.
+    pub headers: Vec<CustomProviderHeader>,
 }
 
 impl Default for MintConfig {
@@ -158,6 +199,7 @@ impl Default for MintConfig {
             disabled_tools: Vec::new(),
             agents: default_agents(),
             enable_agent_collaboration: false,
+            custom_providers: Vec::new(),
             extra: runtime_extra_defaults(),
         }
     }
@@ -205,34 +247,56 @@ impl MintConfig {
             "huggingface" => &self.hf_model,
             "local_openai" => &self.local_model_name,
             "ollama" => &self.ollama_model,
+            p if p.starts_with("custom:") => {
+                // Return the first model id of the matching custom provider, if any.
+                self.resolve_custom_provider(p)
+                    .and_then(|cp| cp.models.first())
+                    .map(|m| m.model_id.as_str())
+                    .unwrap_or("")
+            }
             _ => &self.gemini_model,
         }
     }
 
-    pub fn available_providers(&self) -> Vec<&'static str> {
+    /// Returns the `CustomProvider` whose id matches `provider_key`.
+    ///
+    /// `provider_key` must be in `"custom:<id>"` format (the leading `"custom:"`
+    /// prefix is stripped before the lookup).
+    pub fn resolve_custom_provider(&self, provider_key: &str) -> Option<&CustomProvider> {
+        let id = provider_key.strip_prefix("custom:").unwrap_or(provider_key);
+        self.custom_providers.iter().find(|cp| cp.id == id)
+    }
+
+    pub fn available_providers(&self) -> Vec<String> {
         let mut providers = Vec::new();
         if has_value(&self.anthropic_api_key) {
-            providers.push("anthropic");
+            providers.push("anthropic".to_owned());
         }
         if has_value(&self.openai_api_key) {
-            providers.push("openai");
+            providers.push("openai".to_owned());
         }
         if has_value(&self.openrouter_api_key) {
-            providers.push("openrouter");
+            providers.push("openrouter".to_owned());
         }
         if has_value(&self.deepseek_api_key) {
-            providers.push("deepseek");
+            providers.push("deepseek".to_owned());
         }
         if has_value(&self.api_key) {
-            providers.push("gemini");
+            providers.push("gemini".to_owned());
         }
         if has_value(&self.hf_api_key) {
-            providers.push("huggingface");
+            providers.push("huggingface".to_owned());
         }
         if has_value(&self.local_api_base_url) {
-            providers.push("local_openai");
+            providers.push("local_openai".to_owned());
         }
-        providers.push("ollama");
+        providers.push("ollama".to_owned());
+        // Include all user-defined custom providers that have a base URL configured.
+        for cp in &self.custom_providers {
+            if !cp.base_url.trim().is_empty() {
+                providers.push(format!("custom:{}", cp.id));
+            }
+        }
         providers
     }
 }
@@ -438,7 +502,10 @@ mod tests {
 
     #[test]
     fn default_config_always_exposes_ollama() {
-        assert_eq!(MintConfig::default().available_providers(), vec!["ollama"]);
+        assert_eq!(
+            MintConfig::default().available_providers(),
+            vec!["ollama".to_owned()]
+        );
     }
 
     #[test]
@@ -454,12 +521,12 @@ mod tests {
         assert_eq!(
             config.available_providers(),
             vec![
-                "openai",
-                "openrouter",
-                "deepseek",
-                "gemini",
-                "local_openai",
-                "ollama"
+                "openai".to_owned(),
+                "openrouter".to_owned(),
+                "deepseek".to_owned(),
+                "gemini".to_owned(),
+                "local_openai".to_owned(),
+                "ollama".to_owned(),
             ]
         );
     }
@@ -509,8 +576,108 @@ mod tests {
         save_config_to(&path, &initial_config).unwrap();
 
         let loaded = load_config_from(&path).unwrap();
-        assert!(loaded.theme.len() > 0);
+        assert!(!loaded.theme.is_empty());
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn custom_provider_round_trips() {
+        let config = MintConfig {
+            custom_providers: vec![CustomProvider {
+                id: "myprovider".into(),
+                display_name: "My Provider".into(),
+                base_url: "http://localhost:20128/v1".into(),
+                api_key: "sk-abc".into(),
+                models: vec![CustomProviderModel {
+                    model_id: "llama-3.1-8b".into(),
+                    display_name: "Llama 3.1 8B".into(),
+                }],
+                headers: vec![CustomProviderHeader {
+                    name: "X-Custom".into(),
+                    value: "test".into(),
+                }],
+            }],
+            ..MintConfig::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let restored: MintConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, config);
+    }
+
+    #[test]
+    fn custom_provider_appears_in_available_providers() {
+        let config = MintConfig {
+            custom_providers: vec![CustomProvider {
+                id: "myprovider".into(),
+                base_url: "http://localhost:20128/v1".into(),
+                ..CustomProvider::default()
+            }],
+            ..MintConfig::default()
+        };
+        assert!(
+            config
+                .available_providers()
+                .contains(&"custom:myprovider".to_owned())
+        );
+    }
+
+    #[test]
+    fn custom_provider_without_base_url_excluded() {
+        let config = MintConfig {
+            custom_providers: vec![CustomProvider {
+                id: "empty".into(),
+                base_url: "".into(),
+                ..CustomProvider::default()
+            }],
+            ..MintConfig::default()
+        };
+        assert!(
+            !config
+                .available_providers()
+                .contains(&"custom:empty".to_owned())
+        );
+    }
+
+    #[test]
+    fn active_model_resolves_first_custom_model() {
+        let config = MintConfig {
+            ai_provider: "custom:myprovider".into(),
+            custom_providers: vec![CustomProvider {
+                id: "myprovider".into(),
+                base_url: "http://localhost:20128/v1".into(),
+                models: vec![CustomProviderModel {
+                    model_id: "llama-3.1-8b".into(),
+                    display_name: String::new(),
+                }],
+                ..CustomProvider::default()
+            }],
+            ..MintConfig::default()
+        };
+        assert_eq!(config.active_model(), "llama-3.1-8b");
+    }
+
+    #[test]
+    fn resolve_custom_provider_returns_none_for_unknown() {
+        let config = MintConfig::default();
+        assert!(
+            config
+                .resolve_custom_provider("custom:nonexistent")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn resolve_custom_provider_strips_prefix() {
+        let config = MintConfig {
+            custom_providers: vec![CustomProvider {
+                id: "myp".into(),
+                ..CustomProvider::default()
+            }],
+            ..MintConfig::default()
+        };
+        assert!(config.resolve_custom_provider("custom:myp").is_some());
+        // Also works without prefix
+        assert!(config.resolve_custom_provider("myp").is_some());
     }
 }

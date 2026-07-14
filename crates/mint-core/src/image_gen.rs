@@ -659,11 +659,11 @@ async fn call_replicate(
         poll_replicate(client, &api_key, &prediction_url).await?
     };
 
-    if let Some(err) = prediction.get("error") {
-        if !err.is_null() {
-            let msg = err.as_str().unwrap_or("unknown Replicate error");
-            return Err(ImageGenError::ModelError(msg.to_owned()));
-        }
+    if let Some(err) = prediction.get("error")
+        && !err.is_null()
+    {
+        let msg = err.as_str().unwrap_or("unknown Replicate error");
+        return Err(ImageGenError::ModelError(msg.to_owned()));
     }
 
     // Output is an array of image URLs

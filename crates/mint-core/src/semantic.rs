@@ -169,7 +169,7 @@ fn chunk_text(content: &str) -> Vec<(usize, usize, String)> {
     while start < lines.len() {
         let mut end = start;
         let mut chars = 0;
-        while end < lines.len() && (end == start || chars + lines[end].len() + 1 <= MAX_CHARS) {
+        while end < lines.len() && (end == start || chars + lines[end].len() < MAX_CHARS) {
             chars += lines[end].len() + 1;
             end += 1;
         }

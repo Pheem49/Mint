@@ -494,8 +494,8 @@ async fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&load_config()?)?)
                 }
                 ConfigCommand::Set { key, value } => {
-                    let value = serde_json::from_str(&value)
-                        .unwrap_or_else(|_| serde_json::Value::String(value));
+                    let value =
+                        serde_json::from_str(&value).unwrap_or(serde_json::Value::String(value));
                     println!(
                         "{}",
                         serde_json::to_string_pretty(&set_config_value(&key, value)?)?
@@ -579,7 +579,7 @@ async fn main() -> Result<()> {
 
                 // Start tailing the log file in a background task
                 let log_dir = dirs::config_dir()
-                    .unwrap_or_else(|| std::env::temp_dir())
+                    .unwrap_or_else(std::env::temp_dir)
                     .join("mint");
                 let log_file = log_dir.join("browser-automation.log");
 
@@ -591,39 +591,36 @@ async fn main() -> Result<()> {
                     use std::io::{BufRead, BufReader, Seek, SeekFrom};
                     let mut file_pos = 0;
                     loop {
-                        if log_file_clone.exists() {
-                            if let Ok(mut file) = std::fs::File::open(&log_file_clone) {
-                                if let Ok(_) = file.seek(SeekFrom::Start(file_pos)) {
-                                    let reader = BufReader::new(file);
-                                    for line in reader.lines() {
-                                        if let Ok(line_str) = line {
-                                            if line_str.contains("[NAVIGATE]")
-                                                || line_str.contains("[NAVIGATE_SUCCESS]")
-                                            {
-                                                println!("🌐 {line_str}");
-                                            } else if line_str.contains("[CLICK]")
-                                                || line_str.contains("[CLICK_SUCCESS]")
-                                            {
-                                                println!("🖱️ {line_str}");
-                                            } else if line_str.contains("[TYPE]")
-                                                || line_str.contains("[TYPE_SUCCESS]")
-                                            {
-                                                println!("⌨️ {line_str}");
-                                            } else if line_str.contains("[READ]")
-                                                || line_str.contains("[READ_SUCCESS]")
-                                            {
-                                                println!("📖 {line_str}");
-                                            } else if line_str.contains("_ERROR]") {
-                                                println!("❌ {line_str}");
-                                            } else {
-                                                println!("📝 {line_str}");
-                                            }
-                                        }
-                                    }
-                                    if let Ok(pos) = log_file_clone.metadata().map(|m| m.len()) {
-                                        file_pos = pos;
-                                    }
+                        if log_file_clone.exists()
+                            && let Ok(mut file) = std::fs::File::open(&log_file_clone)
+                            && file.seek(SeekFrom::Start(file_pos)).is_ok()
+                        {
+                            let reader = BufReader::new(file);
+                            for line_str in reader.lines().flatten() {
+                                if line_str.contains("[NAVIGATE]")
+                                    || line_str.contains("[NAVIGATE_SUCCESS]")
+                                {
+                                    println!("🌐 {line_str}");
+                                } else if line_str.contains("[CLICK]")
+                                    || line_str.contains("[CLICK_SUCCESS]")
+                                {
+                                    println!("🖱️ {line_str}");
+                                } else if line_str.contains("[TYPE]")
+                                    || line_str.contains("[TYPE_SUCCESS]")
+                                {
+                                    println!("⌨️ {line_str}");
+                                } else if line_str.contains("[READ]")
+                                    || line_str.contains("[READ_SUCCESS]")
+                                {
+                                    println!("📖 {line_str}");
+                                } else if line_str.contains("_ERROR]") {
+                                    println!("❌ {line_str}");
+                                } else {
+                                    println!("📝 {line_str}");
                                 }
+                            }
+                            if let Ok(pos) = log_file_clone.metadata().map(|m| m.len()) {
+                                file_pos = pos;
                             }
                         }
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -705,20 +702,20 @@ async fn main() -> Result<()> {
                             home.join(".config").join("mint").join("mint-skills");
                         mint_core::skills::load_skills_from_dir(&global_skills_path, &mut skills);
                     }
-                    if let Ok(root) = std::env::current_dir() {
-                        if let Ok(root) = root.canonicalize() {
-                            let workspace_skills_path1 = root.join(".agents").join("skills");
-                            mint_core::skills::load_skills_from_dir(
-                                &workspace_skills_path1,
-                                &mut skills,
-                            );
+                    if let Ok(root) = std::env::current_dir()
+                        && let Ok(root) = root.canonicalize()
+                    {
+                        let workspace_skills_path1 = root.join(".agents").join("skills");
+                        mint_core::skills::load_skills_from_dir(
+                            &workspace_skills_path1,
+                            &mut skills,
+                        );
 
-                            let workspace_skills_path2 = root.join("skills");
-                            mint_core::skills::load_skills_from_dir(
-                                &workspace_skills_path2,
-                                &mut skills,
-                            );
-                        }
+                        let workspace_skills_path2 = root.join("skills");
+                        mint_core::skills::load_skills_from_dir(
+                            &workspace_skills_path2,
+                            &mut skills,
+                        );
                     }
 
                     let mut unique_skills = std::collections::BTreeMap::new();
@@ -1153,10 +1150,10 @@ async fn main() -> Result<()> {
                                         ),
                                     }
                                 }
-                                if let Some(desc) = &result.description {
-                                    if !desc.is_empty() {
-                                        println!("\n{DIM}{desc}{RESET}");
-                                    }
+                                if let Some(desc) = &result.description
+                                    && !desc.is_empty()
+                                {
+                                    println!("\n{DIM}{desc}{RESET}");
                                 }
                             }
                             Err(e) => eprintln!("{ERROR}Failed to save images: {e}{RESET}"),
@@ -1201,16 +1198,16 @@ async fn launch_mint_target(target: String) -> Result<()> {
                         path = p.parent();
                     }
                 }
-                if found.is_none() {
-                    if let Ok(cwd) = std::env::current_dir() {
-                        let mut path = Some(cwd.as_path());
-                        while let Some(p) = path {
-                            if p.join("package.json").exists() {
-                                found = Some(p.to_path_buf());
-                                break;
-                            }
-                            path = p.parent();
+                if found.is_none()
+                    && let Ok(cwd) = std::env::current_dir()
+                {
+                    let mut path = Some(cwd.as_path());
+                    while let Some(p) = path {
+                        if p.join("package.json").exists() {
+                            found = Some(p.to_path_buf());
+                            break;
                         }
+                        path = p.parent();
                     }
                 }
                 found.ok_or_else(|| {
@@ -1219,7 +1216,7 @@ async fn launch_mint_target(target: String) -> Result<()> {
             };
             std::process::Command::new("npm")
                 .current_dir(&project_root)
-                .args(&["run", "dev:web"])
+                .args(["run", "dev:web"])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
@@ -1402,7 +1399,7 @@ fn render_markdown_table(table_lines: &[String]) -> String {
     rendered.push_str(&draw_border("┌", "┬", "┐", "─", &col_widths));
 
     if let Some(ref header) = header_row {
-        rendered.push_str("│");
+        rendered.push('│');
         for (i, col) in header.iter().enumerate() {
             let width = unicode_width(col);
             let padding = col_widths[i] - width;
@@ -1411,20 +1408,20 @@ fn render_markdown_table(table_lines: &[String]) -> String {
                 col,
                 " ".repeat(padding + 1)
             ));
-            rendered.push_str("│");
+            rendered.push('│');
         }
         rendered.push('\n');
         rendered.push_str(&draw_border("├", "┼", "┤", "─", &col_widths));
     }
 
     for (r_idx, row) in data_rows.iter().enumerate() {
-        rendered.push_str("│");
+        rendered.push('│');
         for i in 0..num_cols {
             let col_val = row.get(i).cloned().unwrap_or_default();
             let width = unicode_width(&col_val);
             let padding = col_widths[i] - width;
             rendered.push_str(&format!(" {}{}", col_val, " ".repeat(padding + 1)));
-            rendered.push_str("│");
+            rendered.push('│');
         }
         rendered.push('\n');
 
@@ -1433,7 +1430,7 @@ fn render_markdown_table(table_lines: &[String]) -> String {
         }
     }
 
-    rendered.push_str(&draw_border("└", "┴", "┘", "─", &col_widths).trim_end());
+    rendered.push_str(draw_border("└", "┴", "┘", "─", &col_widths).trim_end());
     rendered
 }
 
@@ -2299,44 +2296,40 @@ async fn handle_slash_command(
 
                 // Scan local workspace skills directory
                 let local_skills_dir = session.current_dir.join("skills");
-                if local_skills_dir.is_dir() {
-                    if let Ok(entries) = fs::read_dir(&local_skills_dir) {
-                        let mut local_files = Vec::new();
-                        for entry in entries.flatten() {
-                            let path = entry.path();
-                            if path.is_file() {
-                                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                                    if matches!(ext.to_ascii_lowercase().as_str(), "md" | "txt") {
-                                        if let Some(name) =
-                                            path.file_name().and_then(|n| n.to_str())
-                                        {
-                                            if let Ok(canon_path) = path.canonicalize() {
-                                                local_files.push((name.to_owned(), canon_path));
-                                            } else {
-                                                local_files.push((name.to_owned(), path));
-                                            }
-                                        }
-                                    }
-                                }
+                if local_skills_dir.is_dir()
+                    && let Ok(entries) = fs::read_dir(&local_skills_dir)
+                {
+                    let mut local_files = Vec::new();
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_file()
+                            && let Some(ext) = path.extension().and_then(|e| e.to_str())
+                            && matches!(ext.to_ascii_lowercase().as_str(), "md" | "txt")
+                            && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                        {
+                            if let Ok(canon_path) = path.canonicalize() {
+                                local_files.push((name.to_owned(), canon_path));
+                            } else {
+                                local_files.push((name.to_owned(), path));
                             }
                         }
+                    }
 
-                        let inactive_files: Vec<_> = local_files
-                            .into_iter()
-                            .filter(|(_, full_path)| !active_skills.contains(full_path))
-                            .map(|(name, _)| name)
-                            .collect();
+                    let inactive_files: Vec<_> = local_files
+                        .into_iter()
+                        .filter(|(_, full_path)| !active_skills.contains(full_path))
+                        .map(|(name, _)| name)
+                        .collect();
 
-                        if !inactive_files.is_empty() {
+                    if !inactive_files.is_empty() {
+                        println!(
+                            "\n{MINT}Local Skill Files (Found but not learned/active yet):{RESET}"
+                        );
+                        for file in inactive_files {
                             println!(
-                                "\n{MINT}Local Skill Files (Found but not learned/active yet):{RESET}"
+                                "  - {WARN}{:<20}{RESET} skills/{} {DIM}(Type '/learn skills/{}' to activate){RESET}",
+                                file, file, file
                             );
-                            for file in inactive_files {
-                                println!(
-                                    "  - {WARN}{:<20}{RESET} skills/{} {DIM}(Type '/learn skills/{}' to activate){RESET}",
-                                    file, file, file
-                                );
-                            }
                         }
                     }
                 }
@@ -2395,7 +2388,8 @@ async fn run_interactive_chat() -> Result<()> {
         now.format("%M")
     );
     let version = env!("CARGO_PKG_VERSION");
-    let line1_text = format!("[Mint] v{} | Active AI: {}", version, provider);
+    let clean_provider_name = format_provider_display_name(provider, &config);
+    let line1_text = format!("[Mint] v{} | Active AI: {}", version, clean_provider_name);
     let line2_text = format!("{} • {}", date_time, model);
 
     let len1 = line1_text.chars().count();
@@ -2417,7 +2411,7 @@ async fn run_interactive_chat() -> Result<()> {
         println!(
             "{MINT}|  \\/  (_)_ __ | |_ / __| |  |_ _|{RESET}   {DIM}│{RESET} {MINT}[Mint]{RESET} v{} | Active AI: {}{} {DIM}│{RESET}",
             version,
-            provider,
+            clean_provider_name,
             " ".repeat(content_width - len1)
         );
         println!(
@@ -2434,7 +2428,7 @@ async fn run_interactive_chat() -> Result<()> {
         println!(
             "{DIM}│{RESET} {MINT}[Mint]{RESET} v{} | Active AI: {}{} {DIM}│{RESET}",
             version,
-            provider,
+            clean_provider_name,
             " ".repeat(content_width - len1)
         );
         println!(
@@ -2474,11 +2468,11 @@ async fn run_interactive_chat() -> Result<()> {
     loop {
         if let Some(handle) = update_handle.take() {
             if handle.is_finished() {
-                if let Ok(Some((current, latest))) = handle.await {
-                    if !printed_update {
-                        updater::print_update_notice(&current, &latest);
-                        printed_update = true;
-                    }
+                if let Ok(Some((current, latest))) = handle.await
+                    && !printed_update
+                {
+                    updater::print_update_notice(&current, &latest);
+                    printed_update = true;
                 }
             } else {
                 update_handle = Some(handle);
@@ -2580,8 +2574,7 @@ async fn run_interactive_chat() -> Result<()> {
             print!("  {MINT}Mint:{RESET} {DIM}Thinking...{RESET}");
             let _ = io::stdout().flush();
 
-            let mut system_instruction = format!(
-                "You are Mint, a cute and helpful AI assistant. You speak in a polite, friendly, and sweet Thai tone (using \"คุณ\", \"ค่ะ\", \"นะคะ\"). \
+            let mut system_instruction = "You are Mint, a cute and helpful AI assistant. You speak in a polite, friendly, and sweet Thai tone (using \"คุณ\", \"ค่ะ\", \"นะคะ\"). \
                 You are running inside the Mint CLI interactive chat. \
                 You have access to native system actions to help the user! If the user asks you to open a website, launch an app, read a file, list a folder, run code, run tests, or execute a local shell command, you can execute these actions by writing a special block at the very end of your response: \
                 `[ACTION: <command> <arguments>]` \
@@ -2592,15 +2585,14 @@ async fn run_interactive_chat() -> Result<()> {
                 - `[ACTION: read-folder <path>]` to list files/folders in a directory. \
                 - `[ACTION: run-shell <command>]` to run a non-destructive local shell command after approval. \
                 You may discuss mature personal topics at a non-explicit level, including adult relationships, sex education, intimacy, emotions, and feelings. Keep the tone respectful and supportive, avoid graphic sexual detail, and do not engage with sexual content involving minors, coercion, exploitation, or sexual violence. \
-                Write the action block on a single line at the very end of your response."
-            );
-            if let Ok(memory) = MemoryStore::open_default() {
-                if let Ok(Some(name)) = memory.get_profile("name") {
-                    system_instruction.push_str(&format!(
-                        "\nThe user's name is {}. Refer to them by their name when appropriate.",
-                        name
-                    ));
-                }
+                Write the action block on a single line at the very end of your response.".to_string();
+            if let Ok(memory) = MemoryStore::open_default()
+                && let Ok(Some(name)) = memory.get_profile("name")
+            {
+                system_instruction.push_str(&format!(
+                    "\nThe user's name is {}. Refer to them by their name when appropriate.",
+                    name
+                ));
             }
 
             let image_uri = session.pending_image.take();
@@ -2699,9 +2691,10 @@ async fn run_interactive_chat() -> Result<()> {
 
 fn print_exit_message(session: &InteractiveSession) {
     println!("\n{MINT}──────────────── Mint session closed ────────────────{RESET}");
+    let clean_provider = format_provider_display_name(&session.config.ai_provider, &session.config);
     println!(
         "{DIM}Provider:{RESET} {} {DIM}• Model:{RESET} {}",
-        session.config.ai_provider,
+        clean_provider,
         active_model(&session.config.ai_provider, &session.config)
     );
     println!(
@@ -2710,6 +2703,36 @@ fn print_exit_message(session: &InteractiveSession) {
     );
     println!("{DIM}Saved config stays available for the next Mint run.{RESET}");
     println!("{MINT}See you next time.{RESET}\n");
+}
+
+fn format_provider_display_name(provider: &str, config: &mint_core::MintConfig) -> String {
+    if provider.starts_with("custom:") {
+        let id = provider.strip_prefix("custom:").unwrap_or(provider);
+        let cp = config.custom_providers.iter().find(|p| p.id == id);
+        match cp {
+            Some(p) if !p.display_name.is_empty() => format!("{} (Custom)", p.display_name),
+            Some(p) => format!("{} (Custom)", p.id),
+            None => format!("{} (Custom)", id),
+        }
+    } else {
+        match provider {
+            "gemini" => "Gemini".to_string(),
+            "openai" => "OpenAI".to_string(),
+            "openrouter" => "OpenRouter".to_string(),
+            "deepseek" => "DeepSeek".to_string(),
+            "anthropic" => "Claude".to_string(),
+            "huggingface" => "HF".to_string(),
+            "local_openai" => "Local".to_string(),
+            "ollama" => "Ollama".to_string(),
+            _ => {
+                let mut chars = provider.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+                }
+            }
+        }
+    }
 }
 
 const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
@@ -2753,12 +2776,10 @@ fn draw_input_box(
     let content_max_len = input_width.saturating_sub(prefix.chars().count());
 
     let mut start_idx = 0;
-    if input_chars.len() > content_max_len {
-        if cursor_pos >= content_max_len {
-            start_idx = (cursor_pos + 5).saturating_sub(content_max_len);
-            if start_idx + content_max_len > input_chars.len() {
-                start_idx = input_chars.len() - content_max_len;
-            }
+    if input_chars.len() > content_max_len && cursor_pos >= content_max_len {
+        start_idx = (cursor_pos + 5).saturating_sub(content_max_len);
+        if start_idx + content_max_len > input_chars.len() {
+            start_idx = input_chars.len() - content_max_len;
         }
     }
 
@@ -2816,7 +2837,7 @@ fn draw_input_box(
             .collect();
 
         if !matches.is_empty() {
-            let total_pages = (matches.len() + 4) / 5;
+            let total_pages = matches.len().div_ceil(5);
             let highlight_idx = tab_index.map(|idx| idx % matches.len());
             let selected_idx = highlight_idx.unwrap_or(0);
             let current_page = selected_idx / 5;
@@ -2853,12 +2874,10 @@ fn input_cursor_column(input_chars: &[char], cursor_pos: usize) -> usize {
     let content_max_len = input_width.saturating_sub(prefix.chars().count());
 
     let mut start_idx = 0;
-    if input_chars.len() > content_max_len {
-        if cursor_pos >= content_max_len {
-            start_idx = (cursor_pos + 5).saturating_sub(content_max_len);
-            if start_idx + content_max_len > input_chars.len() {
-                start_idx = input_chars.len() - content_max_len;
-            }
+    if input_chars.len() > content_max_len && cursor_pos >= content_max_len {
+        start_idx = (cursor_pos + 5).saturating_sub(content_max_len);
+        if start_idx + content_max_len > input_chars.len() {
+            start_idx = input_chars.len() - content_max_len;
         }
     }
 
@@ -2981,312 +3000,308 @@ fn read_line_interactive(
                 last_paste_time = Some(std::time::Instant::now());
                 continue;
             }
-            if let Event::Key(key_event) = ev {
-                if key_event.kind == event::KeyEventKind::Press {
-                    let is_ctrl_d = matches!(key_event.code, KeyCode::Char('d'))
-                        && key_event
+            if let Event::Key(key_event) = ev
+                && key_event.kind == event::KeyEventKind::Press
+            {
+                let is_ctrl_d = matches!(key_event.code, KeyCode::Char('d'))
+                    && key_event
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL);
+                if ctrl_d_pressed && !is_ctrl_d {
+                    ctrl_d_pressed = false;
+                    disable_raw_mode()?;
+                    print!("\r\x1b[3B\r\x1b[2K\x1b[3A");
+                    print!("\x1b[{}G", input_cursor_column(&input_chars, cursor_pos));
+                    let _ = io::stdout().flush();
+                    enable_raw_mode()?;
+                }
+
+                // Reset tab autocomplete state if any key other than Tab, Up, or Down is pressed
+                if key_event.code != KeyCode::Tab
+                    && key_event.code != KeyCode::Up
+                    && key_event.code != KeyCode::Down
+                {
+                    tab_base_input = None;
+                    tab_index = None;
+                }
+
+                match key_event.code {
+                    KeyCode::Char('d')
+                        if key_event
                             .modifiers
-                            .contains(crossterm::event::KeyModifiers::CONTROL);
-                    if ctrl_d_pressed && !is_ctrl_d {
-                        ctrl_d_pressed = false;
-                        disable_raw_mode()?;
-                        print!("\r\x1b[3B\r\x1b[2K\x1b[3A");
-                        print!("\x1b[{}G", input_cursor_column(&input_chars, cursor_pos));
-                        let _ = io::stdout().flush();
-                        enable_raw_mode()?;
-                    }
-
-                    // Reset tab autocomplete state if any key other than Tab, Up, or Down is pressed
-                    if key_event.code != KeyCode::Tab
-                        && key_event.code != KeyCode::Up
-                        && key_event.code != KeyCode::Down
+                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
                     {
-                        tab_base_input = None;
-                        tab_index = None;
-                    }
-
-                    match key_event.code {
-                        KeyCode::Char('d')
-                            if key_event
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL) =>
-                        {
-                            if ctrl_d_pressed {
-                                disable_raw_mode()?;
-                                clear_input_box();
-                                let _ = io::stdout().flush();
-                                break None;
-                            } else {
-                                ctrl_d_pressed = true;
-                                disable_raw_mode()?;
-                                print!(
-                                    "\r\x1b[3B\r\x1b[2K{WARN}Press Ctrl+D again to exit{RESET}\x1b[3A"
-                                );
-                                print!("\x1b[{}G", input_cursor_column(&input_chars, cursor_pos));
-                                let _ = io::stdout().flush();
-                                enable_raw_mode()?;
-                            }
-                        }
-                        KeyCode::Char('v')
-                            if key_event
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL) =>
-                        {
-                            if let Ok(Some(uri)) = image::read_clipboard_image() {
-                                if let Some(ref mut current) = pasted_image {
-                                    current.push(' ');
-                                    current.push_str(&uri);
-                                } else {
-                                    pasted_image = Some(uri);
-                                }
-                                insert_image_placeholder(&mut input_chars, &mut cursor_pos);
-
-                                disable_raw_mode()?;
-                                redraw_input_box(
-                                    &input_chars,
-                                    cursor_pos,
-                                    placeholder,
-                                    model,
-                                    path_str,
-                                    None,
-                                    None,
-                                );
-                                enable_raw_mode()?;
-                            }
-                        }
-                        KeyCode::Char(c) => {
-                            if input_chars.len() < 10000 {
-                                input_chars.insert(cursor_pos, c);
-                                cursor_pos += 1;
-
-                                disable_raw_mode()?;
-                                redraw_input_box(
-                                    &input_chars,
-                                    cursor_pos,
-                                    placeholder,
-                                    model,
-                                    path_str,
-                                    None,
-                                    None,
-                                );
-                                enable_raw_mode()?;
-                            }
-                        }
-                        KeyCode::Backspace => {
-                            if cursor_pos > 0 {
-                                cursor_pos -= 1;
-                                input_chars.remove(cursor_pos);
-
-                                disable_raw_mode()?;
-                                redraw_input_box(
-                                    &input_chars,
-                                    cursor_pos,
-                                    placeholder,
-                                    model,
-                                    path_str,
-                                    None,
-                                    None,
-                                );
-                                enable_raw_mode()?;
-                            }
-                        }
-                        KeyCode::Tab => {
-                            let base = match &tab_base_input {
-                                Some(b) => b.clone(),
-                                None => {
-                                    let current_str: String = input_chars.iter().collect();
-                                    tab_base_input = Some(current_str.clone());
-                                    current_str
-                                }
-                            };
-
-                            if base.starts_with('/') {
-                                let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
-                                    .iter()
-                                    .filter(|(cmd, _)| cmd.starts_with(&base))
-                                    .collect();
-
-                                if !matches.is_empty() {
-                                    let idx = tab_index.unwrap_or(0) % matches.len();
-                                    let completed = format!("{} ", matches[idx].0);
-                                    input_chars = completed.chars().collect();
-                                    cursor_pos = input_chars.len();
-
-                                    // Highlight currently completed item in suggestions
-                                    let current_highlight = Some(idx);
-                                    tab_index = Some(idx + 1);
-
-                                    disable_raw_mode()?;
-                                    redraw_input_box(
-                                        &input_chars,
-                                        cursor_pos,
-                                        placeholder,
-                                        model,
-                                        path_str,
-                                        Some(&base),
-                                        current_highlight,
-                                    );
-                                    enable_raw_mode()?;
-                                }
-                            }
-                        }
-                        KeyCode::Down => {
-                            let base = match &tab_base_input {
-                                Some(b) => b.clone(),
-                                None => {
-                                    let current_str: String = input_chars.iter().collect();
-                                    tab_base_input = Some(current_str.clone());
-                                    current_str
-                                }
-                            };
-
-                            if base.starts_with('/') {
-                                let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
-                                    .iter()
-                                    .filter(|(cmd, _)| cmd.starts_with(&base))
-                                    .collect();
-
-                                if !matches.is_empty() {
-                                    let new_idx = match tab_index {
-                                        Some(idx) => (idx + 1) % matches.len(),
-                                        None => 0,
-                                    };
-                                    tab_index = Some(new_idx);
-                                    let completed = format!("{} ", matches[new_idx].0);
-                                    input_chars = completed.chars().collect();
-                                    cursor_pos = input_chars.len();
-
-                                    disable_raw_mode()?;
-                                    redraw_input_box(
-                                        &input_chars,
-                                        cursor_pos,
-                                        placeholder,
-                                        model,
-                                        path_str,
-                                        Some(&base),
-                                        Some(new_idx),
-                                    );
-                                    enable_raw_mode()?;
-                                }
-                            }
-                        }
-                        KeyCode::Up => {
-                            let base = match &tab_base_input {
-                                Some(b) => b.clone(),
-                                None => {
-                                    let current_str: String = input_chars.iter().collect();
-                                    tab_base_input = Some(current_str.clone());
-                                    current_str
-                                }
-                            };
-
-                            if base.starts_with('/') {
-                                let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
-                                    .iter()
-                                    .filter(|(cmd, _)| cmd.starts_with(&base))
-                                    .collect();
-
-                                if !matches.is_empty() {
-                                    let new_idx = match tab_index {
-                                        Some(idx) => {
-                                            if idx == 0 {
-                                                matches.len() - 1
-                                            } else {
-                                                idx - 1
-                                            }
-                                        }
-                                        None => matches.len() - 1,
-                                    };
-                                    tab_index = Some(new_idx);
-                                    let completed = format!("{} ", matches[new_idx].0);
-                                    input_chars = completed.chars().collect();
-                                    cursor_pos = input_chars.len();
-
-                                    disable_raw_mode()?;
-                                    redraw_input_box(
-                                        &input_chars,
-                                        cursor_pos,
-                                        placeholder,
-                                        model,
-                                        path_str,
-                                        Some(&base),
-                                        Some(new_idx),
-                                    );
-                                    enable_raw_mode()?;
-                                }
-                            }
-                        }
-                        KeyCode::Left => {
-                            while cursor_pos > 0 {
-                                cursor_pos -= 1;
-                                if cursor_pos == 0 || !is_thai_zero_width(input_chars[cursor_pos]) {
-                                    break;
-                                }
-                            }
-                            disable_raw_mode()?;
-                            redraw_input_box(
-                                &input_chars,
-                                cursor_pos,
-                                placeholder,
-                                model,
-                                path_str,
-                                None,
-                                None,
-                            );
-                            enable_raw_mode()?;
-                        }
-                        KeyCode::Right => {
-                            while cursor_pos < input_chars.len() {
-                                cursor_pos += 1;
-                                if cursor_pos == input_chars.len()
-                                    || !is_thai_zero_width(input_chars[cursor_pos])
-                                {
-                                    break;
-                                }
-                            }
-                            disable_raw_mode()?;
-                            redraw_input_box(
-                                &input_chars,
-                                cursor_pos,
-                                placeholder,
-                                model,
-                                path_str,
-                                None,
-                                None,
-                            );
-                            enable_raw_mode()?;
-                        }
-                        KeyCode::Enter => {
-                            if let Some(time) = last_paste_time {
-                                if time.elapsed() < std::time::Duration::from_millis(100) {
-                                    continue;
-                                }
-                            }
-                            disable_raw_mode()?;
-                            clear_input_box();
-                            let input_str: String = input_chars.iter().collect();
-
-                            let mut expanded_str = input_str.clone();
-                            for (placeholder_str, content) in &paste_contents {
-                                expanded_str = expanded_str.replace(placeholder_str, content);
-                            }
-
-                            println!("  {BLUE}You ›{RESET} {}", expanded_str);
-                            let _ = io::stdout().flush();
-
-                            break Some(InteractiveInput {
-                                text: expanded_str,
-                                pasted_image,
-                            });
-                        }
-                        KeyCode::Esc => {
+                        if ctrl_d_pressed {
                             disable_raw_mode()?;
                             clear_input_box();
                             let _ = io::stdout().flush();
                             break None;
+                        } else {
+                            ctrl_d_pressed = true;
+                            disable_raw_mode()?;
+                            print!(
+                                "\r\x1b[3B\r\x1b[2K{WARN}Press Ctrl+D again to exit{RESET}\x1b[3A"
+                            );
+                            print!("\x1b[{}G", input_cursor_column(&input_chars, cursor_pos));
+                            let _ = io::stdout().flush();
+                            enable_raw_mode()?;
                         }
-                        _ => {}
                     }
+                    KeyCode::Char('v')
+                        if key_event
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                    {
+                        if let Ok(Some(uri)) = image::read_clipboard_image() {
+                            if let Some(ref mut current) = pasted_image {
+                                current.push(' ');
+                                current.push_str(&uri);
+                            } else {
+                                pasted_image = Some(uri);
+                            }
+                            insert_image_placeholder(&mut input_chars, &mut cursor_pos);
+
+                            disable_raw_mode()?;
+                            redraw_input_box(
+                                &input_chars,
+                                cursor_pos,
+                                placeholder,
+                                model,
+                                path_str,
+                                None,
+                                None,
+                            );
+                            enable_raw_mode()?;
+                        }
+                    }
+                    KeyCode::Char(c) if input_chars.len() < 10000 => {
+                        input_chars.insert(cursor_pos, c);
+                        cursor_pos += 1;
+
+                        disable_raw_mode()?;
+                        redraw_input_box(
+                            &input_chars,
+                            cursor_pos,
+                            placeholder,
+                            model,
+                            path_str,
+                            None,
+                            None,
+                        );
+                        enable_raw_mode()?;
+                    }
+                    KeyCode::Backspace if cursor_pos > 0 => {
+                        cursor_pos -= 1;
+                        input_chars.remove(cursor_pos);
+
+                        disable_raw_mode()?;
+                        redraw_input_box(
+                            &input_chars,
+                            cursor_pos,
+                            placeholder,
+                            model,
+                            path_str,
+                            None,
+                            None,
+                        );
+                        enable_raw_mode()?;
+                    }
+                    KeyCode::Tab => {
+                        let base = match &tab_base_input {
+                            Some(b) => b.clone(),
+                            None => {
+                                let current_str: String = input_chars.iter().collect();
+                                tab_base_input = Some(current_str.clone());
+                                current_str
+                            }
+                        };
+
+                        if base.starts_with('/') {
+                            let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
+                                .iter()
+                                .filter(|(cmd, _)| cmd.starts_with(&base))
+                                .collect();
+
+                            if !matches.is_empty() {
+                                let idx = tab_index.unwrap_or(0) % matches.len();
+                                let completed = format!("{} ", matches[idx].0);
+                                input_chars = completed.chars().collect();
+                                cursor_pos = input_chars.len();
+
+                                // Highlight currently completed item in suggestions
+                                let current_highlight = Some(idx);
+                                tab_index = Some(idx + 1);
+
+                                disable_raw_mode()?;
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                    Some(&base),
+                                    current_highlight,
+                                );
+                                enable_raw_mode()?;
+                            }
+                        }
+                    }
+                    KeyCode::Down => {
+                        let base = match &tab_base_input {
+                            Some(b) => b.clone(),
+                            None => {
+                                let current_str: String = input_chars.iter().collect();
+                                tab_base_input = Some(current_str.clone());
+                                current_str
+                            }
+                        };
+
+                        if base.starts_with('/') {
+                            let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
+                                .iter()
+                                .filter(|(cmd, _)| cmd.starts_with(&base))
+                                .collect();
+
+                            if !matches.is_empty() {
+                                let new_idx = match tab_index {
+                                    Some(idx) => (idx + 1) % matches.len(),
+                                    None => 0,
+                                };
+                                tab_index = Some(new_idx);
+                                let completed = format!("{} ", matches[new_idx].0);
+                                input_chars = completed.chars().collect();
+                                cursor_pos = input_chars.len();
+
+                                disable_raw_mode()?;
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                    Some(&base),
+                                    Some(new_idx),
+                                );
+                                enable_raw_mode()?;
+                            }
+                        }
+                    }
+                    KeyCode::Up => {
+                        let base = match &tab_base_input {
+                            Some(b) => b.clone(),
+                            None => {
+                                let current_str: String = input_chars.iter().collect();
+                                tab_base_input = Some(current_str.clone());
+                                current_str
+                            }
+                        };
+
+                        if base.starts_with('/') {
+                            let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
+                                .iter()
+                                .filter(|(cmd, _)| cmd.starts_with(&base))
+                                .collect();
+
+                            if !matches.is_empty() {
+                                let new_idx = match tab_index {
+                                    Some(idx) => {
+                                        if idx == 0 {
+                                            matches.len() - 1
+                                        } else {
+                                            idx - 1
+                                        }
+                                    }
+                                    None => matches.len() - 1,
+                                };
+                                tab_index = Some(new_idx);
+                                let completed = format!("{} ", matches[new_idx].0);
+                                input_chars = completed.chars().collect();
+                                cursor_pos = input_chars.len();
+
+                                disable_raw_mode()?;
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                    Some(&base),
+                                    Some(new_idx),
+                                );
+                                enable_raw_mode()?;
+                            }
+                        }
+                    }
+                    KeyCode::Left => {
+                        while cursor_pos > 0 {
+                            cursor_pos -= 1;
+                            if cursor_pos == 0 || !is_thai_zero_width(input_chars[cursor_pos]) {
+                                break;
+                            }
+                        }
+                        disable_raw_mode()?;
+                        redraw_input_box(
+                            &input_chars,
+                            cursor_pos,
+                            placeholder,
+                            model,
+                            path_str,
+                            None,
+                            None,
+                        );
+                        enable_raw_mode()?;
+                    }
+                    KeyCode::Right => {
+                        while cursor_pos < input_chars.len() {
+                            cursor_pos += 1;
+                            if cursor_pos == input_chars.len()
+                                || !is_thai_zero_width(input_chars[cursor_pos])
+                            {
+                                break;
+                            }
+                        }
+                        disable_raw_mode()?;
+                        redraw_input_box(
+                            &input_chars,
+                            cursor_pos,
+                            placeholder,
+                            model,
+                            path_str,
+                            None,
+                            None,
+                        );
+                        enable_raw_mode()?;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(time) = last_paste_time
+                            && time.elapsed() < std::time::Duration::from_millis(100)
+                        {
+                            continue;
+                        }
+                        disable_raw_mode()?;
+                        clear_input_box();
+                        let input_str: String = input_chars.iter().collect();
+
+                        let mut expanded_str = input_str.clone();
+                        for (placeholder_str, content) in &paste_contents {
+                            expanded_str = expanded_str.replace(placeholder_str, content);
+                        }
+
+                        println!("  {BLUE}You ›{RESET} {}", expanded_str);
+                        let _ = io::stdout().flush();
+
+                        break Some(InteractiveInput {
+                            text: expanded_str,
+                            pasted_image,
+                        });
+                    }
+                    KeyCode::Esc => {
+                        disable_raw_mode()?;
+                        clear_input_box();
+                        let _ = io::stdout().flush();
+                        break None;
+                    }
+                    _ => {}
                 }
             }
         }
@@ -3326,18 +3341,18 @@ fn format_placeholders(s: &str) -> String {
     while i < chars.len() {
         if chars[i] == '[' && i + 12 < chars.len() {
             let slice: String = chars[i..i + 13].iter().collect();
-            if slice == "[Pasted text #" {
-                if let Some(end_offset) = chars[i..].iter().position(|&c| c == ']') {
-                    let end_idx = i + end_offset;
-                    let inside: String = chars[i + 1..end_idx].iter().collect();
-                    result.push('[');
-                    result.push_str(BLUE);
-                    result.push_str(&inside);
-                    result.push_str("\x1b[39m");
-                    result.push(']');
-                    i = end_idx + 1;
-                    continue;
-                }
+            if slice == "[Pasted text #"
+                && let Some(end_offset) = chars[i..].iter().position(|&c| c == ']')
+            {
+                let end_idx = i + end_offset;
+                let inside: String = chars[i + 1..end_idx].iter().collect();
+                result.push('[');
+                result.push_str(BLUE);
+                result.push_str(&inside);
+                result.push_str("\x1b[39m");
+                result.push(']');
+                i = end_idx + 1;
+                continue;
             }
         }
         result.push(chars[i]);
@@ -3368,6 +3383,22 @@ fn active_model<'a>(provider: &str, config: &'a mint_core::MintConfig) -> &'a st
         "huggingface" => &config.hf_model,
         "local_openai" => &config.local_model_name,
         "ollama" => &config.ollama_model,
+        p if p.starts_with("custom:") => {
+            if let Some(id) = p.strip_prefix("custom:")
+                && let Some(selections) = config
+                    .extra
+                    .get("customModelSelections")
+                    .and_then(|v| v.as_object())
+                && let Some(m) = selections.get(id).and_then(|v| v.as_str())
+            {
+                return m;
+            }
+            config
+                .resolve_custom_provider(p)
+                .and_then(|cp| cp.models.first())
+                .map(|m| m.model_id.as_str())
+                .unwrap_or("")
+        }
         _ => &config.gemini_model,
     }
 }

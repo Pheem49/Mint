@@ -4,7 +4,29 @@ We are excited to release **Mint Agent v1.8.2**! This release introduces a confi
 
 ---
 
+## 🔌 Custom Provider Support
+
+Users can now add any **OpenAI-compatible endpoint** as a fully configurable custom AI provider, giving complete control over which LLM backend Mint uses.
+
+### Backend (`config.rs`, `chat.rs`)
+- **New data model:** Added `CustomProvider`, `CustomProviderModel`, and `CustomProviderHeader` structs to `MintConfig`. Custom providers are persisted to `mint-config.json` under the `customProviders` key.
+- **Provider ID format:** Each custom provider is stored with a user-defined slug ID and is referenced in `ai_provider` as `"custom:<id>"` (e.g. `"custom:myprovider"`).
+- **Chat routing:** `send_chat()` and `stream_chat()` now dispatch `custom:*` providers through `call_custom_provider()` / `stream_custom_provider()`, which use the existing OpenAI-compatible HTTP code path.
+- **Multiple models:** Each provider stores a list of models; the active model is resolved from `customModelSelections` extra config (set by the UI model selector dropdown).
+- **Custom HTTP headers:** All configured headers are applied to every request sent to that provider.
+- **`available_providers()`** now returns `Vec<String>` (up from `Vec<&'static str>`) to accommodate dynamic custom provider IDs.
+- **`resolve_custom_provider()`** helper added to look up a `CustomProvider` by key (strips the `custom:` prefix automatically).
+
+### Frontend (`SettingsWindow.tsx`, `GeneralTab.tsx`, `AgentsTab.tsx`)
+- **Settings → General → Active Provider dropdown** now includes all configured custom providers dynamically.
+- **Model selector:** When a custom provider is selected as the active provider, a second dropdown appears to pick among that provider's configured models.
+- **Custom Providers section:** A new section at the bottom of General settings displays each custom provider as a card. Each card allows inline editing of: Provider ID (slug-validated), Display Name, Base URL, API Key (password), per-model rows (model ID + display name), and per-header rows (name + value). Providers can be added with `+ Add custom provider` and deleted inline.
+- **Agents tab:** Custom providers (with a configured base URL) now appear in the AI Provider dropdown when creating or editing an agent. The model selector shows that provider's configured models.
+
+---
+
 ## 🔍 Web Search Source Cards
+
 - **Favicon Source Cards:** After a web search, compact clickable source cards now appear above the AI response bubble — each showing the website's favicon, domain name, and a tooltip with the page snippet. Clicking a card opens the source in the browser.
 - **Frontend-only change:** Parsed directly from existing `AgentProgress` `ToolEnd` events — no backend changes required.
 - The AI response also includes a plain-text `Sources:` section listing title and URL for each result used.
@@ -75,6 +97,10 @@ Improved the autocomplete experience in the terminal:
 ### 🎨 12. Material Icon Theme in Agent Activity Tracker
 - **Visual File & Folder Tracking**: The agent activity tracker (e.g. "Exploring file" progress log) now resolves target filenames/foldernames to display specific Material Icon Theme SVGs (e.g. JavaScript icon for `.js`, Rust icon for `.rs` / Cargo directories). This replaces the generic wireframe outline icons, resulting in a cleaner and more polished UI.
 
+### 🎙️ 13. Stricter Voice Reply Settings Control
+- **Strict Control Switch**: The global "Enable Voice Reply" toggle now acts as a strict master switch. When disabled, Mint will never speak responses out loud under any circumstances (including when using voice conversation/microphone mode).
+- **Voice Mode Loop Resumption**: When "Enable Voice Reply" is disabled but voice conversation mode is active, the microphone automatically resumes listening after the AI response is printed on screen, maintaining the continuous hands-free voice loop.
+
 ---
 
 
@@ -122,6 +148,7 @@ Improved the autocomplete experience in the terminal:
 - Refactor file and folder icon mappings from `WorkspacePanel.tsx` into a central, reusable utility `src/renderer/shared/utils/fileIcons.ts`.
 - Update `AgentActivityTable.tsx` to resolve target filenames/foldernames and display their respective Material Icon Theme SVGs instead of default wireframe outlines.
 - Update Desktop and Web CSS stylesheets (`styles.css`) to support rendering and scaling Material Icon SVGs inside the agent activity tracker.
+- Update `ChatPanel.tsx` (Desktop and Web) to strictly check the global `enableVoiceReply` setting. If voice reply is disabled but voice conversation mode is active, the microphone listening loop is automatically scheduled to resume without reading the AI response out loud.
 
 ### CLI Agent (`crates/mint-cli`)
 - Redefine live status print lines (`plan_lines`, `tasks_lines`, `activities_lines`, `explored_lines`) to accept progress tick state and apply the `get_bullet` helper.

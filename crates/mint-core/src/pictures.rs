@@ -79,11 +79,10 @@ pub fn list_saved_pictures() -> Result<Vec<PictureEntry>, PictureError> {
                 .thumbnail_path
                 .as_ref()
                 .is_none_or(|thumbnail_path| !thumbnail_path.exists())
+                && let Some(thumbnail_path) = create_thumbnail_from_file(&directory, &entry)
             {
-                if let Some(thumbnail_path) = create_thumbnail_from_file(&directory, &entry) {
-                    entry.thumbnail_path = Some(thumbnail_path);
-                    changed = true;
-                }
+                entry.thumbnail_path = Some(thumbnail_path);
+                changed = true;
             }
             entry.url = Some(file_url(&entry.path));
             entry.thumbnail_url = entry.thumbnail_path.as_deref().map(file_url);

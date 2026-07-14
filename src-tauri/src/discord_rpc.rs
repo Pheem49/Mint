@@ -14,7 +14,7 @@ pub fn set_activity(config: &MintConfig, instruction: &str) -> Result<String, St
         .filter(|value| !value.trim().is_empty())
         .ok_or("missing config value 'discordApplicationId'")?;
     let input: Value = serde_json::from_str(instruction).unwrap_or_else(|_| {
-        json!({ "details": instruction.trim().is_empty().then_some("Using Mint Assistant").unwrap_or(instruction) })
+        json!({ "details": if instruction.trim().is_empty() { "Using Mint Assistant" } else { instruction } })
     });
     let activity = json!({
         "details": input["details"].as_str().unwrap_or("Using Mint Assistant"),

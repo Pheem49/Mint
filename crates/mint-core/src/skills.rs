@@ -120,25 +120,23 @@ pub fn load_skills_from_dir(dir: &Path, list: &mut Vec<LearnedSkill>) {
                         break;
                     }
                 }
-            } else if path.is_file() {
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    if matches!(ext.to_ascii_lowercase().as_str(), "md" | "txt") {
-                        if let Ok(content) = fs::read_to_string(&path) {
-                            let name = path
-                                .file_stem()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("skill")
-                                .to_string();
-                            list.push(LearnedSkill {
-                                id: 0,
-                                name,
-                                source_path: path.to_string_lossy().to_string(),
-                                content,
-                                created_at: String::new(),
-                            });
-                        }
-                    }
-                }
+            } else if path.is_file()
+                && let Some(ext) = path.extension().and_then(|e| e.to_str())
+                && matches!(ext.to_ascii_lowercase().as_str(), "md" | "txt")
+                && let Ok(content) = fs::read_to_string(&path)
+            {
+                let name = path
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("skill")
+                    .to_string();
+                list.push(LearnedSkill {
+                    id: 0,
+                    name,
+                    source_path: path.to_string_lossy().to_string(),
+                    content,
+                    created_at: String::new(),
+                });
             }
         }
     }

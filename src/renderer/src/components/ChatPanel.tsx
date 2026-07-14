@@ -224,8 +224,13 @@ export default function ChatPanel({
       case 'ollama':
         return dynamicOllamaModels
       default:
+        if (provider.startsWith('custom:')) {
+          const id = provider.replace(/^custom:/, '')
+          const cp = (settingsConfig?.customProviders ?? []).find(p => p.id === id)
+          return cp?.models.map(m => m.modelId) ?? []
+        }
         return []
-    }
+      }
   }
 
   const activeProvider = status?.activeProvider ?? ''
@@ -251,6 +256,11 @@ export default function ChatPanel({
       case 'ollama':
         return settingsConfig.ollamaModel
       default:
+        if (provider.startsWith('custom:')) {
+          const id = provider.replace(/^custom:/, '')
+          const cp = (settingsConfig?.customProviders ?? []).find(p => p.id === id)
+          return (settingsConfig.customModelSelections ?? {})[id] ?? cp?.models[0]?.modelId ?? ''
+        }
         return ''
     }
   }
@@ -382,14 +392,19 @@ export default function ChatPanel({
       }
     }
     if (sending) return
-    if (!settingsConfig?.enableVoiceReply && !voiceMode) {
-      lastAutoSpokenIdRef.current = latest?.id ?? null
+    if (!latest?.aiText || latest.id === lastAutoSpokenIdRef.current) return
+
+    if (!settingsConfig?.enableVoiceReply) {
+      lastAutoSpokenIdRef.current = latest.id
+      if (voiceMode) {
+        scheduleVoiceListen(350)
+      }
       return
     }
-    if (!latest?.aiText || latest.id === lastAutoSpokenIdRef.current) return
+
     lastAutoSpokenIdRef.current = latest.id
     speak(latest.aiText)
-  }, [interactions, sending, settingsConfig?.enableVoiceReply])
+  }, [interactions, sending, settingsConfig?.enableVoiceReply, voiceMode])
   useEffect(() => {
     if (!toolMenuOpen) return
     const closeMenu = (event: MouseEvent) => {
@@ -1055,6 +1070,11 @@ export default function ChatPanel({
                 else if (provider === 'huggingface') displayName = 'HF'
                 else if (provider === 'local_openai') displayName = 'Local'
                 else if (provider === 'ollama') displayName = 'Ollama'
+                else if (provider.startsWith('custom:')) {
+                  const id = provider.replace(/^custom:/, '')
+                  const cp = (settingsConfig?.customProviders ?? []).find(p => p.id === id)
+                  displayName = cp?.displayName || id
+                }
                 return <option key={provider} value={provider}>{displayName}</option>
               })}
             </select>

@@ -27,21 +27,21 @@ pub fn read_clipboard_image() -> Result<Option<String>> {
         if let Ok(output) = std::process::Command::new("xclip")
             .args(["-selection", "clipboard", "-t", "image/png", "-o"])
             .output()
+            && output.status.success()
+            && !output.stdout.is_empty()
         {
-            if output.status.success() && !output.stdout.is_empty() {
-                let encoded = BASE64.encode(&output.stdout);
-                return Ok(Some(format!("data:image/png;base64,{encoded}")));
-            }
+            let encoded = BASE64.encode(&output.stdout);
+            return Ok(Some(format!("data:image/png;base64,{encoded}")));
         }
 
         if let Ok(output) = std::process::Command::new("wl-paste")
             .args(["--type", "image/png"])
             .output()
+            && output.status.success()
+            && !output.stdout.is_empty()
         {
-            if output.status.success() && !output.stdout.is_empty() {
-                let encoded = BASE64.encode(&output.stdout);
-                return Ok(Some(format!("data:image/png;base64,{encoded}")));
-            }
+            let encoded = BASE64.encode(&output.stdout);
+            return Ok(Some(format!("data:image/png;base64,{encoded}")));
         }
 
         Ok(None)
