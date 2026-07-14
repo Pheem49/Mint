@@ -121,7 +121,7 @@ fn run_in_sandbox(
             .arg(cwd)
             .args(["bash", "-lc", command])
             .output()?;
-        return Ok(Some(output));
+        Ok(Some(output))
     }
 
     #[cfg(target_os = "macos")]

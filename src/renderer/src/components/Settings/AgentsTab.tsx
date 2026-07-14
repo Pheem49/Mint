@@ -7,7 +7,8 @@ import {
   DEEPSEEK_MODELS,
   ANTHROPIC_MODELS,
   HF_MODELS,
-  LOCAL_MODELS
+  LOCAL_MODELS,
+  CustomProviderConfig,
 } from '../SettingsWindow'
 
 interface Agent {
@@ -21,7 +22,7 @@ interface Agent {
 }
 
 interface AgentsTabProps {
-  config: typeof DEFAULT_CONFIG & { agents?: Agent[] }
+  config: typeof DEFAULT_CONFIG & { agents?: Agent[], customProviders?: CustomProviderConfig[] }
   updateField: (field: any, value: any) => void
   dynamicOllamaModels?: string[]
 }
@@ -47,6 +48,11 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
     else if (newProvider === 'huggingface') defaultModel = config.hfModel || HF_MODELS[0]
     else if (newProvider === 'local_openai') defaultModel = config.localModelName || LOCAL_MODELS[0]
     else if (newProvider === 'ollama') defaultModel = config.ollamaModel || dynamicOllamaModels[0] || 'llama3:latest'
+    else if (newProvider.startsWith('custom:')) {
+      const cpId = newProvider.replace(/^custom:/, '')
+      const cp = (config.customProviders ?? []).find(p => p.id === cpId)
+      defaultModel = cp?.models[0]?.modelId ?? ''
+    }
     setModel(defaultModel)
   }
 
@@ -141,6 +147,14 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
     { value: 'ollama', label: 'Ollama (Local)', hasKey: true },
     { value: 'huggingface', label: 'Hugging Face', hasKey: !!config.hfApiKey },
     { value: 'local_openai', label: 'Local (LM Studio / OpenAI Compatible)', hasKey: true },
+    // Custom providers — available whenever they have a base URL configured
+    ...(config.customProviders ?? [])
+      .filter(cp => cp.baseUrl.trim().length > 0)
+      .map(cp => ({
+        value: `custom:${cp.id}`,
+        label: `${cp.displayName || cp.id} (Custom)`,
+        hasKey: true,
+      })),
   ].filter(p => p.hasKey);
 
   // Find out what models list corresponds to the selected provider
@@ -170,6 +184,11 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
   } else if (provider === 'ollama') {
     modelList = dynamicOllamaModels
     defaultGeneralModel = config.ollamaModel
+  } else if (provider.startsWith('custom:')) {
+    const cpId = provider.replace(/^custom:/, '')
+    const cp = (config.customProviders ?? []).find(p => p.id === cpId)
+    modelList = cp?.models.map(m => m.modelId) ?? []
+    defaultGeneralModel = modelList[0] ?? ''
   }
 
   // Sort modelList so defaultGeneralModel is first (at the top)

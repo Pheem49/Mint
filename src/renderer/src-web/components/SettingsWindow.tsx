@@ -8,6 +8,27 @@ import ThemeTab from './Settings/ThemeTab'
 import PluginsTab from './Settings/PluginsTab'
 import AgentsTab from './Settings/AgentsTab'
 
+// ─── Custom Provider Types ────────────────────────────────────────────────────
+
+export interface CustomProviderModel {
+  modelId: string
+  displayName: string
+}
+
+export interface CustomProviderHeader {
+  name: string
+  value: string
+}
+
+export interface CustomProviderConfig {
+  id: string
+  displayName: string
+  baseUrl: string
+  apiKey: string
+  models: CustomProviderModel[]
+  headers: CustomProviderHeader[]
+}
+
 export const DEFAULT_CONFIG = {
   theme: 'dark',
   accentColor: '#10b981',
@@ -122,7 +143,11 @@ export const DEFAULT_CONFIG = {
       systemInstruction: 'You are the Reviewer agent. Your task is to verify the code modifications made by the Coder. Run the automated tests, check lint errors, and ensure the implementation is correct and complete.',
       enabled: true
     }
-  ]
+  ],
+  // Custom Providers
+  customProviders: [] as CustomProviderConfig[],
+  // Per-provider model selection: { [providerId]: selectedModelId }
+  customModelSelections: {} as Record<string, string>,
 }
 
 type TabType = 'sect-general' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
@@ -400,6 +425,54 @@ export default function SettingsWindow() {
       await window.settingsApi.saveSettings(finalConfig)
       applyThemeStyles(finalConfig)
       window.settingsApi.closeSettings()
+    } else {
+      try {
+        await setProfileValue('user-settings', JSON.stringify(finalConfig))
+        applyThemeStyles(finalConfig)
+      } catch (e) {
+        console.error("Failed to save user settings:", e)
+      }
+    }
+  }
+
+  const handleSaveWithoutClosing = async () => {
+    const finalConfig = { ...config }
+    
+    if (config.geminiModel === 'custom') {
+      finalConfig.geminiModel = customGemini || 'gemini-2.5-flash'
+    }
+    if (config.openaiModel === 'custom') {
+      finalConfig.openaiModel = customOpenAI || 'gpt-4o'
+    }
+    if (config.openrouterModel === 'custom') {
+      finalConfig.openrouterModel = customOpenRouter || 'openai/gpt-4o-mini'
+    }
+    if (config.deepseekModel === 'custom') {
+      finalConfig.deepseekModel = customDeepSeek || 'deepseek-v4-flash'
+    }
+    if (config.anthropicModel === 'custom') {
+      finalConfig.anthropicModel = customAnthropic || 'claude-3-5-sonnet-latest'
+    }
+    if (config.hfModel === 'custom') {
+      finalConfig.hfModel = customHF || 'meta-llama/Meta-Llama-3-8B-Instruct'
+    }
+    if (config.localModelName === 'custom') {
+      finalConfig.localModelName = customLocal || 'local-model'
+    }
+    if (config.ollamaModel === 'custom') {
+      finalConfig.ollamaModel = customOllama || 'llama3:latest'
+    }
+
+    try {
+      await setProfileValue('name', userName)
+      await setProfileValue('preferences', userPreferences)
+    } catch (e) {
+      console.error("Failed to save user profile memory:", e)
+    }
+
+    if (window.settingsApi) {
+      await window.settingsApi.saveSettings(finalConfig)
+      applyThemeStyles(finalConfig)
     } else {
       try {
         await setProfileValue('user-settings', JSON.stringify(finalConfig))
@@ -694,6 +767,7 @@ export default function SettingsWindow() {
               handleCheckUpdates={handleCheckUpdates}
               handleInstallUpdate={handleInstallUpdate}
               isDesktopApp={isDesktopApp}
+              onSaveWithoutClosing={handleSaveWithoutClosing}
             />
           )}
 

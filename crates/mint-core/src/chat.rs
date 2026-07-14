@@ -19,13 +19,13 @@ pub async fn send_chat_with_fallback(
         Err(_) => {}
     }
     for provider in config.available_providers() {
-        if provider == config.ai_provider.as_str() {
+        if provider.as_str() == config.ai_provider.as_str() {
             continue;
         }
-        let alt = config_for_provider(config, provider);
+        let alt = config_for_provider(config, &provider);
         if let Ok(mut r) = send_chat(&alt, request).await {
             r.fallback_provider = Some(config.ai_provider.clone());
-            return Ok((r, Some(provider.to_owned())));
+            return Ok((r, Some(provider)));
         }
     }
     // all fallbacks failed — retry primary to surface original error
@@ -50,13 +50,13 @@ where
         }
     }
     for provider in config.available_providers() {
-        if provider == config.ai_provider.as_str() {
+        if provider.as_str() == config.ai_provider.as_str() {
             continue;
         }
-        let alt = config_for_provider(config, provider);
+        let alt = config_for_provider(config, &provider);
         if let Ok(mut r) = stream_chat(&alt, request, &mut on_chunk).await {
             r.fallback_provider = Some(config.ai_provider.clone());
-            return Ok((r, Some(provider.to_owned())));
+            return Ok((r, Some(provider)));
         }
     }
     stream_chat(config, request, &mut on_chunk)
@@ -230,6 +230,7 @@ pub async fn send_chat(
         "ollama" => call_ollama(&client, config, request).await?,
         "anthropic" => call_anthropic(&client, config, request).await?,
         "huggingface" => call_huggingface(&client, config, request).await?,
+        p if p.starts_with("custom:") => call_custom_provider(&client, config, request).await?,
         other => return Err(ChatError::UnsupportedProvider(other.into())),
     };
     Ok(ChatResponse {
@@ -259,6 +260,9 @@ where
         "ollama" => stream_ollama(&client, config, request, &mut on_chunk).await?,
         "anthropic" => stream_anthropic(&client, config, request, &mut on_chunk).await?,
         "huggingface" => stream_huggingface(&client, config, request, &mut on_chunk).await?,
+        p if p.starts_with("custom:") => {
+            stream_custom_provider(&client, config, request, &mut on_chunk).await?
+        }
         other => return Err(ChatError::UnsupportedProvider(other.into())),
     };
     Ok(ChatResponse {
@@ -708,6 +712,109 @@ fn required_key(provider: &str, key: &str) -> Result<(), ChatError> {
     }
 }
 
+/// Resolve which model to use for the current custom provider.
+///
+/// Checks `config.extra["customModelSelections"]` first (set by the UI when the
+/// user picks a specific model from the multi-model dropdown), then falls back to
+/// the first model defined in the `CustomProvider`.
+fn resolve_custom_model(config: &crate::MintConfig) -> String {
+    let provider_id = config
+        .ai_provider
+        .strip_prefix("custom:")
+        .unwrap_or(&config.ai_provider);
+
+    // Check if a per-provider model selection was persisted in extra config.
+    if let Some(selections) = config
+        .extra
+        .get("customModelSelections")
+        .and_then(|v| v.as_object())
+        && let Some(model) = selections.get(provider_id).and_then(|v| v.as_str())
+        && !model.is_empty()
+    {
+        return model.to_owned();
+    }
+
+    // Fall back to the first model in the provider definition.
+    config
+        .resolve_custom_provider(&config.ai_provider)
+        .and_then(|cp| cp.models.first())
+        .map(|m| m.model_id.clone())
+        .unwrap_or_default()
+}
+
+async fn call_custom_provider(
+    client: &Client,
+    config: &crate::MintConfig,
+    request: &ChatRequest,
+) -> Result<(String, String), ChatError> {
+    let provider = config
+        .resolve_custom_provider(&config.ai_provider)
+        .ok_or_else(|| ChatError::UnsupportedProvider(config.ai_provider.clone()))?;
+
+    let base_url = provider.base_url.trim_end_matches('/');
+    let model = resolve_custom_model(config);
+    let payload = openai_chat_payload(&model, request, false);
+
+    let mut builder = client
+        .post(format!("{base_url}/chat/completions"))
+        .json(&payload);
+
+    if !provider.api_key.is_empty() {
+        builder = builder.bearer_auth(&provider.api_key);
+    }
+    for h in &provider.headers {
+        if !h.name.is_empty() {
+            builder = builder.header(h.name.as_str(), h.value.as_str());
+        }
+    }
+
+    let response: serde_json::Value = builder.send().await?.error_for_status()?.json().await?;
+
+    Ok((
+        model,
+        response["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or(ChatError::MissingResponseText)?
+            .into(),
+    ))
+}
+
+async fn stream_custom_provider<F>(
+    client: &Client,
+    config: &crate::MintConfig,
+    request: &ChatRequest,
+    on_chunk: &mut F,
+) -> Result<(String, String), ChatError>
+where
+    F: FnMut(String),
+{
+    let provider = config
+        .resolve_custom_provider(&config.ai_provider)
+        .ok_or_else(|| ChatError::UnsupportedProvider(config.ai_provider.clone()))?;
+
+    let base_url = provider.base_url.trim_end_matches('/');
+    let model = resolve_custom_model(config);
+    let payload = openai_chat_payload(&model, request, true);
+
+    let mut builder = client
+        .post(format!("{base_url}/chat/completions"))
+        .json(&payload);
+
+    if !provider.api_key.is_empty() {
+        builder = builder.bearer_auth(&provider.api_key);
+    }
+    for h in &provider.headers {
+        if !h.name.is_empty() {
+            builder = builder.header(h.name.as_str(), h.value.as_str());
+        }
+    }
+
+    let response = builder.send().await?.error_for_status()?;
+    collect_stream(response, StreamFormat::OpenAi, on_chunk)
+        .await
+        .map(|text| (model, text))
+}
+
 fn provider_key(configured: &str, environment_variable: &str) -> String {
     if configured.trim().is_empty() {
         std::env::var(environment_variable).unwrap_or_default()
@@ -720,16 +827,24 @@ fn require_supported_attachments(provider: &str, request: &ChatRequest) -> Resul
     let has_image = request
         .image_data_uri
         .as_ref()
-        .map_or(false, |s| !s.trim().is_empty());
+        .is_some_and(|s| !s.trim().is_empty());
     let has_audio = request
         .audio_data_uri
         .as_ref()
-        .map_or(false, |s| !s.trim().is_empty());
+        .is_some_and(|s| !s.trim().is_empty());
 
     match provider {
         "gemini" => Ok(()),
         "ollama" if has_audio => Err(ChatError::UnsupportedAttachments(provider.into())),
         "ollama" => Ok(()),
+        // Custom providers are text-only for now; reject any multimodal content.
+        p if p.starts_with("custom:") => {
+            if has_image || has_audio {
+                Err(ChatError::UnsupportedAttachments(provider.into()))
+            } else {
+                Ok(())
+            }
+        }
         _ if has_image || has_audio => Err(ChatError::UnsupportedAttachments(provider.into())),
         _ => Ok(()),
     }

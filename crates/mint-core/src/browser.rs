@@ -243,7 +243,7 @@ pub async fn spawn_automation_browser(config: &MintConfig) -> Result<(), String>
         .unwrap_or("chromium");
 
     let profile_dir = dirs::config_dir()
-        .unwrap_or_else(|| std::env::temp_dir())
+        .unwrap_or_else(std::env::temp_dir)
         .join("mint")
         .join("automation-profile");
     let profile_arg = format!("--user-data-dir={}", profile_dir.to_string_lossy());

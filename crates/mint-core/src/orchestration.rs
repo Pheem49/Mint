@@ -71,15 +71,14 @@ pub async fn resolve_github_links(message: &str, config: &MintConfig) -> String 
                 .collect();
 
             let repo_key = format!("{owner}/{repo_clean}");
-            if resolved_repos.insert(repo_key.clone()) {
-                if let Ok(summary) =
+            if resolved_repos.insert(repo_key.clone())
+                && let Ok(summary) =
                     crate::code_tools::fetch_github_repo_summary(owner, &repo_clean).await
-                {
-                    resolved_msg.push_str(&format!(
+            {
+                resolved_msg.push_str(&format!(
                         "\n\n--- Auto-Resolved GitHub Metadata for {} ---\n{}\n--------------------------------------------",
                         repo_key, summary
                     ));
-                }
             }
         }
     }
@@ -210,18 +209,18 @@ fn enrich_request(
     let mut enriched = request.clone();
 
     let mut profile_instructions = String::new();
-    if let Ok(Some(name)) = memory.get_profile("name") {
-        if !name.trim().is_empty() {
-            profile_instructions.push_str(&format!("User Name: {}\n", name.trim()));
-        }
+    if let Ok(Some(name)) = memory.get_profile("name")
+        && !name.trim().is_empty()
+    {
+        profile_instructions.push_str(&format!("User Name: {}\n", name.trim()));
     }
-    if let Ok(Some(preferences)) = memory.get_profile("preferences") {
-        if !preferences.trim().is_empty() {
-            profile_instructions.push_str(&format!(
-                "User Preferences & Profile:\n{}\n",
-                preferences.trim()
-            ));
-        }
+    if let Ok(Some(preferences)) = memory.get_profile("preferences")
+        && !preferences.trim().is_empty()
+    {
+        profile_instructions.push_str(&format!(
+            "User Preferences & Profile:\n{}\n",
+            preferences.trim()
+        ));
     }
 
     if !profile_instructions.is_empty() {
@@ -746,17 +745,17 @@ fn resolve_agent_config(
     cfg_clone.local_model_name = agent.model.clone();
     cfg_clone.ollama_model = agent.model.clone();
 
-    if let Some(key) = &agent.api_key {
-        if !key.trim().is_empty() {
-            match agent.provider.as_str() {
-                "gemini" => cfg_clone.api_key = key.clone(),
-                "openai" => cfg_clone.openai_api_key = key.clone(),
-                "anthropic" => cfg_clone.anthropic_api_key = key.clone(),
-                "openrouter" => cfg_clone.openrouter_api_key = key.clone(),
-                "deepseek" => cfg_clone.deepseek_api_key = key.clone(),
-                "huggingface" => cfg_clone.hf_api_key = key.clone(),
-                _ => {}
-            }
+    if let Some(key) = &agent.api_key
+        && !key.trim().is_empty()
+    {
+        match agent.provider.as_str() {
+            "gemini" => cfg_clone.api_key = key.clone(),
+            "openai" => cfg_clone.openai_api_key = key.clone(),
+            "anthropic" => cfg_clone.anthropic_api_key = key.clone(),
+            "openrouter" => cfg_clone.openrouter_api_key = key.clone(),
+            "deepseek" => cfg_clone.deepseek_api_key = key.clone(),
+            "huggingface" => cfg_clone.hf_api_key = key.clone(),
+            _ => {}
         }
     }
 
@@ -806,18 +805,18 @@ where
 
     if let Ok(memory) = MemoryStore::open_default() {
         let mut profile_instructions = String::new();
-        if let Ok(Some(name)) = memory.get_profile("name") {
-            if !name.trim().is_empty() {
-                profile_instructions.push_str(&format!("User Name: {}\n", name.trim()));
-            }
+        if let Ok(Some(name)) = memory.get_profile("name")
+            && !name.trim().is_empty()
+        {
+            profile_instructions.push_str(&format!("User Name: {}\n", name.trim()));
         }
-        if let Ok(Some(preferences)) = memory.get_profile("preferences") {
-            if !preferences.trim().is_empty() {
-                profile_instructions.push_str(&format!(
-                    "User Preferences & Profile:\n{}\n",
-                    preferences.trim()
-                ));
-            }
+        if let Ok(Some(preferences)) = memory.get_profile("preferences")
+            && !preferences.trim().is_empty()
+        {
+            profile_instructions.push_str(&format!(
+                "User Preferences & Profile:\n{}\n",
+                preferences.trim()
+            ));
         }
 
         if !profile_instructions.is_empty() {
@@ -1274,14 +1273,14 @@ where
             if crate::is_browser_running(config).await {
                 let result = crate::browser::navigate(config, url)
                     .await
-                    .map_err(|e| OrchestrationError::Agent(e))?;
+                    .map_err(OrchestrationError::Agent)?;
                 Ok(result)
             } else {
                 let opened = if cfg!(target_os = "macos") {
                     std::process::Command::new("open").arg(url).spawn().is_ok()
                 } else if cfg!(target_os = "windows") {
                     std::process::Command::new("cmd")
-                        .args(&["/C", "start", url])
+                        .args(["/C", "start", url])
                         .spawn()
                         .is_ok()
                 } else {
@@ -1313,7 +1312,7 @@ where
             };
             let result = crate::browser::click(config, selector)
                 .await
-                .map_err(|e| OrchestrationError::Agent(e))?;
+                .map_err(OrchestrationError::Agent)?;
             Ok(result)
         }
         "browser_type" => {
@@ -1337,13 +1336,13 @@ where
             };
             let result = crate::browser::type_text(config, selector, text)
                 .await
-                .map_err(|e| OrchestrationError::Agent(e))?;
+                .map_err(OrchestrationError::Agent)?;
             Ok(result)
         }
         "browser_read" => {
             let result = crate::browser::read_page_text(config)
                 .await
-                .map_err(|e| OrchestrationError::Agent(e))?;
+                .map_err(OrchestrationError::Agent)?;
             Ok(result)
         }
         "memory_recall" => {
@@ -1499,7 +1498,7 @@ where
                 path: file_name.to_owned(),
                 content: input.file_content.clone(),
             })
-            .map_err(|e| OrchestrationError::Agent(e))?;
+            .map_err(OrchestrationError::Agent)?;
 
             match approved {
                 ApprovalOutcome::Approved => {
@@ -1522,7 +1521,7 @@ where
                 name: name.to_owned(),
                 instruction: instruction.to_owned(),
             })
-            .map_err(|e| OrchestrationError::Agent(e))?;
+            .map_err(OrchestrationError::Agent)?;
 
             match approved {
                 ApprovalOutcome::Approved => Ok(execute_native_plugin(config, name, instruction)
@@ -1540,7 +1539,7 @@ where
                 tool: tool.to_owned(),
                 arguments: input.arguments.clone(),
             })
-            .map_err(|e| OrchestrationError::Agent(e))?;
+            .map_err(OrchestrationError::Agent)?;
 
             match approved {
                 ApprovalOutcome::Approved => Ok(serde_json::to_string_pretty(
@@ -1561,7 +1560,7 @@ where
                 command: command.to_owned(),
                 mode,
             })
-            .map_err(|e| OrchestrationError::Agent(e))?;
+            .map_err(OrchestrationError::Agent)?;
 
             match approved {
                 ApprovalOutcome::Approved => run_shell(root, config, command),
@@ -1606,7 +1605,7 @@ where
                 hunks: patch.hunks.clone(),
                 diff,
             })
-            .map_err(|e| OrchestrationError::Agent(e))?;
+            .map_err(OrchestrationError::Agent)?;
 
             match approved {
                 ApprovalOutcome::Approved => {
@@ -1642,7 +1641,7 @@ where
                 content: input.file_content.clone(),
                 diff,
             })
-            .map_err(|e| OrchestrationError::Agent(e))?;
+            .map_err(OrchestrationError::Agent)?;
 
             match approved {
                 ApprovalOutcome::Approved => {
@@ -1836,13 +1835,13 @@ fn view_image(path: &Path, config: &MintConfig) -> Result<String, OrchestrationE
     }
     let bytes = std::fs::read(&path)
         .map_err(|e| OrchestrationError::Agent(format!("cannot read image: {e}")))?;
-    Ok(serde_json::to_string_pretty(&serde_json::json!({
+    serde_json::to_string_pretty(&serde_json::json!({
         "path": path,
         "bytes": bytes.len(),
         "mime": mime,
         "dataUri": format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes)),
     }))
-    .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+    .map_err(|e| OrchestrationError::Agent(e.to_string()))
 }
 
 fn run_shell(
@@ -1858,14 +1857,13 @@ fn run_shell(
 
     let mut hint = "";
     let cmd_lower = command.to_lowercase();
-    if output.success {
-        if cmd_lower.contains("open")
+    if output.success
+        && (cmd_lower.contains("open")
             || cmd_lower.contains("launch")
             || cmd_lower.contains("chrome")
-            || cmd_lower.contains("firefox")
-        {
-            hint = "\nNote: Opening URLs, files, folders, or launching applications are background processes. Even if there are warnings or stdout/stderr outputs, since the command exited successfully with status 0, the operation has succeeded and you should now use the 'finish' action to inform the user.";
-        }
+            || cmd_lower.contains("firefox"))
+    {
+        hint = "\nNote: Opening URLs, files, folders, or launching applications are background processes. Even if there are warnings or stdout/stderr outputs, since the command exited successfully with status 0, the operation has succeeded and you should now use the 'finish' action to inform the user.";
     }
 
     Ok(format!(
@@ -2286,19 +2284,19 @@ Example response:
         text_reply.to_string()
     };
 
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&clean_json) {
-        if let Some(obj) = value.as_object() {
-            if let Some(new_name) = obj.get("name").and_then(|v| v.as_str()) {
-                let trimmed_name = new_name.trim();
-                if !trimmed_name.is_empty() && trimmed_name != current_name {
-                    memory.set_profile("name", trimmed_name)?;
-                }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&clean_json)
+        && let Some(obj) = value.as_object()
+    {
+        if let Some(new_name) = obj.get("name").and_then(|v| v.as_str()) {
+            let trimmed_name = new_name.trim();
+            if !trimmed_name.is_empty() && trimmed_name != current_name {
+                memory.set_profile("name", trimmed_name)?;
             }
-            if let Some(new_pref) = obj.get("preferences").and_then(|v| v.as_str()) {
-                let trimmed_pref = new_pref.trim();
-                if !trimmed_pref.is_empty() && trimmed_pref != current_pref {
-                    memory.set_profile("preferences", trimmed_pref)?;
-                }
+        }
+        if let Some(new_pref) = obj.get("preferences").and_then(|v| v.as_str()) {
+            let trimmed_pref = new_pref.trim();
+            if !trimmed_pref.is_empty() && trimmed_pref != current_pref {
+                memory.set_profile("preferences", trimmed_pref)?;
             }
         }
     }
@@ -2309,6 +2307,7 @@ Example response:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::AgentConfig;
 
     #[test]
     fn preserves_request_without_history() {
@@ -2325,9 +2324,12 @@ mod tests {
             workspace_path: None,
             agent_id: None,
         };
-        assert_eq!(
-            enrich_request(&store, &request).unwrap().system_instruction,
-            "system"
+        let config = MintConfig::default();
+        assert!(
+            enrich_request(&config, &store, &request)
+                .unwrap()
+                .system_instruction
+                .starts_with("system")
         );
     }
 
@@ -2433,6 +2435,7 @@ mod tests {
     #[test]
     fn test_resolve_agent_config() {
         let mut config = MintConfig::default();
+        config.enable_agent_collaboration = true;
         config.agents = vec![
             AgentConfig {
                 id: "planner".into(),
@@ -2462,7 +2465,7 @@ mod tests {
         assert_eq!(name, Some("Planner".to_string()));
         assert_eq!(model, Some("gpt-4o".to_string()));
 
-        let (cfg, instr, name, model) = resolve_agent_config(&config, None, &[]);
+        let (cfg, instr, name, _model) = resolve_agent_config(&config, None, &[]);
         assert_eq!(cfg.ai_provider, "openai");
         assert_eq!(instr, "Planner instruction");
         assert_eq!(name, Some("Planner".to_string()));

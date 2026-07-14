@@ -213,16 +213,15 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         new_title: String,
                     }
 
-                    if let Ok(req) = serde_json::from_str::<RenameRequest>(body) {
-                        if let Ok(memory) = MemoryStore::open_default() {
-                            let updated = memory
-                                .rename_chat_session(&req.chat_id, &req.new_title)
-                                .unwrap_or(0);
-                            let response =
-                                serde_json::json!({ "status": "ok", "updated": updated });
-                            send_json_response(socket, "200 OK", &response.to_string()).await;
-                            return;
-                        }
+                    if let Ok(req) = serde_json::from_str::<RenameRequest>(body)
+                        && let Ok(memory) = MemoryStore::open_default()
+                    {
+                        let updated = memory
+                            .rename_chat_session(&req.chat_id, &req.new_title)
+                            .unwrap_or(0);
+                        let response = serde_json::json!({ "status": "ok", "updated": updated });
+                        send_json_response(socket, "200 OK", &response.to_string()).await;
+                        return;
                     }
                     send_json_response(
                         socket,
@@ -252,12 +251,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         key: String,
                         value: String,
                     }
-                    if let Ok(req) = serde_json::from_str::<ProfileRequest>(body) {
-                        if let Ok(memory) = MemoryStore::open_default() {
-                            let _ = memory.set_profile(&req.key, &req.value);
-                            send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                            return;
-                        }
+                    if let Ok(req) = serde_json::from_str::<ProfileRequest>(body)
+                        && let Ok(memory) = MemoryStore::open_default()
+                    {
+                        let _ = memory.set_profile(&req.key, &req.value);
+                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
+                        return;
                     }
                     send_json_response(
                         socket,
@@ -341,25 +340,18 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         activity: Vec<AgentProgress>,
                     }
 
-                    if let Ok(payload) = serde_json::from_str::<SaveAgentActivityRequest>(body) {
-                        if let Ok(memory) = MemoryStore::open_default() {
-                            match serde_json::to_string(&payload.activity) {
-                                Ok(activity_json) => {
-                                    if memory
-                                        .set_interaction_agent_activity_json(
-                                            payload.interaction_id,
-                                            &activity_json,
-                                        )
-                                        .is_ok()
-                                    {
-                                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}")
-                                            .await;
-                                        return;
-                                    }
-                                }
-                                Err(_) => {}
-                            }
-                        }
+                    if let Ok(payload) = serde_json::from_str::<SaveAgentActivityRequest>(body)
+                        && let Ok(memory) = MemoryStore::open_default()
+                        && let Ok(activity_json) = serde_json::to_string(&payload.activity)
+                        && memory
+                            .set_interaction_agent_activity_json(
+                                payload.interaction_id,
+                                &activity_json,
+                            )
+                            .is_ok()
+                    {
+                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
+                        return;
                     }
                     send_json_response(
                         socket,
@@ -406,11 +398,11 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     }
                 }
                 ("POST", "/api/config") => {
-                    if let Ok(new_config) = serde_json::from_str::<MintConfig>(body) {
-                        if save_config(&new_config).is_ok() {
-                            send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                            return;
-                        }
+                    if let Ok(new_config) = serde_json::from_str::<MintConfig>(body)
+                        && save_config(&new_config).is_ok()
+                    {
+                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
+                        return;
                     }
                     send_json_response(
                         socket,
@@ -693,8 +685,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                                         "text": format!("Error orchestrating chat: {e}")
                                                     }
                                                 });
-                                                let _ = tx_done
-                                                    .send(format!("{}\n", err_json.to_string()));
+                                                let _ = tx_done.send(format!("{}\n", err_json));
                                             }
                                         }
                                     });
@@ -774,8 +765,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                                         "text": format!("Error orchestrating agent: {e}")
                                                     }
                                                 });
-                                                let _ = tx_done
-                                                    .send(format!("{}\n", err_json.to_string()));
+                                                let _ = tx_done.send(format!("{}\n", err_json));
                                             }
                                         }
                                     });
@@ -1147,12 +1137,13 @@ fn percent_decode(raw: &str) -> String {
     let mut output = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index] == b'%' && index + 2 < bytes.len() {
-            if let Ok(hex) = u8::from_str_radix(&raw[index + 1..index + 3], 16) {
-                output.push(hex);
-                index += 3;
-                continue;
-            }
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let Ok(hex) = u8::from_str_radix(&raw[index + 1..index + 3], 16)
+        {
+            output.push(hex);
+            index += 3;
+            continue;
         }
         output.push(if bytes[index] == b'+' {
             b' '

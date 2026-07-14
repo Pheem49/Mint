@@ -189,47 +189,47 @@ pub async fn run_code_agent_with_options(
             agent_name,
             model_name,
         } => {
-            if !options.fast_mode {
-                if let Ok(mut status) = progress_live_status.lock() {
-                    let label = if let (Some(a), Some(m)) = (agent_name, model_name) {
-                        format!(
-                            "{} ({}) is thinking ({} • Esc to interrupt)",
-                            a,
-                            m,
-                            format_elapsed(Duration::from_secs(elapsed_secs))
-                        )
-                    } else {
-                        format!(
-                            "Thinking ({} • Esc to interrupt)",
-                            format_elapsed(Duration::from_secs(elapsed_secs))
-                        )
-                    };
-                    status.thinking = Some(label);
-                    render_live_status(&mut status);
-                }
+            if !options.fast_mode
+                && let Ok(mut status) = progress_live_status.lock()
+            {
+                let label = if let (Some(a), Some(m)) = (agent_name, model_name) {
+                    format!(
+                        "{} ({}) is thinking ({} • Esc to interrupt)",
+                        a,
+                        m,
+                        format_elapsed(Duration::from_secs(elapsed_secs))
+                    )
+                } else {
+                    format!(
+                        "Thinking ({} • Esc to interrupt)",
+                        format_elapsed(Duration::from_secs(elapsed_secs))
+                    )
+                };
+                status.thinking = Some(label);
+                render_live_status(&mut status);
             }
         }
         AgentProgress::Thought { thought } => {
-            if !options.fast_mode {
-                if let Ok(mut status) = progress_live_status.lock() {
-                    commit_activity_snapshot(&mut status);
-                    print_timeline_note(&thought);
-                    status.thinking = None;
-                    render_live_status(&mut status);
-                }
+            if !options.fast_mode
+                && let Ok(mut status) = progress_live_status.lock()
+            {
+                commit_activity_snapshot(&mut status);
+                print_timeline_note(&thought);
+                status.thinking = None;
+                render_live_status(&mut status);
             }
         }
         AgentProgress::ToolStart { action, input } => {
             if !options.fast_mode {
-                if action == "create_plan" || action == "update_plan" {
-                    if let Some(steps) = extract_plan_steps(&input) {
-                        if let Ok(mut status) = progress_live_status.lock() {
-                            status.thinking = None;
-                            status.plan_steps = steps;
-                            render_live_status(&mut status);
-                        }
-                        return;
+                if (action == "create_plan" || action == "update_plan")
+                    && let Some(steps) = extract_plan_steps(&input)
+                {
+                    if let Ok(mut status) = progress_live_status.lock() {
+                        status.thinking = None;
+                        status.plan_steps = steps;
+                        render_live_status(&mut status);
                     }
+                    return;
                 }
                 if let Some(label) = explored_action_label(&action, &input) {
                     if let Ok(mut status) = progress_live_status.lock() {
@@ -321,12 +321,12 @@ pub async fn run_code_agent_with_options(
         } => {
             if !options.fast_mode {
                 if action == "create_plan" || action == "update_plan" {
-                    if let Some(steps) = extract_plan_steps(&input) {
-                        if let Ok(mut status) = progress_live_status.lock() {
-                            status.thinking = None;
-                            status.plan_steps = steps;
-                            render_live_status(&mut status);
-                        }
+                    if let Some(steps) = extract_plan_steps(&input)
+                        && let Ok(mut status) = progress_live_status.lock()
+                    {
+                        status.thinking = None;
+                        status.plan_steps = steps;
+                        render_live_status(&mut status);
                     }
                 } else if command_was_run(&result)
                     && let Some(commands) = ran_command_labels(&action, &input)
@@ -343,39 +343,38 @@ pub async fn run_code_agent_with_options(
             if action == "web_search"
                 && !result.starts_with("Web search error:")
                 && result != "No web search results found."
+                && let Ok(mut status) = progress_live_status.lock()
             {
-                if let Ok(mut status) = progress_live_status.lock() {
-                    let sources = parse_web_search_sources(&result);
-                    status.web_sources.extend(sources);
-                }
+                let sources = parse_web_search_sources(&result);
+                status.web_sources.extend(sources);
             }
         }
     };
 
     let chunk_live_status = Arc::clone(&live_status);
     let on_chunk = |summary: String| {
-        if !options.fast_mode {
-            if let Ok(mut status) = chunk_live_status.lock() {
-                status.thinking = None;
-                commit_activity_snapshot(&mut status);
-                clear_live_status(&mut status);
-            }
+        if !options.fast_mode
+            && let Ok(mut status) = chunk_live_status.lock()
+        {
+            status.thinking = None;
+            commit_activity_snapshot(&mut status);
+            clear_live_status(&mut status);
         }
         let formatted_summary = format_markdown_bold(&sanitize_latex(&summary));
         print!("\n  {MINT}Mint:{RESET} ");
         render_live_summary(&formatted_summary);
 
         // Print web search sources if any were collected
-        if let Ok(mut status) = chunk_live_status.lock() {
-            if !status.web_sources.is_empty() {
-                println!();
-                println!("  {DIM}Sources:{RESET}");
-                for (i, (title, url)) in status.web_sources.iter().enumerate() {
-                    println!("  {DIM}{}.{RESET} {BLUE}{}{RESET}", i + 1, title);
-                    println!("     {DIM}{}{RESET}", url);
-                }
-                status.web_sources.clear();
+        if let Ok(mut status) = chunk_live_status.lock()
+            && !status.web_sources.is_empty()
+        {
+            println!();
+            println!("  {DIM}Sources:{RESET}");
+            for (i, (title, url)) in status.web_sources.iter().enumerate() {
+                println!("  {DIM}{}.{RESET} {BLUE}{}{RESET}", i + 1, title);
+                println!("     {DIM}{}{RESET}", url);
             }
+            status.web_sources.clear();
         }
 
         println!();
@@ -404,14 +403,14 @@ pub async fn run_code_agent_with_options(
         }
     };
     agent_done.store(true, Ordering::Relaxed);
-    if !options.fast_mode {
-        if let Ok(mut status) = live_status.lock() {
-            status.thinking = None;
-            if res.is_err() {
-                commit_activity_snapshot(&mut status);
-            }
-            clear_live_status(&mut status);
+    if !options.fast_mode
+        && let Ok(mut status) = live_status.lock()
+    {
+        status.thinking = None;
+        if res.is_err() {
+            commit_activity_snapshot(&mut status);
         }
+        clear_live_status(&mut status);
     }
     let res = res.map_err(|e| anyhow!("{}", e))?;
 
@@ -444,19 +443,19 @@ fn parse_web_search_sources(result: &str) -> Vec<(String, String)> {
     for line in result.lines() {
         let trimmed = line.trim();
         // Match numbered title lines: "1. Title text"
-        if let Some(rest) = trimmed.split_once(". ") {
-            if rest.0.parse::<usize>().is_ok() {
-                current_title = Some(rest.1.trim().to_owned());
-                continue;
-            }
+        if let Some(rest) = trimmed.split_once(". ")
+            && rest.0.parse::<usize>().is_ok()
+        {
+            current_title = Some(rest.1.trim().to_owned());
+            continue;
         }
         // Match URL lines: "URL: https://..."
-        if let Some(url) = trimmed.strip_prefix("URL: ") {
-            if let Some(title) = current_title.take() {
-                let url = url.trim().to_owned();
-                if !url.is_empty() {
-                    sources.push((title, url));
-                }
+        if let Some(url) = trimmed.strip_prefix("URL: ")
+            && let Some(title) = current_title.take()
+        {
+            let url = url.trim().to_owned();
+            if !url.is_empty() {
+                sources.push((title, url));
             }
         }
     }
@@ -688,7 +687,7 @@ fn render_live_status(status: &mut LiveStatus) {
         let stripped = strip_ansi_escapes(line);
         let line_len = stripped.chars().filter(|&c| !is_thai_combining(c)).count();
         let physical_lines = if width > 0 {
-            (line_len + width - 1) / width
+            line_len.div_ceil(width)
         } else {
             1
         }
@@ -761,7 +760,11 @@ fn clear_live_status(status: &mut LiveStatus) {
 
 fn get_bullet(name: &str, is_thinking: bool, tick: usize) -> String {
     let char_str = if is_thinking {
-        if (tick / 4) % 2 == 0 { "●" } else { "○" }
+        if (tick / 4).is_multiple_of(2) {
+            "●"
+        } else {
+            "○"
+        }
     } else {
         "●"
     };
@@ -974,7 +977,7 @@ fn format_markdown_bold(text: &str) -> String {
                 } else {
                     if c == '-' || c == '*' || c == '+' {
                         let after = &line[idx + c.len_utf8()..];
-                        if after.chars().next().map_or(false, |c| c.is_whitespace()) {
+                        if after.chars().next().is_some_and(|c| c.is_whitespace()) {
                             is_list_item = true;
                             marker_char = c;
                         }

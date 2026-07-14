@@ -119,11 +119,7 @@ fn get_runtime_status() -> Result<RuntimeStatus, String> {
             .display()
             .to_string(),
         active_provider: config.ai_provider.clone(),
-        available_providers: config
-            .available_providers()
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
+        available_providers: config.available_providers(),
         integrations: integration_status(&config),
     })
 }
@@ -1185,8 +1181,8 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
 fn install_shortcuts(app: &AppHandle) -> tauri::Result<()> {
     let main_shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Space);
     let spotlight_shortcut = Shortcut::new(Some(Modifiers::ALT), Code::Space);
-    let main_handler = main_shortcut.clone();
-    let spotlight_handler = spotlight_shortcut.clone();
+    let main_handler = main_shortcut;
+    let spotlight_handler = spotlight_shortcut;
     app.plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(move |app, shortcut, event| {

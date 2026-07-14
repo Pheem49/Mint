@@ -296,71 +296,71 @@ pub async fn run() -> Result<()> {
     loop {
         match event::poll(std::time::Duration::from_millis(100)) {
             Ok(true) => {
-                if let Event::Key(key_event) = event::read()? {
-                    if key_event.kind == event::KeyEventKind::Press {
-                        let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
-                            && key_event
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL);
-                        if is_ctrl_c {
-                            disable_raw_mode()?;
-                            println!("\n\x1b[31mOnboarding cancelled.\x1b[0m");
-                            return Ok(());
-                        }
+                if let Event::Key(key_event) = event::read()?
+                    && key_event.kind == event::KeyEventKind::Press
+                {
+                    let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                        && key_event
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL);
+                    if is_ctrl_c {
+                        disable_raw_mode()?;
+                        println!("\n\x1b[31mOnboarding cancelled.\x1b[0m");
+                        return Ok(());
+                    }
 
-                        match key_event.code {
-                            KeyCode::Up => {
-                                if cursor > 0 {
-                                    cursor -= 1;
-                                } else {
-                                    cursor = services.len() - 1;
-                                }
-                                disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", service_display_lines(&services));
-                                print_services(&services, cursor);
-                                enable_raw_mode()?;
+                    match key_event.code {
+                        KeyCode::Up => {
+                            if cursor > 0 {
+                                cursor -= 1;
+                            } else {
+                                cursor = services.len() - 1;
                             }
-                            KeyCode::Down => {
-                                if cursor < services.len() - 1 {
-                                    cursor += 1;
-                                } else {
-                                    cursor = 0;
-                                }
-                                disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", service_display_lines(&services));
-                                print_services(&services, cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Char(' ') => {
-                                services[cursor].enabled = !services[cursor].enabled;
-                                disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", service_display_lines(&services));
-                                print_services(&services, cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Char('a') => {
-                                for svc in &mut services {
-                                    svc.enabled = true;
-                                }
-                                disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", service_display_lines(&services));
-                                print_services(&services, cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Char('i') => {
-                                for svc in &mut services {
-                                    svc.enabled = !svc.enabled;
-                                }
-                                disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", service_display_lines(&services));
-                                print_services(&services, cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Enter => {
-                                break;
-                            }
-                            _ => {}
+                            disable_raw_mode()?;
+                            print!("\x1b[{}A\x1b[J", service_display_lines(&services));
+                            print_services(&services, cursor);
+                            enable_raw_mode()?;
                         }
+                        KeyCode::Down => {
+                            if cursor < services.len() - 1 {
+                                cursor += 1;
+                            } else {
+                                cursor = 0;
+                            }
+                            disable_raw_mode()?;
+                            print!("\x1b[{}A\x1b[J", service_display_lines(&services));
+                            print_services(&services, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Char(' ') => {
+                            services[cursor].enabled = !services[cursor].enabled;
+                            disable_raw_mode()?;
+                            print!("\x1b[{}A\x1b[J", service_display_lines(&services));
+                            print_services(&services, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Char('a') => {
+                            for svc in &mut services {
+                                svc.enabled = true;
+                            }
+                            disable_raw_mode()?;
+                            print!("\x1b[{}A\x1b[J", service_display_lines(&services));
+                            print_services(&services, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Char('i') => {
+                            for svc in &mut services {
+                                svc.enabled = !svc.enabled;
+                            }
+                            disable_raw_mode()?;
+                            print!("\x1b[{}A\x1b[J", service_display_lines(&services));
+                            print_services(&services, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Enter => {
+                            break;
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -1052,52 +1052,52 @@ fn prompt_select_or_custom(
     loop {
         match event::poll(std::time::Duration::from_millis(100)) {
             Ok(true) => {
-                if let Event::Key(key_event) = event::read()? {
-                    if key_event.kind == event::KeyEventKind::Press {
-                        let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
-                            && key_event
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL);
-                        if is_ctrl_c {
-                            disable_raw_mode()?;
-                            println!("\n\x1b[31mOnboarding cancelled.\x1b[0m");
-                            bail!("onboarding cancelled");
-                        }
+                if let Event::Key(key_event) = event::read()?
+                    && key_event.kind == event::KeyEventKind::Press
+                {
+                    let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                        && key_event
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL);
+                    if is_ctrl_c {
+                        disable_raw_mode()?;
+                        println!("\n\x1b[31mOnboarding cancelled.\x1b[0m");
+                        bail!("onboarding cancelled");
+                    }
 
-                        match key_event.code {
-                            KeyCode::Up => {
-                                if cursor > 0 {
-                                    cursor -= 1;
-                                } else {
-                                    cursor = options.len() - 1;
-                                }
-                                disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", options.len());
-                                print_select_options(&options, cursor);
-                                enable_raw_mode()?;
+                    match key_event.code {
+                        KeyCode::Up => {
+                            if cursor > 0 {
+                                cursor -= 1;
+                            } else {
+                                cursor = options.len() - 1;
                             }
-                            KeyCode::Down => {
-                                if cursor < options.len() - 1 {
-                                    cursor += 1;
-                                } else {
-                                    cursor = 0;
-                                }
-                                disable_raw_mode()?;
-                                print!("\x1b[{}A\x1b[J", options.len());
-                                print_select_options(&options, cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Enter => {
-                                disable_raw_mode()?;
-                                println!();
-                                let selected = options[cursor].clone();
-                                if selected == custom_label {
-                                    return prompt_input(label, Some(current));
-                                }
-                                return Ok(selected);
-                            }
-                            _ => {}
+                            disable_raw_mode()?;
+                            print!("\x1b[{}A\x1b[J", options.len());
+                            print_select_options(&options, cursor);
+                            enable_raw_mode()?;
                         }
+                        KeyCode::Down => {
+                            if cursor < options.len() - 1 {
+                                cursor += 1;
+                            } else {
+                                cursor = 0;
+                            }
+                            disable_raw_mode()?;
+                            print!("\x1b[{}A\x1b[J", options.len());
+                            print_select_options(&options, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Enter => {
+                            disable_raw_mode()?;
+                            println!();
+                            let selected = options[cursor].clone();
+                            if selected == custom_label {
+                                return prompt_input(label, Some(current));
+                            }
+                            return Ok(selected);
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -1223,10 +1223,10 @@ fn print_select_options(options: &[String], cursor: usize) {
 
 fn prompt_input(label: &str, default: Option<&str>) -> Result<String> {
     print!("{}", label);
-    if let Some(d) = default {
-        if !d.is_empty() {
-            print!(" [\x1b[90m{}\x1b[0m]", d);
-        }
+    if let Some(d) = default
+        && !d.is_empty()
+    {
+        print!(" [\x1b[90m{}\x1b[0m]", d);
     }
     print!(": ");
     io::stdout().flush()?;
@@ -1234,10 +1234,10 @@ fn prompt_input(label: &str, default: Option<&str>) -> Result<String> {
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
     let trimmed = input.trim();
-    if trimmed.is_empty() {
-        if let Some(d) = default {
-            return Ok(d.to_string());
-        }
+    if trimmed.is_empty()
+        && let Some(d) = default
+    {
+        return Ok(d.to_string());
     }
     Ok(trimmed.to_string())
 }

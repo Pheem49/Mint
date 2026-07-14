@@ -41,8 +41,8 @@ pub use code_tools::{
     propose_code_edits, read_code_file, repository_summary, search_code,
 };
 pub use config::{
-    ConfigError, MintConfig, config_path, initialize_config, load_config, save_config,
-    set_config_value,
+    AgentConfig, ConfigError, CustomProvider, CustomProviderHeader, CustomProviderModel,
+    MintConfig, config_path, initialize_config, load_config, save_config, set_config_value,
 };
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
 pub use image_gen::{

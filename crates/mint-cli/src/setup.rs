@@ -175,66 +175,66 @@ pub async fn run() -> Result<Option<String>> {
     loop {
         match event::poll(std::time::Duration::from_millis(100)) {
             Ok(true) => {
-                if let Event::Key(key_event) = event::read()? {
-                    if key_event.kind == event::KeyEventKind::Press {
-                        let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
-                            && key_event
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL);
-                        if is_ctrl_c {
-                            disable_raw_mode()?;
-                            println!("\n\x1b[31mSetup cancelled.\x1b[0m");
-                            return Ok(None);
-                        }
+                if let Event::Key(key_event) = event::read()?
+                    && key_event.kind == event::KeyEventKind::Press
+                {
+                    let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                        && key_event
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL);
+                    if is_ctrl_c {
+                        disable_raw_mode()?;
+                        println!("\n\x1b[31mSetup cancelled.\x1b[0m");
+                        return Ok(None);
+                    }
 
-                        match key_event.code {
-                            KeyCode::Up => {
-                                if cursor > 0 {
-                                    cursor -= 1;
-                                } else {
-                                    cursor = options.len() - 1;
-                                }
-                                disable_raw_mode()?;
-                                redraw_phase_1(&options, cursor);
-                                enable_raw_mode()?;
+                    match key_event.code {
+                        KeyCode::Up => {
+                            if cursor > 0 {
+                                cursor -= 1;
+                            } else {
+                                cursor = options.len() - 1;
                             }
-                            KeyCode::Down => {
-                                if cursor < options.len() - 1 {
-                                    cursor += 1;
-                                } else {
-                                    cursor = 0;
-                                }
-                                disable_raw_mode()?;
-                                redraw_phase_1(&options, cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Char(' ') => {
-                                options[cursor].enabled = !options[cursor].enabled;
-                                disable_raw_mode()?;
-                                redraw_phase_1(&options, cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Char('a') => {
-                                for opt in &mut options {
-                                    opt.enabled = true;
-                                }
-                                disable_raw_mode()?;
-                                redraw_phase_1(&options, cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Char('i') => {
-                                for opt in &mut options {
-                                    opt.enabled = !opt.enabled;
-                                }
-                                disable_raw_mode()?;
-                                redraw_phase_1(&options, cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Enter => {
-                                break;
-                            }
-                            _ => {}
+                            disable_raw_mode()?;
+                            redraw_phase_1(&options, cursor);
+                            enable_raw_mode()?;
                         }
+                        KeyCode::Down => {
+                            if cursor < options.len() - 1 {
+                                cursor += 1;
+                            } else {
+                                cursor = 0;
+                            }
+                            disable_raw_mode()?;
+                            redraw_phase_1(&options, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Char(' ') => {
+                            options[cursor].enabled = !options[cursor].enabled;
+                            disable_raw_mode()?;
+                            redraw_phase_1(&options, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Char('a') => {
+                            for opt in &mut options {
+                                opt.enabled = true;
+                            }
+                            disable_raw_mode()?;
+                            redraw_phase_1(&options, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Char('i') => {
+                            for opt in &mut options {
+                                opt.enabled = !opt.enabled;
+                            }
+                            disable_raw_mode()?;
+                            redraw_phase_1(&options, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Enter => {
+                            break;
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -298,67 +298,67 @@ pub async fn run() -> Result<Option<String>> {
     loop {
         match event::poll(std::time::Duration::from_millis(100)) {
             Ok(true) => {
-                if let Event::Key(key_event) = event::read()? {
-                    if key_event.kind == event::KeyEventKind::Press {
-                        let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
-                            && key_event
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL);
-                        if is_ctrl_c {
-                            disable_raw_mode()?;
-                            println!("\n\x1b[31mSetup cancelled.\x1b[0m");
-                            return Ok(None);
-                        }
+                if let Event::Key(key_event) = event::read()?
+                    && key_event.kind == event::KeyEventKind::Press
+                {
+                    let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                        && key_event
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL);
+                    if is_ctrl_c {
+                        disable_raw_mode()?;
+                        println!("\n\x1b[31mSetup cancelled.\x1b[0m");
+                        return Ok(None);
+                    }
 
-                        match key_event.code {
-                            KeyCode::Up => {
-                                if native_cursor > 0 {
-                                    native_cursor -= 1;
-                                } else {
-                                    native_cursor = native_options.len() - 1;
-                                }
-                                disable_raw_mode()?;
-                                redraw_phase_2(&native_options, native_cursor);
-                                enable_raw_mode()?;
+                    match key_event.code {
+                        KeyCode::Up => {
+                            if native_cursor > 0 {
+                                native_cursor -= 1;
+                            } else {
+                                native_cursor = native_options.len() - 1;
                             }
-                            KeyCode::Down => {
-                                if native_cursor < native_options.len() - 1 {
-                                    native_cursor += 1;
-                                } else {
-                                    native_cursor = 0;
-                                }
-                                disable_raw_mode()?;
-                                redraw_phase_2(&native_options, native_cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Char(' ') => {
-                                native_options[native_cursor].enabled =
-                                    !native_options[native_cursor].enabled;
-                                disable_raw_mode()?;
-                                redraw_phase_2(&native_options, native_cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Char('a') => {
-                                for opt in &mut native_options {
-                                    opt.enabled = true;
-                                }
-                                disable_raw_mode()?;
-                                redraw_phase_2(&native_options, native_cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Char('i') => {
-                                for opt in &mut native_options {
-                                    opt.enabled = !opt.enabled;
-                                }
-                                disable_raw_mode()?;
-                                redraw_phase_2(&native_options, native_cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Enter => {
-                                break;
-                            }
-                            _ => {}
+                            disable_raw_mode()?;
+                            redraw_phase_2(&native_options, native_cursor);
+                            enable_raw_mode()?;
                         }
+                        KeyCode::Down => {
+                            if native_cursor < native_options.len() - 1 {
+                                native_cursor += 1;
+                            } else {
+                                native_cursor = 0;
+                            }
+                            disable_raw_mode()?;
+                            redraw_phase_2(&native_options, native_cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Char(' ') => {
+                            native_options[native_cursor].enabled =
+                                !native_options[native_cursor].enabled;
+                            disable_raw_mode()?;
+                            redraw_phase_2(&native_options, native_cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Char('a') => {
+                            for opt in &mut native_options {
+                                opt.enabled = true;
+                            }
+                            disable_raw_mode()?;
+                            redraw_phase_2(&native_options, native_cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Char('i') => {
+                            for opt in &mut native_options {
+                                opt.enabled = !opt.enabled;
+                            }
+                            disable_raw_mode()?;
+                            redraw_phase_2(&native_options, native_cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Enter => {
+                            break;
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -410,44 +410,44 @@ pub async fn run() -> Result<Option<String>> {
     loop {
         match event::poll(std::time::Duration::from_millis(100)) {
             Ok(true) => {
-                if let Event::Key(key_event) = event::read()? {
-                    if key_event.kind == event::KeyEventKind::Press {
-                        let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
-                            && key_event
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL);
-                        if is_ctrl_c {
-                            disable_raw_mode()?;
-                            println!("\n\x1b[31mRun selection cancelled.\x1b[0m");
-                            return Ok(None);
-                        }
+                if let Event::Key(key_event) = event::read()?
+                    && key_event.kind == event::KeyEventKind::Press
+                {
+                    let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                        && key_event
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL);
+                    if is_ctrl_c {
+                        disable_raw_mode()?;
+                        println!("\n\x1b[31mRun selection cancelled.\x1b[0m");
+                        return Ok(None);
+                    }
 
-                        match key_event.code {
-                            KeyCode::Up => {
-                                if run_cursor > 0 {
-                                    run_cursor -= 1;
-                                } else {
-                                    run_cursor = run_options.len() - 1;
-                                }
-                                disable_raw_mode()?;
-                                redraw_phase_3(&run_options, run_cursor);
-                                enable_raw_mode()?;
+                    match key_event.code {
+                        KeyCode::Up => {
+                            if run_cursor > 0 {
+                                run_cursor -= 1;
+                            } else {
+                                run_cursor = run_options.len() - 1;
                             }
-                            KeyCode::Down => {
-                                if run_cursor < run_options.len() - 1 {
-                                    run_cursor += 1;
-                                } else {
-                                    run_cursor = 0;
-                                }
-                                disable_raw_mode()?;
-                                redraw_phase_3(&run_options, run_cursor);
-                                enable_raw_mode()?;
-                            }
-                            KeyCode::Enter => {
-                                break;
-                            }
-                            _ => {}
+                            disable_raw_mode()?;
+                            redraw_phase_3(&run_options, run_cursor);
+                            enable_raw_mode()?;
                         }
+                        KeyCode::Down => {
+                            if run_cursor < run_options.len() - 1 {
+                                run_cursor += 1;
+                            } else {
+                                run_cursor = 0;
+                            }
+                            disable_raw_mode()?;
+                            redraw_phase_3(&run_options, run_cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Enter => {
+                            break;
+                        }
+                        _ => {}
                     }
                 }
             }

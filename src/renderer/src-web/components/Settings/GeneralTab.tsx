@@ -7,7 +7,10 @@ import {
   DEEPSEEK_MODELS,
   ANTHROPIC_MODELS,
   HF_MODELS,
-  LOCAL_MODELS
+  LOCAL_MODELS,
+  CustomProviderConfig,
+  CustomProviderModel,
+  CustomProviderHeader,
 } from '../SettingsWindow'
 
 interface GeneralTabProps {
@@ -35,6 +38,7 @@ interface GeneralTabProps {
   handleCheckUpdates: () => void
   handleInstallUpdate: () => void
   isDesktopApp?: boolean
+  onSaveWithoutClosing?: () => Promise<void>
 }
 
 export default function GeneralTab({
@@ -61,8 +65,18 @@ export default function GeneralTab({
   updateMessage,
   handleCheckUpdates,
   handleInstallUpdate,
-  isDesktopApp = false
+  isDesktopApp = false,
+  onSaveWithoutClosing
 }: GeneralTabProps) {
+  const [savedProviderId, setSavedProviderId] = React.useState<string | null>(null)
+
+  const handleSaveProvider = async (providerId: string) => {
+    if (onSaveWithoutClosing) {
+      await onSaveWithoutClosing()
+      setSavedProviderId(providerId)
+      setTimeout(() => setSavedProviderId(null), 2000)
+    }
+  }
   return (
     <div className="tab-pane active">
       <section className="setting-section">
@@ -86,8 +100,38 @@ export default function GeneralTab({
               <option value="ollama">Ollama (Local / Private)</option>
               <option value="huggingface">Hugging Face (Inference API)</option>
               <option value="local_openai">Local (LM Studio / OpenAI Compatible)</option>
+              {(config.customProviders ?? []).map(cp => (
+                <option key={`custom:${cp.id}`} value={`custom:${cp.id}`}>
+                  {cp.displayName || cp.id} (Custom)
+                </option>
+              ))}
             </select>
           </div>
+          {/* Model selector for custom providers */}
+          {config.aiProvider.startsWith('custom:') && (() => {
+            const activeId = config.aiProvider.replace(/^custom:/, '')
+            const cp = (config.customProviders ?? []).find(p => p.id === activeId)
+            if (!cp || cp.models.length === 0) return null
+            const currentModel = (config.customModelSelections ?? {})[activeId] ?? cp.models[0]?.modelId ?? ''
+            return (
+              <div className="setting-row wide">
+                <label>Active Model</label>
+                <select
+                  value={currentModel}
+                  onChange={(e) => updateField('customModelSelections', {
+                    ...(config.customModelSelections ?? {}),
+                    [activeId]: e.target.value
+                  })}
+                >
+                  {cp.models.map(m => (
+                    <option key={m.modelId} value={m.modelId}>
+                      {m.displayName || m.modelId}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )
+          })()}
         </div>
 
         <div className="provider-cards-container">
@@ -877,12 +921,219 @@ export default function GeneralTab({
         </div>
       </section>
 
+      {/* ─── Custom Providers ─────────────────────────────────────────────────── */}
+      <section className="setting-section">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Custom AI Routing</p>
+            <h2 className="section-title">Custom Providers</h2>
+          </div>
+          <p className="section-description">
+            Add any OpenAI-compatible endpoint as a custom provider. Configure its models and optional headers.
+          </p>
+        </div>
+
+        <div className="provider-cards-container">
+          {(config.customProviders ?? []).map((cp, cpIdx) => {
+            const isActive = config.aiProvider === `custom:${cp.id}`
+
+            const updateCp = (patch: Partial<CustomProviderConfig>) => {
+              const updated = (config.customProviders ?? []).map((p, i) =>
+                i === cpIdx ? { ...p, ...patch } : p
+              )
+              updateField('customProviders', updated)
+            }
+
+            const deleteCp = () => {
+              const updated = (config.customProviders ?? []).filter((_, i) => i !== cpIdx)
+              updateField('customProviders', updated)
+              if (config.aiProvider === `custom:${cp.id}`) {
+                updateField('aiProvider', 'gemini')
+              }
+            }
+
+            const updateModel = (mIdx: number, patch: Partial<CustomProviderModel>) => {
+              const updatedModels = cp.models.map((m, i) => i === mIdx ? { ...m, ...patch } : m)
+              updateCp({ models: updatedModels })
+            }
+            const deleteModel = (mIdx: number) => {
+              updateCp({ models: cp.models.filter((_, i) => i !== mIdx) })
+            }
+            const addModel = () => {
+              updateCp({ models: [...cp.models, { modelId: '', displayName: '' }] })
+            }
+
+            const updateHeader = (hIdx: number, patch: Partial<CustomProviderHeader>) => {
+              const updatedHeaders = cp.headers.map((h, i) => i === hIdx ? { ...h, ...patch } : h)
+              updateCp({ headers: updatedHeaders })
+            }
+            const deleteHeader = (hIdx: number) => {
+              updateCp({ headers: cp.headers.filter((_, i) => i !== hIdx) })
+            }
+            const addHeader = () => {
+              updateCp({ headers: [...cp.headers, { name: '', value: '' }] })
+            }
+
+            return (
+              <div key={cpIdx} className={`provider-card ${isActive ? 'active-provider' : ''}`}>
+                <div className="provider-card-header">
+                  <div className="provider-card-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14" />
+                    </svg>
+                    {cp.displayName || cp.id || 'Unnamed Provider'}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {isActive && <span className="provider-active-badge">Active</span>}
+                    <button
+                      className="btn btn-primary"
+                      style={{ padding: '3px 8px', fontSize: '12px', background: savedProviderId === cp.id ? '#10b981' : '' }}
+                      onClick={() => handleSaveProvider(cp.id)}
+                      title="Save this provider settings"
+                    >
+                      {savedProviderId === cp.id ? 'Saved! ✓' : 'Save'}
+                    </button>
+                    <button
+                      className="btn btn-danger"
+                      style={{ padding: '3px 8px', fontSize: '12px' }}
+                      onClick={deleteCp}
+                      title="Delete this provider"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+
+                <div className="provider-card-body">
+                  <div className="setting-row">
+                    <label>Name</label>
+                    <input
+                      type="text"
+                      value={cp.displayName}
+                      onChange={(e) => {
+                        const name = e.target.value
+                        const computedId = name
+                          .toLowerCase()
+                          .replace(/[^a-z0-9_-]/g, '-')
+                          .replace(/-+/g, '-')
+                          .replace(/^-|-$/g, '') || `provider-${cpIdx + 1}`
+                        updateCp({ displayName: name, id: computedId })
+                      }}
+                      placeholder="e.g. DeepSeek"
+                    />
+                  </div>
+
+                  <div className="setting-row">
+                    <label>Base URL</label>
+                    <input
+                      type="text"
+                      value={cp.baseUrl}
+                      onChange={(e) => updateCp({ baseUrl: e.target.value })}
+                      placeholder="https://api.myprovider.com/v1"
+                    />
+                  </div>
+
+                  <div className="setting-row">
+                    <label>API Key</label>
+                    <input
+                      type="password"
+                      value={cp.apiKey}
+                      onChange={(e) => updateCp({ apiKey: e.target.value })}
+                      placeholder="Optional. Leave empty if you manage auth via headers."
+                    />
+                  </div>
+
+                  {/* Models */}
+                  <div style={{ marginTop: '12px' }}>
+                    <label style={{ fontWeight: 600, fontSize: '13px', display: 'block', marginBottom: '8px' }}>Model list</label>
+                    {cp.models.map((m, mIdx) => (
+                      <div key={mIdx} style={{ display: 'flex', gap: '8px', marginBottom: '6px', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          value={m.modelId}
+                          onChange={(e) => updateModel(mIdx, { modelId: e.target.value, displayName: e.target.value })}
+                          placeholder="e.g. llama-3.1-8b"
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          className="btn btn-danger"
+                          style={{ padding: '4px 8px', fontSize: '12px', flexShrink: 0 }}
+                          onClick={() => deleteModel(mIdx)}
+                          title="Remove model"
+                        >🗑</button>
+                      </div>
+                    ))}
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: '12px', marginTop: '4px' }}
+                      onClick={addModel}
+                    >
+                      + Add model
+                    </button>
+                  </div>
+
+                  {/* Headers */}
+                  <div style={{ marginTop: '12px' }}>
+                    <label style={{ fontWeight: 600, fontSize: '13px', display: 'block', marginBottom: '8px' }}>Headers (optional)</label>
+                    {cp.headers.map((h, hIdx) => (
+                      <div key={hIdx} style={{ display: 'flex', gap: '8px', marginBottom: '6px', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          value={h.name}
+                          onChange={(e) => updateHeader(hIdx, { name: e.target.value })}
+                          placeholder="Header-Name"
+                          style={{ flex: 1 }}
+                        />
+                        <input
+                          type="text"
+                          value={h.value}
+                          onChange={(e) => updateHeader(hIdx, { value: e.target.value })}
+                          placeholder="value"
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          className="btn btn-danger"
+                          style={{ padding: '4px 8px', fontSize: '12px', flexShrink: 0 }}
+                          onClick={() => deleteHeader(hIdx)}
+                          title="Remove header"
+                        >🗑</button>
+                      </div>
+                    ))}
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: '12px', marginTop: '4px' }}
+                      onClick={addHeader}
+                    >
+                      + Add header
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="setting-actions" style={{ marginTop: '16px' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              const newId = `provider-${(config.customProviders ?? []).length + 1}`
+              updateField('customProviders', [
+                ...(config.customProviders ?? []),
+                { id: newId, displayName: '', baseUrl: '', apiKey: '', models: [], headers: [] }
+              ])
+            }}
+          >
+            + Add custom provider
+          </button>
+        </div>
+      </section>
+
       {isDesktopApp && (
         <section className="setting-section">
           <div className="section-heading">
             <div>
               <p className="section-kicker">Desktop updates</p>
-
               <h2 className="section-title">Signed Tauri Channel</h2>
             </div>
             <p className="section-description">Check and explicitly install signed Tauri releases from your configured update channel.</p>

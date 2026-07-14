@@ -536,18 +536,17 @@ pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String
         .await
         .map_err(|e| e.to_string())?;
     let mut file_tree = String::from("Unavailable");
-    if contents_resp.status().is_success() {
-        if let Ok(contents_info) = contents_resp.json::<serde_json::Value>().await {
-            if let Some(arr) = contents_info.as_array() {
-                let mut files = Vec::new();
-                for item in arr {
-                    let name = item["name"].as_str().unwrap_or("");
-                    let r#type = item["type"].as_str().unwrap_or("");
-                    files.push(format!("- {} ({})", name, r#type));
-                }
-                file_tree = files.join("\n");
-            }
+    if contents_resp.status().is_success()
+        && let Ok(contents_info) = contents_resp.json::<serde_json::Value>().await
+        && let Some(arr) = contents_info.as_array()
+    {
+        let mut files = Vec::new();
+        for item in arr {
+            let name = item["name"].as_str().unwrap_or("");
+            let r#type = item["type"].as_str().unwrap_or("");
+            files.push(format!("- {} ({})", name, r#type));
         }
+        file_tree = files.join("\n");
     }
 
     // 3. Fetch README.md
@@ -558,15 +557,14 @@ pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String
         .await
         .map_err(|e| e.to_string())?;
     let mut readme_text = String::from("No README available.");
-    if readme_resp.status().is_success() {
-        if let Ok(readme_info) = readme_resp.json::<serde_json::Value>().await {
-            if let Some(content_b64) = readme_info["content"].as_str() {
-                let cleaned_b64 = content_b64.replace('\n', "").replace('\r', "");
-                use base64::{Engine as _, engine::general_purpose::STANDARD};
-                if let Ok(decoded_bytes) = STANDARD.decode(cleaned_b64) {
-                    readme_text = String::from_utf8_lossy(&decoded_bytes).to_string();
-                }
-            }
+    if readme_resp.status().is_success()
+        && let Ok(readme_info) = readme_resp.json::<serde_json::Value>().await
+        && let Some(content_b64) = readme_info["content"].as_str()
+    {
+        let cleaned_b64 = content_b64.replace(['\n', '\r'], "");
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        if let Ok(decoded_bytes) = STANDARD.decode(cleaned_b64) {
+            readme_text = String::from_utf8_lossy(&decoded_bytes).to_string();
         }
     }
 

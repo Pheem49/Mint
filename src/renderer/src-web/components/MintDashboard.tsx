@@ -606,6 +606,11 @@ export default function MintDashboard() {
     else if (provider === 'huggingface') providerName = 'HF'
     else if (provider === 'local_openai') providerName = 'Local'
     else if (provider === 'ollama') providerName = 'Ollama'
+    else if (provider.startsWith('custom:')) {
+      const id = provider.replace(/^custom:/, '')
+      const cp = (settingsConfig?.customProviders ?? []).find((p: any) => p.id === id)
+      providerName = cp?.displayName || id
+    }
 
     if (providerName && providerName === provider) {
       providerName = providerName.charAt(0).toUpperCase() + providerName.slice(1)
@@ -623,7 +628,14 @@ export default function MintDashboard() {
       case 'huggingface': return config.hfModel || 'meta-llama/Meta-Llama-3-8B-Instruct'
       case 'local_openai': return config.localModelName || 'llama3'
       case 'ollama': return config.ollamaModel || 'llama3:latest'
-      default: return ''
+      default: {
+        if (provider.startsWith('custom:')) {
+          const id = provider.replace(/^custom:/, '')
+          const cp = (config.customProviders ?? []).find((p: any) => p.id === id)
+          return (config.customModelSelections ?? {})[id] ?? cp?.models[0]?.modelId ?? ''
+        }
+        return ''
+      }
     }
   }
 
@@ -665,6 +677,12 @@ export default function MintDashboard() {
         config.localModelName = modelName
       } else if (provider === 'ollama') {
         config.ollamaModel = modelName
+      } else if (provider.startsWith('custom:')) {
+        const id = provider.replace(/^custom:/, '')
+        config.customModelSelections = {
+          ...(config.customModelSelections ?? {}),
+          [id]: modelName
+        }
       }
       await window.settingsApi.saveSettings(config)
       setSettingsConfig(config)
