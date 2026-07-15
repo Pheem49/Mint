@@ -92,6 +92,31 @@ pub fn learned_skills_context(workspace_root: Option<&Path>) -> Result<String, S
     Ok(format!("{}\n...<learned skills truncated>", &value[..end]))
 }
 
+pub fn parse_skill_description(content: &str) -> Option<String> {
+    let content = content.trim_start();
+    if !content.starts_with("---") {
+        return None;
+    }
+    let rest = &content[3..];
+    let end_idx = rest.find("---")?;
+    let frontmatter = &rest[..end_idx];
+    for line in frontmatter.lines() {
+        let line = line.trim();
+        if let Some(desc) = line.strip_prefix("description:") {
+            let mut val = desc.trim();
+            if (val.starts_with('"') && val.ends_with('"'))
+                || (val.starts_with('\'') && val.ends_with('\''))
+            {
+                if val.len() >= 2 {
+                    val = &val[1..val.len() - 1];
+                }
+            }
+            return Some(val.to_string());
+        }
+    }
+    None
+}
+
 pub fn load_skills_from_dir(dir: &Path, list: &mut Vec<LearnedSkill>) {
     if !dir.is_dir() {
         return;
@@ -109,12 +134,14 @@ pub fn load_skills_from_dir(dir: &Path, list: &mut Vec<LearnedSkill>) {
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("skill")
                                 .to_string();
+                            let description = parse_skill_description(&content);
                             list.push(LearnedSkill {
                                 id: 0,
                                 name,
                                 source_path: skill_file.to_string_lossy().to_string(),
                                 content,
                                 created_at: String::new(),
+                                description,
                             });
                         }
                         break;
@@ -130,12 +157,14 @@ pub fn load_skills_from_dir(dir: &Path, list: &mut Vec<LearnedSkill>) {
                     .and_then(|n| n.to_str())
                     .unwrap_or("skill")
                     .to_string();
+                let description = parse_skill_description(&content);
                 list.push(LearnedSkill {
                     id: 0,
                     name,
                     source_path: path.to_string_lossy().to_string(),
                     content,
                     created_at: String::new(),
+                    description,
                 });
             }
         }

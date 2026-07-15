@@ -58,6 +58,8 @@ pub struct LearnedSkill {
     pub source_path: String,
     pub content: String,
     pub created_at: String,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -624,12 +626,15 @@ fn ensure_column(
 }
 
 fn learned_skill_row(row: &rusqlite::Row<'_>) -> Result<LearnedSkill, rusqlite::Error> {
+    let content: String = row.get(3)?;
+    let description = crate::skills::parse_skill_description(&content);
     Ok(LearnedSkill {
         id: row.get(0)?,
         name: row.get(1)?,
         source_path: row.get(2)?,
-        content: row.get(3)?,
+        content,
         created_at: row.get(4)?,
+        description,
     })
 }
 

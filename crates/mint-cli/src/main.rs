@@ -1745,6 +1745,10 @@ async fn handle_slash_command(
                 ("Ctrl+V", "Paste clipboard image as [Image #1]"),
                 ("/learn <path>", "Import a persistent .md or .txt skill"),
                 (
+                    "/skill add <path>",
+                    "Copy/install skill file or folder to global config",
+                ),
+                (
                     "/plugins <name> [prompt]",
                     "Generate a skill.md file for a plugin/skill",
                 ),
@@ -2093,6 +2097,73 @@ async fn handle_slash_command(
                         skill.name, skill.source_path
                     ),
                     Err(error) => println!("{ERROR}Learn error:{RESET} {error}\n"),
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/skill" => {
+            let (subcmd, args) = rest
+                .split_once(char::is_whitespace)
+                .map(|(c, a)| (c, a.trim()))
+                .unwrap_or((rest, ""));
+
+            match subcmd {
+                "add" | "install" => {
+                    if args.is_empty() {
+                        println!(
+                            "{WARN}/skill add <path> requires a path to a skill file or folder{RESET}\n"
+                        );
+                    } else {
+                        let source_path = PathBuf::from(args);
+                        let source_path = if source_path.is_absolute() {
+                            source_path
+                        } else {
+                            session.current_dir.join(source_path)
+                        };
+
+                        if !source_path.exists() {
+                            println!("{ERROR}Source skill path not found: {}{RESET}\n", args);
+                        } else if let Some(home) = dirs::home_dir() {
+                            let global_skills_path =
+                                home.join(".config").join("mint").join("mint-skills");
+                            if !global_skills_path.exists() {
+                                let _ = std::fs::create_dir_all(&global_skills_path);
+                            }
+
+                            let name = source_path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("skill");
+
+                            let dest_path = global_skills_path.join(name);
+                            let copy_res = if source_path.is_dir() {
+                                copy_dir_all(&source_path, &dest_path)
+                            } else {
+                                std::fs::copy(&source_path, &dest_path)
+                                    .map(|_| ())
+                                    .map_err(|e| e)
+                            };
+
+                            match copy_res {
+                                Ok(()) => println!(
+                                    "{DIM}Skill successfully copied to Global config: {}{RESET}\n",
+                                    dest_path.display()
+                                ),
+                                Err(e) => println!(
+                                    "{ERROR}Failed to copy skill to Global: {}{RESET}\n",
+                                    e
+                                ),
+                            }
+                        } else {
+                            println!(
+                                "{ERROR}Unable to resolve home directory for Global config.{RESET}\n"
+                            );
+                        }
+                    }
+                }
+                _ => {
+                    println!("{WARN}Usage: /skill add <path>  (or /skill install <path>){RESET}\n");
                 }
             }
             Some(SlashResult::Handled)
@@ -2482,9 +2553,12 @@ async fn run_interactive_chat() -> Result<()> {
         let path_str = format_path_with_tilde(&session.current_dir);
         let model_str = active_model(&session.config.ai_provider, &session.config).to_owned();
 
-        if let Some(input) =
-            read_line_interactive(&session.config.ai_provider, &model_str, &path_str)?
-        {
+        if let Some(input) = read_line_interactive(
+            &session.config.ai_provider,
+            &model_str,
+            &path_str,
+            &session.current_dir,
+        )? {
             if let Some(uri) = input.pasted_image {
                 if let Some(ref mut current) = session.pending_image {
                     current.push(' ');
@@ -2495,6 +2569,72 @@ async fn run_interactive_chat() -> Result<()> {
             }
             let query_str = input.text.trim().to_owned();
             if query_str.is_empty() {
+                continue;
+            }
+
+            if query_str.starts_with('$') {
+                let (skill_word, task_part) = query_str
+                    .split_once(char::is_whitespace)
+                    .map(|(s, t)| (s, t.trim()))
+                    .unwrap_or((&query_str, ""));
+
+                let skill_name = skill_word.trim_start_matches('$').to_lowercase();
+                let skills = load_all_available_skills(&session.current_dir);
+                let skill_opt = skills.iter().find(|s| s.name.to_lowercase() == skill_name);
+
+                if let Some(skill) = skill_opt {
+                    println!("\n{BLUE}Skill: {}{RESET}", skill.name);
+                    if let Some(ref desc) = skill.description {
+                        println!("{DIM}{}{RESET}", desc);
+                    }
+                    println!("{DIM}────────────────────────────────────────────{RESET}");
+                    println!("{}", skill.content);
+                    println!("{DIM}────────────────────────────────────────────{RESET}\n");
+
+                    if confirm("ต้องการ activate skill นี้ไหม? [y/N] ")? {
+                        let final_task = if task_part.is_empty() {
+                            print!("พิมพ์ Task ที่ต้องการให้ทำงานด้วย Skill นี้: ");
+                            let _ = io::stdout().flush();
+                            let mut input = String::new();
+                            io::stdin().read_line(&mut input)?;
+                            let input = input.trim().to_owned();
+                            if input.is_empty() {
+                                println!("{WARN}Cancelled: Task cannot be empty.{RESET}\n");
+                                continue;
+                            }
+                            input
+                        } else {
+                            task_part.to_owned()
+                        };
+
+                        let task_with_skill = format!(
+                            "=== ACTIVATED SKILL: {} ===\n\
+                             {}\n\
+                             ===========================\n\n\
+                             Task: {}",
+                            skill.name, skill.content, final_task
+                        );
+
+                        println!();
+                        if let Err(error) = run_code_agent_with_saved_image(
+                            &task_with_skill,
+                            &session.current_dir,
+                            &session.config,
+                            session.pending_image.take(),
+                            agent::AgentOptions {
+                                fast_mode: session.fast_mode,
+                            },
+                        )
+                        .await
+                        {
+                            println!("{ERROR}Error:{RESET} {error}\n");
+                        }
+                    } else {
+                        println!("{DIM}Cancelled.{RESET}\n");
+                    }
+                } else {
+                    println!("{ERROR}Skill '{}' not found.{RESET}\n", skill_name);
+                }
                 continue;
             }
 
@@ -2757,8 +2897,46 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ),
     ("/paste", "Attach image from clipboard"),
     ("/plugins", "List or generate plugins/skills"),
+    ("/skill add", "Add or install global skill file or folder"),
     ("/stats", "Show session statistics"),
 ];
+
+fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
+    std::fs::create_dir_all(&dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        } else {
+            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
+fn load_all_available_skills(current_dir: &Path) -> Vec<mint_core::LearnedSkill> {
+    let mut skills = Vec::new();
+    if let Ok(memory) = MemoryStore::open_default() {
+        if let Ok(s) = memory.learned_skills(100) {
+            skills = s;
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let global_skills_path = home.join(".config").join("mint").join("mint-skills");
+        mint_core::skills::load_skills_from_dir(&global_skills_path, &mut skills);
+    }
+    let workspace_skills_path1 = current_dir.join(".agents").join("skills");
+    mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
+    let workspace_skills_path2 = current_dir.join("skills");
+    mint_core::skills::load_skills_from_dir(&workspace_skills_path2, &mut skills);
+
+    let mut unique_skills = std::collections::BTreeMap::new();
+    for skill in skills {
+        unique_skills.insert(skill.name.clone(), skill);
+    }
+    unique_skills.into_values().collect()
+}
 
 fn draw_input_box(
     input_chars: &[char],
@@ -2768,6 +2946,7 @@ fn draw_input_box(
     path_str: &str,
     tab_base_input: Option<&str>,
     tab_index: Option<usize>,
+    current_dir: &Path,
 ) -> (usize, usize) {
     let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let width = term_width as usize;
@@ -2841,9 +3020,9 @@ fn draw_input_box(
             let highlight_idx = tab_index.map(|idx| idx % matches.len());
             let selected_idx = highlight_idx.unwrap_or(0);
             let current_page = selected_idx / 5;
-            let start_idx = current_page * 5;
-            let end_idx = std::cmp::min(start_idx + 5, matches.len());
-            match_count = end_idx - start_idx;
+            let s_start_idx = current_page * 5;
+            let s_end_idx = std::cmp::min(s_start_idx + 5, matches.len());
+            match_count = s_end_idx - s_start_idx;
 
             println!();
             println!(
@@ -2851,12 +3030,68 @@ fn draw_input_box(
                 current_page + 1,
                 total_pages
             );
-            for i in start_idx..end_idx {
+            for i in s_start_idx..s_end_idx {
                 let (cmd, desc) = matches[i];
                 if Some(i) == highlight_idx {
                     println!("  {BLUE}▶ {:<16}{RESET} {DIM}- {}{RESET}", cmd, desc);
                 } else {
                     println!("    {DIM}{:<16} - {}{RESET}", cmd, desc);
+                }
+            }
+        }
+    } else if search_query.starts_with('$') {
+        // Parse skill name (excluding arguments)
+        let skill_query = search_query
+            .split_whitespace()
+            .next()
+            .unwrap_or(search_query);
+        let prefix = &skill_query[1..].to_lowercase();
+        let skills = load_all_available_skills(current_dir);
+        let matches: Vec<_> = skills
+            .iter()
+            .filter(|skill| skill.name.to_lowercase().starts_with(prefix))
+            .collect();
+
+        if !matches.is_empty() {
+            let total_pages = matches.len().div_ceil(5);
+            let highlight_idx = tab_index.map(|idx| idx % matches.len());
+            let selected_idx = highlight_idx.unwrap_or(0);
+            let current_page = selected_idx / 5;
+            let s_start_idx = current_page * 5;
+            let s_end_idx = std::cmp::min(s_start_idx + 5, matches.len());
+            match_count = s_end_idx - s_start_idx;
+
+            println!();
+            println!(
+                " {BLUE}Suggestions ({}/{}){RESET}",
+                current_page + 1,
+                total_pages
+            );
+            for i in s_start_idx..s_end_idx {
+                let skill = matches[i];
+                let desc = skill
+                    .description
+                    .as_deref()
+                    .unwrap_or("No description provided");
+                let max_desc_len = width.saturating_sub(35);
+                let truncated_desc = if desc.chars().count() > max_desc_len {
+                    let mut s: String = desc.chars().take(max_desc_len.saturating_sub(3)).collect();
+                    s.push_str("...");
+                    s
+                } else {
+                    desc.to_string()
+                };
+
+                if Some(i) == highlight_idx {
+                    println!(
+                        "  {BLUE}▶ ${:<20}{RESET} {MINT}[Skill]{RESET} {DIM}{}{RESET}",
+                        skill.name, truncated_desc
+                    );
+                } else {
+                    println!(
+                        "    {DIM}${:<20} [Skill] {}{RESET}",
+                        skill.name, truncated_desc
+                    );
                 }
             }
         }
@@ -2912,6 +3147,7 @@ fn redraw_input_box(
     path_str: &str,
     tab_base_input: Option<&str>,
     tab_index: Option<usize>,
+    current_dir: &Path,
 ) {
     clear_input_box();
     let (match_count, _) = draw_input_box(
@@ -2922,6 +3158,7 @@ fn redraw_input_box(
         path_str,
         tab_base_input,
         tab_index,
+        current_dir,
     );
     position_input_cursor(input_chars, cursor_pos, match_count);
     let _ = io::stdout().flush();
@@ -2931,6 +3168,7 @@ fn read_line_interactive(
     _provider: &str,
     model: &str,
     path_str: &str,
+    current_dir: &Path,
 ) -> io::Result<Option<InteractiveInput>> {
     use crossterm::event::{self, Event, KeyCode};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -2955,6 +3193,7 @@ fn read_line_interactive(
         path_str,
         None,
         None,
+        current_dir,
     );
     position_input_cursor(&input_chars, cursor_pos, match_count);
     let _ = io::stdout().flush();
@@ -2995,6 +3234,7 @@ fn read_line_interactive(
                     path_str,
                     None,
                     None,
+                    current_dir,
                 );
                 enable_raw_mode()?;
                 last_paste_time = Some(std::time::Instant::now());
@@ -3070,6 +3310,7 @@ fn read_line_interactive(
                                 path_str,
                                 None,
                                 None,
+                                current_dir,
                             );
                             enable_raw_mode()?;
                         }
@@ -3087,6 +3328,7 @@ fn read_line_interactive(
                             path_str,
                             None,
                             None,
+                            current_dir,
                         );
                         enable_raw_mode()?;
                     }
@@ -3103,6 +3345,7 @@ fn read_line_interactive(
                             path_str,
                             None,
                             None,
+                            current_dir,
                         );
                         enable_raw_mode()?;
                     }
@@ -3141,6 +3384,38 @@ fn read_line_interactive(
                                     path_str,
                                     Some(&base),
                                     current_highlight,
+                                    current_dir,
+                                );
+                                enable_raw_mode()?;
+                            }
+                        } else if base.starts_with('$') {
+                            let skill_query = base.split_whitespace().next().unwrap_or(&base);
+                            let prefix = &skill_query[1..].to_lowercase();
+                            let skills = load_all_available_skills(current_dir);
+                            let matches: Vec<_> = skills
+                                .iter()
+                                .filter(|s| s.name.to_lowercase().starts_with(prefix))
+                                .collect();
+
+                            if !matches.is_empty() {
+                                let idx = tab_index.unwrap_or(0) % matches.len();
+                                let completed = format!("${} ", matches[idx].name);
+                                input_chars = completed.chars().collect();
+                                cursor_pos = input_chars.len();
+
+                                let current_highlight = Some(idx);
+                                tab_index = Some(idx + 1);
+
+                                disable_raw_mode()?;
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                    Some(&base),
+                                    current_highlight,
+                                    current_dir,
                                 );
                                 enable_raw_mode()?;
                             }
@@ -3181,6 +3456,39 @@ fn read_line_interactive(
                                     path_str,
                                     Some(&base),
                                     Some(new_idx),
+                                    current_dir,
+                                );
+                                enable_raw_mode()?;
+                            }
+                        } else if base.starts_with('$') {
+                            let skill_query = base.split_whitespace().next().unwrap_or(&base);
+                            let prefix = &skill_query[1..].to_lowercase();
+                            let skills = load_all_available_skills(current_dir);
+                            let matches: Vec<_> = skills
+                                .iter()
+                                .filter(|s| s.name.to_lowercase().starts_with(prefix))
+                                .collect();
+
+                            if !matches.is_empty() {
+                                let new_idx = match tab_index {
+                                    Some(idx) => (idx + 1) % matches.len(),
+                                    None => 0,
+                                };
+                                tab_index = Some(new_idx);
+                                let completed = format!("${} ", matches[new_idx].name);
+                                input_chars = completed.chars().collect();
+                                cursor_pos = input_chars.len();
+
+                                disable_raw_mode()?;
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                    Some(&base),
+                                    Some(new_idx),
+                                    current_dir,
                                 );
                                 enable_raw_mode()?;
                             }
@@ -3227,6 +3535,45 @@ fn read_line_interactive(
                                     path_str,
                                     Some(&base),
                                     Some(new_idx),
+                                    current_dir,
+                                );
+                                enable_raw_mode()?;
+                            }
+                        } else if base.starts_with('$') {
+                            let skill_query = base.split_whitespace().next().unwrap_or(&base);
+                            let prefix = &skill_query[1..].to_lowercase();
+                            let skills = load_all_available_skills(current_dir);
+                            let matches: Vec<_> = skills
+                                .iter()
+                                .filter(|s| s.name.to_lowercase().starts_with(prefix))
+                                .collect();
+
+                            if !matches.is_empty() {
+                                let new_idx = match tab_index {
+                                    Some(idx) => {
+                                        if idx == 0 {
+                                            matches.len() - 1
+                                        } else {
+                                            idx - 1
+                                        }
+                                    }
+                                    None => matches.len() - 1,
+                                };
+                                tab_index = Some(new_idx);
+                                let completed = format!("${} ", matches[new_idx].name);
+                                input_chars = completed.chars().collect();
+                                cursor_pos = input_chars.len();
+
+                                disable_raw_mode()?;
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                    Some(&base),
+                                    Some(new_idx),
+                                    current_dir,
                                 );
                                 enable_raw_mode()?;
                             }
@@ -3248,6 +3595,7 @@ fn read_line_interactive(
                             path_str,
                             None,
                             None,
+                            current_dir,
                         );
                         enable_raw_mode()?;
                     }
@@ -3269,6 +3617,7 @@ fn read_line_interactive(
                             path_str,
                             None,
                             None,
+                            current_dir,
                         );
                         enable_raw_mode()?;
                     }

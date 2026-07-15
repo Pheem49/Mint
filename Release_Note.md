@@ -1,6 +1,6 @@
-# Release Notes - Mint Agent v1.8.2
+# Release Notes - Mint Agent v1.9.0
 
-We are excited to release **Mint Agent v1.8.2**! This release introduces a configurable Multi-Agent system for sequential collaboration, powerful local workspace file management features, real-time AI-generated workflow suggestions in the user's active language, mobile layout optimization, and general UI/UX polish.
+We are excited to release **Mint Agent v1.9.0**! This release introduces a configurable Multi-Agent system for sequential collaboration, powerful local workspace file management features, real-time AI-generated workflow suggestions in the user's active language, mobile layout optimization, and general UI/UX polish.
 
 ---
 
@@ -161,6 +161,13 @@ Improved the autocomplete experience in the terminal:
 - Fixed `AgentProgress::Thinking` pattern matching compiler error (E0027) in `crates/mint-cli/src/agent.rs` and render active agent and model names in the live thinking terminal status bar.
 - Implement horizontal scrolling viewport for the CLI prompt input box in `crates/mint-cli/src/main.rs`, slicing the visible text to fit the terminal screen and adjusting the cursor column offset accordingly, allowing arbitrary length instructions.
 - Save `provider_change` system interaction events to the database and render a beautiful styled horizontal divider in the console when switching models via `/models` inside `crates/mint-cli/src/main.rs`.
+- Implement dynamic skill invocation with `$` prefix in the CLI interactive chat.
+- Add realtime autocomplete and pagination dropdown list for local/workspace and global skills under the `$` trigger, resolving and rendering skill descriptions.
+- Add frontmatter YAML parser in `crates/mint-core/src/skills.rs` to fetch skill description values.
+- Support confirmation dialogue to display skill contents and confirm activation before running the Agent, allowing inline or prompted tasks.
+- Register `/skill add <path>` (and `/skill install <path>`) slash commands to automatically copy/install a skill file or folder into the global `~/.config/mint/mint-skills/` directory.
+
+
 
 
 ### Github CI/CD Workflows
