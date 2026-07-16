@@ -151,6 +151,7 @@ Improved the autocomplete experience in the terminal:
 - Update `ChatPanel.tsx` (Desktop and Web) to strictly check the global `enableVoiceReply` setting. If voice reply is disabled but voice conversation mode is active, the microphone listening loop is automatically scheduled to resume without reading the AI response out loud.
 
 ### CLI Agent (`crates/mint-cli`)
+- Print the welcome banner/ASCII art when launching the web interface (via `mint web` command).
 - Redefine live status print lines (`plan_lines`, `tasks_lines`, `activities_lines`, `explored_lines`) to accept progress tick state and apply the `get_bullet` helper.
 - Update `render_live_status` in `crates/mint-cli/src/agent.rs` to compute true physical lines of terminal wrapped text, using a new `is_thai_combining` filter.
 - Modify `confirm` in `crates/mint-cli/src/main.rs` to indent confirmation prompts.
@@ -165,7 +166,11 @@ Improved the autocomplete experience in the terminal:
 - Add realtime autocomplete and pagination dropdown list for local/workspace and global skills under the `$` trigger, resolving and rendering skill descriptions.
 - Add frontmatter YAML parser in `crates/mint-core/src/skills.rs` to fetch skill description values.
 - Support confirmation dialogue to display skill contents and confirm activation before running the Agent, allowing inline or prompted tasks.
-- Register `/skill add <path>` (and `/skill install <path>`) slash commands to automatically copy/install a skill file or folder into the global `~/.config/mint/mint-skills/` directory.
+- Refactor `main.rs` to split modular features into separate files (`markdown.rs`, `actions.rs`, `interactive.rs`) to improve maintainability and keep files concise.
+- Relocate markdown table parsing and formatting to `markdown.rs`.
+- Relocate AI-driven system action execution to `actions.rs`.
+- Relocate terminal interactive UI loops, suggestions, visual width measurement, and welcome banner rendering to `interactive.rs`.
+
 
 
 
