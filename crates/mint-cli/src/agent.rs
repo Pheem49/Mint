@@ -647,6 +647,55 @@ fn is_thai_combining(c: char) -> bool {
     )
 }
 
+fn apply_wave_effect(text: &str, tick: usize) -> String {
+    let (label, metadata) = if let Some(idx) = text.rfind(" • Esc to interrupt)") {
+        if let Some(open_paren_idx) = text[..idx].rfind('(') {
+            (&text[..open_paren_idx], &text[open_paren_idx..])
+        } else {
+            (text, "")
+        }
+    } else {
+        (text, "")
+    };
+
+    let trimmed_label = label.trim_end();
+    let spaces_count = label.len() - trimmed_label.len();
+    
+    let chars: Vec<char> = trimmed_label.chars().collect();
+    let n = chars.len();
+    if n == 0 {
+        return text.to_string();
+    }
+
+    let active_idx = if n > 0 {
+        tick % n
+    } else {
+        0
+    };
+
+    let mut animated_label = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        if c == ' ' {
+            animated_label.push(c);
+            continue;
+        }
+        let diff = (i as isize - active_idx as isize).abs();
+        if diff == 0 {
+            animated_label.push_str(&format!("\x1b[1m{BLUE}{c}{RESET}"));
+        } else if diff == 1 {
+            animated_label.push_str(&format!("\x1b[1m{MINT}{c}{RESET}"));
+        } else {
+            animated_label.push_str(&format!("\x1b[1m{DIM}{c}{RESET}"));
+        }
+    }
+
+    animated_label.push_str(&" ".repeat(spaces_count));
+    if !metadata.is_empty() {
+        animated_label.push_str(&format!("{BRIGHT}{metadata}{RESET}"));
+    }
+    animated_label
+}
+
 fn render_live_status(status: &mut LiveStatus) {
     clear_live_status(status);
     let mut lines = Vec::new();
@@ -670,10 +719,32 @@ fn render_live_status(status: &mut LiveStatus) {
         tick,
     ));
     if let Some(thinking) = &status.thinking {
-        let frames = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let frames = &[
+            "🌑\u{FE0E}",
+            "🌒\u{FE0E}",
+            "🌓\u{FE0E}",
+            "🌔\u{FE0E}",
+            "🌕\u{FE0E}",
+            "🌖\u{FE0E}",
+            "🌗\u{FE0E}",
+            "🌘\u{FE0E}",
+        ];
         let frame = frames[status.spinner_tick % frames.len()];
+        
+        let dots_frames = &["", ".", "..", "..."];
+        let dots = dots_frames[(status.spinner_tick / 2) % dots_frames.len()];
+        
         status.spinner_tick += 1;
-        lines.push(format!("  {MINT}{frame}{RESET} {BRIGHT}{thinking}{RESET}"));
+        
+        let custom_thinking = if thinking.contains("is thinking") {
+            thinking.replace("is thinking", &format!("is ｔｈｉｎｋｉｎｇ{:<3}", dots))
+        } else {
+            thinking.replace("Thinking", &format!("Ｔｈｉｎｋｉｎｇ{:<3}", dots))
+        };
+        
+        let waved_thinking = apply_wave_effect(&custom_thinking, status.spinner_tick);
+        
+        lines.push(format!("  {MINT}{frame}{RESET} {waved_thinking}"));
     }
     if lines.is_empty() {
         return;

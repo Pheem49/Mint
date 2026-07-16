@@ -2,16 +2,41 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
 const PACKAGE: &str = "@pheem49/mint";
 
 pub fn run(check_only: bool, dry_run: bool, approved: bool) -> Result<()> {
     let current = env!("CARGO_PKG_VERSION");
+
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    spinner.set_message("Checking for updates...");
+    spinner.enable_steady_tick(Duration::from_millis(80));
+
     let output = Command::new(npm())
         .args(["view", PACKAGE, "version", "--json"])
-        .output()
-        .context("unable to run npm update check")?;
+        .output();
+
+    let output = match output {
+        Ok(out) => {
+            spinner.finish_and_clear();
+            out
+        }
+        Err(e) => {
+            spinner.finish_and_clear();
+            bail!("unable to run npm update check: {}", e);
+        }
+    };
+
     if !output.status.success() {
         bail!(
             "npm update check failed: {}",
@@ -34,14 +59,31 @@ pub fn run(check_only: bool, dry_run: bool, approved: bool) -> Result<()> {
     if !approved {
         bail!("update installation requires --approve");
     }
+
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    spinner.set_message(format!("Updating to {latest} via npm..."));
+    spinner.enable_steady_tick(Duration::from_millis(80));
+
     let mut command = Command::new(npm());
     command.args(["install", "-g", &format!("{PACKAGE}@latest")]);
     if dry_run {
         command.arg("--dry-run");
     }
-    let status = command
-        .status()
-        .context("unable to run npm global update")?;
+    let status = command.status();
+    spinner.finish_and_clear();
+
+    let status = match status {
+        Ok(s) => s,
+        Err(e) => {
+            bail!("unable to run npm global update: {}", e);
+        }
+    };
     if !status.success() {
         bail!("npm global update failed with status {status}");
     }

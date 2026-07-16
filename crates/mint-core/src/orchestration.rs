@@ -793,15 +793,15 @@ where
         ))
     })?;
     let resolved_task = resolve_github_links(task, config).await;
-    let skills = crate::skills::learned_skills_context(Some(&root)).unwrap_or_default();
-    let mut observation = initial_observation(&resolved_task, &root, &skills);
-    let mut pending_image = image_data_uri;
-
-    let mut system_prompt = build_system_prompt(config);
     let chat_id = chat_id
         .map(str::trim)
         .filter(|chat_id| !chat_id.is_empty())
         .unwrap_or(DEFAULT_CONVERSATION_ID);
+    let skills = crate::skills::learned_skills_context(Some(&root), Some(chat_id)).unwrap_or_default();
+    let mut observation = initial_observation(&resolved_task, &root, &skills);
+    let mut pending_image = image_data_uri;
+
+    let mut system_prompt = build_system_prompt(config);
 
     if let Ok(memory) = MemoryStore::open_default() {
         let mut profile_instructions = String::new();

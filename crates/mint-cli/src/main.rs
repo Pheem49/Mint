@@ -2,7 +2,6 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -746,14 +745,27 @@ async fn main() -> Result<()> {
                     server,
                     tool,
                     arguments,
-                } => println!(
-                    "{}",
-                    serde_json::to_string_pretty(&mcp::call(
+                } => {
+                    use indicatif::{ProgressBar, ProgressStyle};
+                    use std::time::Duration;
+                    let spinner = ProgressBar::new_spinner();
+                    spinner.set_style(
+                        ProgressStyle::default_spinner()
+                            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+                            .template("{spinner:.green} {msg}")
+                            .unwrap(),
+                    );
+                    spinner.set_message(format!("Executing MCP tool '{}' on server '{}'...", tool, server));
+                    spinner.enable_steady_tick(Duration::from_millis(80));
+
+                    let res = mcp::call(
                         &server,
                         &tool,
-                        serde_json::from_str(&arguments)?
-                    )?)?
-                ),
+                        serde_json::from_str(&arguments)?,
+                    );
+                    spinner.finish_and_clear();
+                    println!("{}", serde_json::to_string_pretty(&res?)?);
+                }
             },
             Command::Gmail { command } => match command {
                 GmailCommand::Auth { no_open, port } => gmail::auth(no_open, port).await?,
@@ -823,17 +835,39 @@ async fn main() -> Result<()> {
                     anyhow::bail!("use mint learn <path>, --list, or --delete <id|path|name>");
                 }
             }
-            Command::Symbols { root, limit } => println!(
-                "{}",
-                serde_json::to_string_pretty(&build_symbol_index(&root, limit, &load_config()?)?)?
-            ),
+            Command::Symbols { root, limit } => {
+                use indicatif::{ProgressBar, ProgressStyle};
+                use std::time::Duration;
+                let spinner = ProgressBar::new_spinner();
+                spinner.set_style(
+                    ProgressStyle::default_spinner()
+                        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+                        .template("{spinner:.green} {msg}")
+                        .unwrap(),
+                );
+                spinner.set_message("Building symbol index...");
+                spinner.enable_steady_tick(Duration::from_millis(80));
+                let index = build_symbol_index(&root, limit, &load_config()?);
+                spinner.finish_and_clear();
+                println!("{}", serde_json::to_string_pretty(&index?)?);
+            }
             Command::SemanticCode { command } => match command {
-                SemanticCodeCommand::Index { root } => println!(
-                    "{}",
-                    serde_json::to_string_pretty(
-                        &index_semantic_code(&root, &load_config()?).await?
-                    )?
-                ),
+                SemanticCodeCommand::Index { root } => {
+                    use indicatif::{ProgressBar, ProgressStyle};
+                    use std::time::Duration;
+                    let spinner = ProgressBar::new_spinner();
+                    spinner.set_style(
+                        ProgressStyle::default_spinner()
+                            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+                            .template("{spinner:.green} {msg}")
+                            .unwrap(),
+                    );
+                    spinner.set_message("Indexing semantic code workspace...");
+                    spinner.enable_steady_tick(Duration::from_millis(80));
+                    let res = index_semantic_code(&root, &load_config()?).await;
+                    spinner.finish_and_clear();
+                    println!("{}", serde_json::to_string_pretty(&res?)?);
+                }
                 SemanticCodeCommand::Search { query, root, limit } => println!(
                     "{}",
                     serde_json::to_string_pretty(
@@ -1179,8 +1213,18 @@ async fn main() -> Result<()> {
             } => {
                 let config = load_config()?;
                 let count = count.clamp(1, 4);
-                eprint!("{DIM}✦ Generating {count} image(s)...{RESET}");
-                let _ = std::io::stderr().flush();
+                use indicatif::{ProgressBar, ProgressStyle};
+                use std::time::Duration;
+                let spinner = ProgressBar::new_spinner();
+                spinner.set_style(
+                    ProgressStyle::default_spinner()
+                        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+                        .template("{spinner:.green} {msg}")
+                        .unwrap(),
+                );
+                spinner.set_message(format!("Generating {} image(s)...", count));
+                spinner.enable_steady_tick(Duration::from_millis(80));
+
                 let request = ImageGenRequest {
                     prompt: prompt.clone(),
                     negative_prompt: negative,
@@ -1191,8 +1235,9 @@ async fn main() -> Result<()> {
                 };
                 match generate_images(&config, &request).await {
                     Ok(result) => {
+                        spinner.finish_and_clear();
                         eprintln!(
-                            "\r{MINT}✦ Generated {} image(s)         {RESET}",
+                            "{MINT}✦ Generated {} image(s){RESET}",
                             result.images.len()
                         );
                         let data_uris: Vec<String> = result
@@ -1231,6 +1276,7 @@ async fn main() -> Result<()> {
                         }
                     }
                     Err(e) => {
+                        spinner.finish_and_clear();
                         eprintln!("{ERROR}✗ Image generation failed: {e}{RESET}");
                         anyhow::bail!("image generation failed: {e}");
                     }
@@ -1377,13 +1423,26 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
         );
     };
 
-    println!(
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    spinner.set_message(format!(
         "Fetching information for {}/{} from GitHub...",
         owner, repo_name
-    );
+    ));
+    spinner.enable_steady_tick(Duration::from_millis(80));
+
     let summary = match fetch_github_repo_summary(&owner, &repo_name).await {
         Ok(s) => s,
         Err(e) => {
+            spinner.finish_and_clear();
             anyhow::bail!(
                 "Failed to fetch repository summary: {}. Check that the repository is public and spelled correctly.",
                 e
@@ -1391,13 +1450,13 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
         }
     };
 
-    println!("Analyzing repository with AI model...");
+    spinner.set_message("Analyzing repository with AI model...");
     let prompt = format!(
         "Here is the metadata, top-level directory structure, and README.md content for the GitHub repository {}/{}:\n\n{}\n\nBased on this information, please provide a high-level overview of what this repository is about, what tech stack it uses, its overall architecture, and how it is organized.",
         owner, repo_name, summary
     );
 
-    let (response, _) = orchestrate_chat_with_fallback(
+    let (response, _) = match orchestrate_chat_with_fallback(
         config,
         &ChatRequest {
             message: prompt,
@@ -1410,7 +1469,16 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
             agent_id: None,
         },
     )
-    .await?;
+    .await {
+        Ok(res) => {
+            spinner.finish_and_clear();
+            res
+        }
+        Err(e) => {
+            spinner.finish_and_clear();
+            return Err(e.into());
+        }
+    };
 
     println!(
         "\n--- AI Repository Overview for {}/{} ---",
