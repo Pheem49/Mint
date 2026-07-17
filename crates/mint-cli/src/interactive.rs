@@ -99,37 +99,72 @@ pub async fn handle_slash_command(
         }
 
         "/fast" => {
-            session.fast_mode = match rest {
-                "off" => false,
-                "on" => true,
-                "" => !session.fast_mode,
-                _ => {
-                    println!("{WARN}/fast usage: /fast [on|off]{RESET}");
-                    return Some(SlashResult::Handled);
+            let choice = if rest.is_empty() {
+                let options = vec![
+                    "on (hide thinking traces)".to_string(),
+                    "off (show thinking traces)".to_string(),
+                ];
+                let current = if session.fast_mode {
+                    &options[0]
+                } else {
+                    &options[1]
+                };
+                match prompt_interactive_select("Select Fast Mode", &options, current) {
+                    Ok(Some(sel)) => {
+                        if sel.starts_with("on") {
+                            Some(true)
+                        } else {
+                            Some(false)
+                        }
+                    }
+                    Ok(None) => None,
+                    Err(e) => {
+                        println!("{ERROR}Error selecting fast mode:{RESET} {e}\n");
+                        None
+                    }
+                }
+            } else {
+                match rest {
+                    "on" => Some(true),
+                    "off" => Some(false),
+                    _ => {
+                        println!("{WARN}/fast usage: /fast [on|off]{RESET}\n");
+                        None
+                    }
                 }
             };
-            if session.fast_mode {
-                println!("{DIM}[Fast] mode ON — thinking traces hidden{RESET}\n");
-            } else {
-                println!("{DIM}[Fast] mode OFF{RESET}\n");
+
+            if let Some(mode) = choice {
+                session.fast_mode = mode;
+                if session.fast_mode {
+                    println!("{DIM}[Fast] mode ON — thinking traces hidden{RESET}\n");
+                } else {
+                    println!("{DIM}[Fast] mode OFF{RESET}\n");
+                }
             }
             Some(SlashResult::Handled)
         }
 
         "/models" => {
-            if rest.is_empty() {
-                println!("\n{BLUE}Configured providers:{RESET}");
-                for p in session.config.available_providers() {
-                    let active = if p == session.config.ai_provider.as_str() {
-                        format!(" {MINT}← active{RESET}")
-                    } else {
-                        String::new()
-                    };
-                    println!("  {p}{active}");
+            let selected_provider = if rest.is_empty() {
+                let providers = session.config.available_providers();
+                match prompt_interactive_select("Select AI provider", &providers, &session.config.ai_provider) {
+                    Ok(Some(p)) => Some(p),
+                    Ok(None) => {
+                        println!("Cancelled provider selection.\n");
+                        None
+                    }
+                    Err(e) => {
+                        println!("{ERROR}Error selecting provider:{RESET} {e}\n");
+                        None
+                    }
                 }
-                println!();
             } else {
-                session.config.ai_provider = rest.to_owned();
+                Some(rest.to_owned())
+            };
+
+            if let Some(provider) = selected_provider {
+                session.config.ai_provider = provider;
                 match mint_core::save_config(&session.config) {
                     Ok(()) => {
                         let active_model =
@@ -209,6 +244,31 @@ pub async fn handle_slash_command(
                     }
                 }
                 println!();
+
+                let options = vec![
+                    "Keep current status".to_string(),
+                    "on (enable collaboration)".to_string(),
+                    "off (disable collaboration)".to_string(),
+                ];
+                let current = &options[0];
+                match prompt_interactive_select("Toggle Collaboration Status?", &options, current) {
+                    Ok(Some(sel)) => {
+                        if sel.starts_with("on") {
+                            session.config.enable_agent_collaboration = true;
+                            match mint_core::save_config(&session.config) {
+                                Ok(()) => println!("{DIM}Multi-Agent collaboration set to: Enabled{RESET}\n"),
+                                Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                            }
+                        } else if sel.starts_with("off") {
+                            session.config.enable_agent_collaboration = false;
+                            match mint_core::save_config(&session.config) {
+                                Ok(()) => println!("{DIM}Multi-Agent collaboration set to: Disabled{RESET}\n"),
+                                Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                            }
+                        }
+                    }
+                    _ => {}
+                }
             }
             Some(SlashResult::Handled)
         }
@@ -234,37 +294,52 @@ pub async fn handle_slash_command(
                 available.push("nanobanana");
             }
 
-            if rest.is_empty() {
-                println!("\n{BLUE}Configured image generation providers:{RESET}");
-                for p in &available {
-                    let active = if p == &session.config.image_gen_provider.as_str() {
-                        format!(" {MINT}← active{RESET}")
-                    } else {
-                        String::new()
-                    };
-                    println!("  {p}{active}");
+            let selected_provider = if rest.is_empty() {
+                let options: Vec<String> = available.iter().map(|s| s.to_string()).collect();
+                match prompt_interactive_select("Select Image Generation provider", &options, &session.config.image_gen_provider) {
+                    Ok(Some(p)) => Some(p),
+                    Ok(None) => {
+                        println!("Cancelled image provider selection.\n");
+                        None
+                    }
+                    Err(e) => {
+                        println!("{ERROR}Error selecting provider:{RESET} {e}\n");
+                        None
+                    }
                 }
-                println!();
             } else {
                 if available.contains(&rest) {
-                    session.config.image_gen_provider = rest.to_owned();
-                    match mint_core::save_config(&session.config) {
-                        Ok(()) => println!(
-                            "{DIM}Switched default image provider to: {}{RESET}\n",
-                            session.config.image_gen_provider
-                        ),
-                        Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
-                    }
+                    Some(rest.to_owned())
                 } else {
                     println!("{ERROR}Provider '{rest}' is not configured or invalid.{RESET}\n");
+                    None
+                }
+            };
+
+            if let Some(provider) = selected_provider {
+                session.config.image_gen_provider = provider;
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => println!(
+                        "{DIM}Switched default image provider to: {}{RESET}\n",
+                        session.config.image_gen_provider
+                    ),
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
                 }
             }
             Some(SlashResult::Handled)
         }
 
         "/clear" | "/reset" => {
-            println!("Clear conversation history? [y/N] ");
-            if let Ok(true) = confirm("Clear conversation history? [y/N] ") {
+            let options = vec![
+                "No (keep history)".to_string(),
+                "Yes (clear history)".to_string(),
+            ];
+            let choice = match prompt_interactive_select("Clear conversation history?", &options, &options[0]) {
+                Ok(Some(sel)) => sel == options[1],
+                _ => false,
+            };
+
+            if choice {
                 if let Ok(memory) = MemoryStore::open_default() {
                     match memory.clear_interactions() {
                         Ok(count) => println!("{DIM}Cleared {count} interactions.{RESET}"),
@@ -272,6 +347,8 @@ pub async fn handle_slash_command(
                     }
                 }
                 println!("{DIM}Conversation context cleared.{RESET}\n");
+            } else {
+                println!("{DIM}Cancelled.{RESET}\n");
             }
             Some(SlashResult::Handled)
         }
@@ -585,8 +662,79 @@ pub async fn handle_slash_command(
             match subcmd {
                 "list" | "" => match crate::mcp::list() {
                     Ok(servers) => {
-                        println!("\n{BLUE}MCP servers:{RESET}");
-                        crate::print_mcp_servers(&servers);
+                        if servers.is_empty() {
+                            println!("{DIM}(No MCP servers configured.){RESET}\n");
+                        } else {
+                            let allowed_mcp = session.config.extra.get("allowedMcpTools")
+                                .and_then(|v| v.as_object());
+
+                            let mut choices = vec!["Cancel / Keep current settings".to_string()];
+                            let mut server_names = vec![];
+
+                            let max_name_len = servers.keys().map(|k| k.len()).max().unwrap_or(10);
+
+                            for (name, srv) in &servers {
+                                let args_str = srv.args.join(" ");
+                                let status_label = if let Some(allowed) = allowed_mcp.and_then(|m| m.get(name)) {
+                                    if let Some(arr) = allowed.as_array() {
+                                        let tools: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+                                        if tools.contains(&"*") {
+                                            format!("{MINT}[Allowed: *]{RESET}")
+                                        } else if tools.is_empty() {
+                                            format!("{DIM}[No tools allowed]{RESET}")
+                                        } else {
+                                            format!("{MINT}[Allowed: {}]{RESET}", tools.join(", "))
+                                        }
+                                    } else {
+                                        format!("{DIM}[No tools allowed]{RESET}")
+                                    }
+                                } else {
+                                    format!("{DIM}[No tools allowed]{RESET}")
+                                };
+
+                                let padded_name = format!("{:<width$}", name, width = max_name_len + 2);
+                                choices.push(format!("{}{} ({} {})", padded_name, status_label, srv.command, args_str));
+                                server_names.push(name.clone());
+                            }
+
+                            match prompt_interactive_select("Select MCP Server", &choices, &choices[0]) {
+                                Ok(Some(selected_choice)) => {
+                                    if selected_choice != choices[0] {
+                                        if let Some(pos) = choices.iter().position(|c| c == &selected_choice) {
+                                            let server_name = &server_names[pos - 1];
+
+                                            let auth_options = vec![
+                                                "Keep current settings".to_string(),
+                                                "Allow all tools (*)".to_string(),
+                                            ];
+
+                                            let title = format!("Authorize MCP Server '{}'?", server_name);
+                                            match prompt_interactive_select(&title, &auth_options, &auth_options[0]) {
+                                                Ok(Some(auth_choice)) => {
+                                                    if auth_choice == auth_options[1] {
+                                                        match crate::mcp::allow(server_name, "*") {
+                                                            Ok(true) => {
+                                                                println!("{DIM}Allowed MCP tool: {server_name}/*{RESET}");
+                                                                if let Ok(updated_config) = mint_core::load_config() {
+                                                                    session.config = updated_config;
+                                                                }
+                                                                println!("{MINT}Successfully authorized all tools for: {server_name}{RESET}\n");
+                                                            }
+                                                            Ok(false) => {
+                                                                println!("{DIM}MCP tools already allowed for {server_name}{RESET}\n");
+                                                            }
+                                                            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                                                        }
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                     Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
                 },
@@ -596,7 +744,12 @@ pub async fn handle_slash_command(
                     let tool = parts.next();
                     if let (Some(server), Some(tool)) = (server, tool) {
                         match crate::mcp::allow(server, tool) {
-                            Ok(true) => println!("{DIM}Allowed MCP tool: {server}/{tool}{RESET}\n"),
+                            Ok(true) => {
+                                println!("{DIM}Allowed MCP tool: {server}/{tool}{RESET}\n");
+                                if let Ok(updated_config) = mint_core::load_config() {
+                                    session.config = updated_config;
+                                }
+                            }
                             Ok(false) => {
                                 println!("{DIM}MCP tool already allowed: {server}/{tool}{RESET}\n")
                             }
@@ -606,7 +759,9 @@ pub async fn handle_slash_command(
                         println!("{WARN}/mcp allow usage: <server> <tool>{RESET}\n");
                     }
                 }
-                _ => println!("{WARN}/mcp usage: list | allow <server> <tool>{RESET}\n"),
+                _ => println!(
+                    "{WARN}/mcp usage: list | allow <server> <tool> | remove <name> | clear{RESET}\n"
+                ),
             }
             Some(SlashResult::Handled)
         }
@@ -760,6 +915,53 @@ pub async fn handle_slash_command(
     }
 }
 
+fn apply_welcome_gradient(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let count = chars.len();
+    if count == 0 {
+        return String::new();
+    }
+
+    // Gradient stops: Mint (105, 230, 166) -> Sky Blue (72, 202, 228) -> Deep Blue (0, 119, 182)
+    let stops = [
+        (105.0, 230.0, 166.0), // Mint Green
+        (72.0, 202.0, 228.0),  // Sky Blue
+        (0.0, 119.0, 182.0),   // Deep Blue
+    ];
+
+    let mut result = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        if c == ' ' {
+            result.push(c);
+            continue;
+        }
+        let t = if count > 1 { i as f32 / (count - 1) as f32 } else { 0.0 };
+
+        let (r, g, b) = if t <= 0.5 {
+            let local_t = t * 2.0;
+            let r = stops[0].0 + (stops[1].0 - stops[0].0) * local_t;
+            let g = stops[0].1 + (stops[1].1 - stops[0].1) * local_t;
+            let b = stops[0].2 + (stops[1].2 - stops[0].2) * local_t;
+            (r, g, b)
+        } else {
+            let local_t = (t - 0.5) * 2.0;
+            let r = stops[1].0 + (stops[2].0 - stops[1].0) * local_t;
+            let g = stops[1].1 + (stops[2].1 - stops[1].1) * local_t;
+            let b = stops[1].2 + (stops[2].2 - stops[1].2) * local_t;
+            (r, g, b)
+        };
+
+        result.push_str(&format!(
+            "\x1b[38;2;{};{};{}m{}\x1b[0m",
+            r.round() as u8,
+            g.round() as u8,
+            b.round() as u8,
+            c
+        ));
+    }
+    result
+}
+
 pub fn print_welcome_banner(config: &MintConfig) {
     let provider = &config.ai_provider;
     let model = active_model(provider, config);
@@ -793,22 +995,26 @@ pub fn print_welcome_banner(config: &MintConfig) {
 
     if term_width >= ascii_width + spacing + box_width {
         println!(
-            "{MINT} __  __ _       _    ___ _    ___ {RESET}   {DIM}╭{}╮{RESET}",
+            "{}   {DIM}╭{}╮{RESET}",
+            apply_welcome_gradient(" __  __ _       _    ___ _    ___ "),
             "─".repeat(border_len)
         );
         println!(
-            "{MINT}|  \\/  (_)_ __ | |_ / __| |  |_ _|{RESET}   {DIM}│{RESET} {MINT}[Mint]{RESET} v{} | Active AI: {}{} {DIM}│{RESET}",
+            "{}   {DIM}│{RESET} {MINT}[Mint]{RESET} v{} | Active AI: {}{} {DIM}│{RESET}",
+            apply_welcome_gradient("|  \\/  (_)_ __ | |_ / __| |  |_ _|"),
             version,
             clean_provider_name,
             " ".repeat(content_width - len1)
         );
         println!(
-            "{MINT}| |\\/| | | '_ \\|  _| (__| |__ | | {RESET}   {DIM}│{RESET} {DIM}{}{}{RESET} {DIM}│{RESET}",
+            "{}   {DIM}│{RESET} {DIM}{}{}{RESET} {DIM}│{RESET}",
+            apply_welcome_gradient("| |\\/| | | '_ \\|  _| (__| |__ | | "),
             line2_text,
             " ".repeat(content_width - len2)
         );
         println!(
-            "{MINT}|_|  |_|_|_| |_|\\__|\\___|\\___|___|{RESET}   {DIM}╰{}╯{RESET}",
+            "{}   {DIM}╰{}╯{RESET}",
+            apply_welcome_gradient("|_|  |_|_|_| |_|\\__|\\___|\\___|___|"),
             "─".repeat(border_len)
         );
     } else {
@@ -825,10 +1031,10 @@ pub fn print_welcome_banner(config: &MintConfig) {
             " ".repeat(content_width - len2)
         );
         println!("{DIM}╰{}╯{RESET}", "─".repeat(border_len));
-        println!("{MINT} __  __ _       _    ___ _    ___ {RESET}");
-        println!("{MINT}|  \\/  (_)_ __ | |_ / __| |  |_ _|{RESET}");
-        println!("{MINT}| |\\/| | | '_ \\|  _| (__| |__ | | {RESET}");
-        println!("{MINT}|_|  |_|_|_| |_|\\__|\\___|\\___|___|{RESET}");
+        println!("{}", apply_welcome_gradient(" __  __ _       _    ___ _    ___ "));
+        println!("{}", apply_welcome_gradient("|  \\/  (_)_ __ | |_ / __| |  |_ _|"));
+        println!("{}", apply_welcome_gradient("| |\\/| | | '_ \\|  _| (__| |__ | | "));
+        println!("{}", apply_welcome_gradient("|_|  |_|_|_| |_|\\__|\\___|\\___|___|"));
     }
 }
 
@@ -2243,6 +2449,108 @@ pub fn confirm(prompt: &str) -> Result<bool> {
         _ => Ok(false),
     }
 }
+
+pub fn prompt_interactive_select(title: &str, options: &[String], current_selection: &str) -> Result<Option<String>> {
+    use crossterm::event::{self, Event, KeyCode};
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+    use crossterm::tty::IsTty;
+
+    if !io::stdout().is_tty() || enable_raw_mode().is_err() {
+        return Ok(None);
+    }
+
+    let _ = disable_raw_mode();
+    println!("  {BLUE}{} (Use ↑/↓ to navigate, Enter to select, Esc to cancel):{RESET}", title);
+
+    let mut selected = options
+        .iter()
+        .position(|p| p == current_selection)
+        .unwrap_or(0);
+
+    let print_choices = |selected: usize| -> Result<()> {
+        for (i, opt) in options.iter().enumerate() {
+            if i == selected {
+                println!("  {BLUE}❯ {}{RESET}", opt);
+            } else {
+                println!("    {DIM}{}{RESET}", opt);
+            }
+        }
+        io::stdout().flush()?;
+        Ok(())
+    };
+
+    print_choices(selected)?;
+
+    let _ = enable_raw_mode();
+
+    let choice = loop {
+        match event::poll(std::time::Duration::from_millis(100)) {
+            Ok(true) => match event::read() {
+                Ok(Event::Key(key_event)) => {
+                    if key_event.kind == event::KeyEventKind::Press {
+                        let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                            && key_event
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL);
+                        if is_ctrl_c {
+                            break None;
+                        }
+
+                        match key_event.code {
+                            KeyCode::Up => {
+                                if selected > 0 {
+                                    selected -= 1;
+                                } else {
+                                    selected = options.len() - 1;
+                                }
+                                let _ = disable_raw_mode();
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                let _ = print_choices(selected);
+                                let _ = enable_raw_mode();
+                            }
+                            KeyCode::Down | KeyCode::Tab => {
+                                if selected < options.len() - 1 {
+                                    selected += 1;
+                                } else {
+                                    selected = 0;
+                                }
+                                let _ = disable_raw_mode();
+                                print!("\x1b[{}A\x1b[J", options.len());
+                                let _ = print_choices(selected);
+                                let _ = enable_raw_mode();
+                            }
+                            KeyCode::Enter => {
+                                break Some(selected);
+                            }
+                            KeyCode::Esc => {
+                                break None;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    break None;
+                }
+            },
+            Ok(false) => {}
+            Err(_) => {
+                break None;
+            }
+        }
+    };
+
+    let _ = disable_raw_mode();
+    print!("\x1b[{}A\x1b[J", options.len() + 1);
+    let _ = io::stdout().flush();
+
+    match choice {
+        Some(idx) => Ok(Some(options[idx].clone())),
+        None => Ok(None),
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

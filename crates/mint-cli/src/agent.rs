@@ -667,26 +667,51 @@ fn apply_wave_effect(text: &str, tick: usize) -> String {
         return text.to_string();
     }
 
-    let active_idx = if n > 0 {
-        tick % n
-    } else {
-        0
-    };
-
     let mut animated_label = String::new();
+    
+    // Smooth wave movement using a sine wave function.
+    // phase shifts with tick (time), index i acts as spatial shift.
+    // 0.3 speed controls animation rate, 0.4 controls width of the wave crest.
+    let speed = 0.3;
+    let phase = tick as f32 * speed;
+    
     for (i, &c) in chars.iter().enumerate() {
         if c == ' ' {
             animated_label.push(c);
             continue;
         }
-        let diff = (i as isize - active_idx as isize).abs();
-        if diff == 0 {
-            animated_label.push_str(&format!("\x1b[1m{BLUE}{c}{RESET}"));
-        } else if diff == 1 {
-            animated_label.push_str(&format!("\x1b[1m{MINT}{c}{RESET}"));
+        
+        let x = (i as f32 * 0.4) - phase;
+        let t = (x.sin() + 1.0) / 2.0; // Oscillates in [0.0, 1.0]
+        
+        // Stop colors: Dim Gray (70, 70, 70) -> Mint Green (105, 230, 166) -> Cyan (78, 201, 216)
+        let (r, g, b) = if t < 0.3 {
+            let local_t = t / 0.3;
+            let r = 70.0 + (105.0 - 70.0) * local_t;
+            let g = 70.0 + (230.0 - 70.0) * local_t;
+            let b = 70.0 + (166.0 - 70.0) * local_t;
+            (r, g, b)
+        } else if t < 0.7 {
+            let local_t = (t - 0.3) / 0.4;
+            let r = 105.0 + (78.0 - 105.0) * local_t;
+            let g = 230.0 + (201.0 - 230.0) * local_t;
+            let b = 166.0 + (216.0 - 166.0) * local_t;
+            (r, g, b)
         } else {
-            animated_label.push_str(&format!("\x1b[1m{DIM}{c}{RESET}"));
-        }
+            let local_t = (t - 0.7) / 0.3;
+            let r = 78.0 + (70.0 - 78.0) * local_t;
+            let g = 201.0 + (70.0 - 201.0) * local_t;
+            let b = 216.0 + (70.0 - 216.0) * local_t;
+            (r, g, b)
+        };
+        
+        animated_label.push_str(&format!(
+            "\x1b[1m\x1b[38;2;{};{};{}m{}\x1b[0m",
+            r.round() as u8,
+            g.round() as u8,
+            b.round() as u8,
+            c
+        ));
     }
 
     animated_label.push_str(&" ".repeat(spaces_count));
@@ -737,9 +762,9 @@ fn render_live_status(status: &mut LiveStatus) {
         status.spinner_tick += 1;
         
         let custom_thinking = if thinking.contains("is thinking") {
-            thinking.replace("is thinking", &format!("is ｔｈｉｎｋｉｎｇ{:<3}", dots))
+            thinking.replace("is thinking", &format!("is thinking{:<3}", dots))
         } else {
-            thinking.replace("Thinking", &format!("Ｔｈｉｎｋｉｎｇ{:<3}", dots))
+            thinking.replace("Thinking", &format!("Thinking{:<3}", dots))
         };
         
         let waved_thinking = apply_wave_effect(&custom_thinking, status.spinner_tick);

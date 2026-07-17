@@ -2,7 +2,10 @@ use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader, Write},
     process::{Child, Command, Stdio},
-    sync::mpsc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::{Duration, Instant},
 };
 
@@ -12,7 +15,8 @@ use thiserror::Error;
 
 use crate::{ConfigError, MintConfig, load_config, save_config};
 
-const MCP_TIMEOUT: Duration = Duration::from_secs(10);
+const MCP_TIMEOUT: Duration = Duration::from_secs(30);
+static OAUTH_DETECTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpServer {
@@ -33,7 +37,7 @@ pub enum McpError {
     InvalidEnvironment,
     #[error("MCP server '{0}' is not configured")]
     MissingServer(String),
-    #[error("MCP tool '{server}/{tool}' is not allowed by policy")]
+    #[error("MCP tool '{server}/{tool}' is not allowed by policy. To allow it, please run: /mcp allow {server} {tool} (or /mcp allow {server} * to allow all tools on this server)")]
     NotAllowed { server: String, tool: String },
     #[error("unable to start MCP server '{command}': {source}")]
     Start {
@@ -186,18 +190,77 @@ fn parse_env(values: Vec<String>) -> Result<BTreeMap<String, String>, McpError> 
         .collect()
 }
 
+fn find_url(line: &str) -> Option<String> {
+    let start_idx = line.find("http://").or_else(|| line.find("https://"))?;
+    let rest = &line[start_idx..];
+    let end_idx = rest
+        .find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '<' || c == '>')
+        .unwrap_or(rest.len());
+    let url = rest[..end_idx].to_string();
+
+    let lower = url.to_lowercase();
+    if lower.contains("registry.npmjs.org") || lower.contains("npmjs.com") || lower.contains("github.com/modelcontextprotocol") {
+        return None;
+    }
+
+    if lower.contains("oauth")
+        || lower.contains("auth")
+        || lower.contains("login")
+        || lower.contains("google.com")
+        || lower.contains("authorize")
+    {
+        Some(url)
+    } else {
+        None
+    }
+}
+
+fn open_url_in_browser(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open").arg(url).spawn().map(|_| ())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg(url).spawn().map(|_| ())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd").args(&["/C", "start", url]).spawn().map(|_| ())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        let _ = url;
+        Ok(())
+    }
+}
+
 fn start_server(server: &McpServer) -> Result<Child, McpError> {
     let mut process = Command::new(&server.command)
         .args(&server.args)
         .envs(&server.env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|source| McpError::Start {
             command: server.command.clone(),
             source,
         })?;
+
+    if let Some(stderr) = process.stderr.take() {
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().map_while(Result::ok) {
+                if let Some(url) = find_url(&line) {
+                    println!("\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n", url);
+                    OAUTH_DETECTED.store(true, Ordering::Relaxed);
+                    let _ = open_url_in_browser(&url);
+                }
+            }
+        });
+    }
+
     write_message(
         &mut process,
         &json!({
@@ -224,24 +287,60 @@ fn exchange(process: &mut Child, request: Value) -> Result<Value, McpError> {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Some(url) = find_url(&line) {
+                println!("\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n", url);
+                OAUTH_DETECTED.store(true, Ordering::Relaxed);
+                let _ = open_url_in_browser(&url);
+            }
             if let Ok(value) = serde_json::from_str::<Value>(&line) {
                 let _ = sender.send(value);
             }
         }
     });
+
+    let timeout = if OAUTH_DETECTED.load(Ordering::Relaxed) {
+        Duration::from_secs(120)
+    } else {
+        MCP_TIMEOUT
+    };
+
     let started = Instant::now();
-    while started.elapsed() < MCP_TIMEOUT {
+    while started.elapsed() < timeout {
         let response = receiver
-            .recv_timeout(MCP_TIMEOUT.saturating_sub(started.elapsed()))
+            .recv_timeout(timeout.saturating_sub(started.elapsed()))
             .map_err(|_| McpError::Timeout)?;
         if response["id"] == 2 {
+            OAUTH_DETECTED.store(false, Ordering::Relaxed);
             if let Some(error) = response.get("error") {
                 return Err(McpError::Tool(error.clone()));
             }
             return Ok(response.get("result").cloned().unwrap_or(Value::Null));
         }
     }
+    OAUTH_DETECTED.store(false, Ordering::Relaxed);
     Err(McpError::Timeout)
+}
+
+pub fn list_server_tools(
+    config: &MintConfig,
+    server_name: &str,
+) -> Result<Value, McpError> {
+    let servers = configured_mcp_servers(config)?;
+    let server = servers
+        .get(server_name)
+        .ok_or_else(|| McpError::MissingServer(server_name.into()))?;
+    let mut process = start_server(server)?;
+    let result = exchange(
+        &mut process,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {}
+        }),
+    );
+    let _ = process.kill();
+    result
 }
 
 fn write_message(process: &mut Child, message: &Value) -> Result<(), McpError> {

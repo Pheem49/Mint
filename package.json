@@ -56,6 +56,7 @@
     "mint": "src/bin/index.js"
   },
   "dependencies": {
+    "@pouyanafisi/gmail-mcp": "^2.0.0",
     "@tauri-apps/api": "^2.0.0",
     "@vitejs/plugin-react": "^6.0.1",
     "@xyflow/react": "^12.11.1",

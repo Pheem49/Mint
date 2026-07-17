@@ -302,6 +302,7 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         "note_write",
         "run_plugin",
         "mcp_tool",
+        "mcp_list_tools",
         "run_shell",
         "verify",
         "apply_patch",
@@ -410,8 +411,19 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
     if allowed_actions.contains(&"run_plugin") {
         input_formats.push("- run_plugin: {\"name\":\"gmail|google_calendar|notion|docker|spotify|obsidian|system_metrics\",\"instruction\":\"instruction string\"}");
     }
+    let mcp_str;
     if allowed_actions.contains(&"mcp_tool") {
-        input_formats.push("- mcp_tool: {\"server\":\"configured-server\",\"tool\":\"tool-name\",\"arguments\":{}}");
+        let servers = crate::mcp::list_mcp_servers()
+            .map(|m| m.keys().cloned().collect::<Vec<String>>().join(", "))
+            .unwrap_or_default();
+        mcp_str = format!(
+            "- mcp_tool: {{\"server\":\"<name>\",\"tool\":\"tool-name\",\"arguments\":{{}}}} (Available configured servers: {})",
+            servers
+        );
+        input_formats.push(&mcp_str);
+    }
+    if allowed_actions.contains(&"mcp_list_tools") {
+        input_formats.push("- mcp_list_tools: {\"server\":\"configured-server\"}");
     }
     if allowed_actions.contains(&"run_shell") {
         input_formats.push(
@@ -1549,6 +1561,27 @@ where
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
                 ApprovalOutcome::Denied => {
                     Ok(format!("User denied MCP tool call: {} {}", server, tool))
+                }
+                ApprovalOutcome::Intercepted(obs) => Ok(obs),
+            }
+        }
+        "mcp_list_tools" => {
+            let server = required(&input.server, "server")?;
+            let approved = approve_cb(&AgentApproval::McpTool {
+                server: server.to_owned(),
+                tool: "list_tools".to_owned(),
+                arguments: serde_json::json!({}),
+            })
+            .map_err(OrchestrationError::Agent)?;
+
+            match approved {
+                ApprovalOutcome::Approved => Ok(serde_json::to_string_pretty(
+                    &crate::mcp::list_server_tools(config, server)
+                        .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
+                )
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
+                ApprovalOutcome::Denied => {
+                    Ok(format!("User denied MCP list tools: {}", server))
                 }
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
             }
