@@ -31,8 +31,9 @@ pub use chat::{
 };
 
 pub use browser::{
-    BrowserTab, click, is_browser_running, list_tabs, navigate, read_page_text,
-    spawn_automation_browser, type_text,
+    BrowserTab, click, get_element_coordinates, is_browser_running, key_press, list_tabs,
+    mouse_click, mouse_move, navigate, read_page_text, screenshot, spawn_automation_browser,
+    type_text, type_text_native,
 };
 pub use code_tools::{
     AppliedCodeEdit, CodeEdit, CodeEditPreview, CodeEditProposal, CodeFile, CodeInspectionError,

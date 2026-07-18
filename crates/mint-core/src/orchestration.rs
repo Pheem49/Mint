@@ -314,6 +314,10 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         allowed_actions.push("browser_click");
         allowed_actions.push("browser_type");
         allowed_actions.push("browser_read");
+        allowed_actions.push("browser_mouse_move");
+        allowed_actions.push("browser_mouse_click");
+        allowed_actions.push("browser_key_press");
+        allowed_actions.push("browser_screenshot");
     }
 
     allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
@@ -355,14 +359,26 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         input_formats.push("- browser_open: {\"url\":\"https://example.com\"}");
     }
     if allowed_actions.contains(&"browser_click") {
-        input_formats.push("- browser_click: {\"selector\":\"button.submit-btn\"}");
+        input_formats.push("- browser_click: {\"selector\":\"button.submit-btn\"} (CSS selector, or text=Login, contains=Submit, xpath=//button)");
     }
     if allowed_actions.contains(&"browser_type") {
         input_formats
-            .push("- browser_type: {\"selector\":\"input.search-bar\", \"text\":\"search query\"}");
+            .push("- browser_type: {\"selector\":\"input.search-bar\", \"text\":\"search query\"} (CSS selector, or text=Placeholder, contains=Label)");
     }
     if allowed_actions.contains(&"browser_read") {
         input_formats.push("- browser_read: {}");
+    }
+    if allowed_actions.contains(&"browser_mouse_move") {
+        input_formats.push("- browser_mouse_move: {\"x\":640,\"y\":360}");
+    }
+    if allowed_actions.contains(&"browser_mouse_click") {
+        input_formats.push("- browser_mouse_click: {\"x\":640,\"y\":360,\"button\":\"left\"}");
+    }
+    if allowed_actions.contains(&"browser_key_press") {
+        input_formats.push("- browser_key_press: {\"key\":\"Enter\"} (keys: Enter,Tab,Escape,Backspace,Delete,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,F1-F12,Space)");
+    }
+    if allowed_actions.contains(&"browser_screenshot") {
+        input_formats.push("- browser_screenshot: {}");
     }
     if allowed_actions.contains(&"memory_recall") {
         input_formats.push("- memory_recall: {\"query\":\"what did user say about X\"}");
@@ -480,15 +496,27 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         rules.push("7a. Use browser_open to navigate the virtual browser to a URL.");
     }
     if allowed_actions.contains(&"browser_click") {
-        rules.push("7b. Use browser_click to click elements on the page.");
+        rules.push("7b. Use browser_click to click elements. Selector can be: CSS selector (button.class, #id, [attr=val]), text=ExactText to find by visible text, contains=PartialText for partial match, or xpath=//expr for XPath. Prefer text= or contains= when the element has visible text but no unique CSS class.");
     }
     if allowed_actions.contains(&"browser_type") {
-        rules.push("7c. Use browser_type to enter text/input into form fields or search boxes.");
+        rules.push("7c. Use browser_type to enter text into form fields or search boxes. Selector supports the same formats as browser_click.");
     }
     if allowed_actions.contains(&"browser_read") {
         rules.push(
             "7d. Use browser_read to read the text content of the active page to analyze it.",
         );
+    }
+    if allowed_actions.contains(&"browser_mouse_move") {
+        rules.push("7e. Use browser_mouse_move to move the real mouse cursor to absolute (x,y) coordinates.");
+    }
+    if allowed_actions.contains(&"browser_mouse_click") {
+        rules.push("7f. Use browser_mouse_click to perform a native mouse click at (x,y) coordinates. Use browser_screenshot first to find the target position.");
+    }
+    if allowed_actions.contains(&"browser_key_press") {
+        rules.push("7g. Use browser_key_press to press a keyboard key (e.g. Enter, Tab, Escape, ArrowDown). Use after browser_type or browser_mouse_click to interact with focused elements.");
+    }
+    if allowed_actions.contains(&"browser_screenshot") {
+        rules.push("7h. Use browser_screenshot to capture the current page as a PNG image (base64). Use it to inspect the visual state of the page before deciding where to click.");
     }
     if allowed_actions.contains(&"memory_recall") {
         rules.push("8. Use memory_recall to search past interactions before asking the user to repeat context.");
@@ -670,6 +698,14 @@ struct AgentInput {
     selector: String,
     #[serde(default)]
     text: String,
+    #[serde(default)]
+    x: Option<f64>,
+    #[serde(default)]
+    y: Option<f64>,
+    #[serde(default)]
+    button: String,
+    #[serde(default)]
+    key: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1356,6 +1392,40 @@ where
                 .await
                 .map_err(OrchestrationError::Agent)?;
             Ok(result)
+        }
+        "browser_mouse_move" => {
+            let x = input.x.ok_or_else(|| OrchestrationError::Agent("browser_mouse_move requires 'x'".into()))?;
+            let y = input.y.ok_or_else(|| OrchestrationError::Agent("browser_mouse_move requires 'y'".into()))?;
+            let result = crate::browser::mouse_move(config, x, y)
+                .await
+                .map_err(OrchestrationError::Agent)?;
+            Ok(result)
+        }
+        "browser_mouse_click" => {
+            let x = input.x.ok_or_else(|| OrchestrationError::Agent("browser_mouse_click requires 'x'".into()))?;
+            let y = input.y.ok_or_else(|| OrchestrationError::Agent("browser_mouse_click requires 'y'".into()))?;
+            let button = if input.button.is_empty() { "left" } else { &input.button };
+            let result = crate::browser::mouse_click(config, x, y, button)
+                .await
+                .map_err(OrchestrationError::Agent)?;
+            Ok(result)
+        }
+        "browser_key_press" => {
+            let key = if !input.key.is_empty() {
+                &input.key
+            } else {
+                return Err(OrchestrationError::Agent("browser_key_press requires 'key'".into()));
+            };
+            let result = crate::browser::key_press(config, key)
+                .await
+                .map_err(OrchestrationError::Agent)?;
+            Ok(result)
+        }
+        "browser_screenshot" => {
+            let data = crate::browser::screenshot(config)
+                .await
+                .map_err(OrchestrationError::Agent)?;
+            Ok(format!("data:image/png;base64,{data}"))
         }
         "memory_recall" => {
             let query = required(&input.query, "query")?;

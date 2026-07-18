@@ -599,6 +599,10 @@ async fn main() -> Result<()> {
                     "browser_click",
                     "browser_type",
                     "browser_read",
+                    "browser_mouse_move",
+                    "browser_mouse_click",
+                    "browser_key_press",
+                    "browser_screenshot",
                 ] {
                     if config_mut.disabled_tools.contains(&tool.to_string()) {
                         config_mut.disabled_tools.retain(|x| x != *tool);
@@ -608,7 +612,7 @@ async fn main() -> Result<()> {
                 if changed {
                     mint_core::save_config(&config_mut)?;
                     println!(
-                        "✅ Enabled browser automation tools in config: browser_open, browser_click, browser_type, browser_read"
+                        "✅ Enabled browser automation tools in config: browser_open, browser_click, browser_type, browser_read, browser_mouse_move, browser_mouse_click, browser_key_press, browser_screenshot"
                     );
                 }
 
@@ -657,6 +661,22 @@ async fn main() -> Result<()> {
                                     || line_str.contains("[READ_SUCCESS]")
                                 {
                                     println!("📖 {line_str}");
+                                } else if line_str.contains("[MOUSE_MOVE]")
+                                    || line_str.contains("[MOUSE_MOVE_SUCCESS]")
+                                {
+                                    println!("🖱️  {line_str}");
+                                } else if line_str.contains("[MOUSE_CLICK]")
+                                    || line_str.contains("[MOUSE_CLICK_SUCCESS]")
+                                {
+                                    println!("🖱️ ● {line_str}");
+                                } else if line_str.contains("[KEY_PRESS]")
+                                    || line_str.contains("[KEY_PRESS_SUCCESS]")
+                                {
+                                    println!("⌨️  {line_str}");
+                                } else if line_str.contains("[SCREENSHOT]")
+                                    || line_str.contains("[SCREENSHOT_SUCCESS]")
+                                {
+                                    println!("📸 {line_str}");
                                 } else if line_str.contains("_ERROR]") {
                                     println!("❌ {line_str}");
                                 } else {

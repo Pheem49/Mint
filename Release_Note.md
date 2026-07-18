@@ -1,8 +1,48 @@
 # Release Notes - Mint Agent v1.9.1
 
+---
+
+## 🖱️ Browser Automation — Native Mouse & Keyboard Control
+
+This release significantly upgrades `mint auto` browser automation with real native input control via Chrome DevTools Protocol (CDP), matching the behavior seen in advanced AI browser agents.
+
+### New Tools
+
+| Tool | Description |
+|---|---|
+| `browser_mouse_move` | Move the real mouse cursor to absolute (x,y) coordinates |
+| `browser_mouse_click` | Native mousePressed + mouseReleased at (x,y) with configurable button |
+| `browser_key_press` | Press real keyboard keys (Enter, Tab, Escape, F1–F12, etc.) via CDP |
+| `browser_screenshot` | Capture the current page as a base64 PNG image |
+
+### Upgraded Tools
+
+- **`browser_click`**: Now uses native CDP mouse events (gets element coordinates via `getBoundingClientRect`, then dispatches `mousePressed`/`mouseReleased`), falling back to JS `.click()` for off-screen elements.
+- **`browser_type`**: Upgraded to use `Input.insertText` CDP command (native keyboard), typing character by character like a real user. Also clicks the target element first to focus it.
+
+### Visual Cursor Overlay
+
+- Browser pages controlled by `mint auto` now show an **animated mouse cursor** (SVG arrow with green stroke) that moves in real-time as the AI controls the mouse.
+- The cursor has a smooth CSS transition and a click animation (scale shrink) when clicking.
+- The green aura border remains and now coexists with the new cursor overlay.
+
+### Internal Architecture
+
+- Added `cdp_call_raw()` — lightweight CDP call without overlay injection, used for all Input.* and Page.captureScreenshot methods to avoid unnecessary JS round-trips.
+- Added `get_element_coordinates(selector)` — helper that returns viewport-relative (x,y) center of any CSS selector element.
+- Added `type_text_native(text)` — pure CDP keyboard input using `Input.insertText`.
+- Added `key_to_cdp_params(key)` — maps key names to `windowsVirtualKeyCode` and CDP code strings.
+- **`AgentInput`** struct extended with `x: Option<f64>`, `y: Option<f64>`, `button: String`, `key: String` fields.
+- Log display in `mint auto` updated with new emoji indicators: 🖱️ (mouse move), 🖱️● (click), ⌨️ (key press), 📸 (screenshot).
+
+---
+
+# Release Notes - Mint Agent v1.9.1
+
 We are excited to release **Mint Agent v1.9.1**! This version introduces major enhancements to the Command Line Interface (CLI) user experience, featuring rich terminal loaders, animated status wave highlights, code modularization, and workflow automation polishes.
 
 ---
+
 
 ## 🚀 Key Features & Enhancements
 
