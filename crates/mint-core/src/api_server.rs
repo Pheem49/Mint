@@ -4,6 +4,7 @@ use std::{
     process::{Command, Stdio},
 };
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -11,10 +12,10 @@ use tokio::net::TcpListener;
 
 use crate::{
     AgentProgress, ApprovalOutcome, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID,
-    ImageGenRequest, MemoryStore, MintConfig, config_path, create_folder, find_paths,
-    generate_images, list_saved_pictures, load_config, orchestrate_agent_loop,
-    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, save_chat_images,
-    save_config, weather,
+    ImageGenRequest, MemoryStore, MintConfig, VideoGenRequest, config_path, create_folder,
+    find_paths, generate_images, generate_video, list_saved_pictures, load_config,
+    orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    save_chat_images, save_config, weather,
 };
 
 const MAX_API_REQUEST_BYTES: usize = 32 * 1024 * 1024;
@@ -260,6 +261,32 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
+                ("POST", "/api/active-model") => {
+                    #[derive(Deserialize)]
+                    struct ActiveModelReq {
+                        provider: String,
+                        model: Option<String>,
+                    }
+                    if let Ok(req) = serde_json::from_str::<ActiveModelReq>(body)
+                        && let Ok(mut config) = load_config()
+                    {
+                        if let Ok(display_name) = config.set_active_model(&req.provider, req.model.as_deref()) {
+                            send_json_response(
+                                socket,
+                                "200 OK",
+                                &serde_json::json!({ "status": "ok", "displayName": display_name }).to_string(),
+                            )
+                            .await;
+                            return;
+                        }
+                    }
+                    send_json_response(
+                        socket,
+                        "500 Internal Server Error",
+                        "{\"status\":\"error\"}",
+                    )
+                    .await;
+                }
                 ("POST", "/api/interactions/clear") => {
                     if let Ok(memory) = MemoryStore::open_default() {
                         let chat_id = query_param(query, "chatId")
@@ -384,6 +411,22 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         }
                     }
                 }
+                ("GET", route) if route.starts_with("/api/thumbnails/") => {
+                    let filename = percent_decode(route.trim_start_matches("/api/thumbnails/"));
+                    match thumbnail_bytes(&filename) {
+                        Ok((mime_type, bytes)) => {
+                            send_binary_response(socket, "200 OK", &mime_type, &bytes).await
+                        }
+                        Err(_) => {
+                            send_json_response(
+                                socket,
+                                "404 Not Found",
+                                "{\"error\":\"thumbnail not found\"}",
+                            )
+                            .await
+                        }
+                    }
+                }
                 ("GET", "/api/config") => {
                     let config = load_config().unwrap_or_default();
                     if let Ok(json_str) = serde_json::to_string(&config) {
@@ -453,6 +496,71 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         .await;
                     }
                 }
+                ("POST", "/api/uploads") => {
+                    // Accept raw body bytes and optional filename query param.
+                    // Body is the raw file bytes (client should POST the file as the request body).
+                    let filename_param = query_param(query, "filename");
+                    let header_end_idx = header_end as usize;
+                    // extract raw bytes for body
+                    let body_bytes = &request_bytes[header_end_idx + 4..];
+
+                    if body_bytes.is_empty() {
+                        send_json_response(socket, "400 Bad Request", "{\"error\":\"empty body\"}")
+                            .await;
+                        return;
+                    }
+
+                    // Determine mime type from filename or fallback to video/mp4
+                    let (mime_type, _extension) = filename_param
+                        .as_deref()
+                        .and_then(|f| f.rsplit_once('.'))
+                        .map(|(_, ext)| {
+                            let e = ext.to_ascii_lowercase();
+                            match e.as_str() {
+                                "mp4" => ("video/mp4", "mp4"),
+                                "webm" => ("video/webm", "webm"),
+                                "mov" => ("video/quicktime", "mov"),
+                                "mkv" => ("video/x-matroska", "mkv"),
+                                "avi" => ("video/x-msvideo", "avi"),
+                                _ => ("application/octet-stream", "bin"),
+                            }
+                        })
+                        .unwrap_or(("video/mp4", "mp4"));
+
+                    // Build data URI and reuse save_chat_images helper to persist and index file
+                    let encoded = BASE64.encode(body_bytes);
+                    let data_uri = format!("data:{};base64,{}", mime_type, encoded);
+                    match save_chat_images(
+                        vec![data_uri],
+                        Some("upload".into()),
+                        Some("uploaded".into()),
+                    ) {
+                        Ok(saved) => {
+                            if let Some(entry) = saved.into_iter().next() {
+                                let res_json = json!({ "url": format!("/api/pictures/{}", entry.filename), "filename": entry.filename });
+                                send_json_response(socket, "200 OK", &res_json.to_string()).await;
+                                return;
+                            }
+                        }
+                        Err(err) => {
+                            let err_json = json!({ "error": err.to_string() });
+                            send_json_response(
+                                socket,
+                                "500 Internal Server Error",
+                                &err_json.to_string(),
+                            )
+                            .await;
+                            return;
+                        }
+                    }
+                    send_json_response(
+                        socket,
+                        "500 Internal Server Error",
+                        "{\"error\":\"failed to save upload\"}",
+                    )
+                    .await;
+                }
+
                 ("POST", "/api/chat") => {
                     #[derive(Deserialize)]
                     #[serde(rename_all = "camelCase")]
@@ -462,6 +570,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         chat_id: Option<String>,
                         image_data_uri: Option<String>,
                         audio_data_uri: Option<String>,
+                        video_data_uri: Option<String>,
                         document_attachment: Option<crate::chat::DocumentAttachment>,
                         agent_id: Option<String>,
                     }
@@ -474,6 +583,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             chat_id: req.chat_id,
                             image_data_uri: req.image_data_uri,
                             audio_data_uri: req.audio_data_uri,
+                            video_data_uri: req.video_data_uri,
                             document_attachment: req.document_attachment,
                             workspace_path: None,
                             agent_id: req.agent_id,
@@ -481,6 +591,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         let mut chat_req =
                             chat_req.with_document_context(&config).unwrap_or(chat_req);
                         let sent_image = chat_req.image_data_uri.clone();
+                        let sent_video = chat_req.video_data_uri.clone();
                         let sent_message = chat_req.message.clone();
 
                         let response = if let Some(clean_message) =
@@ -503,6 +614,16 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 if let Some(image) = sent_image {
                                     let _ = save_chat_images(
                                         image
+                                            .split_whitespace()
+                                            .map(str::to_owned)
+                                            .collect::<Vec<_>>(),
+                                        Some("web".into()),
+                                        Some(sent_message.clone()),
+                                    );
+                                }
+                                if let Some(video) = sent_video {
+                                    let _ = save_chat_images(
+                                        video
                                             .split_whitespace()
                                             .map(str::to_owned)
                                             .collect::<Vec<_>>(),
@@ -566,6 +687,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         chat_id: Option<String>,
                         image_data_uri: Option<String>,
                         audio_data_uri: Option<String>,
+                        video_data_uri: Option<String>,
                         document_attachment: Option<crate::chat::DocumentAttachment>,
                         agent_id: Option<String>,
                     }
@@ -578,6 +700,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             chat_id: req.chat_id,
                             image_data_uri: req.image_data_uri,
                             audio_data_uri: req.audio_data_uri,
+                            video_data_uri: req.video_data_uri,
                             document_attachment: req.document_attachment,
                             workspace_path: None,
                             agent_id: req.agent_id,
@@ -585,6 +708,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         let mut chat_req =
                             chat_req.with_document_context(&config).unwrap_or(chat_req);
                         let sent_image = chat_req.image_data_uri.clone();
+                        let sent_video = chat_req.video_data_uri.clone();
                         let sent_message = chat_req.message.clone();
 
                         let is_chat = if let Some(clean_message) =
@@ -717,6 +841,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     let chat_id_str = chat_id.clone().unwrap_or_default();
                                     let message = chat_req.message.clone();
                                     let image_data_uri = chat_req.image_data_uri.clone();
+                                    let video_data_uri = chat_req.video_data_uri.clone();
                                     let agent_id = chat_req.agent_id.clone();
 
                                     let join_handle = tokio::spawn(async move {
@@ -725,6 +850,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                             &message,
                                             &root,
                                             image_data_uri,
+                                            video_data_uri,
                                             chat_id.as_deref(),
                                             agent_id.as_deref(),
                                             fast_mode,
@@ -798,6 +924,16 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             if let Some(image) = sent_image {
                                 let _ = save_chat_images(
                                     image
+                                        .split_whitespace()
+                                        .map(str::to_owned)
+                                        .collect::<Vec<_>>(),
+                                    Some("web".into()),
+                                    Some(sent_message.clone()),
+                                );
+                            }
+                            if let Some(video) = sent_video {
+                                let _ = save_chat_images(
+                                    video
                                         .split_whitespace()
                                         .map(str::to_owned)
                                         .collect::<Vec<_>>(),
@@ -890,6 +1026,91 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         .await;
                     }
                 }
+                ("POST", "/api/video-generate") => {
+                    #[derive(serde::Deserialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct VideoGenApiRequest {
+                        prompt: String,
+                        #[serde(default)]
+                        negative_prompt: Option<String>,
+                        #[serde(default)]
+                        aspect_ratio: Option<String>,
+                        #[serde(default)]
+                        duration: Option<u32>,
+                        #[serde(default)]
+                        model: Option<String>,
+                        #[serde(default)]
+                        provider: Option<String>,
+                    }
+
+                    if let Ok(req) = serde_json::from_str::<VideoGenApiRequest>(body) {
+                        let config = load_config().unwrap_or_default();
+                        let gen_request = VideoGenRequest {
+                            prompt: req.prompt.clone(),
+                            negative_prompt: req.negative_prompt,
+                            aspect_ratio: req.aspect_ratio.unwrap_or_else(|| "16:9".to_string()),
+                            duration: req.duration.unwrap_or(5),
+                            model: req.model,
+                            provider: req.provider.unwrap_or_else(|| "veo".to_string()),
+                        };
+                        match generate_video(&config, &gen_request).await {
+                            Ok(result) => {
+                                let mut response =
+                                    serde_json::to_value(&result).unwrap_or(json!({}));
+                                if let Some(videos) =
+                                    response.get_mut("videos").and_then(|v| v.as_array_mut())
+                                {
+                                    for picture in videos {
+                                        let filename = picture
+                                            .get("filename")
+                                            .and_then(|f| f.as_str())
+                                            .map(|s| s.to_string());
+                                        if let Some(filename) = filename {
+                                            picture.as_object_mut().unwrap().insert(
+                                                "url".to_string(),
+                                                json!(format!("/api/pictures/{}", filename)),
+                                            );
+                                        }
+                                        let id = picture
+                                            .get("id")
+                                            .and_then(|i| i.as_str())
+                                            .map(|s| s.to_string());
+                                        if let Some(id) = id {
+                                            let has_thumb = picture.get("thumbnailPath").is_some()
+                                                || picture.get("thumbnailUrl").is_some();
+                                            if has_thumb {
+                                                picture.as_object_mut().unwrap().insert(
+                                                    "thumbnailUrl".to_string(),
+                                                    json!(format!(
+                                                        "/api/thumbnails/{}.thumb.png",
+                                                        id
+                                                    )),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                send_json_response(socket, "200 OK", &response.to_string()).await;
+                            }
+                            Err(e) => {
+                                let err = json!({ "error": e.to_string() });
+                                send_json_response(
+                                    socket,
+                                    "500 Internal Server Error",
+                                    &err.to_string(),
+                                )
+                                .await;
+                            }
+                        }
+                    } else {
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"error\":\"invalid video generation request body\"}",
+                        )
+                        .await;
+                    }
+                }
                 ("GET", "/api/image-gen/providers") => {
                     let config = load_config().unwrap_or_default();
                     let mut available: Vec<String> = Vec::new();
@@ -942,6 +1163,7 @@ async fn run_web_agent_loop(
         &request.message,
         &root,
         request.image_data_uri.clone(),
+        request.video_data_uri.clone(),
         request.chat_id.as_deref(),
         request.agent_id.as_deref(),
         fast_mode,
@@ -1118,6 +1340,25 @@ fn picture_bytes(filename: &str) -> Result<(String, Vec<u8>), String> {
         .ok_or_else(|| "picture not found".to_string())?;
     let bytes = std::fs::read(&picture.path).map_err(|error| error.to_string())?;
     Ok((picture.mime_type, bytes))
+}
+
+fn thumbnail_bytes(filename: &str) -> Result<(String, Vec<u8>), String> {
+    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+        return Err("invalid thumbnail path".into());
+    }
+    let id = filename
+        .strip_suffix(".thumb.png")
+        .ok_or_else(|| "invalid thumbnail name".to_string())?;
+    let picture = list_saved_pictures()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .ok_or_else(|| "picture not found".to_string())?;
+    let thumb_path = picture
+        .thumbnail_path
+        .ok_or_else(|| "thumbnail not found".to_string())?;
+    let bytes = std::fs::read(&thumb_path).map_err(|error| error.to_string())?;
+    Ok(("image/png".to_string(), bytes))
 }
 
 fn query_param(query: &str, key: &str) -> Option<String> {

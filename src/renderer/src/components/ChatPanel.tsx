@@ -38,6 +38,7 @@ interface ChatPanelProps {
   sending: boolean
   sendingMessage: string
   sendingImageCount: number
+  sendingVideoCount?: number
   streamedReply: string
   streamedResponse: ChatResponse | null
   agentProgress: AgentProgress[]
@@ -46,6 +47,7 @@ interface ChatPanelProps {
   onThinkingExpandedChange: (key: string, open: boolean) => void
   message: string
   imageAttachments: Array<{ dataUri: string; name: string; previewDataUri?: string }>
+  videoAttachments: Array<{ dataUri: string; name: string }>
   documentName: string
   pendingApproval: any | null
   smartContext: boolean
@@ -56,11 +58,13 @@ interface ChatPanelProps {
   welcomeInteraction: any
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   onSelectImage: (event: ChangeEvent<HTMLInputElement>) => void
+  onSelectVideo: (event: ChangeEvent<HTMLInputElement>) => void
   onSelectDocument: (event: ChangeEvent<HTMLInputElement>) => void
   onPasteImage: (clipboardData: DataTransfer) => boolean
   onSetMessage: (message: string) => void
   onSendVoiceMessage: (message: string, audioDataUri?: string | null) => Promise<void>
   onRemoveImage: (idx: number) => void
+  onRemoveVideo: (idx: number) => void
   onRemoveDocument: () => void
   onStartWebSearch: () => void
   onCaptureScreen: () => void
@@ -80,6 +84,7 @@ export default function ChatPanel({
   sending,
   sendingMessage,
   sendingImageCount,
+  sendingVideoCount,
   streamedReply,
   streamedResponse,
   agentProgress,
@@ -88,6 +93,7 @@ export default function ChatPanel({
   onThinkingExpandedChange,
   message,
   imageAttachments,
+  videoAttachments,
   documentName,
   pendingApproval,
   smartContext,
@@ -98,11 +104,13 @@ export default function ChatPanel({
   welcomeInteraction,
   onSubmit,
   onSelectImage,
+  onSelectVideo,
   onSelectDocument,
   onPasteImage,
   onSetMessage,
   onSendVoiceMessage,
   onRemoveImage,
+  onRemoveVideo,
   onRemoveDocument,
   onStartWebSearch,
   onCaptureScreen,
@@ -178,6 +186,72 @@ export default function ChatPanel({
   const lastAutoSpokenIdRef = useRef<number | string | null>(null)
   const speakingRef = useRef<string | null>(null)
 
+  // Drag and Drop Zone Overlay
+  const [isDragging, setIsDragging] = useState(false)
+  const dragCounter = useRef(0)
+
+  const handleDragEnter = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    if (e.dataTransfer?.types?.includes('Files')) {
+      dragCounter.current++
+      setIsDragging(true)
+    }
+  }
+
+  const handleDragLeave = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    if (e.dataTransfer?.types?.includes('Files')) {
+      dragCounter.current--
+      if (dragCounter.current === 0) {
+        setIsDragging(false)
+      }
+    }
+  }
+
+  const handleDragOver = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+  }
+
+  const handleDrop = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    dragCounter.current = 0
+    setIsDragging(false)
+
+    const files = e.dataTransfer?.files
+    if (files && files.length > 0) {
+      const file = files[0]
+      if (file.type.startsWith('image/')) {
+        const input = document.getElementById('vision-file-input') as HTMLInputElement | null
+        if (input) {
+          const dt = new DataTransfer()
+          dt.items.add(file)
+          input.files = dt.files
+          const event = { target: input } as ChangeEvent<HTMLInputElement>
+          onSelectImage(event)
+        }
+      } else if (file.type.startsWith('video/')) {
+        const input = document.getElementById('video-file-input') as HTMLInputElement | null
+        if (input) {
+          const dt = new DataTransfer()
+          dt.items.add(file)
+          input.files = dt.files
+          const event = { target: input } as ChangeEvent<HTMLInputElement>
+          onSelectVideo(event)
+        }
+      } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        const input = document.getElementById('document-file-input') as HTMLInputElement | null
+        if (input) {
+          const dt = new DataTransfer()
+          dt.items.add(file)
+          input.files = dt.files
+          const event = { target: input } as ChangeEvent<HTMLInputElement>
+          onSelectDocument(event)
+        }
+      }
+    }
+  }
+
+
   const {
     isRecording,
     voiceMode,
@@ -200,8 +274,9 @@ export default function ChatPanel({
     onSetMessage: (val) => onSetMessage(val)
   })
 
-  const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || documentName)
+  const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || videoAttachments.length > 0 || documentName)
   const sendingImageMarkers = Array.from({ length: sendingImageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
+  const sendingVideoMarkers = Array.from({ length: sendingVideoCount || 0 }, (_, index) => `[Video #${index + 1}]`).join(' ')
   const voiceStatus = speakingText ? 'speaking' : (sending || voiceAwaitingResponse) ? 'thinking' : isRecording ? 'listening' : voiceMode ? 'ready' : 'off'
   const voiceStatusLabel = voiceStatus === 'speaking' ? 'Speaking' : voiceStatus === 'thinking' ? 'Thinking' : voiceStatus === 'listening' ? 'Listening' : 'Ready'
 
@@ -443,6 +518,10 @@ export default function ChatPanel({
   const openImagePicker = () => {
     setToolMenuOpen(false)
     document.getElementById('vision-file-input')?.click()
+  }
+  const openVideoPicker = () => {
+    setToolMenuOpen(false)
+    document.getElementById('video-file-input')?.click()
   }
   const openDocumentPicker = () => {
     setToolMenuOpen(false)
@@ -730,7 +809,46 @@ export default function ChatPanel({
   }
 
   return (
-    <section className={`conversation-panel ${isEmptyChat ? 'is-empty' : ''}`}>
+    <section
+      className={`conversation-panel ${isEmptyChat ? 'is-empty' : ''}`}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{ position: 'relative' }}
+    >
+      {isDragging && (
+        <div
+          className="drag-drop-overlay"
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(15, 23, 42, 0.82)',
+            backdropFilter: 'blur(8px)',
+            border: '2px dashed var(--accent)',
+            borderRadius: '16px',
+            margin: '12px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'white',
+            zIndex: 1000,
+            pointerEvents: 'auto',
+          }}
+        >
+          <div style={{ fontSize: '3.5rem', marginBottom: '16px' }}>🖼️</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 'bold', letterSpacing: '0.5px' }}>Drag files to attach data</div>
+          <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '8px' }}>Supports images (PNG, JPEG, WebP, GIF), videos (MP4, WebM, MOV, MKV), and PDF files</div>
+        </div>
+      )}
       <div className="chat-header">
         <div className="chat-header-title">
           <img src="./assets/icon.png" alt="Logo" className="chat-header-logo" />
@@ -741,6 +859,8 @@ export default function ChatPanel({
         {interactions.map((interaction) => {
           const isSystemEvent = interaction.provider === 'system' && interaction.model === 'provider_change';
           if (isSystemEvent) {
+            const rawText = interaction.userText || ''
+            const cleanText = rawText.replace(/^Changed model to\s*/i, '').trim()
             return (
               <div key={interaction.id} className="system-event-divider">
                 <div className="system-event-line" />
@@ -748,7 +868,7 @@ export default function ChatPanel({
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
                   </svg>
-                  <span>{interaction.userText}</span>
+                  <span>{cleanText}</span>
                 </div>
                 <div className="system-event-line" />
               </div>
@@ -804,7 +924,7 @@ export default function ChatPanel({
 
         {sending && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-            <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{sendingImageMarkers ? renderFormattedMessage(`${sendingMessage} ${sendingImageMarkers}`) : renderFormattedMessage(sendingMessage)}</div></div></div>
+            <div className="message user-message"><div className="bubble-wrapper"><div className="message-bubble">{renderFormattedMessage([sendingMessage, sendingImageMarkers, sendingVideoMarkers].filter(Boolean).join(' '))}</div></div></div>
             {agentMode && (
               <AgentActivityDrawer
                 activityView={agentActivities}
@@ -951,12 +1071,28 @@ export default function ChatPanel({
             if (onPasteImage(event.clipboardData)) event.preventDefault()
           }}
         >
-          {(imageAttachments.length > 0 || documentName) && (
+          {(imageAttachments.length > 0 || videoAttachments.length > 0 || documentName) && (
             <div className="mint-attachment">
               {imageAttachments.map((attachment, idx) => (
                 <div className="mint-image-attachment" key={idx}>
                   <img className="mint-image-preview" src={attachment.previewDataUri || attachment.dataUri} alt={attachment.name || 'Image attachment'} />
                   <button className="mint-attachment-remove" type="button" onClick={() => onRemoveImage(idx)} aria-label="Remove image">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+              ))}
+              {videoAttachments.map((attachment, idx) => (
+                <div className="mint-image-attachment" key={idx}>
+                  <video className="mint-image-preview" src={attachment.dataUri} muted playsInline preload="metadata" />
+                  <div className="mint-video-play-indicator" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none', background: 'rgba(0,0,0,0.6)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '22px', height: '22px', border: '1.5px solid white' }}>
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="white" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                  </div>
+                  <button className="mint-attachment-remove" type="button" onClick={() => onRemoveVideo(idx)} aria-label="Remove video">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="18" y1="6" x2="6" y2="18"></line>
                       <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -1014,6 +1150,15 @@ export default function ChatPanel({
                   </span>
                   <span>Add image</span>
                 </button>
+                <button type="button" role="menuitem" onClick={openVideoPicker} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                      <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                    </svg>
+                  </span>
+                  <span>Add video</span>
+                </button>
                 <button type="button" role="menuitem" onClick={openDocumentPicker} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1036,6 +1181,7 @@ export default function ChatPanel({
             )}
           </div>
           <input id="vision-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={onSelectImage} style={{ display: 'none' }} />
+          <input id="video-file-input" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" onChange={onSelectVideo} style={{ display: 'none' }} />
           <input id="document-file-input" type="file" accept="application/pdf,.pdf" onChange={onSelectDocument} style={{ display: 'none' }} />
           <button id="screen-capture-btn" type="button" onClick={onCaptureScreen} aria-label="Capture screen">
             <span className="screen-capture-eye" aria-hidden="true" />

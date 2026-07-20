@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 
-export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'workflows'
+export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'workflows' | 'veo'
 
 interface ChatSessionItem {
   id: string
@@ -181,7 +181,7 @@ export default function DashboardSidebar({
       </button>
 
       <div className="sidebar-more-container" ref={moreContainerRef}>
-        <button className={`sidebar-top-action ${isMoreOpen || view === 'imagine' || view === 'workflows' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)}>
+        <button className={`sidebar-top-action ${isMoreOpen || view === 'imagine' || view === 'workflows' || view === 'veo' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)}>
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="1.5"></circle>
@@ -213,6 +213,15 @@ export default function DashboardSidebar({
                 </svg>
               </span>
               <span>Workflow (Beta)</span>
+            </button>
+            <button className={`popover-item ${view === 'veo' ? 'active' : ''}`} onClick={() => { onSetView('veo'); setIsMoreOpen(false); }}>
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                </svg>
+              </span>
+              <span>Veo Studio</span>
             </button>
           </div>
         )}

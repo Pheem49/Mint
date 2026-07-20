@@ -820,6 +820,7 @@ pub async fn orchestrate_agent_loop<Approve, Progress, Chunk>(
     task: &str,
     root: &Path,
     image_data_uri: Option<String>,
+    video_data_uri: Option<String>,
     chat_id: Option<&str>,
     agent_id: Option<&str>,
     fast_mode: bool,
@@ -845,9 +846,11 @@ where
         .map(str::trim)
         .filter(|chat_id| !chat_id.is_empty())
         .unwrap_or(DEFAULT_CONVERSATION_ID);
-    let skills = crate::skills::learned_skills_context(Some(&root), Some(chat_id)).unwrap_or_default();
+    let skills =
+        crate::skills::learned_skills_context(Some(&root), Some(chat_id)).unwrap_or_default();
     let mut observation = initial_observation(&resolved_task, &root, &skills);
     let mut pending_image = image_data_uri;
+    let mut pending_video = video_data_uri;
 
     let mut system_prompt = build_system_prompt(config);
 
@@ -934,6 +937,7 @@ where
                 chat_id: Some(chat_id.to_owned()),
                 image_data_uri: pending_image.take(),
                 audio_data_uri: None,
+                video_data_uri: pending_video.take(),
                 document_attachment: None,
                 workspace_path: None,
                 agent_id: None,
@@ -963,6 +967,7 @@ where
                         chat_id: Some(chat_id.to_owned()),
                         image_data_uri: None,
                         audio_data_uri: None,
+                        video_data_uri: None,
                         document_attachment: None,
                         workspace_path: None,
                         agent_id: None,
@@ -1394,17 +1399,29 @@ where
             Ok(result)
         }
         "browser_mouse_move" => {
-            let x = input.x.ok_or_else(|| OrchestrationError::Agent("browser_mouse_move requires 'x'".into()))?;
-            let y = input.y.ok_or_else(|| OrchestrationError::Agent("browser_mouse_move requires 'y'".into()))?;
+            let x = input.x.ok_or_else(|| {
+                OrchestrationError::Agent("browser_mouse_move requires 'x'".into())
+            })?;
+            let y = input.y.ok_or_else(|| {
+                OrchestrationError::Agent("browser_mouse_move requires 'y'".into())
+            })?;
             let result = crate::browser::mouse_move(config, x, y)
                 .await
                 .map_err(OrchestrationError::Agent)?;
             Ok(result)
         }
         "browser_mouse_click" => {
-            let x = input.x.ok_or_else(|| OrchestrationError::Agent("browser_mouse_click requires 'x'".into()))?;
-            let y = input.y.ok_or_else(|| OrchestrationError::Agent("browser_mouse_click requires 'y'".into()))?;
-            let button = if input.button.is_empty() { "left" } else { &input.button };
+            let x = input.x.ok_or_else(|| {
+                OrchestrationError::Agent("browser_mouse_click requires 'x'".into())
+            })?;
+            let y = input.y.ok_or_else(|| {
+                OrchestrationError::Agent("browser_mouse_click requires 'y'".into())
+            })?;
+            let button = if input.button.is_empty() {
+                "left"
+            } else {
+                &input.button
+            };
             let result = crate::browser::mouse_click(config, x, y, button)
                 .await
                 .map_err(OrchestrationError::Agent)?;
@@ -1414,7 +1431,9 @@ where
             let key = if !input.key.is_empty() {
                 &input.key
             } else {
-                return Err(OrchestrationError::Agent("browser_key_press requires 'key'".into()));
+                return Err(OrchestrationError::Agent(
+                    "browser_key_press requires 'key'".into(),
+                ));
             };
             let result = crate::browser::key_press(config, key)
                 .await
@@ -1650,9 +1669,7 @@ where
                         .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
                 )
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
-                ApprovalOutcome::Denied => {
-                    Ok(format!("User denied MCP list tools: {}", server))
-                }
+                ApprovalOutcome::Denied => Ok(format!("User denied MCP list tools: {}", server)),
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
             }
         }
@@ -2363,6 +2380,7 @@ Example response:
         chat_id: None,
         image_data_uri: None,
         audio_data_uri: None,
+        video_data_uri: None,
         document_attachment: None,
         workspace_path: None,
         agent_id: None,
@@ -2423,6 +2441,7 @@ mod tests {
             chat_id: None,
             image_data_uri: None,
             audio_data_uri: None,
+            video_data_uri: None,
             document_attachment: None,
             workspace_path: None,
             agent_id: None,

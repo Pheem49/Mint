@@ -1,13 +1,12 @@
+use crate::{BLUE, COMPOSER_BG, DIM, ERROR, MINT, RESET, WARN};
+use crate::{actions, agent, image, markdown};
 use anyhow::Result;
+use mint_core::{
+    CHAT_CLI_ID, ChatRequest, MemoryStore, MintConfig, orchestrate_chat_stream_with_fallback,
+};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use mint_core::{
-    CHAT_CLI_ID, ChatRequest, MemoryStore, MintConfig,
-    orchestrate_chat_stream_with_fallback,
-};
-use crate::{agent, image, actions, markdown};
-use crate::{MINT, RESET, BLUE, DIM, ERROR, WARN, COMPOSER_BG};
 
 pub static SESSION_APPROVED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
@@ -32,6 +31,31 @@ pub enum SlashResult {
     ForwardToAgent(String),
     /// Break out of the loop.
     Exit,
+}
+
+fn parse_path_and_prompt(rest: &str) -> (String, String) {
+    let rest = rest.trim();
+    if rest.is_empty() {
+        return (String::new(), String::new());
+    }
+
+    let mut chars = rest.chars();
+    if let Some(first) = chars.next() {
+        if first == '"' || first == '\'' {
+            let quote = first;
+            if let Some(end_idx) = rest[1..].find(quote) {
+                let path = rest[1..1 + end_idx].to_string();
+                let prompt = rest[1 + end_idx + 1..].trim().to_string();
+                return (path, prompt);
+            }
+        }
+    }
+
+    if let Some((path, prompt)) = rest.split_once(char::is_whitespace) {
+        (path.to_string(), prompt.trim().to_string())
+    } else {
+        (rest.to_string(), String::new())
+    }
 }
 
 /// Route `/…` commands. Returns `None` if the input is not a slash command.
@@ -80,6 +104,11 @@ pub async fn handle_slash_command(
                 (
                     "/image-provider [name]",
                     "List image gen providers or switch default provider",
+                ),
+                ("/veo <prompt>", "Generate video using Google Veo"),
+                (
+                    "/video-provider [name]",
+                    "List video gen providers or switch default provider",
                 ),
                 ("/mcp list", "List configured MCP servers"),
                 ("/mcp allow <server> <tool>", "Allow an MCP tool"),
@@ -148,7 +177,11 @@ pub async fn handle_slash_command(
         "/models" => {
             let selected_provider = if rest.is_empty() {
                 let providers = session.config.available_providers();
-                match prompt_interactive_select("Select AI provider", &providers, &session.config.ai_provider) {
+                match prompt_interactive_select(
+                    "Select AI provider",
+                    &providers,
+                    &session.config.ai_provider,
+                ) {
                     Ok(Some(p)) => Some(p),
                     Ok(None) => {
                         println!("Cancelled provider selection.\n");
@@ -164,28 +197,8 @@ pub async fn handle_slash_command(
             };
 
             if let Some(provider) = selected_provider {
-                session.config.ai_provider = provider;
-                match mint_core::save_config(&session.config) {
-                    Ok(()) => {
-                        let active_model =
-                            active_model(&session.config.ai_provider, &session.config);
-                        let display_name = format!(
-                            "Changed model to {} • {}",
-                            session.config.ai_provider, active_model
-                        );
-
-                        // Save system event interaction in memory
-                        if let Ok(memory) = MemoryStore::open_default() {
-                            let _ = memory.add_interaction_for_chat_with_fallback(
-                                CHAT_CLI_ID,
-                                &display_name,
-                                "",
-                                "system",
-                                "provider_change",
-                                None,
-                            );
-                        }
-
+                match session.config.set_active_model(&provider, None) {
+                    Ok(display_name) => {
                         println!(
                             "\n{DIM}───{RESET} {MINT}{}{RESET} {DIM}───{RESET}\n",
                             display_name
@@ -256,13 +269,17 @@ pub async fn handle_slash_command(
                         if sel.starts_with("on") {
                             session.config.enable_agent_collaboration = true;
                             match mint_core::save_config(&session.config) {
-                                Ok(()) => println!("{DIM}Multi-Agent collaboration set to: Enabled{RESET}\n"),
+                                Ok(()) => println!(
+                                    "{DIM}Multi-Agent collaboration set to: Enabled{RESET}\n"
+                                ),
                                 Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
                             }
                         } else if sel.starts_with("off") {
                             session.config.enable_agent_collaboration = false;
                             match mint_core::save_config(&session.config) {
-                                Ok(()) => println!("{DIM}Multi-Agent collaboration set to: Disabled{RESET}\n"),
+                                Ok(()) => println!(
+                                    "{DIM}Multi-Agent collaboration set to: Disabled{RESET}\n"
+                                ),
                                 Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
                             }
                         }
@@ -296,7 +313,11 @@ pub async fn handle_slash_command(
 
             let selected_provider = if rest.is_empty() {
                 let options: Vec<String> = available.iter().map(|s| s.to_string()).collect();
-                match prompt_interactive_select("Select Image Generation provider", &options, &session.config.image_gen_provider) {
+                match prompt_interactive_select(
+                    "Select Image Generation provider",
+                    &options,
+                    &session.config.image_gen_provider,
+                ) {
                     Ok(Some(p)) => Some(p),
                     Ok(None) => {
                         println!("Cancelled image provider selection.\n");
@@ -329,12 +350,94 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/video-provider" => {
+            let mut available = Vec::new();
+            if !session.config.api_key.trim().is_empty() || std::env::var("GEMINI_API_KEY").is_ok()
+            {
+                available.push("veo");
+            }
+            if available.is_empty() {
+                available.push("veo");
+            }
+
+            let current_provider = session
+                .config
+                .extra
+                .get("videoGenProvider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("veo")
+                .to_string();
+
+            let selected_provider = if rest.is_empty() {
+                let options = vec!["Google Veo (Gemini Videos)".to_string()];
+                let current_display = if current_provider == "veo" {
+                    "Google Veo (Gemini Videos)"
+                } else {
+                    &current_provider
+                };
+                match prompt_interactive_select(
+                    "Select Video Generation provider",
+                    &options,
+                    current_display,
+                ) {
+                    Ok(Some(p)) => {
+                        if p == "Google Veo (Gemini Videos)" {
+                            Some("veo".to_string())
+                        } else {
+                            Some(p)
+                        }
+                    }
+                    Ok(None) => {
+                        println!("Cancelled video provider selection.\n");
+                        None
+                    }
+                    Err(e) => {
+                        println!("{ERROR}Error selecting provider:{RESET} {e}\n");
+                        None
+                    }
+                }
+            } else {
+                if rest == "veo" || rest == "Google Veo (Gemini Videos)" {
+                    Some("veo".to_string())
+                } else {
+                    println!("{ERROR}Provider '{rest}' is not configured or invalid.{RESET}\n");
+                    None
+                }
+            };
+
+            if let Some(provider) = selected_provider {
+                session.config.extra.insert(
+                    "videoGenProvider".to_string(),
+                    serde_json::Value::String(provider.clone()),
+                );
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => {
+                        let display_name = if provider == "veo" {
+                            "Google Veo (Gemini Videos)"
+                        } else {
+                            &provider
+                        };
+                        println!(
+                            "{DIM}Switched default video provider to: {}{RESET}\n",
+                            display_name
+                        );
+                    }
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
         "/clear" | "/reset" => {
             let options = vec![
                 "No (keep history)".to_string(),
                 "Yes (clear history)".to_string(),
             ];
-            let choice = match prompt_interactive_select("Clear conversation history?", &options, &options[0]) {
+            let choice = match prompt_interactive_select(
+                "Clear conversation history?",
+                &options,
+                &options[0],
+            ) {
                 Ok(Some(sel)) => sel == options[1],
                 _ => false,
             };
@@ -371,17 +474,82 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/veo" => {
+            if rest.is_empty() {
+                println!(
+                    "{WARN}Usage: /veo <prompt> [--aspect <ratio>] [--duration <secs>]{RESET}\n"
+                );
+            } else {
+                let mut prompt = rest.to_string();
+                let mut aspect = "16:9".to_string();
+                let mut duration = 5;
+
+                // Simple flag parsing
+                if let Some(pos) = prompt.find("--aspect") {
+                    let rest_str = prompt[pos..].to_string();
+                    let mut parts = rest_str.split_whitespace();
+                    parts.next(); // Skip --aspect
+                    if let Some(val) = parts.next() {
+                        aspect = val.to_string();
+                    }
+                    prompt = prompt[..pos].trim().to_string();
+                }
+                if let Some(pos) = prompt.find("--duration") {
+                    let rest_str = prompt[pos..].to_string();
+                    let mut parts = rest_str.split_whitespace();
+                    parts.next(); // Skip --duration
+                    if let Some(val) = parts.next() {
+                        if let Ok(parsed) = val.parse::<u32>() {
+                            duration = parsed;
+                        }
+                    }
+                    prompt = prompt[..pos].trim().to_string();
+                }
+
+                use indicatif::{ProgressBar, ProgressStyle};
+                let spinner = ProgressBar::new_spinner();
+                spinner.set_style(
+                    ProgressStyle::default_spinner()
+                        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+                        .template("{spinner:.magenta} {msg}")
+                        .unwrap(),
+                );
+                let gen_request = mint_core::VideoGenRequest {
+                    prompt: prompt.clone(),
+                    negative_prompt: None,
+                    aspect_ratio: aspect.clone(),
+                    duration,
+                    model: None,
+                    provider: "veo".to_string(),
+                };
+
+                match mint_core::generate_video(&session.config, &gen_request).await {
+                    Ok(result) => {
+                        spinner.finish_and_clear();
+                        if let Some(video) = result.videos.first() {
+                            println!("{MINT}✓ Video generated successfully!{RESET}");
+                            println!("{MINT}Saved to: {}{RESET}\n", video.path.display());
+                        } else {
+                            println!("{ERROR}✗ Video generation returned no videos.{RESET}\n");
+                        }
+                    }
+                    Err(e) => {
+                        spinner.finish_and_clear();
+                        println!("{ERROR}✗ Video generation failed: {e}{RESET}\n");
+                    }
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
         "/image" => {
-            let (img_path, prompt) = rest
-                .split_once(char::is_whitespace)
-                .map(|(p, r)| (p, r.trim()))
-                .unwrap_or((rest, ""));
+            let (img_path, prompt) = parse_path_and_prompt(rest);
 
             if img_path.is_empty() {
                 println!("{WARN}/image usage: /image <path> [prompt]{RESET}\n");
                 return Some(SlashResult::Handled);
             }
-            match image::load_image_as_data_uri(std::path::Path::new(img_path)) {
+            match image::load_image_as_data_uri(std::path::Path::new(&img_path)) {
                 Ok(uri) => {
                     if let Some(ref mut current) = session.pending_image {
                         current.push(' ');
@@ -665,7 +833,10 @@ pub async fn handle_slash_command(
                         if servers.is_empty() {
                             println!("{DIM}(No MCP servers configured.){RESET}\n");
                         } else {
-                            let allowed_mcp = session.config.extra.get("allowedMcpTools")
+                            let allowed_mcp = session
+                                .config
+                                .extra
+                                .get("allowedMcpTools")
                                 .and_then(|v| v.as_object());
 
                             let mut choices = vec!["Cancel / Keep current settings".to_string()];
@@ -675,9 +846,12 @@ pub async fn handle_slash_command(
 
                             for (name, srv) in &servers {
                                 let args_str = srv.args.join(" ");
-                                let status_label = if let Some(allowed) = allowed_mcp.and_then(|m| m.get(name)) {
+                                let status_label = if let Some(allowed) =
+                                    allowed_mcp.and_then(|m| m.get(name))
+                                {
                                     if let Some(arr) = allowed.as_array() {
-                                        let tools: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+                                        let tools: Vec<&str> =
+                                            arr.iter().filter_map(|v| v.as_str()).collect();
                                         if tools.contains(&"*") {
                                             format!("{MINT}[Allowed: *]{RESET}")
                                         } else if tools.is_empty() {
@@ -692,15 +866,25 @@ pub async fn handle_slash_command(
                                     format!("{DIM}[No tools allowed]{RESET}")
                                 };
 
-                                let padded_name = format!("{:<width$}", name, width = max_name_len + 2);
-                                choices.push(format!("{}{} ({} {})", padded_name, status_label, srv.command, args_str));
+                                let padded_name =
+                                    format!("{:<width$}", name, width = max_name_len + 2);
+                                choices.push(format!(
+                                    "{}{} ({} {})",
+                                    padded_name, status_label, srv.command, args_str
+                                ));
                                 server_names.push(name.clone());
                             }
 
-                            match prompt_interactive_select("Select MCP Server", &choices, &choices[0]) {
+                            match prompt_interactive_select(
+                                "Select MCP Server",
+                                &choices,
+                                &choices[0],
+                            ) {
                                 Ok(Some(selected_choice)) => {
                                     if selected_choice != choices[0] {
-                                        if let Some(pos) = choices.iter().position(|c| c == &selected_choice) {
+                                        if let Some(pos) =
+                                            choices.iter().position(|c| c == &selected_choice)
+                                        {
                                             let server_name = &server_names[pos - 1];
 
                                             let auth_options = vec![
@@ -708,22 +892,37 @@ pub async fn handle_slash_command(
                                                 "Allow all tools (*)".to_string(),
                                             ];
 
-                                            let title = format!("Authorize MCP Server '{}'?", server_name);
-                                            match prompt_interactive_select(&title, &auth_options, &auth_options[0]) {
+                                            let title =
+                                                format!("Authorize MCP Server '{}'?", server_name);
+                                            match prompt_interactive_select(
+                                                &title,
+                                                &auth_options,
+                                                &auth_options[0],
+                                            ) {
                                                 Ok(Some(auth_choice)) => {
                                                     if auth_choice == auth_options[1] {
                                                         match crate::mcp::allow(server_name, "*") {
                                                             Ok(true) => {
-                                                                println!("{DIM}Allowed MCP tool: {server_name}/*{RESET}");
-                                                                if let Ok(updated_config) = mint_core::load_config() {
+                                                                println!(
+                                                                    "{DIM}Allowed MCP tool: {server_name}/*{RESET}"
+                                                                );
+                                                                if let Ok(updated_config) =
+                                                                    mint_core::load_config()
+                                                                {
                                                                     session.config = updated_config;
                                                                 }
-                                                                println!("{MINT}Successfully authorized all tools for: {server_name}{RESET}\n");
+                                                                println!(
+                                                                    "{MINT}Successfully authorized all tools for: {server_name}{RESET}\n"
+                                                                );
                                                             }
                                                             Ok(false) => {
-                                                                println!("{DIM}MCP tools already allowed for {server_name}{RESET}\n");
+                                                                println!(
+                                                                    "{DIM}MCP tools already allowed for {server_name}{RESET}\n"
+                                                                );
                                                             }
-                                                            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                                                            Err(e) => println!(
+                                                                "{ERROR}MCP error:{RESET} {e}\n"
+                                                            ),
                                                         }
                                                     }
                                                 }
@@ -793,6 +992,7 @@ pub async fn handle_slash_command(
                     println!("  Image    : {WARN}attached{RESET}");
                 }
             }
+
             println!();
             Some(SlashResult::Handled)
         }
@@ -935,7 +1135,11 @@ fn apply_welcome_gradient(text: &str) -> String {
             result.push(c);
             continue;
         }
-        let t = if count > 1 { i as f32 / (count - 1) as f32 } else { 0.0 };
+        let t = if count > 1 {
+            i as f32 / (count - 1) as f32
+        } else {
+            0.0
+        };
 
         let (r, g, b) = if t <= 0.5 {
             let local_t = t * 2.0;
@@ -1031,10 +1235,22 @@ pub fn print_welcome_banner(config: &MintConfig) {
             " ".repeat(content_width - len2)
         );
         println!("{DIM}╰{}╯{RESET}", "─".repeat(border_len));
-        println!("{}", apply_welcome_gradient(" __  __ _       _    ___ _    ___ "));
-        println!("{}", apply_welcome_gradient("|  \\/  (_)_ __ | |_ / __| |  |_ _|"));
-        println!("{}", apply_welcome_gradient("| |\\/| | | '_ \\|  _| (__| |__ | | "));
-        println!("{}", apply_welcome_gradient("|_|  |_|_|_| |_|\\__|\\___|\\___|___|"));
+        println!(
+            "{}",
+            apply_welcome_gradient(" __  __ _       _    ___ _    ___ ")
+        );
+        println!(
+            "{}",
+            apply_welcome_gradient("|  \\/  (_)_ __ | |_ / __| |  |_ _|")
+        );
+        println!(
+            "{}",
+            apply_welcome_gradient("| |\\/| | | '_ \\|  _| (__| |__ | | ")
+        );
+        println!(
+            "{}",
+            apply_welcome_gradient("|_|  |_|_|_| |_|\\__|\\___|\\___|___|")
+        );
     }
 }
 
@@ -1152,6 +1368,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                             &session.current_dir,
                             &session.config,
                             session.pending_image.take(),
+                            None,
                             agent::AgentOptions {
                                 fast_mode: session.fast_mode,
                             },
@@ -1176,6 +1393,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                     print_exit_message(&session);
                     break;
                 }
+
                 Some(SlashResult::ForwardToAgent(task)) => {
                     // Force code agent for /code forwarded tasks
                     println!();
@@ -1184,6 +1402,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                         &session.current_dir,
                         &session.config,
                         session.pending_image.take(),
+                        None,
                         agent::AgentOptions {
                             fast_mode: session.fast_mode,
                         },
@@ -1205,6 +1424,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                     &session.current_dir,
                     &session.config,
                     session.pending_image.take(),
+                    None,
                     agent::AgentOptions {
                         fast_mode: session.fast_mode,
                     },
@@ -1223,6 +1443,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                     &session.current_dir,
                     &session.config,
                     session.pending_image.take(),
+                    None,
                     agent::AgentOptions {
                         fast_mode: session.fast_mode,
                     },
@@ -1280,6 +1501,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                     chat_id: Some(CHAT_CLI_ID.to_owned()),
                     image_data_uri: image_uri,
                     audio_data_uri: None,
+                    video_data_uri: None,
                     document_attachment: None,
                     workspace_path: None,
                     agent_id: None,
@@ -1446,14 +1668,16 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/mcp", "List configured MCP servers"),
     ("/memory", "Manage long-term memory store"),
     ("/models", "List AI providers or switch active provider"),
-    (
-        "/multi-agent",
-        "Toggle Multi-Agent Collaboration system",
-    ),
+    ("/multi-agent", "Toggle Multi-Agent Collaboration system"),
     ("/paste", "Attach image from clipboard"),
     ("/plugins", "List or generate plugins/skills"),
     ("/skill add", "Add or install global skill file or folder"),
     ("/stats", "Show session statistics"),
+    ("/veo", "Generate video using Google Veo"),
+    (
+        "/video-provider",
+        "List video gen providers or switch default provider",
+    ),
 ];
 
 pub fn draw_input_box(
@@ -2450,7 +2674,11 @@ pub fn confirm(prompt: &str) -> Result<bool> {
     }
 }
 
-pub fn prompt_interactive_select(title: &str, options: &[String], current_selection: &str) -> Result<Option<String>> {
+pub fn prompt_interactive_select(
+    title: &str,
+    options: &[String],
+    current_selection: &str,
+) -> Result<Option<String>> {
     use crossterm::event::{self, Event, KeyCode};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
     use crossterm::tty::IsTty;
@@ -2460,7 +2688,10 @@ pub fn prompt_interactive_select(title: &str, options: &[String], current_select
     }
 
     let _ = disable_raw_mode();
-    println!("  {BLUE}{} (Use ↑/↓ to navigate, Enter to select, Esc to cancel):{RESET}", title);
+    println!(
+        "  {BLUE}{} (Use ↑/↓ to navigate, Enter to select, Esc to cancel):{RESET}",
+        title
+    );
 
     let mut selected = options
         .iter()
@@ -2550,7 +2781,6 @@ pub fn prompt_interactive_select(title: &str, options: &[String], current_select
         None => Ok(None),
     }
 }
-
 
 #[cfg(test)]
 mod tests {

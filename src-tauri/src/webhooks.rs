@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
-use mint_core::{ChatRequest, load_config, orchestrate_chat};
+use mint_core::load_config;
 use serde_json::{Value, json};
 use sha2::Sha256;
 use tokio::{
@@ -14,10 +14,16 @@ type HmacSha256 = Hmac<Sha256>;
 
 pub fn start_webhooks() {
     tauri::async_runtime::spawn(async {
-        let _ = serve(3000, Service::Line).await;
+        let (host, port) = load_config()
+            .map(|c| (c.line_webhook_host(), c.line_webhook_port()))
+            .unwrap_or_else(|_| ("127.0.0.1".into(), 3000));
+        let _ = serve(&host, port, Service::Line).await;
     });
     tauri::async_runtime::spawn(async {
-        let _ = serve(3001, Service::Whatsapp).await;
+        let (host, port) = load_config()
+            .map(|c| (c.whatsapp_webhook_host(), c.whatsapp_webhook_port()))
+            .unwrap_or_else(|_| ("127.0.0.1".into(), 3001));
+        let _ = serve(&host, port, Service::Whatsapp).await;
     });
 }
 
@@ -27,8 +33,9 @@ enum Service {
     Whatsapp,
 }
 
-async fn serve(port: u16, service: Service) -> Result<(), String> {
-    let listener = TcpListener::bind(("127.0.0.1", port))
+async fn serve(host: &str, port: u16, service: Service) -> Result<(), String> {
+    let addr = format!("{host}:{port}");
+    let listener = TcpListener::bind(&addr)
         .await
         .map_err(|error| error.to_string())?;
     loop {
@@ -78,9 +85,18 @@ async fn handle_line(request: HttpRequest) -> Result<(&'static str, String), Str
         ) else {
             continue;
         };
-        let answer = answer(text, "Reply concisely for a LINE chat.").await;
+        let user_id = event["source"]["userId"].as_str().unwrap_or("unknown");
+        let formatted_chat_id = format!("line:{user_id}");
+        let answer = mint_core::channels::answer_channel(text, "Reply concisely for a LINE chat.", Some(formatted_chat_id)).await;
+        
+        let mut messages = Vec::new();
+        if config.bridge_ack_enabled() {
+            messages.push(json!({ "type": "text", "text": config.bridge_ack_message() }));
+        }
+        messages.push(json!({ "type": "text", "text": answer }));
+
         let _ = mint_core::HTTP_CLIENT.clone().post("https://api.line.me/v2/bot/message/reply").bearer_auth(&token)
-            .json(&json!({ "replyToken": reply_token, "messages": [{ "type": "text", "text": answer }] })).send().await;
+            .json(&json!({ "replyToken": reply_token, "messages": messages })).send().await;
     }
     Ok(("200 OK", "ok".into()))
 }
@@ -133,33 +149,16 @@ async fn handle_whatsapp(request: HttpRequest) -> Result<(&'static str, String),
         else {
             continue;
         };
-        let answer = answer(text, "Reply concisely for a WhatsApp chat.").await;
+        if config.bridge_ack_enabled() {
+            let _ = mint_core::HTTP_CLIENT.clone().post(format!("https://graph.facebook.com/v23.0/{phone_id}/messages")).bearer_auth(&access_token)
+                .json(&json!({ "messaging_product": "whatsapp", "to": to, "type": "text", "text": { "body": config.bridge_ack_message() } })).send().await;
+        }
+        let formatted_chat_id = format!("whatsapp:{to}");
+        let answer = mint_core::channels::answer_channel(text, "Reply concisely for a WhatsApp chat.", Some(formatted_chat_id)).await;
         let _ = mint_core::HTTP_CLIENT.clone().post(format!("https://graph.facebook.com/v23.0/{phone_id}/messages")).bearer_auth(&access_token)
             .json(&json!({ "messaging_product": "whatsapp", "to": to, "type": "text", "text": { "body": answer } })).send().await;
     }
     Ok(("200 OK", "ok".into()))
-}
-
-async fn answer(text: &str, system: &str) -> String {
-    let Ok(config) = load_config() else {
-        return "Mint config error".into();
-    };
-    orchestrate_chat(
-        &config,
-        &ChatRequest {
-            message: text.into(),
-            system_instruction: system.into(),
-            chat_id: None,
-            image_data_uri: None,
-            audio_data_uri: None,
-            document_attachment: None,
-            workspace_path: None,
-            agent_id: None,
-        },
-    )
-    .await
-    .map(|response| response.text)
-    .unwrap_or_else(|error| format!("Mint error: {error}"))
 }
 
 struct HttpRequest {

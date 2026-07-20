@@ -24,7 +24,7 @@ pub struct AgentOptions {
 }
 
 pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Result<AgentResult> {
-    run_code_agent_with_image(task, root, config, None).await
+    run_code_agent_with_image(task, root, config, None, None).await
 }
 
 pub async fn run_code_agent_with_image(
@@ -32,8 +32,17 @@ pub async fn run_code_agent_with_image(
     root: &Path,
     config: &MintConfig,
     image_data_uri: Option<String>,
+    video_data_uri: Option<String>,
 ) -> Result<AgentResult> {
-    run_code_agent_with_options(task, root, config, image_data_uri, AgentOptions::default()).await
+    run_code_agent_with_options(
+        task,
+        root,
+        config,
+        image_data_uri,
+        video_data_uri,
+        AgentOptions::default(),
+    )
+    .await
 }
 
 pub async fn run_code_agent_with_options(
@@ -41,6 +50,7 @@ pub async fn run_code_agent_with_options(
     root: &Path,
     config: &MintConfig,
     image_data_uri: Option<String>,
+    video_data_uri: Option<String>,
     options: AgentOptions,
 ) -> Result<AgentResult> {
     let started_at = Instant::now();
@@ -385,6 +395,7 @@ pub async fn run_code_agent_with_options(
         task,
         root,
         image_data_uri,
+        video_data_uri,
         Some(CHAT_CLI_ID),
         None,
         options.fast_mode,
@@ -660,7 +671,7 @@ fn apply_wave_effect(text: &str, tick: usize) -> String {
 
     let trimmed_label = label.trim_end();
     let spaces_count = label.len() - trimmed_label.len();
-    
+
     let chars: Vec<char> = trimmed_label.chars().collect();
     let n = chars.len();
     if n == 0 {
@@ -668,22 +679,22 @@ fn apply_wave_effect(text: &str, tick: usize) -> String {
     }
 
     let mut animated_label = String::new();
-    
+
     // Smooth wave movement using a sine wave function.
     // phase shifts with tick (time), index i acts as spatial shift.
     // 0.3 speed controls animation rate, 0.4 controls width of the wave crest.
     let speed = 0.3;
     let phase = tick as f32 * speed;
-    
+
     for (i, &c) in chars.iter().enumerate() {
         if c == ' ' {
             animated_label.push(c);
             continue;
         }
-        
+
         let x = (i as f32 * 0.4) - phase;
         let t = (x.sin() + 1.0) / 2.0; // Oscillates in [0.0, 1.0]
-        
+
         // Stop colors: Dim Gray (70, 70, 70) -> Mint Green (105, 230, 166) -> Cyan (78, 201, 216)
         let (r, g, b) = if t < 0.3 {
             let local_t = t / 0.3;
@@ -704,7 +715,7 @@ fn apply_wave_effect(text: &str, tick: usize) -> String {
             let b = 216.0 + (70.0 - 216.0) * local_t;
             (r, g, b)
         };
-        
+
         animated_label.push_str(&format!(
             "\x1b[1m\x1b[38;2;{};{};{}m{}\x1b[0m",
             r.round() as u8,
@@ -755,20 +766,20 @@ fn render_live_status(status: &mut LiveStatus) {
             "🌘\u{FE0E}",
         ];
         let frame = frames[status.spinner_tick % frames.len()];
-        
+
         let dots_frames = &["", ".", "..", "..."];
         let dots = dots_frames[(status.spinner_tick / 2) % dots_frames.len()];
-        
+
         status.spinner_tick += 1;
-        
+
         let custom_thinking = if thinking.contains("is thinking") {
             thinking.replace("is thinking", &format!("is thinking{:<3}", dots))
         } else {
             thinking.replace("Thinking", &format!("Thinking{:<3}", dots))
         };
-        
+
         let waved_thinking = apply_wave_effect(&custom_thinking, status.spinner_tick);
-        
+
         lines.push(format!("  {MINT}{frame}{RESET} {waved_thinking}"));
     }
     if lines.is_empty() {

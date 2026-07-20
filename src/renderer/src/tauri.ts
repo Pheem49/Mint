@@ -59,6 +59,26 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   return invoke<RuntimeStatus>('get_runtime_status')
 }
 
+export async function setActiveModel(provider: string, model?: string): Promise<string> {
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase()
+    try {
+      const res = await fetch(`${API_BASE}/active-model`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, model }),
+      })
+      const data = await res.json()
+      return data.displayName || `Changed model to ${provider}`
+    } catch (e) {
+      console.error('Failed to set active model via API:', e)
+      return `Changed model to ${provider}`
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string>('set_active_model', { provider, model })
+}
+
 export interface DetectedTools {
   docker: boolean
   git: boolean
@@ -81,23 +101,52 @@ export async function detectSystemTools(): Promise<DetectedTools> {
   return invoke<DetectedTools>('detect_system_tools')
 }
 
+export async function uploadFile(file: File): Promise<string> {
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase();
+    const res = await fetch(`${API_BASE}/uploads?filename=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      body: file,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return data.url;
+  }
+
+  // Tauri runtime: call native command with base64 payload
+  const { invoke } = await import('@tauri-apps/api/core');
+  const dataUri = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  const base64 = dataUri.split(',')[1] || '';
+  const url = await invoke<string>('upload_file', { filename: file.name, dataB64: base64 });
+  return url;
+}
+
 export async function sendChatMessage(
   message: string,
   imageDataUri?: string | null,
   audioDataUri?: string | null,
+  videoDataUri?: string | null,
   documentAttachment?: DocumentAttachment | null,
   workspacePath?: string | null,
   chatId?: string | null,
   agentId?: string | null,
 ): Promise<ChatResponse> {
-  const outgoingMessage = withImagePlaceholder(message, imageDataUri)
+  const outgoingMessage = withImagePlaceholder(message, imageDataUri, videoDataUri)
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();
     try {
       const res = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, documentAttachment, agentId })
+        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId })
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
@@ -118,11 +167,18 @@ export async function sendChatMessage(
   }
   const { invoke } = await import('@tauri-apps/api/core')
   const response = await invoke<ChatResponse>('send_chat_message', {
-    request: { message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, documentAttachment, workspacePath, agentId },
+    request: { message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId },
   })
   if (imageDataUri) {
     await invoke('save_pictures', {
       images: imageDataUri.split(' '),
+      source: 'chat',
+      message: outgoingMessage,
+    })
+  }
+  if (videoDataUri) {
+    await invoke('save_pictures', {
+      images: videoDataUri.split(' '),
       source: 'chat',
       message: outgoingMessage,
     })
@@ -135,6 +191,7 @@ export async function streamChatMessage(
   onChunk: (chunk: string) => void,
   imageDataUri?: string | null,
   audioDataUri?: string | null,
+  videoDataUri?: string | null,
   systemInstruction = '',
   onProgress?: (progress: AgentProgress) => void,
   documentAttachment?: DocumentAttachment | null,
@@ -144,11 +201,11 @@ export async function streamChatMessage(
 ): Promise<ChatResponse> {
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();
-    const outgoingMessage = withImagePlaceholder(message, imageDataUri);
+    const outgoingMessage = withImagePlaceholder(message, imageDataUri, videoDataUri);
     const res = await fetch(`${API_BASE}/chat-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, documentAttachment, agentId })
+      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId })
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -187,14 +244,14 @@ export async function streamChatMessage(
     throw new Error("Stream closed without a final response");
   }
   const { invoke, Channel } = await import('@tauri-apps/api/core')
-  const outgoingMessage = withImagePlaceholder(message, imageDataUri)
+  const outgoingMessage = withImagePlaceholder(message, imageDataUri, videoDataUri)
   const onEvent = new Channel<DesktopStreamEvent>()
   onEvent.onmessage = (event) => {
     if (event.type === 'chunk') onChunk(event.chunk)
     else onProgress?.(event.progress)
   }
   const response = await invoke<ChatResponse>('stream_chat_message', {
-    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, documentAttachment, workspacePath, agentId },
+    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId },
     onEvent,
   })
   if (imageDataUri) {
@@ -204,14 +261,29 @@ export async function streamChatMessage(
       message: outgoingMessage,
     })
   }
+  if (videoDataUri) {
+    await invoke('save_pictures', {
+      images: videoDataUri.split(' '),
+      source: 'chat',
+      message: outgoingMessage,
+    })
+  }
   return response
 }
 
-function withImagePlaceholder(message: string, imageDataUri?: string | null) {
-  if (!imageDataUri || message.includes('[Image #1]')) return message
-  const imageCount = imageDataUri.split(/\s+/).filter(Boolean).length
-  const markers = Array.from({ length: imageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
-  return markers ? `${message} ${markers}` : message
+function withImagePlaceholder(message: string, imageDataUri?: string | null, videoDataUri?: string | null) {
+  let finalMessage = message
+  if (imageDataUri && !finalMessage.includes('[Image #1]')) {
+    const imageCount = imageDataUri.split(/\s+/).filter(Boolean).length
+    const markers = Array.from({ length: imageCount }, (_, index) => `[Image #${index + 1}]`).join(' ')
+    if (markers) finalMessage = `${finalMessage} ${markers}`
+  }
+  if (videoDataUri && !finalMessage.includes('[Video #1]')) {
+    const videoCount = videoDataUri.split(/\s+/).filter(Boolean).length
+    const markers = Array.from({ length: videoCount }, (_, index) => `[Video #${index + 1}]`).join(' ')
+    if (markers) finalMessage = `${finalMessage} ${markers}`
+  }
+  return finalMessage
 }
 
 export async function getTtsUrls(text: string): Promise<TtsUrl[]> {
@@ -1072,7 +1144,7 @@ export function installTauriAdapters() {
   }
 
   window.api = {
-    sendMessage: (message, imageDataUri, audioDataUri, documentAttachment) => sendChatMessage(message, imageDataUri, audioDataUri, documentAttachment),
+    sendMessage: (message, imageDataUri, audioDataUri, documentAttachment) => sendChatMessage(message, imageDataUri, audioDataUri, undefined, documentAttachment),
     closeWindow: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
       const { getCurrentWindow } = await import('@tauri-apps/api/window')
@@ -1228,6 +1300,52 @@ export async function readClipboardImage(): Promise<string | null> {
     return null
   }
 }
+
+// ─── Veo Studio — Video Generation (stub; real Tauri command in follow-up) ───
+
+export interface VideoGenRequest {
+  prompt: string
+  negativePrompt?: string
+  aspectRatio: '16:9' | '9:16' | '1:1'
+  duration: 5 | 8
+  model?: string
+  provider: string
+}
+
+export interface VideoGenEntry {
+  id: string
+  url: string
+  path: string
+  message?: string
+  createdAt?: string
+}
+
+export interface VideoGenResponse {
+  videos: VideoGenEntry[]
+  provider: string
+  model: string
+  description?: string
+}
+
+export interface VideoGenProviders {
+  active: string
+  available: string[]
+}
+
+/**
+ * Generate a video using the configured provider.
+ * NOTE: This is a frontend stub — the real Tauri backend command will be
+ * added in a follow-up PR once the Veo REST API integration is ready.
+ */
+export async function generateVideo(request: VideoGenRequest): Promise<VideoGenResponse> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<VideoGenResponse>('generate_video', { request })
+}
+
+export async function getVideoGenProviders(): Promise<VideoGenProviders> {
+  return { active: 'veo', available: ['veo'] }
+}
+
 
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {

@@ -75,8 +75,10 @@ const REPLICATE_MODEL_PRESETS: &[&str] = &[
     "black-forest-labs/flux-1.1-pro",
     "black-forest-labs/flux-schnell",
     "stability-ai/sdxl",
-    "bytedance/sdxl-lightning-4step",
 ];
+
+// ── Video Generation Providers ──────────────────────────────────────────────
+const VEO_VIDEO_MODEL_PRESETS: &[&str] = &["veo-2.0-flash-exp", "veo-3.0-flash-exp"];
 
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
@@ -279,6 +281,19 @@ pub async fn run() -> Result<()> {
             name: "Replicate (FLUX / SDXL / custom)",
             key: "img_replicate",
             enabled: !config.replicate_api_key.is_empty(),
+        },
+        // ── Video Generation ─────────────────────────────────────────────────
+        OnboardService {
+            category: "Video Generation",
+            name: "Google Veo (Gemini Videos)  [uses Gemini key]",
+            key: "vid_veo",
+            enabled: !config.api_key.is_empty()
+                && config
+                    .extra
+                    .get("veoModel")
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false),
         },
     ];
 
@@ -974,6 +989,34 @@ pub async fn run() -> Result<()> {
         )?;
     } else {
         config.replicate_api_key = String::new();
+    }
+
+    // Google Veo (Gemini Videos)
+    if is_selected("vid_veo", &services) {
+        println!("\n\x1b[36m--- Google Veo (Gemini Videos) ---\x1b[0m");
+        println!(
+            "\x1b[90mUses the same Gemini API key as Step 1. Select the video generation model.\x1b[0m"
+        );
+        let current_veo_model = config
+            .extra
+            .get("veoModel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("veo-2.0-flash-exp")
+            .to_string();
+        let selected_veo_model = prompt_select_or_custom(
+            "Veo Model",
+            static_model_options(VEO_VIDEO_MODEL_PRESETS),
+            Some(&current_veo_model),
+            "Custom Veo model...",
+        )?;
+        config.extra.insert(
+            "veoModel".to_string(),
+            serde_json::Value::String(selected_veo_model),
+        );
+        config.extra.insert(
+            "videoGenProvider".to_string(),
+            serde_json::Value::String("veo".to_string()),
+        );
     }
 
     save_config(&config)?;

@@ -53,7 +53,10 @@ pub fn learn_skill(path: &Path) -> Result<LearnedSkill, SkillError> {
     Ok(MemoryStore::open_default()?.add_learned_skill(name, &path.to_string_lossy(), &content)?)
 }
 
-pub fn learned_skills_context(workspace_root: Option<&Path>, chat_id: Option<&str>) -> Result<String, SkillError> {
+pub fn learned_skills_context(
+    workspace_root: Option<&Path>,
+    chat_id: Option<&str>,
+) -> Result<String, SkillError> {
     let mut skills = MemoryStore::open_default()?.learned_skills(20)?;
 
     if let Some(home) = dirs::home_dir() {
@@ -105,7 +108,10 @@ pub fn learned_skills_context(workspace_root: Option<&Path>, chat_id: Option<&st
         }
 
         if is_workspace_skill {
-            let desc = skill.description.as_deref().unwrap_or("No description provided");
+            let desc = skill
+                .description
+                .as_deref()
+                .unwrap_or("No description provided");
             let status_msg = if has_history {
                 "READ. You have already read this skill in a previous turn of this conversation. Do NOT call `read_file` to read it again unless you need to re-verify its contents."
             } else {

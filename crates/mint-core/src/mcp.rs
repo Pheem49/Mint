@@ -25,6 +25,8 @@ pub struct McpServer {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -37,7 +39,9 @@ pub enum McpError {
     InvalidEnvironment,
     #[error("MCP server '{0}' is not configured")]
     MissingServer(String),
-    #[error("MCP tool '{server}/{tool}' is not allowed by policy. To allow it, please run: /mcp allow {server} {tool} (or /mcp allow {server} * to allow all tools on this server)")]
+    #[error(
+        "MCP tool '{server}/{tool}' is not allowed by policy. To allow it, please run: /mcp allow {server} {tool} (or /mcp allow {server} * to allow all tools on this server)"
+    )]
     NotAllowed { server: String, tool: String },
     #[error("unable to start MCP server '{command}': {source}")]
     Start {
@@ -86,6 +90,7 @@ pub fn add_mcp_server(
             command: command.into(),
             args,
             env: parse_env(env)?,
+            icon: None,
         },
     );
     save_mcp_servers(&mut config, servers)
@@ -199,7 +204,10 @@ fn find_url(line: &str) -> Option<String> {
     let url = rest[..end_idx].to_string();
 
     let lower = url.to_lowercase();
-    if lower.contains("registry.npmjs.org") || lower.contains("npmjs.com") || lower.contains("github.com/modelcontextprotocol") {
+    if lower.contains("registry.npmjs.org")
+        || lower.contains("npmjs.com")
+        || lower.contains("github.com/modelcontextprotocol")
+    {
         return None;
     }
 
@@ -226,7 +234,10 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        Command::new("cmd").args(&["/C", "start", url]).spawn().map(|_| ())
+        Command::new("cmd")
+            .args(&["/C", "start", url])
+            .spawn()
+            .map(|_| ())
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
@@ -253,7 +264,10 @@ fn start_server(server: &McpServer) -> Result<Child, McpError> {
             let reader = BufReader::new(stderr);
             for line in reader.lines().map_while(Result::ok) {
                 if let Some(url) = find_url(&line) {
-                    println!("\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n", url);
+                    println!(
+                        "\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n",
+                        url
+                    );
                     OAUTH_DETECTED.store(true, Ordering::Relaxed);
                     let _ = open_url_in_browser(&url);
                 }
@@ -288,7 +302,10 @@ fn exchange(process: &mut Child, request: Value) -> Result<Value, McpError> {
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if let Some(url) = find_url(&line) {
-                println!("\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n", url);
+                println!(
+                    "\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n",
+                    url
+                );
                 OAUTH_DETECTED.store(true, Ordering::Relaxed);
                 let _ = open_url_in_browser(&url);
             }
@@ -321,10 +338,7 @@ fn exchange(process: &mut Child, request: Value) -> Result<Value, McpError> {
     Err(McpError::Timeout)
 }
 
-pub fn list_server_tools(
-    config: &MintConfig,
-    server_name: &str,
-) -> Result<Value, McpError> {
+pub fn list_server_tools(config: &MintConfig, server_name: &str) -> Result<Value, McpError> {
     let servers = configured_mcp_servers(config)?;
     let server = servers
         .get(server_name)

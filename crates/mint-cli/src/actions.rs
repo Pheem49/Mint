@@ -1,9 +1,9 @@
+use crate::confirm;
+use crate::{DIM, ERROR, MINT, RESET, WARN};
 use anyhow::Result;
-use std::fs;
-use std::path::{Path, PathBuf};
 use mint_core::MintConfig;
-use crate::{MINT, RESET, DIM, ERROR, WARN};
-use crate::confirm; // Will be moved to interactive later, or crate::interactive::confirm
+use std::fs;
+use std::path::{Path, PathBuf}; // Will be moved to interactive later, or crate::interactive::confirm
 
 pub struct ActionStreamFilter {
     buffer: String,
@@ -203,7 +203,12 @@ pub fn execute_action(action: &str, config: &MintConfig) -> Result<()> {
                 println!("{WARN}System action:{RESET} run local shell command");
                 println!("  {args}");
                 if confirm_shell_execution()? {
-                    let output = mint_core::run_shell_command(args, &std::env::current_dir()?, true, config)?;
+                    let output = mint_core::run_shell_command(
+                        args,
+                        &std::env::current_dir()?,
+                        true,
+                        config,
+                    )?;
                     print_shell_output(&output);
                 } else {
                     println!("Shell command cancelled.\n");

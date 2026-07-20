@@ -43,9 +43,7 @@ pub struct BrowserTab {
 
 pub async fn list_tabs(config: &MintConfig) -> Result<Vec<BrowserTab>, String> {
     if !is_browser_running(config).await {
-        return Err(
-            "Browser automation is not running. Please run 'mint auto' first.".to_string(),
-        );
+        return Err("Browser automation is not running. Please run 'mint auto' first.".to_string());
     }
     Ok(fetch_pages(config)
         .await?
@@ -73,7 +71,10 @@ pub async fn navigate(config: &MintConfig, url: &str) -> Result<String, String> 
     match cdp_call(config, "Page.navigate", json!({ "url": url })).await {
         Ok(response) => {
             if response["result"]["frameId"].as_str().is_some() {
-                log_action("NAVIGATE_SUCCESS", &format!("Successfully navigated to {url}"));
+                log_action(
+                    "NAVIGATE_SUCCESS",
+                    &format!("Successfully navigated to {url}"),
+                );
                 Ok(format!("navigating to {url}"))
             } else {
                 let err = response_error(&response);
@@ -169,9 +170,15 @@ pub async fn click(config: &MintConfig, selector: &str) -> Result<String, String
         if let Some(val_str) = val["value"].as_str() {
             if let Ok(parsed) = serde_json::from_str::<Value>(val_str) {
                 if let (Some(x), Some(y)) = (parsed["x"].as_f64(), parsed["y"].as_f64()) {
-                    log_action("CLICK", &format!("Coordinates ({x:.0},{y:.0}) for '{selector}'"));
+                    log_action(
+                        "CLICK",
+                        &format!("Coordinates ({x:.0},{y:.0}) for '{selector}'"),
+                    );
                     let result = mouse_click(config, x, y, "left").await?;
-                    log_action("CLICK_SUCCESS", &format!("Clicked '{selector}' at ({x:.0},{y:.0})"));
+                    log_action(
+                        "CLICK_SUCCESS",
+                        &format!("Clicked '{selector}' at ({x:.0},{y:.0})"),
+                    );
                     return Ok(result);
                 }
             }
@@ -197,7 +204,10 @@ pub async fn click(config: &MintConfig, selector: &str) -> Result<String, String
     {
         Ok(response) => match response["result"]["result"]["value"].as_str() {
             Some("clicked") => {
-                log_action("CLICK_SUCCESS", &format!("JS-fallback clicked '{selector}'"));
+                log_action(
+                    "CLICK_SUCCESS",
+                    &format!("JS-fallback clicked '{selector}'"),
+                );
                 Ok("clicked".into())
             }
             Some("not-found") => {
@@ -300,7 +310,10 @@ pub async fn mouse_click(
     y: f64,
     button: &str,
 ) -> Result<String, String> {
-    log_action("MOUSE_CLICK", &format!("Clicking ({x:.0},{y:.0}) btn={button}"));
+    log_action(
+        "MOUSE_CLICK",
+        &format!("Clicking ({x:.0},{y:.0}) btn={button}"),
+    );
     ensure_page_open(config).await?;
 
     let button_str = match button {
@@ -344,7 +357,10 @@ pub async fn mouse_click(
         }),
     )
     .await
-    .map_err(|e| { log_action("MOUSE_CLICK_ERROR", &format!("mousePressed: {e}")); e })?;
+    .map_err(|e| {
+        log_action("MOUSE_CLICK_ERROR", &format!("mousePressed: {e}"));
+        e
+    })?;
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -362,10 +378,18 @@ pub async fn mouse_click(
         }),
     )
     .await
-    .map_err(|e| { log_action("MOUSE_CLICK_ERROR", &format!("mouseReleased: {e}")); e })?;
+    .map_err(|e| {
+        log_action("MOUSE_CLICK_ERROR", &format!("mouseReleased: {e}"));
+        e
+    })?;
 
-    log_action("MOUSE_CLICK_SUCCESS", &format!("Clicked ({x:.0},{y:.0}) {button_str}"));
-    Ok(format!("clicked at ({x:.0},{y:.0}) with {button_str} button"))
+    log_action(
+        "MOUSE_CLICK_SUCCESS",
+        &format!("Clicked ({x:.0},{y:.0}) {button_str}"),
+    );
+    Ok(format!(
+        "clicked at ({x:.0},{y:.0}) with {button_str} button"
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -423,12 +447,13 @@ pub async fn key_press(config: &MintConfig, key: &str) -> Result<String, String>
         }),
     )
     .await
-    .map_err(|e| { log_action("KEY_PRESS_ERROR", &format!("keyDown failed: {e}")); e })?;
+    .map_err(|e| {
+        log_action("KEY_PRESS_ERROR", &format!("keyDown failed: {e}"));
+        e
+    })?;
 
     // char event for printable single characters
-    if key.chars().count() == 1
-        && !key.chars().next().map(|c| c.is_control()).unwrap_or(true)
-    {
+    if key.chars().count() == 1 && !key.chars().next().map(|c| c.is_control()).unwrap_or(true) {
         let _ = cdp_call_raw(
             config,
             "Input.dispatchKeyEvent",
@@ -461,7 +486,10 @@ pub async fn key_press(config: &MintConfig, key: &str) -> Result<String, String>
         }),
     )
     .await
-    .map_err(|e| { log_action("KEY_PRESS_ERROR", &format!("keyUp failed: {e}")); e })?;
+    .map_err(|e| {
+        log_action("KEY_PRESS_ERROR", &format!("keyUp failed: {e}"));
+        e
+    })?;
 
     log_action("KEY_PRESS_SUCCESS", &format!("Pressed '{key}'"));
     Ok(format!("pressed key '{key}'"))
@@ -540,8 +568,7 @@ pub async fn get_element_coordinates(
                 return Err(format!("element not found: {selector}"));
             }
             if let Some(val_str) = val["value"].as_str() {
-                let parsed: Value =
-                    serde_json::from_str(val_str).map_err(|e| e.to_string())?;
+                let parsed: Value = serde_json::from_str(val_str).map_err(|e| e.to_string())?;
                 let x = parsed["x"].as_f64().ok_or("missing x")?;
                 let y = parsed["y"].as_f64().ok_or("missing y")?;
                 Ok((x, y))
@@ -604,7 +631,6 @@ async fn inject_overlay(config: &MintConfig) {
     )
     .await;
 }
-
 
 // ---------------------------------------------------------------------------
 // Browser lifecycle
@@ -701,9 +727,7 @@ pub async fn spawn_automation_browser(config: &MintConfig) -> Result<(), String>
 
 pub async fn ensure_page_open(config: &MintConfig) -> Result<(), String> {
     if !is_browser_running(config).await {
-        return Err(
-            "Browser automation is not running. Please run 'mint auto' first.".to_string(),
-        );
+        return Err("Browser automation is not running. Please run 'mint auto' first.".to_string());
     }
     let endpoint = config
         .extra
@@ -832,7 +856,9 @@ async fn cdp_call(config: &MintConfig, method: &str, params: Value) -> Result<Va
 
     while let Some(message) = socket.next().await {
         let message = message.map_err(|e| e.to_string())?;
-        let Message::Text(raw) = message else { continue };
+        let Message::Text(raw) = message else {
+            continue;
+        };
         let value: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
         if value["id"] == 1 {
             return Ok(value);
@@ -842,11 +868,7 @@ async fn cdp_call(config: &MintConfig, method: &str, params: Value) -> Result<Va
 }
 
 /// Lightweight CDP call — no overlay injection. Used for Input.* and Page.captureScreenshot.
-async fn cdp_call_raw(
-    config: &MintConfig,
-    method: &str,
-    params: Value,
-) -> Result<Value, String> {
+async fn cdp_call_raw(config: &MintConfig, method: &str, params: Value) -> Result<Value, String> {
     let page = fetch_pages(config)
         .await?
         .into_iter()
@@ -870,7 +892,9 @@ async fn cdp_call_raw(
 
     while let Some(message) = socket.next().await {
         let message = message.map_err(|e| e.to_string())?;
-        let Message::Text(raw) = message else { continue };
+        let Message::Text(raw) = message else {
+            continue;
+        };
         let value: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
         if value["id"] == 1 {
             return Ok(value);

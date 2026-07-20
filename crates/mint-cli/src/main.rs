@@ -11,9 +11,8 @@ use mint_core::{
     build_symbol_index, classify_shell_command, config_path, create_folder, execute_native_plugin,
     fetch_github_repo_summary, find_paths, generate_images, index_semantic_code, initialize_config,
     inspect_code_plan, list_code_files, load_config, native_plugins,
-    orchestrate_chat_with_fallback, parse_github_url,
-    propose_code_edits, read_code_file, repository_summary, run_shell_command, search_code,
-    search_semantic_code, set_config_value,
+    orchestrate_chat_with_fallback, parse_github_url, propose_code_edits, read_code_file,
+    repository_summary, run_shell_command, search_code, search_semantic_code, set_config_value,
 };
 
 mod actions;
@@ -28,7 +27,9 @@ mod setup;
 mod skills;
 mod updater;
 
-pub use interactive::{confirm, active_model, print_welcome_banner, run_interactive_chat, SESSION_APPROVED};
+pub use interactive::{
+    SESSION_APPROVED, active_model, confirm, print_welcome_banner, run_interactive_chat,
+};
 
 pub const RESET: &str = "\x1b[0m";
 pub const MINT: &str = "\x1b[32m";
@@ -43,11 +44,23 @@ pub(crate) async fn run_code_agent_with_saved_image(
     current_dir: &Path,
     config: &MintConfig,
     image_data_uri: Option<String>,
+    video_data_uri: Option<String>,
     options: agent::AgentOptions,
 ) -> Result<()> {
     let sent_image = image_data_uri.clone();
-    agent::run_code_agent_with_options(task, current_dir, config, image_data_uri, options).await?;
+    let sent_video = video_data_uri.clone();
+    agent::run_code_agent_with_options(
+        task,
+        current_dir,
+        config,
+        image_data_uri,
+        video_data_uri,
+        options,
+    )
+    .await?;
+    // Save any attached images and videos that were sent with the task
     image::save_sent_image_after_send(sent_image.as_deref(), task);
+    image::save_sent_image_after_send(sent_video.as_deref(), task);
     Ok(())
 }
 
@@ -239,6 +252,23 @@ enum Command {
         #[arg(long)]
         negative: Option<String>,
         /// Save the first generated image to this path
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Generate a video from a text prompt using Google Veo.
+    Veo {
+        /// Text description of the video to generate.
+        prompt: String,
+        /// Aspect ratio: 16:9, 9:16, or 1:1 [default: 16:9]
+        #[arg(long, default_value = "16:9")]
+        aspect: String,
+        /// Duration of the video in seconds (5 or 8) [default: 5]
+        #[arg(long, default_value_t = 5)]
+        duration: u32,
+        /// Negative prompt — elements to avoid in the video
+        #[arg(long)]
+        negative: Option<String>,
+        /// Save the generated video to this path
         #[arg(long)]
         output: Option<PathBuf>,
     },
@@ -498,7 +528,9 @@ enum MemoryCommand {
     },
 }
 
-pub(crate) fn print_mcp_servers(servers: &std::collections::BTreeMap<String, mint_core::mcp::McpServer>) {
+pub(crate) fn print_mcp_servers(
+    servers: &std::collections::BTreeMap<String, mint_core::mcp::McpServer>,
+) {
     if servers.is_empty() {
         println!("{DIM}(No MCP servers configured.){RESET}\n");
         return;
@@ -517,6 +549,7 @@ pub(crate) fn print_mcp_servers(servers: &std::collections::BTreeMap<String, min
 async fn main() -> Result<()> {
     match Cli::parse().command {
         None => {
+            mint_core::channels::start_channels();
             run_interactive_chat().await?;
         }
         Some(cmd) => match cmd {
@@ -702,10 +735,13 @@ async fn main() -> Result<()> {
                 print_welcome_banner(&config);
 
                 println!("\n{MINT}✔ Mint API Server is running!{RESET}\n");
-                println!("    {BLUE}API Server URL:{RESET} {MINT}http://localhost:{}{RESET}\n", port);
+                println!(
+                    "    {BLUE}API Server URL:{RESET} {MINT}http://localhost:{}{RESET}\n",
+                    port
+                );
 
                 println!("Messaging Bridges Status:");
-                
+
                 let bridges = [
                     ("enableTelegramBridge", "Telegram Bot Bridge"),
                     ("enableDiscordBridge", "Discord Bot Bridge"),
@@ -715,7 +751,11 @@ async fn main() -> Result<()> {
                 ];
 
                 for &(key, name) in &bridges {
-                    let enabled = config.extra.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
+                    let enabled = config
+                        .extra
+                        .get(key)
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     if enabled {
                         println!("  {MINT}● {name:<23} [Active]{RESET}");
                     } else {
@@ -775,14 +815,13 @@ async fn main() -> Result<()> {
                             .template("{spinner:.green} {msg}")
                             .unwrap(),
                     );
-                    spinner.set_message(format!("Executing MCP tool '{}' on server '{}'...", tool, server));
+                    spinner.set_message(format!(
+                        "Executing MCP tool '{}' on server '{}'...",
+                        tool, server
+                    ));
                     spinner.enable_steady_tick(Duration::from_millis(80));
 
-                    let res = mcp::call(
-                        &server,
-                        &tool,
-                        serde_json::from_str(&arguments)?,
-                    );
+                    let res = mcp::call(&server, &tool, serde_json::from_str(&arguments)?);
                     spinner.finish_and_clear();
                     println!("{}", serde_json::to_string_pretty(&res?)?);
                 }
@@ -911,6 +950,7 @@ async fn main() -> Result<()> {
                         &std::env::current_dir()?,
                         &load_config()?,
                         image_data_uri,
+                        None,
                         agent::AgentOptions::default(),
                     )
                     .await?;
@@ -923,6 +963,7 @@ async fn main() -> Result<()> {
                             chat_id: Some(CHAT_CLI_ID.to_owned()),
                             image_data_uri,
                             audio_data_uri: None,
+                            video_data_uri: None,
                             document_attachment: None,
                             workspace_path: None,
                             agent_id: None,
@@ -1256,10 +1297,7 @@ async fn main() -> Result<()> {
                 match generate_images(&config, &request).await {
                     Ok(result) => {
                         spinner.finish_and_clear();
-                        eprintln!(
-                            "{MINT}✦ Generated {} image(s){RESET}",
-                            result.images.len()
-                        );
+                        eprintln!("{MINT}✦ Generated {} image(s){RESET}", result.images.len());
                         let data_uris: Vec<String> = result
                             .images
                             .iter()
@@ -1299,6 +1337,67 @@ async fn main() -> Result<()> {
                         spinner.finish_and_clear();
                         eprintln!("{ERROR}✗ Image generation failed: {e}{RESET}");
                         anyhow::bail!("image generation failed: {e}");
+                    }
+                }
+            }
+            Command::Veo {
+                prompt,
+                aspect,
+                duration,
+                negative,
+                output,
+            } => {
+                let config = load_config()?;
+                use indicatif::{ProgressBar, ProgressStyle};
+                use std::time::Duration as StdDuration;
+                let spinner = ProgressBar::new_spinner();
+                spinner.set_style(
+                    ProgressStyle::default_spinner()
+                        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+                        .template("{spinner:.magenta} {msg}")
+                        .unwrap(),
+                );
+                spinner.set_message(format!(
+                    "Generating {}s (aspect: {}) video with Veo for: \"{}\"...",
+                    duration, aspect, prompt
+                ));
+                spinner.enable_steady_tick(StdDuration::from_millis(80));
+
+                let gen_request = mint_core::VideoGenRequest {
+                    prompt: prompt.clone(),
+                    negative_prompt: negative,
+                    aspect_ratio: aspect.clone(),
+                    duration,
+                    model: None,
+                    provider: "veo".to_string(),
+                };
+
+                match mint_core::generate_video(&config, &gen_request).await {
+                    Ok(result) => {
+                        spinner.finish_and_clear();
+                        if let Some(video) = result.videos.first() {
+                            println!("{MINT}✓ Video generated successfully!{RESET}");
+                            println!("{MINT}Saved to: {}{RESET}", video.path.display());
+                            if let Some(out_path) = output {
+                                if let Err(e) = std::fs::copy(&video.path, &out_path) {
+                                    eprintln!(
+                                        "{ERROR}✗ Failed to copy generated video to output path: {e}{RESET}"
+                                    );
+                                } else {
+                                    println!(
+                                        "{MINT}✓ Copied to output destination: {}{RESET}",
+                                        out_path.display()
+                                    );
+                                }
+                            }
+                        } else {
+                            eprintln!("{ERROR}✗ Video generation returned no videos.{RESET}");
+                        }
+                    }
+                    Err(e) => {
+                        spinner.finish_and_clear();
+                        eprintln!("{ERROR}✗ Video generation failed: {e}{RESET}");
+                        anyhow::bail!("video generation failed: {e}");
                     }
                 }
             }
@@ -1361,7 +1460,10 @@ async fn launch_mint_target(target: String) -> Result<()> {
             println!("\n{MINT}✔ Mint Web is running!{RESET}\n");
             println!("    {BLUE}Web UI:{RESET}     {MINT}http://localhost:9000{RESET}");
             if let Some(ip) = mint_core::api_server::get_local_ip() {
-                println!("    {BLUE}Mobile:{RESET}     {MINT}http://{}:9000{RESET}", ip);
+                println!(
+                    "    {BLUE}Mobile:{RESET}     {MINT}http://{}:9000{RESET}",
+                    ip
+                );
             }
             println!("    {BLUE}API Server:{RESET} {MINT}http://localhost:3000{RESET}\n");
 
@@ -1376,9 +1478,6 @@ async fn launch_mint_target(target: String) -> Result<()> {
 
     Ok(())
 }
-
-
-
 
 async fn run_cli_agent_task(task: Option<String>) -> Result<()> {
     let store = TaskStore::open_default()?;
@@ -1415,26 +1514,6 @@ async fn run_cli_agent_task(task: Option<String>) -> Result<()> {
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
     let Some((owner, repo_name)) = parse_github_url(repo) else {
@@ -1484,6 +1563,7 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
             chat_id: Some("github_review".to_string()),
             image_data_uri: None,
             audio_data_uri: None,
+            video_data_uri: None,
             document_attachment: None,
             workspace_path: None,
             agent_id: None,
@@ -1508,5 +1588,3 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
     println!("--------------------------------------------------");
     Ok(())
 }
-
-

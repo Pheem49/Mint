@@ -2,6 +2,7 @@ use std::{
     fs,
     io::Cursor,
     path::{Path, PathBuf},
+    process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -131,6 +132,11 @@ pub fn parse_data_uri(raw: &str) -> Option<(String, &'static str, Vec<u8>)> {
         "image/jpeg" | "image/jpg" => "jpg",
         "image/webp" => "webp",
         "image/gif" => "gif",
+        "video/mp4" => "mp4",
+        "video/webm" => "webm",
+        "video/quicktime" => "mov",
+        "video/x-msvideo" => "avi",
+        "video/x-matroska" => "mkv",
         _ => return None,
     };
     Some((mime_type, extension, STANDARD.decode(encoded).ok()?))
@@ -166,7 +172,13 @@ fn save_chat_images_to_directory(
         let id = filename
             .trim_end_matches(&format!(".{extension}"))
             .to_owned();
-        let thumbnail_path = create_thumbnail_from_bytes(directory, &id, &bytes);
+        let thumbnail_path = if mime_type.starts_with("image/") {
+            create_thumbnail_from_bytes(directory, &id, &bytes)
+        } else if mime_type.starts_with("video/") {
+            extract_video_thumbnail_from_bytes(directory, &id, &bytes)
+        } else {
+            None
+        };
         let entry = PictureEntry {
             id,
             filename,
@@ -219,6 +231,57 @@ fn create_thumbnail_from_bytes(directory: &Path, id: &str, bytes: &[u8]) -> Opti
         .ok()?;
     fs::write(&path, encoded.into_inner()).ok()?;
     Some(path)
+}
+
+fn extract_video_thumbnail_from_bytes(directory: &Path, id: &str, bytes: &[u8]) -> Option<PathBuf> {
+    // Write video to temporary file
+    let temp_video = std::env::temp_dir().join(format!("mint-video-{}.tmp", id));
+    if fs::write(&temp_video, bytes).is_err() {
+        return None;
+    }
+
+    let temp_frame = std::env::temp_dir().join(format!("mint-frame-{}.png", id));
+
+    let res = (|| -> Option<PathBuf> {
+        let temp_video_str = temp_video.to_str()?;
+        let temp_frame_str = temp_frame.to_str()?;
+
+        let output = Command::new("ffmpeg")
+            .args(&["-i", temp_video_str])
+            .args(&["-vf", "select=eq(n\\,0)"])
+            .args(&["-vframes", "1"])
+            .args(&["-y", temp_frame_str])
+            .stderr(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        // Load extracted frame and create thumbnail
+        let frame_bytes = fs::read(&temp_frame).ok()?;
+        let image = image::load_from_memory(&frame_bytes).ok()?;
+        let thumbnail = image.thumbnail(THUMBNAIL_MAX_SIZE, THUMBNAIL_MAX_SIZE);
+
+        let thumbnail_directory = thumbnails_directory(directory);
+        ensure_directory(&thumbnail_directory).ok()?;
+        let path = thumbnail_directory.join(format!("{id}.thumb.png"));
+
+        let mut encoded = Cursor::new(Vec::new());
+        thumbnail
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .ok()?;
+        fs::write(&path, encoded.into_inner()).ok()?;
+        Some(path)
+    })();
+
+    // Always clean up temp files to avoid leaking in /tmp
+    let _ = fs::remove_file(&temp_video);
+    let _ = fs::remove_file(&temp_frame);
+
+    res
 }
 
 fn read_index(directory: &Path) -> Result<Vec<PictureEntry>, PictureError> {

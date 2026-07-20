@@ -27,6 +27,7 @@ import {
 import ChatPanel from './ChatPanel'
 import DashboardSidebar, { type DashboardView } from './DashboardSidebar'
 import ImageStudioPanel from './ImageStudioPanel'
+import VeoStudioPanel from './VeoStudioPanel'
 import ModelPanel from './ModelPanel'
 import type { ModelInteraction } from './ModelPanel'
 import PicturesLibrary from './PicturesLibrary'
@@ -108,6 +109,7 @@ export default function MintDashboard() {
   const [sending, setSending] = useState(false)
   const [sendingMessage, setSendingMessage] = useState('')
   const [sendingImageCount, setSendingImageCount] = useState(0)
+  const [sendingVideoCount, setSendingVideoCount] = useState(0)
   const [streamedReply, setStreamedReply] = useState('')
   const [streamedResponse, setStreamedResponse] = useState<ChatResponse | null>(null)
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null)
@@ -116,6 +118,7 @@ export default function MintDashboard() {
   const [thinkingExpanded, setThinkingExpanded] = useState<Record<string, boolean>>({})
   const liveThinkingOpenRef = useRef(true)
   const [imageAttachments, setImageAttachments] = useState<Array<{ dataUri: string; name: string; previewDataUri?: string }>>([])
+  const [videoAttachments, setVideoAttachments] = useState<Array<{ dataUri: string; name: string }>>([])
   const [documentAttachment, setDocumentAttachment] = useState<DocumentAttachment | null>(null)
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
   const [sessionAutoApproved, setSessionAutoApproved] = useState(false)
@@ -280,9 +283,21 @@ export default function MintDashboard() {
           setImageAttachments((current) => [...current, { dataUri: image, previewDataUri, name: 'Screen capture' }])
         })
     })
+    const handleWindowFocus = () => {
+      getRuntimeStatus().then(setStatus).catch(() => {})
+      window.settingsApi?.getSettings?.().then((loaded: any) => {
+        if (loaded) {
+          setSettingsConfig(loaded)
+          applyThemeStyles(loaded)
+        }
+      }).catch(() => {})
+    }
+    window.addEventListener('focus', handleWindowFocus)
+
     window.api?.onSettingsChanged?.((loaded: any) => {
       setSettingsConfig(loaded)
       applyThemeStyles(loaded)
+      getRuntimeStatus().then(setStatus).catch(() => {})
     })
 
     const unlistenPromise = listen<any>('tool-approval-requested', (event) => {
@@ -298,6 +313,7 @@ export default function MintDashboard() {
       setProactiveSuggestion(suggestion)
     })
     return () => {
+      window.removeEventListener('focus', handleWindowFocus)
       unlistenPromise?.then?.((unlisten) => unlisten?.())
       unlistenSpotlight?.then?.((unlisten) => unlisten?.())
       unlistenVision?.then?.((unlisten) => unlisten?.())
@@ -407,6 +423,7 @@ export default function MintDashboard() {
       setStreamingConversationId(null)
       setSendingMessage('')
       setSendingImageCount(0)
+      setSendingVideoCount(0)
     }
   }
 
@@ -414,6 +431,7 @@ export default function MintDashboard() {
     promptText: string,
     options: {
       imageAttachments?: Array<{ dataUri: string; name: string; previewDataUri?: string }>
+      videoAttachments?: Array<{ dataUri: string; name: string }>
       audioDataUri?: string | null
       documentAttachment?: DocumentAttachment | null
       systemInstruction?: string
@@ -422,14 +440,17 @@ export default function MintDashboard() {
   ) {
     if (sending) return
     const outgoingImages = options.imageAttachments ?? []
+    const outgoingVideos = options.videoAttachments ?? []
     const outgoingDocument = options.documentAttachment ?? null
     const shouldUseAgentMode = agentMode || promptText.toLowerCase().startsWith('search web:')
     const outgoingImage = outgoingImages.map((img) => img.dataUri).join(' ')
+    const outgoingVideo = outgoingVideos.map((vid) => vid.dataUri).join(' ')
     const outgoingImageCount = outgoingImages.length
     setSending(true)
     setStreamingConversationId(conversationId)
     setSendingMessage(promptText)
     setSendingImageCount(outgoingImageCount)
+    setSendingVideoCount(outgoingVideos.length)
     setError('')
     setStreamedReply('')
     setStreamedResponse(null)
@@ -440,6 +461,7 @@ export default function MintDashboard() {
     if (options.clearComposer) {
       setMessage('')
       setImageAttachments([])
+      setVideoAttachments([])
       setDocumentAttachment(null)
     }
 
@@ -449,6 +471,7 @@ export default function MintDashboard() {
         (chunk) => setStreamedReply((current) => `${current}${chunk}`),
         outgoingImage,
         options.audioDataUri ?? null,
+        outgoingVideo,
         options.systemInstruction ?? '',
         (progress) => {
           progressSnapshot.push(progress)
@@ -489,6 +512,7 @@ export default function MintDashboard() {
       setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, enrichedHistory))
       await refreshChatSessions()
       await refreshPictures()
+      getRuntimeStatus().then(setStatus).catch(() => {})
       setStreamedReply('')
       setStreamedResponse(null)
     } catch (reason) {
@@ -498,6 +522,7 @@ export default function MintDashboard() {
       setStreamingConversationId(null)
       setSendingMessage('')
       setSendingImageCount(0)
+      setSendingVideoCount(0)
     }
   }
 
@@ -516,12 +541,18 @@ export default function MintDashboard() {
     event.preventDefault()
     const trimmed = message.trim()
     const currentImages = imageAttachments
+    const currentVideos = videoAttachments
     const currentDocument = documentAttachment
-    const hasAttachments = currentImages.length > 0 || Boolean(currentDocument)
+    const hasAttachments = currentImages.length > 0 || currentVideos.length > 0 || Boolean(currentDocument)
     if ((!trimmed && !hasAttachments) || sending) return
-    const promptText = trimmed || (currentImages.length > 1 ? 'Describe these images.' : currentImages.length === 1 ? 'Describe this image.' : 'Summarize this document.')
+    const promptText = trimmed || (
+      currentImages.length > 0 ? (currentImages.length > 1 ? 'Describe these images.' : 'Describe this image.') :
+      currentVideos.length > 0 ? (currentVideos.length > 1 ? 'Describe these videos.' : 'Describe this video.') :
+      'Summarize this document.'
+    )
     await sendPrompt(promptText, {
       imageAttachments: currentImages,
+      videoAttachments: currentVideos,
       documentAttachment: currentDocument,
       clearComposer: true,
     })
@@ -545,6 +576,28 @@ export default function MintDashboard() {
       const dataUri = await readImage(file)
       const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
       setImageAttachments((current) => [...current, { dataUri, previewDataUri, name: file.name }])
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      event.target.value = ''
+    }
+  }
+  const MAX_VIDEO_BYTES = 25 * 1024 * 1024 // 25 MB
+  async function selectVideo(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try {
+      if (file.size > MAX_VIDEO_BYTES) {
+        setError(`Video is too large. Maximum allowed is ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB.`)
+        return
+      }
+      const dataUri = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      setVideoAttachments((current) => [...current, { dataUri, name: file.name }])
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -968,7 +1021,7 @@ export default function MintDashboard() {
             expressionIndex={expressionIndex}
             accessoryIndex={accessoryIndex}
             isLocked={isLocked}
-            isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'workflows'}
+            isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'workflows' && view !== 'imagine' && view !== 'veo'}
             layoutPreset={layoutPreset}
             sending={sending}
             interactionEnabled={interactionEnabled}
@@ -990,11 +1043,13 @@ export default function MintDashboard() {
             streamedReply={streamingConversationId === conversationId ? streamedReply : ''}
             streamedResponse={streamingConversationId === conversationId ? streamedResponse : null}
             agentProgress={streamingConversationId === conversationId ? agentProgress : []}
+            sendingVideoCount={streamingConversationId === conversationId ? sendingVideoCount : 0}
             agentActivitySnapshots={agentActivitySnapshots}
             thinkingExpanded={thinkingExpanded}
             onThinkingExpandedChange={handleThinkingExpandedChange}
             message={message}
             imageAttachments={imageAttachments}
+            videoAttachments={videoAttachments}
             documentName={documentAttachment?.filename ?? ''}
             pendingApproval={streamingConversationId === conversationId ? pendingApproval : null}
             smartContext={smartContext}
@@ -1005,12 +1060,16 @@ export default function MintDashboard() {
             welcomeInteraction={MOCK_WELCOME_INTERACTION}
             onSubmit={handleSubmit}
             onSelectImage={selectImage}
+            onSelectVideo={selectVideo}
             onSelectDocument={selectDocument}
             onPasteImage={pasteImage}
             onSetMessage={setMessage}
             onSendVoiceMessage={sendVoiceMessage}
             onRemoveImage={(idx: number) => {
               setImageAttachments((current) => current.filter((_, i) => i !== idx))
+            }}
+            onRemoveVideo={(idx: number) => {
+              setVideoAttachments((current) => current.filter((_, i) => i !== idx))
             }}
             onRemoveDocument={() => setDocumentAttachment(null)}
             onStartWebSearch={startWebSearch}
@@ -1032,6 +1091,13 @@ export default function MintDashboard() {
           onSendToChat={(_url, imgPrompt) => {
             setView('chat')
             setMessage(imgPrompt)
+          }}
+        />
+        <VeoStudioPanel
+          view={view}
+          onSendToChat={(vidPrompt) => {
+            setView('chat')
+            setMessage(vidPrompt)
           }}
         />
         <WorkflowBuilderPanel

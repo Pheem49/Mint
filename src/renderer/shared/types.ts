@@ -8,6 +8,7 @@ export interface RuntimeStatus {
   backend: string
   configPath: string
   activeProvider: string
+  activeModel?: string
   availableProviders: string[]
   integrations: Record<string, unknown>
   localIp?: string

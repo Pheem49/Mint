@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { getLocalApiBase, isTauriRuntime, getProfileValue, setProfileValue } from '../tauri'
+import { getLocalApiBase, isTauriRuntime, getProfileValue, setProfileValue, setActiveModel } from '../tauri'
 import GeneralTab from './Settings/GeneralTab'
 import MemoryTab from './Settings/MemoryTab'
 import AudioTab from './Settings/AudioTab'
@@ -91,11 +91,17 @@ export const DEFAULT_CONFIG = {
   lineChannelAccessToken: '',
   lineChannelSecret: '',
   enableLineBridge: false,
+  lineWebhookHost: '127.0.0.1',
+  lineWebhookPort: 3000,
   whatsappCloudAccessToken: '',
   whatsappPhoneNumberId: '',
   whatsappVerifyToken: '',
   whatsappAppSecret: '',
   enableWhatsappBridge: false,
+  whatsappWebhookHost: '127.0.0.1',
+  whatsappWebhookPort: 3001,
+  enableBridgeAckNotification: true,
+  bridgeAckMessage: '[Mint Agent] Remote command received, processing...',
   notionApiKey: '',
   notionDatabaseId: '',
   gmailClientId: '',
@@ -114,6 +120,9 @@ export const DEFAULT_CONFIG = {
   stabilityApiKey: '',
   ideogramApiKey: '',
   replicateApiKey: '',
+  // Video Generation
+  videoGenProvider: 'veo' as 'veo',
+  veoModel: 'veo-2.0-flash-exp',
   // Multi-Agent Configuration
   agents: [
     {
@@ -239,6 +248,7 @@ export default function SettingsWindow() {
   const [mcpCmd, setMcpCmd] = useState('')
   const [mcpArgs, setMcpArgs] = useState('')
   const [mcpEnv, setMcpEnv] = useState('')
+  const [mcpIcon, setMcpIcon] = useState('')
   const [updateMessage, setUpdateMessage] = useState('')
   const [updateAvailable, setUpdateAvailable] = useState(false)
 
@@ -421,6 +431,21 @@ export default function SettingsWindow() {
       console.error("Failed to save user profile memory:", e)
     }
 
+    const getActiveModelName = (provider: string, cfg: typeof finalConfig) => {
+      switch (provider) {
+        case 'gemini': return cfg.geminiModel
+        case 'openai': return cfg.openaiModel
+        case 'openrouter': return cfg.openrouterModel
+        case 'deepseek': return cfg.deepseekModel
+        case 'anthropic': return cfg.anthropicModel
+        case 'huggingface': return cfg.hfModel
+        case 'local_openai': return cfg.localModelName
+        case 'ollama': return cfg.ollamaModel
+        default: return ''
+      }
+    }
+    setActiveModel(finalConfig.aiProvider, getActiveModelName(finalConfig.aiProvider, finalConfig)).catch(() => {})
+
     if (window.settingsApi) {
       await window.settingsApi.saveSettings(finalConfig)
       applyThemeStyles(finalConfig)
@@ -557,7 +582,8 @@ export default function SettingsWindow() {
       [mcpName.trim()]: {
         command: mcpCmd.trim(),
         args: argList,
-        env: parsedEnv
+        env: parsedEnv,
+        icon: mcpIcon.trim() || undefined
       }
     }
 
@@ -570,6 +596,7 @@ export default function SettingsWindow() {
     setMcpCmd('')
     setMcpArgs('')
     setMcpEnv('')
+    setMcpIcon('')
   }
 
   const handleRemoveMcpServer = (name: string) => {
@@ -816,6 +843,8 @@ export default function SettingsWindow() {
               setMcpArgs={setMcpArgs}
               mcpEnv={mcpEnv}
               setMcpEnv={setMcpEnv}
+              mcpIcon={mcpIcon}
+              setMcpIcon={setMcpIcon}
               handleAddMcpServer={handleAddMcpServer}
               handleRemoveMcpServer={handleRemoveMcpServer}
               handleConnectPlugin={handleConnectPlugin}

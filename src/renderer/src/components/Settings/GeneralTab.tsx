@@ -921,6 +921,52 @@ export default function GeneralTab({
         </div>
       </section>
 
+      {/* ── Video Generation ── */}
+      <section className="setting-section">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">AI video creation</p>
+            <h2 className="section-title">Video Generation</h2>
+          </div>
+          <p className="section-description">Choose which video generation provider Mint uses.</p>
+        </div>
+        <div className="provider-cards-container">
+          {/* Veo */}
+          <div className={`provider-card ${config.videoGenProvider === 'veo' ? 'active-provider' : ''}`}>
+            <div className="provider-card-header">
+              <div className="provider-card-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="23 7 16 12 23 17 23 7" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                </svg>
+                Google Veo (Gemini Videos)
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {config.videoGenProvider === 'veo' && <span className="provider-active-badge">Active</span>}
+                <label className="settings-toggle-switch" style={{ marginBottom: 0 }}>
+                  <input type="radio" name="videoGenProvider" style={{ display: 'none' }} checked={config.videoGenProvider === 'veo'} onChange={() => updateField('videoGenProvider', 'veo')} />
+                  <span className="settings-toggle-slider" style={{ cursor: 'pointer' }} onClick={() => updateField('videoGenProvider', 'veo')} />
+                </label>
+              </div>
+            </div>
+            <div className="provider-card-body">
+              <p className="hint" style={{ margin: 0 }}>Uses your Gemini API key — no extra key needed.</p>
+              <div className="setting-row" style={{ marginTop: '12px' }}>
+                <label>Default Veo Model</label>
+                <select
+                  value={config.veoModel || 'veo-2.0-flash-exp'}
+                  onChange={(e) => updateField('veoModel', e.target.value)}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', padding: '6px', borderRadius: '4px' }}
+                >
+                  <option value="veo-2.0-flash-exp">veo-2.0-flash-exp (Default)</option>
+                  <option value="veo-3.0-flash-exp">veo-3.0-flash-exp (Preview)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ─── Custom Providers ─────────────────────────────────────────────────── */}
       <section className="setting-section">
         <div className="section-heading">

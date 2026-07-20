@@ -2822,6 +2822,52 @@ input:checked + .slider:before {
   cursor: not-allowed;
 }
 
+/* ── Pictures Type Filter & Video Card Styles ── */
+.pictures-type-filter {
+  display: flex;
+  gap: 8px;
+  max-width: 1120px;
+  margin: 0 auto 20px;
+  padding: 0 10px;
+}
+
+.filter-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  outline: none;
+}
+
+.filter-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+  border-color: var(--accent);
+}
+
+.filter-tab-btn.active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: var(--accent);
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+
+.picture-card video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--panel-soft);
+}
+
 .pictures-empty {
   max-width: 360px;
   margin: 18vh auto 0;
