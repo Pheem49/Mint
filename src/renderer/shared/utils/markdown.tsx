@@ -33,27 +33,27 @@ export function readableAssistantText(text: string): string {
 function sanitizeLatex(text: string): string {
   return text
     // arrows
-    .replace(/\$\\rightarrow\$|\\\(\\rightarrow\\\)/g, '→')
-    .replace(/\$\\leftarrow\$|\\\(\\leftarrow\\\)/g, '←')
-    .replace(/\$\\Rightarrow\$|\\\(\\Rightarrow\\\)/g, '⇒')
-    .replace(/\$\\Leftarrow\$|\\\(\\Leftarrow\\\)/g, '⇐')
-    .replace(/\$\\leftrightarrow\$|\\\(\\leftrightarrow\\\)/g, '↔')
+    .replace(/\$\\rightarrow\$|\\\(\\rightarrow\\\)|\\rightarrow|\bightarrow\b/g, '→')
+    .replace(/\$\\leftarrow\$|\\\(\\leftarrow\\\)|\\leftarrow|\beftarrow\b/g, '←')
+    .replace(/\$\\Rightarrow\$|\\\(\\Rightarrow\\\)|\\Rightarrow|\begRightarrow\b/g, '⇒')
+    .replace(/\$\\Leftarrow\$|\\\(\\Leftarrow\\\)|\\Leftarrow/g, '⇐')
+    .replace(/\$\\leftrightarrow\$|\\\(\\leftrightarrow\\\)|\\leftrightarrow/g, '↔')
     // comparison
-    .replace(/\$\\leq\$|\\\(\\leq\\\)/g, '≤')
-    .replace(/\$\\geq\$|\\\(\\geq\\\)/g, '≥')
-    .replace(/\$\\neq\$|\\\(\\neq\\\)/g, '≠')
+    .replace(/\$\\leq\$|\\\(\\leq\\\)|\\leq/g, '≤')
+    .replace(/\$\\geq\$|\\\(\\geq\\\)|\\geq/g, '≥')
+    .replace(/\$\\neq\$|\\\(\\neq\\\)|\\neq/g, '≠')
     .replace(/\$\\approx\$|\\\(\\approx\\\)/g, '≈')
     // math
-    .replace(/\$\\times\$|\\\(\\times\\\)/g, '×')
-    .replace(/\$\\div\$|\\\(\\div\\\)/g, '÷')
+    .replace(/\$\\times\$|\\\(\\times\\\)|\\times/g, '×')
+    .replace(/\$\\div\$|\\\(\\div\\\)|\\div/g, '÷')
     .replace(/\$\\pm\$|\\\(\\pm\\\)/g, '±')
-    .replace(/\$\\infty\$|\\\(\\infty\\\)/g, '∞')
+    .replace(/\$\\infty\$|\\\(\\infty\\\)|\\infty/g, '∞')
     // other common symbols
-    .replace(/\$\\cdot\$|\\\(\\cdot\\\)/g, '·')
-    .replace(/\$\\in\$|\\\(\\in\\\)/g, '∈')
-    .replace(/\$\\subset\$|\\\(\\subset\\\)/g, '⊂')
-    .replace(/\$\\cup\$|\\\(\\cup\\\)/g, '∪')
-    .replace(/\$\\cap\$|\\\(\\cap\\\)/g, '∩')
+    .replace(/\$\\cdot\$|\\\(\\cdot\\\)|\\cdot/g, '·')
+    .replace(/\$\\in\$|\\\(\\in\\\)|\\in\b/g, '∈')
+    .replace(/\$\\subset\$|\\\(\\subset\\\)|\\subset/g, '⊂')
+    .replace(/\$\\cup\$|\\\(\\cup\\\)|\\cup\b/g, '∪')
+    .replace(/\$\\cap\$|\\\(\\cap\\\)|\\cap\b/g, '∩')
     // strip remaining inline math delimiters $...$ and \(...\) that weren't matched
     .replace(/\$([^$\n]{1,60})\$/g, '$1')
     .replace(/\\\(([^)]{1,60})\\\)/g, '$1')

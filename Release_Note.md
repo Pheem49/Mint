@@ -1,4 +1,20 @@
-# Release Notes - Mint Agent
+# Release Notes - Mint Agent v1.9.1
+
+We are excited to release **Mint Agent v1.9.1**! This version introduces major enhancements across CLI, Desktop, Web, Multimodal Video, Remote Messaging Bridges, Browser Automation, and LaTeX Sanitization.
+
+---
+
+## 🔣 LaTeX Symbol & `ightarrow` Sanitization
+
+This update enhances markdown and CLI sanitization to automatically convert unescaped LaTeX symbols into Unicode symbols even when printed without LaTeX delimiters `$`.
+
+### Features Added & Enhancements
+
+- **Bare LaTeX Symbol Conversion**: Updated `sanitizeLatex` in `markdown.tsx` and `sanitize_latex` in `agent.rs` to convert unescaped symbols like `ightarrow`, `\rightarrow`, `\leftarrow`, `\Rightarrow`, etc. directly into Unicode arrows (`→`, `←`, `⇒`).
+- **Standalone `ightarrow` Cleanup**: Fixes garbled outputs from LLMs where string escape sequences swallow `\r` from `\rightarrow`, automatically replacing plain text `ightarrow` with `→`.
+- **Frontend & CLI Parity**: Ensures both UI message rendering (`markdown.tsx`) and CLI terminal outputs (`agent.rs`) sanitize LaTeX math symbols consistently.
+
+---
 
 ## 🔄 Unified AI Model Switch & Real-time Synchronization
 
@@ -14,6 +30,7 @@ This update standardizes model switching across **CLI**, **Desktop (Tauri)**, an
 | **MCP Server Inline Edit Drawer (✏️)** | Added inline expandable configuration panel directly inside each MCP Server card to easily modify Command, Arguments, SVG Icon, and Environment Variables in place. |
 | **Real-time Event Broadcast (`settings-changed`)** | Emits real-time setting change events to Tauri listeners and HTTP clients whenever the model is changed from CLI, Settings UI, or API endpoints. |
 | **Window Focus & Post-Send Sync** | Frontend UI automatically refreshes runtime status on window focus (`window.addEventListener('focus', ...)`) and post-message completion so status badges update instantly without manual app restart. |
+| **General Tab Collapsible Accordion** | Added collapsible section headers (AI Routing, Search, Productivity, Image Gen, Video Gen, Custom Providers, Desktop Updates) with "Expand All" & "Collapse All" quick controls for a clean and readable Settings experience. |
 
 ---
 
@@ -145,13 +162,6 @@ This release significantly upgrades `mint auto` browser automation with real nat
 - Log display in `mint auto` updated with new emoji indicators: 🖱️ (mouse move), 🖱️● (click), ⌨️ (key press), 📸 (screenshot).
 
 ---
-
-# Release Notes - Mint Agent v1.9.1
-
-We are excited to release **Mint Agent v1.9.1**! This version introduces major enhancements to the Command Line Interface (CLI) user experience, featuring rich terminal loaders, animated status wave highlights, code modularization, and workflow automation polishes.
-
----
-
 
 ## 🚀 Key Features & Enhancements
 
