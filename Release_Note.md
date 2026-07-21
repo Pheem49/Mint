@@ -4,6 +4,20 @@ We are excited to release **Mint Agent v1.9.1**! This version introduces major e
 
 ---
 
+## 🇹🇭 Thai Language Typography & Chat Panel Spacing Enhancement
+
+This update addresses cramped text rendering, missing paragraph line breaks, unformatted ordered/bullet lists, and unclickable markdown links in the chat interface.
+
+### Features Added & Enhancements
+
+- **Thai Typography & Line Height**: Increased line-height from tight defaults to `1.7` and added font fallbacks (`Prompt`, `Sarabun`, `Noto Sans Thai`, `Kanit`) for clear rendering of Thai upper/lower diacritics and vowels.
+- **Structured Block Rendering**: Refactored `markdown.tsx` to group text into clean block paragraphs (`.chat-paragraph`), section titles (`.chat-section-title`), and structured list items with distinct margins.
+- **Ordered & Bullet List Formatting**: Lines starting with `1.`, `2.`, `(1)`, `-`, `*`, or `•` are parsed into dedicated flex list elements (`.chat-list-item`) with custom centered vector CSS circle dot markers for pixel-perfect vertical alignment across all Thai/English fonts.
+- **Interactive Markdown & Raw URL Links**: Added inline link parsing for `[label](url)` and raw `https://...` URLs, converting them into clickable external links (`.chat-link`).
+- **UI Font Family Selector**: Expanded the Font Family dropdown in **Settings > Theme & UI** with Google Fonts support for `Prompt`, `Sarabun`, `Kanit`, `Mitr`, `Noto Sans Thai`, `Mali`, `Inter`, and `Fira Code`.
+
+---
+
 ## 🔣 LaTeX Symbol & `ightarrow` Sanitization
 
 This update enhances markdown and CLI sanitization to automatically convert unescaped LaTeX symbols into Unicode symbols even when printed without LaTeX delimiters `$`.

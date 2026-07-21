@@ -107,9 +107,14 @@ export default function ThemeTab({ config, updateField }: ThemeTabProps) {
             <label>Font Family</label>
             <select value={config.fontFamily} onChange={(e) => updateField('fontFamily', e.target.value)}>
               <option value="'Outfit', sans-serif">Outfit (Default)</option>
-              <option value="'Mali', cursive">Mali (Cute Thai Font)</option>
               <option value="'Prompt', sans-serif">Prompt (Modern Thai)</option>
               <option value="'Sarabun', sans-serif">Sarabun (Formal Thai)</option>
+              <option value="'Kanit', sans-serif">Kanit (Trendy Thai)</option>
+              <option value="'Mitr', sans-serif">Mitr (Friendly Thai)</option>
+              <option value="'Noto Sans Thai', sans-serif">Noto Sans Thai (Clean Thai)</option>
+              <option value="'Mali', cursive">Mali (Cute Thai Font)</option>
+              <option value="'Inter', sans-serif">Inter (Clean Sans-Serif)</option>
+              <option value="'Fira Code', monospace">Fira Code (Developer Code Font)</option>
             </select>
           </div>
           <div className="setting-row">

@@ -89,7 +89,10 @@ export function renderFormattedMessage(text: string): ReactNode {
   const displayText = readableAssistantText(text)
   if (!displayText) return null
 
-  const formatInline = (str: string) => {
+  const formatInline = (str: string): ReactNode => {
+    if (!str) return null
+
+    // Split code backticks first
     const codeParts = str.split(/`([\s\S]*?)`/g)
     return codeParts.map((codePart, codeIndex) => {
       if (codeIndex % 2 === 1) {
@@ -99,27 +102,92 @@ export function renderFormattedMessage(text: string): ReactNode {
           </code>
         )
       }
-      const boldParts = codePart.split(/\*\*([\s\S]*?)\*\*/g)
-      return boldParts.map((boldPart, boldIndex) => {
-        if (boldIndex % 2 === 1) {
-          return (
-            <strong key={`bold-${boldIndex}`} className="chat-bold-highlight">
-              {boldPart}
-            </strong>
-          )
-        }
-        const mentionParts = boldPart.split(/(@[\w\-\.\/]+)/g)
-        return mentionParts.map((mentionPart, mentionIndex) => {
-          if (mentionIndex % 2 === 1) {
+
+      // Match markdown links [label](url)
+      const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g
+      const linkMatches: Array<{ index: number; length: number; label: string; url: string }> = []
+      let match: RegExpExecArray | null
+      while ((match = linkRegex.exec(codePart)) !== null) {
+        linkMatches.push({
+          index: match.index,
+          length: match[0].length,
+          label: match[1],
+          url: match[2],
+        })
+      }
+
+      const renderTextAndFormatting = (subStr: string, keyPrefix: string): ReactNode => {
+        // Process bold **text**
+        const boldParts = subStr.split(/\*\*([\s\S]*?)\*\*/g)
+        return boldParts.map((boldPart, boldIndex) => {
+          if (boldIndex % 2 === 1) {
             return (
-              <span key={`mention-${mentionIndex}`} className="chat-mention">
-                {mentionPart}
-              </span>
+              <strong key={`${keyPrefix}-bold-${boldIndex}`} className="chat-bold-highlight">
+                {boldPart}
+              </strong>
             )
           }
-          return mentionPart
+          // Process mentions (@...)
+          const mentionParts = boldPart.split(/(@[\w\-\.\/]+)/g)
+          return mentionParts.map((mentionPart, mentionIndex) => {
+            if (mentionIndex % 2 === 1) {
+              return (
+                <span key={`${keyPrefix}-mention-${mentionIndex}`} className="chat-mention">
+                  {mentionPart}
+                </span>
+              )
+            }
+            // Process raw URLs (https://... or http://...)
+            const urlRegex = /(https?:\/\/[^\s<>\(\)]+)/g
+            const urlParts = mentionPart.split(urlRegex)
+            return urlParts.map((urlPart, urlIndex) => {
+              if (urlIndex % 2 === 1) {
+                return (
+                  <a
+                    key={`${keyPrefix}-url-${urlIndex}`}
+                    href={urlPart}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="chat-link"
+                  >
+                    {urlPart}
+                  </a>
+                )
+              }
+              return urlPart
+            })
+          })
         })
+      }
+
+      if (linkMatches.length === 0) {
+        return renderTextAndFormatting(codePart, `c-${codeIndex}`)
+      }
+
+      const linkElements: ReactNode[] = []
+      let lastIdx = 0
+      linkMatches.forEach((lMatch, lIdx) => {
+        if (lMatch.index > lastIdx) {
+          linkElements.push(renderTextAndFormatting(codePart.slice(lastIdx, lMatch.index), `c-${codeIndex}-pre-${lIdx}`))
+        }
+        linkElements.push(
+          <a
+            key={`link-${codeIndex}-${lIdx}`}
+            href={lMatch.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="chat-link"
+          >
+            {renderTextAndFormatting(lMatch.label, `c-${codeIndex}-label-${lIdx}`)}
+          </a>
+        )
+        lastIdx = lMatch.index + lMatch.length
       })
+      if (lastIdx < codePart.length) {
+        linkElements.push(renderTextAndFormatting(codePart.slice(lastIdx), `c-${codeIndex}-post`))
+      }
+
+      return linkElements
     })
   }
 
@@ -231,7 +299,7 @@ export function renderFormattedMessage(text: string): ReactNode {
   }
 
   const lines = displayText.split('\n')
-  const items: ReactNode[] = []
+  const blocks: ReactNode[] = []
 
   let inCodeBlock = false
   let codeBlockLang = ''
@@ -242,22 +310,40 @@ export function renderFormattedMessage(text: string): ReactNode {
 
   const flushTable = (index: number) => {
     if (tableLines.length > 0) {
-      items.push(renderHtmlTable(tableLines, `table-${index}`))
+      blocks.push(renderHtmlTable(tableLines, `table-${index}`))
       tableLines = []
       inTable = false
     }
   }
 
+  let currentParagraphLines: string[] = []
+
+  const flushParagraph = (index: number) => {
+    if (currentParagraphLines.length > 0) {
+      const paragraphText = currentParagraphLines.join('\n')
+      if (paragraphText.trim()) {
+        blocks.push(
+          <div key={`para-${index}`} className="chat-paragraph">
+            {formatInline(paragraphText)}
+          </div>
+        )
+      }
+      currentParagraphLines = []
+    }
+  }
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
+    const trimmedLine = line.trim()
 
-    if (line.trim().startsWith('```')) {
-      if (inTable) {
-        flushTable(i)
-      }
+    // Code block toggle
+    if (trimmedLine.startsWith('```')) {
+      if (inTable) flushTable(i)
+      flushParagraph(i)
+
       if (inCodeBlock) {
         const codeText = codeBlockLines.join('\n')
-        items.push(
+        blocks.push(
           <ChatCodeBlock
             key={`code-block-${i}`}
             code={codeText}
@@ -268,7 +354,7 @@ export function renderFormattedMessage(text: string): ReactNode {
         codeBlockLines = []
       } else {
         inCodeBlock = true
-        codeBlockLang = line.trim().slice(3).trim() || 'plaintext'
+        codeBlockLang = trimmedLine.slice(3).trim() || 'plaintext'
       }
       continue
     }
@@ -278,63 +364,87 @@ export function renderFormattedMessage(text: string): ReactNode {
       continue
     }
 
+    // Markdown Table
     if (isTableLine(line)) {
+      flushParagraph(i)
       inTable = true
       tableLines.push(line)
-    } else {
-      if (inTable) {
-        flushTable(i)
-      }
-
-      const headerMatch = line.match(/^(#{1,6})\s+(.*)$/)
-      if (headerMatch) {
-        const level = headerMatch[1].length
-        const content = headerMatch[2]
-
-        const style = {
-          fontWeight: 'bold',
-          display: 'block',
-          marginTop: level === 1 ? '16px' : level === 2 ? '14px' : '10px',
-          marginBottom: '6px',
-          fontSize: level === 1 ? '1.25em' : level === 2 ? '1.15em' : '1.05em',
-          color: 'var(--text-main)',
-        }
-
-        items.push(
-          <span key={`line-${i}`} style={style}>
-            {formatInline(content)}
-          </span>
-        )
-      } else {
-        const listMatch = line.match(/^(\s*)([-*+])\s+(.*)$/)
-        if (listMatch) {
-          const indent = listMatch[1]
-          const content = listMatch[3]
-          items.push(
-            <Fragment key={`line-${i}`}>
-              {indent}• {formatInline(content)}
-              {i < lines.length - 1 && '\n'}
-            </Fragment>
-          )
-        } else {
-          items.push(
-            <Fragment key={`line-${i}`}>
-              {formatInline(line)}
-              {i < lines.length - 1 && '\n'}
-            </Fragment>
-          )
-        }
-      }
+      continue
+    } else if (inTable) {
+      flushTable(i)
     }
+
+    // Empty line -> flush paragraph (creates paragraph gap)
+    if (!trimmedLine) {
+      flushParagraph(i)
+      continue
+    }
+
+    // Markdown Headers (# Header)
+    const headerMatch = line.match(/^(#{1,6})\s+(.*)$/)
+    if (headerMatch) {
+      flushParagraph(i)
+      const level = Math.min(headerMatch[1].length, 6)
+      const content = headerMatch[2]
+      blocks.push(
+        <div key={`header-${i}`} className={`chat-heading chat-heading-${level}`}>
+          {formatInline(content)}
+        </div>
+      )
+      continue
+    }
+
+    // Numbered list items: "1. ", "2) ", "(1) ", etc.
+    const orderedMatch = line.match(/^(\s*)(?:(\d+)[\.\)]|[\(\[](\d+)[\)\]])\s+(.*)$/)
+    if (orderedMatch) {
+      flushParagraph(i)
+      const num = orderedMatch[2] || orderedMatch[3]
+      const content = orderedMatch[4]
+      blocks.push(
+        <div key={`ordered-${i}`} className="chat-list-item chat-ordered-item">
+          <span className="chat-list-number">{num}.</span>
+          <span className="chat-list-text">{formatInline(content)}</span>
+        </div>
+      )
+      continue
+    }
+
+    // Bullet list items: "- ", "* ", "+ ", "• "
+    const bulletMatch = line.match(/^(\s*)([-*+•])\s+(.*)$/)
+    if (bulletMatch) {
+      flushParagraph(i)
+      const content = bulletMatch[3]
+      blocks.push(
+        <div key={`bullet-${i}`} className="chat-list-item chat-bullet-item">
+          <span className="chat-list-bullet">•</span>
+          <span className="chat-list-text">{formatInline(content)}</span>
+        </div>
+      )
+      continue
+    }
+
+    // Emoji header / Section title (e.g. "🚀 ขั้นตอนเริ่มต้นสำหรับคุณภีม:", "⚠️ ข้อควรระวังจากมัน (สำคัญมาก!):")
+    const isEmojiHeader = /^(?:[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]).*:$/u.test(trimmedLine)
+    if (isEmojiHeader) {
+      flushParagraph(i)
+      blocks.push(
+        <div key={`section-${i}`} className="chat-heading chat-heading-3 chat-section-title">
+          {formatInline(line)}
+        </div>
+      )
+      continue
+    }
+
+    // Regular text line -> append to current paragraph
+    currentParagraphLines.push(line)
   }
 
-  if (inTable) {
-    flushTable(lines.length)
-  }
+  if (inTable) flushTable(lines.length)
+  flushParagraph(lines.length)
 
   if (inCodeBlock && codeBlockLines.length > 0) {
     const codeText = codeBlockLines.join('\n')
-    items.push(
+    blocks.push(
       <ChatCodeBlock
         key={`code-block-end`}
         code={codeText}
@@ -343,5 +453,6 @@ export function renderFormattedMessage(text: string): ReactNode {
     )
   }
 
-  return <>{items}</>
+  return <div className="chat-formatted-body">{blocks}</div>
 }
+

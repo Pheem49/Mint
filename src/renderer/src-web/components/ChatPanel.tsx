@@ -897,7 +897,7 @@ export default function ChatPanel({
                     />
                   )
                 })()}
-                <div className="message-bubble" style={{ whiteSpace: 'pre-wrap' }}>{renderFormattedMessage(interaction.aiText)}</div>
+                <div className="message-bubble">{renderFormattedMessage(interaction.aiText)}</div>
                 {renderWebSearchSources(interaction)}
                 <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
