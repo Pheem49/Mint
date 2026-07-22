@@ -4,6 +4,32 @@ We are excited to release **Mint Agent v1.9.1**! This version introduces major e
 
 ---
 
+## 🛠️ Deduplicated Settings System Events
+
+This update fixes an issue where saving settings without changing AI providers or models logged redundant `provider_change` system event badges in the chat timeline.
+
+### Bug Fixes & Enhancements
+
+- **Backend Deduplication (`set_active_model`)**: Updated `set_active_model` in `config.rs` to compare previous provider and active model against new values, ensuring system interaction events are only written to the database when provider or model actually changes.
+- **Frontend Deduplication (`SettingsWindow.tsx` & `MintDashboard.tsx`)**: Updated settings save handlers and provider/model switch handlers in both Desktop and Web renderers to verify whether provider or model changed before invoking `setActiveModel` or `saveSystemInteraction`.
+
+---
+
+## 🖥️ Minimalist CLI Security Approval UI Redesign
+
+This release overhauls the interactive CLI approval prompt (`AgentApproval`) for MCP tools, local shell commands, file edits, note creation, and plugin executions into a modern, emoji-free **Minimalist Divider Badge** card layout.
+
+### Features Added & Enhancements
+
+- **Minimalist Divider Badge Cards**: Formatted security checks into clean 2-column key-value tables (`Server │ gmail`, `Tool │ list_tools`, `Command │ git status`) bounded by sleek ANSI divider lines.
+- **Emoji-Free Modern Terminal Style**: Removed distracting emoji icons for a crisp, high-contrast developer terminal aesthetic (`BRIGHT`, `BLUE`, `DIM`, `MINT`).
+- **Descriptive Action Options**: Updated the interactive selection menu with explicit choice descriptions:
+  - `1. Approve (Once)` - Allow single execution
+  - `2. Approve (Entire Session)` - Auto-approve throughout session
+  - `3. Deny` - Cancel action
+
+---
+
 ## 🇹🇭 Thai Language Typography & Chat Panel Spacing Enhancement
 
 This update addresses cramped text rendering, missing paragraph line breaks, unformatted ordered/bullet lists, and unclickable markdown links in the chat interface.

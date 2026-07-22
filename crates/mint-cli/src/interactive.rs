@@ -2554,17 +2554,31 @@ pub fn confirm(prompt: &str) -> Result<bool> {
     }
 
     let _ = disable_raw_mode();
-    println!("  {}", clean_prompt);
+    println!("  \x1b[1;97m{}\x1b[0m", clean_prompt);
 
-    let options = ["Approve", "Approve this session", "No"];
+    let options_with_desc = [
+        ("Approve (Once)", "Allow single execution"),
+        ("Approve (Entire Session)", "Auto-approve throughout session"),
+        ("Deny", "Cancel action"),
+    ];
     let mut selected = 0;
 
     let print_choices = |selected: usize| -> Result<()> {
-        for (i, opt) in options.iter().enumerate() {
+        for (i, (opt, desc)) in options_with_desc.iter().enumerate() {
             if i == selected {
-                println!("  {BLUE}❯ {}. {}{RESET}", i + 1, opt);
+                println!(
+                    "  {BLUE}❯ {}. {:<24}{RESET} {DIM}- {}{RESET}",
+                    i + 1,
+                    opt,
+                    desc
+                );
             } else {
-                println!("    {DIM}{}. {}{RESET}", i + 1, opt);
+                println!(
+                    "    {DIM}{}. {:<24} - {}{RESET}",
+                    i + 1,
+                    opt,
+                    desc
+                );
             }
         }
         io::stdout().flush()?;
@@ -2593,32 +2607,32 @@ pub fn confirm(prompt: &str) -> Result<bool> {
                                 if selected > 0 {
                                     selected -= 1;
                                 } else {
-                                    selected = options.len() - 1;
+                                    selected = options_with_desc.len() - 1;
                                 }
                                 let _ = disable_raw_mode();
-                                print!("\x1b[{}A\x1b[J", options.len());
+                                print!("\x1b[{}A\x1b[J", options_with_desc.len());
                                 let _ = print_choices(selected);
                                 let _ = enable_raw_mode();
                             }
                             KeyCode::Down => {
-                                if selected < options.len() - 1 {
+                                if selected < options_with_desc.len() - 1 {
                                     selected += 1;
                                 } else {
                                     selected = 0;
                                 }
                                 let _ = disable_raw_mode();
-                                print!("\x1b[{}A\x1b[J", options.len());
+                                print!("\x1b[{}A\x1b[J", options_with_desc.len());
                                 let _ = print_choices(selected);
                                 let _ = enable_raw_mode();
                             }
                             KeyCode::Tab => {
-                                if selected < options.len() - 1 {
+                                if selected < options_with_desc.len() - 1 {
                                     selected += 1;
                                 } else {
                                     selected = 0;
                                 }
                                 let _ = disable_raw_mode();
-                                print!("\x1b[{}A\x1b[J", options.len());
+                                print!("\x1b[{}A\x1b[J", options_with_desc.len());
                                 let _ = print_choices(selected);
                                 let _ = enable_raw_mode();
                             }
@@ -2654,12 +2668,12 @@ pub fn confirm(prompt: &str) -> Result<bool> {
     };
 
     let _ = disable_raw_mode();
-    print!("\x1b[{}A\x1b[J", options.len() + 1);
+    print!("\x1b[{}A\x1b[J", options_with_desc.len() + 1);
 
     let result_str = match choice {
-        0 => format!("{MINT}Approve{RESET}"),
-        1 => format!("{MINT}Approve this session{RESET}"),
-        _ => format!("{ERROR}No{RESET}"),
+        0 => format!("{MINT}Approve (Once){RESET}"),
+        1 => format!("{MINT}Approve (Entire Session){RESET}"),
+        _ => format!("{ERROR}Deny{RESET}"),
     };
     println!("  {} {}", clean_prompt, result_str);
     let _ = io::stdout().flush();

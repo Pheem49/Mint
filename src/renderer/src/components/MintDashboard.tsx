@@ -850,6 +850,7 @@ export default function MintDashboard() {
   async function changeProvider(provider: string) {
     try {
       const config = await window.settingsApi.getSettings()
+      if (config.aiProvider === provider) return
       config.aiProvider = provider
       await window.settingsApi.saveSettings(config)
       setSettingsConfig(config)
@@ -869,6 +870,8 @@ export default function MintDashboard() {
     try {
       const config = await window.settingsApi.getSettings()
       const provider = config.aiProvider
+      const currentModel = getActiveModelName(config, provider)
+      if (currentModel === modelName) return
       if (provider === 'gemini') {
         config.geminiModel = modelName
       } else if (provider === 'openai') {

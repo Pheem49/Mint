@@ -76,29 +76,32 @@ pub async fn run_code_agent_with_options(
 
         match approval {
             AgentApproval::WriteFile { diff, .. } => {
-                println!("  Proposed edit");
+                print_approval_card("File Modification", &[("Target", "File Edit")]);
+                println!("  {DIM}Proposed edit:{RESET}");
                 print_colored_diff(diff);
-                if confirm_pausing_interrupt("Approve file edit? [y/N]", &approve_approval_active) {
+                if confirm_pausing_interrupt("Approve file edit?", &approve_approval_active) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
                 }
             }
             AgentApproval::ApplyPatch { diff, .. } => {
-                println!("  Proposed edit");
+                print_approval_card("File Modification", &[("Target", "File Patch")]);
+                println!("  {DIM}Proposed edit:{RESET}");
                 print_colored_diff(diff);
-                if confirm_pausing_interrupt("Approve file edit? [y/N]", &approve_approval_active) {
+                if confirm_pausing_interrupt("Approve file edit?", &approve_approval_active) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
                 }
             }
             AgentApproval::RunShell { command, mode } => {
-                println!("  {BLUE}• Proposed command{RESET}");
-                println!("    mode: {}", mode);
-                println!("    {}", command);
+                print_approval_card(
+                    "Local Shell Command",
+                    &[("Command", command), ("Mode", mode)],
+                );
                 if confirm_pausing_interrupt(
-                    "Approve local shell execution? [y/N]",
+                    "Approve running shell command?",
                     &approve_approval_active,
                 ) {
                     Ok(ApprovalOutcome::Approved)
@@ -107,10 +110,9 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::NoteWrite { path, .. } => {
-                println!("  {BLUE}• Proposed note write{RESET}");
-                println!("    {}", path);
+                print_approval_card("Note Creation", &[("Path", path)]);
                 if confirm_pausing_interrupt(
-                    "Approve writing this note? [y/N]",
+                    "Approve writing this note?",
                     &approve_approval_active,
                 ) {
                     Ok(ApprovalOutcome::Approved)
@@ -119,9 +121,12 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::RunPlugin { name, instruction } => {
-                println!("    Run plugin {}: {}", name, instruction);
+                print_approval_card(
+                    "Plugin Execution",
+                    &[("Plugin", name), ("Detail", instruction)],
+                );
                 if confirm_pausing_interrupt(
-                    &format!("Approve running plugin '{}'? [y/N]", name),
+                    &format!("Approve running plugin '{}'?", name),
                     &approve_approval_active,
                 ) {
                     Ok(ApprovalOutcome::Approved)
@@ -129,11 +134,15 @@ pub async fn run_code_agent_with_options(
                     Ok(ApprovalOutcome::Denied)
                 }
             }
-            AgentApproval::McpTool { server, tool, .. } => {
-                println!("  Called MCP tool");
-                println!("    {} {}", server, tool);
+            AgentApproval::McpTool { server, tool, arguments } => {
+                let mut fields = vec![("Server", server.as_str()), ("Tool", tool.as_str())];
+                let formatted_args = arguments.to_string();
+                if !formatted_args.is_empty() && formatted_args != "{}" && formatted_args != "null" {
+                    fields.push(("Arguments", &formatted_args));
+                }
+                print_approval_card("MCP Tool Call", &fields);
                 if confirm_pausing_interrupt(
-                    "Approve MCP tool call? [y/N]",
+                    "Approve MCP tool call?",
                     &approve_approval_active,
                 ) {
                     Ok(ApprovalOutcome::Approved)
@@ -142,10 +151,12 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::UserApproval { title, prompt } => {
-                println!("  {BLUE}• Approval requested:{RESET} {}", title);
-                println!("    {}", prompt);
+                print_approval_card(
+                    "Security Authorization",
+                    &[("Title", title), ("Detail", prompt)],
+                );
                 if confirm_pausing_interrupt(
-                    "Approve this request? [y/N]",
+                    "Approve this request?",
                     &approve_approval_active,
                 ) {
                     Ok(ApprovalOutcome::Approved)
@@ -154,9 +165,8 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::AskUser { question } => {
-                println!("  {BLUE}• Question from agent{RESET}");
-                println!("    {}", question);
-                print!("Answer (leave empty to decline): ");
+                print_approval_card("Agent Question", &[("Question", question)]);
+                print!("  Answer (leave empty to decline): ");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 let mut answer = String::new();
                 match std::io::stdin().read_line(&mut answer) {
@@ -1052,6 +1062,30 @@ async fn wait_for_escape_interrupt(approval_active: Arc<AtomicBool>) {
         }
         tokio::time::sleep(Duration::from_millis(80)).await;
     }
+}
+
+fn print_approval_card(title: &str, fields: &[(&str, &str)]) {
+    let top_bar = format!("  {DIM}{}┬{}{RESET}", "─".repeat(11), "─".repeat(56));
+    let bot_bar = format!("  {DIM}{}┴{}{RESET}", "─".repeat(11), "─".repeat(56));
+
+    println!();
+    println!("  {BRIGHT}APPROVAL REQUIRED{RESET} {DIM}•{RESET} {BLUE}{}{RESET}", title);
+    println!("{}", top_bar);
+    for (label, val) in fields {
+        let val_lines: Vec<&str> = val.lines().collect();
+        if val_lines.is_empty() {
+            println!("  {BRIGHT}{:<10}{RESET} {DIM}│{RESET}", label);
+        } else {
+            for (idx, line) in val_lines.iter().enumerate() {
+                if idx == 0 {
+                    println!("  {BRIGHT}{:<10}{RESET} {DIM}│{RESET} {}", label, line);
+                } else {
+                    println!("             {DIM}│{RESET} {}", line);
+                }
+            }
+        }
+    }
+    println!("{}", bot_bar);
 }
 
 fn confirm_pausing_interrupt(prompt: &str, approval_active: &AtomicBool) -> bool {

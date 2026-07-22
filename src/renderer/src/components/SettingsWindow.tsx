@@ -446,7 +446,11 @@ export default function SettingsWindow() {
             default: return ''
           }
         }
-        await setActiveModel(finalConfig.aiProvider, getActiveModelName(finalConfig.aiProvider, finalConfig))
+        const oldModel = getActiveModelName(config.aiProvider, config)
+        const newModel = getActiveModelName(finalConfig.aiProvider, finalConfig)
+        if (config.aiProvider !== finalConfig.aiProvider || oldModel !== newModel) {
+          await setActiveModel(finalConfig.aiProvider, newModel)
+        }
       } catch (e) {
         console.warn('Failed to sync active model event:', e)
       }

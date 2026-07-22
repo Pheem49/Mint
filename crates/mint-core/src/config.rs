@@ -260,6 +260,9 @@ impl MintConfig {
 
     /// Sets the active provider and model, saves the configuration to disk, and logs a system event interaction.
     pub fn set_active_model(&mut self, provider: &str, model: Option<&str>) -> Result<String, ConfigError> {
+        let old_provider = self.ai_provider.clone();
+        let old_active_model = self.active_model().to_string();
+
         self.ai_provider = provider.to_string();
         if let Some(m) = model {
             let m_trimmed = m.trim();
@@ -282,15 +285,18 @@ impl MintConfig {
         let active_model = self.active_model().to_string();
         let display_name = format!("{} • {}", self.ai_provider, active_model);
 
-        if let Ok(memory) = crate::MemoryStore::open_default() {
-            let _ = memory.add_interaction_for_chat_with_fallback(
-                crate::CHAT_CLI_ID,
-                &display_name,
-                "",
-                "system",
-                "provider_change",
-                None,
-            );
+        let changed = old_provider != self.ai_provider || old_active_model != active_model;
+        if changed {
+            if let Ok(memory) = crate::MemoryStore::open_default() {
+                let _ = memory.add_interaction_for_chat_with_fallback(
+                    crate::CHAT_CLI_ID,
+                    &display_name,
+                    "",
+                    "system",
+                    "provider_change",
+                    None,
+                );
+            }
         }
 
         Ok(display_name)

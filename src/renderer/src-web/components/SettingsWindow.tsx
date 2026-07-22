@@ -444,7 +444,11 @@ export default function SettingsWindow() {
         default: return ''
       }
     }
-    setActiveModel(finalConfig.aiProvider, getActiveModelName(finalConfig.aiProvider, finalConfig)).catch(() => {})
+    const oldModel = getActiveModelName(config.aiProvider, config)
+    const newModel = getActiveModelName(finalConfig.aiProvider, finalConfig)
+    if (config.aiProvider !== finalConfig.aiProvider || oldModel !== newModel) {
+      setActiveModel(finalConfig.aiProvider, newModel).catch(() => {})
+    }
 
     if (window.settingsApi) {
       await window.settingsApi.saveSettings(finalConfig)
