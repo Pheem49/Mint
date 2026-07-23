@@ -7,6 +7,7 @@ import {
   getRecentInteractions,
   saveSystemInteraction,
   getRuntimeStatus,
+  setActiveModel,
   listChatSessions,
   listSavedPictures,
   saveInteractionAgentActivity,
@@ -33,6 +34,8 @@ import {
   createTrimmedImagePreview,
   applyThemeStyles,
 } from '../../shared/utils/ui'
+import { executeSlashCommand } from '../../shared/utils/slashCommandProcessor'
+
 
 const DEFAULT_CONFIG = {
   theme: 'dark',
@@ -425,6 +428,65 @@ export default function MintDashboard() {
     const currentDocument = documentAttachment
     const hasAttachments = currentImages.length > 0 || currentVideos.length > 0 || Boolean(currentDocument)
     if ((!trimmed && !hasAttachments) || sending) return
+
+    if (trimmed.startsWith('/')) {
+      const activeP = status?.activeProvider || ''
+      const activeM = settingsConfig?.model || ''
+      const slashResult = executeSlashCommand(trimmed, {
+        activeProvider: activeP,
+        activeModel: activeM,
+        availableProviders: status?.availableProviders || [],
+        interactionsCount: interactions.length,
+        fastMode: settingsConfig?.fastMode ?? false,
+        multiAgent: settingsConfig?.multiAgent ?? false,
+      })
+
+      if (slashResult.handled) {
+        setMessage('')
+        setImageAttachments([])
+        setVideoAttachments([])
+        setDocumentAttachment(null)
+
+        if (slashResult.action === 'set_agent_mode') {
+          setAgentMode(true)
+          if (slashResult.payload?.prompt) {
+            await sendPrompt(slashResult.payload.prompt, { clearComposer: true })
+          }
+          return
+        }
+
+        if (slashResult.action === 'open_image_picker') {
+          document.getElementById('vision-file-input')?.click()
+          return
+        } else if (slashResult.action === 'open_plugins') {
+          setView('settings')
+          return
+        } else if (slashResult.action === 'generate_veo') {
+          setView('veo_studio')
+          return
+        } else if (slashResult.action === 'set_provider_model' && slashResult.payload?.target) {
+          const target = slashResult.payload.target
+          if (status?.availableProviders.includes(target)) {
+            setActiveModel(target).then(() => getRuntimeStatus().then(setStatus)).catch(() => {})
+          }
+        }
+
+        if (slashResult.systemText) {
+          const systemMsg = {
+            id: Date.now(),
+            userText: trimmed,
+            aiText: slashResult.systemText,
+            createdAt: new Date().toISOString(),
+            provider: 'system',
+            model: 'mint-cli',
+          }
+          setInteractions((prev) => [...prev, systemMsg])
+          saveSystemInteraction(conversationId, trimmed, slashResult.systemText || '', 'system', 'mint-cli').catch(() => {})
+        }
+        return
+      }
+    }
+
     const promptText = trimmed || (
       currentImages.length > 0 ? (currentImages.length > 1 ? 'Describe these images.' : 'Describe this image.') :
       currentVideos.length > 0 ? (currentVideos.length > 1 ? 'Describe these videos.' : 'Describe this video.') :
@@ -705,7 +767,7 @@ export default function MintDashboard() {
       // Record system event in chat history
       const activeModel = getActiveModelName(config, provider)
       const displayName = formatProviderChangeText(provider, activeModel)
-      await saveSystemInteraction(conversationId, displayName, 'system', 'provider_change')
+      await saveSystemInteraction(conversationId, displayName, '', 'system', 'provider_change')
       await refreshHistory()
     } catch (reason) {
       setError(errorMessage(reason))
@@ -747,7 +809,7 @@ export default function MintDashboard() {
 
       // Record system event in chat history
       const displayName = formatProviderChangeText(provider, modelName)
-      await saveSystemInteraction(conversationId, displayName, 'system', 'provider_change')
+      await saveSystemInteraction(conversationId, displayName, '', 'system', 'provider_change')
       await refreshHistory()
     } catch (reason) {
       setError(errorMessage(reason))

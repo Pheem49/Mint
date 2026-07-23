@@ -77,6 +77,9 @@ export interface ImageGenRequest {
   numImages?: number
   model?: string
   provider?: string
+  imageDataUri?: string
+  maskDataUri?: string
+  mode?: 'generate' | 'edit' | 'inpaint'
 }
 
 export interface ImageGenProviders {

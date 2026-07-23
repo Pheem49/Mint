@@ -10,8 +10,8 @@ use crate::MintConfig;
 // Public request / response types
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// A request to generate images from any supported provider.
-#[derive(Debug, Clone, Deserialize)]
+/// A request to generate or edit images from any supported provider.
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageGenRequest {
     pub prompt: String,
@@ -30,6 +30,15 @@ pub struct ImageGenRequest {
     /// Falls back to `config.image_gen_provider` when omitted.
     #[serde(default)]
     pub provider: Option<String>,
+    /// Optional input image data URI (`data:image/png;base64,...`) for Image-to-Image / Inpainting
+    #[serde(default)]
+    pub image_data_uri: Option<String>,
+    /// Optional mask image data URI for Inpainting
+    #[serde(default)]
+    pub mask_data_uri: Option<String>,
+    /// Optional mode: "generate" | "edit" | "inpaint". Inferred if omitted.
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 /// One generated image returned from the model.
@@ -76,6 +85,8 @@ pub enum ImageGenError {
     // ── Generic ──────────────────────────────────────────────────────────────
     #[error("unsupported image generation provider: {0}")]
     UnsupportedProvider(String),
+    #[error("image-to-image editing is not supported by {0} — please use Replicate, Stability AI, or DALL·E")]
+    UnsupportedMode(String),
     #[error("API request failed: {0}")]
     Request(#[from] reqwest::Error),
     #[error("the model returned no images for this prompt")]
@@ -129,6 +140,15 @@ async fn call_nanobanana(
     config: &MintConfig,
     request: &ImageGenRequest,
 ) -> Result<ImageGenResponse, ImageGenError> {
+    if request.image_data_uri.is_some()
+        || request.mode.as_deref() == Some("edit")
+        || request.mode.as_deref() == Some("inpaint")
+    {
+        return Err(ImageGenError::UnsupportedMode(
+            "NanoBanana (Gemini Text-to-Image)".to_owned(),
+        ));
+    }
+
     let api_key = if config.api_key.trim().is_empty() {
         std::env::var("GEMINI_API_KEY").unwrap_or_default()
     } else {
@@ -270,6 +290,94 @@ async fn call_dalle(
         return Err(ImageGenError::MissingOpenAiKey);
     }
 
+    if let Some(ref img_data_uri) = request.image_data_uri {
+        let (mime_type, img_bytes) = parse_data_uri(img_data_uri)
+            .ok_or_else(|| ImageGenError::ModelError("invalid base64 image data URI".to_owned()))?;
+
+        let size = aspect_ratio_to_dalle_size(request.aspect_ratio.as_deref());
+        let boundary = format!("MintBoundary{}", uuid_v4_hex());
+
+        let mut text_fields = vec![
+            ("prompt".to_owned(), request.prompt.clone()),
+            ("n".to_owned(), "1".to_owned()),
+            ("size".to_owned(), size.to_owned()),
+            ("response_format".to_owned(), "b64_json".to_owned()),
+            ("model".to_owned(), "dall-e-2".to_owned()),
+        ];
+        if let Some(ref neg) = request.negative_prompt {
+            if !neg.trim().is_empty() {
+                text_fields.push(("prompt".to_owned(), format!("{} (avoid: {})", request.prompt, neg)));
+            }
+        }
+
+        let mut file_fields = vec![
+            ("image", "image.png", mime_type.as_str(), img_bytes.as_slice()),
+        ];
+
+        let mask_bytes_storage;
+        if let Some(ref mask_data_uri) = request.mask_data_uri {
+            if let Some((mask_mime, mask_bytes)) = parse_data_uri(mask_data_uri) {
+                mask_bytes_storage = (mask_mime, mask_bytes);
+                file_fields.push(("mask", "mask.png", mask_bytes_storage.0.as_str(), mask_bytes_storage.1.as_slice()));
+            }
+        }
+
+        let body = build_multipart_binary(&boundary, &text_fields, &file_fields);
+
+        let response: Value = client
+            .post("https://api.openai.com/v1/images/edits")
+            .bearer_auth(&api_key)
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(body)
+            .send()
+            .await?
+            .error_for_status()
+            .map_err(ImageGenError::Request)?
+            .json()
+            .await?;
+
+        if let Some(err) = response.get("error") {
+            let msg = err["message"]
+                .as_str()
+                .unwrap_or("unknown OpenAI API error");
+            return Err(ImageGenError::ModelError(msg.to_owned()));
+        }
+
+        let data = response["data"]
+            .as_array()
+            .ok_or(ImageGenError::UnexpectedResponse)?;
+
+        let images: Vec<GeneratedImage> = data
+            .iter()
+            .filter_map(|item| {
+                let b64 = item["b64_json"].as_str()?;
+                if b64.is_empty() || STANDARD.decode(b64).is_err() {
+                    return None;
+                }
+                let data_uri = format!("data:image/png;base64,{b64}");
+                Some(GeneratedImage {
+                    data_uri,
+                    mime_type: "image/png".to_owned(),
+                })
+            })
+            .collect();
+
+        if images.is_empty() {
+            return Err(ImageGenError::NoImagesReturned);
+        }
+
+        return Ok(ImageGenResponse {
+            images,
+            model: "dall-e-2".to_owned(),
+            provider: "dalle".to_owned(),
+            prompt: request.prompt.clone(),
+            description: None,
+        });
+    }
+
     let model = request
         .model
         .as_deref()
@@ -393,42 +501,81 @@ async fn call_stability(
             }
         });
 
-    // Route: Stable Image Core uses /core; SD3.x models use /sd3
-    let (endpoint, model_param) = if model == "core" {
-        (
-            "https://api.stability.ai/v2beta/stable-image/generate/core".to_owned(),
-            None,
-        )
-    } else {
-        (
-            "https://api.stability.ai/v2beta/stable-image/generate/sd3".to_owned(),
-            Some(model.clone()),
-        )
-    };
-
-    let aspect_ratio = request.aspect_ratio.as_deref().unwrap_or("1:1");
-
-    // Build multipart/form-data manually (reqwest multipart feature not enabled).
     let boundary = format!("MintBoundary{}", uuid_v4_hex());
 
-    let mut body_parts: Vec<(String, String)> = vec![
-        ("prompt".into(), request.prompt.clone()),
-        ("aspect_ratio".into(), aspect_ratio.to_owned()),
-        ("output_format".into(), "png".to_owned()),
-    ];
+    let (endpoint, raw_body) = if let Some(ref img_uri) = request.image_data_uri {
+        let (mime_type, img_bytes) = parse_data_uri(img_uri)
+            .ok_or_else(|| ImageGenError::ModelError("invalid base64 image data URI".to_owned()))?;
 
-    if let Some(neg) = &request.negative_prompt {
-        let neg = neg.trim();
-        if !neg.is_empty() {
-            body_parts.push(("negative_prompt".into(), neg.to_owned()));
+        let is_inpaint = request.mask_data_uri.is_some() || request.mode.as_deref() == Some("inpaint");
+        let endpoint = if is_inpaint {
+            "https://api.stability.ai/v2beta/stable-image/edit/inpaint".to_owned()
+        } else {
+            "https://api.stability.ai/v2beta/stable-image/generate/sd3".to_owned()
+        };
+
+        let mut body_parts: Vec<(String, String)> = vec![
+            ("prompt".into(), request.prompt.clone()),
+            ("output_format".into(), "png".to_owned()),
+        ];
+        if !is_inpaint && model != "core" {
+            body_parts.push(("model".into(), model.clone()));
+            body_parts.push(("mode".into(), "image-to-image".to_owned()));
+            body_parts.push(("strength".into(), "0.7".to_owned()));
         }
-    }
 
-    if let Some(m) = model_param {
-        body_parts.push(("model".into(), m));
-    }
+        if let Some(neg) = &request.negative_prompt {
+            let neg = neg.trim();
+            if !neg.is_empty() {
+                body_parts.push(("negative_prompt".into(), neg.to_owned()));
+            }
+        }
 
-    let raw_body = build_multipart_text(&boundary, &body_parts);
+        let mut file_fields = vec![("image", "input.png", mime_type.as_str(), img_bytes.as_slice())];
+        let mask_storage;
+        if let Some(ref mask_uri) = request.mask_data_uri {
+            if let Some((mask_mime, mask_bytes)) = parse_data_uri(mask_uri) {
+                mask_storage = (mask_mime, mask_bytes);
+                file_fields.push(("mask", "mask.png", mask_storage.0.as_str(), mask_storage.1.as_slice()));
+            }
+        }
+
+        (endpoint, build_multipart_binary(&boundary, &body_parts, &file_fields))
+    } else {
+        // Route: Stable Image Core uses /core; SD3.x models use /sd3
+        let (endpoint, model_param) = if model == "core" {
+            (
+                "https://api.stability.ai/v2beta/stable-image/generate/core".to_owned(),
+                None,
+            )
+        } else {
+            (
+                "https://api.stability.ai/v2beta/stable-image/generate/sd3".to_owned(),
+                Some(model.clone()),
+            )
+        };
+
+        let aspect_ratio = request.aspect_ratio.as_deref().unwrap_or("1:1");
+
+        let mut body_parts: Vec<(String, String)> = vec![
+            ("prompt".into(), request.prompt.clone()),
+            ("aspect_ratio".into(), aspect_ratio.to_owned()),
+            ("output_format".into(), "png".to_owned()),
+        ];
+
+        if let Some(neg) = &request.negative_prompt {
+            let neg = neg.trim();
+            if !neg.is_empty() {
+                body_parts.push(("negative_prompt".into(), neg.to_owned()));
+            }
+        }
+
+        if let Some(m) = model_param {
+            body_parts.push(("model".into(), m));
+        }
+
+        (endpoint, build_multipart_text(&boundary, &body_parts).into_bytes())
+    };
 
     let response = client
         .post(&endpoint)
@@ -604,17 +751,23 @@ async fn call_replicate(
         .map(str::to_owned)
         .unwrap_or_else(|| {
             let m = config.replicate_model.trim();
-            if m.is_empty() {
-                "black-forest-labs/flux-1.1-pro".to_owned()
-            } else {
+            if !m.is_empty() {
                 m.to_owned()
+            } else if request.image_data_uri.is_some() {
+                if request.mask_data_uri.is_some() {
+                    "black-forest-labs/flux-fill-dev".to_owned()
+                } else {
+                    "timbrooks/instruct-pix2pix".to_owned()
+                }
+            } else {
+                "black-forest-labs/flux-1.1-pro".to_owned()
             }
         });
 
     let num_images = request.num_images.unwrap_or(1).clamp(1, 4);
     let aspect_ratio = request.aspect_ratio.as_deref().unwrap_or("1:1");
 
-    // Build input — common fields used by FLUX and SDXL families
+    // Build input — common fields used by FLUX, InstructPix2Pix, and SDXL families
     let mut input = json!({
         "prompt": request.prompt,
         "num_outputs": num_images,
@@ -622,6 +775,13 @@ async fn call_replicate(
         "output_format": "png",
         "output_quality": 90
     });
+
+    if let Some(ref img_uri) = request.image_data_uri {
+        input["image"] = json!(img_uri);
+        if let Some(ref mask_uri) = request.mask_data_uri {
+            input["mask"] = json!(mask_uri);
+        }
+    }
 
     if let Some(neg) = &request.negative_prompt {
         let neg = neg.trim();
@@ -790,6 +950,58 @@ fn build_multipart_text(boundary: &str, fields: &[(String, String)]) -> String {
     body
 }
 
+/// Parse base64 data URI (e.g. data:image/png;base64,...) into (mime_type, bytes).
+fn parse_data_uri(data_uri: &str) -> Option<(String, Vec<u8>)> {
+    if !data_uri.starts_with("data:") {
+        return None;
+    }
+    let parts: Vec<&str> = data_uri.splitn(2, ',').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let header = parts[0];
+    let b64 = parts[1];
+
+    let mime_type = header
+        .trim_start_matches("data:")
+        .split(';')
+        .next()
+        .unwrap_or("image/png")
+        .trim()
+        .to_string();
+
+    let bytes = STANDARD.decode(b64.trim()).ok()?;
+    Some((mime_type, bytes))
+}
+
+/// Build multipart body containing both text fields and binary file fields.
+fn build_multipart_binary(
+    boundary: &str,
+    text_fields: &[(String, String)],
+    file_fields: &[(&str, &str, &str, &[u8])],
+) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (name, value) in text_fields {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
+        );
+        body.extend_from_slice(value.as_bytes());
+        body.extend_from_slice(b"\r\n");
+    }
+    for (param_name, file_name, mime_type, bytes) in file_fields {
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            format!("Content-Disposition: form-data; name=\"{param_name}\"; filename=\"{file_name}\"\r\n").as_bytes(),
+        );
+        body.extend_from_slice(format!("Content-Type: {mime_type}\r\n\r\n").as_bytes());
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    body
+}
+
 /// Build the final prompt string, optionally embedding aspect ratio and negative
 /// prompt guidance. Used by providers that accept a plain text prompt.
 fn build_prompt(request: &ImageGenRequest) -> String {
@@ -832,6 +1044,9 @@ mod tests {
             num_images: None,
             model: None,
             provider: None,
+            image_data_uri: None,
+            mask_data_uri: None,
+            mode: None,
         }
     }
 
@@ -850,6 +1065,9 @@ mod tests {
             num_images: Some(2),
             model: None,
             provider: None,
+            image_data_uri: None,
+            mask_data_uri: None,
+            mode: None,
         };
         let result = build_prompt(&req);
         assert!(result.contains("a cat"));
@@ -866,6 +1084,9 @@ mod tests {
             num_images: None,
             model: None,
             provider: None,
+            image_data_uri: None,
+            mask_data_uri: None,
+            mode: None,
         };
         assert!(!build_prompt(&req).contains("aspect ratio"));
     }
@@ -891,5 +1112,15 @@ mod tests {
         assert_eq!(aspect_ratio_to_ideogram(Some("4:3")), "ASPECT_4_3");
         assert_eq!(aspect_ratio_to_ideogram(Some("1:1")), "ASPECT_1_1");
         assert_eq!(aspect_ratio_to_ideogram(None), "ASPECT_1_1");
+    }
+
+    #[test]
+    fn parse_data_uri_valid() {
+        let uri = "data:image/png;base64,aGVsbG8=";
+        let parsed = parse_data_uri(uri);
+        assert!(parsed.is_some());
+        let (mime, bytes) = parsed.unwrap();
+        assert_eq!(mime, "image/png");
+        assert_eq!(bytes, b"hello");
     }
 }

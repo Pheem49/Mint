@@ -1,8 +1,52 @@
-# Release Notes - Mint Agent v1.9.1
+# Release Notes - Mint Agent v1.10.0
 
-We are excited to release **Mint Agent v1.9.1**! This version introduces major enhancements across CLI, Desktop, Web, Multimodal Video, Remote Messaging Bridges, Browser Automation, and LaTeX Sanitization.
+We are excited to release **Mint Agent v1.10.0**! This version introduces major enhancements across CLI, Desktop, Web, Multimodal Video, Remote Messaging Bridges, Browser Automation, LaTeX Sanitization, and **AI Image-to-Image & Inpainting Editing Capabilities**.
 
 ---
+
+## 🎨 Image-to-Image & Inpainting (Image Editing) Support
+
+Mint Agent now supports full AI Image Editing (Image-to-Image and Inpainting)! Users can provide an existing image, specify modification instructions (such as *"remove background objects"*, *"change coat color to red"*), and generate edited images directly.
+
+### Features Added & Enhancements
+- **Multi-Provider Image Editing**:
+  - **Replicate**: Instruction-based editing via `timbrooks/instruct-pix2pix` and mask inpainting via `black-forest-labs/flux-fill-dev`.
+  - **Stability AI**: Integrated Stability Image Edit / Inpaint REST API endpoints (`/v2beta/stable-image/edit/inpaint`).
+  - **DALL·E**: Integrated OpenAI `/v1/images/edits` endpoint when image input is provided.
+  - **Provider Validation**: Automatically returns clear guidance if text-only image models (like Gemini NanoBanana) are selected for image editing.
+- **New `/edit-image` Slash Command & Redesigned Image Studio UI**:
+  - Usage in CLI: `/edit-image <image_path> <instruction>`
+  - Image Studio UI (Web & Desktop): Redesigned image upload area into a premium **Drag & Drop Zone** with custom upload styling, SVG icons, hover animations, thumbnail previews, and instant file removal.
+  - Parity: Implemented across both Desktop UI (`src/renderer/src`) and Web UI (`src/renderer/src-web`).
+- **`AGENTS.md` Workspace Rules & Skills Autoloading**:
+  - Automatically scans and loads workspace rule files (`.agents/AGENTS.md`, `AGENTS.md`, `~/.gemini/config/AGENTS.md`) into system instruction prompt contexts, REST API endpoint (`GET /api/learned-skills`), Tauri Desktop IPC (`list_learned_skills`), and UI autocompletes.
+  - Full Parity: Verified and supported across CLI (`mint`), Desktop UI (`src/renderer/src`), and Web UI (`src/renderer/src-web`).
+
+---
+
+## ⚡ Functional Slash Commands & `@` Context Autocomplete in Web & Desktop UI
+
+This update brings full CLI slash command execution capabilities and `@` context mention autocomplete to both Web and Desktop interfaces.
+
+### Features Added & Enhancements
+
+- **Direct Keyboard Triggers (`/` and `@`)**: Type `/` to open the slash commands menu or `@` to trigger workspace context mentions directly inside the chat textarea.
+- **Fluid Micro-Animations & Elastic Physics**: Added cubic-bezier spring pop-in animations (`cubic-bezier(0.16, 1, 0.3, 1)`), smooth hover translations (`translateX(4px)`), rotation transitions (`transform: rotate(45deg)`), and active button click scaling for all chat tools, popups, and autocomplete items.
+- **Persistence Fix for System Response Cards**: Updated `save_system_interaction` in Rust (`src-tauri` & `mint-core`) and frontend IPC APIs (`tauri.ts`) to persist `aiText` output into the SQLite database. Previously, reopening the app restored commands like `/stats` or `/help` with an empty response card because `ai_text` was saved as an empty string. Now system outputs are fully preserved across app restarts.
+- **CLI Parity Command Handlers**:
+  - `/help`: Displays formatted interactive command table in chat.
+  - `/fast [on|off]`: Toggles fast mode and thinking trace visibility.
+  - `/code <task>`: Enables code-agent mode and submits `<task>`.
+  - `/cd [path]`: Changes active workspace directory or opens folder picker.
+  - `/models [name]`: Lists active providers & models or switches active model.
+  - `/stats`: Displays rich session statistics system card (workspace, interactions, provider, model).
+  - `/multi-agent [on|off]`: Toggles Multi-Agent Collaboration system.
+  - `/image` & `/paste`: Triggers file dialog or clipboard image attachment.
+  - `/veo <prompt>`: Routes to Veo video generation studio.
+- **`@` Context Mention Autocomplete**: Added popup suggestion menu for `@workspace`, `@file`, `@docs`, and `@memory` mentions when typing `@` or clicking the `@` toolbar button.
+
+---
+
 
 ## 🛠️ Deduplicated Settings System Events
 

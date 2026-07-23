@@ -226,6 +226,41 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
+                ("GET", "/api/learned-skills") => {
+                    let mut skills = match MemoryStore::open_default() {
+                        Ok(m) => m.learned_skills(100).unwrap_or_default(),
+                        Err(_) => Vec::new(),
+                    };
+
+                    if let Some(home) = dirs::home_dir() {
+                        let global_agents_path = home.join(".gemini").join("config").join("AGENTS.md");
+                        crate::skills::load_agent_rules_file(&global_agents_path, &mut skills);
+
+                        let global_skills_path = home.join(".config").join("mint").join("mint-skills");
+                        crate::skills::load_skills_from_dir(&global_skills_path, &mut skills);
+                    }
+
+                    if let Ok(current_dir) = std::env::current_dir() {
+                        let workspace_agents_path1 = current_dir.join(".agents").join("AGENTS.md");
+                        crate::skills::load_agent_rules_file(&workspace_agents_path1, &mut skills);
+                        let workspace_agents_path2 = current_dir.join("AGENTS.md");
+                        crate::skills::load_agent_rules_file(&workspace_agents_path2, &mut skills);
+
+                        let workspace_skills_path1 = current_dir.join(".agents").join("skills");
+                        crate::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
+                        let workspace_skills_path2 = current_dir.join("skills");
+                        crate::skills::load_skills_from_dir(&workspace_skills_path2, &mut skills);
+                    }
+
+                    let mut unique_skills = std::collections::BTreeMap::new();
+                    for s in skills {
+                        unique_skills.insert(s.name.clone(), s);
+                    }
+
+                    let list: Vec<_> = unique_skills.into_values().collect();
+                    send_json_response(socket, "200 OK", &serde_json::to_string(&list).unwrap_or_default()).await;
+                    return;
+                }
                 ("GET", "/api/profile") => {
                     let key = query_param(query, "key").unwrap_or_default();
                     if let Ok(memory) = MemoryStore::open_default() {
@@ -308,6 +343,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     struct ApiSaveInteraction {
                         chat_id: String,
                         user_text: String,
+                        ai_text: Option<String>,
                         provider: String,
                         model: String,
                     }
@@ -317,7 +353,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             match memory.add_interaction_for_chat(
                                 &req.chat_id,
                                 &req.user_text,
-                                "",
+                                req.ai_text.as_deref().unwrap_or(""),
                                 &req.provider,
                                 &req.model,
                             ) {
@@ -967,6 +1003,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         /// Which image provider to use (overrides config.image_gen_provider).
                         #[serde(default)]
                         provider: Option<String>,
+                        #[serde(default)]
+                        image_data_uri: Option<String>,
+                        #[serde(default)]
+                        mask_data_uri: Option<String>,
+                        #[serde(default)]
+                        mode: Option<String>,
                     }
 
                     if let Ok(req) = serde_json::from_str::<ImageGenApiRequest>(body) {
@@ -978,6 +1020,9 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             num_images: req.num_images,
                             model: req.model,
                             provider: req.provider,
+                            image_data_uri: req.image_data_uri,
+                            mask_data_uri: req.mask_data_uri,
+                            mode: req.mode,
                         };
                         match generate_images(&config, &gen_request).await {
                             Ok(result) => {

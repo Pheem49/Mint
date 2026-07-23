@@ -12,6 +12,7 @@ import {
 } from '../../shared/constants/models'
 import { badge, providerLabel, fallbackNotice } from '../../shared/utils/providers'
 import { activitiesFrom, parseWebSearchSources, type AgentActivity, type AgentActivityView } from '../../shared/utils/agentActivity'
+import { SLASH_COMMANDS } from '../../shared/constants/slashCommands'
 import { AgentActivityTable } from '../../shared/components/AgentActivityTable'
 import { ChatCodeBlock } from '../../shared/components/ChatCodeBlock'
 import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../../shared/utils/approval'
@@ -26,6 +27,8 @@ import { useSpeechToText } from '../../shared/utils/speech'
 
 
 import {
+  listLearnedSkills,
+  type LearnedSkill,
   type AgentProgress,
   type ChatResponse,
   type RuntimeStatus,
@@ -467,12 +470,154 @@ export default function ChatPanel({
       }
     }
   }
+  const [skillsList, setSkillsList] = useState<LearnedSkill[]>([])
+  const [slashMenuOpen, setSlashMenuOpen] = useState(true)
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+  const slashMenuRef = useRef<HTMLDivElement>(null)
+  const slashListRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const isSlashInput = message.trimStart().startsWith('/')
+  const isSkillInput = message.trimStart().startsWith('$')
+  const atMatch = message.match(/@([\w\-\.\/]*)$/)
+  const isAtInput = Boolean(atMatch)
+  const atQuery = atMatch ? atMatch[1].toLowerCase() : ''
+
+  const CONTEXT_SUGGESTIONS = [
+    { label: '@workspace', desc: 'Include workspace path & context' },
+    { label: '@file', desc: 'Reference workspace file' },
+    { label: '@docs', desc: 'Include documentation context' },
+    { label: '@memory', desc: 'Include long-term memory store' },
+  ]
+
+  const filteredContexts = isAtInput
+    ? CONTEXT_SUGGESTIONS.filter((item) => item.label.toLowerCase().includes(atQuery))
+    : []
+
+  useEffect(() => {
+    let isMounted = true
+    listLearnedSkills()
+      .then((res) => {
+        if (isMounted && Array.isArray(res)) setSkillsList(res)
+      })
+      .catch(() => {})
+    return () => { isMounted = false }
+  }, [isSkillInput])
+
+  const slashQuery = isSlashInput ? message.trimStart().toLowerCase() : ''
+  const filteredSlashCommands = isSlashInput
+    ? SLASH_COMMANDS.filter((c) => c.command.toLowerCase().startsWith(slashQuery))
+    : []
+
+  const skillQuery = isSkillInput ? message.trimStart().slice(1).toLowerCase() : ''
+  const filteredSkills = isSkillInput
+    ? skillsList.filter((s) => s.name.toLowerCase().startsWith(skillQuery))
+    : []
+
+  const showSuggestionMenu = slashMenuOpen && (
+    (isSlashInput && filteredSlashCommands.length > 0) ||
+    (isSkillInput && filteredSkills.length > 0) ||
+    (isAtInput && filteredContexts.length > 0)
+  )
+
+  const suggestionCount = isSlashInput
+    ? filteredSlashCommands.length
+    : isSkillInput
+    ? filteredSkills.length
+    : filteredContexts.length
+
+  useEffect(() => {
+    if (isSlashInput || isSkillInput || isAtInput) {
+      setSlashMenuOpen(true)
+      setSlashSelectedIndex(0)
+    }
+  }, [message])
+
+  useEffect(() => {
+    if (showSuggestionMenu && slashListRef.current) {
+      const activeItem = slashListRef.current.children[slashSelectedIndex] as HTMLElement
+      if (activeItem) {
+        activeItem.scrollIntoView({ block: 'nearest' })
+      }
+    }
+  }, [slashSelectedIndex, showSuggestionMenu])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        slashMenuRef.current &&
+        !slashMenuRef.current.contains(event.target as Node) &&
+        textareaRef.current &&
+        !textareaRef.current.contains(event.target as Node)
+      ) {
+        setSlashMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const selectSlashCommand = (cmd: string) => {
+    onSetMessage(cmd + ' ')
+    setSlashMenuOpen(false)
+    setSlashSelectedIndex(0)
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }
+
+  const selectSkillCommand = (name: string) => {
+    onSetMessage('$' + name + ' ')
+    setSlashMenuOpen(false)
+    setSlashSelectedIndex(0)
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }
+
+  const selectAtCommand = (label: string) => {
+    const nextMsg = message.replace(/@[\w\-\.\/]*$/, label + ' ')
+    onSetMessage(nextMsg)
+    setSlashMenuOpen(false)
+    setSlashSelectedIndex(0)
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }
+
   const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
     event.preventDefault()
     event.currentTarget.form?.requestSubmit()
   }
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSuggestionMenu) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setSlashSelectedIndex((prev) => (prev + 1) % suggestionCount)
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setSlashSelectedIndex((prev) => (prev - 1 + suggestionCount) % suggestionCount)
+        return
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        if (!event.shiftKey && !event.nativeEvent.isComposing) {
+          event.preventDefault()
+          if (isSlashInput) {
+            const selected = filteredSlashCommands[slashSelectedIndex] || filteredSlashCommands[0]
+            if (selected) selectSlashCommand(selected.command)
+          } else if (isSkillInput) {
+            const selected = filteredSkills[slashSelectedIndex] || filteredSkills[0]
+            if (selected) selectSkillCommand(selected.name)
+          } else if (isAtInput) {
+            const selected = filteredContexts[slashSelectedIndex] || filteredContexts[0]
+            if (selected) selectAtCommand(selected.label)
+          }
+          return
+        }
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setSlashMenuOpen(false)
+        return
+      }
+    }
     submitOnEnter(event)
   }
   const resizeInput = (element: HTMLTextAreaElement) => {
@@ -1061,6 +1206,65 @@ export default function ChatPanel({
           </div>
         )}
 
+        {showSuggestionMenu && (
+          <div className="slash-suggestions-popup" ref={slashMenuRef}>
+            <div className="slash-suggestions-header">
+              {isSlashInput ? 'Slash Commands' : isSkillInput ? 'Learned Skills' : 'Context Mentions'} ({slashSelectedIndex + 1}/{suggestionCount})
+            </div>
+            <div className="slash-suggestions-list" ref={slashListRef}>
+              {isSlashInput
+                ? filteredSlashCommands.map((item, idx) => (
+                    <button
+                      key={item.command}
+                      type="button"
+                      className={`slash-suggestion-item ${idx === slashSelectedIndex ? 'active' : ''}`}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        selectSlashCommand(item.command)
+                      }}
+                      onMouseEnter={() => setSlashSelectedIndex(idx)}
+                    >
+                      <span className="slash-cmd-name">{item.command}</span>
+                      <span className="slash-cmd-desc">{item.description}</span>
+                    </button>
+                  ))
+                : isSkillInput
+                ? filteredSkills.map((item, idx) => (
+                    <button
+                      key={item.id || item.name}
+                      type="button"
+                      className={`slash-suggestion-item ${idx === slashSelectedIndex ? 'active' : ''}`}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        selectSkillCommand(item.name)
+                      }}
+                      onMouseEnter={() => setSlashSelectedIndex(idx)}
+                    >
+                      <span className="slash-cmd-name">${item.name}</span>
+                      <span className="skill-badge">[Skill]</span>
+                      <span className="slash-cmd-desc">{item.description || item.content?.slice(0, 60)}</span>
+                    </button>
+                  ))
+                : filteredContexts.map((item, idx) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      className={`slash-suggestion-item ${idx === slashSelectedIndex ? 'active' : ''}`}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        selectAtCommand(item.label)
+                      }}
+                      onMouseEnter={() => setSlashSelectedIndex(idx)}
+                    >
+                      <span className="slash-cmd-name">{item.label}</span>
+                      <span className="skill-badge">[Context]</span>
+                      <span className="slash-cmd-desc">{item.desc}</span>
+                    </button>
+                  ))}
+            </div>
+          </div>
+        )}
+
         <form
           id="chat-form"
           onSubmit={onSubmit}
@@ -1105,6 +1309,7 @@ export default function ChatPanel({
           )}
           <textarea
             id="chat-input"
+            ref={textareaRef}
             value={message}
             onChange={(event) => {
               resizeInput(event.currentTarget)
@@ -1115,55 +1320,55 @@ export default function ChatPanel({
             rows={1}
           />
           <div className="chat-tool-menu-wrap" ref={toolMenuRef}>
-            <button id="chat-tool-btn" type="button" aria-haspopup="menu" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((open) => !open)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19"></line>
-                <line x1="5" y1="12" x2="19" y2="12"></line>
-              </svg>
-            </button>
-            {toolMenuOpen && (
-              <div className="chat-tool-menu" role="menu">
-                <button type="button" role="menuitem" onClick={openImagePicker}>
-                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                      <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                      <polyline points="21 15 16 10 5 21"></polyline>
-                    </svg>
-                  </span>
-                  <span>Add image</span>
-                </button>
-                <button type="button" role="menuitem" onClick={openVideoPicker}>
-                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <polygon points="23 7 16 12 23 17 23 7"></polygon>
-                      <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
-                    </svg>
-                  </span>
-                  <span>Add video</span>
-                </button>
-                <button type="button" role="menuitem" onClick={openDocumentPicker}>
-                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                      <polyline points="14 2 14 8 20 8"></polyline>
-                    </svg>
-                  </span>
-                  <span>Add file</span>
-                </button>
-                <button type="button" role="menuitem" onClick={startWebSearch}>
-                  <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <line x1="2" y1="12" x2="22" y2="12"></line>
-                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                    </svg>
-                  </span>
-                  <span>Search web</span>
-                </button>
-              </div>
-            )}
-          </div>
+              <button id="chat-tool-btn" type="button" aria-haspopup="menu" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((open) => !open)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+              </button>
+              {toolMenuOpen && (
+                <div className="chat-tool-menu" role="menu">
+                  <button type="button" role="menuitem" onClick={openImagePicker}>
+                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                        <polyline points="21 15 16 10 5 21"></polyline>
+                      </svg>
+                    </span>
+                    <span>Add image</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={openVideoPicker}>
+                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                      </svg>
+                    </span>
+                    <span>Add video</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={openDocumentPicker}>
+                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                      </svg>
+                    </span>
+                    <span>Add file</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={startWebSearch}>
+                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="2" y1="12" x2="22" y2="12"></line>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                      </svg>
+                    </span>
+                    <span>Search web</span>
+                  </button>
+                </div>
+              )}
+            </div>
           <input id="vision-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={onSelectImage} style={{ display: 'none' }} />
           <input id="video-file-input" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" onChange={onSelectVideo} style={{ display: 'none' }} />
           <input id="document-file-input" type="file" accept="application/pdf,.pdf" onChange={onSelectDocument} style={{ display: 'none' }} />

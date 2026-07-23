@@ -571,6 +571,54 @@ pub async fn handle_slash_command(
             }
         }
 
+        "/edit-image" => {
+            let (img_path, instruction) = parse_path_and_prompt(rest);
+
+            if img_path.is_empty() || instruction.is_empty() {
+                println!("{WARN}Usage: /edit-image <image_path> <editing instruction>{RESET}\n");
+                return Some(SlashResult::Handled);
+            }
+            match image::load_image_as_data_uri(std::path::Path::new(&img_path)) {
+                Ok(uri) => {
+                    println!("{DIM}Editing image with prompt: \"{}\"...{RESET}", instruction);
+                    let req = mint_core::ImageGenRequest {
+                        prompt: instruction.to_owned(),
+                        negative_prompt: None,
+                        aspect_ratio: None,
+                        num_images: Some(1),
+                        model: None,
+                        provider: None,
+                        image_data_uri: Some(uri),
+                        mask_data_uri: None,
+                        mode: Some("edit".to_owned()),
+                    };
+                    let rt = tokio::runtime::Handle::current();
+                    let config = session.config.clone();
+                    let handle = std::thread::spawn(move || {
+                        rt.block_on(mint_core::generate_images(&config, &req))
+                    });
+                    match handle.join() {
+                        Ok(Ok(resp)) => {
+                            if let Some(first) = resp.images.first() {
+                                println!("{DIM}Image edited successfully using {} ({}){RESET}\n", resp.provider, resp.model);
+                                println!("{DIM}Image data URI prefix: {}{RESET}\n", &first.data_uri[..first.data_uri.len().min(60)]);
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            println!("{ERROR}Image editing failed: {e}{RESET}\n");
+                        }
+                        Err(_) => {
+                            println!("{ERROR}Image editing thread panicked.{RESET}\n");
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("{ERROR}Failed to load image: {e}{RESET}\n");
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
         "/paste" => match image::read_clipboard_image() {
             Ok(Some(uri)) => {
                 if let Some(ref mut current) = session.pending_image {
@@ -1637,9 +1685,17 @@ pub fn load_all_available_skills(current_dir: &Path) -> Vec<mint_core::LearnedSk
     };
 
     if let Some(home) = dirs::home_dir() {
+        let global_agents_path = home.join(".gemini").join("config").join("AGENTS.md");
+        mint_core::skills::load_agent_rules_file(&global_agents_path, &mut skills);
+
         let global_skills_path = home.join(".config").join("mint").join("mint-skills");
         mint_core::skills::load_skills_from_dir(&global_skills_path, &mut skills);
     }
+    let workspace_agents_path1 = current_dir.join(".agents").join("AGENTS.md");
+    mint_core::skills::load_agent_rules_file(&workspace_agents_path1, &mut skills);
+    let workspace_agents_path2 = current_dir.join("AGENTS.md");
+    mint_core::skills::load_agent_rules_file(&workspace_agents_path2, &mut skills);
+
     let workspace_skills_path1 = current_dir.join(".agents").join("skills");
     mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
     let workspace_skills_path2 = current_dir.join("skills");
@@ -1656,6 +1712,7 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/cd", "Change active workspace directory"),
     ("/clear", "Clear conversation history"),
     ("/code", "Run in code-agent mode"),
+    ("/edit-image", "Edit attached image with prompt instruction"),
     ("/exit", "Exit Mint CLI"),
     ("/fast", "Toggle fast mode (hide thinking traces)"),
     ("/help", "Show help menu"),

@@ -53,6 +53,28 @@ pub fn learn_skill(path: &Path) -> Result<LearnedSkill, SkillError> {
     Ok(MemoryStore::open_default()?.add_learned_skill(name, &path.to_string_lossy(), &content)?)
 }
 
+pub fn load_agent_rules_file(file_path: &Path, list: &mut Vec<LearnedSkill>) {
+    if file_path.is_file() {
+        if let Ok(content) = fs::read_to_string(file_path) {
+            let name = file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("AGENTS.md")
+                .to_string();
+            let description = parse_skill_description(&content)
+                .or_else(|| Some("Workspace instructions and rules".to_string()));
+            list.push(LearnedSkill {
+                id: 0,
+                name,
+                source_path: file_path.to_string_lossy().to_string(),
+                content,
+                created_at: String::new(),
+                description,
+            });
+        }
+    }
+}
+
 pub fn learned_skills_context(
     workspace_root: Option<&Path>,
     chat_id: Option<&str>,
@@ -60,6 +82,9 @@ pub fn learned_skills_context(
     let mut skills = MemoryStore::open_default()?.learned_skills(20)?;
 
     if let Some(home) = dirs::home_dir() {
+        let global_agents_path = home.join(".gemini").join("config").join("AGENTS.md");
+        load_agent_rules_file(&global_agents_path, &mut skills);
+
         let global_skills_path = home.join(".config").join("mint").join("mint-skills");
         if !global_skills_path.exists() {
             let _ = std::fs::create_dir_all(&global_skills_path);
@@ -68,6 +93,12 @@ pub fn learned_skills_context(
     }
 
     if let Some(root) = workspace_root {
+        let workspace_agents_path1 = root.join(".agents").join("AGENTS.md");
+        load_agent_rules_file(&workspace_agents_path1, &mut skills);
+
+        let workspace_agents_path2 = root.join("AGENTS.md");
+        load_agent_rules_file(&workspace_agents_path2, &mut skills);
+
         let workspace_skills_path1 = root.join(".agents").join("skills");
         load_skills_from_dir(&workspace_skills_path1, &mut skills);
 

@@ -2127,7 +2127,7 @@ dependencies = [
 
 [[package]]
 name = "mint-cli"
-version = "1.9.1"
+version = "1.10.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "mint-core"
-version = "1.9.1"
+version = "1.10.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2168,7 +2168,7 @@ dependencies = [
 
 [[package]]
 name = "mint-desktop"
-version = "1.9.1"
+version = "1.10.0"
 dependencies = [
  "base64 0.22.1",
  "dirs",

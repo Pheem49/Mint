@@ -53,6 +53,7 @@ export interface MintPlatformApi {
   saveSystemInteraction(
     chatId: string,
     userText: string,
+    aiText: string,
     provider: string,
     model: string,
   ): Promise<any>

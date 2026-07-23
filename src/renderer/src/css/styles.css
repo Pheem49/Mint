@@ -1284,12 +1284,120 @@ h1 {
 
 /* Input Area */
 .input-area {
+  position: relative;
   padding: 16px 20px;
   background: color-mix(in srgb, var(--panel-bg) 60%, transparent);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border-top: 1px solid var(--border);
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
+}
+
+/* Slash Command Suggestions Popup */
+.slash-suggestions-popup {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 20px;
+  right: 20px;
+  max-height: 250px;
+  background: color-mix(in srgb, var(--card-bg, #18191c) 92%, #000 8%);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  border-radius: 14px;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(45, 212, 191, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 100;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transform-origin: bottom center;
+  animation: slashPopupFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, opacity;
+}
+
+@keyframes slashPopupFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.slash-suggestions-header {
+  padding: 9px 16px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent, #2dd4bf);
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: rgba(0, 0, 0, 0.3);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.slash-suggestions-list {
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  scroll-behavior: smooth;
+}
+
+.slash-suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease, box-shadow 0.18s ease;
+  will-change: transform, background;
+}
+
+.slash-suggestion-item:hover,
+.slash-suggestion-item.active {
+  background: rgba(45, 212, 191, 0.12);
+  transform: translateX(4px);
+  box-shadow: inset 2px 0 0 var(--accent, #2dd4bf);
+}
+
+.slash-cmd-name {
+  font-size: 0.86rem;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  color: var(--accent, #2dd4bf);
+  min-width: 140px;
+  flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+
+.slash-suggestion-item.active .slash-cmd-name {
+  color: #5eead4;
+}
+
+.skill-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent, #2dd4bf);
+  background: rgba(45, 212, 191, 0.16);
+  padding: 2px 7px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.slash-cmd-desc {
+  font-size: 0.8rem;
+  color: var(--text-soft, rgba(255, 255, 255, 0.65));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .input-disclaimer {
@@ -3968,9 +4076,32 @@ input:checked + .slider:before {
   transform: translate(-50%, -50%);
 }
 
+#chat-tool-btn,
+#send-btn,
+#mic-btn,
+#screen-capture-btn {
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  will-change: transform;
+}
+
+#chat-tool-btn:hover,
+#send-btn:hover:not(:disabled),
+#mic-btn:hover,
+#screen-capture-btn:hover {
+  transform: scale(1.08);
+}
+
+#chat-tool-btn:active,
+#send-btn:active:not(:disabled),
+#mic-btn:active,
+#screen-capture-btn:active {
+  transform: scale(0.92);
+}
+
 #chat-tool-btn[aria-expanded='true'] {
   background: var(--panel-raised);
   color: var(--text-main);
+  transform: rotate(45deg);
 }
 
 .chat-tool-menu {
@@ -3983,9 +4114,23 @@ input:checked + .slider:before {
   background: color-mix(in srgb, var(--panel-raised) 92%, #000 8%);
   border: 1px solid var(--border);
   border-radius: 16px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(45, 212, 191, 0.12);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
+  transform-origin: bottom left;
+  animation: toolMenuPopIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, opacity;
+}
+
+@keyframes toolMenuPopIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .chat-tool-menu button {
@@ -4004,10 +4149,12 @@ input:checked + .slider:before {
   font-size: 0.92rem;
   text-align: left;
   cursor: pointer;
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), background 0.16s ease;
 }
 
 .chat-tool-menu button:hover {
   background: var(--surface-strong);
+  transform: translateX(4px);
 }
 
 .chat-tool-menu button span:first-child {

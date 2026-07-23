@@ -326,6 +326,7 @@ export async function getRecentInteractions(limit = 50, chatId?: string | null):
 export async function saveSystemInteraction(
   chatId: string,
   userText: string,
+  aiText: string,
   provider: string,
   model: string,
 ): Promise<any> {
@@ -335,7 +336,7 @@ export async function saveSystemInteraction(
       const res = await fetch(`${API_BASE}/interactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatId, userText, provider, model }),
+        body: JSON.stringify({ chatId, userText, aiText, provider, model }),
       });
       return await res.json();
     } catch (e) {
@@ -344,7 +345,7 @@ export async function saveSystemInteraction(
     }
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('save_system_interaction', { chatId, userText, provider, model })
+  return invoke('save_system_interaction', { chatId, userText, aiText, provider, model })
 }
 
 export async function saveInteractionAgentActivity(
@@ -471,15 +472,20 @@ export interface LearnedSkill {
 }
 
 export async function listLearnedSkills(workspacePath?: string): Promise<LearnedSkill[]> {
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     try {
+      const API_BASE = getLocalApiBase()
+      const res = await fetch(`${API_BASE}/learned-skills`)
+      if (res.ok) {
+        return await res.json()
+      }
       const val = await getProfileValue('learned-skills-web-mock')
       if (val) {
         return JSON.parse(val)
       }
       return []
     } catch (e) {
-      console.error("Failed to load web mock skills:", e)
+      console.error("Failed to load web skills:", e)
       return []
     }
   }
@@ -589,6 +595,9 @@ export async function generateImages(
         numImages: request.numImages ?? 1,
         model: request.model,
         provider: request.provider,
+        imageDataUri: request.imageDataUri,
+        maskDataUri: request.maskDataUri,
+        mode: request.mode,
       }),
     })
     if (!res.ok) {

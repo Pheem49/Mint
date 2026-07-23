@@ -652,12 +652,19 @@ fn save_interaction_agent_activity(
 fn save_system_interaction(
     chat_id: String,
     user_text: String,
+    ai_text: Option<String>,
     provider: String,
     model: String,
 ) -> Result<i64, String> {
     MemoryStore::open_default()
         .and_then(|memory| {
-            memory.add_interaction_for_chat(&chat_id, &user_text, "", &provider, &model)
+            memory.add_interaction_for_chat(
+                &chat_id,
+                &user_text,
+                ai_text.as_deref().unwrap_or(""),
+                &provider,
+                &model,
+            )
         })
         .map_err(|error| error.to_string())
 }
@@ -732,6 +739,9 @@ fn list_learned_skills(workspace_path: Option<String>) -> Result<Vec<LearnedSkil
 
     let mut global_skills = Vec::new();
     if let Some(home) = dirs::home_dir() {
+        let global_agents_path = home.join(".gemini").join("config").join("AGENTS.md");
+        mint_core::skills::load_agent_rules_file(&global_agents_path, &mut global_skills);
+
         let global_skills_path = home.join(".config").join("mint").join("mint-skills");
         if !global_skills_path.exists() {
             let _ = std::fs::create_dir_all(&global_skills_path);
@@ -741,6 +751,12 @@ fn list_learned_skills(workspace_path: Option<String>) -> Result<Vec<LearnedSkil
 
     let mut workspace_skills = Vec::new();
     if let Ok(root) = workspace_root(workspace_path.as_deref()) {
+        let workspace_agents_path1 = root.join(".agents").join("AGENTS.md");
+        mint_core::skills::load_agent_rules_file(&workspace_agents_path1, &mut workspace_skills);
+
+        let workspace_agents_path2 = root.join("AGENTS.md");
+        mint_core::skills::load_agent_rules_file(&workspace_agents_path2, &mut workspace_skills);
+
         let workspace_skills_path1 = root.join(".agents").join("skills");
         mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut workspace_skills);
 

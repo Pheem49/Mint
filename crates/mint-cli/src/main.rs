@@ -1293,6 +1293,9 @@ async fn main() -> Result<()> {
                     num_images: Some(count),
                     model: None,
                     provider: None,
+                    image_data_uri: None,
+                    mask_data_uri: None,
+                    mode: None,
                 };
                 match generate_images(&config, &request).await {
                     Ok(result) => {
