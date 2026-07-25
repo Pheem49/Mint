@@ -475,7 +475,7 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         );
     }
     if allowed_actions.contains(&"apply_patch") && allowed_actions.contains(&"write_file") {
-        rules.push("3. Use apply_patch for all edits to existing files. write_file is only for creating new files inside the workspace.");
+        rules.push("3. Use apply_patch for all edits to existing files (write_file is only for creating new files). For edits across multiple sections of a file, supply separate small hunks in the 'hunks' array (one hunk per edit location). Keep oldText in each hunk minimal (only 1-3 exact lines needed to pinpoint the edit). NEVER bundle multiple separate edits into a single giant hunk that spans the entire file.");
     }
     if allowed_actions.contains(&"run_shell")
         || allowed_actions.contains(&"write_file")

@@ -2467,7 +2467,18 @@ pub fn read_line_interactive(
                             expanded_str = expanded_str.replace(placeholder_str, content);
                         }
 
-                        println!("  {BLUE}You ›{RESET} {}", expanded_str);
+                        let lines: Vec<&str> = expanded_str.lines().collect();
+                        if lines.len() <= 1 {
+                            println!("  {BLUE}You ›{RESET} {}", expanded_str);
+                        } else {
+                            for (idx, line) in lines.iter().enumerate() {
+                                if idx == 0 {
+                                    println!("  {BLUE}You ›{RESET} {}", line);
+                                } else {
+                                    println!("        {}", line);
+                                }
+                            }
+                        }
                         let _ = io::stdout().flush();
 
                         break Some(InteractiveInput {

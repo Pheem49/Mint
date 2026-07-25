@@ -21,6 +21,10 @@ Mint Agent now supports full AI Image Editing (Image-to-Image and Inpainting)! U
 - **`AGENTS.md` Workspace Rules & Skills Autoloading**:
   - Automatically scans and loads workspace rule files (`.agents/AGENTS.md`, `AGENTS.md`, `~/.gemini/config/AGENTS.md`) into system instruction prompt contexts, REST API endpoint (`GET /api/learned-skills`), Tauri Desktop IPC (`list_learned_skills`), and UI autocompletes.
   - Full Parity: Verified and supported across CLI (`mint`), Desktop UI (`src/renderer/src`), and Web UI (`src/renderer/src-web`).
+- **File Approval Target Path, Line Numbers & Diff Stats (`+additions -deletions`)**:
+  - Enhanced file modification and creation approval cards to display exact target file paths, line numbers on the left margin (parsed from Unified Diff hunk headers), and line addition/deletion counts (e.g. `path/to/file.rs (+15 -3)`) matching Codex-style diff previews.
+  - Integrated `similar` (Myers Diff Algorithm) into `mint-core`'s `full_file_diff` generator to produce clean line-by-line diff previews with 3 context lines, eliminating whole-file replacement previews.
+  - Full Parity: Supported across CLI (`crates/mint-cli`), Desktop UI (`src/renderer/src`), and Web UI (`src/renderer/src-web`).
 
 ---
 
@@ -97,6 +101,15 @@ This update enhances markdown and CLI sanitization to automatically convert unes
 - **Bare LaTeX Symbol Conversion**: Updated `sanitizeLatex` in `markdown.tsx` and `sanitize_latex` in `agent.rs` to convert unescaped symbols like `ightarrow`, `\rightarrow`, `\leftarrow`, `\Rightarrow`, etc. directly into Unicode arrows (`→`, `←`, `⇒`).
 - **Standalone `ightarrow` Cleanup**: Fixes garbled outputs from LLMs where string escape sequences swallow `\r` from `\rightarrow`, automatically replacing plain text `ightarrow` with `→`.
 - **Frontend & CLI Parity**: Ensures both UI message rendering (`markdown.tsx`) and CLI terminal outputs (`agent.rs`) sanitize LaTeX math symbols consistently.
+
+---
+
+## 🧩 New Agent Skills Installation
+
+Installed new external agent skills to enhance the workspace's capability and discipline.
+
+### Skills Added
+- **Gridgeist**: Installed the `gridgeist` skill from `ohmiler/gridgeist` repository into `.agents/skills/gridgeist`, including agents, assets, and design references.
 
 ---
 
@@ -247,7 +260,7 @@ This release significantly upgrades `mint auto` browser automation with real nat
 
 ---
 
-## 🚀 Key Features & Enhancements
+
 
 ### 🖥️ 1. Rich Terminal Spinner Integration (`indicatif`)
 - Added steady-tick green spinner loaders to keep the CLI interactive and visually responsive during blocking background operations:

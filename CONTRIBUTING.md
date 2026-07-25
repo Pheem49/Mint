@@ -63,29 +63,7 @@ To build and run Mint locally, you need the following tools:
   - **macOS:** Xcode Command Line Tools.
   - **Windows:** C++ Build Tools via Visual Studio Installer.
 
-### Steps to Run Locally
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/Pheem49/Mint.git
-   cd Mint
-   ```
-2. **Install frontend dependencies:**
-   ```bash
-   npm install
-   ```
-3. **Configure Environment Variables:**
-   ```bash
-   cp .env.example .env
-   # Add your API keys if you want to use cloud providers (e.g. Gemini, OpenAI)
-   ```
-4. **Run the Tauri Desktop app (Dev mode):**
-   ```bash
-   npm run tauri:dev
-   ```
-5. **Run the CLI helper:**
-   ```bash
-   npm run cli -- chat "Hello"
-   ```
+
 
 ---
 
