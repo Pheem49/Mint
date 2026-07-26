@@ -55,9 +55,10 @@ const PROVIDER_MODELS: Record<string, { value: string; label: string }[]> = {
   ],
   replicate: [
     { value: 'black-forest-labs/flux-1.1-pro',          label: 'FLUX 1.1 Pro (Default)' },
+    { value: 'timbrooks/instruct-pix2pix',              label: 'InstructPix2Pix (Image Editing)' },
+    { value: 'black-forest-labs/flux-fill-dev',         label: 'FLUX Fill (Inpainting)' },
     { value: 'black-forest-labs/flux-schnell',          label: 'FLUX Schnell (fast)' },
     { value: 'stability-ai/sdxl',                       label: 'SDXL' },
-    { value: 'bytedance/sdxl-lightning-4step',          label: 'SDXL Lightning' },
   ],
 }
 
@@ -146,6 +147,36 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
 
   const effectiveModel = selectedModel === 'custom' ? customModel.trim() : selectedModel
 
+  const [inputImage, setInputImage] = useState<string | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (evt) => {
+      if (typeof evt.target?.result === 'string') {
+        setInputImage(evt.target.result)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const file = e.dataTransfer.files?.[0]
+    if (!file || !file.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = (evt) => {
+      if (typeof evt.target?.result === 'string') {
+        setInputImage(evt.target.result)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
   const handleGenerate = useCallback(async () => {
     const trimmed = prompt.trim()
     if (!trimmed || generating) return
@@ -161,6 +192,8 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
       numImages,
       model: effectiveModel || undefined,
       provider: selectedProvider,
+      imageDataUri: inputImage || undefined,
+      mode: inputImage ? 'edit' : 'generate',
     }
 
     try {
@@ -176,7 +209,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
     } finally {
       setGenerating(false)
     }
-  }, [prompt, negativePrompt, aspectRatio, numImages, generating, onRefreshPictures, selectedProvider, effectiveModel])
+  }, [prompt, negativePrompt, aspectRatio, numImages, generating, onRefreshPictures, selectedProvider, effectiveModel, inputImage])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -299,11 +332,61 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
             </div>
           )}
 
+          {/* Image Editing / Source Image Attachment */}
+          <div className="img-studio-field">
+            <label className="img-studio-label">
+              Source Image (Optional for Image Editing)
+              <span className="img-studio-label-hint">Upload an image to edit / inpaint</span>
+            </label>
+            {inputImage ? (
+              <div className="img-studio-preview-card">
+                <img src={inputImage} alt="Input source" className="img-studio-preview-thumb" />
+                <div className="img-studio-preview-info">
+                  <div className="img-studio-preview-title">
+                    <span>Source Image Attached</span>
+                  </div>
+                  <div className="img-studio-preview-subtitle">Ready for Image Editing</div>
+                </div>
+                <button
+                  type="button"
+                  className="img-studio-preview-remove"
+                  onClick={() => setInputImage(null)}
+                >
+                  ✕ Remove
+                </button>
+              </div>
+            ) : (
+              <div
+                className={`img-studio-dropzone ${isDragging ? 'is-dragging' : ''}`}
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={handleDrop}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  disabled={generating}
+                  style={{ display: 'none' }}
+                />
+                <svg className="img-studio-dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <div className="img-studio-dropzone-text">Click or Drag & Drop image here</div>
+                <div className="img-studio-dropzone-subtext">PNG, JPG, WEBP up to 10MB</div>
+              </div>
+            )}
+          </div>
+
           {/* Prompt */}
           <div className="img-studio-field">
             <label className="img-studio-label" htmlFor="img-studio-prompt">
-              Prompt
-              <span className="img-studio-label-hint">Describe the image you want</span>
+              {inputImage ? 'Editing Instruction Prompt' : 'Prompt'}
+              <span className="img-studio-label-hint">{inputImage ? 'Describe what to edit or remove' : 'Describe the image you want'}</span>
             </label>
             <textarea
               id="img-studio-prompt"

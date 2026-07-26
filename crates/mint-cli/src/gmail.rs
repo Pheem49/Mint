@@ -37,8 +37,28 @@ pub async fn auth(no_open: bool, port: u16) -> Result<()> {
     if !no_open {
         open_browser(&url)?;
     }
-    println!("Waiting for Gmail OAuth callback on {redirect} ...");
-    let code = wait_for_code(listener, &state)?;
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+            .template("{spinner:.green} {msg}")
+            .unwrap(),
+    );
+    spinner.set_message("Waiting for Gmail OAuth authorization in browser...");
+    spinner.enable_steady_tick(Duration::from_millis(80));
+
+    let code = match wait_for_code(listener, &state) {
+        Ok(c) => {
+            spinner.finish_and_clear();
+            c
+        }
+        Err(e) => {
+            spinner.finish_and_clear();
+            return Err(e);
+        }
+    };
     let token: Value = mint_core::HTTP_CLIENT
         .clone()
         .post(TOKEN_URL)

@@ -14,6 +14,8 @@ use mint_core::{
 
 const RESET: &str = "\x1b[0m";
 const MINT: &str = "\x1b[32m";
+const GREEN: &str = "\x1b[32m";
+const RED: &str = "\x1b[31m";
 const BLUE: &str = "\x1b[38;2;78;201;216m";
 const DIM: &str = "\x1b[90m";
 const BRIGHT: &str = "\x1b[1;97m";
@@ -24,7 +26,7 @@ pub struct AgentOptions {
 }
 
 pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Result<AgentResult> {
-    run_code_agent_with_image(task, root, config, None).await
+    run_code_agent_with_image(task, root, config, None, None).await
 }
 
 pub async fn run_code_agent_with_image(
@@ -32,8 +34,17 @@ pub async fn run_code_agent_with_image(
     root: &Path,
     config: &MintConfig,
     image_data_uri: Option<String>,
+    video_data_uri: Option<String>,
 ) -> Result<AgentResult> {
-    run_code_agent_with_options(task, root, config, image_data_uri, AgentOptions::default()).await
+    run_code_agent_with_options(
+        task,
+        root,
+        config,
+        image_data_uri,
+        video_data_uri,
+        AgentOptions::default(),
+    )
+    .await
 }
 
 pub async fn run_code_agent_with_options(
@@ -41,6 +52,7 @@ pub async fn run_code_agent_with_options(
     root: &Path,
     config: &MintConfig,
     image_data_uri: Option<String>,
+    video_data_uri: Option<String>,
     options: AgentOptions,
 ) -> Result<AgentResult> {
     let started_at = Instant::now();
@@ -65,30 +77,39 @@ pub async fn run_code_agent_with_options(
         let _guard = ApprovalGuard(Arc::clone(&approve_approval_active));
 
         match approval {
-            AgentApproval::WriteFile { diff, .. } => {
-                println!("  Proposed edit");
+            AgentApproval::WriteFile { path, diff, .. } => {
+                let (additions, deletions) = diff_stats(diff);
+                let colored_stats = format!("{DIM}({RESET}{GREEN}+{}{RESET} {RED}-{}{RESET}{DIM}){RESET}", additions, deletions);
+                let target_str = format!("{} {}", path, colored_stats);
+                print_approval_card("File Creation / Write", &[("Target", &target_str), ("Action", "Write File")]);
+                println!("  {DIM}Proposed edit for {RESET}{BRIGHT}{}{RESET} {}:", path, colored_stats);
                 print_colored_diff(diff);
-                if confirm_pausing_interrupt("Approve file edit? [y/N]", &approve_approval_active) {
+                if confirm_pausing_interrupt(&format!("Approve writing file '{}'?", path), &approve_approval_active) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
                 }
             }
-            AgentApproval::ApplyPatch { diff, .. } => {
-                println!("  Proposed edit");
+            AgentApproval::ApplyPatch { path, diff, .. } => {
+                let (additions, deletions) = diff_stats(diff);
+                let colored_stats = format!("{DIM}({RESET}{GREEN}+{}{RESET} {RED}-{}{RESET}{DIM}){RESET}", additions, deletions);
+                let target_str = format!("{} {}", path, colored_stats);
+                print_approval_card("File Modification", &[("Target", &target_str), ("Action", "Apply Patch")]);
+                println!("  {DIM}Proposed edit for {RESET}{BRIGHT}{}{RESET} {}:", path, colored_stats);
                 print_colored_diff(diff);
-                if confirm_pausing_interrupt("Approve file edit? [y/N]", &approve_approval_active) {
+                if confirm_pausing_interrupt(&format!("Approve patching file '{}'?", path), &approve_approval_active) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
                 }
             }
             AgentApproval::RunShell { command, mode } => {
-                println!("  {BLUE}• Proposed command{RESET}");
-                println!("    mode: {}", mode);
-                println!("    {}", command);
+                print_approval_card(
+                    "Local Shell Command",
+                    &[("Command", command), ("Mode", mode)],
+                );
                 if confirm_pausing_interrupt(
-                    "Approve local shell execution? [y/N]",
+                    "Approve running shell command?",
                     &approve_approval_active,
                 ) {
                     Ok(ApprovalOutcome::Approved)
@@ -97,10 +118,9 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::NoteWrite { path, .. } => {
-                println!("  {BLUE}• Proposed note write{RESET}");
-                println!("    {}", path);
+                print_approval_card("Note Creation", &[("Path", path)]);
                 if confirm_pausing_interrupt(
-                    "Approve writing this note? [y/N]",
+                    "Approve writing this note?",
                     &approve_approval_active,
                 ) {
                     Ok(ApprovalOutcome::Approved)
@@ -109,9 +129,12 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::RunPlugin { name, instruction } => {
-                println!("    Run plugin {}: {}", name, instruction);
+                print_approval_card(
+                    "Plugin Execution",
+                    &[("Plugin", name), ("Detail", instruction)],
+                );
                 if confirm_pausing_interrupt(
-                    &format!("Approve running plugin '{}'? [y/N]", name),
+                    &format!("Approve running plugin '{}'?", name),
                     &approve_approval_active,
                 ) {
                     Ok(ApprovalOutcome::Approved)
@@ -119,11 +142,15 @@ pub async fn run_code_agent_with_options(
                     Ok(ApprovalOutcome::Denied)
                 }
             }
-            AgentApproval::McpTool { server, tool, .. } => {
-                println!("  Called MCP tool");
-                println!("    {} {}", server, tool);
+            AgentApproval::McpTool { server, tool, arguments } => {
+                let mut fields = vec![("Server", server.as_str()), ("Tool", tool.as_str())];
+                let formatted_args = arguments.to_string();
+                if !formatted_args.is_empty() && formatted_args != "{}" && formatted_args != "null" {
+                    fields.push(("Arguments", &formatted_args));
+                }
+                print_approval_card("MCP Tool Call", &fields);
                 if confirm_pausing_interrupt(
-                    "Approve MCP tool call? [y/N]",
+                    "Approve MCP tool call?",
                     &approve_approval_active,
                 ) {
                     Ok(ApprovalOutcome::Approved)
@@ -132,10 +159,12 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::UserApproval { title, prompt } => {
-                println!("  {BLUE}• Approval requested:{RESET} {}", title);
-                println!("    {}", prompt);
+                print_approval_card(
+                    "Security Authorization",
+                    &[("Title", title), ("Detail", prompt)],
+                );
                 if confirm_pausing_interrupt(
-                    "Approve this request? [y/N]",
+                    "Approve this request?",
                     &approve_approval_active,
                 ) {
                     Ok(ApprovalOutcome::Approved)
@@ -144,9 +173,8 @@ pub async fn run_code_agent_with_options(
                 }
             }
             AgentApproval::AskUser { question } => {
-                println!("  {BLUE}• Question from agent{RESET}");
-                println!("    {}", question);
-                print!("Answer (leave empty to decline): ");
+                print_approval_card("Agent Question", &[("Question", question)]);
+                print!("  Answer (leave empty to decline): ");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 let mut answer = String::new();
                 match std::io::stdin().read_line(&mut answer) {
@@ -385,6 +413,7 @@ pub async fn run_code_agent_with_options(
         task,
         root,
         image_data_uri,
+        video_data_uri,
         Some(CHAT_CLI_ID),
         None,
         options.fast_mode,
@@ -496,18 +525,73 @@ fn render_live_summary(summary: &str) {
     let _ = io::stdout().flush();
 }
 
+fn diff_stats(diff: &str) -> (usize, usize) {
+    let mut additions = 0;
+    let mut deletions = 0;
+    for line in diff.lines() {
+        if line.starts_with("+++ ") || line.starts_with("--- ") {
+            continue;
+        }
+        if line.starts_with('+') {
+            additions += 1;
+        } else if line.starts_with('-') {
+            deletions += 1;
+        }
+    }
+    (additions, deletions)
+}
+
+fn parse_hunk_header(line: &str) -> Option<(usize, usize)> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("@@") {
+        return None;
+    }
+    let parts: Vec<&str> = trimmed.split("@@").collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let header_body = parts[1].trim();
+    let mut old_start = 1;
+    let mut new_start = 1;
+
+    for token in header_body.split_whitespace() {
+        if let Some(num_str) = token.strip_prefix('-') {
+            let start_str = num_str.split(',').next().unwrap_or(num_str);
+            old_start = start_str.parse().unwrap_or(1);
+        } else if let Some(num_str) = token.strip_prefix('+') {
+            let start_str = num_str.split(',').next().unwrap_or(num_str);
+            new_start = start_str.parse().unwrap_or(1);
+        }
+    }
+    Some((old_start, new_start))
+}
+
 fn print_colored_diff(diff: &str) {
+    let mut current_old_line = 1;
+    let mut current_new_line = 1;
+
     for line in diff.lines() {
         if line.starts_with("@@") {
-            println!("{BLUE}{line}{RESET}");
+            if let Some((old_s, new_s)) = parse_hunk_header(line) {
+                current_old_line = old_s;
+                current_new_line = new_s;
+            }
+            println!("       {BLUE}{line}{RESET}");
         } else if line.starts_with("--- ") || line.starts_with("+++ ") {
-            println!("{DIM}{line}{RESET}");
+            println!("       {DIM}{line}{RESET}");
         } else if line.starts_with('-') {
-            println!("\x1b[31m{line}\x1b[0m");
+            let line_num_str = format!("{:>5}", current_old_line);
+            current_old_line += 1;
+            println!("  {DIM}{line_num_str}{RESET} \x1b[31m{line}\x1b[0m");
         } else if line.starts_with('+') {
-            println!("\x1b[32m{line}\x1b[0m");
+            let line_num_str = format!("{:>5}", current_new_line);
+            current_new_line += 1;
+            println!("  {DIM}{line_num_str}{RESET} \x1b[32m{line}\x1b[0m");
         } else {
-            println!("{line}");
+            let line_num_str = format!("{:>5}", current_new_line);
+            current_old_line += 1;
+            current_new_line += 1;
+            println!("  {DIM}{line_num_str}{RESET} {line}");
         }
     }
 }
@@ -647,6 +731,80 @@ fn is_thai_combining(c: char) -> bool {
     )
 }
 
+fn apply_wave_effect(text: &str, tick: usize) -> String {
+    let (label, metadata) = if let Some(idx) = text.rfind(" • Esc to interrupt)") {
+        if let Some(open_paren_idx) = text[..idx].rfind('(') {
+            (&text[..open_paren_idx], &text[open_paren_idx..])
+        } else {
+            (text, "")
+        }
+    } else {
+        (text, "")
+    };
+
+    let trimmed_label = label.trim_end();
+    let spaces_count = label.len() - trimmed_label.len();
+
+    let chars: Vec<char> = trimmed_label.chars().collect();
+    let n = chars.len();
+    if n == 0 {
+        return text.to_string();
+    }
+
+    let mut animated_label = String::new();
+
+    // Smooth wave movement using a sine wave function.
+    // phase shifts with tick (time), index i acts as spatial shift.
+    // 0.3 speed controls animation rate, 0.4 controls width of the wave crest.
+    let speed = 0.3;
+    let phase = tick as f32 * speed;
+
+    for (i, &c) in chars.iter().enumerate() {
+        if c == ' ' {
+            animated_label.push(c);
+            continue;
+        }
+
+        let x = (i as f32 * 0.4) - phase;
+        let t = (x.sin() + 1.0) / 2.0; // Oscillates in [0.0, 1.0]
+
+        // Stop colors: Dim Gray (70, 70, 70) -> Mint Green (105, 230, 166) -> Cyan (78, 201, 216)
+        let (r, g, b) = if t < 0.3 {
+            let local_t = t / 0.3;
+            let r = 70.0 + (105.0 - 70.0) * local_t;
+            let g = 70.0 + (230.0 - 70.0) * local_t;
+            let b = 70.0 + (166.0 - 70.0) * local_t;
+            (r, g, b)
+        } else if t < 0.7 {
+            let local_t = (t - 0.3) / 0.4;
+            let r = 105.0 + (78.0 - 105.0) * local_t;
+            let g = 230.0 + (201.0 - 230.0) * local_t;
+            let b = 166.0 + (216.0 - 166.0) * local_t;
+            (r, g, b)
+        } else {
+            let local_t = (t - 0.7) / 0.3;
+            let r = 78.0 + (70.0 - 78.0) * local_t;
+            let g = 201.0 + (70.0 - 201.0) * local_t;
+            let b = 216.0 + (70.0 - 216.0) * local_t;
+            (r, g, b)
+        };
+
+        animated_label.push_str(&format!(
+            "\x1b[1m\x1b[38;2;{};{};{}m{}\x1b[0m",
+            r.round() as u8,
+            g.round() as u8,
+            b.round() as u8,
+            c
+        ));
+    }
+
+    animated_label.push_str(&" ".repeat(spaces_count));
+    if !metadata.is_empty() {
+        animated_label.push_str(&format!("{BRIGHT}{metadata}{RESET}"));
+    }
+    animated_label
+}
+
 fn render_live_status(status: &mut LiveStatus) {
     clear_live_status(status);
     let mut lines = Vec::new();
@@ -670,10 +828,32 @@ fn render_live_status(status: &mut LiveStatus) {
         tick,
     ));
     if let Some(thinking) = &status.thinking {
-        let frames = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let frames = &[
+            "🌑\u{FE0E}",
+            "🌒\u{FE0E}",
+            "🌓\u{FE0E}",
+            "🌔\u{FE0E}",
+            "🌕\u{FE0E}",
+            "🌖\u{FE0E}",
+            "🌗\u{FE0E}",
+            "🌘\u{FE0E}",
+        ];
         let frame = frames[status.spinner_tick % frames.len()];
+
+        let dots_frames = &["", ".", "..", "..."];
+        let dots = dots_frames[(status.spinner_tick / 2) % dots_frames.len()];
+
         status.spinner_tick += 1;
-        lines.push(format!("  {MINT}{frame}{RESET} {BRIGHT}{thinking}{RESET}"));
+
+        let custom_thinking = if thinking.contains("is thinking") {
+            thinking.replace("is thinking", &format!("is thinking{:<3}", dots))
+        } else {
+            thinking.replace("Thinking", &format!("Thinking{:<3}", dots))
+        };
+
+        let waved_thinking = apply_wave_effect(&custom_thinking, status.spinner_tick);
+
+        lines.push(format!("  {MINT}{frame}{RESET} {waved_thinking}"));
     }
     if lines.is_empty() {
         return;
@@ -947,6 +1127,30 @@ async fn wait_for_escape_interrupt(approval_active: Arc<AtomicBool>) {
     }
 }
 
+fn print_approval_card(title: &str, fields: &[(&str, &str)]) {
+    let top_bar = format!("  {DIM}{}┬{}{RESET}", "─".repeat(11), "─".repeat(56));
+    let bot_bar = format!("  {DIM}{}┴{}{RESET}", "─".repeat(11), "─".repeat(56));
+
+    println!();
+    println!("  {BRIGHT}APPROVAL REQUIRED{RESET} {DIM}•{RESET} {BLUE}{}{RESET}", title);
+    println!("{}", top_bar);
+    for (label, val) in fields {
+        let val_lines: Vec<&str> = val.lines().collect();
+        if val_lines.is_empty() {
+            println!("  {BRIGHT}{:<10}{RESET} {DIM}│{RESET}", label);
+        } else {
+            for (idx, line) in val_lines.iter().enumerate() {
+                if idx == 0 {
+                    println!("  {BRIGHT}{:<10}{RESET} {DIM}│{RESET} {}", label, line);
+                } else {
+                    println!("             {DIM}│{RESET} {}", line);
+                }
+            }
+        }
+    }
+    println!("{}", bot_bar);
+}
+
 fn confirm_pausing_interrupt(prompt: &str, approval_active: &AtomicBool) -> bool {
     approval_active.store(true, Ordering::Relaxed);
     let approved = crate::confirm(prompt).unwrap_or(false);
@@ -1055,21 +1259,37 @@ fn sanitize_latex(text: &str) -> String {
     for (pat, uni) in [
         // arrows
         ("$\\rightarrow$", "→"),
+        ("\\rightarrow", "→"),
+        ("ightarrow", "→"),
         ("$\\leftarrow$", "←"),
+        ("\\leftarrow", "←"),
+        ("eftarrow", "←"),
         ("$\\Rightarrow$", "⇒"),
+        ("\\Rightarrow", "⇒"),
         ("$\\Leftarrow$", "⇐"),
+        ("\\Leftarrow$", "⇐"),
         ("$\\leftrightarrow$", "↔"),
+        ("\\leftrightarrow", "↔"),
         // comparison
         ("$\\leq$", "≤"),
+        ("\\leq", "≤"),
         ("$\\geq$", "≥"),
+        ("\\geq", "≥"),
         ("$\\neq$", "≠"),
+        ("\\neq", "≠"),
         ("$\\approx$", "≈"),
+        ("\\approx", "≈"),
         // math
         ("$\\times$", "×"),
+        ("\\times", "×"),
         ("$\\div$", "÷"),
+        ("\\div", "÷"),
         ("$\\pm$", "±"),
+        ("\\pm", "±"),
         ("$\\infty$", "∞"),
+        ("\\infty", "∞"),
         ("$\\cdot$", "·"),
+        ("\\cdot", "·"),
         // sets
         ("$\\in$", "∈"),
         ("$\\subset$", "⊂"),

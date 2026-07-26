@@ -61,7 +61,17 @@ async fn telegram_loop() -> Result<(), String> {
             ) else {
                 continue;
             };
-            let answer = answer(text, "Reply concisely for a Telegram chat.").await;
+            let formatted_chat_id = format!("telegram:{chat_id}");
+            if let Ok(config) = load_config() {
+                if config.bridge_ack_enabled() {
+                    let _ = client
+                        .post(format!("https://api.telegram.org/bot{token}/sendChatAction"))
+                        .json(&json!({ "chat_id": chat_id, "action": "typing" }))
+                        .send()
+                        .await;
+                }
+            }
+            let answer = answer_channel(text, "Reply concisely for a Telegram chat.", Some(formatted_chat_id)).await;
             let _ = client
                 .post(format!("https://api.telegram.org/bot{token}/sendMessage"))
                 .json(&json!({ "chat_id": chat_id, "text": answer }))
@@ -116,7 +126,14 @@ async fn discord_loop() -> Result<(), String> {
                         mentions.iter().any(|mention| mention["id"].as_str() == Some(&bot_id))
                     });
                     if !direct_message && !mentioned { continue }
-                    let reply = answer(text, "Reply concisely for a Discord chat.").await;
+                    if let Ok(config) = load_config() {
+                        if config.bridge_ack_enabled() {
+                            let _ = crate::HTTP_CLIENT.clone().post(format!("https://discord.com/api/v10/channels/{channel}/typing"))
+                                .header("Authorization", format!("Bot {token}")).send().await;
+                        }
+                    }
+                    let formatted_chat_id = format!("discord:{channel}");
+                    let reply = answer_channel(text, "Reply concisely for a Discord chat.", Some(formatted_chat_id)).await;
                     let _ = crate::HTTP_CLIENT.clone().post(format!("https://discord.com/api/v10/channels/{channel}/messages"))
                         .header("Authorization", format!("Bot {token}")).json(&json!({ "content": reply })).send().await;
                 }
@@ -168,7 +185,8 @@ async fn slack_loop() -> Result<(), String> {
         else {
             continue;
         };
-        let reply = answer(text, "Reply concisely for a Slack chat.").await;
+        let formatted_chat_id = format!("slack:{channel}");
+        let reply = answer_channel(text, "Reply concisely for a Slack chat.", Some(formatted_chat_id)).await;
         let _ = crate::HTTP_CLIENT
             .clone()
             .post("https://slack.com/api/chat.postMessage")
@@ -180,20 +198,59 @@ async fn slack_loop() -> Result<(), String> {
     Ok(())
 }
 
-async fn answer(text: &str, system_instruction: &str) -> String {
+pub fn is_action_intent(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let action_keywords = [
+        "แก้", "สร้าง", "ลบ", "รัน", "ตรวจ", "ค้นหา", "เช็ค", "ดูไฟล์", "อ่านไฟล์", "วิเคราะห์ไฟล์",
+        "fix", "create", "build", "run", "delete", "edit", "update", "check", "find", "search",
+        "read file", "git", "patch", "test", "analyze file"
+    ];
+    action_keywords.iter().any(|&keyword| lower.contains(keyword))
+}
+
+pub async fn answer_channel(text: &str, system_instruction: &str, chat_id: Option<String>) -> String {
     let Ok(config) = load_config() else {
         return "Mint config error".into();
     };
+    let workspace = config.active_workspace_path();
+    let workspace_str = workspace.as_ref().map(|p| p.to_string_lossy().to_string());
+
+    if is_action_intent(text) && let Some(ref root_path) = workspace {
+        if root_path.exists() {
+            let agent_result = crate::orchestrate_agent_loop(
+                &config,
+                text,
+                root_path,
+                None,
+                None,
+                chat_id.as_deref(),
+                None,
+                true,
+                |_approval| Ok(crate::ApprovalOutcome::Approved),
+                |_progress| {},
+                |_chunk| {},
+            )
+            .await;
+
+            if let Ok(res) = agent_result {
+                if !res.summary.trim().is_empty() {
+                    return res.summary;
+                }
+            }
+        }
+    }
+
     orchestrate_chat(
         &config,
         &ChatRequest {
             message: text.into(),
             system_instruction: system_instruction.into(),
-            chat_id: None,
+            chat_id,
             image_data_uri: None,
             audio_data_uri: None,
+            video_data_uri: None,
             document_attachment: None,
-            workspace_path: None,
+            workspace_path: workspace_str,
             agent_id: None,
         },
     )

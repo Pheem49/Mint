@@ -6,6 +6,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use similar::{ChangeTag, TextDiff};
 use thiserror::Error;
 
 use crate::{Capability, MintConfig, SafetyError, assert_path_capability};
@@ -401,17 +402,35 @@ fn sha256(content: &str) -> String {
 
 fn full_file_diff(path: &Path, previous: &str, next: &str) -> String {
     let label = path.display();
+    let diff = TextDiff::from_lines(previous, next);
     let mut lines = vec![
         format!("--- a/{label}"),
         format!("+++ b/{label}"),
-        format!(
-            "@@ -1,{} +1,{} @@",
-            previous.lines().count(),
-            next.lines().count()
-        ),
     ];
-    lines.extend(previous.lines().map(|line| format!("-{line}")));
-    lines.extend(next.lines().map(|line| format!("+{line}")));
+
+    for group in diff.grouped_ops(3) {
+        let mut first = true;
+        for op in group {
+            if first {
+                let old_start = op.old_range().start + 1;
+                let old_len = op.old_range().len();
+                let new_start = op.new_range().start + 1;
+                let new_len = op.new_range().len();
+                lines.push(format!("@@ -{old_start},{old_len} +{new_start},{new_len} @@"));
+                first = false;
+            }
+            for change in diff.iter_changes(&op) {
+                let sign = match change.tag() {
+                    ChangeTag::Delete => "-",
+                    ChangeTag::Insert => "+",
+                    ChangeTag::Equal => " ",
+                };
+                let content = change.value().trim_end_matches(&['\r', '\n'][..]);
+                lines.push(format!("{sign}{content}"));
+            }
+        }
+    }
+
     lines.join("\n")
 }
 

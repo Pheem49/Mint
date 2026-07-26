@@ -31,11 +31,11 @@ use integrations::{channel_inventory, list_plugins};
 use mint_core::{
     AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, ChatRequest, ChatResponse,
     ChatSession, CodeEdit, CodeEditProposal, ImageGenRequest, InteractionMemory, MemoryStore,
-    MintConfig, PictureEntry, TtsUrl, WeatherReport, apply_code_edits, classify_shell_command,
-    config_path, google_tts_urls, list_saved_pictures, load_config, load_workflows,
-    orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    propose_code_edits, save_chat_images, save_config, save_workflows, start_channels, weather,
-    workflows_path,
+    MintConfig, PictureEntry, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport,
+    apply_code_edits, classify_shell_command, config_path, google_tts_urls, list_saved_pictures,
+    load_config, load_workflows, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
+    orchestrate_chat_with_fallback, propose_code_edits, save_chat_images, save_config,
+    save_workflows, start_channels, weather, workflows_path,
 };
 use plugins::execute_plugin;
 
@@ -73,6 +73,7 @@ struct RuntimeStatus {
     backend: &'static str,
     config_path: String,
     active_provider: String,
+    active_model: String,
     available_providers: Vec<String>,
     integrations: Value,
 }
@@ -119,6 +120,7 @@ fn get_runtime_status() -> Result<RuntimeStatus, String> {
             .display()
             .to_string(),
         active_provider: config.ai_provider.clone(),
+        active_model: config.active_model().to_string(),
         available_providers: config.available_providers(),
         integrations: integration_status(&config),
     })
@@ -306,13 +308,29 @@ fn update_config(app: AppHandle, config: MintConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn set_active_model(app: AppHandle, provider: String, model: Option<String>) -> Result<String, String> {
+    let mut config = load_config().map_err(|error| error.to_string())?;
+    let display_name = config
+        .set_active_model(&provider, model.as_deref())
+        .map_err(|error| error.to_string())?;
+    let _ = app.emit("settings-changed", &config);
+    Ok(display_name)
+}
+
+#[tauri::command]
 fn inspect_shell_command(command: String) -> mint_core::ShellClassification {
     classify_shell_command(&command)
 }
 
 #[tauri::command]
 async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatResponse, String> {
-    let config = load_config().map_err(|error| error.to_string())?;
+    let mut config = load_config().map_err(|error| error.to_string())?;
+    if let Some(ref path) = request.workspace_path {
+        if !path.trim().is_empty() && config.extra.get("activeWorkspacePath").and_then(Value::as_str) != Some(path.as_str()) {
+            config.extra.insert("activeWorkspacePath".into(), Value::String(path.clone()));
+            let _ = save_config(&config);
+        }
+    }
     let request = request.with_document_context(&config)?;
 
     if request.message.starts_with("/chat ") {
@@ -392,6 +410,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
     let message_clone = request.message.clone();
     let root_clone = root.clone();
     let image_data_uri_clone = request.image_data_uri.clone();
+    let video_data_uri_clone = request.video_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
     let agent_id_clone = request.agent_id.clone();
 
@@ -401,6 +420,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
             &message_clone,
             &root_clone,
             image_data_uri_clone,
+            video_data_uri_clone,
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
             fast_mode,
@@ -449,7 +469,13 @@ async fn stream_chat_message(
     request: ChatRequest,
     on_event: Channel<DesktopStreamEvent>,
 ) -> Result<ChatResponse, String> {
-    let config = load_config().map_err(|error| error.to_string())?;
+    let mut config = load_config().map_err(|error| error.to_string())?;
+    if let Some(ref path) = request.workspace_path {
+        if !path.trim().is_empty() && config.extra.get("activeWorkspacePath").and_then(Value::as_str) != Some(path.as_str()) {
+            config.extra.insert("activeWorkspacePath".into(), Value::String(path.clone()));
+            let _ = save_config(&config);
+        }
+    }
     let request = request.with_document_context(&config)?;
 
     if request.message.starts_with("/chat ") {
@@ -548,6 +574,7 @@ async fn stream_chat_message(
     let message_clone = request.message.clone();
     let root_clone = root.clone();
     let image_data_uri_clone = request.image_data_uri.clone();
+    let video_data_uri_clone = request.video_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
     let agent_id_clone = request.agent_id.clone();
 
@@ -557,6 +584,7 @@ async fn stream_chat_message(
             &message_clone,
             &root_clone,
             image_data_uri_clone,
+            video_data_uri_clone,
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
             fast_mode,
@@ -624,12 +652,19 @@ fn save_interaction_agent_activity(
 fn save_system_interaction(
     chat_id: String,
     user_text: String,
+    ai_text: Option<String>,
     provider: String,
     model: String,
 ) -> Result<i64, String> {
     MemoryStore::open_default()
         .and_then(|memory| {
-            memory.add_interaction_for_chat(&chat_id, &user_text, "", &provider, &model)
+            memory.add_interaction_for_chat(
+                &chat_id,
+                &user_text,
+                ai_text.as_deref().unwrap_or(""),
+                &provider,
+                &model,
+            )
         })
         .map_err(|error| error.to_string())
 }
@@ -704,6 +739,9 @@ fn list_learned_skills(workspace_path: Option<String>) -> Result<Vec<LearnedSkil
 
     let mut global_skills = Vec::new();
     if let Some(home) = dirs::home_dir() {
+        let global_agents_path = home.join(".gemini").join("config").join("AGENTS.md");
+        mint_core::skills::load_agent_rules_file(&global_agents_path, &mut global_skills);
+
         let global_skills_path = home.join(".config").join("mint").join("mint-skills");
         if !global_skills_path.exists() {
             let _ = std::fs::create_dir_all(&global_skills_path);
@@ -713,6 +751,12 @@ fn list_learned_skills(workspace_path: Option<String>) -> Result<Vec<LearnedSkil
 
     let mut workspace_skills = Vec::new();
     if let Ok(root) = workspace_root(workspace_path.as_deref()) {
+        let workspace_agents_path1 = root.join(".agents").join("AGENTS.md");
+        mint_core::skills::load_agent_rules_file(&workspace_agents_path1, &mut workspace_skills);
+
+        let workspace_agents_path2 = root.join("AGENTS.md");
+        mint_core::skills::load_agent_rules_file(&workspace_agents_path2, &mut workspace_skills);
+
         let workspace_skills_path1 = root.join(".agents").join("skills");
         mint_core::skills::load_skills_from_dir(&workspace_skills_path1, &mut workspace_skills);
 
@@ -868,6 +912,14 @@ async fn generate_images(request: ImageGenRequest) -> Result<DesktopImageGenResp
 }
 
 #[tauri::command]
+async fn generate_video(request: VideoGenRequest) -> Result<VideoGenResponse, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    mint_core::generate_video(&config, &request)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn list_pictures() -> Result<Vec<PictureEntry>, String> {
     list_saved_pictures().map_err(|error| error.to_string())
 }
@@ -879,6 +931,37 @@ fn save_pictures(
     message: Option<String>,
 ) -> Result<Vec<PictureEntry>, String> {
     save_chat_images(images, source, message).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn upload_file(filename: String, data_b64: String) -> Result<String, String> {
+    // Determine mime from filename
+    let mime = filename
+        .rsplit_once('.')
+        .map(|(_, ext)| match ext.to_ascii_lowercase().as_str() {
+            "mp4" => "video/mp4",
+            "webm" => "video/webm",
+            "mov" => "video/quicktime",
+            "mkv" => "video/x-matroska",
+            "avi" => "video/x-msvideo",
+            _ => "application/octet-stream",
+        })
+        .unwrap_or("application/octet-stream");
+
+    let data_uri = format!("data:{};base64,{}", mime, data_b64);
+    match save_chat_images(
+        vec![data_uri],
+        Some("upload".into()),
+        Some("uploaded".into()),
+    ) {
+        Ok(mut saved) => {
+            if let Some(entry) = saved.pop() {
+                return Ok(format!("/api/pictures/{}", entry.filename));
+            }
+            Err("no entry saved".into())
+        }
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[tauri::command]
@@ -1241,12 +1324,14 @@ pub fn run() {
             create_workspace_folder,
             delete_workspace_item,
             generate_images,
+            generate_video,
             select_workspace_directory,
             get_config,
             get_updater_status,
             check_for_updates,
             install_available_update,
             update_config,
+            set_active_model,
             inspect_shell_command,
             send_chat_message,
             stream_chat_message,
@@ -1265,6 +1350,7 @@ pub fn run() {
             delete_learned_skill,
             list_pictures,
             save_pictures,
+            upload_file,
             open_folder,
             get_tts_urls,
             get_weather,

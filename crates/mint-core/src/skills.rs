@@ -53,10 +53,38 @@ pub fn learn_skill(path: &Path) -> Result<LearnedSkill, SkillError> {
     Ok(MemoryStore::open_default()?.add_learned_skill(name, &path.to_string_lossy(), &content)?)
 }
 
-pub fn learned_skills_context(workspace_root: Option<&Path>) -> Result<String, SkillError> {
+pub fn load_agent_rules_file(file_path: &Path, list: &mut Vec<LearnedSkill>) {
+    if file_path.is_file() {
+        if let Ok(content) = fs::read_to_string(file_path) {
+            let name = file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("AGENTS.md")
+                .to_string();
+            let description = parse_skill_description(&content)
+                .or_else(|| Some("Workspace instructions and rules".to_string()));
+            list.push(LearnedSkill {
+                id: 0,
+                name,
+                source_path: file_path.to_string_lossy().to_string(),
+                content,
+                created_at: String::new(),
+                description,
+            });
+        }
+    }
+}
+
+pub fn learned_skills_context(
+    workspace_root: Option<&Path>,
+    chat_id: Option<&str>,
+) -> Result<String, SkillError> {
     let mut skills = MemoryStore::open_default()?.learned_skills(20)?;
 
     if let Some(home) = dirs::home_dir() {
+        let global_agents_path = home.join(".gemini").join("config").join("AGENTS.md");
+        load_agent_rules_file(&global_agents_path, &mut skills);
+
         let global_skills_path = home.join(".config").join("mint").join("mint-skills");
         if !global_skills_path.exists() {
             let _ = std::fs::create_dir_all(&global_skills_path);
@@ -65,6 +93,12 @@ pub fn learned_skills_context(workspace_root: Option<&Path>) -> Result<String, S
     }
 
     if let Some(root) = workspace_root {
+        let workspace_agents_path1 = root.join(".agents").join("AGENTS.md");
+        load_agent_rules_file(&workspace_agents_path1, &mut skills);
+
+        let workspace_agents_path2 = root.join("AGENTS.md");
+        load_agent_rules_file(&workspace_agents_path2, &mut skills);
+
         let workspace_skills_path1 = root.join(".agents").join("skills");
         load_skills_from_dir(&workspace_skills_path1, &mut skills);
 
@@ -77,11 +111,53 @@ pub fn learned_skills_context(workspace_root: Option<&Path>) -> Result<String, S
         unique_skills.insert(skill.name.clone(), skill);
     }
 
-    let value = unique_skills
-        .into_values()
-        .map(|skill| format!("Skill: {}\n{}", skill.name, skill.content))
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    let mut has_history = false;
+    if let Some(cid) = chat_id {
+        if let Ok(memory) = MemoryStore::open_default() {
+            if let Ok(interactions) = memory.recent_interactions_for_chat(cid, 1) {
+                has_history = !interactions.is_empty();
+            }
+        }
+    }
+
+    let mut formatted_skills = Vec::new();
+    for skill in unique_skills.into_values() {
+        let mut is_workspace_skill = false;
+        let mut rel_path = String::new();
+        if let Some(root) = workspace_root {
+            let skill_path = Path::new(&skill.source_path);
+            if let Ok(canonical_skill) = skill_path.canonicalize() {
+                if let Ok(canonical_root) = root.canonicalize() {
+                    if canonical_skill.starts_with(&canonical_root) {
+                        if let Ok(relative) = canonical_skill.strip_prefix(&canonical_root) {
+                            is_workspace_skill = true;
+                            rel_path = relative.to_string_lossy().to_string();
+                        }
+                    }
+                }
+            }
+        }
+
+        if is_workspace_skill {
+            let desc = skill
+                .description
+                .as_deref()
+                .unwrap_or("No description provided");
+            let status_msg = if has_history {
+                "READ. You have already read this skill in a previous turn of this conversation. Do NOT call `read_file` to read it again unless you need to re-verify its contents."
+            } else {
+                "UNREAD. You MUST execute the `read_file` tool with the path above to read this skill before starting the task."
+            };
+            formatted_skills.push(format!(
+                "Skill: {}\nDescription: {}\nPath: {}\nStatus: {}",
+                skill.name, desc, rel_path, status_msg
+            ));
+        } else {
+            formatted_skills.push(format!("Skill: {}\n{}", skill.name, skill.content));
+        }
+    }
+
+    let value = formatted_skills.join("\n\n");
     if value.len() <= MAX_CONTEXT_BYTES {
         return Ok(value);
     }

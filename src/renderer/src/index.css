@@ -4,6 +4,7 @@
 @import './css/widget.css';
 @import './css/image-studio.css';
 @import './css/workflows.css';
+@import './css/veo-studio.css';
 
 * {
   box-sizing: border-box;

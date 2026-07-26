@@ -96,6 +96,8 @@ pub struct ChatRequest {
     #[serde(default)]
     pub audio_data_uri: Option<String>,
     #[serde(default)]
+    pub video_data_uri: Option<String>,
+    #[serde(default)]
     pub document_attachment: Option<DocumentAttachment>,
     #[serde(default)]
     pub workspace_path: Option<String>,
@@ -284,10 +286,12 @@ async fn call_gemini(
     let url =
         format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent");
 
+    let payload = gemini_chat_payload(config, request)?;
+
     let response: Value = client
         .post(url)
         .header("x-goog-api-key", api_key)
-        .json(&gemini_chat_payload(config, request)?)
+        .json(&payload)
         .send()
         .await?
         .error_for_status()?
@@ -832,20 +836,28 @@ fn require_supported_attachments(provider: &str, request: &ChatRequest) -> Resul
         .audio_data_uri
         .as_ref()
         .is_some_and(|s| !s.trim().is_empty());
+    let has_video = request
+        .video_data_uri
+        .as_ref()
+        .is_some_and(|s| !s.trim().is_empty());
 
     match provider {
         "gemini" => Ok(()),
-        "ollama" if has_audio => Err(ChatError::UnsupportedAttachments(provider.into())),
+        "ollama" if has_audio || has_video => {
+            Err(ChatError::UnsupportedAttachments(provider.into()))
+        }
         "ollama" => Ok(()),
         // Custom providers are text-only for now; reject any multimodal content.
         p if p.starts_with("custom:") => {
-            if has_image || has_audio {
+            if has_image || has_audio || has_video {
                 Err(ChatError::UnsupportedAttachments(provider.into()))
             } else {
                 Ok(())
             }
         }
-        _ if has_image || has_audio => Err(ChatError::UnsupportedAttachments(provider.into())),
+        _ if has_image || has_audio || has_video => {
+            Err(ChatError::UnsupportedAttachments(provider.into()))
+        }
         _ => Ok(()),
     }
 }
@@ -1035,6 +1047,21 @@ fn gemini_parts(request: &ChatRequest) -> Result<Vec<Value>, ChatError> {
             }));
         }
     }
+    if let Some(ref video_data) = request.video_data_uri {
+        for vid in video_data.split_whitespace() {
+            let payload = vid
+                .strip_prefix("data:")
+                .and_then(|payload| payload.split_once(";base64,"))
+                .filter(|(mime_type, data)| mime_type.starts_with("video/") && !data.is_empty())
+                .ok_or(ChatError::InvalidAttachment)?;
+            parts.push(json!({
+                "inlineData": {
+                    "mimeType": payload.0,
+                    "data": payload.1
+                }
+            }));
+        }
+    }
     Ok(parts)
 }
 
@@ -1046,6 +1073,26 @@ mod tests {
     fn rejects_missing_api_key() {
         let error = required_key("gemini", "").unwrap_err();
         assert!(matches!(error, ChatError::MissingApiKey(provider) if provider == "gemini"));
+    }
+
+    #[test]
+    fn rejects_video_attachments_for_non_gemini_providers() {
+        let request = ChatRequest {
+            message: "describe this video".into(),
+            system_instruction: String::new(),
+            chat_id: None,
+            image_data_uri: None,
+            audio_data_uri: None,
+            video_data_uri: Some("data:video/mp4;base64,AAAA".into()),
+            document_attachment: None,
+            workspace_path: None,
+            agent_id: None,
+        };
+
+        let error = require_supported_attachments("openai", &request).unwrap_err();
+        assert!(
+            matches!(error, ChatError::UnsupportedAttachments(provider) if provider == "openai")
+        );
     }
 
     #[test]
@@ -1080,6 +1127,7 @@ mod tests {
             chat_id: None,
             image_data_uri: Some("data:image/png;base64,aGk= data:image/jpeg;base64,Ynl5".into()),
             audio_data_uri: None,
+            video_data_uri: None,
             document_attachment: None,
             workspace_path: None,
             agent_id: None,

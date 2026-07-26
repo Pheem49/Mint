@@ -20,6 +20,7 @@ pub mod skills;
 pub mod symbols;
 pub mod tasks;
 pub mod tts;
+pub mod video_gen;
 pub mod weather;
 pub mod web_search;
 pub mod workflows;
@@ -31,8 +32,9 @@ pub use chat::{
 };
 
 pub use browser::{
-    BrowserTab, click, is_browser_running, list_tabs, navigate, read_page_text,
-    spawn_automation_browser, type_text,
+    BrowserTab, click, get_element_coordinates, is_browser_running, key_press, list_tabs,
+    mouse_click, mouse_move, navigate, read_page_text, screenshot, spawn_automation_browser,
+    type_text, type_text_native,
 };
 pub use code_tools::{
     AppliedCodeEdit, CodeEdit, CodeEditPreview, CodeEditProposal, CodeFile, CodeInspectionError,
@@ -82,6 +84,7 @@ pub use skills::{SkillError, learn_skill, learned_skills_context};
 pub use symbols::{CodeSymbol, SymbolError, SymbolIndex, build_symbol_index};
 pub use tasks::{Task, TaskError, TaskStore, tasks_path};
 pub use tts::{TtsUrl, google_tts_urls};
+pub use video_gen::{VideoGenError, VideoGenRequest, VideoGenResponse, generate_video};
 pub use weather::{WeatherError, WeatherReport, weather};
 pub use workflows::{WorkflowError, load_workflows, save_workflows, workflows_path};
 pub mod api_server;

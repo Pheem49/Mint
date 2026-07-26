@@ -1,174 +1,319 @@
-# Release Notes - Mint Agent v1.9.0
+# Release Notes - Mint Agent v1.10.0
 
-We are excited to release **Mint Agent v1.9.0**! This release introduces a configurable Multi-Agent system for sequential collaboration, powerful local workspace file management features, real-time AI-generated workflow suggestions in the user's active language, mobile layout optimization, and general UI/UX polish.
-
----
-
-## 🔌 Custom Provider Support
-
-Users can now add any **OpenAI-compatible endpoint** as a fully configurable custom AI provider, giving complete control over which LLM backend Mint uses.
-
-### Backend (`config.rs`, `chat.rs`)
-- **New data model:** Added `CustomProvider`, `CustomProviderModel`, and `CustomProviderHeader` structs to `MintConfig`. Custom providers are persisted to `mint-config.json` under the `customProviders` key.
-- **Provider ID format:** Each custom provider is stored with a user-defined slug ID and is referenced in `ai_provider` as `"custom:<id>"` (e.g. `"custom:myprovider"`).
-- **Chat routing:** `send_chat()` and `stream_chat()` now dispatch `custom:*` providers through `call_custom_provider()` / `stream_custom_provider()`, which use the existing OpenAI-compatible HTTP code path.
-- **Multiple models:** Each provider stores a list of models; the active model is resolved from `customModelSelections` extra config (set by the UI model selector dropdown).
-- **Custom HTTP headers:** All configured headers are applied to every request sent to that provider.
-- **`available_providers()`** now returns `Vec<String>` (up from `Vec<&'static str>`) to accommodate dynamic custom provider IDs.
-- **`resolve_custom_provider()`** helper added to look up a `CustomProvider` by key (strips the `custom:` prefix automatically).
-
-### Frontend (`SettingsWindow.tsx`, `GeneralTab.tsx`, `AgentsTab.tsx`)
-- **Settings → General → Active Provider dropdown** now includes all configured custom providers dynamically.
-- **Model selector:** When a custom provider is selected as the active provider, a second dropdown appears to pick among that provider's configured models.
-- **Custom Providers section:** A new section at the bottom of General settings displays each custom provider as a card. Each card allows inline editing of: Provider ID (slug-validated), Display Name, Base URL, API Key (password), per-model rows (model ID + display name), and per-header rows (name + value). Providers can be added with `+ Add custom provider` and deleted inline.
-- **Agents tab:** Custom providers (with a configured base URL) now appear in the AI Provider dropdown when creating or editing an agent. The model selector shows that provider's configured models.
+We are excited to release **Mint Agent v1.10.0**! This version introduces major enhancements across CLI, Desktop, Web, Multimodal Video, Remote Messaging Bridges, Browser Automation, LaTeX Sanitization, and **AI Image-to-Image & Inpainting Editing Capabilities**.
 
 ---
 
-## 🔍 Web Search Source Cards
+## 📋 Message Action Bar & UI Clean Up (Web & Desktop UI)
 
-- **Favicon Source Cards:** After a web search, compact clickable source cards now appear above the AI response bubble — each showing the website's favicon, domain name, and a tooltip with the page snippet. Clicking a card opens the source in the browser.
-- **Frontend-only change:** Parsed directly from existing `AgentProgress` `ToolEnd` events — no backend changes required.
-- The AI response also includes a plain-text `Sources:` section listing title and URL for each result used.
+- **Message Copy Button & Action Bar**:
+  - Added a Copy Button to AI responses in both Desktop UI (`src/renderer/src`) and Web UI (`src/renderer/src-web`).
+  - Interactive status feedback: copies message text to clipboard with instant visual checkmark (✓) and copied tooltip state.
+- **Mint Web & API Server Terminal Logging & Diagnostics**:
+  - Implemented real-time filtered terminal logging for both `mint web` and `mint api` modes in `mint-cli` and `mint-core` (`crates/mint-core/src/api_server.rs`).
+  - Terminal now displays real-time colorized API Requests (e.g. `[14:30:15] [API] POST /api/chat -> 200 OK`, `/api/status`, `/api/image-generate`, `/api/video-generate`) and Error Logs (`[14:30:15] [ERROR] API /api/video-generate error`) while keeping verbose frontend asset logs silent.
+- **Google Veo 2 Video Generation Fix & Diagnostics**:
+  - Updated Google Veo default model endpoint in `mint-core` (`crates/mint-core/src/video_gen.rs`) from deprecated preview string `veo-2.0-flash-exp` to official model identifier `veo-2.0-generate-001`.
+  - Added automatic model fallback to `veo-2.0-flash-001` and descriptive error guidance (`ModelNotFound`) explaining Google Cloud / AI Studio API Key whitelisting requirements if 404 is returned.
 
 ---
 
+## 🎨 Image-to-Image & Inpainting (Image Editing) Support
 
-## 🚀 Key Features & Enhancements
+Mint Agent now supports full AI Image Editing (Image-to-Image and Inpainting)! Users can provide an existing image, specify modification instructions (such as *"remove background objects"*, *"change coat color to red"*), and generate edited images directly.
 
-### 🛑 1. Escape (Esc) Key & Stop Button to Cancel AI Agent / Chat
-You can now cancel or stop an active AI stream or agent loop at any point in the web and desktop applications:
-- **Escape Key Press:** Pressing the `Esc` key while the AI is thinking or executing automatically aborts the active stream.
-- **Red Stop Composer Button:** When the AI is running, the composer "Send" button turns into a red "Stop" square icon button, allowing users to stop the generation instantly.
-- **Thinking Label Hints:** Updated the progress indicator label to explicitly display "Thinking for Xs (Esc to cancel)" so users are aware of the shortcut.
+### Features Added & Enhancements
+- **Multi-Provider Image Editing**:
+  - **Replicate**: Instruction-based editing via `timbrooks/instruct-pix2pix` and mask inpainting via `black-forest-labs/flux-fill-dev`.
+  - **Stability AI**: Integrated Stability Image Edit / Inpaint REST API endpoints (`/v2beta/stable-image/edit/inpaint`).
+  - **DALL·E**: Integrated OpenAI `/v1/images/edits` endpoint when image input is provided.
+  - **Provider Validation**: Automatically returns clear guidance if text-only image models (like Gemini NanoBanana) are selected for image editing.
+- **New `/edit-image` Slash Command & Redesigned Image Studio UI**:
+  - Usage in CLI: `/edit-image <image_path> <instruction>`
+  - Image Studio UI (Web & Desktop): Redesigned image upload area into a premium **Drag & Drop Zone** with custom upload styling, SVG icons, hover animations, thumbnail previews, and instant file removal.
+  - Parity: Implemented across both Desktop UI (`src/renderer/src`) and Web UI (`src/renderer/src-web`).
+- **`AGENTS.md` Workspace Rules & Skills Autoloading**:
+  - Automatically scans and loads workspace rule files (`.agents/AGENTS.md`, `AGENTS.md`, `~/.gemini/config/AGENTS.md`) into system instruction prompt contexts, REST API endpoint (`GET /api/learned-skills`), Tauri Desktop IPC (`list_learned_skills`), and UI autocompletes.
+  - Full Parity: Verified and supported across CLI (`mint`), Desktop UI (`src/renderer/src`), and Web UI (`src/renderer/src-web`).
+- **File Approval Target Path, Line Numbers & Diff Stats (`+additions -deletions`)**:
+  - Enhanced file modification and creation approval cards to display exact target file paths, line numbers on the left margin (parsed from Unified Diff hunk headers), and line addition/deletion counts (e.g. `path/to/file.rs (+15 -3)`) matching Codex-style diff previews.
+  - Integrated `similar` (Myers Diff Algorithm) into `mint-core`'s `full_file_diff` generator to produce clean line-by-line diff previews with 3 context lines, eliminating whole-file replacement previews.
+  - Full Parity: Supported across CLI (`crates/mint-cli`), Desktop UI (`src/renderer/src`), and Web UI (`src/renderer/src-web`).
 
-### 🎙️ 2. Microphone Active Breathing Aura Glow
-When the microphone/voice mode is active, the boundaries of the chat composer box and the voice status bar light up with a dynamic, breathing green aura, providing intuitive visual feedback.
+---
 
-### 🤖 3. Configurable Multi-Agent System & Collaboration Pipeline
-Users can now configure and run multiple specialized AI agents (e.g. Planner, Coder, Reviewer) within the desktop and web settings panel, allocating custom models, providers, and instructions to each agent:
-- **Global Toggle Switch:** Added a main "Enable Multi-Agent Collaboration" toggle switch at the top of the new "Multi-Agent (Beta)" settings tab to globally turn on/off the agent routing pipeline.
-- **Provider-Specific Dropdowns:** Replaced the text input for model selection with provider-specific dropdown select lists matching the models available in General settings.
-- **Disable All Button:** Added a "Disable All" button allowing users to disable all configured agents instantly in one click.
-- **Real-Time Agent & Model Indicators:** The live thinking message bubble in the chat panel dynamically displays the active agent's name and model in real-time (e.g. `Planner (gemini-2.5-flash) is thinking...`).
+## ⚡ Functional Slash Commands & `@` Context Autocomplete in Web & Desktop UI
 
-### 🖥️ 4. CLI Suggestions Pagination & Ordering
-Improved the autocomplete experience in the terminal:
-- **Pagination (5 Items Max):** Autocomplete suggestions now display a maximum of 5 commands at a time with a page indicator (e.g., `Suggestions (1/4)`), preventing long list clutter.
-- **Alphabetical Sorting:** Autocomplete suggestions are sorted alphabetically at source.
-- **Simplified Exit Options:** Removed `/quit` from the autocomplete suggestions and help output (while retaining hidden execution support) to clean up the interface.
-- **Real-Time Agent & Model Status:** The CLI live thinking status bar dynamically displays which agent and model is executing.
+This update brings full CLI slash command execution capabilities and `@` context mention autocomplete to both Web and Desktop interfaces.
 
-### 📋 5. Fix Clipboard Permission Popup on Text Paste (Ctrl+V) & Desktop Image Paste Fallback
-- Fixed a bug where pasting text (or pressing `Ctrl + V`) would trigger a browser-level clipboard permission warning popup (asking to "Allow Paste").
-- Removed the redundant global `keydown` Ctrl+V listener and the async `navigator.clipboard.read()` fallback on text paste events. The application now correctly relies on standard, synchronous `event.clipboardData` values during paste events, ensuring seamless pasting of both images and text without prompting the user.
-- **Tauri Native Fallback:** Restored an asynchronous fallback using Tauri's native backend `readClipboardImage` command specifically for the desktop application. This solves the Linux/Windows WebView limitations where WebKitGTK and standard web APIs fail to expose file handles in standard paste events.
-- **Double Paste Throttling:** Implemented a 100ms throttle wrapper around the native clipboard read callback, preventing duplicate image attachments caused by concurrent window-level capture and element-level paste event propagation.
+### Features Added & Enhancements
 
-
-
-### 📦 6. Codebase Refactoring & Shared Utilities
-- **Shared UI & Progress Helpers:** Refactored duplicate helper functions and TypeScript interfaces from the desktop renderer (`src/renderer/src`) and web renderer (`src/renderer/src-web`) into the unified `shared` codebase.
-- **Maintainability:** Standardized helper functions across both application targets to prevent future regressions.
-
-### 🖥️ 7. Horizontal Scrolling for CLI Input Box
-- **Arbitrary Input Length:** Removed the single-line input constraint (previously restricted to `term_width - 4`) in the CLI interactive prompt, allowing users to type or edit long prompt instructions.
-- **Dynamic Sliding Window:** Implemented a horizontal scrolling viewport for the single-line prompt box. It dynamically slices and displays a subset of characters surrounding the cursor position to preserve console alignment and layout integrity.
-- **Interactive Cursor Navigation:** Bounded the arrow keys (`Left` and `Right` navigation) to trigger full box redraws, enabling the visible text window to scroll back and forward dynamically as the cursor moves.
-
-### 🖥️ 8. Browser Automation Visual Indicator (Green Aura)
-- **Visual Feedback:** Injects a breathing green glowing border overlay around the viewport of any browser page under active AI control.
-- **Non-Intrusive Design:** Built with `pointer-events: none` and a high z-index to ensure it sits on top of all page elements without blocking clicks, scrolling, or user interactions.
-
-### 🎙️ 9. Client-Side Speech-to-Text Microphone Consolidation
-- **Consolidated Flow**: Standardized the voice interface to client-side Speech-to-Text (`SpeechRecognition`), enabling compatibility with all AI models (Gemini, OpenAI, Claude, etc.) by transcribing voice to text before sending.
-- **Accurate Speech End Detection**: Configured the Speech-to-Text engine to run in continuous mode (`continuous = true`) so it keeps listening continuously across normal speaking pauses. Added a custom silence timer that triggers sending only after a full 2 seconds of silence, and fixed a loop bug by triggering the timer only after the user starts speaking (preventing the mic from cycling on and off during initial silence).
-- **TTS Language Auto-Detection**: Added automatic Thai character detection in both frontend system voice lookup (now matching language tags case-insensitively) and backend Google Translate TTS generation, resolving the issue where Thai responses were read aloud in English voices.
-- **Codebase Simplification & Hook Refactoring**: Extracted all Speech-to-Text logic, Web Speech APIs, silence timers, and React states into a shared, reusable custom hook `useSpeechToText` in [speech.ts](file:///home/pheem49/vscode/Project/Mint-CLI/src/renderer/shared/utils/speech.ts). This cleaned up ~150 lines of duplicate code in both desktop and web `ChatPanel.tsx` components.
-- **Native App Guidance**: Added a helper prompt to notify users if they attempt to record voice in a browser or WebView that doesn't natively support SpeechRecognition (such as Firefox, Safari, or the Tauri desktop application on Linux/Windows), guiding them to use Google Chrome or Microsoft Edge instead.
-
-### 🖼️ 10. Saved Pictures Gallery Pagination & Caching
-- **24-Picture Pagination**: Refactored the Saved Pictures library component to load exactly 24 images initially, replacing the buggy automatic timer loading with a clean, manual "Load More" button at the bottom of the grid.
-- **Cache-Busting Image URLs**: Appended a dynamic timestamp query parameter (`?_t=...`) to the static API picture fetches and individual image URLs. This prevents the browser from loading stale lists or caching broken images, ensuring that clicking "Refresh" successfully resolves any missing or incomplete pictures.
-
-### 🤖 11. AI Model Self-Awareness Context Injection
-- **Dynamic Context Injection**: Updated the core prompt compilation layer to automatically append an `[Active Environment Context]` block to the system instructions. This supplies the active AI model name and provider to the AI model itself, allowing the AI to successfully know its own model configurations in real-time when queried by the user.
-
-### 🎨 12. Material Icon Theme in Agent Activity Tracker
-- **Visual File & Folder Tracking**: The agent activity tracker (e.g. "Exploring file" progress log) now resolves target filenames/foldernames to display specific Material Icon Theme SVGs (e.g. JavaScript icon for `.js`, Rust icon for `.rs` / Cargo directories). This replaces the generic wireframe outline icons, resulting in a cleaner and more polished UI.
-
-### 🎙️ 13. Stricter Voice Reply Settings Control
-- **Strict Control Switch**: The global "Enable Voice Reply" toggle now acts as a strict master switch. When disabled, Mint will never speak responses out loud under any circumstances (including when using voice conversation/microphone mode).
-- **Voice Mode Loop Resumption**: When "Enable Voice Reply" is disabled but voice conversation mode is active, the microphone automatically resumes listening after the AI response is printed on screen, maintaining the continuous hands-free voice loop.
+- **Direct Keyboard Triggers (`/` and `@`)**: Type `/` to open the slash commands menu or `@` to trigger workspace context mentions directly inside the chat textarea.
+- **Fluid Micro-Animations & Elastic Physics**: Added cubic-bezier spring pop-in animations (`cubic-bezier(0.16, 1, 0.3, 1)`), smooth hover translations (`translateX(4px)`), rotation transitions (`transform: rotate(45deg)`), and active button click scaling for all chat tools, popups, and autocomplete items.
+- **Persistence Fix for System Response Cards**: Updated `save_system_interaction` in Rust (`src-tauri` & `mint-core`) and frontend IPC APIs (`tauri.ts`) to persist `aiText` output into the SQLite database. Previously, reopening the app restored commands like `/stats` or `/help` with an empty response card because `ai_text` was saved as an empty string. Now system outputs are fully preserved across app restarts.
+- **CLI Parity Command Handlers**:
+  - `/help`: Displays formatted interactive command table in chat.
+  - `/fast [on|off]`: Toggles fast mode and thinking trace visibility.
+  - `/code <task>`: Enables code-agent mode and submits `<task>`.
+  - `/cd [path]`: Changes active workspace directory or opens folder picker.
+  - `/models [name]`: Lists active providers & models or switches active model.
+  - `/stats`: Displays rich session statistics system card (workspace, interactions, provider, model).
+  - `/multi-agent [on|off]`: Toggles Multi-Agent Collaboration system.
+  - `/image` & `/paste`: Triggers file dialog or clipboard image attachment.
+  - `/veo <prompt>`: Routes to Veo video generation studio.
+- **`@` Context Mention Autocomplete**: Added popup suggestion menu for `@workspace`, `@file`, `@docs`, and `@memory` mentions when typing `@` or clicking the `@` toolbar button.
 
 ---
 
 
-## 🛠️ Codebase Changes
+## 🛠️ Deduplicated Settings System Events
 
-### Tauri Backend (`src-tauri` & `crates/mint-core`)
-- Register Tauri commands: `create_workspace_file`, `create_workspace_folder`, and `delete_workspace_item` in `src-tauri/src/lib.rs`.
-- Add `location` field to `LearnedSkillDto` and populate it based on workspace, global config, or database sources in `src-tauri/src/lib.rs`.
-- Update `workspace_root` path resolver in `src-tauri/src/lib.rs` to strip `src-tauri` from the active directory during dev mode.
-- Standardize process suggestion monitor logic to run AI prompt translations in the background thread inside `src-tauri/src/workflows.rs`.
-- Change `submit_tool_approval` signature and `ApprovalsState` pending channel type to support `ApprovalOutcome` in `src-tauri/src/lib.rs`.
-- Add executable search helper `which` and GitKraken auto-detection hooks to `load_config_from` in `crates/mint-core/src/config.rs`.
-- Support multiple source directory scanning and deduplication of learned skills in `crates/mint-core/src/skills.rs`.
-- Introduce a global `ACTIVE_AGENTS` thread-safe hash map registry and `cancel_agent` API in `crates/mint-core/src/lib.rs` to track active tokio tasks.
-- Register Tauri command `cancel_chat_message` in `src-tauri/src/lib.rs`.
-- Implement `POST /api/cancel-chat` in `crates/mint-core/src/api_server.rs` to cancel running web agent tasks.
-- Add `enable_agent_collaboration` config parameter (defaulting to `false`) in `crates/mint-core/src/config.rs`.
-- Update `resolve_agent_config` in `crates/mint-core/src/orchestration.rs` to return a tuple containing the active agent name and model, and check `enable_agent_collaboration`.
-- Expand `AgentProgress::Thinking` in `crates/mint-core/src/orchestration.rs` to optionally contain `agent_name` and `model_name`.
-- Inject active AI provider and model name environment context inside `enrich_request` and the initial prompt observation inside `crates/mint-core/src/orchestration.rs` so that the model becomes fully self-aware of its configuration and execution metadata.
-- Inject a green aura viewport border style and DOM overlay (`#mint-browser-aura`) into the active browser page before executing CDP automation actions in `crates/mint-core/src/browser.rs` to visually notify users of active AI control.
+This update fixes an issue where saving settings without changing AI providers or models logged redundant `provider_change` system event badges in the chat timeline.
+
+### Bug Fixes & Enhancements
+
+- **Backend Deduplication (`set_active_model`)**: Updated `set_active_model` in `config.rs` to compare previous provider and active model against new values, ensuring system interaction events are only written to the database when provider or model actually changes.
+- **Frontend Deduplication (`SettingsWindow.tsx` & `MintDashboard.tsx`)**: Updated settings save handlers and provider/model switch handlers in both Desktop and Web renderers to verify whether provider or model changed before invoking `setActiveModel` or `saveSystemInteraction`.
+
+---
+
+## 🖥️ Minimalist CLI Security Approval UI Redesign
+
+This release overhauls the interactive CLI approval prompt (`AgentApproval`) for MCP tools, local shell commands, file edits, note creation, and plugin executions into a modern, emoji-free **Minimalist Divider Badge** card layout.
+
+### Features Added & Enhancements
+
+- **Minimalist Divider Badge Cards**: Formatted security checks into clean 2-column key-value tables (`Server │ gmail`, `Tool │ list_tools`, `Command │ git status`) bounded by sleek ANSI divider lines.
+- **Emoji-Free Modern Terminal Style**: Removed distracting emoji icons for a crisp, high-contrast developer terminal aesthetic (`BRIGHT`, `BLUE`, `DIM`, `MINT`).
+- **Descriptive Action Options**: Updated the interactive selection menu with explicit choice descriptions:
+  - `1. Approve (Once)` - Allow single execution
+  - `2. Approve (Entire Session)` - Auto-approve throughout session
+  - `3. Deny` - Cancel action
+
+---
+
+## 🇹🇭 Thai Language Typography & Chat Panel Spacing Enhancement
+
+This update addresses cramped text rendering, missing paragraph line breaks, unformatted ordered/bullet lists, and unclickable markdown links in the chat interface.
+
+### Features Added & Enhancements
+
+- **Thai Typography & Line Height**: Increased line-height from tight defaults to `1.7` and added font fallbacks (`Prompt`, `Sarabun`, `Noto Sans Thai`, `Kanit`) for clear rendering of Thai upper/lower diacritics and vowels.
+- **Structured Block Rendering**: Refactored `markdown.tsx` to group text into clean block paragraphs (`.chat-paragraph`), section titles (`.chat-section-title`), and structured list items with distinct margins.
+- **Ordered & Bullet List Formatting**: Lines starting with `1.`, `2.`, `(1)`, `-`, `*`, or `•` are parsed into dedicated flex list elements (`.chat-list-item`) with custom centered vector CSS circle dot markers for pixel-perfect vertical alignment across all Thai/English fonts.
+- **Interactive Markdown & Raw URL Links**: Added inline link parsing for `[label](url)` and raw `https://...` URLs, converting them into clickable external links (`.chat-link`).
+- **UI Font Family Selector**: Expanded the Font Family dropdown in **Settings > Theme & UI** with Google Fonts support for `Prompt`, `Sarabun`, `Kanit`, `Mitr`, `Noto Sans Thai`, `Mali`, `Inter`, and `Fira Code`.
+
+---
+
+## 🔣 LaTeX Symbol & `ightarrow` Sanitization
+
+This update enhances markdown and CLI sanitization to automatically convert unescaped LaTeX symbols into Unicode symbols even when printed without LaTeX delimiters `$`.
+
+### Features Added & Enhancements
+
+- **Bare LaTeX Symbol Conversion**: Updated `sanitizeLatex` in `markdown.tsx` and `sanitize_latex` in `agent.rs` to convert unescaped symbols like `ightarrow`, `\rightarrow`, `\leftarrow`, `\Rightarrow`, etc. directly into Unicode arrows (`→`, `←`, `⇒`).
+- **Standalone `ightarrow` Cleanup**: Fixes garbled outputs from LLMs where string escape sequences swallow `\r` from `\rightarrow`, automatically replacing plain text `ightarrow` with `→`.
+- **Frontend & CLI Parity**: Ensures both UI message rendering (`markdown.tsx`) and CLI terminal outputs (`agent.rs`) sanitize LaTeX math symbols consistently.
+
+---
+
+## 🧩 New Agent Skills Installation
+
+Installed new external agent skills to enhance the workspace's capability and discipline.
+
+### Skills Added
+- **Gridgeist**: Installed the `gridgeist` skill from `ohmiler/gridgeist` repository into `.agents/skills/gridgeist`, including agents, assets, and design references.
+
+---
+
+## 🔄 Unified AI Model Switch & Real-time Synchronization
+
+This update standardizes model switching across **CLI**, **Desktop (Tauri)**, and **Web** into a single unified implementation, eliminating out-of-sync status badges, inconsistent format strings, and outdated model indicators.
+
+### Features Added & Enhancements
+
+| Feature | Description |
+|---|---|
+| **Single Source of Truth (`set_active_model`)** | Added `set_active_model(provider, model)` to `MintConfig` in `mint-core` as the unified function for updating active AI providers and models. |
+| **Unified Event Log Format** | Standardized the system event interaction message format across CLI, Desktop, and Web: `<provider> • <model>` (e.g. `gemini • gemini-2.5-flash`). |
+| **MCP & Plugins Custom SVG Icons** | Replaced emoji icons with high-resolution vector SVGs for Docker, Git, GitHub, Node.js, Spotify, Discord, and Servers. Added custom SVG code, Image URL, and Preset icon support for Custom MCP Servers in Settings UI. |
+| **MCP Server Inline Edit Drawer (✏️)** | Added inline expandable configuration panel directly inside each MCP Server card to easily modify Command, Arguments, SVG Icon, and Environment Variables in place. |
+| **Real-time Event Broadcast (`settings-changed`)** | Emits real-time setting change events to Tauri listeners and HTTP clients whenever the model is changed from CLI, Settings UI, or API endpoints. |
+| **Window Focus & Post-Send Sync** | Frontend UI automatically refreshes runtime status on window focus (`window.addEventListener('focus', ...)`) and post-message completion so status badges update instantly without manual app restart. |
+| **General Tab Collapsible Accordion** | Added collapsible section headers (AI Routing, Search, Productivity, Image Gen, Video Gen, Custom Providers, Desktop Updates) with "Expand All" & "Collapse All" quick controls for a clean and readable Settings experience. |
+
+---
+
+## 🌐 Remote Mint Agent — Messaging Bridges & Remote Workspace Control
+
+This update enhances **Telegram**, **Discord**, **Slack**, **LINE**, and **WhatsApp Cloud** bridges to enable full remote control of the Mint Agent, active workspace path resolution, agent loop execution, session isolation, and configurable webhook endpoints.
+
+### Features Added & Enhancements
+
+| Feature | Description |
+|---|---|
+| **Active Workspace Path Resolution** | Automatically resolves the active Desktop workspace path when requests arrive from Telegram, Discord, Slack, LINE, or WhatsApp (`workspace_path`), allowing the AI to inspect and read local files relative to the project directory. |
+| **Session Isolation (`chat_id`)** | Assigns deterministic platform chat IDs (`telegram:<id>`, `discord:<channel_id>`, `slack:<channel_id>`, `line:<user_id>`, `whatsapp:<phone>`) so conversations and memory history remain isolated per channel/user instead of merging into default chat. |
+| **Agent Loop Remote Intent Execution** | Automatically detects action/execution intents (e.g. *"แก้โค้ด"*, *"ดูไฟล์"*, *"รัน test"*, *"fix"*, *"build"*) from channel messages and invokes `orchestrate_agent_loop` to perform multi-step file reads and tool executions on the local machine. |
+| **Instant Remote Ack Notification** | Immediately sends typing indicators and acknowledgement messages (`[Mint Agent] Remote command received, processing...`) when remote messages arrive via Telegram, Discord, LINE, or WhatsApp so users get instant feedback. |
+| **Configurable Webhook Host & Port** | Added `lineWebhookHost`, `lineWebhookPort`, `whatsappWebhookHost`, `whatsappWebhookPort` to `MintConfig` and updated Tauri webhook handlers to allow binding to custom hosts (e.g. `0.0.0.0`) for public tunnel exposure. |
+| **Automation Settings UI Redesign** | Redesigned the Native Channel Bridges UI in Settings > Automation into premium modern cards with platform color badges (Telegram ✈️, Discord 💬, Slack 💼, LINE 🟢, WhatsApp 📞), active status indicators (`Active` vs `Disabled`), toggle switches, styled inputs, and global Instant Ack notification options. |
+
+### Files Changed
+
+- `crates/mint-core/src/config.rs` — Added `active_workspace_path()`, `bridge_ack_enabled()`, `bridge_ack_message()`, and webhook host/port helpers to `MintConfig`.
+- `crates/mint-core/src/channels.rs` — Added `answer_channel` with workspace path resolution, action intent classification, agent loop execution, instant typing indicators, and platform session `chat_id` forwarding.
+- `src-tauri/src/webhooks.rs` — Updated LINE and WhatsApp handlers to send instant acknowledgement notifications, use configurable host/port, extract user/phone IDs for session isolation, and delegate to `answer_channel`.
+- `src-tauri/src/lib.rs` — Updated `send_chat_message` and `stream_chat_message` to automatically persist `activeWorkspacePath` into `MintConfig` when a workspace is opened or used.
+- `src/renderer/src/components/Settings/AutomationTab.tsx` & `src/renderer/src-web/components/Settings/AutomationTab.tsx` — Added UI input fields for LINE & WhatsApp Webhook Host and Port settings.
+
+---
+
+## 📹 Multimodal Video Attachments & Web Veo Studio Integration
+
+This update introduces full support for sending video attachments, saving sent videos to local storage, filtering photos vs. videos in the Gallery, and enabling Veo Studio in the web build.
+
+### Features Added
+
+| Feature | Description |
+|---|---|
+| **Multimodal Video Support** | Attached videos (`.mp4`, `.webm`, `.mov`, `.mkv`) are sent as base64 `inlineData` payloads to Google Gemini API. Supported in Desktop/Web compose panels. |
+| **Save Attached Videos to Disk** | Videos sent through the chat interface are automatically saved to `<config_path>/../Pictures/` with timestamped names, bypassing standard image thumbnail generation, and indexed in `index.json`. |
+| **Photo/Video Gallery Tabs** | Added **Photos** 📷 and **Videos** 📹 tabs to the Saved Pictures gallery (both Desktop and Web builds). Video files render using native HTML5 `<video>` tags with controls. |
+| **Web Veo Studio Integration** | Ported and enabled the **Veo Studio** video generation panel in the web build (`src-web`). Added a sidebar navigation entry and integrated the React workspace. |
+| **Video Placeholder & Agent Mode** | Displays `[Video #1]` visual indicator in the user's chat bubble during transmission. Enabled full video support in `Agent Mode` loops and Tauri API server. |
+
+### Files Changed
+
+- `crates/mint-core/src/chat.rs` — Added `video_data_uri` to `ChatRequest` and updated `gemini_parts` payload builder
+- `crates/mint-core/src/api_server.rs` — Exposed `video_data_uri` on HTTP routes, updated `orchestrate_agent_loop` calls, added saving of sent video attachments in `/api/chat` and `/api/chat-stream` endpoints, and added a `/api/thumbnails` route to serve generated video/image thumbnails on Web.
+- `crates/mint-core/src/pictures.rs` — Added video MIME parsing, thumbnail extraction, and fixed temporary video/frame file leakage under `/tmp`
+- `crates/mint-core/src/orchestration.rs` — Added `video_data_uri` parameter to `orchestrate_agent_loop` and forwarded it to fallback chat requests
+- `crates/mint-cli/src/main.rs` — Connected the Veo command to the real video generation backend.
+- `crates/mint-cli/src/image.rs` — Created `load_video_as_data_uri` helper
+- `crates/mint-cli/src/interactive.rs` — Handled saving pending videos, and connected the `/veo` interactive command to the real video generation backend.
+- `crates/mint-cli/src/agent.rs` — Updated `orchestrate_agent_loop` call
+- `src-tauri/src/lib.rs` — Updated `orchestrate_agent_loop` calls with `video_data_uri`, fixed a compilation error (mismatched types E0308) in `upload_file` command, and registered `upload_file` in `generate_handler!`.
+- `src/renderer/shared/platform.ts` — Updated `sendChatMessage` / `streamChatMessage` signatures
+- `src/renderer/src/tauri.ts` & `src/renderer/src-web/tauri.ts` — Implemented video parameter forwarding and save commands
+- `src/renderer/src/components/PicturesLibrary.tsx` & `src/renderer/src-web/components/PicturesLibrary.tsx` — Added Photo/Video filter tabs, replaced playable HTML5 `<video>` tags with static thumbnail cards featuring a video badge, and set a fixed `4:3` aspect ratio on containers to prevent placeholder collapsing and ensure uniform sizing.
+- `src/renderer/src/components/MintDashboard.tsx` & `src/renderer/src-web/components/MintDashboard.tsx` — Wired video attachments, integrated VeoStudioPanel, and added `sendingVideoCount` state
+- `src/renderer/src/components/ChatPanel.tsx` & `src/renderer/src-web/components/ChatPanel.tsx` — Added video picker, previews, and `[Video #1]` placeholder rendering during sending
+- `src/renderer/src-web/components/VeoStudioPanel.tsx` — **[NEW]** Ported video generator workspace for web renderer
+
+---
+
+## 🎬 Veo Studio — AI Video Generation Panel
+
+This release introduces **Veo Studio**, a new dedicated panel for AI-powered video generation, accessible via the "More" menu in the sidebar.
+
+### Features Added
+
+| Feature | Description |
+|---|---|
+| **Veo Studio panel** | New `VeoStudioPanel.tsx` component mirroring Image Studio's layout — left controls pane + right video results pane |
+| **Prompt input** | Full text prompt & optional negative prompt (collapsible) |
+| **Style chips** | Quick-add style suggestions: `cinematic`, `slow motion`, `time-lapse`, `aerial view`, `documentary`, `animation`, `action`, `nature` |
+| **Aspect ratio** | Toggle between `16:9`, `9:16`, and `1:1` video formats |
+| **Duration selector** | Choose between `5s` or `8s` video length |
+| **Provider & model dropdowns** | Google Veo 2.0 Flash (default) and Veo 3.0 Flash (preview) |
+| **Video preview player** | Native `<video>` player with controls for reviewing generated videos |
+| **Send to Chat** | One-click to send the prompt back to the Chat panel |
+| **Recent prompts history** | Tracks last 8 prompts for quick reuse |
+| **Purple/violet theme** | Distinct visual identity separating Veo Studio from Image Studio |
+| **`mint veo` CLI command** | A new CLI command to generate videos from text prompts (e.g., `mint veo "a bird flying" --aspect 16:9 --duration 5`) |
+| **`/veo` Slash Command** | A new slash command in interactive CLI chat mode to quickly trigger video generation (e.g., `/veo a dragon flying --aspect 16:9 --duration 8`) |
 
 
-### Desktop/Web Frontend (`src/renderer`)
-- Integrate creation/deletion actions and focus/polling lifecycle listeners inside `WorkspacePanel.tsx`.
-- Redesign actions bar grid layouts inside `styles.css`.
-- Update inline markdown parser inside `ChatPanel.tsx` to wrap `@` mentions, and style `.chat-mention` in `index.css`.
-- Update `submitToolApproval` API and component state handlers (`MintDashboard.tsx`, `ChatPanel.tsx`) in both desktop and web directories to render and submit custom answers.
-- Update `activitiesFrom` and `AgentActivity` structure to parse and append the user's answer into the active `ask_user` tool target block upon `ToolEnd`.
-- Update `LearnedSkill` TypeScript interface in `src/renderer/src/tauri.ts` to include optional `location`.
-- Render colored location badges, strip lengthy content text boxes, and unify MCP toggles/delete controls in `src/renderer/src/components/Settings/PluginsTab.tsx` and `src/renderer/src-web/components/Settings/PluginsTab.tsx`.
-- Implement `cancelChatMessage` API helpers in `tauri.ts` for desktop and web.
-- Bind global Window keydown listeners for `Escape` key and dynamic "Stop" buttons in `ChatPanel.tsx` and `MintDashboard.tsx` under desktop and web source directories.
-- Enhance microphone connection/permission alert dialogs in `ChatPanel.tsx` to print the exact Web API error message for easier debugging.
-- Add voice-active class state and breathing keyframe animation effects around the chat input boundaries when microphone mode is active.
-- Refine the voice status bar rendering logic to prevent displaying redundant text (such as "Listening Listening...") and display actual user speech transcripts wrapped inside quotes instead.
-- Create new settings tab `AgentsTab.tsx` in desktop and web source directories supporting CRUD operations, provider-specific model dropdown selects, "Disable All" button, and global collaboration toggle.
-- Register the `Multi-Agent (Beta)` tab in the sidebar of `SettingsWindow.tsx`.
-- Update `ChatPanel.tsx` in desktop and web source directories to render the active agent and model names inside the live thinking status message.
-- Remove duplicate "Enable Multi-Agent Review" checkbox from `AutomationTab.tsx`.
-- Remove redundant `handleWindowKeyDown` Ctrl+V listeners, unused `onReadClipboardImage` prop, and `navigator.clipboard.read()` async fallback routines from `ChatPanel.tsx` and `MintDashboard.tsx` in both desktop and web directories to resolve browser clipboard permission warning popups during text pasting.
-- Refactor duplicated types (`DiffHunk`, `FileChange`), helper functions (`numericSetting`, `errorMessage`, `readImage`, `readDocument`, `createTrimmedImagePreview`, `lightenColor`, `hexToRgb`, `applyThemeStyles`), and progress parsers (`parseFileChangesFromProgress`) from the desktop and web components to a central `src/renderer/shared` repository. Corrected a type checking issue by exporting `AgentProgress` and `InteractionMemory` from `shared/agentProgress.ts`.
-- Consolidate microphone interface to client-side Speech-to-Text (`SpeechRecognition`), extract STT states, silence-detection timers, and event listeners into a reusable React hook `useSpeechToText` in [speech.ts](file:///home/pheem49/vscode/Project/Mint-CLI/src/renderer/shared/utils/speech.ts), and clean up both desktop (`src/renderer/src/components/ChatPanel.tsx`) and web (`src/renderer/src-web/components/ChatPanel.tsx`) `ChatPanel` components.
-- Implement 24-picture pagination, a manual "Load More" button, and API/image fetch cache-busters in `PicturesLibrary.tsx` and `tauri.ts` across desktop and web directories.
-- Refactor file and folder icon mappings from `WorkspacePanel.tsx` into a central, reusable utility `src/renderer/shared/utils/fileIcons.ts`.
-- Update `AgentActivityTable.tsx` to resolve target filenames/foldernames and display their respective Material Icon Theme SVGs instead of default wireframe outlines.
-- Update Desktop and Web CSS stylesheets (`styles.css`) to support rendering and scaling Material Icon SVGs inside the agent activity tracker.
-- Update `ChatPanel.tsx` (Desktop and Web) to strictly check the global `enableVoiceReply` setting. If voice reply is disabled but voice conversation mode is active, the microphone listening loop is automatically scheduled to resume without reading the AI response out loud.
+### Files Changed
 
-### CLI Agent (`crates/mint-cli`)
-- Redefine live status print lines (`plan_lines`, `tasks_lines`, `activities_lines`, `explored_lines`) to accept progress tick state and apply the `get_bullet` helper.
-- Update `render_live_status` in `crates/mint-cli/src/agent.rs` to compute true physical lines of terminal wrapped text, using a new `is_thai_combining` filter.
-- Modify `confirm` in `crates/mint-cli/src/main.rs` to indent confirmation prompts.
-- Format `mint learn --list` and `/learn` CLI output into a bullet-point summary showing active skill locations and source paths.
-- Register `/multi-agent` slash command to display configured agents and toggle collaboration status via `/multi-agent on` and `/multi-agent off` in `crates/mint-cli/src/main.rs`.
-- Reorder `AUTOCOMPLETE_COMMANDS` alphabetically and simplify exit suggestions by keeping only `/exit`.
-- Paginate suggestions to display at most 5 items per page with page numbers.
-- Fixed `AgentProgress::Thinking` pattern matching compiler error (E0027) in `crates/mint-cli/src/agent.rs` and render active agent and model names in the live thinking terminal status bar.
-- Implement horizontal scrolling viewport for the CLI prompt input box in `crates/mint-cli/src/main.rs`, slicing the visible text to fit the terminal screen and adjusting the cursor column offset accordingly, allowing arbitrary length instructions.
-- Save `provider_change` system interaction events to the database and render a beautiful styled horizontal divider in the console when switching models via `/models` inside `crates/mint-cli/src/main.rs`.
-- Implement dynamic skill invocation with `$` prefix in the CLI interactive chat.
-- Add realtime autocomplete and pagination dropdown list for local/workspace and global skills under the `$` trigger, resolving and rendering skill descriptions.
-- Add frontmatter YAML parser in `crates/mint-core/src/skills.rs` to fetch skill description values.
-- Support confirmation dialogue to display skill contents and confirm activation before running the Agent, allowing inline or prompted tasks.
-- Register `/skill add <path>` (and `/skill install <path>`) slash commands to automatically copy/install a skill file or folder into the global `~/.config/mint/mint-skills/` directory.
+- `src/renderer/src/components/VeoStudioPanel.tsx` — **[NEW]** React component
+- `src/renderer/src/css/veo-studio.css` — **[NEW]** CSS with purple accent palette
+- `src/renderer/src/index.css` — Added `@import './css/veo-studio.css'`
+- `src/renderer/src/components/DashboardSidebar.tsx` — Added `'veo'` view type + sidebar entry
+- `src/renderer/src/components/MintDashboard.tsx` — Imported and wired `VeoStudioPanel`
+- `src/renderer/src/tauri.ts` — Added `VideoGenRequest`, `VideoGenResponse`, `VideoGenEntry`, `VideoGenProviders` types + stub `generateVideo()` / `getVideoGenProviders()`
+
+> **Note:** The backend video generation API (Veo REST integration) is stubbed and will be fully connected in the next update.
+
+---
+
+## 🖱️ Browser Automation — Native Mouse & Keyboard Control
+
+This release significantly upgrades `mint auto` browser automation with real native input control via Chrome DevTools Protocol (CDP), matching the behavior seen in advanced AI browser agents.
+
+### New Tools
+
+| Tool | Description |
+|---|---|
+| `browser_mouse_move` | Move the real mouse cursor to absolute (x,y) coordinates |
+| `browser_mouse_click` | Native mousePressed + mouseReleased at (x,y) with configurable button |
+| `browser_key_press` | Press real keyboard keys (Enter, Tab, Escape, F1–F12, etc.) via CDP |
+| `browser_screenshot` | Capture the current page as a base64 PNG image |
+
+### Upgraded Tools
+
+- **`browser_click`**: Now uses native CDP mouse events (gets element coordinates via `getBoundingClientRect`, then dispatches `mousePressed`/`mouseReleased`), falling back to JS `.click()` for off-screen elements.
+- **`browser_type`**: Upgraded to use `Input.insertText` CDP command (native keyboard), typing character by character like a real user. Also clicks the target element first to focus it.
+
+### Visual Cursor Overlay
+
+- Browser pages controlled by `mint auto` now show an **animated mouse cursor** (SVG arrow with green stroke) that moves in real-time as the AI controls the mouse.
+- The cursor has a smooth CSS transition and a click animation (scale shrink) when clicking.
+- The green aura border remains and now coexists with the new cursor overlay.
+
+### Internal Architecture
+
+- Added `cdp_call_raw()` — lightweight CDP call without overlay injection, used for all Input.* and Page.captureScreenshot methods to avoid unnecessary JS round-trips.
+- Added `get_element_coordinates(selector)` — helper that returns viewport-relative (x,y) center of any CSS selector element.
+- Added `type_text_native(text)` — pure CDP keyboard input using `Input.insertText`.
+- Added `key_to_cdp_params(key)` — maps key names to `windowsVirtualKeyCode` and CDP code strings.
+- **`AgentInput`** struct extended with `x: Option<f64>`, `y: Option<f64>`, `button: String`, `key: String` fields.
+- Log display in `mint auto` updated with new emoji indicators: 🖱️ (mouse move), 🖱️● (click), ⌨️ (key press), 📸 (screenshot).
+
+---
 
 
 
+### 🖥️ 1. Rich Terminal Spinner Integration (`indicatif`)
+- Added steady-tick green spinner loaders to keep the CLI interactive and visually responsive during blocking background operations:
+  - Repository metadata fetching and AI analysis (`GithubOverview`).
+  - Codebase indexing & syntax tree parsing (`Command::Symbols`).
+  - Semantic vector database embedding indexing (`SemanticCodeCommand::Index`).
+  - AI image generation (`Command::Imagine`).
+  - Wait for OAuth browser redirection flow (`GmailCommand::Auth`).
+  - Application updates check and NPM dependency installations (`updater`).
 
-### Github CI/CD Workflows
-- Modify `Publish GitHub release` step in `.github/workflows/release.yml` to use `body_path: Release_Note.md`.
+### 🤖 2. Dynamic Moon Walk Thinking Loader
+- Replaced standard loaders with an elegant Moon phase vector animation loop (`🌑`, `🌒`, `🌓`, `🌔`, `🌕`, `🌖`, `🌗`, `🌘`) forced into a clean text-presentation style and glowing in a mint-green color.
+- Implemented trailing dynamic dot padding (`""` -> `"."` -> `".."` -> `"..."` -> `""`) to keep line length constant and completely prevent terminal jitter.
+
+### 🎨 3. Glowing Bold Wave Text Scanner
+- Added a floating light wave effect (`apply_wave_effect`) that slides color gradients (Cyan `BLUE`, Mint `MINT`, and Gray `DIM`) dynamically across the letters of the thinking text from left to right.
+- Changed the font weight to bold (`\x1b[1m`) and characters to full-width (`Ｔｈｉｎｋｉｎｇ` / `ｉｓ  ｔｈｉｎｋｉｎｇ`) to match CJK character scaling, making the text physically larger and highly prominent in the console.
+
+### 📦 4. Codebase Modularization & Refactoring
+- Split `main.rs` into modular helper components (`markdown.rs`, `actions.rs`, `interactive.rs`) to improve structure and readability.
+- Cleaned up unused compiler warning imports and standardized process exit codes.
+
+### 🧪 5. Automated CI/CD Workflow Releases
+- Reconfigured the GitHub Actions compiler pipeline (`release.yml`) to automatically parse and publish this `Release_Note.md` directly as the release description body.
+
+---
+
+## 🛠️ Codebase Changes Summary
+- **Tauri Backend**: Refactored learned skill directory resolver, process suggestion backgrounds, and added global active task cancel hooks (`ACTIVE_AGENTS`).
+- **Web/Desktop Frontend**: Refactored component layout structures, consolidated client-side Speech-to-Text hooks, integrated Material Icon SVGs for agent file explorations, and cleaned up clipboard paste warnings.
+- **CLI Agent**:
+  - Reorganized autocomplete commands alphabetically and paginated console inputs to 5 commands max per page.
+  - Added dynamic skill prompts (`$`).
+  - Added a Crossterm-based interactive arrow-key selection menu (themed in active Blue/Cyan highlight) to `/models`, `/image-provider`, `/fast`, `/multi-agent`, and `/clear` commands.
+  - Implemented a custom 24-bit Truecolor Mint-to-Blue gradient renderer for the ASCII welcome banner logo.
+  - Upgraded the "Thinking" status loader with a smooth 24-bit Truecolor sine-wave gradient wave animation, and restored standard English characters for cleaner rendering.
+  - Improved the MCP safety policy error with direct instructions to run `/mcp allow` to authorize blocked tools.
+  - Implemented background `stderr` and `stdout` monitoring for MCP servers to automatically detect OAuth URLs, increased default tool timeout to 30 seconds for slow `npx` resolution, and launch the default system browser with extended timeouts.
+  - Injected the list of available MCP servers directly into the system prompt's `mcp_tool` description in `orchestration.rs` to prevent agent naming hallucinations.
+  - Implemented the `mcp_list_tools` capability to allow the AI agent to query the complete list of registered tools from any configured MCP server dynamically, enabling self-discovery of tool APIs.
+  - Upgraded `/mcp` command to use a two-step interactive menu (themed in active Blue/Cyan highlight) to select a configured server first, show its status, and authorize all tools on the spot.
+- **Workspace Skills Loading**: Modified skill loading to only supply metadata (name, description, path) for workspace-relative skills in the initial context, forcing the AI agent to explicitly invoke `read_file` to read the skill files. This makes skill reading visible as tool call logs in the user interface. Added chat history check to mark skills as READ on subsequent turns, preventing redundant reads on every turn.

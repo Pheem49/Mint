@@ -258,6 +258,50 @@ impl MintConfig {
         }
     }
 
+    /// Sets the active provider and model, saves the configuration to disk, and logs a system event interaction.
+    pub fn set_active_model(&mut self, provider: &str, model: Option<&str>) -> Result<String, ConfigError> {
+        let old_provider = self.ai_provider.clone();
+        let old_active_model = self.active_model().to_string();
+
+        self.ai_provider = provider.to_string();
+        if let Some(m) = model {
+            let m_trimmed = m.trim();
+            if !m_trimmed.is_empty() {
+                match provider {
+                    "anthropic" => self.anthropic_model = m_trimmed.to_string(),
+                    "openai" => self.openai_model = m_trimmed.to_string(),
+                    "openrouter" => self.openrouter_model = m_trimmed.to_string(),
+                    "deepseek" => self.deepseek_model = m_trimmed.to_string(),
+                    "huggingface" => self.hf_model = m_trimmed.to_string(),
+                    "local_openai" => self.local_model_name = m_trimmed.to_string(),
+                    "ollama" => self.ollama_model = m_trimmed.to_string(),
+                    "gemini" => self.gemini_model = m_trimmed.to_string(),
+                    _ => {}
+                }
+            }
+        }
+        save_config(self)?;
+
+        let active_model = self.active_model().to_string();
+        let display_name = format!("{} • {}", self.ai_provider, active_model);
+
+        let changed = old_provider != self.ai_provider || old_active_model != active_model;
+        if changed {
+            if let Ok(memory) = crate::MemoryStore::open_default() {
+                let _ = memory.add_interaction_for_chat_with_fallback(
+                    crate::CHAT_CLI_ID,
+                    &display_name,
+                    "",
+                    "system",
+                    "provider_change",
+                    None,
+                );
+            }
+        }
+
+        Ok(display_name)
+    }
+
     /// Returns the `CustomProvider` whose id matches `provider_key`.
     ///
     /// `provider_key` must be in `"custom:<id>"` format (the leading `"custom:"`
@@ -298,6 +342,70 @@ impl MintConfig {
             }
         }
         providers
+    }
+
+    pub fn active_workspace_path(&self) -> Option<PathBuf> {
+        self.extra
+            .get("activeWorkspacePath")
+            .or_else(|| self.extra.get("defaultWorkspacePath"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| std::env::current_dir().ok())
+    }
+
+    pub fn line_webhook_host(&self) -> String {
+        self.extra
+            .get("lineWebhookHost")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("127.0.0.1")
+            .to_string()
+    }
+
+    pub fn line_webhook_port(&self) -> u16 {
+        self.extra
+            .get("lineWebhookPort")
+            .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+            .map(|p| p as u16)
+            .unwrap_or(3000)
+    }
+
+    pub fn whatsapp_webhook_host(&self) -> String {
+        self.extra
+            .get("whatsappWebhookHost")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("127.0.0.1")
+            .to_string()
+    }
+
+    pub fn whatsapp_webhook_port(&self) -> u16 {
+        self.extra
+            .get("whatsappWebhookPort")
+            .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+            .map(|p| p as u16)
+            .unwrap_or(3001)
+    }
+
+    pub fn bridge_ack_enabled(&self) -> bool {
+        self.extra
+            .get("enableBridgeAckNotification")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+    }
+
+    pub fn bridge_ack_message(&self) -> String {
+        self.extra
+            .get("bridgeAckMessage")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("[Mint Agent] Remote command received, processing...")
+            .to_string()
     }
 }
 

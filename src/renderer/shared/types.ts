@@ -8,6 +8,7 @@ export interface RuntimeStatus {
   backend: string
   configPath: string
   activeProvider: string
+  activeModel?: string
   availableProviders: string[]
   integrations: Record<string, unknown>
   localIp?: string
@@ -76,6 +77,9 @@ export interface ImageGenRequest {
   numImages?: number
   model?: string
   provider?: string
+  imageDataUri?: string
+  maskDataUri?: string
+  mode?: 'generate' | 'edit' | 'inpaint'
 }
 
 export interface ImageGenProviders {

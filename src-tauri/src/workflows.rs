@@ -79,6 +79,7 @@ pub fn start_monitor(app: AppHandle) {
                             chat_id: None,
                             image_data_uri: None,
                             audio_data_uri: None,
+                            video_data_uri: None,
                             document_attachment: None,
                             workspace_path: None,
                             agent_id: None,
