@@ -20,6 +20,36 @@ use crate::{
 
 const MAX_API_REQUEST_BYTES: usize = 32 * 1024 * 1024;
 
+pub(crate) fn log_api_req(method: &str, route: &str, status: &str, info: Option<&str>) {
+    let timestamp = chrono::Local::now().format("%H:%M:%S");
+    let status_str = if status.starts_with('2') {
+        format!("\x1b[32m{}\x1b[0m", status)
+    } else if status.starts_with('4') || status.starts_with('5') {
+        format!("\x1b[1;31m{}\x1b[0m", status)
+    } else {
+        format!("\x1b[33m{}\x1b[0m", status)
+    };
+    if let Some(detail) = info {
+        println!(
+            "\x1b[90m[{}]\x1b[0m \x1b[1;36m[API]\x1b[0m \x1b[1m{}\x1b[0m {} -> {} \x1b[90m({})\x1b[0m",
+            timestamp, method, route, status_str, detail
+        );
+    } else {
+        println!(
+            "\x1b[90m[{}]\x1b[0m \x1b[1;36m[API]\x1b[0m \x1b[1m{}\x1b[0m {} -> {}",
+            timestamp, method, route, status_str
+        );
+    }
+}
+
+pub(crate) fn log_api_err(context: &str, error: &dyn std::fmt::Display) {
+    let timestamp = chrono::Local::now().format("%H:%M:%S");
+    eprintln!(
+        "\x1b[90m[{}]\x1b[0m \x1b[1;31m[ERROR]\x1b[0m \x1b[1;33m{}\x1b[0m: {}",
+        timestamp, context, error
+    );
+}
+
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
@@ -120,6 +150,19 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
             }
 
             let (route, query) = path.split_once('?').unwrap_or((path, ""));
+
+            if route.starts_with("/api/")
+                && !route.starts_with("/api/pictures/")
+                && !route.starts_with("/api/thumbnails/")
+                && route != "/api/chat"
+                && route != "/api/chat-stream"
+                && route != "/api/image-generate"
+                && route != "/api/video-generate"
+                && route != "/api/action"
+                && route != "/api/config"
+            {
+                log_api_req(method, route, "200 OK", None);
+            }
 
             match (method, route) {
                 ("GET", "/api/status") => {
@@ -647,6 +690,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
                         match response {
                             Ok(resp) => {
+                                log_api_req("POST", "/api/chat", "200 OK", Some(&format!("Model: {}", config.ai_provider)));
                                 if let Some(image) = sent_image {
                                     let _ = save_chat_images(
                                         image
@@ -673,7 +717,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 }
                             }
                             Err(e) => {
-                                eprintln!("API Chat error: {:?}", e);
+                                log_api_err("API /api/chat error", &e);
                                 let err_json = serde_json::json!({
                                     "provider": "error",
                                     "model": "error",
@@ -821,6 +865,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
                                         match result {
                                             Ok((response, _)) => {
+                                                log_api_req("POST", "/api/chat-stream", "200 OK", Some(&format!("Provider: {}", config_clone.ai_provider)));
                                                 if let Ok(json_val) =
                                                     serde_json::to_string(&serde_json::json!({
                                                         "type": "done",
@@ -831,7 +876,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                                 }
                                             }
                                             Err(e) => {
-                                                eprintln!("API Chat Stream error: {:?}", e);
+                                                log_api_err("API /api/chat-stream error", &e);
                                                 let err_json = serde_json::json!({
                                                     "type": "done",
                                                     "response": {
@@ -1026,6 +1071,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         };
                         match generate_images(&config, &gen_request).await {
                             Ok(result) => {
+                                log_api_req("POST", "/api/image-generate", "200 OK", Some(&format!("Provider: {}", result.provider)));
                                 let data_uris: Vec<String> = result
                                     .images
                                     .iter()
@@ -1053,6 +1099,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 send_json_response(socket, "200 OK", &response.to_string()).await;
                             }
                             Err(e) => {
+                                log_api_err("API /api/image-generate error", &e);
                                 let err = json!({ "error": e.to_string() });
                                 send_json_response(
                                     socket,
@@ -1135,9 +1182,11 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                         }
                                     }
                                 }
+                                log_api_req("POST", "/api/video-generate", "200 OK", Some(&format!("Provider: {}", result.provider)));
                                 send_json_response(socket, "200 OK", &response.to_string()).await;
                             }
                             Err(e) => {
+                                log_api_err("API /api/video-generate error", &e);
                                 let err = json!({ "error": e.to_string() });
                                 send_json_response(
                                     socket,

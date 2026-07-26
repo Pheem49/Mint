@@ -122,7 +122,7 @@ export const DEFAULT_CONFIG = {
   replicateApiKey: '',
   // Video Generation
   videoGenProvider: 'veo' as 'veo',
-  veoModel: 'veo-2.0-flash-exp',
+  veoModel: 'veo-2.0-generate-001',
   // Multi-Agent Configuration
   agents: [
     {

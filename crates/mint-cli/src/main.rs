@@ -763,7 +763,8 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                println!("\n{DIM}Press Ctrl+C to stop{RESET}\n");
+                println!("\n{DIM}(API Requests & Error logs will be displayed below){RESET}\n");
+                println!("{DIM}Press Ctrl+C to stop{RESET}\n");
                 mint_core::start_api_server(port).await?;
             }
             Command::Mcp { command } => match command {
@@ -1472,6 +1473,7 @@ async fn launch_mint_target(target: String) -> Result<()> {
 
             println!("Point your browser to:");
             println!("{MINT}http://localhost:9000{RESET}\n");
+            println!("{DIM}(API Requests & Error logs will be displayed below){RESET}\n");
 
             println!("{DIM}Press Ctrl+C to stop{RESET}\n");
             mint_core::start_api_server(3000).await?;

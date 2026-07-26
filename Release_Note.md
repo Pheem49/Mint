@@ -4,6 +4,20 @@ We are excited to release **Mint Agent v1.10.0**! This version introduces major 
 
 ---
 
+## 📋 Message Action Bar & UI Clean Up (Web & Desktop UI)
+
+- **Message Copy Button & Action Bar**:
+  - Added a Copy Button to AI responses in both Desktop UI (`src/renderer/src`) and Web UI (`src/renderer/src-web`).
+  - Interactive status feedback: copies message text to clipboard with instant visual checkmark (✓) and copied tooltip state.
+- **Mint Web & API Server Terminal Logging & Diagnostics**:
+  - Implemented real-time filtered terminal logging for both `mint web` and `mint api` modes in `mint-cli` and `mint-core` (`crates/mint-core/src/api_server.rs`).
+  - Terminal now displays real-time colorized API Requests (e.g. `[14:30:15] [API] POST /api/chat -> 200 OK`, `/api/status`, `/api/image-generate`, `/api/video-generate`) and Error Logs (`[14:30:15] [ERROR] API /api/video-generate error`) while keeping verbose frontend asset logs silent.
+- **Google Veo 2 Video Generation Fix & Diagnostics**:
+  - Updated Google Veo default model endpoint in `mint-core` (`crates/mint-core/src/video_gen.rs`) from deprecated preview string `veo-2.0-flash-exp` to official model identifier `veo-2.0-generate-001`.
+  - Added automatic model fallback to `veo-2.0-flash-001` and descriptive error guidance (`ModelNotFound`) explaining Google Cloud / AI Studio API Key whitelisting requirements if 404 is returned.
+
+---
+
 ## 🎨 Image-to-Image & Inpainting (Image Editing) Support
 
 Mint Agent now supports full AI Image Editing (Image-to-Image and Inpainting)! Users can provide an existing image, specify modification instructions (such as *"remove background objects"*, *"change coat color to red"*), and generate edited images directly.

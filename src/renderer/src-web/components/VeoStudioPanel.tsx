@@ -36,8 +36,8 @@ const STYLE_SUGGESTIONS = [
 
 const PROVIDER_MODELS: Record<string, { value: string; label: string }[]> = {
   veo: [
-    { value: 'veo-2.0-flash-exp', label: 'Veo 2.0 Flash (Default)' },
-    { value: 'veo-3.0-flash-exp', label: 'Veo 3.0 Flash (Preview)' },
+    { value: 'veo-2.0-generate-001', label: 'Veo 2.0 Generate (Default)' },
+    { value: 'veo-2.0-flash-001', label: 'Veo 2.0 Flash' },
   ],
 }
 

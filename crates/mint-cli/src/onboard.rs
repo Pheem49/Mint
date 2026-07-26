@@ -78,7 +78,7 @@ const REPLICATE_MODEL_PRESETS: &[&str] = &[
 ];
 
 // ── Video Generation Providers ──────────────────────────────────────────────
-const VEO_VIDEO_MODEL_PRESETS: &[&str] = &["veo-2.0-flash-exp", "veo-3.0-flash-exp"];
+const VEO_VIDEO_MODEL_PRESETS: &[&str] = &["veo-2.0-generate-001", "veo-2.0-flash-001"];
 
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
@@ -1001,7 +1001,7 @@ pub async fn run() -> Result<()> {
             .extra
             .get("veoModel")
             .and_then(|v| v.as_str())
-            .unwrap_or("veo-2.0-flash-exp")
+            .unwrap_or("veo-2.0-generate-001")
             .to_string();
         let selected_veo_model = prompt_select_or_custom(
             "Veo Model",

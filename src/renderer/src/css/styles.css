@@ -4709,4 +4709,37 @@ input:checked + .slider:before {
   transform: scale(0.98);
 }
 
+/* Message action buttons (Copy, Read Aloud, Like, Dislike) */
+.msg-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-soft, #94a3b8);
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease-in-out;
+  opacity: 0.75;
+}
+
+.msg-action-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main, #f8fafc);
+  opacity: 1;
+}
+
+.msg-action-btn.is-copied {
+  color: var(--accent, #10b981) !important;
+  opacity: 1 !important;
+}
+
+.msg-action-btn.is-speaking {
+  color: var(--accent, #10b981) !important;
+  opacity: 1 !important;
+}
+
+
+
 

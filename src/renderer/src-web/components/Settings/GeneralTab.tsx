@@ -1052,12 +1052,12 @@ export default function GeneralTab({
               <div className="setting-row" style={{ marginTop: '12px' }}>
                 <label>Default Veo Model</label>
                 <select
-                  value={config.veoModel || 'veo-2.0-flash-exp'}
+                  value={config.veoModel || 'veo-2.0-generate-001'}
                   onChange={(e) => updateField('veoModel', e.target.value)}
                   style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', padding: '6px', borderRadius: '4px' }}
                 >
-                  <option value="veo-2.0-flash-exp">veo-2.0-flash-exp (Default)</option>
-                  <option value="veo-3.0-flash-exp">veo-3.0-flash-exp (Preview)</option>
+                  <option value="veo-2.0-generate-001">veo-2.0-generate-001 (Default)</option>
+                  <option value="veo-2.0-flash-001">veo-2.0-flash-001</option>
                 </select>
               </div>
             </div>

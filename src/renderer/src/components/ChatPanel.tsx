@@ -17,7 +17,7 @@ import { AgentActivityTable } from '../../shared/components/AgentActivityTable'
 import { ChatCodeBlock } from '../../shared/components/ChatCodeBlock'
 import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../../shared/utils/approval'
 import { ApprovalCard } from '../../shared/components/ApprovalCard'
-import { renderFormattedMessage, readableAssistantText, cleanSpeechText, renderSpeakerIcon } from '../../shared/utils/markdown'
+import { renderFormattedMessage, readableAssistantText, cleanSpeechText, renderSpeakerIcon, renderCopyIcon } from '../../shared/utils/markdown'
 import { ThinkingBlock } from '../../shared/components/ThinkingBlock'
 import { AgentActivityDrawer } from '../../shared/components/AgentActivityDrawer'
 import type { DiffHunk, FileChange } from '../../shared/types'
@@ -181,6 +181,22 @@ export default function ChatPanel({
     return () => clearInterval(timer)
   }, [sending])
   const [speakingText, setSpeakingText] = useState<string | null>(null)
+  const [copiedId, setCopiedId] = useState<string | number | null>(null)
+
+  const handleCopyMessage = async (id: string | number, text: string) => {
+    try {
+      const cleanText = readableAssistantText(text) || text
+      await navigator.clipboard.writeText(cleanText)
+      setCopiedId(id)
+      setTimeout(() => {
+        setCopiedId((current) => (current === id ? null : current))
+      }, 2000)
+    } catch (err) {
+      console.error('Failed to copy message:', err)
+    }
+  }
+
+
   const toolMenuRef = useRef<HTMLDivElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const speechRunRef = useRef(0)
@@ -1025,7 +1041,17 @@ export default function ChatPanel({
                 <div className="message user-message">
                   <div className="bubble-wrapper">
                     <div className="message-bubble">{renderFormattedMessage(interaction.userText)}</div>
-                    <div className="message-time"><span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+                    <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <button
+                        type="button"
+                        className={`msg-action-btn copy-btn ${copiedId === `user-${interaction.id}` ? 'is-copied' : ''}`}
+                        onClick={() => handleCopyMessage(`user-${interaction.id}`, interaction.userText)}
+                        title={copiedId === `user-${interaction.id}` ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy)'}
+                      >
+                        {renderCopyIcon(copiedId === `user-${interaction.id}`)}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1052,14 +1078,24 @@ export default function ChatPanel({
                   <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
                   {fallbackNotice(interaction) && <span className="provider-fallback-notice">{fallbackNotice(interaction)}</span>}
                   <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  <button
-                    type="button"
-                    className={`tts-btn ${speakingText === interaction.aiText ? 'is-speaking' : ''}`}
-                    onClick={() => speak(interaction.aiText)}
-                    title={speakingText === interaction.aiText ? 'Stop reading' : 'Read aloud'}
-                  >
-                    {renderSpeakerIcon(speakingText === interaction.aiText)}
-                  </button>
+                  <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+                    <button
+                      type="button"
+                      className={`msg-action-btn copy-btn ${copiedId === interaction.id ? 'is-copied' : ''}`}
+                      onClick={() => handleCopyMessage(interaction.id, interaction.aiText)}
+                      title={copiedId === interaction.id ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
+                    >
+                      {renderCopyIcon(copiedId === interaction.id)}
+                    </button>
+                    <button
+                      type="button"
+                      className={`msg-action-btn tts-btn ${speakingText === interaction.aiText ? 'is-speaking' : ''}`}
+                      onClick={() => speak(interaction.aiText)}
+                      title={speakingText === interaction.aiText ? 'Stop reading' : 'Read aloud'}
+                    >
+                      {renderSpeakerIcon(speakingText === interaction.aiText)}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1128,14 +1164,24 @@ export default function ChatPanel({
                     <button className="provider-badge">{badge(streamedResponse.provider, streamedResponse.model)}</button>
                     {activeFallbackNotice && <span className="provider-fallback-notice">{activeFallbackNotice}</span>}
                     {streamedReply && (
-                      <button
-                        type="button"
-                        className={`tts-btn ${speakingText === streamedReply ? 'is-speaking' : ''}`}
-                        onClick={() => speak(streamedReply)}
-                        title={speakingText === streamedReply ? 'Stop reading' : 'Read aloud'}
-                      >
-                        {renderSpeakerIcon(speakingText === streamedReply)}
-                      </button>
+                      <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+                        <button
+                          type="button"
+                          className={`msg-action-btn copy-btn ${copiedId === 'live' ? 'is-copied' : ''}`}
+                          onClick={() => handleCopyMessage('live', streamedReply)}
+                          title={copiedId === 'live' ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
+                        >
+                          {renderCopyIcon(copiedId === 'live')}
+                        </button>
+                        <button
+                          type="button"
+                          className={`msg-action-btn tts-btn ${speakingText === streamedReply ? 'is-speaking' : ''}`}
+                          onClick={() => speak(streamedReply)}
+                          title={speakingText === streamedReply ? 'Stop reading' : 'Read aloud'}
+                        >
+                          {renderSpeakerIcon(speakingText === streamedReply)}
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}

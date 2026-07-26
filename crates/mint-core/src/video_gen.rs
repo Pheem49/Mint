@@ -37,6 +37,8 @@ pub enum VideoGenError {
     Timeout,
     #[error("failed to save generated video: {0}")]
     SaveError(String),
+    #[error("Google Veo model endpoint returned 404 Not Found. Google Veo video generation requires an API Key or Google Cloud project with Veo Model access enabled: {0}")]
+    ModelNotFound(String),
 }
 
 pub async fn generate_video(
@@ -52,7 +54,7 @@ pub async fn generate_video(
         return Err(VideoGenError::MissingApiKey);
     }
 
-    let model_owned = request
+    let mut model_owned = request
         .model
         .as_deref()
         .map(str::trim)
@@ -63,14 +65,17 @@ pub async fn generate_video(
                 .extra
                 .get("veoModel")
                 .and_then(|v| v.as_str())
-                .unwrap_or("veo-2.0-flash-exp")
+                .unwrap_or("veo-2.0-generate-001")
                 .to_string()
         });
-    let model = &model_owned;
+
+    if model_owned == "veo-2.0-flash-exp" {
+        model_owned = "veo-2.0-generate-001".to_string();
+    }
 
     let client = crate::HTTP_CLIENT.clone();
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{model}:predictLongRunning"
+    let mut url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/{model_owned}:predictLongRunning"
     );
 
     let payload = json!({
@@ -86,15 +91,40 @@ pub async fn generate_video(
         }
     });
 
-    let res: Value = client
+    let mut response_res = client
         .post(&url)
         .header("x-goog-api-key", &api_key)
         .json(&payload)
         .send()
-        .await?
-        .error_for_status()?
-        .json()
         .await?;
+
+    if response_res.status() == reqwest::StatusCode::NOT_FOUND && model_owned != "veo-2.0-flash-001" {
+        model_owned = "veo-2.0-flash-001".to_string();
+        url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{model_owned}:predictLongRunning"
+        );
+        response_res = client
+            .post(&url)
+            .header("x-goog-api-key", &api_key)
+            .json(&payload)
+            .send()
+            .await?;
+    }
+
+    if !response_res.status().is_success() {
+        let status = response_res.status();
+        let err_text = response_res.text().await.unwrap_or_default();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(VideoGenError::ModelNotFound(format!(
+                "404 for model {model_owned} on generativelanguage.googleapis.com API. ({err_text})"
+            )));
+        }
+        return Err(VideoGenError::UnexpectedResponse(format!(
+            "HTTP {status}: {err_text}"
+        )));
+    }
+
+    let res: Value = response_res.json().await?;
 
     let operation_name = res
         .get("name")
@@ -195,7 +225,7 @@ pub async fn generate_video(
 
     Ok(VideoGenResponse {
         videos: saved,
-        model: model.to_string(),
+        model: model_owned,
         provider: "veo".to_string(),
         prompt: request.prompt.clone(),
     })
