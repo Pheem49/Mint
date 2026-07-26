@@ -79,12 +79,24 @@ pub async fn run_code_agent_with_options(
         match approval {
             AgentApproval::WriteFile { path, diff, .. } => {
                 let (additions, deletions) = diff_stats(diff);
-                let colored_stats = format!("{DIM}({RESET}{GREEN}+{}{RESET} {RED}-{}{RESET}{DIM}){RESET}", additions, deletions);
+                let colored_stats = format!(
+                    "{DIM}({RESET}{GREEN}+{}{RESET} {RED}-{}{RESET}{DIM}){RESET}",
+                    additions, deletions
+                );
                 let target_str = format!("{} {}", path, colored_stats);
-                print_approval_card("File Creation / Write", &[("Target", &target_str), ("Action", "Write File")]);
-                println!("  {DIM}Proposed edit for {RESET}{BRIGHT}{}{RESET} {}:", path, colored_stats);
+                print_approval_card(
+                    "File Creation / Write",
+                    &[("Target", &target_str), ("Action", "Write File")],
+                );
+                println!(
+                    "  {DIM}Proposed edit for {RESET}{BRIGHT}{}{RESET} {}:",
+                    path, colored_stats
+                );
                 print_colored_diff(diff);
-                if confirm_pausing_interrupt(&format!("Approve writing file '{}'?", path), &approve_approval_active) {
+                if confirm_pausing_interrupt(
+                    &format!("Approve writing file '{}'?", path),
+                    &approve_approval_active,
+                ) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
@@ -92,12 +104,24 @@ pub async fn run_code_agent_with_options(
             }
             AgentApproval::ApplyPatch { path, diff, .. } => {
                 let (additions, deletions) = diff_stats(diff);
-                let colored_stats = format!("{DIM}({RESET}{GREEN}+{}{RESET} {RED}-{}{RESET}{DIM}){RESET}", additions, deletions);
+                let colored_stats = format!(
+                    "{DIM}({RESET}{GREEN}+{}{RESET} {RED}-{}{RESET}{DIM}){RESET}",
+                    additions, deletions
+                );
                 let target_str = format!("{} {}", path, colored_stats);
-                print_approval_card("File Modification", &[("Target", &target_str), ("Action", "Apply Patch")]);
-                println!("  {DIM}Proposed edit for {RESET}{BRIGHT}{}{RESET} {}:", path, colored_stats);
+                print_approval_card(
+                    "File Modification",
+                    &[("Target", &target_str), ("Action", "Apply Patch")],
+                );
+                println!(
+                    "  {DIM}Proposed edit for {RESET}{BRIGHT}{}{RESET} {}:",
+                    path, colored_stats
+                );
                 print_colored_diff(diff);
-                if confirm_pausing_interrupt(&format!("Approve patching file '{}'?", path), &approve_approval_active) {
+                if confirm_pausing_interrupt(
+                    &format!("Approve patching file '{}'?", path),
+                    &approve_approval_active,
+                ) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
@@ -119,10 +143,8 @@ pub async fn run_code_agent_with_options(
             }
             AgentApproval::NoteWrite { path, .. } => {
                 print_approval_card("Note Creation", &[("Path", path)]);
-                if confirm_pausing_interrupt(
-                    "Approve writing this note?",
-                    &approve_approval_active,
-                ) {
+                if confirm_pausing_interrupt("Approve writing this note?", &approve_approval_active)
+                {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
@@ -142,17 +164,19 @@ pub async fn run_code_agent_with_options(
                     Ok(ApprovalOutcome::Denied)
                 }
             }
-            AgentApproval::McpTool { server, tool, arguments } => {
+            AgentApproval::McpTool {
+                server,
+                tool,
+                arguments,
+            } => {
                 let mut fields = vec![("Server", server.as_str()), ("Tool", tool.as_str())];
                 let formatted_args = arguments.to_string();
-                if !formatted_args.is_empty() && formatted_args != "{}" && formatted_args != "null" {
+                if !formatted_args.is_empty() && formatted_args != "{}" && formatted_args != "null"
+                {
                     fields.push(("Arguments", &formatted_args));
                 }
                 print_approval_card("MCP Tool Call", &fields);
-                if confirm_pausing_interrupt(
-                    "Approve MCP tool call?",
-                    &approve_approval_active,
-                ) {
+                if confirm_pausing_interrupt("Approve MCP tool call?", &approve_approval_active) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
@@ -163,10 +187,7 @@ pub async fn run_code_agent_with_options(
                     "Security Authorization",
                     &[("Title", title), ("Detail", prompt)],
                 );
-                if confirm_pausing_interrupt(
-                    "Approve this request?",
-                    &approve_approval_active,
-                ) {
+                if confirm_pausing_interrupt("Approve this request?", &approve_approval_active) {
                     Ok(ApprovalOutcome::Approved)
                 } else {
                     Ok(ApprovalOutcome::Denied)
@@ -1132,7 +1153,10 @@ fn print_approval_card(title: &str, fields: &[(&str, &str)]) {
     let bot_bar = format!("  {DIM}{}┴{}{RESET}", "─".repeat(11), "─".repeat(56));
 
     println!();
-    println!("  {BRIGHT}APPROVAL REQUIRED{RESET} {DIM}•{RESET} {BLUE}{}{RESET}", title);
+    println!(
+        "  {BRIGHT}APPROVAL REQUIRED{RESET} {DIM}•{RESET} {BLUE}{}{RESET}",
+        title
+    );
     println!("{}", top_bar);
     for (label, val) in fields {
         let val_lines: Vec<&str> = val.lines().collect();

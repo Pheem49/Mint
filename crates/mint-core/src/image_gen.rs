@@ -85,7 +85,9 @@ pub enum ImageGenError {
     // ── Generic ──────────────────────────────────────────────────────────────
     #[error("unsupported image generation provider: {0}")]
     UnsupportedProvider(String),
-    #[error("image-to-image editing is not supported by {0} — please use Replicate, Stability AI, or DALL·E")]
+    #[error(
+        "image-to-image editing is not supported by {0} — please use Replicate, Stability AI, or DALL·E"
+    )]
     UnsupportedMode(String),
     #[error("API request failed: {0}")]
     Request(#[from] reqwest::Error),
@@ -306,19 +308,30 @@ async fn call_dalle(
         ];
         if let Some(ref neg) = request.negative_prompt {
             if !neg.trim().is_empty() {
-                text_fields.push(("prompt".to_owned(), format!("{} (avoid: {})", request.prompt, neg)));
+                text_fields.push((
+                    "prompt".to_owned(),
+                    format!("{} (avoid: {})", request.prompt, neg),
+                ));
             }
         }
 
-        let mut file_fields = vec![
-            ("image", "image.png", mime_type.as_str(), img_bytes.as_slice()),
-        ];
+        let mut file_fields = vec![(
+            "image",
+            "image.png",
+            mime_type.as_str(),
+            img_bytes.as_slice(),
+        )];
 
         let mask_bytes_storage;
         if let Some(ref mask_data_uri) = request.mask_data_uri {
             if let Some((mask_mime, mask_bytes)) = parse_data_uri(mask_data_uri) {
                 mask_bytes_storage = (mask_mime, mask_bytes);
-                file_fields.push(("mask", "mask.png", mask_bytes_storage.0.as_str(), mask_bytes_storage.1.as_slice()));
+                file_fields.push((
+                    "mask",
+                    "mask.png",
+                    mask_bytes_storage.0.as_str(),
+                    mask_bytes_storage.1.as_slice(),
+                ));
             }
         }
 
@@ -507,7 +520,8 @@ async fn call_stability(
         let (mime_type, img_bytes) = parse_data_uri(img_uri)
             .ok_or_else(|| ImageGenError::ModelError("invalid base64 image data URI".to_owned()))?;
 
-        let is_inpaint = request.mask_data_uri.is_some() || request.mode.as_deref() == Some("inpaint");
+        let is_inpaint =
+            request.mask_data_uri.is_some() || request.mode.as_deref() == Some("inpaint");
         let endpoint = if is_inpaint {
             "https://api.stability.ai/v2beta/stable-image/edit/inpaint".to_owned()
         } else {
@@ -531,16 +545,29 @@ async fn call_stability(
             }
         }
 
-        let mut file_fields = vec![("image", "input.png", mime_type.as_str(), img_bytes.as_slice())];
+        let mut file_fields = vec![(
+            "image",
+            "input.png",
+            mime_type.as_str(),
+            img_bytes.as_slice(),
+        )];
         let mask_storage;
         if let Some(ref mask_uri) = request.mask_data_uri {
             if let Some((mask_mime, mask_bytes)) = parse_data_uri(mask_uri) {
                 mask_storage = (mask_mime, mask_bytes);
-                file_fields.push(("mask", "mask.png", mask_storage.0.as_str(), mask_storage.1.as_slice()));
+                file_fields.push((
+                    "mask",
+                    "mask.png",
+                    mask_storage.0.as_str(),
+                    mask_storage.1.as_slice(),
+                ));
             }
         }
 
-        (endpoint, build_multipart_binary(&boundary, &body_parts, &file_fields))
+        (
+            endpoint,
+            build_multipart_binary(&boundary, &body_parts, &file_fields),
+        )
     } else {
         // Route: Stable Image Core uses /core; SD3.x models use /sd3
         let (endpoint, model_param) = if model == "core" {
@@ -574,7 +601,10 @@ async fn call_stability(
             body_parts.push(("model".into(), m));
         }
 
-        (endpoint, build_multipart_text(&boundary, &body_parts).into_bytes())
+        (
+            endpoint,
+            build_multipart_text(&boundary, &body_parts).into_bytes(),
+        )
     };
 
     let response = client

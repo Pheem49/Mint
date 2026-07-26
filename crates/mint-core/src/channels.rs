@@ -65,13 +65,20 @@ async fn telegram_loop() -> Result<(), String> {
             if let Ok(config) = load_config() {
                 if config.bridge_ack_enabled() {
                     let _ = client
-                        .post(format!("https://api.telegram.org/bot{token}/sendChatAction"))
+                        .post(format!(
+                            "https://api.telegram.org/bot{token}/sendChatAction"
+                        ))
                         .json(&json!({ "chat_id": chat_id, "action": "typing" }))
                         .send()
                         .await;
                 }
             }
-            let answer = answer_channel(text, "Reply concisely for a Telegram chat.", Some(formatted_chat_id)).await;
+            let answer = answer_channel(
+                text,
+                "Reply concisely for a Telegram chat.",
+                Some(formatted_chat_id),
+            )
+            .await;
             let _ = client
                 .post(format!("https://api.telegram.org/bot{token}/sendMessage"))
                 .json(&json!({ "chat_id": chat_id, "text": answer }))
@@ -186,7 +193,12 @@ async fn slack_loop() -> Result<(), String> {
             continue;
         };
         let formatted_chat_id = format!("slack:{channel}");
-        let reply = answer_channel(text, "Reply concisely for a Slack chat.", Some(formatted_chat_id)).await;
+        let reply = answer_channel(
+            text,
+            "Reply concisely for a Slack chat.",
+            Some(formatted_chat_id),
+        )
+        .await;
         let _ = crate::HTTP_CLIENT
             .clone()
             .post("https://slack.com/api/chat.postMessage")
@@ -201,21 +213,51 @@ async fn slack_loop() -> Result<(), String> {
 pub fn is_action_intent(text: &str) -> bool {
     let lower = text.to_lowercase();
     let action_keywords = [
-        "แก้", "สร้าง", "ลบ", "รัน", "ตรวจ", "ค้นหา", "เช็ค", "ดูไฟล์", "อ่านไฟล์", "วิเคราะห์ไฟล์",
-        "fix", "create", "build", "run", "delete", "edit", "update", "check", "find", "search",
-        "read file", "git", "patch", "test", "analyze file"
+        "แก้",
+        "สร้าง",
+        "ลบ",
+        "รัน",
+        "ตรวจ",
+        "ค้นหา",
+        "เช็ค",
+        "ดูไฟล์",
+        "อ่านไฟล์",
+        "วิเคราะห์ไฟล์",
+        "fix",
+        "create",
+        "build",
+        "run",
+        "delete",
+        "edit",
+        "update",
+        "check",
+        "find",
+        "search",
+        "read file",
+        "git",
+        "patch",
+        "test",
+        "analyze file",
     ];
-    action_keywords.iter().any(|&keyword| lower.contains(keyword))
+    action_keywords
+        .iter()
+        .any(|&keyword| lower.contains(keyword))
 }
 
-pub async fn answer_channel(text: &str, system_instruction: &str, chat_id: Option<String>) -> String {
+pub async fn answer_channel(
+    text: &str,
+    system_instruction: &str,
+    chat_id: Option<String>,
+) -> String {
     let Ok(config) = load_config() else {
         return "Mint config error".into();
     };
     let workspace = config.active_workspace_path();
     let workspace_str = workspace.as_ref().map(|p| p.to_string_lossy().to_string());
 
-    if is_action_intent(text) && let Some(ref root_path) = workspace {
+    if is_action_intent(text)
+        && let Some(ref root_path) = workspace
+    {
         if root_path.exists() {
             let agent_result = crate::orchestrate_agent_loop(
                 &config,

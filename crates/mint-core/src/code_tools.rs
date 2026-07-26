@@ -403,10 +403,7 @@ fn sha256(content: &str) -> String {
 fn full_file_diff(path: &Path, previous: &str, next: &str) -> String {
     let label = path.display();
     let diff = TextDiff::from_lines(previous, next);
-    let mut lines = vec![
-        format!("--- a/{label}"),
-        format!("+++ b/{label}"),
-    ];
+    let mut lines = vec![format!("--- a/{label}"), format!("+++ b/{label}")];
 
     for group in diff.grouped_ops(3) {
         let mut first = true;
@@ -416,7 +413,9 @@ fn full_file_diff(path: &Path, previous: &str, next: &str) -> String {
                 let old_len = op.old_range().len();
                 let new_start = op.new_range().start + 1;
                 let new_len = op.new_range().len();
-                lines.push(format!("@@ -{old_start},{old_len} +{new_start},{new_len} @@"));
+                lines.push(format!(
+                    "@@ -{old_start},{old_len} +{new_start},{new_len} @@"
+                ));
                 first = false;
             }
             for change in diff.iter_changes(&op) {

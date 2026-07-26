@@ -276,10 +276,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     };
 
                     if let Some(home) = dirs::home_dir() {
-                        let global_agents_path = home.join(".gemini").join("config").join("AGENTS.md");
+                        let global_agents_path =
+                            home.join(".gemini").join("config").join("AGENTS.md");
                         crate::skills::load_agent_rules_file(&global_agents_path, &mut skills);
 
-                        let global_skills_path = home.join(".config").join("mint").join("mint-skills");
+                        let global_skills_path =
+                            home.join(".config").join("mint").join("mint-skills");
                         crate::skills::load_skills_from_dir(&global_skills_path, &mut skills);
                     }
 
@@ -301,7 +303,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     }
 
                     let list: Vec<_> = unique_skills.into_values().collect();
-                    send_json_response(socket, "200 OK", &serde_json::to_string(&list).unwrap_or_default()).await;
+                    send_json_response(
+                        socket,
+                        "200 OK",
+                        &serde_json::to_string(&list).unwrap_or_default(),
+                    )
+                    .await;
                     return;
                 }
                 ("GET", "/api/profile") => {
@@ -348,11 +355,14 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     if let Ok(req) = serde_json::from_str::<ActiveModelReq>(body)
                         && let Ok(mut config) = load_config()
                     {
-                        if let Ok(display_name) = config.set_active_model(&req.provider, req.model.as_deref()) {
+                        if let Ok(display_name) =
+                            config.set_active_model(&req.provider, req.model.as_deref())
+                        {
                             send_json_response(
                                 socket,
                                 "200 OK",
-                                &serde_json::json!({ "status": "ok", "displayName": display_name }).to_string(),
+                                &serde_json::json!({ "status": "ok", "displayName": display_name })
+                                    .to_string(),
                             )
                             .await;
                             return;
@@ -690,7 +700,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
                         match response {
                             Ok(resp) => {
-                                log_api_req("POST", "/api/chat", "200 OK", Some(&format!("Model: {}", config.ai_provider)));
+                                log_api_req(
+                                    "POST",
+                                    "/api/chat",
+                                    "200 OK",
+                                    Some(&format!("Model: {}", config.ai_provider)),
+                                );
                                 if let Some(image) = sent_image {
                                     let _ = save_chat_images(
                                         image
@@ -865,7 +880,15 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
                                         match result {
                                             Ok((response, _)) => {
-                                                log_api_req("POST", "/api/chat-stream", "200 OK", Some(&format!("Provider: {}", config_clone.ai_provider)));
+                                                log_api_req(
+                                                    "POST",
+                                                    "/api/chat-stream",
+                                                    "200 OK",
+                                                    Some(&format!(
+                                                        "Provider: {}",
+                                                        config_clone.ai_provider
+                                                    )),
+                                                );
                                                 if let Ok(json_val) =
                                                     serde_json::to_string(&serde_json::json!({
                                                         "type": "done",
@@ -1071,7 +1094,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         };
                         match generate_images(&config, &gen_request).await {
                             Ok(result) => {
-                                log_api_req("POST", "/api/image-generate", "200 OK", Some(&format!("Provider: {}", result.provider)));
+                                log_api_req(
+                                    "POST",
+                                    "/api/image-generate",
+                                    "200 OK",
+                                    Some(&format!("Provider: {}", result.provider)),
+                                );
                                 let data_uris: Vec<String> = result
                                     .images
                                     .iter()
@@ -1182,7 +1210,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                         }
                                     }
                                 }
-                                log_api_req("POST", "/api/video-generate", "200 OK", Some(&format!("Provider: {}", result.provider)));
+                                log_api_req(
+                                    "POST",
+                                    "/api/video-generate",
+                                    "200 OK",
+                                    Some(&format!("Provider: {}", result.provider)),
+                                );
                                 send_json_response(socket, "200 OK", &response.to_string()).await;
                             }
                             Err(e) => {
