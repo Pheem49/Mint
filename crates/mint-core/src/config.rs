@@ -259,7 +259,11 @@ impl MintConfig {
     }
 
     /// Sets the active provider and model, saves the configuration to disk, and logs a system event interaction.
-    pub fn set_active_model(&mut self, provider: &str, model: Option<&str>) -> Result<String, ConfigError> {
+    pub fn set_active_model(
+        &mut self,
+        provider: &str,
+        model: Option<&str>,
+    ) -> Result<String, ConfigError> {
         let old_provider = self.ai_provider.clone();
         let old_active_model = self.active_model().to_string();
 
@@ -368,7 +372,10 @@ impl MintConfig {
     pub fn line_webhook_port(&self) -> u16 {
         self.extra
             .get("lineWebhookPort")
-            .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+            .and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
             .map(|p| p as u16)
             .unwrap_or(3000)
     }
@@ -386,7 +393,10 @@ impl MintConfig {
     pub fn whatsapp_webhook_port(&self) -> u16 {
         self.extra
             .get("whatsappWebhookPort")
-            .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+            .and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
             .map(|p| p as u16)
             .unwrap_or(3001)
     }

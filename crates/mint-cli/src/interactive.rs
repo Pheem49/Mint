@@ -580,7 +580,10 @@ pub async fn handle_slash_command(
             }
             match image::load_image_as_data_uri(std::path::Path::new(&img_path)) {
                 Ok(uri) => {
-                    println!("{DIM}Editing image with prompt: \"{}\"...{RESET}", instruction);
+                    println!(
+                        "{DIM}Editing image with prompt: \"{}\"...{RESET}",
+                        instruction
+                    );
                     let req = mint_core::ImageGenRequest {
                         prompt: instruction.to_owned(),
                         negative_prompt: None,
@@ -600,8 +603,14 @@ pub async fn handle_slash_command(
                     match handle.join() {
                         Ok(Ok(resp)) => {
                             if let Some(first) = resp.images.first() {
-                                println!("{DIM}Image edited successfully using {} ({}){RESET}\n", resp.provider, resp.model);
-                                println!("{DIM}Image data URI prefix: {}{RESET}\n", &first.data_uri[..first.data_uri.len().min(60)]);
+                                println!(
+                                    "{DIM}Image edited successfully using {} ({}){RESET}\n",
+                                    resp.provider, resp.model
+                                );
+                                println!(
+                                    "{DIM}Image data URI prefix: {}{RESET}\n",
+                                    &first.data_uri[..first.data_uri.len().min(60)]
+                                );
                             }
                         }
                         Ok(Err(e)) => {
@@ -2626,7 +2635,10 @@ pub fn confirm(prompt: &str) -> Result<bool> {
 
     let options_with_desc = [
         ("Approve (Once)", "Allow single execution"),
-        ("Approve (Entire Session)", "Auto-approve throughout session"),
+        (
+            "Approve (Entire Session)",
+            "Auto-approve throughout session",
+        ),
         ("Deny", "Cancel action"),
     ];
     let mut selected = 0;
@@ -2641,12 +2653,7 @@ pub fn confirm(prompt: &str) -> Result<bool> {
                     desc
                 );
             } else {
-                println!(
-                    "    {DIM}{}. {:<24} - {}{RESET}",
-                    i + 1,
-                    opt,
-                    desc
-                );
+                println!("    {DIM}{}. {:<24} - {}{RESET}", i + 1, opt, desc);
             }
         }
         io::stdout().flush()?;

@@ -37,7 +37,9 @@ pub enum VideoGenError {
     Timeout,
     #[error("failed to save generated video: {0}")]
     SaveError(String),
-    #[error("Google Veo model endpoint returned 404 Not Found. Google Veo video generation requires an API Key or Google Cloud project with Veo Model access enabled: {0}")]
+    #[error(
+        "Google Veo model endpoint returned 404 Not Found. Google Veo video generation requires an API Key or Google Cloud project with Veo Model access enabled: {0}"
+    )]
     ModelNotFound(String),
 }
 
@@ -98,7 +100,8 @@ pub async fn generate_video(
         .send()
         .await?;
 
-    if response_res.status() == reqwest::StatusCode::NOT_FOUND && model_owned != "veo-2.0-flash-001" {
+    if response_res.status() == reqwest::StatusCode::NOT_FOUND && model_owned != "veo-2.0-flash-001"
+    {
         model_owned = "veo-2.0-flash-001".to_string();
         url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{model_owned}:predictLongRunning"

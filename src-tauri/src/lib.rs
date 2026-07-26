@@ -308,7 +308,11 @@ fn update_config(app: AppHandle, config: MintConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_active_model(app: AppHandle, provider: String, model: Option<String>) -> Result<String, String> {
+fn set_active_model(
+    app: AppHandle,
+    provider: String,
+    model: Option<String>,
+) -> Result<String, String> {
     let mut config = load_config().map_err(|error| error.to_string())?;
     let display_name = config
         .set_active_model(&provider, model.as_deref())
@@ -326,8 +330,16 @@ fn inspect_shell_command(command: String) -> mint_core::ShellClassification {
 async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatResponse, String> {
     let mut config = load_config().map_err(|error| error.to_string())?;
     if let Some(ref path) = request.workspace_path {
-        if !path.trim().is_empty() && config.extra.get("activeWorkspacePath").and_then(Value::as_str) != Some(path.as_str()) {
-            config.extra.insert("activeWorkspacePath".into(), Value::String(path.clone()));
+        if !path.trim().is_empty()
+            && config
+                .extra
+                .get("activeWorkspacePath")
+                .and_then(Value::as_str)
+                != Some(path.as_str())
+        {
+            config
+                .extra
+                .insert("activeWorkspacePath".into(), Value::String(path.clone()));
             let _ = save_config(&config);
         }
     }
@@ -471,8 +483,16 @@ async fn stream_chat_message(
 ) -> Result<ChatResponse, String> {
     let mut config = load_config().map_err(|error| error.to_string())?;
     if let Some(ref path) = request.workspace_path {
-        if !path.trim().is_empty() && config.extra.get("activeWorkspacePath").and_then(Value::as_str) != Some(path.as_str()) {
-            config.extra.insert("activeWorkspacePath".into(), Value::String(path.clone()));
+        if !path.trim().is_empty()
+            && config
+                .extra
+                .get("activeWorkspacePath")
+                .and_then(Value::as_str)
+                != Some(path.as_str())
+        {
+            config
+                .extra
+                .insert("activeWorkspacePath".into(), Value::String(path.clone()));
             let _ = save_config(&config);
         }
     }
