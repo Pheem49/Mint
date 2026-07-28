@@ -6,6 +6,20 @@
 import { Fragment, type ReactNode } from 'react'
 import { ChatCodeBlock } from '../components/ChatCodeBlock'
 
+export const resolveMediaUrl = (url: string): string => {
+  if (!url) return ''
+  if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
+    return url
+  }
+  if (url.startsWith('/api/')) {
+    const origin = typeof window !== 'undefined' && window.location.port === '9000'
+      ? 'http://localhost:3000'
+      : (typeof window !== 'undefined' ? window.location.origin : '')
+    return `${origin}${url}`
+  }
+  return url
+}
+
 export const isTableLine = (line: string): boolean => {
   const trimmed = line.trim()
   return trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 1
@@ -121,17 +135,28 @@ export function renderFormattedMessage(text: string): ReactNode {
         )
       }
 
-      // Match markdown links [label](url)
-      const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g
-      const linkMatches: Array<{ index: number; length: number; label: string; url: string }> = []
+      // Match markdown images ![alt](url) OR markdown links [label](url)
+      const mediaOrLinkRegex = /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g
+      const linkMatches: Array<{ index: number; length: number; label: string; url: string; isImage: boolean }> = []
       let match: RegExpExecArray | null
-      while ((match = linkRegex.exec(codePart)) !== null) {
-        linkMatches.push({
-          index: match.index,
-          length: match[0].length,
-          label: match[1],
-          url: match[2],
-        })
+      while ((match = mediaOrLinkRegex.exec(codePart)) !== null) {
+        if (match[0].startsWith('!')) {
+          linkMatches.push({
+            index: match.index,
+            length: match[0].length,
+            label: match[1] || 'Generated Image',
+            url: match[2],
+            isImage: true,
+          })
+        } else {
+          linkMatches.push({
+            index: match.index,
+            length: match[0].length,
+            label: match[3],
+            url: match[4],
+            isImage: false,
+          })
+        }
       }
 
       const renderTextAndFormatting = (subStr: string, keyPrefix: string): ReactNode => {
@@ -188,17 +213,25 @@ export function renderFormattedMessage(text: string): ReactNode {
         if (lMatch.index > lastIdx) {
           linkElements.push(renderTextAndFormatting(codePart.slice(lastIdx, lMatch.index), `c-${codeIndex}-pre-${lIdx}`))
         }
-        linkElements.push(
-          <a
-            key={`link-${codeIndex}-${lIdx}`}
-            href={lMatch.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="chat-link"
-          >
-            {renderTextAndFormatting(lMatch.label, `c-${codeIndex}-label-${lIdx}`)}
-          </a>
-        )
+        if (lMatch.isImage) {
+          linkElements.push(
+            <div key={`img-${codeIndex}-${lIdx}`} className="chat-media-card" style={{ margin: '8px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
+              <img src={resolveMediaUrl(lMatch.url)} alt={lMatch.label} style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
+            </div>
+          )
+        } else {
+          linkElements.push(
+            <a
+              key={`link-${codeIndex}-${lIdx}`}
+              href={lMatch.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="chat-link"
+            >
+              {renderTextAndFormatting(lMatch.label, `c-${codeIndex}-label-${lIdx}`)}
+            </a>
+          )
+        }
         lastIdx = lMatch.index + lMatch.length
       })
       if (lastIdx < codePart.length) {
@@ -395,6 +428,33 @@ export function renderFormattedMessage(text: string): ReactNode {
     // Empty line -> flush paragraph (creates paragraph gap)
     if (!trimmedLine) {
       flushParagraph(i)
+      continue
+    }
+
+    // Markdown Images: ![alt](url)
+    const imgMatch = trimmedLine.match(/^!\[([^\]]*)\]\(([^)]+)\)$/)
+    if (imgMatch) {
+      flushParagraph(i)
+      const alt = imgMatch[1] || 'Generated Image'
+      const src = imgMatch[2]
+      blocks.push(
+        <div key={`img-${i}`} className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
+          <img src={resolveMediaUrl(src)} alt={alt} style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
+        </div>
+      )
+      continue
+    }
+
+    // HTML5 Video tag: <video ... src="url" ...></video>
+    const videoMatch = trimmedLine.match(/<video[^>]*src="([^"]+)"[^>]*>/)
+    if (videoMatch) {
+      flushParagraph(i)
+      const videoSrc = videoMatch[1]
+      blocks.push(
+        <div key={`video-${i}`} className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: '#000' }}>
+          <video controls src={resolveMediaUrl(videoSrc)} style={{ width: '100%', maxHeight: '400px', borderRadius: '8px', display: 'block' }} />
+        </div>
+      )
       continue
     }
 

@@ -272,6 +272,11 @@ enum Command {
         #[arg(long)]
         output: Option<PathBuf>,
     },
+    /// AI Video Editor — inspect, edit, and process local video files with FFmpeg.
+    Video {
+        #[command(subcommand)]
+        command: VideoCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -512,6 +517,127 @@ enum SafetyCommand {
         path: PathBuf,
         #[arg(long)]
         write: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum VideoCommand {
+    /// Inspect a video file and print its metadata (duration, fps, resolution, etc.).
+    Load {
+        /// Path to the video file.
+        path: PathBuf,
+    },
+    /// Trim a video between start and end seconds.
+    Trim {
+        /// Path to the input video.
+        input: PathBuf,
+        /// Trim start in seconds.
+        #[arg(long)]
+        start: f64,
+        /// Trim end in seconds.
+        #[arg(long)]
+        end: f64,
+        /// Output file path.
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Resize a video. Use -1 for width or height to preserve aspect ratio.
+    Resize {
+        input: PathBuf,
+        #[arg(long, default_value_t = -1)]
+        width: i32,
+        #[arg(long, default_value_t = -1)]
+        height: i32,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Merge multiple video files into one.
+    Merge {
+        /// Input video files (space-separated).
+        #[arg(required = true)]
+        inputs: Vec<PathBuf>,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Extract the audio track from a video as a WAV file.
+    ExtractAudio {
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Remove silent sections from a video.
+    RemoveSilence {
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        /// Silence threshold in dB (default: -30)
+        #[arg(long, default_value_t = -30.0)]
+        threshold: f64,
+        /// Minimum silence duration in seconds to remove (default: 0.5)
+        #[arg(long, default_value_t = 0.5)]
+        min_duration: f64,
+    },
+    /// Re-encode a video to a target resolution, fps, and codec.
+    Export {
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        /// e.g. "1920x1080", "1280x720"
+        #[arg(long)]
+        resolution: Option<String>,
+        #[arg(long)]
+        fps: Option<u32>,
+        /// Video codec: libx264 (default), libx265, libvpx-vp9
+        #[arg(long)]
+        codec: Option<String>,
+        /// CRF quality 0-51 (lower = better, default 23)
+        #[arg(long)]
+        crf: Option<u32>,
+    },
+    /// Transcribe speech in audio/video to an SRT subtitle file.
+    Transcribe {
+        input: PathBuf,
+        #[arg(long)]
+        language: Option<String>,
+        /// Output .srt file path.
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Burn subtitles into a video with style preset (default, tiktok, minimal).
+    Subtitle {
+        input: PathBuf,
+        /// Path to .srt file or raw SRT string content.
+        #[arg(long)]
+        srt: String,
+        /// Style preset: default, tiktok, minimal
+        #[arg(long, default_value = "default")]
+        style: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Translate an SRT subtitle file to another language.
+    TranslateSubtitle {
+        srt: PathBuf,
+        #[arg(long)]
+        lang: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Automatically make viral vertical Shorts clips from a video.
+    MakeShorts {
+        input: PathBuf,
+        /// Destination folder for generated shorts clips.
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        /// Number of clips to generate (default: 3).
+        #[arg(long, default_value_t = 3)]
+        clips: u32,
+        /// Target duration in seconds for each clip (default: 60).
+        #[arg(long, default_value_t = 60.0)]
+        duration: f64,
+        /// Disable burning vertical TikTok-style subtitles.
+        #[arg(long, default_value_t = false)]
+        no_subtitles: bool,
     },
 }
 
@@ -1402,6 +1528,191 @@ async fn main() -> Result<()> {
                         spinner.finish_and_clear();
                         eprintln!("{ERROR}✗ Video generation failed: {e}{RESET}");
                         anyhow::bail!("video generation failed: {e}");
+                    }
+                }
+            }
+            Command::Video { command } => {
+                use mint_core::{
+                    ExportRequest, ExtractAudioRequest, MergeRequest, RemoveSilenceRequest,
+                    ResizeRequest, TrimRequest, video_export, video_extract_audio, video_load,
+                    video_merge, video_remove_silence, video_resize, video_trim,
+                };
+                match command {
+                    VideoCommand::Load { path } => {
+                        let path_str = path.to_string_lossy().to_string();
+                        match video_load(&path_str) {
+                            Ok(info) => {
+                                println!("{MINT}✓ Video loaded:{RESET}");
+                                println!("  Path:        {}", info.path);
+                                println!("  Duration:    {:.2}s", info.duration);
+                                println!("  Resolution:  {}x{}", info.width, info.height);
+                                println!("  FPS:         {:.2}", info.fps);
+                                println!("  Audio:       {} stream(s)", info.audio_streams);
+                                println!("  Format:      {}", info.format);
+                                println!("  Size:        {} bytes", info.size_bytes);
+                            }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Failed to load video: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                    VideoCommand::Trim { input, start, end, output } => {
+                        println!("{BLUE}→ Trimming {:.2}s–{:.2}s...{RESET}", start, end);
+                        let req = TrimRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output: output.to_string_lossy().to_string(),
+                            start,
+                            end,
+                        };
+                        match video_trim(&req) {
+                            Ok(r) => println!("{MINT}✓ Trimmed → {}{RESET}", r.output_path),
+                            Err(e) => { eprintln!("{ERROR}✗ Trim failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                        }
+                    }
+                    VideoCommand::Resize { input, width, height, output } => {
+                        println!("{BLUE}→ Resizing to {}x{}...{RESET}", width, height);
+                        let req = ResizeRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output: output.to_string_lossy().to_string(),
+                            width,
+                            height,
+                        };
+                        match video_resize(&req) {
+                            Ok(r) => println!("{MINT}✓ Resized → {}{RESET}", r.output_path),
+                            Err(e) => { eprintln!("{ERROR}✗ Resize failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                        }
+                    }
+                    VideoCommand::Merge { inputs, output } => {
+                        println!("{BLUE}→ Merging {} clips...{RESET}", inputs.len());
+                        let req = MergeRequest {
+                            inputs: inputs.iter().map(|p| p.to_string_lossy().to_string()).collect(),
+                            output: output.to_string_lossy().to_string(),
+                        };
+                        match video_merge(&req) {
+                            Ok(r) => println!("{MINT}✓ Merged → {}{RESET}", r.output_path),
+                            Err(e) => { eprintln!("{ERROR}✗ Merge failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                        }
+                    }
+                    VideoCommand::ExtractAudio { input, output } => {
+                        println!("{BLUE}→ Extracting audio...{RESET}");
+                        let req = ExtractAudioRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output: output.to_string_lossy().to_string(),
+                        };
+                        match video_extract_audio(&req) {
+                            Ok(r) => println!("{MINT}✓ Audio extracted → {}{RESET}", r.output_path),
+                            Err(e) => { eprintln!("{ERROR}✗ Extract failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                        }
+                    }
+                    VideoCommand::RemoveSilence { input, output, threshold, min_duration } => {
+                        println!("{BLUE}→ Removing silence (threshold: {}dB, min: {}s)...{RESET}", threshold, min_duration);
+                        let req = RemoveSilenceRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output: output.to_string_lossy().to_string(),
+                            threshold_db: threshold,
+                            min_silence_secs: min_duration,
+                        };
+                        match video_remove_silence(&req) {
+                            Ok(r) => {
+                                let dur = r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
+                                println!("{MINT}✓ Silence removed → {} ({dur}){RESET}", r.output_path);
+                            }
+                            Err(e) => { eprintln!("{ERROR}✗ Remove silence failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                        }
+                    }
+                    VideoCommand::Export { input, output, resolution, fps, codec, crf } => {
+                        println!("{BLUE}→ Exporting video...{RESET}");
+                        let req = ExportRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output: output.to_string_lossy().to_string(),
+                            resolution,
+                            fps,
+                            codec,
+                            crf,
+                        };
+                        match video_export(&req) {
+                            Ok(r) => {
+                                let dur = r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
+                                let size = r.size_bytes.map(|s| format!("{} bytes", s)).unwrap_or_default();
+                                println!("{MINT}✓ Exported → {} ({dur}, {size}){RESET}", r.output_path);
+                            }
+                            Err(e) => { eprintln!("{ERROR}✗ Export failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                        }
+                    }
+                    VideoCommand::Transcribe { input, language, output } => {
+                        println!("{BLUE}→ Transcribing audio/speech...{RESET}");
+                        let req = mint_core::TranscribeRequest {
+                            input: input.to_string_lossy().to_string(),
+                            language,
+                            prompt: None,
+                        };
+                        let config = load_config()?;
+                        match mint_core::transcribe(&config, &req).await {
+                            Ok(res) => {
+                                let srt = mint_core::generate_srt(&res.segments);
+                                std::fs::write(&output, srt)?;
+                                println!("{MINT}✓ Transcribed {} segments → {}{RESET}", res.segments.len(), output.display());
+                            }
+                            Err(e) => { eprintln!("{ERROR}✗ Transcription failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                        }
+                    }
+                    VideoCommand::Subtitle { input, srt, style, output } => {
+                        println!("{BLUE}→ Burning subtitles ({style} preset)...{RESET}");
+                        let srt_content = if std::path::Path::new(&srt).exists() {
+                            std::fs::read_to_string(&srt)?
+                        } else {
+                            srt.clone()
+                        };
+                        let req = mint_core::BurnSubtitleRequest {
+                            input_video: input.to_string_lossy().to_string(),
+                            srt_input: srt_content,
+                            output_video: output.to_string_lossy().to_string(),
+                            style: None,
+                            preset: Some(style),
+                        };
+                        match mint_core::burn_subtitles(&req) {
+                            Ok(r) => println!("{MINT}✓ Subtitles burned → {}{RESET}", r.output_path),
+                            Err(e) => { eprintln!("{ERROR}✗ Subtitle burn failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                        }
+                    }
+                    VideoCommand::TranslateSubtitle { srt, lang, output } => {
+                        println!("{BLUE}→ Translating SRT to {lang}...{RESET}");
+                        let srt_content = std::fs::read_to_string(&srt)?;
+                        let req = mint_core::TranslateSubtitleRequest {
+                            srt_content,
+                            target_language: lang,
+                        };
+                        let config = load_config()?;
+                        match mint_core::translate_subtitles(&config, &req).await {
+                            Ok(translated_srt) => {
+                                std::fs::write(&output, translated_srt)?;
+                                println!("{MINT}✓ Subtitles translated → {}{RESET}", output.display());
+                            }
+                            Err(e) => { eprintln!("{ERROR}✗ Subtitle translation failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                        }
+                    }
+                    VideoCommand::MakeShorts { input, output_dir, clips, duration, no_subtitles } => {
+                        println!("{BLUE}🚀 Generating up to {clips} vertical Shorts clips from video...{RESET}");
+                        let req = mint_core::MakeShortsRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output_dir: output_dir.map(|p| p.to_string_lossy().to_string()),
+                            max_clips: clips,
+                            target_duration: duration,
+                            burn_subtitles: !no_subtitles,
+                            width: 1080,
+                            height: 1920,
+                        };
+                        let config = load_config()?;
+                        match mint_core::make_shorts(&config, &req).await {
+                            Ok(res) => {
+                                println!("{MINT}✓ Generated {} vertical Shorts!{RESET}", res.clips.len());
+                                for clip in &res.clips {
+                                    println!("  [{}] {} ({:.1}s) → {}", clip.id, clip.title, clip.duration, clip.path);
+                                }
+                            }
+                            Err(e) => { eprintln!("{ERROR}✗ Make Shorts failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                        }
                     }
                 }
             }

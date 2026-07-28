@@ -125,7 +125,15 @@ pub async fn generate_images(
 
     match provider {
         "nanobanana" => call_nanobanana(&client, config, request).await,
-        "dalle" => call_dalle(&client, config, request).await,
+        "dalle" => {
+            match call_dalle(&client, config, request).await {
+                Err(ImageGenError::MissingOpenAiKey) if !config.api_key.trim().is_empty() || std::env::var("GEMINI_API_KEY").is_ok() => {
+                    eprintln!("[Mint Warning] OpenAI API key missing for DALL-E, falling back to NanoBanana (Gemini)");
+                    call_nanobanana(&client, config, request).await
+                }
+                res => res,
+            }
+        }
         "stability" => call_stability(&client, config, request).await,
         "ideogram" => call_ideogram(&client, config, request).await,
         "replicate" => call_replicate(&client, config, request).await,

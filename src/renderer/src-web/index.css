@@ -33,6 +33,9 @@ button {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  position: relative;
+  --sidebar-expanded-width: 184px;
+  --sidebar-collapsed-width: 56px;
   border: 1px solid rgb(148 163 184 / 20%);
   background: radial-gradient(circle at top left, #064e3b, #111827 52%, #0b1020);
 }

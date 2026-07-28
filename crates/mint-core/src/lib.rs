@@ -12,14 +12,19 @@ pub mod mcp;
 pub mod memory;
 pub mod orchestration;
 pub mod pictures;
+pub mod auto_shorts;
 pub mod plugins;
 pub mod safety;
 pub mod semantic;
 pub mod shell;
 pub mod skills;
+pub mod speech;
+pub mod subtitle;
 pub mod symbols;
 pub mod tasks;
+pub mod timeline;
 pub mod tts;
+pub mod video_edit;
 pub mod video_gen;
 pub mod weather;
 pub mod web_search;
@@ -84,6 +89,30 @@ pub use skills::{SkillError, learn_skill, learned_skills_context};
 pub use symbols::{CodeSymbol, SymbolError, SymbolIndex, build_symbol_index};
 pub use tasks::{Task, TaskError, TaskStore, tasks_path};
 pub use tts::{TtsUrl, google_tts_urls};
+pub use timeline::{
+    RenderTimelineRequest, RenderTimelineResult, Timeline, TimelineAudio, TimelineClip,
+    TimelineEffect, TimelineError, TimelineOutput, TimelineSubtitle, render_timeline,
+    timeline_from_json, timeline_to_json,
+};
+pub use video_edit::{
+    CropRequest, DuckMusicRequest, ExportRequest, ExtractAudioRequest, MergeRequest,
+    RemoveSilenceRequest, ReorderClipsRequest, ResizeRequest, TrimRequest, VideoEditError,
+    VideoEditResult, VideoInfo, ZoomSpeakerRequest, audio_duck_music, effect_zoom_on_speaker,
+    timeline_reorder, video_crop, video_export, video_extract_audio, video_load, video_merge,
+    video_remove_silence, video_resize, video_trim,
+};
+pub use auto_shorts::{
+    AiEditStepResult, AiEditVideoRequest, AiEditVideoResult, AutoShortsError, MakeShortsRequest,
+    MakeShortsResult, ShortClipInfo, ai_edit_video, make_shorts,
+};
+pub use speech::{
+    DetectSilenceRequest, SilenceRange, SpeechError, TranscribeRequest, TranscriptSegment,
+    TranscriptionResult, detect_silence, transcribe,
+};
+pub use subtitle::{
+    BurnSubtitleRequest, SubtitleError, SubtitleStyle, TranslateSubtitleRequest,
+    burn_subtitles, generate_srt, secs_to_srt_timestamp, translate_subtitles,
+};
 pub use video_gen::{VideoGenError, VideoGenRequest, VideoGenResponse, generate_video};
 pub use weather::{WeatherError, WeatherReport, weather};
 pub use workflows::{WorkflowError, load_workflows, save_workflows, workflows_path};

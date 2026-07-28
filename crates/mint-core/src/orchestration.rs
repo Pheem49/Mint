@@ -307,6 +307,22 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         "verify",
         "apply_patch",
         "write_file",
+        "video_trim",
+        "video_remove_silence",
+        "video_resize",
+        "video_merge",
+        "video_export",
+        "video_extract_audio",
+        "speech_transcribe",
+        "subtitle_generate",
+        "subtitle_translate",
+        "subtitle_burn",
+        "timeline_reorder",
+        "effect_zoom_on_speaker",
+        "audio_duck_music",
+        "make_shorts",
+        "generate_image",
+        "generate_video",
     ];
 
     if is_port_9222_open() {
@@ -456,6 +472,54 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         input_formats.push(
             "- write_file: {\"path\":\"new/relative/path\",\"fileContent\":\"full file content\"}",
         );
+    }
+    if allowed_actions.contains(&"video_trim") {
+        input_formats.push("- video_trim / video.trim: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"start\":0.0,\"end\":30.0}");
+    }
+    if allowed_actions.contains(&"video_remove_silence") {
+        input_formats.push("- video_remove_silence / video.remove_silence: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"thresholdDb\":-30.0,\"minSilenceSecs\":0.5}");
+    }
+    if allowed_actions.contains(&"video_resize") {
+        input_formats.push("- video_resize: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"width\":1080,\"height\":1920}");
+    }
+    if allowed_actions.contains(&"video_merge") {
+        input_formats.push("- video_merge: {\"commands\":[\"/path/1.mp4\",\"/path/2.mp4\"],\"output\":\"/path/merged.mp4\"}");
+    }
+    if allowed_actions.contains(&"video_export") {
+        input_formats.push("- video_export / video.export: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"resolution\":\"1080p\"}");
+    }
+    if allowed_actions.contains(&"video_extract_audio") {
+        input_formats.push("- video_extract_audio: {\"input\":\"/path/file.mp4\",\"output\":\"/path/audio.wav\"}");
+    }
+    if allowed_actions.contains(&"speech_transcribe") {
+        input_formats.push("- speech_transcribe: {\"input\":\"/path/file.mp4\",\"language\":\"en\"}");
+    }
+    if allowed_actions.contains(&"subtitle_generate") {
+        input_formats.push("- subtitle_generate / subtitle.generate: {\"input\":\"/path/file.mp4\",\"language\":\"en\"}");
+    }
+    if allowed_actions.contains(&"subtitle_translate") {
+        input_formats.push("- subtitle_translate / subtitle.translate: {\"srtContent\":\"...\",\"targetLanguage\":\"th\"}");
+    }
+    if allowed_actions.contains(&"subtitle_burn") {
+        input_formats.push("- subtitle_burn: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"srtContent\":\"...\",\"preset\":\"tiktok\"}");
+    }
+    if allowed_actions.contains(&"timeline_reorder") {
+        input_formats.push("- timeline_reorder / timeline.reorder: {\"inputs\":[\"/path/1.mp4\",\"/path/2.mp4\"],\"order\":[1,0],\"output\":\"/path/out.mp4\"}");
+    }
+    if allowed_actions.contains(&"effect_zoom_on_speaker") {
+        input_formats.push("- effect_zoom_on_speaker / effect.zoom_on_speaker: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"zoomFactor\":1.25}");
+    }
+    if allowed_actions.contains(&"audio_duck_music") {
+        input_formats.push("- audio_duck_music / audio.duck_music: {\"videoInput\":\"/path/file.mp4\",\"musicInput\":\"/path/bg.mp3\",\"output\":\"/path/out.mp4\",\"musicVolume\":0.2}");
+    }
+    if allowed_actions.contains(&"make_shorts") {
+        input_formats.push("- make_shorts / video.make_shorts: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out_folder\",\"maxClips\":3,\"targetDuration\":60}");
+    }
+    if allowed_actions.contains(&"generate_image") {
+        input_formats.push("- generate_image / image_studio.generate: {\"prompt\":\"a cute cat in space\",\"aspectRatio\":\"1:1\"}");
+    }
+    if allowed_actions.contains(&"generate_video") {
+        input_formats.push("- generate_video / veo.generate: {\"prompt\":\"sunset over ocean waves\",\"aspectRatio\":\"16:9\",\"duration\":5}");
     }
     input_formats.push("- finish: {\"summary\":\"concise final answer in Thai when the user writes Thai\",\"verification\":\"checks run or not run\"}");
 
@@ -706,6 +770,56 @@ struct AgentInput {
     button: String,
     #[serde(default)]
     key: String,
+    // Video tools input fields
+    #[serde(default)]
+    input: String,
+    #[serde(default)]
+    output: String,
+    #[serde(default)]
+    start: Option<f64>,
+    #[serde(default)]
+    end: Option<f64>,
+    #[serde(default)]
+    width: Option<i32>,
+    #[serde(default)]
+    height: Option<i32>,
+    #[serde(default)]
+    threshold_db: Option<f64>,
+    #[serde(default)]
+    min_silence_secs: Option<f64>,
+    #[serde(default)]
+    language: Option<String>,
+    #[serde(default)]
+    target_language: Option<String>,
+    #[serde(default)]
+    srt_content: Option<String>,
+    #[serde(default)]
+    preset: Option<String>,
+    #[serde(default)]
+    max_clips: Option<u32>,
+    #[serde(default)]
+    target_duration: Option<f64>,
+    #[serde(default)]
+    inputs: Vec<String>,
+    #[serde(default)]
+    order: Vec<usize>,
+    #[serde(default)]
+    music_input: Option<String>,
+    #[serde(default)]
+    video_input: Option<String>,
+    #[serde(default)]
+    music_volume: Option<f32>,
+    #[serde(default)]
+    zoom_factor: Option<f32>,
+    // Image & Video generation input fields
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    aspect_ratio: String,
+    #[serde(default)]
+    provider: String,
+    #[serde(default)]
+    duration: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1083,6 +1197,24 @@ where
                     }
                 }
             }
+
+            // Auto-append generated media (image/video) and model feedback to summary if LLM omitted it
+            let mut media_blocks = Vec::new();
+            for step in trajectory.iter() {
+                for line in step.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("![Generated Image](") || trimmed.starts_with("✓ Image generated successfully") || trimmed.starts_with("Saved to:") || trimmed.starts_with("<video") || trimmed.starts_with("✓ Video generated successfully") {
+                        if !summary.contains(trimmed) {
+                            media_blocks.push(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+            if !media_blocks.is_empty() {
+                summary.push_str("\n\n");
+                summary.push_str(&media_blocks.join("\n\n"));
+            }
+
             let verification = meaningful_verification(&decision.input.verification).to_owned();
 
             on_chunk(summary.clone());
@@ -1772,6 +1904,213 @@ where
                 }
                 ApprovalOutcome::Denied => Ok(format!("User denied file edit: {}", path_str)),
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
+            }
+        }
+        "video_trim" | "video.trim" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::TrimRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                start: input.start.unwrap_or(0.0),
+                end: input.end.unwrap_or(0.0),
+            };
+            let res = crate::video_edit::video_trim(&req).map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "video_remove_silence" | "video.remove_silence" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::RemoveSilenceRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                threshold_db: input.threshold_db.unwrap_or(-30.0),
+                min_silence_secs: input.min_silence_secs.unwrap_or(0.5),
+            };
+            let res = crate::video_edit::video_remove_silence(&req).map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "video_resize" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::ResizeRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                width: input.width.unwrap_or(1920),
+                height: input.height.unwrap_or(1080),
+            };
+            let res = crate::video_edit::video_resize(&req).map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "video_merge" => {
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::MergeRequest {
+                inputs: if input.inputs.is_empty() { input.commands.clone() } else { input.inputs.clone() },
+                output: output_path.to_string(),
+            };
+            let res = crate::video_edit::video_merge(&req).map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "video_export" | "video.export" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::ExportRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                resolution: input.preset.clone(),
+                fps: None,
+                codec: None,
+                crf: None,
+            };
+            let res = crate::video_edit::video_export(&req).map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "video_extract_audio" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::ExtractAudioRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+            };
+            let out = crate::video_edit::video_extract_audio(&req).map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(format!("Audio extracted to {}", out.output_path))
+        }
+        "speech_transcribe" | "subtitle_generate" | "subtitle.generate" => {
+            let input_path = required(&input.input, "input")?;
+            let req = crate::speech::TranscribeRequest {
+                input: input_path.to_string(),
+                language: input.language.clone(),
+                prompt: None,
+            };
+            let res = crate::speech::transcribe(config, &req).await.map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "subtitle_translate" | "subtitle.translate" => {
+            let srt = input.srt_content.as_deref().unwrap_or_default();
+            let target = input.target_language.as_deref().unwrap_or("th");
+            let req = crate::subtitle::TranslateSubtitleRequest {
+                srt_content: srt.to_string(),
+                target_language: target.to_string(),
+            };
+            let translated = crate::subtitle::translate_subtitles(config, &req).await.map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(translated)
+        }
+        "subtitle_burn" => {
+            let input_video = required(&input.input, "input")?;
+            let output_video = required(&input.output, "output")?;
+            let srt_input = input.srt_content.as_deref().unwrap_or_default();
+            let req = crate::subtitle::BurnSubtitleRequest {
+                input_video: input_video.to_string(),
+                srt_input: srt_input.to_string(),
+                output_video: output_video.to_string(),
+                style: None,
+                preset: input.preset.clone(),
+            };
+            let res = crate::subtitle::burn_subtitles(&req).map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "timeline_reorder" | "timeline.reorder" => {
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::ReorderClipsRequest {
+                inputs: input.inputs.clone(),
+                order: input.order.clone(),
+                output: output_path.to_string(),
+            };
+            let res = crate::video_edit::timeline_reorder(&req).map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "effect_zoom_on_speaker" | "effect.zoom_on_speaker" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::ZoomSpeakerRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                zoom_factor: input.zoom_factor.unwrap_or(1.25),
+            };
+            let res = crate::video_edit::effect_zoom_on_speaker(&req).map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "audio_duck_music" | "audio.duck_music" => {
+            let video_in = input.video_input.as_deref().unwrap_or(&input.input);
+            let music_in = input.music_input.as_deref().unwrap_or("");
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::DuckMusicRequest {
+                video_input: video_in.to_string(),
+                music_input: music_in.to_string(),
+                output: output_path.to_string(),
+                music_volume: input.music_volume.unwrap_or(0.2),
+            };
+            let res = crate::video_edit::audio_duck_music(&req).map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "make_shorts" | "video.make_shorts" => {
+            let input_path = required(&input.input, "input")?;
+            let req = crate::auto_shorts::MakeShortsRequest {
+                input: input_path.to_string(),
+                output_dir: if input.output.is_empty() { None } else { Some(input.output.clone()) },
+                max_clips: input.max_clips.unwrap_or(3),
+                target_duration: input.target_duration.unwrap_or(60.0),
+                burn_subtitles: true,
+                width: input.width.unwrap_or(1080),
+                height: input.height.unwrap_or(1920),
+            };
+            let res = crate::auto_shorts::make_shorts(config, &req).await.map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "generate_image" | "image_studio.generate" | "image_generate" => {
+            let prompt_text = if !input.prompt.trim().is_empty() {
+                input.prompt.trim()
+            } else if !input.query.trim().is_empty() {
+                input.query.trim()
+            } else {
+                required(&input.text, "prompt")?
+            };
+            let req = crate::image_gen::ImageGenRequest {
+                prompt: prompt_text.to_string(),
+                aspect_ratio: if input.aspect_ratio.is_empty() { Some("1:1".to_string()) } else { Some(input.aspect_ratio.clone()) },
+                provider: if input.provider.is_empty() { None } else { Some(input.provider.clone()) },
+                num_images: Some(1),
+                ..Default::default()
+            };
+            let res = crate::image_gen::generate_images(config, &req).await.map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            let data_uris: Vec<String> = res.images.iter().map(|i| i.data_uri.clone()).collect();
+            if let Ok(saved) = crate::pictures::save_chat_images(data_uris, Some(res.provider.clone()), Some(prompt_text.to_string())) {
+                if let Some(first_saved) = saved.first() {
+                    let img_url = format!("/api/pictures/{}", first_saved.filename);
+                    let saved_path = first_saved.path.display();
+                    let img_md = format!("![Generated Image]({})\n\n✓ Image generated successfully with model `{}` ({})\nSaved to: {}\n\nNote: In your final response or finish summary, you MUST copy the exact image markdown (`![Generated Image]({})`), model feedback (`✓ Image generated successfully...`), and saved path line (`Saved to: {}`) so the user can see them in their chat bubble.", img_url, res.model, res.provider, saved_path, img_url, saved_path);
+                    return Ok(img_md);
+                }
+            }
+            if let Some(first) = res.images.first() {
+                let img_md = format!("![Generated Image]({})\n\n✓ Image generated successfully with model `{}` ({})", first.data_uri, res.model, res.provider);
+                Ok(img_md)
+            } else {
+                Ok("No image returned from provider".to_string())
+            }
+        }
+        "generate_video" | "veo.generate" | "video_generate" => {
+            let prompt_text = if !input.prompt.trim().is_empty() {
+                input.prompt.trim()
+            } else if !input.query.trim().is_empty() {
+                input.query.trim()
+            } else {
+                required(&input.text, "prompt")?
+            };
+            let req = crate::video_gen::VideoGenRequest {
+                prompt: prompt_text.to_string(),
+                negative_prompt: None,
+                aspect_ratio: if input.aspect_ratio.is_empty() { "16:9".to_string() } else { input.aspect_ratio.clone() },
+                duration: input.duration.unwrap_or(5.0) as u32,
+                model: None,
+                provider: if input.provider.is_empty() { "veo".to_string() } else { input.provider.clone() },
+            };
+            let res = crate::video_gen::generate_video(config, &req).await.map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            if let Some(first) = res.videos.first() {
+                let vid_md = format!("<video controls src=\"{}\" width=\"100%\" style=\"max-height:400px; border-radius:8px;\"></video>\n\n✓ Video generated successfully with Veo `{}` ({})", first.path.to_string_lossy(), res.model, res.provider);
+                Ok(vid_md)
+            } else {
+                Ok("No video returned from provider".to_string())
             }
         }
         other => Err(OrchestrationError::Agent(format!(

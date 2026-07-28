@@ -12,11 +12,19 @@ use tokio::net::TcpListener;
 
 use crate::{
     AgentProgress, ApprovalOutcome, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID,
-    ImageGenRequest, MemoryStore, MintConfig, VideoGenRequest, config_path, create_folder,
-    find_paths, generate_images, generate_video, list_saved_pictures, load_config,
-    orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    save_chat_images, save_config, weather,
+    ImageGenRequest, MemoryStore, MintConfig, VideoGenRequest,
+    // Video editing & Speech & Subtitles & Auto Shorts
+    AiEditVideoRequest, BurnSubtitleRequest, CropRequest, DetectSilenceRequest, ExportRequest, ExtractAudioRequest,
+    MakeShortsRequest, MergeRequest, RemoveSilenceRequest, RenderTimelineRequest, ResizeRequest,
+    TranscribeRequest, TranslateSubtitleRequest, TrimRequest,
+    ai_edit_video, burn_subtitles, config_path, create_folder, detect_silence,
+    find_paths, generate_images, generate_srt, generate_video, list_saved_pictures, load_config,
+    make_shorts, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    render_timeline, save_chat_images, save_config, transcribe, translate_subtitles,
+    video_crop, video_export, video_extract_audio, video_load, video_merge, video_remove_silence,
+    video_resize, video_trim, weather,
 };
+
 
 const MAX_API_REQUEST_BYTES: usize = 32 * 1024 * 1024;
 
@@ -1238,7 +1246,321 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         .await;
                     }
                 }
-                ("GET", "/api/image-gen/providers") => {
+                (_, route) if route.starts_with("/api/video/") && method == "POST" => {
+                    // ── Video Editing Routes ────────────────────────────────────────────
+                    match route {
+                        "/api/video/load" => {
+                            #[derive(serde::Deserialize)]
+                            struct VideoLoadReq { path: String }
+                            if let Ok(req) = serde_json::from_str::<VideoLoadReq>(body) {
+                                match video_load(&req.path) {
+                                    Ok(info) => {
+                                        let res = serde_json::to_string(&info).unwrap_or_default();
+                                        log_api_req("POST", "/api/video/load", "200 OK", None);
+                                        send_json_response(socket, "200 OK", &res).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/video/load", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"expected {\\\"path\\\":\\\"...\\\"}\" }").await;
+                            }
+                        }
+                        "/api/video/trim" => {
+                            if let Ok(req) = serde_json::from_str::<TrimRequest>(body) {
+                                match video_trim(&req) {
+                                    Ok(r) => {
+                                        let res = serde_json::to_string(&r).unwrap_or_default();
+                                        log_api_req("POST", "/api/video/trim", "200 OK", None);
+                                        send_json_response(socket, "200 OK", &res).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/video/trim", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid trim request\"}").await;
+                            }
+                        }
+                        "/api/video/crop" => {
+                            if let Ok(req) = serde_json::from_str::<CropRequest>(body) {
+                                match video_crop(&req) {
+                                    Ok(r) => {
+                                        let res = serde_json::to_string(&r).unwrap_or_default();
+                                        log_api_req("POST", "/api/video/crop", "200 OK", None);
+                                        send_json_response(socket, "200 OK", &res).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/video/crop", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid crop request\"}").await;
+                            }
+                        }
+                        "/api/video/resize" => {
+                            if let Ok(req) = serde_json::from_str::<ResizeRequest>(body) {
+                                match video_resize(&req) {
+                                    Ok(r) => {
+                                        let res = serde_json::to_string(&r).unwrap_or_default();
+                                        log_api_req("POST", "/api/video/resize", "200 OK", None);
+                                        send_json_response(socket, "200 OK", &res).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/video/resize", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid resize request\"}").await;
+                            }
+                        }
+                        "/api/video/merge" => {
+                            if let Ok(req) = serde_json::from_str::<MergeRequest>(body) {
+                                match video_merge(&req) {
+                                    Ok(r) => {
+                                        let res = serde_json::to_string(&r).unwrap_or_default();
+                                        log_api_req("POST", "/api/video/merge", "200 OK", None);
+                                        send_json_response(socket, "200 OK", &res).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/video/merge", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid merge request\"}").await;
+                            }
+                        }
+                        "/api/video/extract-audio" => {
+                            if let Ok(req) = serde_json::from_str::<ExtractAudioRequest>(body) {
+                                match video_extract_audio(&req) {
+                                    Ok(r) => {
+                                        let res = serde_json::to_string(&r).unwrap_or_default();
+                                        log_api_req("POST", "/api/video/extract-audio", "200 OK", None);
+                                        send_json_response(socket, "200 OK", &res).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/video/extract-audio", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid extract-audio request\"}").await;
+                            }
+                        }
+                        "/api/video/remove-silence" => {
+                            if let Ok(req) = serde_json::from_str::<RemoveSilenceRequest>(body) {
+                                match video_remove_silence(&req) {
+                                    Ok(r) => {
+                                        let res = serde_json::to_string(&r).unwrap_or_default();
+                                        log_api_req("POST", "/api/video/remove-silence", "200 OK", None);
+                                        send_json_response(socket, "200 OK", &res).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/video/remove-silence", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid remove-silence request\"}").await;
+                            }
+                        }
+                        "/api/video/export" => {
+                            if let Ok(req) = serde_json::from_str::<ExportRequest>(body) {
+                                match video_export(&req) {
+                                    Ok(r) => {
+                                        let res = serde_json::to_string(&r).unwrap_or_default();
+                                        log_api_req("POST", "/api/video/export", "200 OK", None);
+                                        send_json_response(socket, "200 OK", &res).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/video/export", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid export request\"}").await;
+                            }
+                        }
+                        "/api/video/render-timeline" => {
+                            if let Ok(req) = serde_json::from_str::<RenderTimelineRequest>(body) {
+                                match render_timeline(&req.timeline) {
+                                    Ok(r) => {
+                                        let res = serde_json::to_string(&r).unwrap_or_default();
+                                        log_api_req("POST", "/api/video/render-timeline", "200 OK", Some(&format!("{} clips", r.clips_rendered)));
+                                        send_json_response(socket, "200 OK", &res).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/video/render-timeline", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid timeline request\"}").await;
+                            }
+                        }
+                        "/api/video/make-shorts" => {
+                            if let Ok(req) = serde_json::from_str::<MakeShortsRequest>(body) {
+                                let config = load_config().unwrap_or_default();
+                                match make_shorts(&config, &req).await {
+                                    Ok(r) => {
+                                        let res = serde_json::to_string(&r).unwrap_or_default();
+                                        log_api_req("POST", "/api/video/make-shorts", "200 OK", Some(&format!("{} shorts clips", r.clips.len())));
+                                        send_json_response(socket, "200 OK", &res).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/video/make-shorts", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid make-shorts request body\"}").await;
+                            }
+                        }
+                        "/api/video/ai-edit" => {
+                            if let Ok(req) = serde_json::from_str::<AiEditVideoRequest>(body) {
+                                let config = load_config().unwrap_or_default();
+                                match ai_edit_video(&config, &req).await {
+                                    Ok(r) => {
+                                        let res = serde_json::to_string(&r).unwrap_or_default();
+                                        log_api_req("POST", "/api/video/ai-edit", "200 OK", Some(&format!("AI executed prompt: {}", req.instruction)));
+                                        send_json_response(socket, "200 OK", &res).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/video/ai-edit", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid ai-edit request body\"}").await;
+                            }
+                        }
+                        _ => {
+                            send_json_response(socket, "404 Not Found", "{\"error\":\"unknown video route\"}").await;
+                        }
+                    }
+                }
+                (_, route) if route.starts_with("/api/speech/") && method == "POST" => {
+                    // ── Speech Routes ───────────────────────────────────────────────────
+                    match route {
+                        "/api/speech/transcribe" => {
+                            if let Ok(req) = serde_json::from_str::<TranscribeRequest>(body) {
+                                let config = load_config().unwrap_or_default();
+                                match transcribe(&config, &req).await {
+                                    Ok(res) => {
+                                        let json_str = serde_json::to_string(&res).unwrap_or_default();
+                                        log_api_req("POST", "/api/speech/transcribe", "200 OK", None);
+                                        send_json_response(socket, "200 OK", &json_str).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/speech/transcribe", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid transcribe request body\"}").await;
+                            }
+                        }
+                        "/api/speech/detect-silence" => {
+                            if let Ok(req) = serde_json::from_str::<DetectSilenceRequest>(body) {
+                                match detect_silence(&req) {
+                                    Ok(ranges) => {
+                                        let json_str = serde_json::to_string(&ranges).unwrap_or_default();
+                                        log_api_req("POST", "/api/speech/detect-silence", "200 OK", Some(&format!("{} ranges", ranges.len())));
+                                        send_json_response(socket, "200 OK", &json_str).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/speech/detect-silence", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid detect-silence request body\"}").await;
+                            }
+                        }
+                        _ => {
+                            send_json_response(socket, "404 Not Found", "{\"error\":\"unknown speech route\"}").await;
+                        }
+                    }
+                }
+                (_, route) if route.starts_with("/api/subtitle/") && method == "POST" => {
+                    // ── Subtitle Routes ────────────────────────────────────────────────
+                    match route {
+                        "/api/subtitle/generate" => {
+                            #[derive(serde::Deserialize)]
+                            struct GenSubReq {
+                                segments: Vec<crate::speech::TranscriptSegment>,
+                            }
+                            if let Ok(req) = serde_json::from_str::<GenSubReq>(body) {
+                                let srt = generate_srt(&req.segments);
+                                let res = json!({ "srt": srt });
+                                log_api_req("POST", "/api/subtitle/generate", "200 OK", None);
+                                send_json_response(socket, "200 OK", &res.to_string()).await;
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid subtitle generate request body\"}").await;
+                            }
+                        }
+                        "/api/subtitle/translate" => {
+                            if let Ok(req) = serde_json::from_str::<TranslateSubtitleRequest>(body) {
+                                let config = load_config().unwrap_or_default();
+                                match translate_subtitles(&config, &req).await {
+                                    Ok(srt) => {
+                                        let res = json!({ "srt": srt });
+                                        log_api_req("POST", "/api/subtitle/translate", "200 OK", None);
+                                        send_json_response(socket, "200 OK", &res.to_string()).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/subtitle/translate", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid subtitle translate request body\"}").await;
+                            }
+                        }
+                        "/api/subtitle/burn" => {
+                            if let Ok(req) = serde_json::from_str::<BurnSubtitleRequest>(body) {
+                                match burn_subtitles(&req) {
+                                    Ok(res) => {
+                                        let json_str = serde_json::to_string(&res).unwrap_or_default();
+                                        log_api_req("POST", "/api/subtitle/burn", "200 OK", None);
+                                        send_json_response(socket, "200 OK", &json_str).await;
+                                    }
+                                    Err(e) => {
+                                        log_api_err("/api/subtitle/burn", &e);
+                                        let err = json!({ "error": e.to_string() });
+                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                    }
+                                }
+                            } else {
+                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid subtitle burn request body\"}").await;
+                            }
+                        }
+                        _ => {
+                            send_json_response(socket, "404 Not Found", "{\"error\":\"unknown subtitle route\"}").await;
+                        }
+                    }
+                }
+                (_, "/api/video-gen/providers") | (_, "/api/video/providers") | ("GET", "/api/image-gen/providers") => {
                     let config = load_config().unwrap_or_default();
                     let mut available: Vec<String> = Vec::new();
                     if !config.api_key.trim().is_empty() {

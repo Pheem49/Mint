@@ -102,9 +102,9 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
   const loadHistory = useCallback(async () => {
     try {
       const pics = await listSavedPictures()
-      const imageGenSources = ['nanobanana', 'dalle', 'stability', 'ideogram', 'replicate']
+      const imageGenSources = ['nanobanana', 'dalle', 'stability', 'ideogram', 'replicate', 'image_gen']
       const filtered = pics.filter((pic) =>
-        imageGenSources.includes(pic.source?.toLowerCase()),
+        pic.source && imageGenSources.includes(pic.source.toLowerCase()),
       )
       const sorted = [...filtered].sort((a, b) => {
         const da = a.createdAt ? new Date(a.createdAt).getTime() : 0

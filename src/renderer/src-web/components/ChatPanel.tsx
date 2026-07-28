@@ -691,6 +691,18 @@ export default function ChatPanel({
     setToolMenuOpen(false)
     onStartWebSearch()
   }
+  const startGenerateImagePrompt = () => {
+    setToolMenuOpen(false)
+    if (!agentMode) onSetAgentMode(true)
+    onSetMessage('Generate an image of ')
+    textareaRef.current?.focus()
+  }
+  const startGenerateVideoPrompt = () => {
+    setToolMenuOpen(false)
+    if (!agentMode) onSetAgentMode(true)
+    onSetMessage('Generate a video of ')
+    textareaRef.current?.focus()
+  }
   const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
   const renderCompletedActivity = (interaction: any) => {
     const interactionId = String(interaction.id)
@@ -1343,7 +1355,7 @@ export default function ChatPanel({
           />
           <div className="chat-tool-menu-wrap" ref={toolMenuRef}>
               <button id="chat-tool-btn" type="button" aria-haspopup="menu" aria-expanded={toolMenuOpen} onClick={() => setToolMenuOpen((open) => !open)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="12" y1="5" x2="12" y2="19"></line>
                   <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
@@ -1351,7 +1363,7 @@ export default function ChatPanel({
               {toolMenuOpen && (
                 <div className="chat-tool-menu" role="menu">
                   <button type="button" role="menuitem" onClick={openImagePicker}>
-                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span aria-hidden="true">
                       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                         <circle cx="8.5" cy="8.5" r="1.5"></circle>
@@ -1361,8 +1373,8 @@ export default function ChatPanel({
                     <span>Add image</span>
                   </button>
                   <button type="button" role="menuitem" onClick={openVideoPicker}>
-                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <span aria-hidden="true">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <polygon points="23 7 16 12 23 17 23 7"></polygon>
                         <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
                       </svg>
@@ -1370,7 +1382,7 @@ export default function ChatPanel({
                     <span>Add video</span>
                   </button>
                   <button type="button" role="menuitem" onClick={openDocumentPicker}>
-                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span aria-hidden="true">
                       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                         <polyline points="14 2 14 8 20 8"></polyline>
@@ -1379,7 +1391,7 @@ export default function ChatPanel({
                     <span>Add file</span>
                   </button>
                   <button type="button" role="menuitem" onClick={startWebSearch}>
-                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span aria-hidden="true">
                       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="10"></circle>
                         <line x1="2" y1="12" x2="22" y2="12"></line>
@@ -1387,6 +1399,23 @@ export default function ChatPanel({
                       </svg>
                     </span>
                     <span>Search web</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={startGenerateImagePrompt}>
+                    <span aria-hidden="true">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>
+                      </svg>
+                    </span>
+                    <span>Generate image</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={startGenerateVideoPrompt}>
+                    <span aria-hidden="true">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                      </svg>
+                    </span>
+                    <span>Generate video</span>
                   </button>
                 </div>
               )}

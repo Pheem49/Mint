@@ -1355,6 +1355,287 @@ export async function getVideoGenProviders(): Promise<VideoGenProviders> {
   return { active: 'veo', available: ['veo'] }
 }
 
+// ─── AI Video Editor — Edit API ────────────────────────────────────────────
+
+export interface VideoInfo {
+  path: string
+  duration: number
+  fps: number
+  width: number
+  height: number
+  hasAudio: boolean
+  audioStreams: number
+  sizeBytes: number
+  format: string
+}
+
+export interface VideoEditResult {
+  outputPath: string
+  duration?: number
+  sizeBytes?: number
+}
+
+export interface VideoTrimRequest {
+  input: string
+  output: string
+  start: number
+  end: number
+}
+
+export interface VideoResizeRequest {
+  input: string
+  output: string
+  width: number
+  height: number
+}
+
+export interface VideoMergeRequest {
+  inputs: string[]
+  output: string
+}
+
+export interface VideoExtractAudioRequest {
+  input: string
+  output: string
+}
+
+export interface VideoRemoveSilenceRequest {
+  input: string
+  output: string
+  thresholdDb?: number
+  minSilenceSecs?: number
+}
+
+export interface VideoExportRequest {
+  input: string
+  output: string
+  resolution?: string
+  fps?: number
+  codec?: string
+  crf?: number
+}
+
+export interface TimelineClip {
+  source: string
+  trimStart?: number
+  trimEnd?: number
+  order?: number
+  scale?: { width: number; height: number }
+}
+
+export interface TimelineSubtitle {
+  start: number
+  end: number
+  text: string
+}
+
+export interface TimelineAudio {
+  music?: string
+  duck?: boolean
+  musicVolume?: number
+  duckVolume?: number
+}
+
+export interface TimelineOutput {
+  path: string
+  resolution?: string
+  fps?: number
+  codec?: string
+  crf?: number
+}
+
+export interface VideoTimeline {
+  clips: TimelineClip[]
+  subtitles?: TimelineSubtitle[]
+  audio?: TimelineAudio
+  output: TimelineOutput
+}
+
+export interface RenderTimelineResult {
+  outputPath: string
+  clipsRendered: number
+  duration?: number
+  sizeBytes?: number
+}
+
+async function videoEditPost<T>(route: string, body: unknown): Promise<T> {
+  const API_BASE = getLocalApiBase()
+  const res = await fetch(`${API_BASE}${route}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as any).error || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function videoLoad(path: string): Promise<VideoInfo> {
+  return videoEditPost<VideoInfo>('/video/load', { path })
+}
+
+export async function videoTrim(req: VideoTrimRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/trim', req)
+}
+
+export async function videoResize(req: VideoResizeRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/resize', req)
+}
+
+export async function videoMerge(req: VideoMergeRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/merge', req)
+}
+
+export async function videoExtractAudio(req: VideoExtractAudioRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/extract-audio', req)
+}
+
+export async function videoRemoveSilence(req: VideoRemoveSilenceRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/remove-silence', req)
+}
+
+export async function videoExport(req: VideoExportRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/export', req)
+}
+
+export async function videoRenderTimeline(timeline: VideoTimeline): Promise<RenderTimelineResult> {
+  return videoEditPost<RenderTimelineResult>('/video/render-timeline', { timeline })
+}
+
+// ─── Speech & Subtitle API ──────────────────────────────────────────────────
+
+export interface TranscriptSegment {
+  id: number
+  start: number
+  end: number
+  text: string
+  speaker?: string
+}
+
+export interface TranscriptionResult {
+  text: string
+  language: string
+  duration: number
+  segments: TranscriptSegment[]
+}
+
+export interface TranscribeRequest {
+  input: string
+  language?: string
+  prompt?: string
+}
+
+export interface DetectSilenceRequest {
+  input: string
+  thresholdDb?: number
+  minDurationSecs?: number
+}
+
+export interface SilenceRange {
+  start: number
+  end: number
+  duration: number
+}
+
+export interface SubtitleStyle {
+  fontName?: string
+  fontSize?: number
+  primaryColor?: string
+  outlineColor?: string
+  outline?: number
+  alignment?: number
+  marginV?: number
+}
+
+export interface BurnSubtitleRequest {
+  inputVideo: string
+  srtInput: string
+  outputVideo: string
+  style?: SubtitleStyle
+  preset?: string
+}
+
+export interface TranslateSubtitleRequest {
+  srtContent: string
+  targetLanguage: string
+}
+
+export async function speechTranscribe(req: TranscribeRequest): Promise<TranscriptionResult> {
+  return videoEditPost<TranscriptionResult>('/speech/transcribe', req)
+}
+
+export async function speechDetectSilence(req: DetectSilenceRequest): Promise<SilenceRange[]> {
+  return videoEditPost<SilenceRange[]>('/speech/detect-silence', req)
+}
+
+export async function subtitleGenerate(segments: TranscriptSegment[]): Promise<{ srt: string }> {
+  return videoEditPost<{ srt: string }>('/subtitle/generate', { segments })
+}
+
+export async function subtitleTranslate(req: TranslateSubtitleRequest): Promise<{ srt: string }> {
+  return videoEditPost<{ srt: string }>('/subtitle/translate', req)
+}
+
+export async function subtitleBurn(req: BurnSubtitleRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/subtitle/burn', req)
+}
+
+// ─── Auto Shorts API ────────────────────────────────────────────────────────
+
+export interface MakeShortsRequest {
+  input: string
+  outputDir?: string
+  maxClips?: number
+  targetDuration?: number
+  burnSubtitles?: boolean
+  width?: number
+  height?: number
+}
+
+export interface ShortClipInfo {
+  id: number
+  path: string
+  start: number
+  end: number
+  duration: number
+  title: string
+}
+
+export interface MakeShortsResult {
+  clips: ShortClipInfo[]
+}
+
+export async function videoMakeShorts(req: MakeShortsRequest): Promise<MakeShortsResult> {
+  return videoEditPost<MakeShortsResult>('/video/make-shorts', req)
+}
+
+export interface VideoAiEditRequest {
+  input: string
+  output?: string
+  instruction: string
+}
+
+export interface AiEditStepResult {
+  step: number
+  operation: string
+  description: string
+  outputPath: string
+}
+
+export interface AiEditVideoResult {
+  outputPath: string
+  stepsPerformed: AiEditStepResult[]
+  summary: string
+}
+
+export async function videoAiEdit(req: VideoAiEditRequest): Promise<AiEditVideoResult> {
+  return videoEditPost<AiEditVideoResult>('/video/ai-edit', req)
+}
+
+
+
 
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {

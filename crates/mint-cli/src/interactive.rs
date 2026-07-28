@@ -105,6 +105,7 @@ pub async fn handle_slash_command(
                     "/image-provider [name]",
                     "List image gen providers or switch default provider",
                 ),
+                ("/generate-image <prompt>", "Generate image using AI model"),
                 ("/veo <prompt>", "Generate video using Google Veo"),
                 (
                     "/video-provider [name]",
@@ -626,6 +627,16 @@ pub async fn handle_slash_command(
                 }
             }
             Some(SlashResult::Handled)
+        }
+
+        "/generate-image" | "/gen-image" => {
+            let prompt = rest.trim();
+            if prompt.is_empty() {
+                println!("{WARN}Usage: /generate-image <prompt>{RESET}\n");
+                Some(SlashResult::Handled)
+            } else {
+                Some(SlashResult::ForwardToAgent(format!("Generate an image of {}", prompt)))
+            }
         }
 
         "/paste" => match image::read_clipboard_image() {
@@ -1724,6 +1735,8 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/edit-image", "Edit attached image with prompt instruction"),
     ("/exit", "Exit Mint CLI"),
     ("/fast", "Toggle fast mode (hide thinking traces)"),
+    ("/gen-image", "Generate image using AI model"),
+    ("/generate-image", "Generate image using AI model"),
     ("/help", "Show help menu"),
     ("/image", "Attach image from disk"),
     (
