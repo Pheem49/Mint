@@ -214,10 +214,20 @@ export function renderFormattedMessage(text: string): ReactNode {
           linkElements.push(renderTextAndFormatting(codePart.slice(lastIdx, lMatch.index), `c-${codeIndex}-pre-${lIdx}`))
         }
         if (lMatch.isImage) {
+          const isExternalThumb = lMatch.url.startsWith('https://') || lMatch.url.startsWith('http://')
           linkElements.push(
-            <div key={`img-${codeIndex}-${lIdx}`} className="chat-media-card" style={{ margin: '8px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
-              <img src={resolveMediaUrl(lMatch.url)} alt={lMatch.label} style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
-            </div>
+            isExternalThumb ? (
+              <div key={`img-${codeIndex}-${lIdx}`} className="chat-media-card chat-media-card--thumbnail" style={{ margin: '6px 0 10px 0', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px' }}>
+                <img src={resolveMediaUrl(lMatch.url)} alt={lMatch.label} loading="lazy" style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', display: 'block' }} onError={(e) => { (e.currentTarget as HTMLImageElement).parentElement!.style.display = 'none' }} />
+                {lMatch.label && lMatch.label !== 'Generated Image' && (
+                  <div style={{ padding: '5px 10px', fontSize: '0.72rem', color: 'var(--text-muted, #64748b)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lMatch.label}</div>
+                )}
+              </div>
+            ) : (
+              <div key={`img-${codeIndex}-${lIdx}`} className="chat-media-card" style={{ margin: '8px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
+                <img src={resolveMediaUrl(lMatch.url)} alt={lMatch.label} style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
+              </div>
+            )
           )
         } else {
           linkElements.push(
@@ -437,10 +447,22 @@ export function renderFormattedMessage(text: string): ReactNode {
       flushParagraph(i)
       const alt = imgMatch[1] || 'Generated Image'
       const src = imgMatch[2]
+      // External https:// URLs are OG/web-search thumbnails → compact preview style
+      // Internal /api/ paths are AI-generated images → full-size style
+      const isExternalThumbnail = src.startsWith('https://') || src.startsWith('http://')
       blocks.push(
-        <div key={`img-${i}`} className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
-          <img src={resolveMediaUrl(src)} alt={alt} style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
-        </div>
+        isExternalThumbnail ? (
+          <div key={`img-${i}`} className="chat-media-card chat-media-card--thumbnail" style={{ margin: '6px 0 10px 0', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px' }}>
+            <img src={resolveMediaUrl(src)} alt={alt} loading="lazy" style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', display: 'block' }} onError={(e) => { (e.currentTarget as HTMLImageElement).parentElement!.style.display = 'none' }} />
+            {alt && alt !== 'Generated Image' && (
+              <div style={{ padding: '5px 10px', fontSize: '0.72rem', color: 'var(--text-muted, #64748b)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{alt}</div>
+            )}
+          </div>
+        ) : (
+          <div key={`img-${i}`} className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
+            <img src={resolveMediaUrl(src)} alt={alt} style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
+          </div>
+        )
       )
       continue
     }

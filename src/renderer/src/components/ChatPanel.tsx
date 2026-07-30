@@ -737,9 +737,85 @@ export default function ChatPanel({
     const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
     const sources = parseWebSearchSources(progress)
     if (sources.length === 0) return null
+
+    const hasImages = sources.some((s) => s.imageUrl)
+
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
         <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sources</span>
+
+        {/* Image thumbnail strip — shown only when at least one source has an image */}
+        {hasImages && (
+          <div
+            style={{
+              display: 'flex',
+              gap: '8px',
+              overflowX: 'auto',
+              paddingBottom: '4px',
+              scrollbarWidth: 'none',
+            }}
+          >
+            {sources.slice(0, 4).filter((s) => s.imageUrl).map((src, i) => (
+              <a
+                key={i}
+                href={src.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={src.title}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  flexShrink: 0,
+                  width: '130px',
+                  borderRadius: '10px',
+                  overflow: 'hidden',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  textDecoration: 'none',
+                  cursor: 'pointer',
+                  transition: 'transform 0.15s, border-color 0.15s, box-shadow 0.15s',
+                }}
+                onMouseEnter={e => {
+                  const el = e.currentTarget as HTMLAnchorElement
+                  el.style.transform = 'translateY(-2px)'
+                  el.style.borderColor = 'rgba(255,255,255,0.2)'
+                  el.style.boxShadow = '0 4px 16px rgba(0,0,0,0.3)'
+                }}
+                onMouseLeave={e => {
+                  const el = e.currentTarget as HTMLAnchorElement
+                  el.style.transform = 'translateY(0)'
+                  el.style.borderColor = 'rgba(255,255,255,0.08)'
+                  el.style.boxShadow = 'none'
+                }}
+              >
+                <div style={{ width: '130px', height: '80px', overflow: 'hidden', background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>
+                  <img
+                    src={src.imageUrl}
+                    alt={src.title}
+                    loading="lazy"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                  />
+                </div>
+                <div style={{ padding: '5px 7px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <img
+                    src={src.faviconUrl}
+                    alt=""
+                    width={12}
+                    height={12}
+                    style={{ borderRadius: '2px', flexShrink: 0 }}
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                  />
+                  <span style={{ fontSize: '0.7rem', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {src.domain}
+                  </span>
+                </div>
+              </a>
+            ))}
+          </div>
+        )}
+
+        {/* Source chips row */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
           {sources.map((src, i) => (
             <a

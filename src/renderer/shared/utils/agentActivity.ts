@@ -139,6 +139,7 @@ export interface WebSearchSource {
   snippet: string
   domain: string
   faviconUrl: string
+  imageUrl?: string
 }
 
 /**
@@ -163,12 +164,14 @@ export function parseWebSearchSources(progress: AgentProgress[]): WebSearchSourc
       const lines = block.split('\n').map((l: string) => l.trim()).filter(Boolean)
       const titleLine = lines.find((l: string) => /^\d+\.\s/.test(l))
       const urlLine = lines.find((l: string) => l.startsWith('URL:'))
+      const imageLine = lines.find((l: string) => l.startsWith('Image:'))
       if (!titleLine || !urlLine) continue
 
       const title = titleLine.replace(/^\d+\.\s/, '').trim()
       const url = urlLine.replace(/^URL:\s*/, '').trim()
+      const imageUrl = imageLine ? imageLine.replace(/^Image:\s*/, '').trim() : undefined
       const snippet = lines
-        .filter((l: string) => l !== titleLine && l !== urlLine)
+        .filter((l: string) => l !== titleLine && l !== urlLine && l !== imageLine)
         .join(' ')
         .trim()
 
@@ -176,7 +179,7 @@ export function parseWebSearchSources(progress: AgentProgress[]): WebSearchSourc
         const { hostname } = new URL(url)
         const domain = hostname.replace(/^www\./, '')
         const faviconUrl = `https://www.google.com/s2/favicons?sz=32&domain=${hostname}`
-        sources.push({ title, url, snippet, domain, faviconUrl })
+        sources.push({ title, url, snippet, domain, faviconUrl, imageUrl })
       } catch {
         // skip malformed URLs
       }

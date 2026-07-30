@@ -1422,18 +1422,24 @@ where
                             .iter()
                             .enumerate()
                             .map(|(i, h)| {
+                                let image_line = h
+                                    .image_url
+                                    .as_deref()
+                                    .map(|img| format!("   Image: {img}\n"))
+                                    .unwrap_or_default();
                                 format!(
-                                    "{}. {}\n   URL: {}\n   {}\n",
+                                    "{}. {}\n   URL: {}\n{}{}\n",
                                     i + 1,
                                     h.title,
                                     h.url,
+                                    image_line,
                                     h.snippet
                                 )
                             })
                             .collect::<Vec<_>>()
                             .join("\n");
                         Ok(format!(
-                            "{formatted}\n\nNote: Web search succeeded using {provider} Search. In your finish summary, you MUST:\n1. Answer the user's question using the information above.\n2. Mention that you found this information via {provider} Search (e.g. \"I found this information using {provider} Search.\").\nDo NOT list sources manually — the UI will display them automatically."
+                            "{formatted}\n\nNote: Web search succeeded using {provider} Search. In your finish summary, you MUST:\n1. Answer the user's question using the information above.\n2. Mention that you found this information via {provider} Search (e.g. \"I found this information using {provider} Search.\").\n3. INLINE IMAGES: For each result that includes an 'Image:' URL, embed it in your summary using standard markdown image syntax:\n   ![result title](image_url)\n   Place the image tag on its OWN LINE, immediately AFTER the bullet point or paragraph that references that result.\n   Only embed images when they add visual value — e.g. food, restaurants, travel, products, people, art, profiles.\n   Do NOT embed images for code snippets, math, API docs, or pure text answers.\nDo NOT list source URLs manually — the UI will display them automatically."
                         ))
                     }
                 }

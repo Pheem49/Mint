@@ -23,6 +23,23 @@ pub fn process_inline_bold(s: &str) -> String {
 pub fn format_line(line: &str) -> String {
     let mut formatted = line.to_string();
     let trimmed = line.trim_start();
+
+    // Markdown Images: ![alt](url) → render as  🖼  alt — url
+    if let Some(rest) = trimmed.strip_prefix("![") {
+        if let Some(bracket_end) = rest.find("](") {
+            let alt = &rest[..bracket_end];
+            let after = &rest[bracket_end + 2..];
+            if let Some(paren_end) = after.find(')') {
+                let url = &after[..paren_end];
+                return if alt.is_empty() {
+                    format!("  🖼  \x1b[36m{url}\x1b[0m")
+                } else {
+                    format!("  🖼  {alt}\x1b[2m — \x1b[0m\x1b[36m{url}\x1b[0m")
+                };
+            }
+        }
+    }
+
     if (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ "))
         && trimmed.len() >= 2
     {
