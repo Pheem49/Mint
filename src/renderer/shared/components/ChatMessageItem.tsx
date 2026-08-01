@@ -3,6 +3,9 @@ import { renderFormattedMessage, renderCopyIcon, renderSpeakerIcon } from '../ut
 import { fallbackNotice } from '../utils/providers'
 import { ThinkingBlock } from './ThinkingBlock'
 import { thoughtsFrom, hasAgentToolActivity } from '../agentProgress'
+import WeatherCard from './WeatherCard'
+import StockCard from './StockCard'
+import CalculationCard from './CalculationCard'
 
 export interface ChatMessageItemProps {
   interaction: any
@@ -76,6 +79,60 @@ const ChatMessageItem = React.memo(
     const isSpeaking = speakingText === interaction.aiText
     const isExpanded = thinkingExpanded[String(interaction.id)] ?? false
 
+    const fallbackWeatherData = useMemo(() => {
+      if (interaction.aiText && (interaction.aiText.includes('```weather_json') || interaction.aiText.includes('```weather-json'))) {
+        return null
+      }
+      for (const event of progress || []) {
+        if (event.type === 'ToolEnd' && (event.data?.action === 'weather' || event.data?.name === 'weather')) {
+          const res = event.data.result || event.data.output || ''
+          const match = typeof res === 'string' && res.match(/```weather_json\s*([\s\S]*?)\s*```/)
+          if (match && match[1]) {
+            try {
+              return JSON.parse(match[1])
+            } catch {}
+          }
+        }
+      }
+      return null
+    }, [interaction.aiText, progress])
+
+    const fallbackStockData = useMemo(() => {
+      if (interaction.aiText && (interaction.aiText.includes('```stock_json') || interaction.aiText.includes('```stock-json'))) {
+        return null
+      }
+      for (const event of progress || []) {
+        if (event.type === 'ToolEnd' && (event.data?.action === 'stock' || event.data?.name === 'stock')) {
+          const res = event.data.result || event.data.output || ''
+          const match = typeof res === 'string' && res.match(/```stock_json\s*([\s\S]*?)\s*```/)
+          if (match && match[1]) {
+            try {
+              return JSON.parse(match[1])
+            } catch {}
+          }
+        }
+      }
+      return null
+    }, [interaction.aiText, progress])
+
+    const fallbackCalcData = useMemo(() => {
+      if (interaction.aiText && (interaction.aiText.includes('```calculation_json') || interaction.aiText.includes('```calculation-json'))) {
+        return null
+      }
+      for (const event of progress || []) {
+        if (event.type === 'ToolEnd' && (event.data?.action === 'calculation' || event.data?.name === 'calculation')) {
+          const res = event.data.result || event.data.output || ''
+          const match = typeof res === 'string' && res.match(/```calculation_json\s*([\s\S]*?)\s*```/)
+          if (match && match[1]) {
+            try {
+              return JSON.parse(match[1])
+            } catch {}
+          }
+        }
+      }
+      return null
+    }, [interaction.aiText, progress])
+
     return (
       <div key={interaction.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
         {interaction.userText && (
@@ -107,7 +164,12 @@ const ChatMessageItem = React.memo(
               onExpandedChange={onThinkingExpandedChange}
               showEmptyHint={hasAgentToolActivity(progress) && thoughts.length === 0}
             />
-            <div className="message-bubble">{memoizedAiContent}</div>
+            <div className="message-bubble">
+              {fallbackWeatherData && <WeatherCard data={fallbackWeatherData} />}
+              {fallbackStockData && <StockCard data={fallbackStockData} />}
+              {fallbackCalcData && <CalculationCard data={fallbackCalcData} />}
+              {memoizedAiContent}
+            </div>
             {renderWebSearchSources(interaction)}
             <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <button className="provider-badge">{interaction.provider} • {interaction.model}</button>

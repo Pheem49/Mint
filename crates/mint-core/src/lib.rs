@@ -28,6 +28,8 @@ pub mod tts;
 pub mod video_edit;
 pub mod video_gen;
 pub mod weather;
+pub mod stock;
+pub mod calculation;
 pub mod web_search;
 pub mod workflows;
 
@@ -116,6 +118,8 @@ pub use subtitle::{
 };
 pub use video_gen::{VideoGenError, VideoGenRequest, VideoGenResponse, generate_video};
 pub use weather::{WeatherError, WeatherReport, weather};
+pub use stock::{StockError, StockReport, stock};
+pub use calculation::{CalculationError, CalculationReport, calculate};
 pub use workflows::{WorkflowError, load_workflows, save_workflows, workflows_path};
 pub mod api_server;
 pub use api_server::start_api_server;

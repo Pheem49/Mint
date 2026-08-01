@@ -286,6 +286,9 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
         "semantic_search",
         "knowledge_search",
         "web_search",
+        "weather",
+        "stock",
+        "calculation",
         "memory_recall",
         "git_status",
         "git_diff",
@@ -370,6 +373,15 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
     }
     if allowed_actions.contains(&"web_search") {
         input_formats.push("- web_search: {\"query\":\"search terms\",\"limit\":5}");
+    }
+    if allowed_actions.contains(&"weather") {
+        input_formats.push("- weather: {\"city\":\"city or location name\"}");
+    }
+    if allowed_actions.contains(&"stock") {
+        input_formats.push("- stock: {\"query\":\"stock or crypto name/ticker e.g. Apple, TSLA, BTC\"}");
+    }
+    if allowed_actions.contains(&"calculation") {
+        input_formats.push("- calculation: {\"expression\":\"math or percentage expression e.g. 25% of 8500 or 100 * 3.5\"}");
     }
     if allowed_actions.contains(&"browser_open") {
         input_formats.push("- browser_open: {\"url\":\"https://example.com\"}");
@@ -556,6 +568,15 @@ pub fn build_system_prompt(config: &MintConfig) -> String {
     if allowed_actions.contains(&"web_search") {
         rules.push("7. Use web_search when the user asks to look something up online or needs current information.");
     }
+    if allowed_actions.contains(&"weather") {
+        rules.push("7w. Use weather to check current weather conditions or forecasts for a specific city or region. ALWAYS copy the ```weather_json ... ``` block from the tool observation into your final summary text so the UI card renders.");
+    }
+    if allowed_actions.contains(&"stock") {
+        rules.push("7s. Use stock to look up real-time stock/crypto prices, market performance, or ticker symbols. ALWAYS copy the ```stock_json ... ``` block from the tool observation into your final summary text.");
+    }
+    if allowed_actions.contains(&"calculation") {
+        rules.push("7c. Use calculation to evaluate math expressions, percentages, or conversions. ALWAYS copy the ```calculation_json ... ``` block from the tool observation into your final summary text.");
+    }
     if allowed_actions.contains(&"browser_open") {
         rules.push("7a. Use browser_open to navigate the virtual browser to a URL.");
     }
@@ -720,6 +741,10 @@ struct AgentInput {
     path: String,
     #[serde(default)]
     query: String,
+    #[serde(default)]
+    city: String,
+    #[serde(default)]
+    expression: String,
     #[serde(default)]
     command: String,
     #[serde(default)]
@@ -1449,6 +1474,60 @@ where
                      In your finish summary, explain to the user in Thai that the web search failed (mentioning the search error: {e}), \
                      and then answer their query using your own pre-existing knowledge/database."
                 )),
+            }
+        }
+        "weather" => {
+            let city = if !input.city.trim().is_empty() {
+                input.city.trim()
+            } else if !input.query.trim().is_empty() {
+                input.query.trim()
+            } else if !input.path.trim().is_empty() {
+                input.path.trim()
+            } else {
+                "Thailand"
+            };
+            match crate::weather::weather(city).await {
+                Ok(report) => Ok(format!(
+                    "{}\n\nNote: Weather lookup succeeded. In your finish summary, you MUST include the exact ```weather_json ... ``` code block from above in your response so the user sees the weather card UI.",
+                    report.data
+                )),
+                Err(e) => Ok(format!("Weather lookup failed for {city}: {e}")),
+            }
+        }
+        "stock" => {
+            let symbol = if !input.query.trim().is_empty() {
+                input.query.trim()
+            } else if !input.name.trim().is_empty() {
+                input.name.trim()
+            } else if !input.path.trim().is_empty() {
+                input.path.trim()
+            } else {
+                "AAPL"
+            };
+            match crate::stock::stock(symbol).await {
+                Ok(report) => Ok(format!(
+                    "{}\n\nNote: Stock lookup succeeded. In your finish summary, you MUST include the exact ```stock_json ... ``` code block from above in your response so the user sees the stock card UI.",
+                    report.data
+                )),
+                Err(e) => Ok(format!("Stock lookup failed for {symbol}: {e}")),
+            }
+        }
+        "calculation" => {
+            let expr = if !input.expression.trim().is_empty() {
+                input.expression.trim()
+            } else if !input.query.trim().is_empty() {
+                input.query.trim()
+            } else if !input.command.trim().is_empty() {
+                input.command.trim()
+            } else {
+                "0"
+            };
+            match crate::calculation::calculate(expr) {
+                Ok(report) => Ok(format!(
+                    "{}\n\nNote: Calculation succeeded. In your finish summary, you MUST include the exact ```calculation_json ... ``` code block from above in your response so the user sees the calculation card UI.",
+                    report.data
+                )),
+                Err(e) => Ok(format!("Calculation failed for {expr}: {e}")),
             }
         }
         "browser_open" => {

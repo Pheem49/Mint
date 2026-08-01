@@ -911,6 +911,9 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
         "semantic_search",
         "knowledge_search",
         "web_search",
+        "weather",
+        "stock",
+        "calculation",
         "browser_open",
         "memory_recall",
         "git_status",
@@ -950,7 +953,9 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
                     "type": "OBJECT",
                     "properties": {
                         "path": { "type": "STRING", "description": "The target file or directory path (required for list_files, read_file, write_file, apply_patch, symbols, semantic_index, semantic_search)" },
-                        "query": { "type": "STRING", "description": "The search query string (required for search_code, semantic_search, knowledge_search, web_search, memory_recall)" },
+                        "query": { "type": "STRING", "description": "The search query string (required for search_code, semantic_search, knowledge_search, web_search, stock, memory_recall)" },
+                        "city": { "type": "STRING", "description": "The target city or location name (required for weather)" },
+                        "expression": { "type": "STRING", "description": "The math expression or percentage calculation (required for calculation)" },
                         "url": { "type": "STRING", "description": "The target website URL to open (required for browser_open)" },
                         "command": { "type": "STRING", "description": "The local read-only or test shell command to run (required for run_shell)" },
                         "commands": {

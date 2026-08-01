@@ -1,6 +1,17 @@
 # Release Notes - Mint Agent v1.11.0
 
-We are excited to release **Mint Agent v1.11.0**! This version introduces major enhancements across CLI, Desktop, and Web: Core Rust Crates Integration (`ignore`, `grep-searcher`, `shlex`, `srtlib`, `tree-sitter`), Multimodal Video, Remote Messaging Bridges, Browser Automation, LaTeX Sanitization, **AI Image-to-Image & Inpainting Editing Capabilities**, and the **AI Video Editor Core & Auto Shorts Generator**.
+We are excited to release **Mint Agent v1.11.0**! This version introduces major enhancements across CLI, Desktop, and Web: Core Rust Crates Integration (`ignore`, `grep-searcher`, `shlex`, `srtlib`, `tree-sitter`), **Interactive Native UI Widgets Suite (Weather, Stock & Financial, Calculation & Unit Conversion)**, Multimodal Video, Remote Messaging Bridges, Browser Automation, LaTeX Sanitization, **AI Image-to-Image & Inpainting Editing Capabilities**, and the **AI Video Editor Core & Auto Shorts Generator**.
+
+## 🎨 Interactive Native UI Widgets Suite (Weather, Stock & Calculation)
+
+Ported and integrated native interactive widgets across CLI, Desktop UI, and Web UI:
+
+1. 🌤️ **Weather & Daily Forecast Widget**: Real-time Open-Meteo weather fetch, 5-day daily forecast grid, wind speed, humidity, and radial-gradient Blue Weather Card UI (`WeatherCard.tsx`).
+2. 📈 **Stock & Financial Asset Widget**: Real-time market quotes via Yahoo Finance v8 API for stocks (AAPL, TSLA, NVDA) and cryptocurrencies (BTC, ETH, SOL) with positive/negative price gain/loss indicators, ticker resolution, and styled Stock Card UI (`StockCard.tsx`).
+3. 🧮 **Calculation & Unit Converter Widget**: Expression evaluation, percentage calculations ("25% of 8500"), and unit/currency conversions rendered in a modern, transparent Glassmorphism Calculator Card UI (`CalculationCard.tsx`).
+4. 📱 **Universal Cross-Platform & Dual Desktop/Web Parity**: Single-source-of-truth card components in `src/renderer/shared/components/` rendering seamlessly across Desktop Tauri App and Web Browser Client.
+
+---
 
 ## ⚙️ Standard Crates Refactoring (URL Opening, Binary Lookup & HTML Scraping)
 

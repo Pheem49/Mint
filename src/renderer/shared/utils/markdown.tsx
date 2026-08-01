@@ -5,6 +5,9 @@
  */
 import { Fragment, type ReactNode } from 'react'
 import { ChatCodeBlock } from '../components/ChatCodeBlock'
+import WeatherCard from '../components/WeatherCard'
+import StockCard from '../components/StockCard'
+import CalculationCard from '../components/CalculationCard'
 
 export const resolveMediaUrl = (url: string): string => {
   if (!url) return ''
@@ -404,13 +407,54 @@ export function renderFormattedMessage(text: string): ReactNode {
 
       if (inCodeBlock) {
         const codeText = codeBlockLines.join('\n')
-        blocks.push(
-          <ChatCodeBlock
-            key={`code-block-${i}`}
-            code={codeText}
-            language={codeBlockLang}
-          />
-        )
+        if (codeBlockLang === 'weather_json' || codeBlockLang === 'weather-json') {
+          try {
+            const weatherData = JSON.parse(codeText)
+            blocks.push(<WeatherCard key={`weather-card-${i}`} data={weatherData} />)
+          } catch {
+            blocks.push(
+              <ChatCodeBlock
+                key={`code-block-${i}`}
+                code={codeText}
+                language={codeBlockLang}
+              />
+            )
+          }
+        } else if (codeBlockLang === 'stock_json' || codeBlockLang === 'stock-json') {
+          try {
+            const stockData = JSON.parse(codeText)
+            blocks.push(<StockCard key={`stock-card-${i}`} data={stockData} />)
+          } catch {
+            blocks.push(
+              <ChatCodeBlock
+                key={`code-block-${i}`}
+                code={codeText}
+                language={codeBlockLang}
+              />
+            )
+          }
+        } else if (codeBlockLang === 'calculation_json' || codeBlockLang === 'calculation-json') {
+          try {
+            const calcData = JSON.parse(codeText)
+            blocks.push(<CalculationCard key={`calc-card-${i}`} data={calcData} />)
+          } catch {
+            blocks.push(
+              <ChatCodeBlock
+                key={`code-block-${i}`}
+                code={codeText}
+                language={codeBlockLang}
+              />
+            )
+          }
+        } else {
+          blocks.push(
+            <ChatCodeBlock
+              key={`code-block-${i}`}
+              code={codeText}
+              language={codeBlockLang}
+            />
+          )
+        }
         inCodeBlock = false
         codeBlockLines = []
       } else {
