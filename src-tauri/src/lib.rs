@@ -32,7 +32,7 @@ use mint_core::{
     AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, ChatRequest, ChatResponse,
     ChatSession, CodeEdit, CodeEditProposal, ImageGenRequest, InteractionMemory, MemoryStore,
     MintConfig, PictureEntry, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport,
-    apply_code_edits, classify_shell_command, config_path, google_tts_urls, list_saved_pictures,
+    apply_code_edits, classify_shell_command, config_path, delete_saved_picture, google_tts_urls, list_saved_pictures,
     load_config, load_workflows, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
     orchestrate_chat_with_fallback, propose_code_edits, save_chat_images, save_config,
     save_workflows, start_channels, weather, workflows_path,
@@ -945,6 +945,11 @@ fn list_pictures() -> Result<Vec<PictureEntry>, String> {
 }
 
 #[tauri::command]
+fn delete_picture(id: String) -> Result<(), String> {
+    delete_saved_picture(&id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn save_pictures(
     images: Vec<String>,
     source: Option<String>,
@@ -1327,6 +1332,9 @@ pub fn run() {
             start_proactive_loop(app.handle().clone());
             start_channels();
             start_webhooks();
+            tauri::async_runtime::spawn(async {
+                let _ = mint_core::start_api_server(3000).await;
+            });
             if load_config()
                 .map(|config| config.show_desktop_widget)
                 .unwrap_or(false)
@@ -1369,6 +1377,7 @@ pub fn run() {
             add_learned_skill,
             delete_learned_skill,
             list_pictures,
+            delete_picture,
             save_pictures,
             upload_file,
             open_folder,

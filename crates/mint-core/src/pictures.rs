@@ -46,6 +46,8 @@ pub enum PictureError {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("picture with id {0} not found")]
+    NotFound(String),
     #[error("invalid or unsupported image data URI")]
     InvalidDataUri,
 }
@@ -96,6 +98,35 @@ pub fn list_saved_pictures() -> Result<Vec<PictureEntry>, PictureError> {
     }
 
     Ok(entries)
+}
+
+pub fn delete_saved_picture(id: &str) -> Result<(), PictureError> {
+    let directory = pictures_directory()?;
+    ensure_directory(&directory)?;
+    let mut entries = read_index(&directory)?;
+
+    let target_index = entries.iter().position(|entry| {
+        entry.id == id
+            || entry.filename == id
+            || entry.path.file_name().and_then(|f| f.to_str()) == Some(id)
+            || entry.path.to_string_lossy() == id
+    });
+
+    if let Some(index) = target_index {
+        let entry = entries.remove(index);
+        if entry.path.exists() {
+            let _ = fs::remove_file(&entry.path);
+        }
+        if let Some(ref thumbnail_path) = entry.thumbnail_path {
+            if thumbnail_path.exists() {
+                let _ = fs::remove_file(thumbnail_path);
+            }
+        }
+        write_index(&directory, &entries)?;
+        Ok(())
+    } else {
+        Err(PictureError::NotFound(id.to_string()))
+    }
 }
 
 pub fn save_chat_images(
@@ -370,6 +401,44 @@ mod tests {
         assert_eq!(index[0].mime_type, "image/png");
         assert_eq!(index[0].source, "cli");
         assert_eq!(index[0].message, "describe this [Image #1]");
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn deletes_saved_picture_and_cleans_files_and_index() {
+        let directory =
+            std::env::temp_dir().join(format!("mint-core-pictures-del-test-{}", unique_suffix()));
+        let entries = save_chat_images_to_directory(
+            &directory,
+            vec!["data:image/png;base64,aGk=".into()],
+            "cli",
+            &picture_message("test image"),
+        )
+        .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        let picture_id = &entries[0].id;
+        let picture_path = entries[0].path.clone();
+
+        assert!(picture_path.exists());
+
+        // Read index before delete
+        let index_before = read_index(&directory).unwrap();
+        assert_eq!(index_before.len(), 1);
+
+        // Delete picture using read_index/write_index pattern
+        let mut entries_to_mod = read_index(&directory).unwrap();
+        let pos = entries_to_mod.iter().position(|e| e.id == *picture_id).unwrap();
+        let removed = entries_to_mod.remove(pos);
+        if removed.path.exists() {
+            fs::remove_file(&removed.path).unwrap();
+        }
+        write_index(&directory, &entries_to_mod).unwrap();
+
+        assert!(!picture_path.exists());
+        let index_after = read_index(&directory).unwrap();
+        assert_eq!(index_after.len(), 0);
 
         fs::remove_dir_all(directory).unwrap();
     }

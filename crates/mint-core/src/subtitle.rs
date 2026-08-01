@@ -156,30 +156,37 @@ pub struct TranslateSubtitleRequest {
 
 // ── Functions ──────────────────────────────────────────────────────────────
 
+use srtlib::{Subtitle, Subtitles, Timestamp};
+
+/// Convert seconds to `srtlib::Timestamp`.
+fn secs_to_timestamp(secs: f64) -> Timestamp {
+    let total_ms = (secs.max(0.0) * 1000.0).round() as u64;
+    let hours = (total_ms / 3_600_000).min(255) as u8;
+    let mins = ((total_ms % 3_600_000) / 60_000) as u8;
+    let s = ((total_ms % 60_000) / 1_000) as u8;
+    let ms = (total_ms % 1_000) as u16;
+    Timestamp::new(hours, mins, s, ms)
+}
+
 /// Convert `TranscriptSegment` slice into a valid SRT format string.
 pub fn generate_srt(segments: &[TranscriptSegment]) -> String {
-    let mut srt = String::new();
+    let mut subtitles = Subtitles::new();
     for (i, seg) in segments.iter().enumerate() {
-        let index = i + 1;
-        let start_fmt = secs_to_srt_timestamp(seg.start);
-        let end_fmt = secs_to_srt_timestamp(seg.end);
+        let start_ts = secs_to_timestamp(seg.start);
+        let end_ts = secs_to_timestamp(seg.end);
         let text = if let Some(speaker) = &seg.speaker {
             format!("{}: {}", speaker, seg.text)
         } else {
             seg.text.clone()
         };
-        srt.push_str(&format!("{index}\n{start_fmt} --> {end_fmt}\n{text}\n\n"));
+        subtitles.push(Subtitle::new(i + 1, start_ts, end_ts, text));
     }
-    srt
+    subtitles.to_string()
 }
 
 /// Convert seconds to SRT timecode (`HH:MM:SS,mmm`).
 pub fn secs_to_srt_timestamp(secs: f64) -> String {
-    let hours = (secs / 3600.0) as u32;
-    let mins = ((secs % 3600.0) / 60.0) as u32;
-    let s = (secs % 60.0) as u32;
-    let millis = ((secs % 1.0) * 1000.0).round() as u32;
-    format!("{:02}:{:02}:{:02},{:03}", hours, mins, s, millis)
+    secs_to_timestamp(secs).to_string()
 }
 
 /// Burn subtitles into a video file using FFmpeg filter.

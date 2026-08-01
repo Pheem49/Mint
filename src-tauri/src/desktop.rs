@@ -47,7 +47,7 @@ pub struct CaptureRect {
 
 pub fn open_desktop_window(app: &AppHandle, kind: &str) -> Result<(), String> {
     let (label, route, width, height, always_on_top, skip_taskbar) = match kind {
-        "settings" => ("settings", "settings", 1020.0, 720.0, false, false),
+        "settings" => ("settings", "settings", 1180.0, 780.0, false, false),
         "spotlight" => ("spotlight", "spotlight", 600.0, 80.0, true, true),
         "widget" => ("widget", "widget", 150.0, 150.0, true, true),
         "screen-picker" => ("screen-picker", "screen-picker", 1280.0, 800.0, true, true),

@@ -21,6 +21,14 @@ import type {
   AgentProgress,
 } from './types'
 
+export function getLocalApiBase(): string {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname || 'localhost'
+    return `http://${host}:3000/api`
+  }
+  return 'http://localhost:3000/api'
+}
+
 export interface MintPlatformApi {
   getRuntimeStatus(): Promise<RuntimeStatus>
   detectSystemTools(): Promise<DetectedTools>
@@ -69,6 +77,7 @@ export interface MintPlatformApi {
   deleteLearnedSkill(name: string): Promise<number>
   clearChatHistory(chatId?: string | null): Promise<number>
   listSavedPictures(): Promise<PictureEntry[]>
+  deleteSavedPicture(id: string): Promise<void>
   generateImages(req: ImageGenRequest): Promise<ImageGenResponse>
   getImageGenProviders(): Promise<ImageGenProviders>
   setDefaultImageProvider(provider: string): Promise<boolean>

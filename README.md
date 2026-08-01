@@ -345,6 +345,7 @@ You can run individual subcommands by appending them after `mint`:
 ```bash
 mint onboard
 mint setup
+mint plugins
 mint status
 mint web
 mint api
@@ -359,6 +360,7 @@ mint chat "<message>"
 | `mint` | Start the interactive terminal chat assistant |
 | `mint onboard` | Configure Mint for first use |
 | `mint setup` | Interactively manage enabled agent tools |
+| `mint plugins` | Centralized interactive management for built-in ecosystem plugins & skills |
 | `mint web` | Launch the web UI and local API server |
 | `mint api` | Start only the local API server |
 | `mint auto` | Launch the GUI browser automation isolated port |
@@ -416,6 +418,17 @@ mint open README.md
 mint open-app code
 mint learn ./skill.md
 ```
+
+### Ecosystem Plugins (`mint plugins`)
+
+Centralized interactive management for built-in plugins (Spotify, Discord RPC, Gmail, Google Calendar, Notion, YouTube Music, Vercel, GitHub):
+
+```bash
+mint plugins
+```
+* **Interactive Terminal Checklist:** Toggle plugins on or off directly using terminal spacebar navigation.
+* **Credential Prompts:** Automatically prompts for missing OAuth Client IDs, Client Secrets, or API Tokens.
+* **PKCE OAuth & REST Polling:** Starts OAuth authorization flows and polls local REST endpoints (`http://localhost:3000/api/oauth/*`) for seamless Single Sign-On across CLI, Desktop UI, and Web UI.
 
 ### MCP Servers
 

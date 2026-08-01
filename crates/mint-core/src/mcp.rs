@@ -226,7 +226,22 @@ fn find_url(line: &str) -> Option<String> {
 fn open_url_in_browser(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
     {
-        Command::new("xdg-open").arg(url).spawn().map(|_| ())
+        if Command::new("xdg-open").arg(url).spawn().is_ok() {
+            return Ok(());
+        }
+        if Command::new("wslview").arg(url).spawn().is_ok() {
+            return Ok(());
+        }
+        if Command::new("gio").args(["open", url]).spawn().is_ok() {
+            return Ok(());
+        }
+        if Command::new("sensible-browser").arg(url).spawn().is_ok() {
+            return Ok(());
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no browser launcher found (xdg-open, wslview, gio, sensible-browser)",
+        ))
     }
     #[cfg(target_os = "macos")]
     {
@@ -235,7 +250,7 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     {
         Command::new("cmd")
-            .args(&["/C", "start", url])
+            .args(["/C", "start", "", url])
             .spawn()
             .map(|_| ())
     }
@@ -247,6 +262,7 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
 }
 
 fn start_server(server: &McpServer) -> Result<Child, McpError> {
+
     let mut process = Command::new(&server.command)
         .args(&server.args)
         .envs(&server.env)

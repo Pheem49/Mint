@@ -19,6 +19,7 @@ import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../../s
 import { ApprovalCard } from '../../shared/components/ApprovalCard'
 import { renderFormattedMessage, readableAssistantText, cleanSpeechText, renderSpeakerIcon, renderCopyIcon } from '../../shared/utils/markdown'
 import { ThinkingBlock } from '../../shared/components/ThinkingBlock'
+import ChatMessageItem from '../../shared/components/ChatMessageItem'
 import { AgentActivityDrawer } from '../../shared/components/AgentActivityDrawer'
 import type { DiffHunk, FileChange } from '../../shared/types'
 import { numericSetting } from '../../shared/utils/ui'
@@ -49,7 +50,7 @@ interface ChatPanelProps {
   thinkingExpanded: Record<string, boolean>
   onThinkingExpandedChange: (key: string, open: boolean) => void
   message: string
-  imageAttachments: Array<{ dataUri: string; name: string; previewDataUri?: string }>
+  imageAttachments: Array<{ dataUri: string; name: string; previewDataUri?: string; objectUrl?: string }>
   videoAttachments: Array<{ dataUri: string; name: string }>
   documentName: string
   pendingApproval: any | null
@@ -720,7 +721,7 @@ export default function ChatPanel({
   const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
   const renderCompletedActivity = (interaction: any) => {
     const interactionId = String(interaction.id)
-    const activityView = activitiesFrom(agentActivitySnapshots[interactionId] ?? [])
+    const activityView = activitiesFrom(agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? [])
     const isOpen = Boolean(openActivityIds[interactionId])
     return (
       <AgentActivityDrawer
@@ -869,7 +870,7 @@ export default function ChatPanel({
 
   const renderFileChanges = (interaction: any) => {
     const interactionId = String(interaction.id)
-    const progress = agentActivitySnapshots[interactionId] ?? []
+    const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
     const changes = parseFileChangesFromProgress(progress)
     if (changes.length === 0) return null
 
@@ -1105,91 +1106,25 @@ export default function ChatPanel({
         </div>
       </div>
       <div className="chat-container">
-        {interactions.map((interaction) => {
-          const isSystemEvent = interaction.provider === 'system' && interaction.model === 'provider_change';
-          if (isSystemEvent) {
-            const rawText = interaction.userText || ''
-            const cleanText = rawText.replace(/^Changed model to\s*/i, '').trim()
-            return (
-              <div key={interaction.id} className="system-event-divider">
-                <div className="system-event-line" />
-                <div className="system-event-pill">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                  </svg>
-                  <span>{cleanText}</span>
-                </div>
-                <div className="system-event-line" />
-              </div>
-            );
-          }
-          return (
-            <div key={interaction.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-              {interaction.userText && (
-                <div className="message user-message">
-                  <div className="bubble-wrapper">
-                    <div className="message-bubble">{renderFormattedMessage(interaction.userText)}</div>
-                    <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                      <button
-                        type="button"
-                        className={`msg-action-btn copy-btn ${copiedId === `user-${interaction.id}` ? 'is-copied' : ''}`}
-                        onClick={() => handleCopyMessage(`user-${interaction.id}`, interaction.userText)}
-                        title={copiedId === `user-${interaction.id}` ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy)'}
-                      >
-                        {renderCopyIcon(copiedId === `user-${interaction.id}`)}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div className="message ai-message">
-              <div className="bubble-wrapper">
-                {renderCompletedActivity(interaction)}
-                {renderFileChanges(interaction)}
-                {(() => {
-                  const progress = agentActivitySnapshots[String(interaction.id)] ?? interaction.agentActivity ?? []
-                  const thoughts = thoughtsFrom(progress)
-                  return (
-                    <ThinkingBlock
-                      blockKey={String(interaction.id)}
-                      thoughts={thoughts}
-                      expanded={thinkingExpanded[String(interaction.id)] ?? false}
-                      onExpandedChange={onThinkingExpandedChange}
-                      showEmptyHint={hasAgentToolActivity(progress) && thoughts.length === 0}
-                    />
-                  )
-                })()}
-                <div className="message-bubble">{renderFormattedMessage(interaction.aiText)}</div>
-                {renderWebSearchSources(interaction)}
-                <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
-                  {fallbackNotice(interaction) && <span className="provider-fallback-notice">{fallbackNotice(interaction)}</span>}
-                  <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
-                    <button
-                      type="button"
-                      className={`msg-action-btn copy-btn ${copiedId === interaction.id ? 'is-copied' : ''}`}
-                      onClick={() => handleCopyMessage(interaction.id, interaction.aiText)}
-                      title={copiedId === interaction.id ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
-                    >
-                      {renderCopyIcon(copiedId === interaction.id)}
-                    </button>
-                    <button
-                      type="button"
-                      className={`msg-action-btn tts-btn ${speakingText === interaction.aiText ? 'is-speaking' : ''}`}
-                      onClick={() => speak(interaction.aiText)}
-                      title={speakingText === interaction.aiText ? 'Stop reading' : 'Read aloud'}
-                    >
-                      {renderSpeakerIcon(speakingText === interaction.aiText)}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })}
+        {interactions.map((interaction) => (
+          <ChatMessageItem
+            key={interaction.id}
+            interaction={interaction}
+            copiedId={copiedId}
+            speakingText={speakingText}
+            agentActivitySnapshots={agentActivitySnapshots}
+            thinkingExpanded={thinkingExpanded}
+            openActivityIds={openActivityIds}
+            openReviewIds={openReviewIds}
+            openFileDiffs={openFileDiffs}
+            onThinkingExpandedChange={onThinkingExpandedChange}
+            handleCopyMessage={handleCopyMessage}
+            speak={speak}
+            renderCompletedActivity={renderCompletedActivity}
+            renderFileChanges={renderFileChanges}
+            renderWebSearchSources={renderWebSearchSources}
+          />
+        ))}
 
         {sending && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
@@ -1413,7 +1348,7 @@ export default function ChatPanel({
             <div className="mint-attachment">
               {imageAttachments.map((attachment, idx) => (
                 <div className="mint-image-attachment" key={idx}>
-                  <img className="mint-image-preview" src={attachment.previewDataUri || attachment.dataUri} alt={attachment.name || 'Image attachment'} />
+                  <img className="mint-image-preview" src={attachment.objectUrl || attachment.previewDataUri || attachment.dataUri} alt={attachment.name || 'Image attachment'} />
                   <button className="mint-attachment-remove" type="button" onClick={() => onRemoveImage(idx)} aria-label="Remove image">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="18" y1="6" x2="6" y2="18"></line>

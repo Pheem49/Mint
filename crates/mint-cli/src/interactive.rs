@@ -1074,82 +1074,220 @@ pub async fn handle_slash_command(
                 .unwrap_or((rest, ""));
 
             if plugin_name.is_empty() {
-                println!("\n{BLUE}────────────────────────────────────────────{RESET}");
-                println!("{MINT}  Available Plugins & Skills{RESET}");
-                println!("{BLUE}────────────────────────────────────────────{RESET}");
+                // Collect all plugins with their OAuth status
+                use mint_core::oauth::list_oauth_statuses;
+                use crossterm::{
+                    event::{self, Event, KeyCode},
+                    terminal::{disable_raw_mode, enable_raw_mode},
+                };
 
-                println!("{MINT}Native Plugins:{RESET}");
-                for p in mint_core::native_plugins() {
-                    println!("  - {BLUE}{:<20}{RESET} {}", p.name, p.description);
+                let oauth_statuses = list_oauth_statuses();
+
+                // Build native plugin list with statuses
+                struct PluginEntry {
+                    name: String,
+                    desc: String,
+                    is_oauth: bool,
+                    oauth_provider: String,
+                    connected: bool,
+                    account: Option<String>,
                 }
 
-                println!("\n{MINT}Custom Skills/Plugins (Active):{RESET}");
-                let mut active_skills = std::collections::HashSet::new();
-                if let Ok(memory) = MemoryStore::open_default() {
-                    match memory.learned_skills(100) {
-                        Ok(skills) => {
-                            if skills.is_empty() {
-                                println!(
-                                    "  {DIM}(No custom skills/plugins learned yet. Use '/learn <path>' to add one.){RESET}"
-                                );
+                let mut entries: Vec<PluginEntry> = mint_core::native_plugins()
+                    .iter()
+                    .map(|p| {
+                        // Try to find matching OAuth status
+                        let (connected, account) = if !p.oauth_provider.is_empty() {
+                            if let Some(st) = oauth_statuses.iter().find(|s| s.provider == p.oauth_provider) {
+                                (st.connected, st.account_email.clone())
                             } else {
-                                for s in &skills {
-                                    println!("  - {BLUE}{:<20}{RESET} {}", s.name, s.source_path);
+                                (false, None)
+                            }
+                        } else {
+                            (false, None)
+                        };
+                        PluginEntry {
+                            name: p.name.to_string(),
+                            desc: p.description.to_string(),
+                            is_oauth: !p.oauth_provider.is_empty(),
+                            oauth_provider: p.oauth_provider.to_string(),
+                            connected,
+                            account,
+                        }
+                    })
+                    .collect();
 
-                                    // Try to store canonicalized active path
-                                    if let Ok(canon) = Path::new(&s.source_path).canonicalize() {
-                                        active_skills.insert(canon);
-                                    } else {
-                                        active_skills.insert(PathBuf::from(&s.source_path));
+                // Add custom skills as non-OAuth entries
+                let mut custom_entries: Vec<PluginEntry> = Vec::new();
+                if let Ok(memory) = MemoryStore::open_default() {
+                    if let Ok(skills) = memory.learned_skills(100) {
+                        for s in &skills {
+                            custom_entries.push(PluginEntry {
+                                name: s.name.clone(),
+                                desc: format!("Custom skill • {}", s.source_path),
+                                is_oauth: false,
+                                oauth_provider: String::new(),
+                                connected: false,
+                                account: None,
+                            });
+                        }
+                    }
+                }
+
+                // Flatten into display structs
+                #[allow(dead_code)]
+                struct PE {
+                    name: String,
+                    desc: String,
+                    is_oauth: bool,
+                    oauth_provider: String,
+                    connected: bool,
+                    account: Option<String>,
+                    is_custom: bool,
+                }
+                let display: Vec<PE> = entries.drain(..)
+                    .map(|e| PE {
+                        is_custom: false,
+                        name: e.name, desc: e.desc, is_oauth: e.is_oauth,
+                        oauth_provider: e.oauth_provider, connected: e.connected, account: e.account,
+                    })
+                    .chain(custom_entries.drain(..).map(|e| PE {
+                        is_custom: true,
+                        name: e.name, desc: e.desc, is_oauth: e.is_oauth,
+                        oauth_provider: e.oauth_provider, connected: e.connected, account: e.account,
+                    }))
+                    .collect();
+
+                // Print header + list (separator printed inside draw_list so line count stays accurate)
+
+                // Simple interactive list
+                let mut cursor = 0usize;
+                let total = display.len();
+                if total == 0 {
+                    println!("{MINT}  Available Plugins & Skills{RESET}");
+                    println!("{BLUE}────────────────────────────────────────────{RESET}");
+                    println!("  {DIM}(No plugins found.){RESET}\n");
+                    return Some(SlashResult::Handled);
+                }
+
+                // Truncate helper to ensure line items don't wrap and break terminal line counts
+                fn truncate_str(s: &str, max_len: usize) -> String {
+                    if s.chars().count() > max_len {
+                        let end: String = s.chars().take(max_len.saturating_sub(3)).collect();
+                        format!("{end}...")
+                    } else {
+                        s.to_string()
+                    }
+                }
+
+                // Count exact terminal lines printed by draw_list
+                fn count_menu_lines(display: &[PE]) -> usize {
+                    display.len() // one line per item only
+                }
+
+                // Draw list — same clean style as /models (❯ selected, dimmed others, no section headers)
+                let draw_list = |cur: usize| {
+                    for (i, e) in display.iter().enumerate() {
+                        let plain_status = if e.connected {
+                            format!("● {}", truncate_str(e.account.as_deref().unwrap_or("yes"), 18))
+                        } else if e.is_oauth {
+                            "○ Not Connected".to_string()
+                        } else {
+                            "■ Active".to_string()
+                        };
+                        let short_desc = truncate_str(&e.desc, 38);
+                        if i == cur {
+                            let status_colored = if e.connected {
+                                format!("\x1b[32m{:<22}\x1b[0m", plain_status)
+                            } else if e.is_oauth {
+                                format!("{DIM}{:<22}{RESET}", plain_status)
+                            } else {
+                                format!("\x1b[36m{:<22}\x1b[0m", plain_status)
+                            };
+                            println!("  {BLUE}❯ {:<18}{RESET}{}  {DIM}{short_desc}{RESET}", e.name, status_colored);
+                        } else {
+                            println!("    {DIM}{:<18}  {:<22}  {short_desc}{RESET}", e.name, plain_status);
+                        }
+                    }
+                };
+
+                let total_lines = count_menu_lines(&display);
+                // Title pinned above list — printed once, not cleared on redraw (matches /models style)
+                println!("  {BLUE}Plugins & Integrations (↑/↓ navigate, Enter: manage, q: exit):{RESET}");
+                draw_list(cursor);
+                let _ = enable_raw_mode();
+
+                let selected_idx = loop {
+                    match event::poll(std::time::Duration::from_millis(100)) {
+                        Ok(true) => {
+                            if let Ok(Event::Key(key_event)) = event::read() {
+                                if key_event.kind == event::KeyEventKind::Press {
+                                    let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                                        && key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL);
+                                    if is_ctrl_c || matches!(key_event.code, KeyCode::Char('q') | KeyCode::Esc) {
+                                        let _ = disable_raw_mode();
+                                        break None;
+                                    }
+                                    match key_event.code {
+                                        KeyCode::Up => {
+                                            if cursor > 0 { cursor -= 1; } else { cursor = total - 1; }
+                                            let _ = disable_raw_mode();
+                                            print!("\x1b[{}A\x1b[0J", total_lines);
+                                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                                            draw_list(cursor);
+                                            let _ = enable_raw_mode();
+                                        }
+                                        KeyCode::Down => {
+                                            if cursor < total - 1 { cursor += 1; } else { cursor = 0; }
+                                            let _ = disable_raw_mode();
+                                            print!("\x1b[{}A\x1b[0J", total_lines);
+                                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                                            draw_list(cursor);
+                                            let _ = enable_raw_mode();
+                                        }
+                                        KeyCode::Enter => {
+                                            let _ = disable_raw_mode();
+                                            break Some(cursor);
+                                        }
+                                        _ => {}
                                     }
                                 }
                             }
                         }
-                        Err(e) => println!("  {ERROR}Error loading custom skills: {e}{RESET}"),
+                        Ok(false) => {}
+                        Err(_) => { let _ = disable_raw_mode(); break None; }
                     }
-                }
+                };
 
-                // Scan local workspace skills directory
-                let local_skills_dir = session.current_dir.join("skills");
-                if local_skills_dir.is_dir()
-                    && let Ok(entries) = fs::read_dir(&local_skills_dir)
-                {
-                    let mut local_files = Vec::new();
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.is_file()
-                            && let Some(ext) = path.extension().and_then(|e| e.to_str())
-                            && matches!(ext.to_ascii_lowercase().as_str(), "md" | "txt")
-                            && let Some(name) = path.file_name().and_then(|n| n.to_str())
-                        {
-                            if let Ok(canon_path) = path.canonicalize() {
-                                local_files.push((name.to_owned(), canon_path));
-                            } else {
-                                local_files.push((name.to_owned(), path));
-                            }
-                        }
-                    }
-
-                    let inactive_files: Vec<_> = local_files
-                        .into_iter()
-                        .filter(|(_, full_path)| !active_skills.contains(full_path))
-                        .map(|(name, _)| name)
-                        .collect();
-
-                    if !inactive_files.is_empty() {
-                        println!(
-                            "\n{MINT}Local Skill Files (Found but not learned/active yet):{RESET}"
-                        );
-                        for file in inactive_files {
+                if let Some(idx) = selected_idx {
+                    let selected = &display[idx];
+                    println!();
+                    if selected.is_oauth {
+                        if selected.connected {
                             println!(
-                                "  - {WARN}{:<20}{RESET} skills/{} {DIM}(Type '/learn skills/{}' to activate){RESET}",
-                                file, file, file
+                                "\x1b[32m🟢 {} is already connected!\x1b[0m  Account: {}",
+                                selected.name,
+                                selected.account.as_deref().unwrap_or("yes")
                             );
+                            println!(
+                                "{DIM}  To disconnect, run: mint plugins logout {}{RESET}",
+                                selected.oauth_provider
+                            );
+                        } else {
+                            println!("\x1b[1;36m🔑 Sign In to {} via OAuth...\x1b[0m", selected.name);
+                            println!("{DIM}  Opening browser for authorization...{RESET}\n");
+                            crate::plugins_cli::login_plugin_oauth_public(&selected.oauth_provider).await;
                         }
+                    } else if selected.is_custom {
+                        println!("{BLUE}📄 Custom Skill: {}\x1b[0m", selected.name);
+                        println!("{DIM}  Source: {}{RESET}", selected.desc);
+                    } else {
+                        println!("{BLUE}⚙️ {} is a native plugin (always available).\x1b[0m", selected.name);
+                        println!("{DIM}  {}{RESET}", selected.desc);
                     }
+                    println!();
                 }
 
-                println!();
                 Some(SlashResult::Handled)
             } else {
                 let agent_prompt = if prompt.is_empty() {

@@ -11,14 +11,16 @@ import {
   CustomProviderConfig,
 } from '../SettingsWindow'
 
-interface Agent {
+export interface Agent {
   id: string
   name: string
   provider: string
   model: string
   apiKey?: string
-  systemInstruction: string
-  enabled: boolean
+  systemInstruction?: string
+  systemPrompt?: string
+  enabled?: boolean
+  avatar?: string
 }
 
 interface AgentsTabProps {
@@ -39,21 +41,19 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
 
   const handleProviderChange = (newProvider: string) => {
     setProvider(newProvider)
-    let defaultModel = ''
-    if (newProvider === 'gemini') defaultModel = config.geminiModel || GEMINI_MODELS[0]
-    else if (newProvider === 'openai') defaultModel = config.openaiModel || OPENAI_MODELS[0]
-    else if (newProvider === 'anthropic') defaultModel = config.anthropicModel || ANTHROPIC_MODELS[0]
-    else if (newProvider === 'openrouter') defaultModel = config.openrouterModel || OPENROUTER_MODELS[0]
-    else if (newProvider === 'deepseek') defaultModel = config.deepseekModel || DEEPSEEK_MODELS[0]
-    else if (newProvider === 'huggingface') defaultModel = config.hfModel || HF_MODELS[0]
-    else if (newProvider === 'local_openai') defaultModel = config.localModelName || LOCAL_MODELS[0]
-    else if (newProvider === 'ollama') defaultModel = config.ollamaModel || dynamicOllamaModels[0] || 'llama3:latest'
+    if (newProvider === 'gemini') setModel(config.geminiModel || GEMINI_MODELS[0])
+    else if (newProvider === 'openai') setModel(config.openaiModel || OPENAI_MODELS[0])
+    else if (newProvider === 'openrouter') setModel(config.openrouterModel || OPENROUTER_MODELS[0])
+    else if (newProvider === 'deepseek') setModel(config.deepseekModel || DEEPSEEK_MODELS[0])
+    else if (newProvider === 'anthropic') setModel(config.anthropicModel || ANTHROPIC_MODELS[0])
+    else if (newProvider === 'huggingface') setModel(config.hfModel || HF_MODELS[0])
+    else if (newProvider === 'local_openai') setModel(config.localModelName || LOCAL_MODELS[0])
+    else if (newProvider === 'ollama') setModel(config.ollamaModel || dynamicOllamaModels[0] || '')
     else if (newProvider.startsWith('custom:')) {
       const cpId = newProvider.replace(/^custom:/, '')
       const cp = (config.customProviders ?? []).find(p => p.id === cpId)
-      defaultModel = cp?.models[0]?.modelId ?? ''
+      setModel(cp?.models[0]?.modelId ?? '')
     }
-    setModel(defaultModel)
   }
 
   const handleEdit = (agent: Agent) => {
@@ -62,7 +62,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
     setProvider(agent.provider)
     setModel(agent.model)
     setApiKey(agent.apiKey || '')
-    setSystemInstruction(agent.systemInstruction)
+    setSystemInstruction(agent.systemInstruction || agent.systemPrompt || '')
     setIsEditing(true)
   }
 
@@ -77,7 +77,16 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
       // Update existing agent
       updatedAgents = agents.map(a =>
         a.id === editingAgent.id
-          ? { ...a, name, provider, model, apiKey: apiKey || undefined, systemInstruction }
+          ? {
+              ...a,
+              name,
+              provider,
+              model,
+              apiKey: apiKey || undefined,
+              systemInstruction,
+              systemPrompt: systemInstruction,
+              enabled: a.enabled ?? true,
+            }
           : a
       )
     } else {
@@ -89,6 +98,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
         model,
         apiKey: apiKey || undefined,
         systemInstruction,
+        systemPrompt: systemInstruction,
         enabled: true
       }
       updatedAgents = [...agents, newAgent]
@@ -137,16 +147,16 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
     setIsEditing(true)
   }
 
-  // Filter providers that have configured API keys, plus local ones
+  // Available providers for agent routing
   const availableProviders = [
-    { value: 'gemini', label: 'Google Gemini', hasKey: !!config.apiKey },
+    { value: 'gemini', label: 'Google Gemini', hasKey: true },
     { value: 'openai', label: 'OpenAI', hasKey: !!config.openaiApiKey },
     { value: 'anthropic', label: 'Anthropic Claude', hasKey: !!config.anthropicApiKey },
     { value: 'openrouter', label: 'OpenRouter', hasKey: !!config.openrouterApiKey },
     { value: 'deepseek', label: 'DeepSeek', hasKey: !!config.deepseekApiKey },
-    { value: 'ollama', label: 'Ollama (Local)', hasKey: true },
     { value: 'huggingface', label: 'Hugging Face', hasKey: !!config.hfApiKey },
-    { value: 'local_openai', label: 'Local (LM Studio / OpenAI Compatible)', hasKey: true },
+    { value: 'local_openai', label: 'Local OpenAI', hasKey: !!config.localApiBaseUrl },
+    { value: 'ollama', label: 'Ollama (Local)', hasKey: !!config.ollamaHost },
     // Custom providers — available whenever they have a base URL configured
     ...(config.customProviders ?? [])
       .filter(cp => cp.baseUrl.trim().length > 0)
@@ -158,7 +168,7 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
   ].filter(p => p.hasKey);
 
   // Find out what models list corresponds to the selected provider
-  let modelList: string[] = []
+  let modelList: readonly string[] = []
   let defaultGeneralModel = ''
   if (provider === 'gemini') {
     modelList = GEMINI_MODELS

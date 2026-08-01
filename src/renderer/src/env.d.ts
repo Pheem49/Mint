@@ -15,6 +15,7 @@ interface Window {
     resetChat: () => Promise<any>;
     getChatHistory: () => Promise<any>;
     listSavedPictures: () => Promise<any>;
+    deleteSavedPicture: (id: string) => Promise<any>;
     openSettings: () => Promise<any>;
     openWorkflows: () => Promise<any>;
     readClipboard: () => Promise<string>;

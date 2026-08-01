@@ -4,12 +4,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use grep_regex::RegexMatcherBuilder;
+use grep_searcher::{SearcherBuilder, Sink, SinkMatch};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
 use thiserror::Error;
 
-use crate::{Capability, MintConfig, SafetyError, assert_path_capability};
+use crate::{assert_path_capability, Capability, MintConfig, SafetyError};
 
 const IGNORED_DIRECTORIES: &[&str] = &[
     ".git",
@@ -129,7 +131,33 @@ pub fn list_code_files(
 ) -> Result<Vec<CodeFile>, CodeInspectionError> {
     let root = assert_path_capability(root, Capability::Read, config)?;
     let mut files = Vec::new();
-    collect_files(&root, &mut files, limit.max(1), true)?;
+    let walker = ignore::WalkBuilder::new(&root)
+        .hidden(false)
+        .git_ignore(true)
+        .ignore(true)
+        .build();
+
+    for result in walker {
+        if files.len() >= limit.max(1) {
+            break;
+        }
+        let entry = match result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if path.is_file() {
+            if contains_ignored_directory(path, &root) {
+                continue;
+            }
+            if let Ok(metadata) = path.metadata() {
+                files.push(CodeFile {
+                    path: path.to_path_buf(),
+                    size: metadata.len(),
+                });
+            }
+        }
+    }
     Ok(files)
 }
 
@@ -161,6 +189,31 @@ pub fn read_code_file(
         .join("\n"))
 }
 
+struct SearchHitSink<'a> {
+    path: &'a Path,
+    hits: &'a mut Vec<CodeSearchHit>,
+    limit: usize,
+}
+
+impl<'a> Sink for SearchHitSink<'a> {
+    type Error = std::io::Error;
+
+    fn matched(
+        &mut self,
+        _searcher: &grep_searcher::Searcher,
+        mat: &SinkMatch<'_>,
+    ) -> Result<bool, Self::Error> {
+        let line = mat.line_number().unwrap_or(0) as usize;
+        let text = String::from_utf8_lossy(mat.bytes()).trim().to_owned();
+        self.hits.push(CodeSearchHit {
+            path: self.path.to_path_buf(),
+            line,
+            text,
+        });
+        Ok(self.hits.len() < self.limit)
+    }
+}
+
 pub fn search_code(
     root: &Path,
     query: &str,
@@ -173,31 +226,23 @@ pub fn search_code(
         return Ok(hits);
     }
     let escaped = regex::escape(query);
-    let re = match regex::RegexBuilder::new(&escaped)
+    let matcher = match RegexMatcherBuilder::new()
         .case_insensitive(true)
-        .build()
+        .build(&escaped)
     {
-        Ok(re) => re,
+        Ok(m) => m,
         Err(_) => return Ok(hits),
     };
+    let mut searcher = SearcherBuilder::new().build();
     for file in files {
-        let Ok(raw) = fs::read_to_string(&file.path) else {
-            continue;
+        let mut sink = SearchHitSink {
+            path: &file.path,
+            hits: &mut hits,
+            limit,
         };
-        if !re.is_match(&raw) {
-            continue;
-        }
-        for (index, line) in raw.lines().enumerate() {
-            if re.is_match(line) {
-                hits.push(CodeSearchHit {
-                    path: file.path.clone(),
-                    line: index + 1,
-                    text: line.trim().to_owned(),
-                });
-                if hits.len() >= limit.max(1) {
-                    return Ok(hits);
-                }
-            }
+        let _ = searcher.search_path(&matcher, &file.path, &mut sink);
+        if hits.len() >= limit.max(1) {
+            break;
         }
     }
     Ok(hits)
@@ -433,54 +478,18 @@ fn full_file_diff(path: &Path, previous: &str, next: &str) -> String {
     lines.join("\n")
 }
 
-fn collect_files(
-    directory: &Path,
-    files: &mut Vec<CodeFile>,
-    limit: usize,
-    is_root: bool,
-) -> Result<(), CodeInspectionError> {
-    if files.len() >= limit || (!is_root && is_ignored_directory(directory)) {
-        return Ok(());
-    }
-    let entries = fs::read_dir(directory).map_err(|source| CodeInspectionError::Read {
-        path: directory.to_path_buf(),
-        source,
-    })?;
-    for entry in entries {
-        if files.len() >= limit {
-            break;
-        }
-        let entry = entry.map_err(|source| CodeInspectionError::Read {
-            path: directory.to_path_buf(),
-            source,
-        })?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|source| CodeInspectionError::Read {
-                path: path.clone(),
-                source,
-            })?;
-        if file_type.is_dir() {
-            collect_files(&path, files, limit, false)?;
-        } else if file_type.is_file() {
-            let size = entry
-                .metadata()
-                .map_err(|source| CodeInspectionError::Read {
-                    path: path.clone(),
-                    source,
-                })?
-                .len();
-            files.push(CodeFile { path, size });
+fn contains_ignored_directory(path: &Path, root: &Path) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    for component in relative.components() {
+        if let std::path::Component::Normal(name) = component {
+            if let Some(name_str) = name.to_str() {
+                if IGNORED_DIRECTORIES.contains(&name_str) {
+                    return true;
+                }
+            }
         }
     }
-    Ok(())
-}
-
-fn is_ignored_directory(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| IGNORED_DIRECTORIES.contains(&name))
+    false
 }
 
 pub fn parse_github_url(url: &str) -> Option<(String, String)> {

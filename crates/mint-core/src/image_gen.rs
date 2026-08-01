@@ -82,6 +82,9 @@ pub enum ImageGenError {
     // ── Replicate ────────────────────────────────────────────────────────────
     #[error("missing Replicate API key — configure replicate_api_key")]
     MissingReplicateKey,
+    // ── Black Forest Labs (FLUX) ─────────────────────────────────────────────
+    #[error("missing Black Forest Labs API key — configure bfl_api_key or set BFL_API_KEY")]
+    MissingBflKey,
     // ── Generic ──────────────────────────────────────────────────────────────
     #[error("unsupported image generation provider: {0}")]
     UnsupportedProvider(String),
@@ -137,6 +140,7 @@ pub async fn generate_images(
         "stability" => call_stability(&client, config, request).await,
         "ideogram" => call_ideogram(&client, config, request).await,
         "replicate" => call_replicate(&client, config, request).await,
+        "bfl" | "flux" => call_bfl(&client, config, request).await,
         other => Err(ImageGenError::UnsupportedProvider(other.to_owned())),
     }
 }
@@ -919,6 +923,132 @@ async fn poll_replicate(client: &Client, api_key: &str, url: &str) -> Result<Val
     Err(ImageGenError::ModelError(
         "Replicate prediction timed out after 120 seconds".to_owned(),
     ))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Black Forest Labs — Direct FLUX API (api.bfl.ml)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn call_bfl(
+    client: &Client,
+    config: &MintConfig,
+    request: &ImageGenRequest,
+) -> Result<ImageGenResponse, ImageGenError> {
+    let api_key = if config.bfl_api_key.trim().is_empty() {
+        std::env::var("BFL_API_KEY").unwrap_or_default()
+    } else {
+        config.bfl_api_key.clone()
+    };
+    if api_key.trim().is_empty() {
+        return Err(ImageGenError::MissingBflKey);
+    }
+
+    let model = request
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            let m = config.bfl_model.trim();
+            if m.is_empty() {
+                "flux-pro-1.1".to_owned()
+            } else {
+                m.to_owned()
+            }
+        });
+
+    let (width, height) = match request.aspect_ratio.as_deref() {
+        Some("16:9") => (1344, 768),
+        Some("9:16") => (768, 1344),
+        Some("4:3") => (1152, 864),
+        _ => (1024, 1024),
+    };
+
+    let full_prompt = build_prompt(request);
+    let payload = json!({
+        "prompt": full_prompt,
+        "width": width,
+        "height": height,
+        "output_format": "png",
+        "prompt_upsampling": false,
+        "safety_tolerance": 2
+    });
+
+    let endpoint_name = if model.contains('/') {
+        model.split('/').last().unwrap_or("flux-pro-1.1")
+    } else {
+        &model
+    };
+
+    let url = format!("https://api.bfl.ml/v1/{endpoint_name}");
+
+    let resp: Value = client
+        .post(&url)
+        .header("x-key", &api_key)
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await?
+        .error_for_status()
+        .map_err(ImageGenError::Request)?
+        .json()
+        .await?;
+
+    let task_id = resp["id"]
+        .as_str()
+        .ok_or_else(|| ImageGenError::ModelError("No task ID returned from Black Forest Labs".into()))?;
+
+    let poll_url = format!("https://api.bfl.ml/v1/get_result?id={task_id}");
+    let mut sample_url = None;
+
+    for _ in 0..30 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+
+        let poll_resp: Value = client
+            .get(&poll_url)
+            .header("x-key", &api_key)
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        let status = poll_resp["status"].as_str().unwrap_or("Pending");
+        if status == "Ready" {
+            if let Some(url) = poll_resp["result"]["sample"].as_str() {
+                sample_url = Some(url.to_string());
+                break;
+            }
+        } else if status == "Error" || status == "Failed" {
+            let err_msg = poll_resp["error"].as_str().unwrap_or("FLUX generation failed");
+            return Err(ImageGenError::ModelError(err_msg.to_string()));
+        }
+    }
+
+    let image_url = sample_url.ok_or_else(|| {
+        ImageGenError::ModelError("FLUX generation timed out polling for result".into())
+    })?;
+
+    let img_bytes = client
+        .get(&image_url)
+        .send()
+        .await?
+        .bytes()
+        .await?;
+
+    let base64_str = STANDARD.encode(&img_bytes);
+    let data_uri = format!("data:image/png;base64,{base64_str}");
+
+    Ok(ImageGenResponse {
+        images: vec![GeneratedImage {
+            data_uri,
+            mime_type: "image/png".to_string(),
+        }],
+        model: model.clone(),
+        provider: "bfl".to_string(),
+        prompt: request.prompt.clone(),
+        description: None,
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

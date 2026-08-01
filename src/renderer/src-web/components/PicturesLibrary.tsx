@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
-import { type PictureEntry, convertFileSrc, isTauriRuntime, getLocalApiBase } from '../tauri'
+import { useEffect, useMemo, useState, memo } from 'react'
+import { createPortal } from 'react-dom'
+import { type PictureEntry, convertFileSrc, isTauriRuntime, getLocalApiBase, deleteSavedPicture } from '../tauri'
 import type { DashboardView } from './DashboardSidebar'
 
 const getPictureSrc = (picture: PictureEntry, useThumbnail = false) => {
@@ -17,6 +18,98 @@ const getPictureSrc = (picture: PictureEntry, useThumbnail = false) => {
   }
 }
 
+interface PictureCardItemProps {
+  picture: PictureEntry
+  filterType: 'photo' | 'video'
+  index: number
+  onDeleteClick: (picture: PictureEntry) => void
+}
+
+const PictureCardItem = memo(({ picture, filterType, index, onDeleteClick }: PictureCardItemProps) => {
+  const isVideo = filterType === 'video'
+  return (
+    <article className="picture-card" key={picture.id}>
+      <button
+        type="button"
+        className="picture-card-delete-btn"
+        title="Delete item"
+        onClick={(e) => {
+          e.stopPropagation()
+          onDeleteClick(picture)
+        }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="3 6 5 6 21 6"></polyline>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+        </svg>
+      </button>
+      {isVideo ? (
+        <div style={{ position: 'relative', width: '100%', aspectRatio: '4 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a1a' }}>
+          {picture.thumbnailPath || picture.thumbnailUrl ? (
+            <img
+              src={getPictureSrc(picture, true)}
+              alt={picture.message || picture.filename}
+              loading={index < 8 ? 'eager' : 'lazy'}
+              decoding="async"
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              onError={(e) => {
+                const img = e.currentTarget
+                if (!img.dataset.fallback) {
+                  img.dataset.fallback = 'true'
+                  img.src = getPictureSrc(picture, false)
+                }
+              }}
+            />
+          ) : (
+            <video
+              src={getPictureSrc(picture, false)}
+              preload="metadata"
+              style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
+            />
+          )}
+          <div style={{
+            position: 'absolute',
+            top: '8px',
+            left: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            color: '#fff',
+            padding: '4px 8px',
+            borderRadius: '4px',
+            fontSize: '11px',
+            fontWeight: 600,
+            pointerEvents: 'none',
+            backdropFilter: 'blur(4px)',
+            border: '1px solid rgba(255, 255, 255, 0.1)'
+          }}>
+            <span>📹 Video</span>
+          </div>
+        </div>
+      ) : (
+        <div style={{ position: 'relative', width: '100%', aspectRatio: '4 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a1a' }}>
+          <img
+            src={getPictureSrc(picture, true)}
+            alt={picture.message || picture.filename}
+            loading={index < 8 ? 'eager' : 'lazy'}
+            decoding="async"
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+            onError={(e) => {
+              const img = e.currentTarget
+              if (!img.dataset.fallback) {
+                img.dataset.fallback = 'true'
+                img.src = getPictureSrc(picture, false)
+              }
+            }}
+          />
+        </div>
+      )}
+      <div className="picture-card-meta"><span>{picture.message || picture.filename}</span></div>
+    </article>
+  )
+})
+
 interface PicturesLibraryProps {
   view: DashboardView
   pictures: PictureEntry[]
@@ -27,7 +120,8 @@ interface PicturesLibraryProps {
 export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPictures }: PicturesLibraryProps) {
   const [filterType, setFilterType] = useState<'photo' | 'video'>('photo')
   const [visibleCount, setVisibleCount] = useState(24)
-  const [failedImages, setFailedImages] = useState<Set<string>>(new Set())
+  const [deletingPicture, setDeletingPicture] = useState<PictureEntry | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const filteredPictures = useMemo(() => {
     return pictures.filter((picture) => {
@@ -58,6 +152,21 @@ export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPi
   useEffect(() => {
     setVisibleCount(24)
   }, [view, pictures, filterType])
+
+  const handleDeleteConfirm = async () => {
+    if (!deletingPicture) return
+    const target = deletingPicture
+    setIsDeleting(true)
+    try {
+      await deleteSavedPicture(target.id || target.filename)
+      await onRefreshPictures?.()
+    } catch (err) {
+      console.error('Failed to delete picture:', err)
+    } finally {
+      setIsDeleting(false)
+      setDeletingPicture(null)
+    }
+  }
 
   return (
     <section className={`pictures-library ${view === 'pictures' ? 'is-visible' : ''}`} aria-hidden={view !== 'pictures'}>
@@ -111,85 +220,15 @@ export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPi
       ) : (
         <>
           <div className="pictures-grid">
-            {visiblePictures.map((picture, index) => {
-              const isVideo = filterType === 'video'
-              return (
-                <article className="picture-card" key={picture.id}>
-                  {isVideo ? (
-                    <div style={{ position: 'relative', width: '100%', aspectRatio: '4 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a1a' }}>
-                      {failedImages.has(picture.id) ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: '#666' }}>
-                          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
-                            <path d="M23 7l-7 5 7 5V7z"></path>
-                            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
-                          </svg>
-                          <span style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em', textTransform: 'uppercase', opacity: 0.8 }}>Video</span>
-                        </div>
-                      ) : (
-                        <>
-                          {picture.thumbnailPath || picture.thumbnailUrl ? (
-                            <img
-                              src={getPictureSrc(picture, true)}
-                              alt={picture.message || picture.filename}
-                              loading={index < 6 ? 'eager' : 'lazy'}
-                              decoding="async"
-                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              onError={() => setFailedImages((prev) => new Set([...prev, picture.id]))}
-                            />
-                          ) : (
-                            <video
-                              src={getPictureSrc(picture, false)}
-                              preload="metadata"
-                              style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
-                              onError={() => setFailedImages((prev) => new Set([...prev, picture.id]))}
-                            />
-                          )}
-                          <div style={{
-                            position: 'absolute',
-                            top: '8px',
-                            left: '8px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            backgroundColor: 'rgba(0, 0, 0, 0.75)',
-                            color: '#fff',
-                            padding: '4px 8px',
-                            borderRadius: '4px',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            pointerEvents: 'none',
-                            backdropFilter: 'blur(4px)',
-                            border: '1px solid rgba(255, 255, 255, 0.1)'
-                          }}>
-                            <span>📹 Video</span>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{ position: 'relative', width: '100%', aspectRatio: '4 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a1a' }}>
-                      {failedImages.has(picture.id) ? (
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4 }}>
-                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                          <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                          <polyline points="21 15 16 10 5 21"></polyline>
-                        </svg>
-                      ) : (
-                        <img
-                          src={getPictureSrc(picture, true)}
-                          alt={picture.message || picture.filename}
-                          loading={index < 6 ? 'eager' : 'lazy'}
-                          decoding="async"
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          onError={() => setFailedImages((prev) => new Set([...prev, picture.id]))}
-                        />
-                      )}
-                    </div>
-                  )}
-                  <div className="picture-card-meta"><span>{picture.message || picture.filename}</span></div>
-                </article>
-              )
-            })}
+            {visiblePictures.map((picture, index) => (
+              <PictureCardItem
+                key={picture.id}
+                picture={picture}
+                filterType={filterType}
+                index={index}
+                onDeleteClick={setDeletingPicture}
+              />
+            ))}
           </div>
           {visibleCount < filteredPictures.length && (
             <div className="pictures-load-more-container">
@@ -203,6 +242,42 @@ export default function PicturesLibrary({ view, pictures, onSetView, onRefreshPi
             </div>
           )}
         </>
+      )}
+
+      {deletingPicture && typeof document !== 'undefined' && createPortal(
+        <div className="picture-delete-modal-overlay" onClick={() => setDeletingPicture(null)}>
+          <div className="picture-delete-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="picture-delete-modal-header">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              <span>Delete {filterType === 'video' ? 'Video' : 'Picture'}</span>
+            </div>
+            <p className="picture-delete-modal-body">
+              Are you sure you want to permanently delete <strong>{deletingPicture.message || deletingPicture.filename}</strong>? This action cannot be undone.
+            </p>
+            <div className="picture-delete-modal-actions">
+              <button
+                type="button"
+                className="picture-modal-btn cancel"
+                onClick={() => setDeletingPicture(null)}
+                disabled={isDeleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="picture-modal-btn delete"
+                onClick={handleDeleteConfirm}
+                disabled={isDeleting}
+              >
+                {isDeleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
     </section>
   )

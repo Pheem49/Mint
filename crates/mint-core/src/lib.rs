@@ -13,6 +13,7 @@ pub mod memory;
 pub mod orchestration;
 pub mod pictures;
 pub mod auto_shorts;
+pub mod oauth;
 pub mod plugins;
 pub mod safety;
 pub mod semantic;
@@ -72,8 +73,8 @@ pub use orchestration::{
     orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
 };
 pub use pictures::{
-    PictureEntry, PictureError, list_saved_pictures, parse_data_uri, save_chat_images,
-    save_sent_image,
+    PictureEntry, PictureError, delete_saved_picture, list_saved_pictures, parse_data_uri,
+    save_chat_images, save_sent_image,
 };
 pub use plugins::{NativePlugin, PluginError, execute_native_plugin, native_plugins};
 pub use safety::{

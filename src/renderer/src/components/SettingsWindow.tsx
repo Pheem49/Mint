@@ -7,6 +7,16 @@ import AutomationTab from './Settings/AutomationTab'
 import ThemeTab from './Settings/ThemeTab'
 import PluginsTab from './Settings/PluginsTab'
 import AgentsTab from './Settings/AgentsTab'
+import {
+  GEMINI_MODELS,
+  OPENAI_MODELS,
+  OPENROUTER_MODELS,
+  DEEPSEEK_MODELS,
+  ANTHROPIC_MODELS,
+  HF_MODELS,
+  LOCAL_MODELS,
+  OLLAMA_MODELS,
+} from '../../shared/constants/models'
 
 // ─── Custom Provider Types ────────────────────────────────────────────────────
 
@@ -29,200 +39,21 @@ export interface CustomProviderConfig {
   headers: CustomProviderHeader[]
 }
 
-export const DEFAULT_CONFIG = {
-  theme: 'dark',
-  accentColor: '#10b981',
-  systemTextColor: '#f8fafc',
-  customBgStart: '#0f172a',
-  customBgEnd: '#1e1b4b',
-  customPanelBg: '#1e293b',
-  glassBlur: 'blur(16px)',
-  fontFamily: "'Outfit', sans-serif",
-  fontSize: '18px',
-  apiKey: '',
-  aiProvider: 'gemini',
-  geminiModel: 'gemini-2.5-flash',
-  openaiModel: 'gpt-4o',
-  openrouterModel: 'openai/gpt-4o-mini',
-  deepseekModel: 'deepseek-v4-flash',
-  anthropicModel: 'claude-3-5-sonnet-latest',
-  ollamaModel: 'llama3:latest',
-  language: 'th-TH',
-  proactiveInterval: 60,
-  proactiveCooldown: 120,
-  enableVoiceReply: true,
-  enableCustomWorkflows: true,
-  enableAgentCollaboration: false,
-  ttsProvider: 'google',
-  ttsVolume: 1.0,
-  ttsSpeed: 1.0,
-  ttsPitch: 1.0,
-  pluginSpotifyEnabled: true,
-  pluginCalendarEnabled: false,
-  pluginGmailEnabled: false,
-  pluginNotionEnabled: false,
-  pluginDiscordEnabled: false,
-  showDesktopWidget: true,
-  mcpServers: {} as Record<string, any>,
-  hfModel: 'meta-llama/Meta-Llama-3-8B-Instruct',
-  localApiBaseUrl: '',
-  localModelName: 'local-model',
-  ollamaHost: '',
-  anthropicApiKey: '',
-  openaiApiKey: '',
-  openrouterApiKey: '',
-  deepseekApiKey: '',
-  hfApiKey: '',
-  automationBrowser: 'chromium',
-  browserDebugUrl: 'http://127.0.0.1:9222/json/list',
-  browserExtensionContextUrl: 'http://127.0.0.1:3212/context',
-  enableHeadlessTaskQueue: false,
-  enableAutoUpdate: false,
-  updaterEndpoint: '',
-  updaterPublicKey: '',
-  telegramBotToken: '',
-  enableTelegramBridge: false,
-  discordBotToken: '',
-  discordApplicationId: '',
-  enableDiscordBridge: false,
-  slackBotToken: '',
-  slackAppToken: '',
-  enableSlackBridge: false,
-  lineChannelAccessToken: '',
-  lineChannelSecret: '',
-  enableLineBridge: false,
-  lineWebhookHost: '127.0.0.1',
-  lineWebhookPort: 3000,
-  whatsappCloudAccessToken: '',
-  whatsappPhoneNumberId: '',
-  whatsappVerifyToken: '',
-  whatsappAppSecret: '',
-  enableWhatsappBridge: false,
-  whatsappWebhookHost: '127.0.0.1',
-  whatsappWebhookPort: 3001,
-  enableBridgeAckNotification: true,
-  bridgeAckMessage: '[Mint Agent] Remote command received, processing...',
-  notionApiKey: '',
-  notionDatabaseId: '',
-  gmailClientId: '',
-  gmailClientSecret: '',
-  gmailRefreshToken: '',
-  googleCalendarClientId: '',
-  googleCalendarClientSecret: '',
-  googleCalendarRefreshToken: '',
-  // Search
-  searchProvider: 'brave' as 'brave' | 'google',
-  googleSearchApiKey: '',
-  googleSearchCx: '',
-  braveSearchApiKey: '',
-  // Image Generation
-  imageGenProvider: 'gemini' as 'gemini' | 'dalle' | 'stability' | 'ideogram' | 'replicate',
-  stabilityApiKey: '',
-  ideogramApiKey: '',
-  replicateApiKey: '',
-  // Video Generation
-  videoGenProvider: 'veo' as 'veo',
-  veoModel: 'veo-2.0-generate-001',
-  // Multi-Agent Configuration
-  agents: [
-    {
-      id: 'planner',
-      name: 'Planner',
-      provider: 'gemini',
-      model: 'gemini-2.5-flash',
-      apiKey: '',
-      systemInstruction: 'You are the Planner agent. Your task is to analyze the user request, inspect the workspace structure, and design a step-by-step implementation plan. Create or update the implementation_plan.md file to document your proposal.',
-      enabled: true
-    },
-    {
-      id: 'coder',
-      name: 'Coder',
-      provider: 'gemini',
-      model: 'gemini-2.5-flash',
-      apiKey: '',
-      systemInstruction: 'You are the Coder agent. Your task is to implement the changes specified in the approved implementation plan. Read relevant files, write clean and efficient code, and run terminal commands to build or verify. Stay focused on execution.',
-      enabled: true
-    },
-    {
-      id: 'reviewer',
-      name: 'Reviewer',
-      provider: 'gemini',
-      model: 'gemini-2.5-flash',
-      apiKey: '',
-      systemInstruction: 'You are the Reviewer agent. Your task is to verify the code modifications made by the Coder. Run the automated tests, check lint errors, and ensure the implementation is correct and complete.',
-      enabled: true
-    }
-  ],
-  // Custom Providers
-  customProviders: [] as CustomProviderConfig[],
-  /// Per-provider model selection: { [providerId]: selectedModelId }
-  customModelSelections: {} as Record<string, string>,
-}
+import { DEFAULT_CONFIG } from '../../shared/constants/config'
+export { DEFAULT_CONFIG }
 
 type TabType = 'sect-general' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
 
-export const GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
-  'gemini-3.1-flash-lite',
-  'gemini-3.1-flash-lite-preview'
-]
-
-export const OPENAI_MODELS = [
-  'gpt-4o',
-  'gpt-4o-mini',
-  'o1',
-  'o3-mini',
-  'o1-preview',
-  'o1-mini',
-  'gpt-4-turbo'
-]
-
-export const OPENROUTER_MODELS = [
-  'openai/gpt-4o-mini',
-  'openai/gpt-4o',
-  'anthropic/claude-3.5-sonnet',
-  'anthropic/claude-3.5-haiku',
-  'google/gemini-2.5-flash',
-  'meta-llama/llama-3.3-70b-instruct',
-  'mistralai/mistral-large'
-]
-
-export const DEEPSEEK_MODELS = [
-  'deepseek-v4-flash',
-  'deepseek-v4-pro',
-  'deepseek-chat',
-  'deepseek-reasoner'
-]
-
-export const ANTHROPIC_MODELS = [
-  'claude-3-7-sonnet-latest',
-  'claude-3-5-sonnet-latest',
-  'claude-3-5-haiku-latest',
-  'claude-3-opus-latest'
-]
-
-export const HF_MODELS = [
-  'meta-llama/Llama-3.3-70B-Instruct',
-  'meta-llama/Meta-Llama-3-8B-Instruct',
-  'meta-llama/Llama-3.2-3B-Instruct',
-  'Qwen/Qwen2.5-72B-Instruct',
-  'Qwen/Qwen2.5-Coder-32B-Instruct',
-  'mistralai/Mistral-7B-Instruct-v0.3',
-  'google/gemma-2-9b-it'
-]
-
-export const LOCAL_MODELS = [
-  'local-model',
-  'Qwen/Qwen2.5-7B-Instruct-GGUF',
-  'meta-llama/Llama-3.2-3B-Instruct-GGUF',
-  'lmstudio-community/gemma-2-9b-it-GGUF'
-]
-
-export const OLLAMA_MODELS: string[] = []
+export {
+  GEMINI_MODELS,
+  OPENAI_MODELS,
+  OPENROUTER_MODELS,
+  DEEPSEEK_MODELS,
+  ANTHROPIC_MODELS,
+  HF_MODELS,
+  LOCAL_MODELS,
+  OLLAMA_MODELS,
+} from '../../shared/constants/models'
 
 export default function SettingsWindow() {
   const [activeTab, setActiveTab] = useState<TabType>('sect-general')
@@ -823,10 +654,30 @@ export default function SettingsWindow() {
       </main>
 
       <footer className="settings-footer">
-        <button className="btn-danger" onClick={handleQuit}>Quit Application</button>
+        <button className="btn-danger" onClick={handleQuit} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          Quit Application
+        </button>
         <div className="footer-actions">
-          <button className="btn-secondary" onClick={handleReset}>Reset to Default</button>
-          <button className="btn-primary" onClick={handleSave}>Save Settings</button>
+          <button className="btn-secondary" onClick={handleReset} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="1 4 1 10 7 10"></polyline>
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+            </svg>
+            Reset Defaults
+          </button>
+          <button className="btn-primary" onClick={handleSave} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+              <polyline points="17 21 17 13 7 13 7 21"></polyline>
+              <polyline points="7 3 7 8 15 8"></polyline>
+            </svg>
+            Save Settings
+          </button>
         </div>
       </footer>
     </div>

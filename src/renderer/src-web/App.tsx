@@ -3,19 +3,30 @@ import React, { lazy, Suspense, useEffect, useState } from 'react'
 const SettingsWindow = lazy(() => import('./components/SettingsWindow'))
 const MintDashboard = lazy(() => import('./components/MintDashboard'))
 
+function getCurrentRoute(): string {
+  if (typeof window === 'undefined') return '/'
+  const hash = window.location.hash.replace(/^#/, '')
+  const pathname = window.location.pathname
+  if (hash.startsWith('/settings') || pathname.startsWith('/settings')) {
+    return '/settings'
+  }
+  return hash || pathname || '/'
+}
+
 export default function App() {
-  const [hash, setHash] = useState(window.location.hash || '#/')
+  const [route, setRoute] = useState(getCurrentRoute)
 
   useEffect(() => {
-    const handleHashChange = () => {
-      setHash(window.location.hash || '#/')
+    const handleUrlChange = () => {
+      setRoute(getCurrentRoute())
     }
-    window.addEventListener('hashchange', handleHashChange)
-    return () => window.removeEventListener('hashchange', handleHashChange)
+    window.addEventListener('popstate', handleUrlChange)
+    window.addEventListener('hashchange', handleUrlChange)
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange)
+      window.removeEventListener('hashchange', handleUrlChange)
+    }
   }, [])
-
-  // Basic route parsing
-  const route = hash.replace(/^#/, '')
 
   let content = <MintDashboard />
 

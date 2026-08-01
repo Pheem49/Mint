@@ -32,22 +32,13 @@ import {
   readImage,
   readDocument,
   createTrimmedImagePreview,
+  createObjectUrlPreview,
   applyThemeStyles,
 } from '../../shared/utils/ui'
 import { executeSlashCommand } from '../../shared/utils/slashCommandProcessor'
 
 
-const DEFAULT_CONFIG = {
-  theme: 'dark',
-  accentColor: '#10b981',
-  systemTextColor: '#f8fafc',
-  customBgStart: '#0f172a',
-  customBgEnd: '#1e1b4b',
-  customPanelBg: '#1e293b',
-  glassBlur: 'blur(16px)',
-  fontFamily: "'Outfit', sans-serif",
-  fontSize: '18px',
-}
+import { DEFAULT_CONFIG } from '../../shared/constants/config'
 
 const ACTIVE_CONVERSATION_ID_KEY = 'mint:web-active-conversation-id'
 
@@ -78,8 +69,43 @@ const MOCK_WELCOME_INTERACTION = {
 }
 
 
+function getInitialViewFromUrl(): DashboardView {
+  if (typeof window === 'undefined') return 'chat'
+  const hash = (window.location.hash || '').toLowerCase().replace(/^#/, '')
+  const pathname = (window.location.pathname || '').toLowerCase()
+  const target = hash || pathname
+
+  if (target.includes('picture')) return 'pictures'
+  if (target.includes('image-studio') || target.includes('imagine')) return 'imagine'
+  if (target.includes('veo-studio') || target.includes('veo')) return 'veo'
+  return 'chat'
+}
+
+function getCleanPathForView(v: DashboardView): string {
+  if (v === 'pictures') return '/pictures'
+  if (v === 'imagine') return '/image-studio'
+  if (v === 'veo') return '/veo-studio'
+  return '/chat'
+}
+
 export default function MintDashboard() {
-  const [view, setView] = useState<DashboardView>('chat')
+  const [view, setView] = useState<DashboardView>(getInitialViewFromUrl)
+
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const pathname = (window.location.pathname || '').toLowerCase()
+      const hash = (window.location.hash || '').toLowerCase()
+      if (pathname.includes('/settings') || hash.includes('/settings')) return
+      const nextView = getInitialViewFromUrl()
+      setView(nextView)
+    }
+    window.addEventListener('popstate', handleUrlChange)
+    window.addEventListener('hashchange', handleUrlChange)
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange)
+      window.removeEventListener('hashchange', handleUrlChange)
+    }
+  }, [])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -100,6 +126,7 @@ export default function MintDashboard() {
   const [videoAttachments, setVideoAttachments] = useState<Array<{ dataUri: string; name: string }>>([])
   const [documentAttachment, setDocumentAttachment] = useState<DocumentAttachment | null>(null)
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
+  const sessionAutoApprovedRef = useRef(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
@@ -247,8 +274,20 @@ export default function MintDashboard() {
       applyThemeStyles(loaded)
       getRuntimeStatus().then(setStatus).catch(() => {})
     })
+
+    const unlistenPromise = listen<any>('tool-approval-requested', (event) => {
+      if (sessionAutoApprovedRef.current) {
+        submitToolApproval(event.payload.token, true).catch((err) => {
+          console.error("Auto approval failed:", err)
+        })
+      } else {
+        setPendingApproval(event.payload)
+      }
+    })
+
     return () => {
       window.removeEventListener('focus', handleWindowFocus)
+      unlistenPromise?.then?.((unlisten) => unlisten?.())
     }
   }, [])
 
@@ -273,6 +312,10 @@ export default function MintDashboard() {
   const changeView = (newView: DashboardView) => {
     setView(newView)
     setMobileSidebarOpen(false)
+    const targetPath = getCleanPathForView(newView)
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath)
+    }
   }
 
   const toggleSidebar = () => {
@@ -515,9 +558,10 @@ export default function MintDashboard() {
     const file = event.target.files?.[0]
     if (!file) return
     try {
+      const objectUrl = createObjectUrlPreview(file).objectUrl
       const dataUri = await readImage(file)
       const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
-      setImageAttachments((current) => [...current, { dataUri, previewDataUri, name: file.name }])
+      setImageAttachments((current) => [...current, { dataUri, previewDataUri, objectUrl, name: file.name }])
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {

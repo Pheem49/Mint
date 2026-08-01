@@ -70,9 +70,10 @@ pub fn run_shell_command(
         return Err(ShellError::InvalidWorkingDirectory(cwd));
     }
 
+    let prepared_cmd = prepare_shell_command(command);
     let sandbox_mode = config.sandbox_mode.trim().to_ascii_lowercase();
     if config.safety_enabled && sandbox_mode != "off" {
-        if let Some(output) = run_in_sandbox(command, &cwd, config)? {
+        if let Some(output) = run_in_sandbox(&prepared_cmd, &cwd, config)? {
             return Ok(shell_output(
                 command,
                 cwd,
@@ -88,7 +89,7 @@ pub fn run_shell_command(
         }
     }
 
-    let output = shell_command(command).current_dir(&cwd).output()?;
+    let output = shell_command(&prepared_cmd).current_dir(&cwd).output()?;
     Ok(shell_output(
         command,
         cwd,
@@ -97,6 +98,24 @@ pub fn run_shell_command(
         output,
     ))
 }
+
+fn prepare_shell_command(command: &str) -> String {
+    let trimmed = command.trim();
+    if trimmed.ends_with('&') && !trimmed.ends_with("&&") {
+        #[cfg(not(target_os = "windows"))]
+        {
+            let inner = trimmed.trim_end_matches('&').trim();
+            format!("nohup {inner} >/dev/null 2>&1 &")
+        }
+        #[cfg(target_os = "windows")]
+        {
+            command.to_string()
+        }
+    } else {
+        command.to_string()
+    }
+}
+
 
 fn run_in_sandbox(
     command: &str,
@@ -211,15 +230,40 @@ fn writable_roots(config: &MintConfig, cwd: &Path) -> Vec<PathBuf> {
     roots
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn command_exists(command: &str) -> bool {
-    Command::new("which")
-        .arg(command)
-        .output()
-        .is_ok_and(|output| output.status.success())
+    let Some(path_os) = std::env::var_os("PATH") else {
+        return false;
+    };
+    let extensions: &[&str] = if cfg!(target_os = "windows") {
+        &[".exe", ".cmd", ".bat", ".com", ""]
+    } else {
+        &[""]
+    };
+    for dir in std::env::split_paths(&path_os) {
+        for ext in extensions {
+            let candidate = dir.join(format!("{command}{ext}"));
+            if candidate.is_file() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(metadata) = candidate.metadata() {
+                        if metadata.permissions().mode() & 0o111 != 0 {
+                            return true;
+                        }
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn shell_command(command: &str) -> Command {
+
     #[cfg(target_os = "windows")]
     {
         let mut process = Command::new("powershell.exe");
@@ -314,4 +358,20 @@ mod tests {
         assert_eq!(output.status, Some(7));
         assert_eq!(output.stderr, "failure");
     }
+
+    #[test]
+    fn test_command_exists() {
+        assert!(command_exists("sh") || command_exists("bash") || command_exists("cmd"));
+        assert!(!command_exists("non_existent_binary_xyz_12345"));
+    }
+
+    #[test]
+    fn test_background_command_does_not_hang() {
+        let start = std::time::Instant::now();
+        let output = run_shell_command("sleep 5 &", Path::new("."), true, &local_config()).unwrap();
+        assert!(output.success);
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+    }
 }
+
+

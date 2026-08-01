@@ -48,6 +48,8 @@ pub enum PluginError {
 pub struct NativePlugin {
     pub name: &'static str,
     pub description: &'static str,
+    /// OAuth provider key if this plugin needs OAuth sign-in (empty string if not)
+    pub oauth_provider: &'static str,
 }
 
 pub fn native_plugins() -> Vec<NativePlugin> {
@@ -55,38 +57,47 @@ pub fn native_plugins() -> Vec<NativePlugin> {
         NativePlugin {
             name: "dev_tools",
             description: "Read git status, log, or branch information.",
+            oauth_provider: "",
         },
         NativePlugin {
             name: "docker",
             description: "List, start, stop, or restart local Docker containers.",
+            oauth_provider: "",
         },
         NativePlugin {
             name: "obsidian",
             description: "List, read, or append local Markdown notes.",
+            oauth_provider: "",
         },
         NativePlugin {
             name: "spotify",
             description: "Control Spotify through playerctl.",
+            oauth_provider: "spotify",
         },
         NativePlugin {
             name: "system_metrics",
             description: "Read native RAM, CPU, and uptime metrics.",
+            oauth_provider: "",
         },
         NativePlugin {
             name: "gmail",
             description: "Search/read Gmail and create drafts safely.",
+            oauth_provider: "google",
         },
         NativePlugin {
             name: "google_calendar",
             description: "List events and create calendar events via Google Calendar API.",
+            oauth_provider: "google",
         },
         NativePlugin {
             name: "notion",
             description: "Create notes, read databases, and append blocks through Notion API.",
+            oauth_provider: "notion",
         },
         NativePlugin {
             name: "github",
             description: "List issues, view issues, list pull requests, or check PR status via gh CLI.",
+            oauth_provider: "github",
         },
     ]
 }

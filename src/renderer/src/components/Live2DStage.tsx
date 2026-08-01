@@ -282,6 +282,9 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
 
   // Follow the pointer across the whole window and smoothly return to center when tracking stops.
   useEffect(() => {
+    let rafId: number | null = null
+    let pendingNormalized: { x: number; y: number } | null = null
+
     const focus = (x: number, y: number) => {
       if (isNaN(x) || isNaN(y) || !isFinite(x) || !isFinite(y)) {
         x = 0
@@ -300,9 +303,17 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
 
       const x = (event.clientX - (rect.left + rect.width / 2)) / (rect.width / 2)
       const y = ((rect.top + rect.height / 2) - event.clientY) / (rect.height / 2)
-      const normalized = clampToUnitCircle(x, y)
+      pendingNormalized = clampToUnitCircle(x, y)
 
-      focus(normalized.x, normalized.y)
+      if (rafId === null) {
+        rafId = requestAnimationFrame(() => {
+          if (pendingNormalized) {
+            focus(pendingNormalized.x, pendingNormalized.y)
+            pendingNormalized = null
+          }
+          rafId = null
+        })
+      }
     }
 
     if (isLocked) centerFocus()
@@ -311,6 +322,10 @@ export default function Live2DStage({ scale, expressionIndex, accessoryIndex, is
     window.addEventListener('blur', centerFocus)
 
     return () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId)
+        rafId = null
+      }
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('blur', centerFocus)
     }

@@ -115,8 +115,11 @@ pub enum SafetyError {
 }
 
 pub fn classify_shell_command(command: &str) -> ShellClassification {
-    let normalized = command.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.is_empty() {
+    let tokens = shlex::split(command).unwrap_or_else(|| {
+        command.split_whitespace().map(|s| s.to_string()).collect()
+    });
+    let normalized = tokens.join(" ");
+    if normalized.trim().is_empty() {
         return ShellClassification {
             tier: SafetyTier::Blocked,
             mode: ShellCommandMode::Mutating,
@@ -245,6 +248,18 @@ fn is_read_only_command(command: &str) -> bool {
                         | "tree"
                         | "wc"
                         | "which"
+                        | "xdg-open"
+                        | "open"
+                        | "start"
+                        | "wslview"
+                        | "sensible-browser"
+                        | "gio"
+                        | "firefox"
+                        | "google-chrome"
+                        | "chrome"
+                        | "chromium"
+                        | "brave"
+                        | "msedge"
                 )
             ) && !segment.starts_with("git ")
                 || is_read_only_git(segment)

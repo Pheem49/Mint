@@ -1,9 +1,10 @@
 {
   "name": "@pheem49/mint",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
   "scripts": {
     "dev:web": "vite --config vite.config.web.ts",
+    "preview:web": "vite preview --config vite.config.web.ts",
     "web": "cargo run -p mint-cli -- web",
     "typecheck": "tsc --noEmit",
     "build:web": "vite build --config vite.config.web.ts",
@@ -20,11 +21,12 @@
     "rust:cli": "cargo run -p mint-cli --",
     "rust:test": "cargo test -p mint-core -p mint-cli",
     "dev": "tauri dev",
-    "build": "npm run build:desktop:ui",
+    "build": "npm run build:desktop:ui && npm run build:web",
     "preview": "vite preview",
     "start": "tauri dev",
     "test": "cargo test -p mint-core -p mint-cli",
     "cli": "cargo run -p mint-cli --",
+    "prepublishOnly": "npm run build:web",
     "postinstall": "cargo build -p mint-cli --release && mkdir -p bin && cp target/release/mint bin/mint"
   },
   "keywords": [

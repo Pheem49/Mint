@@ -1,6 +1,5 @@
 # Ignore Rust backend and build files
 target/
-out/
 rustc_checker.py
 
 # Ignore local configuration and developer tools

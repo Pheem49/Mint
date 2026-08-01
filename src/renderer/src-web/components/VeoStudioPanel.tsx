@@ -1,8 +1,11 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react'
+import { getActiveModel, setActiveModel, subscribeModelChange } from '../../shared/utils/modelManager'
 import {
   generateVideo,
   getVideoGenProviders,
   convertFileSrc,
+  getProfileValue,
+  setProfileValue,
   type VideoGenRequest,
   type VideoGenResponse,
   type VideoGenProviders,
@@ -18,28 +21,19 @@ interface VeoStudioPanelProps {
   onToggleMobileSidebar?: () => void
 }
 
-const ASPECT_OPTIONS: { value: AspectRatio; label: string; icon: string }[] = [
-  { value: '16:9', label: '16:9', icon: '▬' },
-  { value: '9:16', label: '9:16', icon: '▮' },
-  { value: '1:1',  label: '1:1',  icon: '⬛' },
-]
+import { VIDEO_ASPECT_RATIOS, VIDEO_STYLE_PRESETS } from '../../shared/constants/studio'
+
+const ASPECT_OPTIONS = VIDEO_ASPECT_RATIOS
 
 const DURATION_OPTIONS: { value: Duration; label: string }[] = [
   { value: 5, label: '5s' },
   { value: 8, label: '8s' },
 ]
 
-const STYLE_SUGGESTIONS = [
-  'cinematic', 'slow motion', 'time-lapse', 'aerial view',
-  'documentary', 'animation', 'action', 'nature',
-]
+const STYLE_SUGGESTIONS = VIDEO_STYLE_PRESETS
 
-const PROVIDER_MODELS: Record<string, { value: string; label: string }[]> = {
-  veo: [
-    { value: 'veo-2.0-generate-001', label: 'Veo 2.0 Generate (Default)' },
-    { value: 'veo-2.0-flash-001', label: 'Veo 2.0 Flash' },
-  ],
-}
+import { VEO_STUDIO_MODELS } from '../../shared/constants/models'
+const PROVIDER_MODELS = VEO_STUDIO_MODELS
 
 const PROVIDER_LABELS: Record<string, string> = {
   veo: 'Google Veo (Gemini Videos)',
@@ -100,18 +94,41 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
 
   useEffect(() => {
     let cancelled = false
-    getVideoGenProviders().then((data) => {
+    getVideoGenProviders().then(async (data) => {
       if (cancelled) return
       setProviders(data)
       setSelectedProvider(data.active)
-      setSelectedModel(defaultModelForProvider(data.active))
+      const activeModel = await getActiveModel('veoModel')
+      if (activeModel && !cancelled) {
+        setSelectedModel(activeModel)
+      } else if (!cancelled) {
+        setSelectedModel(defaultModelForProvider(data.active))
+      }
     }).catch(() => { /* keep defaults */ })
-    return () => { cancelled = true }
+
+    // Subscribe to real-time model changes from Settings or other components
+    const unsubscribe = subscribeModelChange((detail) => {
+      if (detail.provider === 'veoModel' || detail.category === 'video') {
+        setSelectedModel(detail.model)
+      }
+    })
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
   }, [])
 
   const handleProviderChange = (provider: string) => {
     setSelectedProvider(provider)
-    setSelectedModel(defaultModelForProvider(provider))
+    const def = defaultModelForProvider(provider)
+    setSelectedModel(def)
+    setActiveModel('veoModel', def, 'video')
+  }
+
+  const handleModelChange = (model: string) => {
+    setSelectedModel(model)
+    setActiveModel('veoModel', model, 'video')
   }
 
   const handleGenerate = useCallback(async () => {
@@ -570,7 +587,7 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
                   className="veo-studio-textarea"
                   style={{ padding: '8px 10px', height: '38px', cursor: 'pointer' }}
                   value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
+                  onChange={(e) => handleModelChange(e.target.value)}
                   disabled={generating}
                 >
                   {modelOptions.map(({ value, label }) => (

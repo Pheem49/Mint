@@ -498,6 +498,16 @@ export async function listSavedPictures(): Promise<PictureEntry[]> {
   return invoke<PictureEntry[]>('list_pictures')
 }
 
+export async function deleteSavedPicture(id: string): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    await fetch(`${API_BASE}/pictures/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return;
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<void>('delete_picture', { id })
+}
+
 export async function generateImages(
   request: ImageGenRequest
 ): Promise<ImageGenResponse> {
@@ -781,6 +791,7 @@ export function installTauriAdapters() {
         }
       },
       listSavedPictures,
+      deleteSavedPicture,
       openSettings: () => {
         window.location.hash = '#/settings';
       },
@@ -1057,6 +1068,7 @@ export function installTauriAdapters() {
     resetChat: clearChatHistory,
     getChatHistory: () => getRecentInteractions(50),
     listSavedPictures,
+    deleteSavedPicture,
     openSettings: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('open_window', { kind: 'settings' })
@@ -1655,6 +1667,7 @@ const _apiCheck: MintPlatformApi = {
   deleteLearnedSkill,
   clearChatHistory,
   listSavedPictures,
+  deleteSavedPicture,
   generateImages,
   getImageGenProviders,
   setDefaultImageProvider,

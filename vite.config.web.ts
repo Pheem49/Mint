@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
@@ -25,6 +26,11 @@ export default defineConfig({
       ]
     }
   },
+  preview: {
+    port: 9000,
+    host: true,
+    strictPort: true,
+  },
   optimizeDeps: {
     force: true,
   },
@@ -33,6 +39,14 @@ export default defineConfig({
     {
       name: 'rewrite-html',
       configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url === '/' || req.url === '/index.html') {
+            req.url = '/index-web.html'
+          }
+          next()
+        })
+      },
+      configurePreviewServer(server) {
         server.middlewares.use((req, res, next) => {
           if (req.url === '/' || req.url === '/index.html') {
             req.url = '/index-web.html'

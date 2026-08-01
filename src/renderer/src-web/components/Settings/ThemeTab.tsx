@@ -17,14 +17,78 @@ export default function ThemeTab({ config, updateField }: ThemeTabProps) {
           </div>
         </div>
         <div className="theme-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-          {(['dark', 'light', 'midnight', 'custom'] as const).map(t => (
+          {[
+            {
+              id: 'dark',
+              label: 'Dark',
+              icon: (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+              )
+            },
+            {
+              id: 'light',
+              label: 'Light',
+              icon: (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="5"></circle>
+                  <line x1="12" y1="1" x2="12" y2="3"></line>
+                  <line x1="12" y1="21" x2="12" y2="23"></line>
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                  <line x1="1" y1="12" x2="3" y2="12"></line>
+                  <line x1="21" y1="12" x2="23" y2="12"></line>
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+              )
+            },
+            {
+              id: 'midnight',
+              label: 'Midnight',
+              icon: (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                </svg>
+              )
+            },
+            {
+              id: 'custom',
+              label: 'Custom',
+              icon: (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle>
+                  <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle>
+                  <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle>
+                  <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle>
+                  <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.92 0 1.7-.74 1.7-1.67 0-.44-.18-.86-.48-1.17-.3-.3-.48-.73-.48-1.16 0-.92.74-1.67 1.67-1.67h2.29c3.09 0 5.6-2.51 5.6-5.6 0-5.25-4.25-9.7-9.7-9.7z"></path>
+                </svg>
+              )
+            }
+          ].map(t => (
             <button 
-              key={t}
-              className={`theme-card ${config.theme === t ? 'active' : ''}`} 
-              onClick={() => updateField('theme', t)}
+              key={t.id}
+              className={`theme-card ${config.theme === t.id ? 'active' : ''}`} 
+              onClick={() => updateField('theme', t.id)}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px',
+                borderRadius: '10px',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                border: config.theme === t.id ? '2px solid var(--accent, #10b981)' : '1px solid var(--border, rgba(255,255,255,0.1))',
+                boxShadow: config.theme === t.id ? '0 0 12px rgba(16, 185, 129, 0.3)' : 'none'
+              }}
             >
-              <div className={`theme-preview ${t}-preview`}></div>
-              <span style={{ textTransform: 'capitalize' }}>{t}</span>
+              <div className={`theme-preview ${t.id}-preview`} style={{ width: '100%', height: '42px', borderRadius: '6px' }}></div>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: '500' }}>
+                {t.icon}
+                {t.label}
+              </span>
             </button>
           ))}
         </div>
@@ -62,14 +126,33 @@ export default function ThemeTab({ config, updateField }: ThemeTabProps) {
         <div className="color-section">
           <div>
             <label>Accent Color</label>
-            <div className="color-presets">
+            <div className="color-presets" style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
               {['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899'].map(c => (
                 <button 
                   key={c}
                   className="color-dot" 
-                  style={{ backgroundColor: c, border: config.accentColor === c ? '2px solid white' : 'none' }} 
+                  style={{ 
+                    backgroundColor: c, 
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: config.accentColor === c ? '2px solid white' : '2px solid transparent',
+                    boxShadow: config.accentColor === c ? `0 0 10px ${c}` : 'none',
+                    transition: 'all 0.2s ease'
+                  }} 
                   onClick={() => updateField('accentColor', c)}
-                />
+                  aria-label={`Select accent color ${c}`}
+                >
+                  {config.accentColor === c && (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                  )}
+                </button>
               ))}
             </div>
           </div>

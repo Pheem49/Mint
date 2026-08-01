@@ -8,9 +8,9 @@ use std::{
 use mint_core::{
     CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, ImageGenRequest, KnowledgeStore,
     MemoryStore, MintConfig, TaskStore, apply_code_edits, assert_path_capability, build_code_patch,
-    build_symbol_index, classify_shell_command, config_path, create_folder, execute_native_plugin,
+    build_symbol_index, classify_shell_command, config_path, create_folder,
     fetch_github_repo_summary, find_paths, generate_images, index_semantic_code, initialize_config,
-    inspect_code_plan, list_code_files, load_config, native_plugins,
+    inspect_code_plan, list_code_files, load_config,
     orchestrate_chat_with_fallback, parse_github_url, propose_code_edits, read_code_file,
     repository_summary, run_shell_command, search_code, search_semantic_code, set_config_value,
 };
@@ -23,6 +23,7 @@ mod interactive;
 mod markdown;
 mod mcp;
 mod onboard;
+mod plugins_cli;
 mod setup;
 mod skills;
 mod updater;
@@ -144,10 +145,11 @@ enum Command {
         #[command(subcommand)]
         command: FilesCommand,
     },
-    /// Run built-in native plugins.
-    Plugin {
+    /// Manage built-in plugins & integrations (Gmail, Calendar, Notion, Spotify, Vercel, GitHub).
+    #[command(alias = "plugin")]
+    Plugins {
         #[command(subcommand)]
-        command: PluginCommand,
+        command: Option<plugins_cli::PluginsSubcommand>,
     },
     /// Index and search native local text knowledge.
     Knowledge {
@@ -169,7 +171,11 @@ enum Command {
     /// Start the browser automation environment and enable browser actions.
     Auto,
     /// Launch the web UI and local API server.
-    Web,
+    Web {
+        /// Force development mode with Hot Module Replacement (HMR)
+        #[arg(long, default_value_t = false)]
+        dev: bool,
+    },
     /// Start only the local API server.
     Api {
         #[arg(long, default_value_t = 3000)]
@@ -853,8 +859,8 @@ async fn main() -> Result<()> {
                 tokio::signal::ctrl_c().await.ok();
                 println!("\n👋 Terminating Mint Browser Automation Environment...");
             }
-            Command::Web => {
-                launch_mint_target("web".into()).await?;
+            Command::Web { dev } => {
+                launch_mint_target("web".into(), dev).await?;
             }
             Command::Api { port } => {
                 let config = load_config()?;
@@ -1219,16 +1225,8 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            Command::Plugin { command } => match command {
-                PluginCommand::List => {
-                    println!("{}", serde_json::to_string_pretty(&native_plugins())?)
-                }
-                PluginCommand::Run { name, instruction } => {
-                    println!(
-                        "{}",
-                        execute_native_plugin(&load_config()?, &name, &instruction).await?
-                    )
-                }
+            Command::Plugins { command } => {
+                plugins_cli::run_plugins_command(command).await?;
             },
             Command::Knowledge { command } => {
                 let store = KnowledgeStore::open_default()?;
@@ -1389,7 +1387,7 @@ async fn main() -> Result<()> {
             }
             Command::Setup => {
                 if let Some(target) = setup::run().await? {
-                    launch_mint_target(target).await?;
+                    launch_mint_target(target, false).await?;
                 }
             }
             Command::Imagine {
@@ -1721,7 +1719,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn launch_mint_target(target: String) -> Result<()> {
+async fn launch_mint_target(target: String, dev: bool) -> Result<()> {
     match target.as_str() {
         "cli" => {
             println!("{MINT}Starting CLI Interactive Chat Assistant...{RESET}\n");
@@ -1764,9 +1762,17 @@ async fn launch_mint_target(target: String) -> Result<()> {
                     anyhow::anyhow!("Failed to find project root directory containing package.json")
                 })?
             };
+            let dist_web = project_root.join("out").join("renderer").join("index-web.html");
+            let web_cmd = if dev {
+                "dev:web"
+            } else if dist_web.exists() {
+                "preview:web"
+            } else {
+                "dev:web"
+            };
             std::process::Command::new("npm")
                 .current_dir(&project_root)
-                .args(["run", "dev:web"])
+                .args(["run", web_cmd])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()

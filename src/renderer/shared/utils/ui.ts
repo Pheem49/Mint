@@ -13,6 +13,20 @@ export function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
 }
 
+export function createObjectUrlPreview(file: File): { objectUrl: string; revoke: () => void } {
+  const objectUrl = URL.createObjectURL(file)
+  return {
+    objectUrl,
+    revoke: () => {
+      try {
+        URL.revokeObjectURL(objectUrl)
+      } catch (e) {
+        // ignore
+      }
+    },
+  }
+}
+
 export function readImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

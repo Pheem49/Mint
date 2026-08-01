@@ -69,54 +69,73 @@ pub struct SearchHit {
 /// Reads at most ~8 KB of the response — enough to cover the <head> section.
 /// Returns `None` on any network/parse error or if no og:image/twitter:image is found.
 async fn og_image_fallback(url: &str) -> Option<String> {
-    let client = crate::HTTP_CLIENT.clone();
-    let resp = tokio::time::timeout(
-        std::time::Duration::from_secs(4),
-        client
-            .get(url)
-            .header("User-Agent", "Mozilla/5.0 (compatible; MintBot/1.0)")
-            .send(),
-    )
-    .await
-    .ok()?
-    .ok()?;
 
-    // Read only enough bytes to cover the HTML <head> — avoids downloading full pages
-    let mut stream = resp.bytes_stream();
-    let mut buf = Vec::with_capacity(8192);
-    while let Some(chunk) = stream.next().await {
-        if let Ok(bytes) = chunk {
-            buf.extend_from_slice(&bytes);
-            if buf.len() >= 8192 {
-                break;
+    tokio::time::timeout(std::time::Duration::from_secs(4), async move {
+        let client = crate::HTTP_CLIENT.clone();
+        let resp = client
+            .get(url)
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            )
+            .send()
+            .await
+            .ok()?;
+
+        let mut stream = resp.bytes_stream();
+        let mut buf = Vec::with_capacity(65536);
+        while let Some(chunk) = stream.next().await {
+            if let Ok(bytes) = chunk {
+                buf.extend_from_slice(&bytes);
+                if buf.len() >= 65536 {
+                    break;
+                }
             }
         }
-    }
-    let html = String::from_utf8_lossy(&buf);
+        let html = String::from_utf8_lossy(&buf);
 
-    // Scan for og:image or twitter:image meta tags
-    // Handles both: <meta property="og:image" content="URL"> and
-    //               <meta name="twitter:image" content="URL">
-    for prefix in &["og:image", "twitter:image"] {
-        if let Some(pos) = html.find(prefix) {
-            let after = &html[pos..];
-            if let Some(c_pos) = after.find("content=") {
-                let rest = &after[c_pos + 8..];
-                if let Some(quote) = rest.chars().next() {
-                    if quote == '"' || quote == '\'' {
-                        let inner = &rest[1..];
-                        if let Some(end) = inner.find(quote) {
-                            let img_url = inner[..end].trim().to_owned();
-                            if img_url.starts_with("http") {
-                                return Some(img_url);
+        // Scan for og:image, twitter:image, thumbnail, or link image_src meta tags
+        // Handles both attribute orders (property before content and content before property)
+        // as well as single and double quotes.
+        static OG_META_RE: std::sync::LazyLock<Vec<regex::Regex>> = std::sync::LazyLock::new(|| {
+            vec![
+                regex::Regex::new(
+                    r#"(?i)<meta\s+[^>]*?(?:property|name|itemprop)=["'](?:og:image|og:image:url|twitter:image|thumbnail|image)["'][^>]*?content=["']([^"']+)["']"#
+                ).unwrap(),
+                regex::Regex::new(
+                    r#"(?i)<meta\s+[^>]*?content=["']([^"']+)["'][^>]*?(?:property|name|itemprop)=["'](?:og:image|og:image:url|twitter:image|thumbnail|image)["']"#
+                ).unwrap(),
+                regex::Regex::new(
+                    r#"(?i)<link\s+[^>]*?rel=["'](?:image_src|apple-touch-icon)["'][^>]*?href=["']([^"']+)["']"#
+                ).unwrap(),
+            ]
+        });
+
+        for re in OG_META_RE.iter() {
+            if let Some(caps) = re.captures(&html) {
+                if let Some(img_match) = caps.get(1) {
+                    let img_url = img_match.as_str().trim().to_owned();
+                    if img_url.starts_with("http://") || img_url.starts_with("https://") {
+                        return Some(img_url);
+                    } else if img_url.starts_with("//") {
+                        return Some(format!("https:{img_url}"));
+                    } else if img_url.starts_with('/') {
+                        if let Ok(base) = reqwest::Url::parse(url) {
+                            if let Ok(joined) = base.join(&img_url) {
+                                return Some(joined.to_string());
                             }
                         }
                     }
                 }
             }
         }
-    }
-    None
+        None
+
+
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Fill in missing `image_url` fields by scraping Open Graph tags in parallel.
@@ -138,7 +157,15 @@ async fn enrich_with_og_images(hits: Vec<SearchHit>, max_fetch: usize) -> Vec<Se
         })
         .collect();
 
-    let resolved = join_all(futures).await;
+    let resolved = match tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        join_all(futures),
+    )
+    .await
+    {
+        Ok(res) => res,
+        Err(_) => vec![None; hits.len()],
+    };
 
     hits.into_iter()
         .enumerate()
@@ -152,6 +179,7 @@ async fn enrich_with_og_images(hits: Vec<SearchHit>, max_fetch: usize) -> Vec<Se
 }
 
 /// Search the web using the first configured provider (Google → Brave).
+
 /// Returns the search hits and the name of the provider used.
 pub async fn search(
     query: &str,

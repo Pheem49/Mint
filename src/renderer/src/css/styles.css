@@ -885,6 +885,8 @@ h1 {
   flex-direction: column;
   gap: 16px;
   user-select: text;
+  contain: content;
+  will-change: transform;
 }
 
 .chat-container::-webkit-scrollbar {
@@ -3366,6 +3368,116 @@ input:checked + .slider:before {
 
 .picture-card:hover {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.picture-card-delete-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(15, 23, 42, 0.75);
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
+}
+
+.picture-card:hover .picture-card-delete-btn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.picture-card-delete-btn:hover {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #ef4444;
+}
+
+.picture-delete-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.picture-delete-modal {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface-bg, #1e293b);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.picture-delete-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--system-text-color, #f8fafc);
+}
+
+.picture-delete-modal-body {
+  font-size: 0.9rem;
+  color: var(--text-soft, #94a3b8);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.picture-delete-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.picture-modal-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.picture-modal-btn.cancel {
+  background: transparent;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  color: var(--system-text-color, #f8fafc);
+}
+
+.picture-modal-btn.cancel:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.picture-modal-btn.delete {
+  background: #ef4444;
+  border: 1px solid #ef4444;
+  color: #ffffff;
+}
+
+.picture-modal-btn.delete:hover {
+  background: #dc2626;
 }
 
 .picture-card img {

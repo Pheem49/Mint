@@ -39,6 +39,7 @@ import {
   readImage,
   readDocument,
   createTrimmedImagePreview,
+  createObjectUrlPreview,
   applyThemeStyles,
 } from '../../shared/utils/ui'
 import { executeSlashCommand } from '../../shared/utils/slashCommandProcessor'
@@ -60,17 +61,7 @@ const ACCESSORIES = [
   "Hold Pen",
 ]
 
-const DEFAULT_CONFIG = {
-  theme: 'dark',
-  accentColor: '#10b981',
-  systemTextColor: '#f8fafc',
-  customBgStart: '#0f172a',
-  customBgEnd: '#1e1b4b',
-  customPanelBg: '#1e293b',
-  glassBlur: 'blur(16px)',
-  fontFamily: "'Outfit', sans-serif",
-  fontSize: '18px',
-}
+import { DEFAULT_CONFIG } from '../../shared/constants/config'
 
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
 const ACTIVE_CONVERSATION_ID_KEY = 'mint:active-conversation-id'
@@ -102,8 +93,66 @@ const MOCK_WELCOME_INTERACTION = {
 }
 
 
+function getInitialViewFromUrl(): DashboardView {
+  if (typeof window === 'undefined') return 'chat'
+  const hash = (window.location.hash || '').toLowerCase().replace(/^#/, '')
+  const pathname = (window.location.pathname || '').toLowerCase()
+  const target = hash || pathname
+
+  if (target.includes('picture')) return 'pictures'
+  if (target.includes('image-studio') || target.includes('imagine')) return 'imagine'
+  if (target.includes('veo-studio') || target.includes('veo')) return 'veo'
+  return 'chat'
+}
+
+function getCleanPathForView(v: string): string {
+  if (v === 'pictures') return '/pictures'
+  if (v === 'imagine') return '/image-studio'
+  if (v === 'veo' || v === 'veo_studio') return '/veo-studio'
+  if (v === 'settings') return '/settings'
+  return '/chat'
+}
+
 export default function MintDashboard() {
-  const [view, setView] = useState<DashboardView>('chat')
+  const [view, setViewState] = useState<DashboardView>(getInitialViewFromUrl)
+
+  const setView = (newView: any) => {
+    setViewState((prev) => {
+      const next = typeof newView === 'function' ? newView(prev) : newView
+      if (next === 'settings') {
+        if ((window as any).api?.openSettings) {
+          (window as any).api.openSettings()
+        } else {
+          if (window.location.pathname !== '/settings') {
+            window.history.pushState({}, '', '/settings')
+          }
+        }
+        return prev
+      }
+      const mappedView: DashboardView = (next === 'veo_studio' ? 'veo' : next) as DashboardView
+      const targetPath = getCleanPathForView(mappedView)
+      if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
+        window.history.pushState({}, '', targetPath)
+      }
+      return mappedView
+    })
+  }
+
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const pathname = (window.location.pathname || '').toLowerCase()
+      const hash = (window.location.hash || '').toLowerCase()
+      if (pathname.includes('/settings') || hash.includes('/settings')) return
+      const nextView = getInitialViewFromUrl()
+      setViewState(nextView)
+    }
+    window.addEventListener('popstate', handleUrlChange)
+    window.addEventListener('hashchange', handleUrlChange)
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange)
+      window.removeEventListener('hashchange', handleUrlChange)
+    }
+  }, [])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -649,9 +698,10 @@ export default function MintDashboard() {
     const file = event.target.files?.[0]
     if (!file) return
     try {
+      const objectUrl = createObjectUrlPreview(file).objectUrl
       const dataUri = await readImage(file)
       const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
-      setImageAttachments((current) => [...current, { dataUri, previewDataUri, name: file.name }])
+      setImageAttachments((current) => [...current, { dataUri, previewDataUri, objectUrl, name: file.name }])
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {

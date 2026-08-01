@@ -18,7 +18,7 @@ use crate::{
     MakeShortsRequest, MergeRequest, RemoveSilenceRequest, RenderTimelineRequest, ResizeRequest,
     TranscribeRequest, TranslateSubtitleRequest, TrimRequest,
     ai_edit_video, burn_subtitles, config_path, create_folder, detect_silence,
-    find_paths, generate_images, generate_srt, generate_video, list_saved_pictures, load_config,
+    find_paths, generate_images, generate_srt, generate_video, delete_saved_picture, list_saved_pictures, load_config,
     make_shorts, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
     render_timeline, save_chat_images, save_config, transcribe, translate_subtitles,
     video_crop, video_export, video_extract_audio, video_load, video_merge, video_remove_silence,
@@ -149,7 +149,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                 let response = "HTTP/1.1 200 OK\r\n\
                                 Access-Control-Allow-Origin: *\r\n\
                                 Access-Control-Allow-Headers: Content-Type\r\n\
-                                Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
+                                Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n\
                                 Content-Length: 0\r\n\
                                 Connection: close\r\n\r\n";
                 let _ = socket.write_all(response.as_bytes()).await;
@@ -354,6 +354,123 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
+                ("GET", "/api/oauth/start") => {
+                    let provider = query_param(query, "provider").unwrap_or_else(|| "google".to_string());
+                    let redirect_uri = format!("http://localhost:3000/api/oauth/callback");
+                    let config = load_config().unwrap_or_default();
+
+                    let custom_client_id = match provider.as_str() {
+                        "google" | "gmail" | "google_calendar" | "youtube_music" => {
+                            config.extra.get("gmailClientId")
+                                .and_then(Value::as_str)
+                                .or_else(|| config.extra.get("googleCalendarClientId").and_then(Value::as_str))
+                        }
+                        "spotify" => {
+                            config.extra.get("spotifyClientId").and_then(Value::as_str)
+                        }
+                        "github" => {
+                            config.extra.get("githubClientId").and_then(Value::as_str)
+                        }
+                        "vercel" => {
+                            config.extra.get("vercelClientId").and_then(Value::as_str)
+                        }
+                        "notion" => {
+                            config.extra.get("notionApiKey").and_then(Value::as_str)
+                        }
+                        _ => None,
+                    };
+
+                    if let Some((auth_url, state)) = crate::oauth::build_auth_url(&provider, &redirect_uri, custom_client_id) {
+                        send_json_response(
+                            socket,
+                            "200 OK",
+                            &serde_json::json!({
+                                "status": "ok",
+                                "auth_url": auth_url,
+                                "state": state,
+                                "redirect_uri": redirect_uri
+                            }).to_string(),
+                        ).await;
+                    } else {
+                        send_json_response(socket, "400 Bad Request", "{\"error\":\"Invalid provider\"}").await;
+                    }
+                    return;
+                }
+                ("GET", "/api/oauth/callback") => {
+                    let code = query_param(query, "code").unwrap_or_default();
+                    let state = query_param(query, "state").unwrap_or_default();
+                    let provider = state.split('-').next().unwrap_or("google");
+                    let redirect_uri = format!("http://localhost:3000/api/oauth/callback");
+                    let config = load_config().unwrap_or_default();
+
+                    let (custom_client_id, custom_client_secret) = match provider {
+                        "google" | "gmail" | "google_calendar" | "youtube_music" => (
+                            config.extra.get("gmailClientId").and_then(Value::as_str).or_else(|| config.extra.get("googleCalendarClientId").and_then(Value::as_str)),
+                            config.extra.get("gmailClientSecret").and_then(Value::as_str).or_else(|| config.extra.get("googleCalendarClientSecret").and_then(Value::as_str)),
+                        ),
+                        "spotify" => (
+                            config.extra.get("spotifyClientId").and_then(Value::as_str),
+                            config.extra.get("spotifyClientSecret").and_then(Value::as_str),
+                        ),
+                        "github" => (
+                            config.extra.get("githubClientId").and_then(Value::as_str),
+                            config.extra.get("githubClientSecret").and_then(Value::as_str),
+                        ),
+                        "vercel" => (
+                            config.extra.get("vercelClientId").and_then(Value::as_str),
+                            config.extra.get("vercelClientSecret").and_then(Value::as_str),
+                        ),
+                        "notion" => (
+                            config.extra.get("notionApiKey").and_then(Value::as_str),
+                            None,
+                        ),
+                        _ => (None, None),
+                    };
+
+                    let result = crate::oauth::exchange_code(provider, &code, &state, &redirect_uri, custom_client_id, custom_client_secret).await;
+
+                    let html_body = match result {
+                        Ok(tokens) => format!(
+                            "<!DOCTYPE html><html><head><title>Mint Agent Connected</title><style>body {{ font-family: system-ui, sans-serif; background: #0f172a; color: #fff; text-align: center; padding: 40px; }} .card {{ background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }} h2 {{ color: #10b981; }}</style></head><body><div class='card'><h2>🟢 Connection Successful!</h2><p>Mint Agent has successfully connected to <strong>{}</strong> ({}).</p><p>You can close this tab now and return to Mint.</p></div><script>setTimeout(() => window.close(), 2500);</script></body></html>",
+                            tokens.provider,
+                            tokens.account_email.as_deref().unwrap_or("Connected")
+                        ),
+                        Err(err) => format!(
+                            "<!DOCTYPE html><html><head><title>Mint OAuth Error</title><style>body {{ font-family: system-ui, sans-serif; background: #0f172a; color: #fff; text-align: center; padding: 40px; }} .card {{ background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; border: 1px solid #ef4444; }} h2 {{ color: #ef4444; }}</style></head><body><div class='card'><h2>❌ Connection Failed</h2><p>Error: {}</p></div></body></html>",
+                            err
+                        ),
+                    };
+
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        html_body.len(),
+                        html_body
+                    );
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    return;
+                }
+                ("GET", "/api/oauth/status") => {
+                    let statuses = crate::oauth::list_oauth_statuses();
+                    send_json_response(
+                        socket,
+                        "200 OK",
+                        &serde_json::json!({ "statuses": statuses }).to_string(),
+                    ).await;
+                    return;
+                }
+                ("POST", "/api/oauth/revoke") => {
+                    #[derive(Deserialize)]
+                    struct RevokeReq {
+                        provider: String,
+                    }
+                    if let Ok(req) = serde_json::from_str::<RevokeReq>(body) {
+                        let _ = crate::oauth::revoke_oauth_tokens(&req.provider);
+                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
+                        return;
+                    }
+                    send_json_response(socket, "400 Bad Request", "{\"status\":\"error\"}").await;
+                    return;
+                }
                 ("POST", "/api/active-model") => {
                     #[derive(Deserialize)]
                     struct ActiveModelReq {
@@ -505,6 +622,18 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 "{\"error\":\"picture not found\"}",
                             )
                             .await
+                        }
+                    }
+                }
+                ("DELETE", route) if route.starts_with("/api/pictures/") => {
+                    let id = percent_decode(route.trim_start_matches("/api/pictures/"));
+                    match delete_saved_picture(&id) {
+                        Ok(_) => {
+                            send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
+                        }
+                        Err(err) => {
+                            let err_msg = serde_json::json!({ "error": err.to_string() }).to_string();
+                            send_json_response(socket, "400 Bad Request", &err_msg).await;
                         }
                     }
                 }
@@ -1578,6 +1707,9 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     if !config.replicate_api_key.trim().is_empty() {
                         available.push("replicate".into());
                     }
+                    if !config.bfl_api_key.trim().is_empty() {
+                        available.push("bfl".into());
+                    }
                     let active = if available.contains(&config.image_gen_provider) {
                         config.image_gen_provider.clone()
                     } else {
@@ -1902,7 +2034,7 @@ async fn send_json_response(mut socket: tokio::net::TcpStream, status: &str, bod
         "HTTP/1.1 {}\r\n\
          Access-Control-Allow-Origin: *\r\n\
          Access-Control-Allow-Headers: Content-Type\r\n\
-         Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
+         Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\
          Connection: close\r\n\r\n\
@@ -1925,7 +2057,8 @@ async fn send_binary_response(
         "HTTP/1.1 {}\r\n\
          Access-Control-Allow-Origin: *\r\n\
          Access-Control-Allow-Headers: Content-Type\r\n\
-         Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
+         Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n\
+         Cache-Control: public, max-age=86400\r\n\
          Content-Type: {}\r\n\
          Content-Length: {}\r\n\
          Connection: close\r\n\r\n",

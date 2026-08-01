@@ -67,12 +67,12 @@ pub async fn generate_video(
                 .extra
                 .get("veoModel")
                 .and_then(|v| v.as_str())
-                .unwrap_or("veo-2.0-generate-001")
+                .unwrap_or("veo-3.1-generate-preview")
                 .to_string()
         });
 
-    if model_owned == "veo-2.0-flash-exp" {
-        model_owned = "veo-2.0-generate-001".to_string();
+    if model_owned.starts_with("veo-2.0") {
+        model_owned = "veo-3.1-generate-preview".to_string();
     }
 
     let client = crate::HTTP_CLIENT.clone();

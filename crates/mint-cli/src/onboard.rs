@@ -14,36 +14,35 @@ struct OnboardService {
 }
 
 const GEMINI_MODEL_PRESETS: &[&str] = &[
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
     "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
 ];
 
 const ANTHROPIC_MODEL_PRESETS: &[&str] = &[
-    "claude-sonnet-4-20250514",
-    "claude-opus-4-20250514",
-    "claude-haiku-35-20241022",
+    "claude-sonnet-5",
+    "claude-opus-5",
+    "claude-sonnet-4.6",
+    "claude-opus-4.8",
+    "claude-haiku-4.5",
 ];
 
 const OPENAI_MODEL_PRESETS: &[&str] = &[
-    "gpt-4.1",
-    "gpt-4.1-mini",
-    "gpt-4.1-nano",
-    "gpt-4o",
-    "gpt-4o-mini",
-    "o3",
-    "o4-mini",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5-thinking",
+    "gpt-5.5-pro",
 ];
 
 const OPENROUTER_MODEL_PRESETS: &[&str] = &[
-    "openai/gpt-4o-mini",
-    "openai/gpt-4o",
-    "anthropic/claude-sonnet-4",
-    "anthropic/claude-haiku-3.5",
-    "google/gemini-2.5-flash",
-    "meta-llama/llama-3.3-70b-instruct",
-    "mistralai/mistral-large",
+    "openai/gpt-5.6-terra",
+    "anthropic/claude-sonnet-5",
+    "google/gemini-3.6-flash",
+    "x-ai/grok-4.5",
+    "deepseek/deepseek-v4-pro",
 ];
 
 const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
@@ -54,31 +53,61 @@ const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
 ];
 
 const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "Qwen/Qwen3-235B-A22B",
-    "mistralai/Mistral-Small-24B-Instruct-2501",
+    "Qwen/Qwen3.6-27B",
+    "deepseek-ai/DeepSeek-V4-Flash",
     "google/gemma-3-27b-it",
+    "meta-llama/Llama-3.3-70B-Instruct",
+    "microsoft/phi-4",
+    "zai-org/GLM-5.2-FP8",
+    "mistralai/Mistral-Large-Instruct",
+    "openai/gpt-oss-120b",
 ];
 
 // ── Image Generation Providers ──────────────────────────────────────────────
-const NANOBANANA_IMAGE_MODEL_PRESETS: &[&str] =
-    &["gemini-2.5-flash-image", "gemini-2.0-flash-image"];
+const NANOBANANA_IMAGE_MODEL_PRESETS: &[&str] = &[
+    "gemini-3.1-flash-image",
+    "gemini-3-pro-image",
+    "gemini-2.5-flash-image",
+];
 
-const DALLE_MODEL_PRESETS: &[&str] = &["dall-e-3", "gpt-image-1", "dall-e-2"];
+const DALLE_MODEL_PRESETS: &[&str] = &["gpt-image-1", "dall-e-3"];
 
-const STABILITY_MODEL_PRESETS: &[&str] =
-    &["sd3.5-large", "sd3.5-large-turbo", "sd3-medium", "core"];
+const STABILITY_MODEL_PRESETS: &[&str] = &[
+    "ultra",
+    "core",
+    "sd3.5-large",
+    "sd3.5-large-turbo",
+    "sd3-medium",
+];
 
 const IDEOGRAM_MODEL_PRESETS: &[&str] = &["V_3", "V_2", "V_2_TURBO"];
 
 const REPLICATE_MODEL_PRESETS: &[&str] = &[
     "black-forest-labs/flux-1.1-pro",
+    "black-forest-labs/flux-kontext-pro",
+    "black-forest-labs/flux-fill-pro",
     "black-forest-labs/flux-schnell",
     "stability-ai/sdxl",
+    "timbrooks/instruct-pix2pix",
+];
+
+const BFL_MODEL_PRESETS: &[&str] = &[
+    "flux-pro-1.1",
+    "flux-pro-1.1-ultra",
+    "flux-pro",
+    "flux-dev",
+    "flux-schnell",
+    "flux-kontext-pro",
+    "flux-kontext-max",
+    "flux-fill-pro",
 ];
 
 // ── Video Generation Providers ──────────────────────────────────────────────
-const VEO_VIDEO_MODEL_PRESETS: &[&str] = &["veo-2.0-generate-001", "veo-2.0-flash-001"];
+const VEO_VIDEO_MODEL_PRESETS: &[&str] = &[
+    "veo-3.1-generate-preview",
+    "veo-3.1-fast-generate-preview",
+    "veo-3.1-lite-generate-preview",
+];
 
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
@@ -221,36 +250,6 @@ pub async fn run() -> Result<()> {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
         },
-        OnboardService {
-            category: "Productivity",
-            name: "Gmail Plugin",
-            key: "gmail",
-            enabled: config
-                .extra
-                .get("pluginGmailEnabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-        },
-        OnboardService {
-            category: "Productivity",
-            name: "Google Calendar Plugin",
-            key: "calendar",
-            enabled: config
-                .extra
-                .get("pluginCalendarEnabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-        },
-        OnboardService {
-            category: "Productivity",
-            name: "Notion Plugin",
-            key: "notion",
-            enabled: config
-                .extra
-                .get("pluginNotionEnabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-        },
         // ── Image Generation ─────────────────────────────────────────────────
         OnboardService {
             category: "Image Generation",
@@ -281,6 +280,12 @@ pub async fn run() -> Result<()> {
             name: "Replicate (FLUX / SDXL / custom)",
             key: "img_replicate",
             enabled: !config.replicate_api_key.is_empty(),
+        },
+        OnboardService {
+            category: "Image Generation",
+            name: "Black Forest Labs (FLUX API)",
+            key: "img_bfl",
+            enabled: !config.bfl_api_key.is_empty(),
         },
         // ── Video Generation ─────────────────────────────────────────────────
         OnboardService {
@@ -742,170 +747,6 @@ pub async fn run() -> Result<()> {
         );
     }
 
-    // Gmail
-    if is_selected("gmail", &services) {
-        println!("\n\x1b[36m--- Gmail Plugin ---\x1b[0m");
-        let current_client_id = config
-            .extra
-            .get("gmailClientId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_client_secret = config
-            .extra
-            .get("gmailClientSecret")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_refresh_token = config
-            .extra
-            .get("gmailRefreshToken")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_user_id = config
-            .extra
-            .get("gmailUserId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("me");
-        let client_id = prompt_input("Gmail Client ID", Some(current_client_id))?;
-        let client_secret = prompt_sensitive("Gmail Client Secret", current_client_secret)?;
-        let refresh_token = prompt_sensitive("Gmail Refresh Token", current_refresh_token)?;
-        let user_id = prompt_input("Gmail User ID", Some(current_user_id))?;
-        config.extra.insert(
-            "gmailClientId".to_string(),
-            serde_json::Value::String(client_id),
-        );
-        config.extra.insert(
-            "gmailClientSecret".to_string(),
-            serde_json::Value::String(client_secret),
-        );
-        config.extra.insert(
-            "gmailRefreshToken".to_string(),
-            serde_json::Value::String(refresh_token),
-        );
-        config.extra.insert(
-            "gmailUserId".to_string(),
-            serde_json::Value::String(user_id),
-        );
-        config.extra.insert(
-            "pluginGmailEnabled".to_string(),
-            serde_json::Value::Bool(true),
-        );
-    } else {
-        config.extra.insert(
-            "pluginGmailEnabled".to_string(),
-            serde_json::Value::Bool(false),
-        );
-    }
-
-    // Google Calendar
-    if is_selected("calendar", &services) {
-        println!("\n\x1b[36m--- Google Calendar Plugin ---\x1b[0m");
-        let current_client_id = config
-            .extra
-            .get("googleCalendarClientId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_client_secret = config
-            .extra
-            .get("googleCalendarClientSecret")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_refresh_token = config
-            .extra
-            .get("googleCalendarRefreshToken")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_cal_id = config
-            .extra
-            .get("googleCalendarId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("primary");
-        let client_id = prompt_input("Google Calendar Client ID", Some(current_client_id))?;
-        let client_secret =
-            prompt_sensitive("Google Calendar Client Secret", current_client_secret)?;
-        let refresh_token =
-            prompt_sensitive("Google Calendar Refresh Token", current_refresh_token)?;
-        let cal_id = prompt_input("Google Calendar ID", Some(current_cal_id))?;
-        config.extra.insert(
-            "googleCalendarClientId".to_string(),
-            serde_json::Value::String(client_id),
-        );
-        config.extra.insert(
-            "googleCalendarClientSecret".to_string(),
-            serde_json::Value::String(client_secret),
-        );
-        config.extra.insert(
-            "googleCalendarRefreshToken".to_string(),
-            serde_json::Value::String(refresh_token),
-        );
-        config.extra.insert(
-            "googleCalendarId".to_string(),
-            serde_json::Value::String(cal_id),
-        );
-        config.extra.insert(
-            "pluginCalendarEnabled".to_string(),
-            serde_json::Value::Bool(true),
-        );
-    } else {
-        config.extra.insert(
-            "pluginCalendarEnabled".to_string(),
-            serde_json::Value::Bool(false),
-        );
-    }
-
-    // Notion
-    if is_selected("notion", &services) {
-        println!("\n\x1b[36m--- Notion Plugin ---\x1b[0m");
-        let current_api_key = config
-            .extra
-            .get("notionApiKey")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_db_id = config
-            .extra
-            .get("notionDatabaseId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_page_id = config
-            .extra
-            .get("notionPageId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_title = config
-            .extra
-            .get("notionTitleProperty")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Name");
-        let api_key = prompt_sensitive("Notion API Key", current_api_key)?;
-        let db_id = prompt_input("Notion Database ID", Some(current_db_id))?;
-        let page_id = prompt_input("Notion Page ID", Some(current_page_id))?;
-        let title_prop = prompt_input("Notion Title Property", Some(current_title))?;
-        config.extra.insert(
-            "notionApiKey".to_string(),
-            serde_json::Value::String(api_key),
-        );
-        config.extra.insert(
-            "notionDatabaseId".to_string(),
-            serde_json::Value::String(db_id),
-        );
-        config.extra.insert(
-            "notionPageId".to_string(),
-            serde_json::Value::String(page_id),
-        );
-        config.extra.insert(
-            "notionTitleProperty".to_string(),
-            serde_json::Value::String(title_prop),
-        );
-        config.extra.insert(
-            "pluginNotionEnabled".to_string(),
-            serde_json::Value::Bool(true),
-        );
-    } else {
-        config.extra.insert(
-            "pluginNotionEnabled".to_string(),
-            serde_json::Value::Bool(false),
-        );
-    }
-
     // ────────────────────────────────────────────────────────────────────────
     // Image Generation providers
     // ────────────────────────────────────────────────────────────────────────
@@ -991,6 +832,24 @@ pub async fn run() -> Result<()> {
         config.replicate_api_key = String::new();
     }
 
+    // Black Forest Labs (FLUX API)
+    if is_selected("img_bfl", &services) {
+        println!("\n\x1b[36m--- Black Forest Labs (FLUX API) ---\x1b[0m");
+        println!(
+            "\x1b[90mGet your API key at https://api.bfl.ml. Supports flux-pro-1.1, flux-pro-1.1-ultra, flux-dev, and flux-pro-1.0-fill.\x1b[0m"
+        );
+        config.bfl_api_key =
+            prompt_sensitive("Black Forest Labs API Key", &config.bfl_api_key)?;
+        config.bfl_model = prompt_select_or_custom(
+            "FLUX Model",
+            static_model_options(BFL_MODEL_PRESETS),
+            Some(&config.bfl_model),
+            "Custom FLUX model...",
+        )?;
+    } else {
+        config.bfl_api_key = String::new();
+    }
+
     // Google Veo (Gemini Videos)
     if is_selected("vid_veo", &services) {
         println!("\n\x1b[36m--- Google Veo (Gemini Videos) ---\x1b[0m");
@@ -1001,7 +860,7 @@ pub async fn run() -> Result<()> {
             .extra
             .get("veoModel")
             .and_then(|v| v.as_str())
-            .unwrap_or("veo-2.0-generate-001")
+            .unwrap_or("veo-3.1-generate-preview")
             .to_string();
         let selected_veo_model = prompt_select_or_custom(
             "Veo Model",
