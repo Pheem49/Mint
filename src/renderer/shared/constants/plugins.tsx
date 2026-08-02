@@ -275,3 +275,32 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     ]
   },
 ]
+
+export function renderSkillsSvgIcon(size = 20, color = 'currentColor') {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+      <path d="M6 12v5c3 3 9 3 12 0v-5" />
+    </svg>
+  )
+}
+
+export function renderMcpHubSvgIcon(size = 20, color = 'currentColor') {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2v8M18 10V4M6 10V4" />
+      <path d="M4 10h16v3a4 4 0 0 1-4 4h-8a4 4 0 0 1-4-4v-3z" />
+      <line x1="12" y1="17" x2="12" y2="22" />
+    </svg>
+  )
+}
+
+export function renderPluginsSvgIcon(size = 20, color = 'currentColor') {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
+    </svg>
+  )
+}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
+import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon } from '../../shared/constants/plugins'
 
-export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'workflows' | 'veo'
+export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'workflows' | 'veo' | 'skills' | 'mcp' | 'plugins'
 
 interface ChatSessionItem {
   id: string
@@ -151,6 +152,7 @@ export default function DashboardSidebar({
         </span>
         <span>Chat</span>
       </button>
+
       <button className={`sidebar-top-action ${view === 'pictures' ? 'is-active' : ''}`} onClick={() => onSetView('pictures')}>
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -181,7 +183,7 @@ export default function DashboardSidebar({
       </button>
 
       <div className="sidebar-more-container" ref={moreContainerRef}>
-        <button className={`sidebar-top-action ${isMoreOpen || view === 'imagine' || view === 'workflows' || view === 'veo' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)}>
+        <button className={`sidebar-top-action ${isMoreOpen || view === 'imagine' || view === 'workflows' || view === 'veo' || view === 'skills' || view === 'mcp' || view === 'plugins' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)}>
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="1.5"></circle>
@@ -192,7 +194,19 @@ export default function DashboardSidebar({
           <span>More</span>
         </button>
         {isMoreOpen && (
-          <div className="sidebar-more-popover">
+          <div className="sidebar-more-popover" style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px', minWidth: '160px' }}>
+            <button className={`popover-item ${view === 'skills' ? 'active' : ''}`} onClick={() => { onSetView('skills'); setIsMoreOpen(false); }}>
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderSkillsSvgIcon(15)}</span>
+              <span>Skills</span>
+            </button>
+            <button className={`popover-item ${view === 'mcp' ? 'active' : ''}`} onClick={() => { onSetView('mcp'); setIsMoreOpen(false); }}>
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderMcpHubSvgIcon(15)}</span>
+              <span>MCP Servers</span>
+            </button>
+            <button className={`popover-item ${view === 'plugins' ? 'active' : ''}`} onClick={() => { onSetView('plugins'); setIsMoreOpen(false); }}>
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderPluginsSvgIcon(15)}</span>
+              <span>Plugins</span>
+            </button>
             <button className={`popover-item ${view === 'imagine' ? 'active' : ''}`} onClick={() => { onSetView('imagine'); setIsMoreOpen(false); }}>
               <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

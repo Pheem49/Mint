@@ -19,6 +19,7 @@ import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../../s
 import { ApprovalCard } from '../../shared/components/ApprovalCard'
 import { renderFormattedMessage, readableAssistantText, cleanSpeechText, renderSpeakerIcon, renderCopyIcon } from '../../shared/utils/markdown'
 import { ThinkingBlock } from '../../shared/components/ThinkingBlock'
+import SourcesBlock from '../../shared/components/SourcesBlock'
 import ChatMessageItem from '../../shared/components/ChatMessageItem'
 import { AgentActivityDrawer } from '../../shared/components/AgentActivityDrawer'
 import type { DiffHunk, FileChange } from '../../shared/types'
@@ -739,133 +740,7 @@ export default function ChatPanel({
     const sources = parseWebSearchSources(progress)
     if (sources.length === 0) return null
 
-    const hasImages = sources.some((s) => s.imageUrl)
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '8px' }}>
-        <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sources</span>
-
-        {/* Image thumbnail strip — shown only when at least one source has an image */}
-        {hasImages && (
-          <div
-            style={{
-              display: 'flex',
-              gap: '8px',
-              overflowX: 'auto',
-              paddingBottom: '4px',
-              scrollbarWidth: 'none',
-            }}
-          >
-            {sources.slice(0, 4).filter((s) => s.imageUrl).map((src, i) => (
-              <a
-                key={i}
-                href={src.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={src.title}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  flexShrink: 0,
-                  width: '130px',
-                  borderRadius: '10px',
-                  overflow: 'hidden',
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  textDecoration: 'none',
-                  cursor: 'pointer',
-                  transition: 'transform 0.15s, border-color 0.15s, box-shadow 0.15s',
-                }}
-                onMouseEnter={e => {
-                  const el = e.currentTarget as HTMLAnchorElement
-                  el.style.transform = 'translateY(-2px)'
-                  el.style.borderColor = 'rgba(255,255,255,0.2)'
-                  el.style.boxShadow = '0 4px 16px rgba(0,0,0,0.3)'
-                }}
-                onMouseLeave={e => {
-                  const el = e.currentTarget as HTMLAnchorElement
-                  el.style.transform = 'translateY(0)'
-                  el.style.borderColor = 'rgba(255,255,255,0.08)'
-                  el.style.boxShadow = 'none'
-                }}
-              >
-                <div style={{ width: '130px', height: '80px', overflow: 'hidden', background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>
-                  <img
-                    src={src.imageUrl}
-                    alt={src.title}
-                    loading="lazy"
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                  />
-                </div>
-                <div style={{ padding: '5px 7px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <img
-                    src={src.faviconUrl}
-                    alt=""
-                    width={12}
-                    height={12}
-                    style={{ borderRadius: '2px', flexShrink: 0 }}
-                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                  />
-                  <span style={{ fontSize: '0.7rem', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {src.domain}
-                  </span>
-                </div>
-              </a>
-            ))}
-          </div>
-        )}
-
-        {/* Source chips row */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-          {sources.map((src, i) => (
-            <a
-              key={i}
-              href={src.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={src.snippet || src.title}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '5px 10px',
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '8px',
-                textDecoration: 'none',
-                color: '#cbd5e1',
-                fontSize: '0.78rem',
-                maxWidth: '220px',
-                overflow: 'hidden',
-                cursor: 'pointer',
-                transition: 'background 0.15s, border-color 0.15s',
-              }}
-              onMouseEnter={e => {
-                (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.08)'
-                ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(255,255,255,0.18)'
-              }}
-              onMouseLeave={e => {
-                (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.04)'
-                ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(255,255,255,0.08)'
-              }}
-            >
-              <img
-                src={src.faviconUrl}
-                alt=""
-                width={14}
-                height={14}
-                style={{ borderRadius: '2px', flexShrink: 0 }}
-                onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-              />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {src.domain}
-              </span>
-            </a>
-          ))}
-        </div>
-      </div>
-    )
+    return <SourcesBlock sources={sources} />
   }
 
   const renderFileChanges = (interaction: any) => {

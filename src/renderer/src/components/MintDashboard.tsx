@@ -71,7 +71,30 @@ function createConversationId() {
   return `conversation-${Date.now().toString(36)}-${random}`
 }
 
+function getConversationIdFromUrl(): string | null {
+  if (typeof window === 'undefined') return null
+  const pathname = window.location.pathname || ''
+  const hash = (window.location.hash || '').replace(/^#/, '')
+  const target = pathname || hash
+
+  const match = target.match(/^\/chat\/(.+)$/i) || target.match(/^\/c\/(.+)$/i)
+  if (match && match[1]) {
+    return decodeURIComponent(match[1])
+  }
+
+  const searchParams = new URLSearchParams(window.location.search)
+  const queryId = searchParams.get('id')
+  if (queryId) return queryId
+
+  return null
+}
+
 function activeConversationId() {
+  const fromUrl = getConversationIdFromUrl()
+  if (fromUrl) {
+    window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, fromUrl)
+    return fromUrl
+  }
   const existing = window.localStorage.getItem(ACTIVE_CONVERSATION_ID_KEY)
   if (existing === 'conversation-default') {
     window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, 'cli')
@@ -93,28 +116,47 @@ const MOCK_WELCOME_INTERACTION = {
 }
 
 
+import SkillsView from '../../shared/components/SkillsView'
+import McpServersView from '../../shared/components/McpServersView'
+import PluginsView from '../../shared/components/PluginsView'
+import {
+  listLearnedSkills,
+  addLearnedSkill,
+  deleteLearnedSkill,
+  detectSystemTools,
+  setProfileValue,
+} from '../tauri'
+
 function getInitialViewFromUrl(): DashboardView {
   if (typeof window === 'undefined') return 'chat'
   const hash = (window.location.hash || '').toLowerCase().replace(/^#/, '')
   const pathname = (window.location.pathname || '').toLowerCase()
   const target = hash || pathname
 
+  if (target.includes('skills')) return 'skills'
+  if (target.includes('mcp')) return 'mcp'
+  if (target.includes('plugins')) return 'plugins'
   if (target.includes('picture')) return 'pictures'
   if (target.includes('image-studio') || target.includes('imagine')) return 'imagine'
   if (target.includes('veo-studio') || target.includes('veo')) return 'veo'
   return 'chat'
 }
 
-function getCleanPathForView(v: string): string {
+function getCleanPathForView(v: string, activeId?: string): string {
+  if (v === 'skills') return '/skills'
+  if (v === 'mcp') return '/mcp'
+  if (v === 'plugins') return '/plugins'
   if (v === 'pictures') return '/pictures'
   if (v === 'imagine') return '/image-studio'
   if (v === 'veo' || v === 'veo_studio') return '/veo-studio'
   if (v === 'settings') return '/settings'
+  if (activeId) return `/chat/${encodeURIComponent(activeId)}`
   return '/chat'
 }
 
 export default function MintDashboard() {
   const [view, setViewState] = useState<DashboardView>(getInitialViewFromUrl)
+  const [conversationId, setConversationId] = useState(activeConversationId)
 
   const setView = (newView: any) => {
     setViewState((prev) => {
@@ -130,7 +172,7 @@ export default function MintDashboard() {
         return prev
       }
       const mappedView: DashboardView = (next === 'veo_studio' ? 'veo' : next) as DashboardView
-      const targetPath = getCleanPathForView(mappedView)
+      const targetPath = getCleanPathForView(mappedView, conversationId)
       if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
         window.history.pushState({}, '', targetPath)
       }
@@ -140,11 +182,25 @@ export default function MintDashboard() {
 
   useEffect(() => {
     const handleUrlChange = () => {
+      if (window.location.hash === '#' || window.location.hash === '#/') {
+        window.history.replaceState({}, '', window.location.pathname + window.location.search)
+      }
       const pathname = (window.location.pathname || '').toLowerCase()
       const hash = (window.location.hash || '').toLowerCase()
       if (pathname.includes('/settings') || hash.includes('/settings')) return
       const nextView = getInitialViewFromUrl()
       setViewState(nextView)
+
+      const urlSessionId = getConversationIdFromUrl()
+      if (urlSessionId && urlSessionId !== conversationId) {
+        window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, urlSessionId)
+        setConversationId(urlSessionId)
+        getRecentInteractions(50, urlSessionId).then((history) => {
+          const reversed = history.reverse()
+          setInteractions(reversed)
+          setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
+        })
+      }
     }
     window.addEventListener('popstate', handleUrlChange)
     window.addEventListener('hashchange', handleUrlChange)
@@ -152,7 +208,7 @@ export default function MintDashboard() {
       window.removeEventListener('popstate', handleUrlChange)
       window.removeEventListener('hashchange', handleUrlChange)
     }
-  }, [])
+  }, [conversationId])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -192,12 +248,78 @@ export default function MintDashboard() {
   const [startupTimedOut, setStartupTimedOut] = useState(false)
   const [settingsConfig, setSettingsConfig] = useState<any>(null)
   const [workspacePath, setWorkspacePath] = useState(() => window.localStorage.getItem(LAST_WORKSPACE_PATH_KEY) || '')
-  const [conversationId, setConversationId] = useState(activeConversationId)
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const lastNativePasteTimeRef = useRef(0)
   const startupReady = (dashboardDataReady && modelReady) || startupTimedOut
   const [proactiveSuggestion, setProactiveSuggestion] = useState<any>(null)
+
+  const [mcpName, setMcpName] = useState('')
+  const [mcpCmd, setMcpCmd] = useState('')
+  const [mcpArgs, setMcpArgs] = useState('')
+  const [mcpEnv, setMcpEnv] = useState('')
+  const [mcpIcon, setMcpIcon] = useState('')
+
+  const handleUpdateSettingsField = async (field: string, value: any) => {
+    const currentConfig = settingsConfig || DEFAULT_CONFIG
+    const updatedConfig = { ...currentConfig, [field]: value }
+    setSettingsConfig(updatedConfig)
+
+    if ((window as any).settingsApi) {
+      await (window as any).settingsApi.saveSettings(updatedConfig)
+    } else {
+      try {
+        await setProfileValue('user-settings', JSON.stringify(updatedConfig))
+      } catch (e) {
+        console.error('Failed to save settings field:', e)
+      }
+    }
+  }
+
+  const handleAddMcpServer = async () => {
+    if (!mcpName.trim() || !mcpCmd.trim()) {
+      alert('Please provide at least a server name and command.')
+      return
+    }
+
+    let parsedEnv = {}
+    if (mcpEnv.trim()) {
+      try {
+        parsedEnv = JSON.parse(mcpEnv)
+      } catch {
+        alert('Invalid JSON in Environment variable field.')
+        return
+      }
+    }
+
+    const argList = mcpArgs.split(/\s+/).filter(Boolean)
+    const currentConfig = settingsConfig || DEFAULT_CONFIG
+    const updatedMcp = {
+      ...currentConfig?.mcpServers,
+      [mcpName.trim()]: {
+        command: mcpCmd.trim(),
+        args: argList,
+        env: parsedEnv,
+        icon: mcpIcon.trim() || undefined,
+      },
+    }
+
+    await handleUpdateSettingsField('mcpServers', updatedMcp)
+    setMcpName('')
+    setMcpCmd('')
+    setMcpArgs('')
+    setMcpEnv('')
+    setMcpIcon('')
+  }
+
+  const handleRemoveMcpServer = async (name: string) => {
+    const currentConfig = settingsConfig || DEFAULT_CONFIG
+    const updated = { ...(currentConfig?.mcpServers || {}) }
+    delete updated[name]
+    await handleUpdateSettingsField('mcpServers', updated)
+  }
+
+  const handleConnectPlugin = (_plugin: string) => {}
 
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -842,9 +964,8 @@ export default function MintDashboard() {
     try {
       if (action === 'New chat') {
         const next = createConversationId()
-        window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, next)
-        setConversationId(next)
-        await refreshChatSessions(next)
+        selectConversation(next)
+        return
       } else {
         if (!window.confirm(`${action} will clear the current conversation history. Continue?`)) return
         await clearChatHistory(conversationId)
@@ -866,13 +987,13 @@ export default function MintDashboard() {
   }
 
   async function selectConversation(id: string) {
-    if (id === conversationId) {
-      setView('chat')
-      return
-    }
     window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, id)
     setConversationId(id)
     setView('chat')
+    const targetPath = getCleanPathForView('chat', id)
+    if (typeof window !== 'undefined' && window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath)
+    }
     setStreamedReply('')
     setStreamedResponse(null)
     setMessage('')
@@ -1112,7 +1233,7 @@ export default function MintDashboard() {
           isSearchOpen={isSearchOpen}
           onSetSearchOpen={setIsSearchOpen}
         />
-        <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspace' ? '' : 'model-hidden'} ${view === 'workspace' ? 'workspace-open' : ''}`}>
+        <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspace' ? '' : 'model-hidden'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'pictures' || view === 'imagine' || view === 'veo') ? { display: 'none' } : undefined}>
           {proactiveSuggestion && (
             <div className="proactive-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
               <div className="proactive-header">
@@ -1150,7 +1271,7 @@ export default function MintDashboard() {
             expressionIndex={expressionIndex}
             accessoryIndex={accessoryIndex}
             isLocked={isLocked}
-            isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'workflows' && view !== 'imagine' && view !== 'veo'}
+            isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'workflows' && view !== 'imagine' && view !== 'veo' && view !== 'skills' && view !== 'mcp' && view !== 'plugins'}
             layoutPreset={layoutPreset}
             sending={sending}
             interactionEnabled={interactionEnabled}
@@ -1213,6 +1334,46 @@ export default function MintDashboard() {
             onCancelMessage={handleCancelMessage}
           />
         </main>
+        {view === 'skills' && (
+          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+            <SkillsView
+              listSkills={listLearnedSkills}
+              addSkill={addLearnedSkill}
+              deleteSkill={deleteLearnedSkill}
+              workspacePath={workspacePath}
+            />
+          </div>
+        )}
+        {view === 'mcp' && (
+          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+            <McpServersView
+              config={settingsConfig || DEFAULT_CONFIG}
+              updateField={handleUpdateSettingsField}
+              mcpName={mcpName}
+              setMcpName={setMcpName}
+              mcpCmd={mcpCmd}
+              setMcpCmd={setMcpCmd}
+              mcpArgs={mcpArgs}
+              setMcpArgs={setMcpArgs}
+              mcpEnv={mcpEnv}
+              setMcpEnv={setMcpEnv}
+              mcpIcon={mcpIcon}
+              setMcpIcon={setMcpIcon}
+              handleAddMcpServer={handleAddMcpServer}
+              handleRemoveMcpServer={handleRemoveMcpServer}
+              detectTools={detectSystemTools}
+            />
+          </div>
+        )}
+        {view === 'plugins' && (
+          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+            <PluginsView
+              config={settingsConfig || DEFAULT_CONFIG}
+              updateField={handleUpdateSettingsField}
+              handleConnectPlugin={handleConnectPlugin}
+            />
+          </div>
+        )}
         <PicturesLibrary view={view} pictures={pictures} onSetView={setView} onRefreshPictures={refreshPictures} />
         <ImageStudioPanel
           view={view}

@@ -697,7 +697,7 @@ export default function SettingsWindow() {
       </main>
 
       <footer className="settings-footer">
-        <button className="btn-danger" onClick={handleQuit} disabled={!isDesktopApp} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+        <button type="button" className="btn-danger" onClick={handleQuit} disabled={!isDesktopApp} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
             <polyline points="16 17 21 12 16 7"></polyline>
@@ -706,14 +706,14 @@ export default function SettingsWindow() {
           Quit Application
         </button>
         <div className="footer-actions">
-          <button className="btn-secondary" onClick={handleReset} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <button type="button" className="btn-secondary" onClick={handleReset} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="1 4 1 10 7 10"></polyline>
               <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
             </svg>
             Reset Defaults
           </button>
-          <button className="btn-primary" onClick={handleSave} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <button type="button" className="btn-primary" onClick={(e) => { e.preventDefault(); handleSave(); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
               <polyline points="17 21 17 13 7 13 7 21"></polyline>

@@ -40,7 +40,7 @@ export default defineConfig({
       name: 'rewrite-html',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
-          if (req.url === '/' || req.url === '/index.html') {
+          if (req.url && !req.url.startsWith('/api') && !/\.[a-zA-Z0-9]+(\?.*)?$/.test(req.url)) {
             req.url = '/index-web.html'
           }
           next()
@@ -48,7 +48,7 @@ export default defineConfig({
       },
       configurePreviewServer(server) {
         server.middlewares.use((req, res, next) => {
-          if (req.url === '/' || req.url === '/index.html') {
+          if (req.url && !req.url.startsWith('/api') && !/\.[a-zA-Z0-9]+(\?.*)?$/.test(req.url)) {
             req.url = '/index-web.html'
           }
           next()

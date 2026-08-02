@@ -17,6 +17,7 @@ const MINT: &str = "\x1b[32m";
 const GREEN: &str = "\x1b[32m";
 const RED: &str = "\x1b[31m";
 const BLUE: &str = "\x1b[38;2;78;201;216m";
+const CYAN: &str = "\x1b[38;2;56;189;248m";
 const DIM: &str = "\x1b[90m";
 const BRIGHT: &str = "\x1b[1;97m";
 
@@ -413,17 +414,33 @@ pub async fn run_code_agent_with_options(
         print!("\n  {MINT}Mint:{RESET} ");
         render_live_summary(&formatted_summary);
 
-        // Print web search sources if any were collected
+        // Print web search sources if any were collected (grouped by domain)
         if let Ok(mut status) = chunk_live_status.lock()
             && !status.web_sources.is_empty()
         {
             println!();
             println!("  {DIM}Sources:{RESET}");
-            for (i, (title, url)) in status.web_sources.iter().enumerate() {
-                println!("  {DIM}{}.{RESET} {BLUE}{}{RESET}", i + 1, title);
-                println!("     {DIM}{}{RESET}", url);
+
+            let mut domain_groups: Vec<(String, Vec<(String, String)>)> = Vec::new();
+            for (title, url) in status.web_sources.drain(..) {
+                let domain = extract_domain(&url);
+                if let Some(group) = domain_groups.iter_mut().find(|(d, _)| d == &domain) {
+                    group.1.push((title, url));
+                } else {
+                    domain_groups.push((domain, vec![(title, url)]));
+                }
             }
-            status.web_sources.clear();
+
+            for (i, (domain, items)) in domain_groups.iter().enumerate() {
+                let (first_title, first_url) = &items[0];
+                let extra_count = items.len() - 1;
+                if extra_count > 0 {
+                    println!("  {DIM}{}.{RESET} {BLUE}{}{RESET} {DIM}({}){RESET} {CYAN}[+{} extra]{RESET}", i + 1, first_title, domain, extra_count);
+                } else {
+                    println!("  {DIM}{}.{RESET} {BLUE}{}{RESET} {DIM}({}){RESET}", i + 1, first_title, domain);
+                }
+                println!("     {DIM}{}{RESET}", first_url);
+            }
         }
 
         println!();
@@ -482,6 +499,16 @@ pub async fn run_code_agent_with_options(
 fn clear_working_status() {
     print!("\r\x1b[2K");
     let _ = io::stdout().flush();
+}
+
+fn extract_domain(url: &str) -> String {
+    let clean = url.trim();
+    let without_scheme = clean
+        .strip_prefix("https://")
+        .or_else(|| clean.strip_prefix("http://"))
+        .unwrap_or(clean);
+    let hostname = without_scheme.split('/').next().unwrap_or(without_scheme);
+    hostname.strip_prefix("www.").unwrap_or(hostname).to_lowercase()
 }
 
 /// Parse (title, url) pairs from the formatted `web_search` ToolEnd result text.

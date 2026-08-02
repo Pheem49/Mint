@@ -158,3 +158,26 @@ Mint Agent now includes a full-featured **AI Video Editor Core** & **Auto Shorts
 - **Dynamic OAuth Client ID Pass-Through (`api_server.rs`)**: Updated `/api/oauth/start` REST endpoint in Rust Core to dynamically inject user-configured Client IDs (`gmailClientId`, `googleCalendarClientId`, `spotifyClientId`, `notionApiKey`) into PKCE authorization flows.
 - **Interactive CLI & Documentation**: Added `mint plugins` subcommand documentation and ecosystem configuration guide to `README.md`.
 
+---
+
+## 🎨 Dynamic Theme Engine, Management Views Redesign & Workspace Skills Detection
+
+- **🎨 Dynamic Theme Management Views (`management-views.css`, `ui.ts`)**:
+  - Consolidated standalone management stylesheets into `src/renderer/shared/css/management-views.css`.
+  - Driven theme variables (`--accent`, `--accent-hover`, `--accent-glow`, `--accent-subtle`, `--accent-border`, `--text-main`) dynamically from Accent Color and Text Accent Color settings.
+  - Set background of `/skills`, `/mcp`, and `/plugins` views in `MintDashboard.tsx` to `transparent`, allowing custom background gradients and wallpapers to show through seamlessly.
+- **🎛️ Settings-Parity Toggle Sliders & Far-Right Controls (`McpServersView.tsx` & `PluginsView.tsx`)**:
+  - Upgraded MCP and Plugin item rows to use iOS-style pill toggle sliders (`.settings-toggle-switch` & `.settings-toggle-slider`).
+  - Added complete action button controls (`Sign In 🌐`, `Disconnect`, `Configure`, `Remove`).
+  - Aligned right-side control containers to the far right edge (`marginLeft: 'auto'`, `flex: 1`) across all item cards.
+  - Fixed MCP server toggle behavior to toggle `disabled: true / false` property instead of deleting the server configuration on toggle OFF.
+- **✨ Vector SVG Icons (`plugins.tsx` & `DashboardSidebar.tsx`)**:
+  - Replaced text emojis with vector SVG icons (`renderSkillsSvgIcon`, `renderMcpHubSvgIcon`, `renderPluginsSvgIcon`) in Sidebar `More` popover menu and page headers.
+  - Updated section title from `Built-in Plugins & Integrations` to `Plugins & Integrations`.
+- **🌐 Clean Routing & Form Submit Hash Cleanup (`SettingsWindow.tsx`, `MintDashboard.tsx` & `tauri.ts`)**:
+  - Added `type="button"` and `e.preventDefault()` to `SettingsWindow` footer buttons.
+  - Built automatic hash cleanup in `MintDashboard.tsx` and `closeSettings()`, preventing unwanted `#/settings` hash accumulation in browser address bar.
+- **🦀 Rust Workspace vs. Global Skills Engine (`memory.rs`, `skills.rs` & `api_server.rs`)**:
+  - Added `is_workspace` field (`#[serde(rename = "is_workspace")]`) to `LearnedSkill` struct in `mint-core`.
+  - Updated `/api/learned-skills` REST endpoint in `api_server.rs` to compute whether a skill file (`.agents/skills/*`, `AGENTS.md`) is located within the active project workspace root (`current_dir`), rendering accurate teal **`• Workspace`** badges vs. purple **`• Global`** badges in the UI.
+

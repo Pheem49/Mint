@@ -203,6 +203,16 @@ export default function PluginsTab({
 
   const pluginsList = BUILTIN_PLUGINS_LIST
 
+  const handleToggleMcpServer = (name: string, enabled: boolean, defaultCmd?: string, defaultArgs?: string[]) => {
+    const updated = { ...(config.mcpServers || {}) }
+    if (updated[name]) {
+      updated[name] = { ...updated[name], disabled: !enabled }
+    } else if (enabled && defaultCmd) {
+      updated[name] = { command: defaultCmd, args: defaultArgs || [], env: {}, disabled: false }
+    }
+    updateField('mcpServers', updated)
+  }
+
   const mcpListItems: Array<{
     name: string
     command: string
@@ -225,7 +235,7 @@ export default function PluginsTab({
       args: srv.args || [],
       icon,
       customIcon: srv.icon,
-      isEnabled: true,
+      isEnabled: (srv as any)?.disabled !== true,
       isConfigured: true,
       description: `Command: ${srv.command} ${(srv.args || []).join(' ')}`
     });
@@ -485,11 +495,7 @@ export default function PluginsTab({
                           type="checkbox"
                           checked={item.isEnabled}
                           onChange={(e) => {
-                            if (e.target.checked) {
-                              handleEnableTool(item.name, item.command, item.args);
-                            } else {
-                              handleRemoveMcpServer(item.name);
-                            }
+                            handleToggleMcpServer(item.name, e.target.checked, item.command, item.args);
                           }}
                         />
                         <span className="settings-toggle-slider" />
@@ -633,7 +639,7 @@ export default function PluginsTab({
         <div className="section-heading">
           <div>
             <p className="section-kicker">Integrations</p>
-            <h2 className="section-title">Built-in Plugins</h2>
+            <h2 className="section-title">Plugins & Integrations</h2>
           </div>
           <p className="section-description">Enable and configure credentials for native Mint plugins.</p>
         </div>

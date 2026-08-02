@@ -303,6 +303,16 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         crate::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
                         let workspace_skills_path2 = current_dir.join("skills");
                         crate::skills::load_skills_from_dir(&workspace_skills_path2, &mut skills);
+
+                        if let Ok(canonical_cwd) = current_dir.canonicalize() {
+                            for s in &mut skills {
+                                if let Ok(p) = std::path::Path::new(&s.source_path).canonicalize() {
+                                    if p.starts_with(&canonical_cwd) {
+                                        s.is_workspace = true;
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     let mut unique_skills = std::collections::BTreeMap::new();

@@ -1,13 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon } from '../../shared/constants/plugins'
 
-export type DashboardView = 'chat' | 'pictures' | 'model' | 'imagine' | 'workflows' | 'veo'
+export type DashboardView = 'chat' | 'pictures' | 'model' | 'imagine' | 'workflows' | 'veo' | 'skills' | 'mcp' | 'plugins'
 
 interface ChatSessionItem {
   id: string
   title: string
-  kind: string
-  createdAt?: string
+  kind?: string
   updatedAt?: string
+  createdAt?: string
 }
 
 interface DashboardSidebarProps {
@@ -43,6 +44,18 @@ export default function DashboardSidebar({
 }: DashboardSidebarProps) {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editTitleValue, setEditTitleValue] = useState('')
+  const [isMoreOpen, setIsMoreOpen] = useState(false)
+  const moreContainerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (moreContainerRef.current && !moreContainerRef.current.contains(event.target as Node)) {
+        setIsMoreOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const handleSaveRename = (id: string) => {
     if (editTitleValue.trim() && editTitleValue.trim() !== chatSessions.find(s => s.id === id)?.title) {
@@ -101,6 +114,7 @@ export default function DashboardSidebar({
         </span>
         <span>Chat</span>
       </button>
+
       <button className={`sidebar-top-action ${view === 'pictures' ? 'is-active' : ''}`} onClick={() => onSetView('pictures')}>
         <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -134,6 +148,35 @@ export default function DashboardSidebar({
         </span>
         <span>Veo Studio</span>
       </button>
+
+      <div className="sidebar-more-container" ref={moreContainerRef}>
+        <button className={`sidebar-top-action ${isMoreOpen || view === 'skills' || view === 'mcp' || view === 'plugins' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)}>
+          <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="1.5"></circle>
+              <circle cx="19" cy="12" r="1.5"></circle>
+              <circle cx="5" cy="12" r="1.5"></circle>
+            </svg>
+          </span>
+          <span>More</span>
+        </button>
+        {isMoreOpen && (
+          <div className="sidebar-more-popover" style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px', minWidth: '160px' }}>
+            <button className={`popover-item ${view === 'skills' ? 'active' : ''}`} onClick={() => { onSetView('skills'); setIsMoreOpen(false); }}>
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderSkillsSvgIcon(15)}</span>
+              <span>Skills</span>
+            </button>
+            <button className={`popover-item ${view === 'mcp' ? 'active' : ''}`} onClick={() => { onSetView('mcp'); setIsMoreOpen(false); }}>
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderMcpHubSvgIcon(15)}</span>
+              <span>MCP Servers</span>
+            </button>
+            <button className={`popover-item ${view === 'plugins' ? 'active' : ''}`} onClick={() => { onSetView('plugins'); setIsMoreOpen(false); }}>
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderPluginsSvgIcon(15)}</span>
+              <span>Plugins</span>
+            </button>
+          </div>
+        )}
+      </div>
 
       <div className="sidebar-section">
         <div className="sidebar-section-title">Conversation CLI</div>

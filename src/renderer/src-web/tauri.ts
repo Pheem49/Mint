@@ -836,6 +836,11 @@ export function installTauriAdapters() {
           return {};
         }
       },
+      closeSettings: async () => {
+        if (window.location.hash.includes('settings')) {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        }
+      },
       onSettingsChanged: () => {},
       startVision: () => {},
       onVisionReady: async () => () => {},
