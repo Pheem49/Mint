@@ -10,6 +10,7 @@ mod updater;
 mod webhooks;
 mod workflows;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use mint_core::browser::{
     BrowserTab, click as browser_click, list_tabs as browser_list_tabs,
     navigate as browser_navigate, read_page_text,
@@ -29,13 +30,14 @@ use tokio::sync::oneshot;
 
 use integrations::{channel_inventory, list_plugins};
 use mint_core::{
-    AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, ChatRequest, ChatResponse,
-    ChatSession, CodeEdit, CodeEditProposal, ImageGenRequest, InteractionMemory, MemoryStore,
-    MintConfig, PictureEntry, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport,
-    apply_code_edits, classify_shell_command, config_path, delete_saved_picture, google_tts_urls, list_saved_pictures,
-    load_config, load_workflows, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
-    orchestrate_chat_with_fallback, propose_code_edits, save_chat_images, save_config,
-    save_workflows, start_channels, weather, workflows_path,
+    AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, AuthUser, ChatRequest,
+    ChatResponse, ChatSession, CodeEdit, CodeEditProposal, ImageGenRequest, InteractionMemory,
+    MemoryStore, MintConfig, PictureEntry, TtsUrl, VideoGenRequest, VideoGenResponse,
+    WeatherReport, apply_code_edits, classify_shell_command, config_path, delete_saved_picture,
+    get_user, google_tts_urls, list_saved_pictures, load_config, load_workflows, login_user,
+    orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    propose_code_edits, register_user, save_avatar_file, save_chat_images, save_config,
+    save_workflows, start_channels, update_profile, weather, workflows_path,
 };
 use plugins::execute_plugin;
 
@@ -741,6 +743,85 @@ fn set_profile_value(key: String, value: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// Path to the file that remembers which shared-store user is currently
+/// logged into the desktop app (`~/.config/mint/session.json`). Desktop is a
+/// single trusted process per launch, so a bearer token isn't needed here —
+/// unlike the web-mode API server (see mint_core::auth session tokens).
+fn desktop_session_path() -> Result<PathBuf, String> {
+    Ok(config_path()
+        .map_err(|error| error.to_string())?
+        .with_file_name("session.json"))
+}
+
+fn write_desktop_session(user_id: &str) -> Result<(), String> {
+    let path = desktop_session_path()?;
+    let contents = serde_json::json!({ "userId": user_id }).to_string();
+    fs::write(path, contents).map_err(|error| error.to_string())
+}
+
+fn read_desktop_session_user_id() -> Option<String> {
+    let path = desktop_session_path().ok()?;
+    let contents = fs::read_to_string(path).ok()?;
+    let value: Value = serde_json::from_str(&contents).ok()?;
+    value.get("userId")?.as_str().map(str::to_string)
+}
+
+#[tauri::command]
+fn auth_register(name: Option<String>, email: String, password: String) -> Result<AuthUser, String> {
+    let user = register_user(name, &email, &password).map_err(|error| error.to_string())?;
+    write_desktop_session(&user.id)?;
+    Ok(user)
+}
+
+#[tauri::command]
+fn auth_login(email: String, password: String) -> Result<AuthUser, String> {
+    let user = login_user(&email, &password).map_err(|error| error.to_string())?;
+    write_desktop_session(&user.id)?;
+    Ok(user)
+}
+
+#[tauri::command]
+fn auth_logout() -> Result<(), String> {
+    let path = desktop_session_path()?;
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn auth_current_user() -> Result<Option<AuthUser>, String> {
+    let Some(user_id) = read_desktop_session_user_id() else {
+        return Ok(None);
+    };
+    get_user(&user_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn auth_update_profile(name: Option<String>, image: Option<String>) -> Result<AuthUser, String> {
+    let Some(user_id) = read_desktop_session_user_id() else {
+        return Err("Not logged in".to_string());
+    };
+    update_profile(&user_id, name, image).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn auth_upload_avatar(file_name: String, data_base64: String) -> Result<AuthUser, String> {
+    let Some(user_id) = read_desktop_session_user_id() else {
+        return Err("Not logged in".to_string());
+    };
+    let bytes = BASE64
+        .decode(data_base64.as_bytes())
+        .map_err(|_| "Invalid image data".to_string())?;
+    let extension = file_name
+        .rsplit('.')
+        .next()
+        .unwrap_or("png")
+        .to_lowercase();
+    let url = save_avatar_file(&bytes, &extension).map_err(|error| error.to_string())?;
+    update_profile(&user_id, None, Some(url)).map_err(|error| error.to_string())
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 struct LearnedSkillDto {
@@ -1372,6 +1453,12 @@ pub fn run() {
             rename_chat_session,
             get_profile_value,
             set_profile_value,
+            auth_register,
+            auth_login,
+            auth_logout,
+            auth_current_user,
+            auth_update_profile,
+            auth_upload_avatar,
             clear_chat_history,
             list_learned_skills,
             add_learned_skill,

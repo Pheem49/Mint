@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { getLocalApiBase, isTauriRuntime, getProfileValue, setProfileValue, setActiveModel } from '../tauri'
+import { getLocalApiBase, isTauriRuntime, getProfileValue, setProfileValue, setActiveModel, authUpdateProfile } from '../tauri'
+import { useAuthUser } from '../../shared/components/AuthGate'
 import GeneralTab from './Settings/GeneralTab'
+import ProfileTab from './Settings/ProfileTab'
 import MemoryTab from './Settings/MemoryTab'
 import AudioTab from './Settings/AudioTab'
 import AutomationTab from './Settings/AutomationTab'
@@ -42,7 +44,7 @@ export interface CustomProviderConfig {
 import { DEFAULT_CONFIG } from '../../shared/constants/config'
 export { DEFAULT_CONFIG }
 
-type TabType = 'sect-general' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
+type TabType = 'sect-general' | 'sect-profile' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
 
 export {
   GEMINI_MODELS,
@@ -62,7 +64,18 @@ export default function SettingsWindow() {
   // Custom user profile / memory state
   const [userName, setUserName] = useState('')
   const [userPreferences, setUserPreferences] = useState('')
-  
+
+  // Shared Mint account profile (name + avatar), saved together with the
+  // rest of settings via the "Save Settings" button.
+  const { user: authUser, refreshUser } = useAuthUser()
+  const [profileName, setProfileName] = useState('')
+  const [profileImageUrl, setProfileImageUrl] = useState('')
+
+  useEffect(() => {
+    setProfileName(authUser?.name || '')
+    setProfileImageUrl(authUser?.image || '')
+  }, [authUser])
+
   // Custom model helpers for all providers
   const [customGemini, setCustomGemini] = useState('')
   const [customOpenAI, setCustomOpenAI] = useState('')
@@ -260,6 +273,13 @@ export default function SettingsWindow() {
       await setProfileValue('preferences', userPreferences)
     } catch (e) {
       console.error("Failed to save user profile memory:", e)
+    }
+
+    try {
+      const updated = await authUpdateProfile(profileName, profileImageUrl)
+      refreshUser(updated)
+    } catch (e) {
+      console.error("Failed to save account profile:", e)
     }
 
     const getActiveModelName = (provider: string, cfg: typeof finalConfig) => {
@@ -529,6 +549,15 @@ export default function SettingsWindow() {
             </span>
             <strong>General</strong>
           </button>
+          <button className={`tab-btn ${activeTab === 'sect-profile' ? 'active' : ''}`} onClick={() => setActiveTab('sect-profile')}>
+            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+            </span>
+            <strong>Profile</strong>
+          </button>
           <button className={`tab-btn ${activeTab === 'sect-memory' ? 'active' : ''}`} onClick={() => setActiveTab('sect-memory')}>
             <span style={{ display: 'inline-flex', alignItems: 'center' }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -630,6 +659,15 @@ export default function SettingsWindow() {
               handleInstallUpdate={handleInstallUpdate}
               isDesktopApp={isDesktopApp}
               onSaveWithoutClosing={handleSaveWithoutClosing}
+            />
+          )}
+
+          {activeTab === 'sect-profile' && (
+            <ProfileTab
+              name={profileName}
+              setName={setProfileName}
+              imageUrl={profileImageUrl}
+              setImageUrl={setProfileImageUrl}
             />
           )}
 

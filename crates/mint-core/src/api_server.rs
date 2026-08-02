@@ -11,13 +11,15 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use crate::{
-    AgentProgress, ApprovalOutcome, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID,
+    AgentProgress, ApprovalOutcome, AuthError, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID,
     ImageGenRequest, MemoryStore, MintConfig, VideoGenRequest,
     // Video editing & Speech & Subtitles & Auto Shorts
     AiEditVideoRequest, BurnSubtitleRequest, CropRequest, DetectSilenceRequest, ExportRequest, ExtractAudioRequest,
     MakeShortsRequest, MergeRequest, RemoveSilenceRequest, RenderTimelineRequest, ResizeRequest,
     TranscribeRequest, TranslateSubtitleRequest, TrimRequest,
-    ai_edit_video, burn_subtitles, config_path, create_folder, detect_silence,
+    ai_edit_video, burn_subtitles, config_path, create_folder, create_session, destroy_session,
+    detect_silence, get_user, login_user, profile_pictures_dir, register_user, save_avatar_file,
+    session_user_id, update_profile,
     find_paths, generate_images, generate_srt, generate_video, delete_saved_picture, list_saved_pictures, load_config,
     make_shorts, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
     render_timeline, save_chat_images, save_config, transcribe, translate_subtitles,
@@ -148,8 +150,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
             if method == "OPTIONS" {
                 let response = "HTTP/1.1 200 OK\r\n\
                                 Access-Control-Allow-Origin: *\r\n\
-                                Access-Control-Allow-Headers: Content-Type\r\n\
-                                Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n\
+                                Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
+                                Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n\
                                 Content-Length: 0\r\n\
                                 Connection: close\r\n\r\n";
                 let _ = socket.write_all(response.as_bytes()).await;
@@ -158,6 +160,11 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
             }
 
             let (route, query) = path.split_once('?').unwrap_or((path, ""));
+
+            let auth_label = match authorized_user_id(&request_str) {
+                Some(user_id) => format!("auth:{}", &user_id[..user_id.len().min(8)]),
+                None => "auth:anonymous".to_string(),
+            };
 
             if route.starts_with("/api/")
                 && !route.starts_with("/api/pictures/")
@@ -169,7 +176,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                 && route != "/api/action"
                 && route != "/api/config"
             {
-                log_api_req(method, route, "200 OK", None);
+                log_api_req(method, route, "200 OK", Some(&auth_label));
             }
 
             match (method, route) {
@@ -193,6 +200,226 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         "localIp": get_local_ip()
                     });
                     send_json_response(socket, "200 OK", &status_json.to_string()).await;
+                }
+                ("POST", "/api/auth/register") => {
+                    #[derive(Deserialize)]
+                    struct RegisterRequest {
+                        #[serde(default)]
+                        name: Option<String>,
+                        email: String,
+                        password: String,
+                    }
+                    let Ok(req) = serde_json::from_str::<RegisterRequest>(body) else {
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"message\":\"Invalid request body.\"}",
+                        )
+                        .await;
+                        return;
+                    };
+                    match register_user(req.name, &req.email, &req.password) {
+                        Ok(user) => {
+                            let token = create_session(&user.id);
+                            send_json_response(
+                                socket,
+                                "201 Created",
+                                &json!({ "token": token, "user": user }).to_string(),
+                            )
+                            .await;
+                        }
+                        Err(err) => {
+                            let status = match err {
+                                AuthError::EmailTaken => "409 Conflict",
+                                AuthError::MissingCredentials | AuthError::PasswordTooShort => {
+                                    "400 Bad Request"
+                                }
+                                _ => "500 Internal Server Error",
+                            };
+                            send_json_response(
+                                socket,
+                                status,
+                                &json!({ "message": err.to_string() }).to_string(),
+                            )
+                            .await;
+                        }
+                    }
+                    return;
+                }
+                ("POST", "/api/auth/login") => {
+                    #[derive(Deserialize)]
+                    struct LoginRequest {
+                        email: String,
+                        password: String,
+                    }
+                    let Ok(req) = serde_json::from_str::<LoginRequest>(body) else {
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"message\":\"Invalid request body.\"}",
+                        )
+                        .await;
+                        return;
+                    };
+                    match login_user(&req.email, &req.password) {
+                        Ok(user) => {
+                            let token = create_session(&user.id);
+                            send_json_response(
+                                socket,
+                                "200 OK",
+                                &json!({ "token": token, "user": user }).to_string(),
+                            )
+                            .await;
+                        }
+                        Err(_) => {
+                            send_json_response(
+                                socket,
+                                "401 Unauthorized",
+                                "{\"message\":\"Invalid email or password.\"}",
+                            )
+                            .await;
+                        }
+                    }
+                    return;
+                }
+                ("POST", "/api/auth/logout") => {
+                    if let Some(header) = get_header(&request_str, "Authorization")
+                        && let Some(token) = header.strip_prefix("Bearer ")
+                    {
+                        destroy_session(token.trim());
+                    }
+                    send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
+                    return;
+                }
+                ("GET", "/api/auth/session") => {
+                    let user = authorized_user_id(&request_str).and_then(|id| get_user(&id).ok().flatten());
+                    send_json_response(socket, "200 OK", &json!({ "user": user }).to_string()).await;
+                    return;
+                }
+                ("GET", "/api/avatar") => {
+                    let key = query_param(query, "key").unwrap_or_default();
+                    // Only ever serve a bare filename from the shared profile
+                    // pictures directory — never treat `key` as a path.
+                    let filename = PathBuf::from(&key)
+                        .file_name()
+                        .map(|name| name.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let content_type = match filename.rsplit('.').next().unwrap_or("") {
+                        "jpg" | "jpeg" => "image/jpeg",
+                        "webp" => "image/webp",
+                        "gif" => "image/gif",
+                        _ => "image/png",
+                    };
+                    let file_path = profile_pictures_dir()
+                        .ok()
+                        .filter(|_| !filename.is_empty())
+                        .map(|dir| dir.join(&filename));
+                    match file_path.and_then(|path| std::fs::read(path).ok()) {
+                        Some(bytes) => {
+                            send_binary_response(socket, "200 OK", content_type, &bytes).await
+                        }
+                        None => {
+                            send_json_response(
+                                socket,
+                                "404 Not Found",
+                                "{\"message\":\"Avatar not found\"}",
+                            )
+                            .await
+                        }
+                    }
+                    return;
+                }
+                ("PUT", "/api/auth/profile") => {
+                    #[derive(Deserialize)]
+                    struct ProfileUpdateRequest {
+                        #[serde(default)]
+                        name: Option<String>,
+                        #[serde(default)]
+                        image: Option<String>,
+                    }
+                    let Some(user_id) = authorized_user_id(&request_str) else {
+                        send_json_response(socket, "401 Unauthorized", "{\"message\":\"Unauthorized\"}")
+                            .await;
+                        return;
+                    };
+                    let Ok(req) = serde_json::from_str::<ProfileUpdateRequest>(body) else {
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"message\":\"Invalid request body.\"}",
+                        )
+                        .await;
+                        return;
+                    };
+                    match update_profile(&user_id, req.name, req.image) {
+                        Ok(user) => {
+                            send_json_response(socket, "200 OK", &json!({ "user": user }).to_string())
+                                .await;
+                        }
+                        Err(err) => {
+                            send_json_response(
+                                socket,
+                                "500 Internal Server Error",
+                                &json!({ "message": err.to_string() }).to_string(),
+                            )
+                            .await;
+                        }
+                    }
+                    return;
+                }
+                ("POST", "/api/auth/avatar") => {
+                    #[derive(Deserialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct AvatarUploadRequest {
+                        file_name: String,
+                        data_base64: String,
+                    }
+                    let Some(user_id) = authorized_user_id(&request_str) else {
+                        send_json_response(socket, "401 Unauthorized", "{\"message\":\"Unauthorized\"}")
+                            .await;
+                        return;
+                    };
+                    let Ok(req) = serde_json::from_str::<AvatarUploadRequest>(body) else {
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"message\":\"Invalid request body.\"}",
+                        )
+                        .await;
+                        return;
+                    };
+                    let Ok(bytes) = BASE64.decode(req.data_base64.as_bytes()) else {
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"message\":\"Invalid image data.\"}",
+                        )
+                        .await;
+                        return;
+                    };
+                    let extension = req
+                        .file_name
+                        .rsplit('.')
+                        .next()
+                        .unwrap_or("png")
+                        .to_lowercase();
+                    match save_avatar_file(&bytes, &extension)
+                        .and_then(|url| update_profile(&user_id, None, Some(url)))
+                    {
+                        Ok(user) => {
+                            send_json_response(socket, "200 OK", &json!({ "user": user }).to_string())
+                                .await;
+                        }
+                        Err(err) => {
+                            send_json_response(
+                                socket,
+                                "500 Internal Server Error",
+                                &json!({ "message": err.to_string() }).to_string(),
+                            )
+                            .await;
+                        }
+                    }
+                    return;
                 }
                 ("GET", "/api/detect-tools") => {
                     let tools_json = serde_json::json!({
@@ -851,7 +1078,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     "POST",
                                     "/api/chat",
                                     "200 OK",
-                                    Some(&format!("Model: {}", config.ai_provider)),
+                                    Some(&format!("Model: {} | {}", config.ai_provider, auth_label)),
                                 );
                                 if let Some(image) = sent_image {
                                     let _ = save_chat_images(
@@ -967,7 +1194,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
                         let headers = "HTTP/1.1 200 OK\r\n\
                                        Access-Control-Allow-Origin: *\r\n\
-                                       Access-Control-Allow-Headers: Content-Type\r\n\
+                                       Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
                                        Content-Type: application/x-ndjson\r\n\
                                        Cache-Control: no-cache\r\n\
                                        Connection: close\r\n\r\n";
@@ -1007,6 +1234,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     let chat_req_clone = chat_req.clone();
                                     let tx_done = tx.clone();
                                     let chat_id_str = chat_req.chat_id.clone().unwrap_or_default();
+                                    let auth_label_clone = auth_label.clone();
                                     let join_handle = tokio::spawn(async move {
                                         let result = orchestrate_chat_stream_with_fallback(
                                             &config_clone,
@@ -1032,8 +1260,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                                     "/api/chat-stream",
                                                     "200 OK",
                                                     Some(&format!(
-                                                        "Provider: {}",
-                                                        config_clone.ai_provider
+                                                        "Provider: {} | {}",
+                                                        config_clone.ai_provider, auth_label_clone
                                                     )),
                                                 );
                                                 if let Ok(json_val) =
@@ -1245,7 +1473,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     "POST",
                                     "/api/image-generate",
                                     "200 OK",
-                                    Some(&format!("Provider: {}", result.provider)),
+                                    Some(&format!("Provider: {} | {}", result.provider, auth_label)),
                                 );
                                 let data_uris: Vec<String> = result
                                     .images
@@ -1361,7 +1589,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     "POST",
                                     "/api/video-generate",
                                     "200 OK",
-                                    Some(&format!("Provider: {}", result.provider)),
+                                    Some(&format!("Provider: {} | {}", result.provider, auth_label)),
                                 );
                                 send_json_response(socket, "200 OK", &response.to_string()).await;
                             }
@@ -1959,6 +2187,29 @@ fn query_param(query: &str, key: &str) -> Option<String> {
     })
 }
 
+/// Reads a header value from the raw request text (headers + body, as
+/// assembled in the connection loop above).
+fn get_header(request_str: &str, header_name: &str) -> Option<String> {
+    let header_end = request_str.find("\r\n\r\n").unwrap_or(request_str.len());
+    let headers = &request_str[..header_end];
+    let needle = format!("{header_name}:");
+    headers.lines().find_map(|line| {
+        if line.len() > needle.len() && line[..needle.len()].eq_ignore_ascii_case(&needle) {
+            Some(line[needle.len()..].trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+/// Resolves the logged-in user id (web mode) from the `Authorization: Bearer
+/// <token>` header, if present and valid.
+fn authorized_user_id(request_str: &str) -> Option<String> {
+    let header = get_header(request_str, "Authorization")?;
+    let token = header.strip_prefix("Bearer ")?;
+    session_user_id(token.trim())
+}
+
 fn percent_decode(raw: &str) -> String {
     let bytes = raw.as_bytes();
     let mut output = Vec::with_capacity(bytes.len());
@@ -2043,8 +2294,8 @@ async fn send_json_response(mut socket: tokio::net::TcpStream, status: &str, bod
     let response = format!(
         "HTTP/1.1 {}\r\n\
          Access-Control-Allow-Origin: *\r\n\
-         Access-Control-Allow-Headers: Content-Type\r\n\
-         Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n\
+         Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
+         Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\
          Connection: close\r\n\r\n\
@@ -2066,8 +2317,8 @@ async fn send_binary_response(
     let response = format!(
         "HTTP/1.1 {}\r\n\
          Access-Control-Allow-Origin: *\r\n\
-         Access-Control-Allow-Headers: Content-Type\r\n\
-         Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n\
+         Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
+         Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n\
          Cache-Control: public, max-age=86400\r\n\
          Content-Type: {}\r\n\
          Content-Length: {}\r\n\

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon } from '../../shared/constants/plugins'
+import { useAuthUser } from '../../shared/components/AuthGate'
 
 export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'workflows' | 'veo' | 'skills' | 'mcp' | 'plugins'
 
@@ -72,6 +73,7 @@ export default function DashboardSidebar({
   const [editTitleValue, setEditTitleValue] = useState('')
   const [isMoreOpen, setIsMoreOpen] = useState(false)
   const moreContainerRef = useRef<HTMLDivElement>(null)
+  const { user, avatarUrl, logout } = useAuthUser()
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -443,6 +445,29 @@ export default function DashboardSidebar({
           <span>Settings</span>
         </button>
       </div>
+
+      {user && (
+        <div className="sidebar-account">
+          <div className="sidebar-account-avatar">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt={user.name || 'User'} />
+            ) : (
+              (user.name?.[0] || user.email?.[0] || 'U').toUpperCase()
+            )}
+          </div>
+          <div className="sidebar-account-info">
+            <span className="sidebar-account-name">{user.name || user.email}</span>
+            {user.email && <span className="sidebar-account-email">{user.email}</span>}
+          </div>
+          <button className="sidebar-account-logout" title="Sign out" onClick={logout}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+              <polyline points="16 17 21 12 16 7"></polyline>
+              <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+          </button>
+        </div>
+      )}
     </aside>
   )
 }

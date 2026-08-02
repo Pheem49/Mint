@@ -19,6 +19,7 @@ import type {
   DetectedTools,
   LearnedSkill,
   AgentProgress,
+  AuthUser,
 } from './types'
 
 export function getLocalApiBase(): string {
@@ -30,6 +31,12 @@ export function getLocalApiBase(): string {
 }
 
 export interface MintPlatformApi {
+  authRegister(name: string | undefined, email: string, password: string): Promise<AuthUser>
+  authLogin(email: string, password: string): Promise<AuthUser>
+  authLogout(): Promise<void>
+  authGetCurrentUser(): Promise<AuthUser | null>
+  authUpdateProfile(name?: string, image?: string): Promise<AuthUser>
+  authUploadAvatar(fileDataUri: string, fileName: string): Promise<AuthUser>
   getRuntimeStatus(): Promise<RuntimeStatus>
   detectSystemTools(): Promise<DetectedTools>
   sendChatMessage(

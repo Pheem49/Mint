@@ -1,4 +1,6 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react'
+import AuthGate from '../shared/components/AuthGate'
+import ChunkErrorBoundary from '../shared/components/ChunkErrorBoundary'
 
 const SettingsWindow = lazy(() => import('./components/SettingsWindow'))
 const MintDashboard = lazy(() => import('./components/MintDashboard'))
@@ -47,5 +49,11 @@ export default function App() {
     )
   }
 
-  return <Suspense fallback={null}>{content}</Suspense>
+  return (
+    <ChunkErrorBoundary>
+      <Suspense fallback={<div className="auth-gate-loading">Loading Mint…</div>}>
+        <AuthGate>{content}</AuthGate>
+      </Suspense>
+    </ChunkErrorBoundary>
+  )
 }

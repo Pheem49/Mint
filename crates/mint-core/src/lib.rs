@@ -1,6 +1,7 @@
 #![recursion_limit = "256"]
 
 pub mod agent_loop;
+pub mod auth;
 pub mod browser;
 pub mod chat;
 pub mod code_tools;
@@ -34,6 +35,11 @@ pub mod web_search;
 pub mod workflows;
 
 pub use agent_loop::{AgentActionFuture, AgentLoopError, parse_agent_json, run_agent_loop};
+pub use auth::{
+    AuthError, AuthUser, create_session, destroy_session, get_user, login_user,
+    profile_pictures_dir, register_user, save_avatar_file, session_user_id, update_profile,
+    user_db_path,
+};
 pub use chat::{
     ChatError, ChatRequest, ChatResponse, send_chat, send_chat_with_fallback, stream_chat,
     stream_chat_with_fallback,

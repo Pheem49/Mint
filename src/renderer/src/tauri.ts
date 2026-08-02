@@ -30,6 +30,7 @@ import type {
   WorkspaceTreeEntry,
   CodeEdit,
   CodeEditProposal,
+  AuthUser,
 } from '../shared/types'
 
 
@@ -37,6 +38,146 @@ type DesktopStreamEvent =
   | { type: 'chunk'; chunk: string }
   | { type: 'progress'; progress: AgentProgress }
 
+const AUTH_TOKEN_KEY = 'mint_auth_token'
+
+function getStoredAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage.getItem(AUTH_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+function setStoredAuthToken(token: string | null) {
+  if (typeof window === 'undefined') return
+  try {
+    if (token) window.localStorage.setItem(AUTH_TOKEN_KEY, token)
+    else window.localStorage.removeItem(AUTH_TOKEN_KEY)
+  } catch {
+    // ignore storage errors (e.g. private browsing)
+  }
+}
+
+export async function authRegister(
+  name: string | undefined,
+  email: string,
+  password: string,
+): Promise<AuthUser> {
+  if (!isTauriRuntime()) {
+    const res = await fetch(`${getLocalApiBase()}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to register.')
+    setStoredAuthToken(data.token)
+    return data.user
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<AuthUser>('auth_register', { name, email, password })
+}
+
+export async function authLogin(email: string, password: string): Promise<AuthUser> {
+  if (!isTauriRuntime()) {
+    const res = await fetch(`${getLocalApiBase()}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Invalid email or password.')
+    setStoredAuthToken(data.token)
+    return data.user
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<AuthUser>('auth_login', { email, password })
+}
+
+export async function authLogout(): Promise<void> {
+  if (!isTauriRuntime()) {
+    const token = getStoredAuthToken()
+    setStoredAuthToken(null)
+    if (token) {
+      await fetch(`${getLocalApiBase()}/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {})
+    }
+    return
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('auth_logout')
+}
+
+export async function authGetCurrentUser(): Promise<AuthUser | null> {
+  if (!isTauriRuntime()) {
+    const token = getStoredAuthToken()
+    if (!token) return null
+    try {
+      const res = await fetch(`${getLocalApiBase()}/auth/session`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.user ?? null
+    } catch {
+      return null
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<AuthUser | null>('auth_current_user')
+}
+
+export async function authUpdateProfile(name?: string, image?: string): Promise<AuthUser> {
+  if (!isTauriRuntime()) {
+    const token = getStoredAuthToken()
+    if (!token) throw new Error('Not logged in')
+    const res = await fetch(`${getLocalApiBase()}/auth/profile`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name, image }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to update profile.')
+    return data.user
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<AuthUser>('auth_update_profile', { name, image })
+}
+
+export async function authUploadAvatar(fileDataUri: string, fileName: string): Promise<AuthUser> {
+  const dataBase64 = fileDataUri.split(',')[1] ?? fileDataUri
+  if (!isTauriRuntime()) {
+    const token = getStoredAuthToken()
+    if (!token) throw new Error('Not logged in')
+    const res = await fetch(`${getLocalApiBase()}/auth/avatar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ fileName, dataBase64 }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to upload avatar.')
+    return data.user
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<AuthUser>('auth_upload_avatar', { fileName, dataBase64 })
+}
+
+/**
+ * `AuthUser.image` is a relative `/api/avatar?key=...` path scoped to
+ * whichever Mint app the account's avatar was uploaded from. Re-point it at
+ * this app's own API server so it resolves regardless of origin (this app's
+ * `/api/avatar` route reads from the same shared Pictures folder).
+ */
+export function resolveAvatarUrl(image?: string | null): string | null {
+  if (!image) return null
+  if (/^https?:\/\//i.test(image)) return image
+  const match = image.match(/[?&]key=([^&]+)/)
+  if (!match) return image
+  return `${getLocalApiBase()}/avatar?key=${match[1]}`
+}
 
 export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   if (!isTauriRuntime()) {
@@ -1655,6 +1796,12 @@ export async function videoAiEdit(req: VideoAiEditRequest): Promise<AiEditVideoR
 
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
+  authRegister,
+  authLogin,
+  authLogout,
+  authGetCurrentUser,
+  authUpdateProfile,
+  authUploadAvatar,
   getRuntimeStatus,
   detectSystemTools,
   sendChatMessage,

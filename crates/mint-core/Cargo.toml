@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 base64.workspace = true
+bcrypt.workspace = true
 chrono.workspace = true
 dirs.workspace = true
 futures-util.workspace = true
@@ -30,6 +31,7 @@ tokio-tungstenite.workspace = true
 tree-sitter.workspace = true
 tree-sitter-rust.workspace = true
 tree-sitter-typescript.workspace = true
+uuid.workspace = true
 
 
 

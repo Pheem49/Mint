@@ -4,6 +4,13 @@
  * Source of truth: Import from here, not from local declarations in tauri.ts.
  */
 
+export interface AuthUser {
+  id: string
+  name: string | null
+  email: string | null
+  image: string | null
+}
+
 export interface RuntimeStatus {
   backend: string
   configPath: string
