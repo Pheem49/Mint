@@ -1,4 +1,5 @@
 import React from 'react'
+import { Calculator } from 'lucide-react'
 
 export interface CalculationData {
   expression: string
@@ -27,7 +28,7 @@ export default function CalculationCard({ data }: { data: CalculationData }) {
     >
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-        <span style={{ fontSize: '16px', opacity: 0.9 }}>🧮</span>
+        <Calculator size={16} strokeWidth={2} style={{ opacity: 0.9 }} />
         <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.8px', color: 'rgba(255, 255, 255, 0.6)' }}>
           CALCULATION
         </span>

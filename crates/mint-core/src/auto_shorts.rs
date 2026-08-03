@@ -24,11 +24,7 @@ pub enum AutoShortsError {
 }
 
 fn temp_id() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("{:x}", now)
+    uuid::Uuid::new_v4().simple().to_string()
 }
 
 /// Request body for AI Natural Language Video Editing.
@@ -281,6 +277,7 @@ async fn detect_highlights(
             document_attachment: None,
             workspace_path: None,
             agent_id: None,
+            plan_mode: false,
         };
 
         if let Ok((res, _)) = crate::chat::send_chat_with_fallback(config, &chat_req).await {

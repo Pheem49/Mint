@@ -1,4 +1,5 @@
 import React from 'react'
+import { TrendingUp, TrendingDown } from 'lucide-react'
 
 export interface StockData {
   symbol: string
@@ -24,7 +25,8 @@ export default function StockCard({ data }: { data: StockData }) {
 
   const formattedChange = (data.change >= 0 ? '+' : '') + data.change.toFixed(2)
   const formattedPercent = (data.changePercent >= 0 ? '+' : '') + data.changePercent.toFixed(2) + '%'
-  const currencySymbol = data.currency === 'USD' ? '$' : data.currency === 'THB' ? '฿' : `${data.currency} `
+  const currency = data.currency || 'USD'
+  const currencySymbol = currency === 'USD' ? '$' : currency === 'THB' ? '฿' : `${currency} `
 
   const formatLargeNum = (num?: number) => {
     if (!num || num === 0) return 'N/A'
@@ -66,7 +68,7 @@ export default function StockCard({ data }: { data: StockData }) {
                 textTransform: 'uppercase',
               }}
             >
-              {data.currency || 'USD'}
+              {currency}
             </span>
           </div>
           <p style={{ margin: '2px 0 0', fontSize: '13px', opacity: 0.7, fontWeight: 500 }}>{data.name}</p>
@@ -87,7 +89,7 @@ export default function StockCard({ data }: { data: StockData }) {
             fontSize: '13px',
           }}
         >
-          <span>{isPositive ? '▲' : '▼'}</span>
+          {isPositive ? <TrendingUp size={14} strokeWidth={2.5} /> : <TrendingDown size={14} strokeWidth={2.5} />}
           <span>{formattedChange} ({formattedPercent})</span>
         </div>
       </div>

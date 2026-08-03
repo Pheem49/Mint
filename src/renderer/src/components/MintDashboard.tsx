@@ -235,6 +235,7 @@ export default function MintDashboard() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
+  const [planMode, setPlanMode] = useState(() => window.localStorage.getItem('mint:plan-mode') === 'true')
   const [scale, setScale] = useState(1.00)
   const [interactionEnabled, setInteractionEnabled] = useState(() => window.localStorage.getItem('mint:interaction-enabled') !== 'false')
   const [showInteractionGuide, setShowInteractionGuide] = useState(() => window.localStorage.getItem('mint:interaction-guide-visible') !== 'false')
@@ -554,6 +555,11 @@ export default function MintDashboard() {
     setAgentMode(enabled)
   }
 
+  const updatePlanMode = (enabled: boolean) => {
+    window.localStorage.setItem('mint:plan-mode', String(enabled))
+    setPlanMode(enabled)
+  }
+
   const updateWorkspacePath = (path: string) => {
     const next = path.trim()
     if (next) {
@@ -654,6 +660,8 @@ export default function MintDashboard() {
         outgoingDocument,
         workspacePath || null,
         conversationId,
+        undefined,
+        shouldUseAgentMode ? planMode : false,
       )
       setStreamedResponse(response)
       const history = (await getRecentInteractions(50, conversationId)).reverse()
@@ -1304,6 +1312,7 @@ export default function MintDashboard() {
             pendingApproval={streamingConversationId === conversationId ? pendingApproval : null}
             smartContext={smartContext}
             agentMode={agentMode}
+            planMode={planMode}
             status={status}
             workspacePath={workspacePath}
             chatEnd={chatEnd}
@@ -1326,6 +1335,7 @@ export default function MintDashboard() {
             onCaptureScreen={captureScreen}
             onSetSmartContext={updateSmartContext}
             onSetAgentMode={updateAgentMode}
+            onSetPlanMode={updatePlanMode}
             onSetProvider={changeProvider}
             onSelectWorkspace={selectWorkspace}
             settingsConfig={settingsConfig}

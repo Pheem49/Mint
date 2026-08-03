@@ -6,6 +6,7 @@ import {
   convertFileSrc,
   getProfileValue,
   setProfileValue,
+  isTauriRuntime,
   type VideoGenRequest,
   type VideoGenResponse,
   type VideoGenProviders,
@@ -218,13 +219,11 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
     setEditLog((prev) => [...prev, `${new Date().toLocaleTimeString()} — ${msg}`])
 
   const handleBrowseFile = async () => {
-    try {
-      // Try Tauri native file dialog first to get full absolute system path
-      const dialogModName = '@tauri-apps/api/dialog'
-      // @ts-ignore
-      const dialog = await import(/* @vite-ignore */ dialogModName).catch(() => null) as any
-      if (dialog && dialog.open) {
-        const selected = await dialog.open({
+    if (isTauriRuntime()) {
+      try {
+        // Native Tauri file dialog gives us the full absolute system path.
+        const { open } = await import('@tauri-apps/plugin-dialog')
+        const selected = await open({
           multiple: false,
           filters: [{ name: 'Video Files', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'] }]
         })
@@ -235,9 +234,9 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
           addLog(`✓ Selected local video file: ${selected}`)
           return
         }
+      } catch {
+        // Fall through to the browser file picker below.
       }
-    } catch {
-      // Fallback for Web UI / Browser file picker
     }
     fileInputRef.current?.click()
   }

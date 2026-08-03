@@ -29,6 +29,7 @@ import { useSpeechToText } from '../../shared/utils/speech'
 
 
 import {
+  APP_ICON_PATH,
   listLearnedSkills,
   type LearnedSkill,
   type AgentProgress,
@@ -57,6 +58,7 @@ interface ChatPanelProps {
   pendingApproval: any | null
   smartContext: boolean
   agentMode: boolean
+  planMode: boolean
   status: RuntimeStatus | null
   workspacePath: string
   chatEnd: RefObject<HTMLDivElement | null>
@@ -75,6 +77,7 @@ interface ChatPanelProps {
   onCaptureScreen: () => void
   onSetSmartContext: (enabled: boolean) => void
   onSetAgentMode: (enabled: boolean) => void
+  onSetPlanMode: (enabled: boolean) => void
   onSetProvider: (provider: string) => void
   onSelectWorkspace: () => void
   onApproval: (approved: boolean, autoApproveSession?: boolean, answer?: string) => void
@@ -103,6 +106,7 @@ export default function ChatPanel({
   pendingApproval,
   smartContext,
   agentMode,
+  planMode,
   status,
   workspacePath,
   chatEnd,
@@ -121,6 +125,7 @@ export default function ChatPanel({
   onCaptureScreen,
   onSetSmartContext,
   onSetAgentMode,
+  onSetPlanMode,
   onSetProvider,
   onSelectWorkspace,
   onApproval,
@@ -976,7 +981,7 @@ export default function ChatPanel({
       )}
       <div className="chat-header">
         <div className="chat-header-title">
-          <img src="./assets/icon.png" alt="Logo" className="chat-header-logo" />
+          <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
           <span>Mint Agent</span>
         </div>
       </div>
@@ -1123,6 +1128,13 @@ export default function ChatPanel({
               <span className="slider round" />
             </label>
             <span>Agent Mode</span>
+          </div>
+          <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }} title="Investigate read-only and require plan approval before editing files or running commands">
+            <label className="toggle-switch">
+              <input type="checkbox" checked={planMode} onChange={(event) => onSetPlanMode(event.target.checked)} />
+              <span className="slider round" />
+            </label>
+            <span>Plan Mode</span>
           </div>
         </div>
         {voiceMode && (

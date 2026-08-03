@@ -391,6 +391,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
         .get("enableFastMode")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let plan_mode = request.plan_mode;
 
     let app_clone = app.clone();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
@@ -438,6 +439,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
             fast_mode,
+            plan_mode,
             approve_cb,
             progress_cb,
             on_chunk,
@@ -548,6 +550,7 @@ async fn stream_chat_message(
         .get("enableFastMode")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let plan_mode = request.plan_mode;
 
     let app_clone = app.clone();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
@@ -610,6 +613,7 @@ async fn stream_chat_message(
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
             fast_mode,
+            plan_mode,
             approve_cb,
             progress_cb,
             on_chunk,
@@ -1400,6 +1404,7 @@ fn install_shortcuts(app: &AppHandle) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(ApprovalsState {
             pending: Mutex::new(HashMap::new()),

@@ -6,6 +6,7 @@ import { thoughtsFrom, hasAgentToolActivity } from '../agentProgress'
 import WeatherCard from './WeatherCard'
 import StockCard from './StockCard'
 import CalculationCard from './CalculationCard'
+import ImageSearchCard from './ImageSearchCard'
 
 export interface ChatMessageItemProps {
   interaction: any
@@ -133,6 +134,24 @@ const ChatMessageItem = React.memo(
       return null
     }, [interaction.aiText, progress])
 
+    const fallbackImageSearchData = useMemo(() => {
+      if (interaction.aiText && (interaction.aiText.includes('```image_search_json') || interaction.aiText.includes('```image-search-json'))) {
+        return null
+      }
+      for (const event of progress || []) {
+        if (event.type === 'ToolEnd' && (event.data?.action === 'image_search' || event.data?.name === 'image_search')) {
+          const res = event.data.result || event.data.output || ''
+          const match = typeof res === 'string' && res.match(/```image_search_json\s*([\s\S]*?)\s*```/)
+          if (match && match[1]) {
+            try {
+              return JSON.parse(match[1])
+            } catch {}
+          }
+        }
+      }
+      return null
+    }, [interaction.aiText, progress])
+
     return (
       <div key={interaction.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
         {interaction.userText && (
@@ -168,6 +187,7 @@ const ChatMessageItem = React.memo(
               {fallbackWeatherData && <WeatherCard data={fallbackWeatherData} />}
               {fallbackStockData && <StockCard data={fallbackStockData} />}
               {fallbackCalcData && <CalculationCard data={fallbackCalcData} />}
+              {fallbackImageSearchData && <ImageSearchCard data={fallbackImageSearchData} />}
               {memoizedAiContent}
             </div>
             {renderWebSearchSources(interaction)}

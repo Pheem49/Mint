@@ -1678,6 +1678,38 @@ h1 {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.approval-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.approval-option-btn {
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+  cursor: pointer;
+  font-size: 0.86rem;
+  padding: 9px 12px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.approval-option-btn:hover {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.approval-option-divider {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  margin: 2px 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 @keyframes agent-activity-slide-up-fade {
   from {
     opacity: 0;
@@ -2037,6 +2069,26 @@ h1 {
   color: var(--text-muted);
   font-size: 1rem;
   line-height: 1;
+}
+
+.agent-activity-output {
+  background: color-mix(in srgb, var(--panel-soft) 70%, transparent);
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid var(--border);
+  overflow: hidden;
+}
+
+.agent-activity-output pre {
+  color: var(--text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px 14px 8px 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ── Thinking Block ─────────────────────────────────────── */

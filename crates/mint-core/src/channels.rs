@@ -268,6 +268,7 @@ pub async fn answer_channel(
                 chat_id.as_deref(),
                 None,
                 true,
+                false,
                 |_approval| Ok(crate::ApprovalOutcome::Approved),
                 |_progress| {},
                 |_chunk| {},
@@ -294,6 +295,7 @@ pub async fn answer_channel(
             document_attachment: None,
             workspace_path: workspace_str,
             agent_id: None,
+            plan_mode: false,
         },
     )
     .await

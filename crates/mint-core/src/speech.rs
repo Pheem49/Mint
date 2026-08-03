@@ -20,11 +20,7 @@ pub enum SpeechError {
 }
 
 fn temp_id() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("{:x}", now)
+    uuid::Uuid::new_v4().simple().to_string()
 }
 
 /// A segment of transcribed speech with timing metadata.

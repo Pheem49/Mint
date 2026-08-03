@@ -262,7 +262,7 @@ fn command_exists(command: &str) -> bool {
     false
 }
 
-fn shell_command(command: &str) -> Command {
+pub(crate) fn shell_command(command: &str) -> Command {
 
     #[cfg(target_os = "windows")]
     {

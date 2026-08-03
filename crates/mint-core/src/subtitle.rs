@@ -20,11 +20,7 @@ pub enum SubtitleError {
 }
 
 fn temp_id() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("{:x}", now)
+    uuid::Uuid::new_v4().simple().to_string()
 }
 
 /// Style settings for burning subtitles into video.
@@ -267,6 +263,7 @@ pub async fn translate_subtitles(
             document_attachment: None,
             workspace_path: None,
             agent_id: None,
+            plan_mode: false,
         };
 
         match crate::chat::send_chat_with_fallback(config, &chat_req).await {

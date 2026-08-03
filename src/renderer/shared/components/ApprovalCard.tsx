@@ -22,6 +22,9 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
   const applyPatch = pendingApproval.approval?.ApplyPatch
   const diffText = writeFile?.diff || applyPatch?.diff
   const isAskUser = !!pendingApproval.approval?.AskUser
+  const askOptions: string[] = Array.isArray(pendingApproval.approval?.AskUser?.options)
+    ? pendingApproval.approval.AskUser.options
+    : []
 
   return (
     <div className="message ai-message" style={{ width: '100%' }}>
@@ -40,6 +43,23 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
             )}
             {isAskUser && (
               <div className="approval-card-input-container" style={{ marginTop: '12px', width: '100%' }}>
+                {askOptions.length > 0 && (
+                  <>
+                    <div className="approval-option-list">
+                      {askOptions.map((option, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          className="approval-option-btn"
+                          onClick={() => onApproval(true, false, option)}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="approval-option-divider">Or type your own answer</div>
+                  </>
+                )}
                 <textarea
                   style={{
                     width: '100%',
@@ -54,7 +74,7 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
                     resize: 'vertical',
                     outline: 'none',
                   }}
-                  placeholder="Type your answer here..."
+                  placeholder={askOptions.length > 0 ? 'Type a custom answer instead...' : 'Type your answer here...'}
                   value={askAnswer}
                   onChange={(e) => setAskAnswer(e.target.value)}
                 />

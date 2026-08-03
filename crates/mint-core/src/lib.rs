@@ -7,12 +7,15 @@ pub mod chat;
 pub mod code_tools;
 pub mod config;
 pub mod files;
+pub mod hooks;
 pub mod image_gen;
+pub mod image_search;
 pub mod knowledge;
 pub mod mcp;
 pub mod memory;
 pub mod orchestration;
 pub mod pictures;
+pub mod prompts;
 pub mod auto_shorts;
 pub mod oauth;
 pub mod plugins;
@@ -61,6 +64,10 @@ pub use config::{
     MintConfig, config_path, initialize_config, load_config, save_config, set_config_value,
 };
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
+pub use hooks::{
+    HookEntry, HookError, HookEvent, PreHookOutcome, add_hook, clear_hooks, list_hooks,
+    remove_hook, run_post_tool_hooks, run_pre_tool_hooks,
+};
 pub use image_gen::{
     GeneratedImage, ImageGenError, ImageGenRequest, ImageGenResponse, generate_images,
 };
@@ -125,6 +132,7 @@ pub use subtitle::{
 pub use video_gen::{VideoGenError, VideoGenRequest, VideoGenResponse, generate_video};
 pub use weather::{WeatherError, WeatherReport, weather};
 pub use stock::{StockError, StockReport, stock};
+pub use image_search::{ImageHit, ImageSearchError, ImageSearchReport, image_search};
 pub use calculation::{CalculationError, CalculationReport, calculate};
 pub use workflows::{WorkflowError, load_workflows, save_workflows, workflows_path};
 pub mod api_server;

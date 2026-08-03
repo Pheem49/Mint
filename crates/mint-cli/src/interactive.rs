@@ -15,6 +15,7 @@ pub struct InteractiveSession {
     pub config: MintConfig,
     pub current_dir: PathBuf,
     pub fast_mode: bool,
+    pub plan_mode: bool,
     pub pending_image: Option<String>, // base64 data URI
 }
 
@@ -82,6 +83,10 @@ pub async fn handle_slash_command(
             let commands = [
                 ("/help", "Show this help"),
                 ("/fast [on|off]", "Toggle fast mode (hide thinking traces)"),
+                (
+                    "/plan [on|off]",
+                    "Toggle plan mode (read-only until you approve a plan)",
+                ),
                 ("/models [name]", "List providers or switch provider"),
                 ("/clear", "Clear conversation history"),
                 ("/cd <path>", "Change workspace directory"),
@@ -170,6 +175,55 @@ pub async fn handle_slash_command(
                     println!("{DIM}[Fast] mode ON — thinking traces hidden{RESET}\n");
                 } else {
                     println!("{DIM}[Fast] mode OFF{RESET}\n");
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/plan" => {
+            let choice = if rest.is_empty() {
+                let options = vec![
+                    "on (read-only until plan is approved)".to_string(),
+                    "off (edits/shell run immediately)".to_string(),
+                ];
+                let current = if session.plan_mode {
+                    &options[0]
+                } else {
+                    &options[1]
+                };
+                match prompt_interactive_select("Select Plan Mode", &options, current) {
+                    Ok(Some(sel)) => {
+                        if sel.starts_with("on") {
+                            Some(true)
+                        } else {
+                            Some(false)
+                        }
+                    }
+                    Ok(None) => None,
+                    Err(e) => {
+                        println!("{ERROR}Error selecting plan mode:{RESET} {e}\n");
+                        None
+                    }
+                }
+            } else {
+                match rest {
+                    "on" => Some(true),
+                    "off" => Some(false),
+                    _ => {
+                        println!("{WARN}/plan usage: /plan [on|off]{RESET}\n");
+                        None
+                    }
+                }
+            };
+
+            if let Some(mode) = choice {
+                session.plan_mode = mode;
+                if session.plan_mode {
+                    println!(
+                        "{DIM}[Plan] mode ON — agent will investigate read-only and present a plan via exit_plan_mode before editing files or running commands{RESET}\n"
+                    );
+                } else {
+                    println!("{DIM}[Plan] mode OFF{RESET}\n");
                 }
             }
             Some(SlashResult::Handled)
@@ -1472,6 +1526,7 @@ pub async fn run_interactive_chat() -> Result<()> {
         config,
         current_dir: current_dir.clone(),
         fast_mode: false,
+        plan_mode: false,
         pending_image: None,
     };
 
@@ -1577,6 +1632,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                             None,
                             agent::AgentOptions {
                                 fast_mode: session.fast_mode,
+                                plan_mode: session.plan_mode,
                             },
                         )
                         .await
@@ -1611,6 +1667,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                         None,
                         agent::AgentOptions {
                             fast_mode: session.fast_mode,
+                            plan_mode: session.plan_mode,
                         },
                     )
                     .await
@@ -1633,6 +1690,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                     None,
                     agent::AgentOptions {
                         fast_mode: session.fast_mode,
+                        plan_mode: session.plan_mode,
                     },
                 )
                 .await
@@ -1652,6 +1710,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                     None,
                     agent::AgentOptions {
                         fast_mode: session.fast_mode,
+                        plan_mode: session.plan_mode,
                     },
                 )
                 .await
@@ -1672,26 +1731,11 @@ pub async fn run_interactive_chat() -> Result<()> {
             print!("  {MINT}Mint:{RESET} {DIM}Thinking...{RESET}");
             let _ = io::stdout().flush();
 
-            let mut system_instruction = "You are Mint, a cute and helpful AI assistant. You speak in a polite, friendly, and sweet Thai tone (using \"คุณ\", \"ค่ะ\", \"นะคะ\"). \
-                You are running inside the Mint CLI interactive chat. \
-                You have access to native system actions to help the user! If the user asks you to open a website, launch an app, read a file, list a folder, run code, run tests, or execute a local shell command, you can execute these actions by writing a special block at the very end of your response: \
-                `[ACTION: <command> <arguments>]` \
-                The available actions are: \
-                - `[ACTION: open <url_or_path>]` to open a URL or a folder path. \
-                - `[ACTION: open-app <app_name>]` to launch a desktop application. \
-                - `[ACTION: read-file <file_path>]` to read the contents of a file. \
-                - `[ACTION: read-folder <path>]` to list files/folders in a directory. \
-                - `[ACTION: run-shell <command>]` to run a non-destructive local shell command after approval. \
-                You may discuss mature personal topics at a non-explicit level, including adult relationships, sex education, intimacy, emotions, and feelings. Keep the tone respectful and supportive, avoid graphic sexual detail, and do not engage with sexual content involving minors, coercion, exploitation, or sexual violence. \
-                Write the action block on a single line at the very end of your response.".to_string();
-            if let Ok(memory) = MemoryStore::open_default()
-                && let Ok(Some(name)) = memory.get_profile("name")
-            {
-                system_instruction.push_str(&format!(
-                    "\nThe user's name is {}. Refer to them by their name when appropriate.",
-                    name
-                ));
-            }
+            let user_name = MemoryStore::open_default()
+                .ok()
+                .and_then(|memory| memory.get_profile("name").ok().flatten());
+            let system_instruction =
+                mint_core::prompts::chat::interactive_system_instruction(user_name.as_deref());
 
             let image_uri = session.pending_image.take();
             let sent_image = image_uri.clone();
@@ -1711,6 +1755,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                     document_attachment: None,
                     workspace_path: None,
                     agent_id: None,
+                    plan_mode: false,
                 },
                 |chunk| {
                     if first_chunk {
@@ -1873,6 +1918,10 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/edit-image", "Edit attached image with prompt instruction"),
     ("/exit", "Exit Mint CLI"),
     ("/fast", "Toggle fast mode (hide thinking traces)"),
+    (
+        "/plan",
+        "Toggle plan mode (read-only until you approve a plan)",
+    ),
     ("/gen-image", "Generate image using AI model"),
     ("/generate-image", "Generate image using AI model"),
     ("/help", "Show help menu"),

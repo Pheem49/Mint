@@ -63,6 +63,7 @@ where
                 document_attachment: None,
                 workspace_path: None,
                 agent_id: None,
+                plan_mode: false,
             },
         )
         .await?;

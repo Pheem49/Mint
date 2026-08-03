@@ -50,7 +50,16 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
   const [isExpanded, setIsExpanded] = useState(false)
   const [openDropdownDomain, setOpenDropdownDomain] = useState<string | null>(null)
 
-  const domainGroups = useMemo(() => groupSourcesByDomain(sources), [sources])
+  const domainGroups = useMemo(() => {
+    const groups = groupSourcesByDomain(sources)
+    // Show groups whose card will render a thumbnail first (stable sort keeps
+    // original ordering within each bucket).
+    return [...groups].sort((a, b) => {
+      const aHasImage = a.items[0]?.imageUrl ? 1 : 0
+      const bHasImage = b.items[0]?.imageUrl ? 1 : 0
+      return bHasImage - aHasImage
+    })
+  }, [sources])
 
   if (!sources || sources.length === 0) return null
 
@@ -64,8 +73,6 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
     .reduce((sum, g) => sum + g.items.length, 0)
   const remainingSourcesCount = sources.length - shownSourcesCount
   const hiddenGroups = domainGroups.slice(MAX_INITIAL_CARDS)
-
-  const hasImages = sources.some((s) => s.imageUrl)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px', marginTop: '4px' }}>
@@ -88,77 +95,6 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
           Sources
         </span>
       </div>
-
-      {/* Image thumbnail strip (if any result contains an image) */}
-      {hasImages && (
-        <div
-          style={{
-            display: 'flex',
-            gap: '8px',
-            overflowX: 'auto',
-            paddingBottom: '4px',
-            scrollbarWidth: 'none',
-          }}
-        >
-          {sources.slice(0, 4).filter((s) => s.imageUrl).map((src, i) => (
-            <a
-              key={i}
-              href={src.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={src.title}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                flexShrink: 0,
-                width: '130px',
-                borderRadius: '10px',
-                overflow: 'hidden',
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                textDecoration: 'none',
-                cursor: 'pointer',
-                transition: 'transform 0.15s, border-color 0.15s, box-shadow 0.15s',
-              }}
-              onMouseEnter={(e) => {
-                const el = e.currentTarget as HTMLAnchorElement
-                el.style.transform = 'translateY(-2px)'
-                el.style.borderColor = 'rgba(255,255,255,0.2)'
-                el.style.boxShadow = '0 4px 16px rgba(0,0,0,0.3)'
-              }}
-              onMouseLeave={(e) => {
-                const el = e.currentTarget as HTMLAnchorElement
-                el.style.transform = 'translateY(0)'
-                el.style.borderColor = 'rgba(255,255,255,0.08)'
-                el.style.boxShadow = 'none'
-              }}
-            >
-              <div style={{ width: '130px', height: '75px', overflow: 'hidden', background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>
-                <img
-                  src={src.imageUrl}
-                  alt={src.title}
-                  loading="lazy"
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                />
-              </div>
-              <div style={{ padding: '5px 7px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <img
-                  src={src.faviconUrl}
-                  alt=""
-                  width={12}
-                  height={12}
-                  style={{ borderRadius: '2px', flexShrink: 0 }}
-                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                />
-                <span style={{ fontSize: '0.7rem', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {src.domain}
-                </span>
-              </div>
-            </a>
-          ))}
-        </div>
-      )}
 
       {/* Domain Cards Container (wraps to next line if exceeding frame width) */}
       <div
@@ -189,7 +125,6 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                   display: 'flex',
                   flexDirection: 'column',
                   justify: 'space-between',
-                  padding: '10px 12px',
                   borderRadius: '10px',
                   background: 'rgba(255, 255, 255, 0.04)',
                   border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -198,6 +133,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                   minHeight: '68px',
                   height: '100%',
                   boxSizing: 'border-box',
+                  overflow: 'hidden',
                 }}
                 onClick={(e) => {
                   // If extra items exist and click was on the badge or dropdown toggle, toggle dropdown
@@ -223,88 +159,103 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                   el.style.transform = 'translateY(0)'
                 }}
               >
-                {/* Title */}
-                <div
-                  title={primaryItem.title}
-                  style={{
-                    fontSize: '0.8rem',
-                    fontWeight: 500,
-                    color: '#f1f5f9',
-                    lineHeight: '1.3',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden',
-                    marginBottom: '8px',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {primaryItem.title}
-                </div>
-
-                {/* Bottom Row */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justify: 'space-between',
-                    marginTop: 'auto',
-                    paddingTop: '2px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', marginRight: '6px' }}>
+                {/* Thumbnail (if this source has an associated image) */}
+                {primaryItem.imageUrl && (
+                  <div style={{ width: '100%', height: '80px', overflow: 'hidden', background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>
                     <img
-                      src={group.faviconUrl}
-                      alt=""
-                      width={14}
-                      height={14}
-                      style={{ borderRadius: '3px', flexShrink: 0 }}
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                      src={primaryItem.imageUrl}
+                      alt={primaryItem.title}
+                      loading="lazy"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).parentElement!.style.display = 'none' }}
                     />
-                    <span
-                      style={{
-                        fontSize: '0.73rem',
-                        color: '#94a3b8',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {group.displayDomain}
-                    </span>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '10px 12px' }}>
+                  {/* Title */}
+                  <div
+                    title={primaryItem.title}
+                    style={{
+                      fontSize: '0.8rem',
+                      fontWeight: 500,
+                      color: '#f1f5f9',
+                      lineHeight: '1.3',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                      marginBottom: '8px',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {primaryItem.title}
                   </div>
 
-                  {extraCount > 0 ? (
-                    <button
-                      type="button"
-                      className="extra-badge-btn"
-                      title={`${extraCount} extra page${extraCount > 1 ? 's' : ''} from ${group.domain} — click to view`}
-                      style={{
-                        fontSize: '0.68rem',
-                        fontWeight: 600,
-                        color: '#38bdf8',
-                        background: 'rgba(56, 189, 248, 0.12)',
-                        border: '1px solid rgba(56, 189, 248, 0.3)',
-                        padding: '1px 6px',
-                        borderRadius: '4px',
-                        flexShrink: 0,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '2px',
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setOpenDropdownDomain(isDropdownOpen ? null : group.domain)
-                      }}
-                    >
-                      +{extraCount}
-                    </button>
-                  ) : (
-                    <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 500, flexShrink: 0 }}>
-                      •{groupIdx + 1}
-                    </span>
-                  )}
+                  {/* Bottom Row */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justify: 'space-between',
+                      marginTop: 'auto',
+                      paddingTop: '2px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', marginRight: '6px' }}>
+                      <img
+                        src={group.faviconUrl}
+                        alt=""
+                        width={14}
+                        height={14}
+                        style={{ borderRadius: '3px', flexShrink: 0 }}
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                      />
+                      <span
+                        style={{
+                          fontSize: '0.73rem',
+                          color: '#94a3b8',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {group.displayDomain}
+                      </span>
+                    </div>
+
+                    {extraCount > 0 ? (
+                      <button
+                        type="button"
+                        className="extra-badge-btn"
+                        title={`${extraCount} extra page${extraCount > 1 ? 's' : ''} from ${group.domain} — click to view`}
+                        style={{
+                          fontSize: '0.68rem',
+                          fontWeight: 600,
+                          color: '#38bdf8',
+                          background: 'rgba(56, 189, 248, 0.12)',
+                          border: '1px solid rgba(56, 189, 248, 0.3)',
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          flexShrink: 0,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '2px',
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setOpenDropdownDomain(isDropdownOpen ? null : group.domain)
+                        }}
+                      >
+                        +{extraCount}
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 500, flexShrink: 0 }}>
+                        •{groupIdx + 1}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 

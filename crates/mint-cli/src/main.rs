@@ -18,6 +18,7 @@ use mint_core::{
 mod actions;
 mod agent;
 mod gmail;
+mod hooks;
 mod image;
 mod interactive;
 mod markdown;
@@ -186,6 +187,11 @@ enum Command {
         #[command(subcommand)]
         command: McpCommand,
     },
+    /// Manage PreToolUse/PostToolUse hooks.
+    Hooks {
+        #[command(subcommand)]
+        command: HooksCommand,
+    },
     /// Configure Gmail OAuth.
     Gmail {
         #[command(subcommand)]
@@ -327,6 +333,25 @@ enum McpCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum HooksCommand {
+    /// Add a hook. event: PreToolUse or PostToolUse. matcher: "*" or a comma/pipe-separated
+    /// list of action names (e.g. "write_file,apply_patch"). command: a shell command that
+    /// receives a JSON payload on stdin and, for PreToolUse, exits with code 2 to block.
+    Add {
+        event: String,
+        matcher: String,
+        command: String,
+        #[arg(long)]
+        timeout: Option<u64>,
+    },
+    List,
+    Remove {
+        index: usize,
+    },
+    Clear,
+}
+
+#[derive(Debug, Subcommand)]
 enum GmailCommand {
     Auth {
         #[arg(long)]
@@ -411,6 +436,9 @@ enum CodeCommand {
         task: String,
         #[arg(long, default_value = ".")]
         root: PathBuf,
+        /// Investigate read-only and require plan approval before editing files or running commands.
+        #[arg(long)]
+        plan: bool,
     },
     /// Summarize source files while skipping build and dependency directories.
     Summary {
@@ -959,6 +987,50 @@ async fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&res?)?);
                 }
             },
+            Command::Hooks { command } => match command {
+                HooksCommand::Add {
+                    event,
+                    matcher,
+                    command,
+                    timeout,
+                } => {
+                    let event = mint_core::HookEvent::parse(&event)?;
+                    hooks::add(event, &matcher, &command, timeout)?;
+                    println!("Added {} hook for '{}'", event.as_str(), matcher);
+                }
+                HooksCommand::List => {
+                    let entries = hooks::list()?;
+                    if entries.is_empty() {
+                        println!("\n{BLUE}No hooks configured.{RESET}");
+                    } else {
+                        println!("\n{BLUE}Hooks:{RESET}");
+                        for (index, hook) in entries.iter().enumerate() {
+                            println!(
+                                "  [{}] {} matcher='{}' timeout={}s command={}",
+                                index,
+                                hook.event.as_str(),
+                                hook.matcher,
+                                hook.timeout_secs,
+                                hook.command
+                            );
+                        }
+                    }
+                }
+                HooksCommand::Remove { index } => {
+                    println!(
+                        "{}",
+                        if hooks::remove(index)? {
+                            "removed"
+                        } else {
+                            "not found"
+                        }
+                    )
+                }
+                HooksCommand::Clear => {
+                    hooks::clear()?;
+                    println!("cleared");
+                }
+            },
             Command::Gmail { command } => match command {
                 GmailCommand::Auth { no_open, port } => gmail::auth(no_open, port).await?,
             },
@@ -1100,6 +1172,7 @@ async fn main() -> Result<()> {
                             document_attachment: None,
                             workspace_path: None,
                             agent_id: None,
+                            plan_mode: false,
                         },
                     )
                     .await?;
@@ -1248,8 +1321,19 @@ async fn main() -> Result<()> {
             Command::Code { command } => {
                 let config = load_config()?;
                 match command {
-                    CodeCommand::Agent { task, root } => {
-                        agent::run_code_agent(&task, &root, &config).await?;
+                    CodeCommand::Agent { task, root, plan } => {
+                        agent::run_code_agent_with_options(
+                            &task,
+                            &root,
+                            &config,
+                            None,
+                            None,
+                            agent::AgentOptions {
+                                fast_mode: false,
+                                plan_mode: plan,
+                            },
+                        )
+                        .await?;
                     }
                     CodeCommand::Summary { root } => println!(
                         "{}",
@@ -1889,6 +1973,7 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
             document_attachment: None,
             workspace_path: None,
             agent_id: None,
+            plan_mode: false,
         },
     )
     .await {

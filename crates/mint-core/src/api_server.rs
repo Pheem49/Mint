@@ -1050,6 +1050,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             document_attachment: req.document_attachment,
                             workspace_path: None,
                             agent_id: req.agent_id,
+                            plan_mode: false,
                         };
                         let mut chat_req =
                             chat_req.with_document_context(&config).unwrap_or(chat_req);
@@ -1173,6 +1174,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             document_attachment: req.document_attachment,
                             workspace_path: None,
                             agent_id: req.agent_id,
+                            plan_mode: false,
                         };
                         let mut chat_req =
                             chat_req.with_document_context(&config).unwrap_or(chat_req);
@@ -1333,6 +1335,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                             chat_id.as_deref(),
                                             agent_id.as_deref(),
                                             fast_mode,
+                                            false,
                                             |_| Ok(ApprovalOutcome::Denied),
                                             progress_cb,
                                             on_chunk,
@@ -1986,6 +1989,7 @@ async fn run_web_agent_loop(
         request.chat_id.as_deref(),
         request.agent_id.as_deref(),
         fast_mode,
+        false,
         |_| Ok(ApprovalOutcome::Denied),
         |_| {},
         |_| {},
@@ -2002,11 +2006,7 @@ async fn run_web_agent_loop(
 }
 
 fn default_chat_system_instruction() -> String {
-    "You are Mint, a warm and helpful Thai assistant. Speak naturally and politely. \
-     If the user writes Thai, answer in Thai and refer to yourself as มิ้น. \
-     You may discuss mature personal topics at a non-explicit level, including adult relationships, sex education, intimacy, emotions, and feelings. \
-     Keep the tone respectful and supportive, avoid graphic sexual detail, and do not engage with sexual content involving minors, coercion, exploitation, or sexual violence."
-        .into()
+    crate::prompts::chat::default_chat_system_instruction()
 }
 
 #[derive(Debug, Deserialize)]

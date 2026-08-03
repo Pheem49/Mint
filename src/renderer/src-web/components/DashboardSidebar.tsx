@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon } from '../../shared/constants/plugins'
 import { useAuthUser } from '../../shared/components/AuthGate'
+import { APP_ICON_PATH } from '../tauri'
 
 export type DashboardView = 'chat' | 'pictures' | 'model' | 'imagine' | 'workflows' | 'veo' | 'skills' | 'mcp' | 'plugins'
 
@@ -84,7 +85,7 @@ export default function DashboardSidebar({
           if (event.key === 'Enter' || event.key === ' ') onToggleSidebar()
         }}
       >
-        <img src="./assets/icon.png" alt="Mint Agent Logo" className="sidebar-logo" />
+        <img src={APP_ICON_PATH} alt="Mint Agent Logo" className="sidebar-logo" />
         <span className="sidebar-brand-name">Mint Agent</span>
       </div>
 

@@ -12,6 +12,8 @@ use mint_core::{
     OrchestrationError, orchestrate_agent_loop,
 };
 
+use crate::markdown;
+
 const RESET: &str = "\x1b[0m";
 const MINT: &str = "\x1b[32m";
 const GREEN: &str = "\x1b[32m";
@@ -24,6 +26,7 @@ const BRIGHT: &str = "\x1b[1;97m";
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AgentOptions {
     pub fast_mode: bool,
+    pub plan_mode: bool,
 }
 
 pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Result<AgentResult> {
@@ -194,17 +197,51 @@ pub async fn run_code_agent_with_options(
                     Ok(ApprovalOutcome::Denied)
                 }
             }
-            AgentApproval::AskUser { question } => {
-                print_approval_card("Agent Question", &[("Question", question)]);
-                print!("  Answer (leave empty to decline): ");
+            AgentApproval::ExitPlanMode { plan } => {
+                print_approval_card("Review Plan", &[("Plan", plan)]);
+                print!(
+                    "  Approve this plan and allow edits? [y/N] (or type feedback to keep planning): "
+                );
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 let mut answer = String::new();
                 match std::io::stdin().read_line(&mut answer) {
-                    Ok(_) if !answer.trim().is_empty() => {
-                        Ok(ApprovalOutcome::Intercepted(answer.trim().to_owned()))
+                    Ok(_) => {
+                        let trimmed = answer.trim();
+                        if trimmed.eq_ignore_ascii_case("y") || trimmed.eq_ignore_ascii_case("yes")
+                        {
+                            Ok(ApprovalOutcome::Approved)
+                        } else if trimmed.is_empty()
+                            || trimmed.eq_ignore_ascii_case("n")
+                            || trimmed.eq_ignore_ascii_case("no")
+                        {
+                            Ok(ApprovalOutcome::Denied)
+                        } else {
+                            Ok(ApprovalOutcome::Intercepted(trimmed.to_owned()))
+                        }
                     }
-                    Ok(_) => Ok(ApprovalOutcome::Denied),
                     Err(error) => Err(error.to_string()),
+                }
+            }
+            AgentApproval::AskUser { question, options } => {
+                if options.is_empty() {
+                    print_approval_card("Agent Question", &[("Question", question)]);
+                    print!("  Answer (leave empty to decline): ");
+                    let _ = io::stdout().flush();
+                    let mut answer = String::new();
+                    match std::io::stdin().read_line(&mut answer) {
+                        Ok(_) => {
+                            let trimmed = answer.trim();
+                            if trimmed.is_empty() {
+                                Ok(ApprovalOutcome::Denied)
+                            } else {
+                                Ok(ApprovalOutcome::Intercepted(trimmed.to_owned()))
+                            }
+                        }
+                        Err(error) => Err(error.to_string()),
+                    }
+                } else {
+                    print_approval_card("Agent Question", &[("Question", question)]);
+                    run_option_picker(options)
                 }
             }
         }
@@ -358,7 +395,7 @@ pub async fn run_code_agent_with_options(
                     if is_activity {
                         status.activities.push(label);
                     } else {
-                        status.tasks.push(label);
+                        status.tasks.push(label.into());
                     }
                     render_live_status(&mut status);
                 }
@@ -383,8 +420,17 @@ pub async fn run_code_agent_with_options(
                     && let Ok(mut status) = progress_live_status.lock()
                 {
                     status.thinking = None;
-                    for cmd in commands {
-                        status.tasks.push(format!("Finished command: `{}`", cmd));
+                    let preview = command_output_preview(&result);
+                    let last_index = commands.len().saturating_sub(1);
+                    for (index, cmd) in commands.into_iter().enumerate() {
+                        status.tasks.push(TaskEntry {
+                            label: format!("Finished command: `{}`", cmd),
+                            output: if index == last_index {
+                                preview.clone()
+                            } else {
+                                Vec::new()
+                            },
+                        });
                     }
                     render_live_status(&mut status);
                 }
@@ -455,6 +501,7 @@ pub async fn run_code_agent_with_options(
         Some(CHAT_CLI_ID),
         None,
         options.fast_mode,
+        options.plan_mode,
         approve_cb,
         progress_cb,
         on_chunk,
@@ -555,7 +602,19 @@ fn render_live_summary(summary: &str) {
     let width = tw as usize;
 
     let mut is_first = true;
+    let mut table_buffer: Vec<String> = Vec::new();
+
     for line in summary.split('\n') {
+        if markdown::is_table_line(line) {
+            table_buffer.push(line.to_string());
+            continue;
+        }
+
+        if !table_buffer.is_empty() {
+            print_table_block(&table_buffer, &mut is_first);
+            table_buffer.clear();
+        }
+
         let indent = if is_first { "" } else { "  " };
         let options = textwrap::Options::new(width)
             .initial_indent(indent)
@@ -570,7 +629,24 @@ fn render_live_summary(summary: &str) {
             print!("\n{wrapped}");
         }
     }
+
+    if !table_buffer.is_empty() {
+        print_table_block(&table_buffer, &mut is_first);
+    }
+
     let _ = io::stdout().flush();
+}
+
+fn print_table_block(table_lines: &[String], is_first: &mut bool) {
+    let rendered = markdown::render_markdown_table(table_lines);
+    for line in rendered.split('\n') {
+        if *is_first {
+            print!("{line}");
+            *is_first = false;
+        } else {
+            print!("\n  {line}");
+        }
+    }
 }
 
 fn diff_stats(diff: &str) -> (usize, usize) {
@@ -678,7 +754,7 @@ struct LiveStatus {
     thinking: Option<String>,
     explored: Vec<ExploredAction>,
     activities: Vec<String>,
-    tasks: Vec<String>,
+    tasks: Vec<TaskEntry>,
     plan_steps: Vec<String>,
     committed_explored: usize,
     committed_activities: usize,
@@ -687,6 +763,22 @@ struct LiveStatus {
     spinner_tick: usize,
     /// Sources collected from web_search ToolEnd results (title, url)
     web_sources: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TaskEntry {
+    label: String,
+    /// Truncated preview of the command's raw output, shown indented under the label.
+    output: Vec<String>,
+}
+
+impl From<String> for TaskEntry {
+    fn from(label: String) -> Self {
+        TaskEntry {
+            label,
+            output: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1049,6 +1141,41 @@ fn command_was_run(result: &str) -> bool {
     result.lines().any(|line| line.starts_with("exit: "))
 }
 
+/// Truncated preview of a command's raw stdout/stderr, shown indented under its
+/// "Finished command" label. Drops internal bookkeeping lines (`mode:`, `sandboxed:`)
+/// and caps the output so a noisy command can't flood the terminal.
+fn command_output_preview(result: &str) -> Vec<String> {
+    const MAX_LINES: usize = 8;
+
+    let filtered: Vec<&str> = result
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim_start();
+            !(trimmed.starts_with("mode: ") || trimmed.starts_with("sandboxed: "))
+        })
+        .collect();
+
+    let start = filtered.iter().position(|l| !l.trim().is_empty());
+    let Some(start) = start else {
+        return Vec::new();
+    };
+    let end = filtered
+        .iter()
+        .rposition(|l| !l.trim().is_empty())
+        .map_or(start, |i| i + 1);
+    let trimmed = &filtered[start..end];
+
+    let mut preview: Vec<String> = trimmed
+        .iter()
+        .take(MAX_LINES)
+        .map(|s| s.to_string())
+        .collect();
+    if trimmed.len() > MAX_LINES {
+        preview.push(format!("... {} more lines", trimmed.len() - MAX_LINES));
+    }
+    preview
+}
+
 fn activities_lines(activities: &[String], is_thinking: bool, tick: usize) -> Vec<String> {
     if activities.is_empty() {
         return Vec::new();
@@ -1116,15 +1243,18 @@ fn plan_lines(steps: &[String], is_thinking: bool, tick: usize) -> Vec<String> {
     lines
 }
 
-fn tasks_lines(tasks: &[String], is_thinking: bool, tick: usize) -> Vec<String> {
+fn tasks_lines(tasks: &[TaskEntry], is_thinking: bool, tick: usize) -> Vec<String> {
     if tasks.is_empty() {
         return Vec::new();
     }
     let mut lines = vec![format!("  {}", get_bullet("tasks", is_thinking, tick))];
-    lines.extend(tasks.iter().take(24).enumerate().map(|(index, task)| {
+    for (index, task) in tasks.iter().take(24).enumerate() {
         let prefix = if index == 0 { "    └" } else { "     " };
-        format!("{DIM}{prefix} {task}{RESET}")
-    }));
+        lines.push(format!("{DIM}{prefix} {}{RESET}", task.label));
+        for out_line in &task.output {
+            lines.push(format!("{DIM}       │ {}{RESET}", out_line));
+        }
+    }
     if tasks.len() > 24 {
         lines.push(format!("{DIM}     ... {} more{RESET}", tasks.len() - 24));
     }
@@ -1172,6 +1302,128 @@ async fn wait_for_escape_interrupt(approval_active: Arc<AtomicBool>) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(80)).await;
+    }
+}
+
+/// Interactive picker for `ask_user` options: ↑/↓ + Enter to choose, digits for a quick
+/// jump, any other character drops into free-text mode, Esc declines. Falls back to a
+/// plain numbered prompt when raw mode isn't available (e.g. piped/non-interactive stdin).
+fn run_option_picker(options: &[String]) -> Result<ApprovalOutcome, String> {
+    use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+    if enable_raw_mode().is_err() {
+        return ask_numbered_fallback(options);
+    }
+
+    println!(
+        "  {DIM}\u{2191}/\u{2193} + Enter to choose  \u{00b7}  type to answer freely  \u{00b7}  Esc to decline{RESET}"
+    );
+    let mut selected = 0usize;
+    render_options(options, selected, true);
+
+    let result = loop {
+        let event = match event::read() {
+            Ok(ev) => ev,
+            Err(e) => break Err(e.to_string()),
+        };
+        let Event::Key(key) = event else { continue };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        match key.code {
+            KeyCode::Up => {
+                selected = selected.saturating_sub(1);
+                render_options(options, selected, false);
+            }
+            KeyCode::Down => {
+                selected = (selected + 1).min(options.len().saturating_sub(1));
+                render_options(options, selected, false);
+            }
+            KeyCode::Enter => break Ok(ApprovalOutcome::Intercepted(options[selected].clone())),
+            KeyCode::Esc => break Ok(ApprovalOutcome::Denied),
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let _ = disable_raw_mode();
+                println!();
+                std::process::exit(130);
+            }
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                if let Some(idx) = (c as usize)
+                    .checked_sub('1' as usize)
+                    .filter(|idx| *idx < options.len())
+                {
+                    break Ok(ApprovalOutcome::Intercepted(options[idx].clone()));
+                }
+            }
+            KeyCode::Char(c) => {
+                let _ = disable_raw_mode();
+                print!("\n  Answer: {c}");
+                let _ = io::stdout().flush();
+                let mut rest = String::new();
+                let _ = std::io::stdin().read_line(&mut rest);
+                let full = format!("{c}{}", rest.trim_end_matches(['\n', '\r']));
+                let trimmed = full.trim();
+                return Ok(if trimmed.is_empty() {
+                    ApprovalOutcome::Denied
+                } else {
+                    ApprovalOutcome::Intercepted(trimmed.to_owned())
+                });
+            }
+            _ => {}
+        }
+    };
+
+    let _ = disable_raw_mode();
+    println!();
+    result
+}
+
+fn render_options(options: &[String], selected: usize, first: bool) {
+    use crossterm::terminal::{Clear, ClearType};
+    use crossterm::{cursor, execute};
+
+    let mut out = io::stdout();
+    if !first {
+        let _ = execute!(out, cursor::MoveUp(options.len() as u16));
+    }
+    for (i, opt) in options.iter().enumerate() {
+        let _ = execute!(out, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine));
+        if i == selected {
+            println!("  {CYAN}\u{276f}{RESET} {CYAN}{}) {}{RESET}", i + 1, opt);
+        } else {
+            println!("    {DIM}{}) {}{RESET}", i + 1, opt);
+        }
+    }
+    let _ = out.flush();
+}
+
+fn ask_numbered_fallback(options: &[String]) -> Result<ApprovalOutcome, String> {
+    for (i, opt) in options.iter().enumerate() {
+        println!("    {}) {}", i + 1, opt);
+    }
+    print!(
+        "  Answer (type a number 1-{}, your own text, or leave empty to decline): ",
+        options.len()
+    );
+    let _ = io::stdout().flush();
+    let mut answer = String::new();
+    match std::io::stdin().read_line(&mut answer) {
+        Ok(_) => {
+            let trimmed = answer.trim();
+            if trimmed.is_empty() {
+                Ok(ApprovalOutcome::Denied)
+            } else if let Some(choice) = trimmed
+                .parse::<usize>()
+                .ok()
+                .and_then(|n| n.checked_sub(1))
+                .and_then(|idx| options.get(idx))
+            {
+                Ok(ApprovalOutcome::Intercepted(choice.clone()))
+            } else {
+                Ok(ApprovalOutcome::Intercepted(trimmed.to_owned()))
+            }
+        }
+        Err(error) => Err(error.to_string()),
     }
 }
 

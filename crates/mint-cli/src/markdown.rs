@@ -52,7 +52,17 @@ pub fn format_line(line: &str) -> String {
 
 pub fn unicode_width(s: &str) -> usize {
     let mut count = 0;
-    for c in s.chars() {
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for c2 in chars.by_ref() {
+                if c2.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
         let val = c as u32;
         if (0x0E31..=0x0E31).contains(&val)
             || (0x0E34..=0x0E3A).contains(&val)

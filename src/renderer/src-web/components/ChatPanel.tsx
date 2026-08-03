@@ -29,6 +29,7 @@ import { useSpeechToText } from '../../shared/utils/speech'
 
 
 import {
+  APP_ICON_PATH,
   listLearnedSkills,
   type LearnedSkill,
   type AgentProgress,
@@ -938,7 +939,7 @@ export default function ChatPanel({
           ☰
         </button>
         <div className="chat-header-title">
-          <img src="./assets/icon.png" alt="Logo" className="chat-header-logo" />
+          <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
           <span>Mint Agent</span>
         </div>
       </div>

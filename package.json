@@ -60,13 +60,17 @@
   "dependencies": {
     "@pouyanafisi/gmail-mcp": "^2.0.0",
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
     "@vitejs/plugin-react": "^6.0.1",
     "@xyflow/react": "^12.11.1",
+    "lucide-react": "^1.28.0",
     "material-icon-theme": "5.34.0",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "typescript": "^6.0.3",
     "vite": "^8.0.16"
   },

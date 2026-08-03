@@ -45,7 +45,16 @@ export function renderApprovalDetails(approval: any): ApprovalDetails {
     return { title: `Run MCP Tool: ${server}/${tool}`, body: typeof args === 'string' ? args : JSON.stringify(args, null, 2), reason: 'Running external MCP tool.', isDangerous: false }
   }
   if (approval.UserApproval) return { title: approval.UserApproval.title, body: approval.UserApproval.prompt, reason: 'The agent requested explicit approval.', isDangerous: false }
-  if (approval.AskUser) return { title: 'Question From Agent', body: approval.AskUser.question, reason: 'Type your answer below and submit to respond to the agent.', isDangerous: false }
+  if (approval.AskUser) {
+    const hasOptions = Array.isArray(approval.AskUser.options) && approval.AskUser.options.length > 0
+    return {
+      title: 'Question From Agent',
+      body: approval.AskUser.question,
+      reason: hasOptions ? 'Pick a choice below, or type your own answer and submit.' : 'Type your answer below and submit to respond to the agent.',
+      isDangerous: false,
+    }
+  }
+  if (approval.ExitPlanMode) return { title: 'Review Plan', body: approval.ExitPlanMode.plan, reason: 'Approve to allow file edits and shell commands. Reject to keep the agent investigating.', isDangerous: false }
   return { title: 'Unknown Action', body: JSON.stringify(approval, null, 2), reason: 'Requires approval to proceed.', isDangerous: false }
 }
 

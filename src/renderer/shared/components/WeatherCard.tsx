@@ -1,4 +1,20 @@
 import React, { useMemo } from 'react';
+import {
+  Sun,
+  CloudSun,
+  Cloud,
+  Cloudy,
+  CloudFog,
+  CloudDrizzle,
+  CloudRain,
+  CloudSunRain,
+  CloudRainWind,
+  CloudSnow,
+  Snowflake,
+  CloudLightning,
+  Droplet,
+  type LucideIcon,
+} from 'lucide-react';
 
 export interface WeatherData {
   location: string;
@@ -23,47 +39,47 @@ export interface WeatherData {
 }
 
 const getWeatherInfo = (code: number, isDay: boolean = true) => {
-  const weatherMap: Record<number, { icon: string; description: string; gradient: string }> = {
+  const weatherMap: Record<number, { icon: LucideIcon; description: string; gradient: string }> = {
     0: {
-      icon: '☀️',
+      icon: Sun,
       description: 'Clear Sky',
       gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e3a8a, #1d4ed8 40%, #0284c7 80%, #0369a1)',
     },
     1: {
-      icon: '🌤️',
+      icon: CloudSun,
       description: 'Mainly Clear',
       gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e3a8a, #1d4ed8 40%, #0284c7 80%, #0369a1)',
     },
     2: {
-      icon: '⛅',
+      icon: Cloud,
       description: 'Partly Cloudy',
       gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #334155 45%, #0284c7 85%)',
     },
     3: {
-      icon: '☁️',
+      icon: Cloudy,
       description: 'Overcast',
       gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #334155 50%, #475569)',
     },
-    45: { icon: '🌫️', description: 'Foggy', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #475569)' },
-    48: { icon: '🌫️', description: 'Rime Fog', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #475569)' },
-    51: { icon: '🌦️', description: 'Light Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
-    53: { icon: '🌦️', description: 'Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
-    55: { icon: '🌧️', description: 'Heavy Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0369a1 60%)' },
-    61: { icon: '🌧️', description: 'Light Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
-    63: { icon: '🌧️', description: 'Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 50%, #0369a1)' },
-    65: { icon: '🌧️', description: 'Heavy Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e3a8a 60%, #0284c7)' },
-    71: { icon: '🌨️', description: 'Light Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #38bdf8 70%)' },
-    73: { icon: '🌨️', description: 'Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #38bdf8 70%)' },
-    75: { icon: '❄️', description: 'Heavy Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 70%)' },
-    80: { icon: '🌦️', description: 'Light Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
-    81: { icon: '🌧️', description: 'Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 50%, #0369a1)' },
-    82: { icon: '⛈️', description: 'Heavy Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e3a8a 50%, #312e81)' },
-    95: { icon: '🌩️', description: 'Thunderstorm', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 50%, #312e81)' },
-    96: { icon: '⛈️', description: 'Thunderstorm & Hail', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 60%)' },
-    99: { icon: '⛈️', description: 'Severe Thunderstorm', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 60%)' },
+    45: { icon: CloudFog, description: 'Foggy', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #475569)' },
+    48: { icon: CloudFog, description: 'Rime Fog', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #475569)' },
+    51: { icon: CloudDrizzle, description: 'Light Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
+    53: { icon: CloudDrizzle, description: 'Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
+    55: { icon: CloudRain, description: 'Heavy Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0369a1 60%)' },
+    61: { icon: CloudRain, description: 'Light Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
+    63: { icon: CloudRain, description: 'Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 50%, #0369a1)' },
+    65: { icon: CloudRain, description: 'Heavy Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e3a8a 60%, #0284c7)' },
+    71: { icon: CloudSnow, description: 'Light Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #38bdf8 70%)' },
+    73: { icon: CloudSnow, description: 'Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #38bdf8 70%)' },
+    75: { icon: Snowflake, description: 'Heavy Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 70%)' },
+    80: { icon: CloudSunRain, description: 'Light Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
+    81: { icon: CloudRain, description: 'Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 50%, #0369a1)' },
+    82: { icon: CloudRainWind, description: 'Heavy Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e3a8a 50%, #312e81)' },
+    95: { icon: CloudLightning, description: 'Thunderstorm', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 50%, #312e81)' },
+    96: { icon: CloudLightning, description: 'Thunderstorm & Hail', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 60%)' },
+    99: { icon: CloudLightning, description: 'Severe Thunderstorm', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 60%)' },
   };
 
-  return weatherMap[code] || { icon: '🌤️', description: 'Weather', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e3a8a, #0284c7)' };
+  return weatherMap[code] || { icon: CloudSun, description: 'Weather', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e3a8a, #0284c7)' };
 };
 
 export default function WeatherCard({ data }: { data: WeatherData }) {
@@ -119,7 +135,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
       {/* Header Info */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <span style={{ fontSize: '42px', lineHeight: 1 }}>{weatherInfo.icon}</span>
+          <weatherInfo.icon size={42} strokeWidth={1.75} style={{ flexShrink: 0 }} />
           <div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
               <span style={{ fontSize: '36px', fontWeight: 'bold', letterSpacing: '-1px' }}>
@@ -179,13 +195,15 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
               }}
             >
               <span style={{ fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>{day.day}</span>
-              <span style={{ fontSize: '20px', marginBottom: '4px' }}>{day.icon}</span>
+              <day.icon size={20} strokeWidth={2} style={{ marginBottom: '4px' }} />
               <div style={{ fontSize: '11px', display: 'flex', gap: '3px' }}>
                 <span style={{ fontWeight: 700 }}>{day.high}°</span>
                 <span style={{ opacity: 0.65 }}>{day.low}°</span>
               </div>
               {day.precipitation !== undefined && day.precipitation > 0 && (
-                <span style={{ fontSize: '10px', opacity: 0.8, marginTop: '2px' }}>💧 {day.precipitation}%</span>
+                <span style={{ fontSize: '10px', opacity: 0.8, marginTop: '2px', display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                  <Droplet size={10} strokeWidth={2.5} /> {day.precipitation}%
+                </span>
               )}
             </div>
           ))}

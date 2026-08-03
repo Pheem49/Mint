@@ -103,6 +103,8 @@ pub struct ChatRequest {
     pub workspace_path: Option<String>,
     #[serde(default)]
     pub agent_id: Option<String>,
+    #[serde(default)]
+    pub plan_mode: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1094,6 +1096,7 @@ mod tests {
             document_attachment: None,
             workspace_path: None,
             agent_id: None,
+            plan_mode: false,
         };
 
         let error = require_supported_attachments("openai", &request).unwrap_err();
@@ -1138,6 +1141,7 @@ mod tests {
             document_attachment: None,
             workspace_path: None,
             agent_id: None,
+            plan_mode: false,
         })
         .unwrap();
         assert_eq!(parts.len(), 3);

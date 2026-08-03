@@ -264,378 +264,10 @@ fn request_chat_id(request: &ChatRequest) -> &str {
         .unwrap_or(DEFAULT_CONVERSATION_ID)
 }
 
+use crate::prompts::agent::build_system_prompt;
+
 const MAX_STEPS: usize = 32;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
-fn is_port_9222_open() -> bool {
-    use std::net::TcpStream;
-    use std::time::Duration;
-    if let Ok(addr) = "127.0.0.1:9222".parse() {
-        TcpStream::connect_timeout(&addr, Duration::from_millis(50)).is_ok()
-    } else {
-        false
-    }
-}
-
-pub fn build_system_prompt(config: &MintConfig) -> String {
-    let mut allowed_actions = vec![
-        "list_files",
-        "read_file",
-        "search_code",
-        "symbols",
-        "semantic_index",
-        "semantic_search",
-        "knowledge_search",
-        "web_search",
-        "weather",
-        "stock",
-        "calculation",
-        "memory_recall",
-        "git_status",
-        "git_diff",
-        "git_log",
-        "git_branch",
-        "create_plan",
-        "update_plan",
-        "request_user_approval",
-        "ask_user",
-        "detect_project",
-        "list_tests",
-        "read_diagnostics",
-        "view_image",
-        "note_write",
-        "run_plugin",
-        "mcp_tool",
-        "mcp_list_tools",
-        "run_shell",
-        "verify",
-        "apply_patch",
-        "write_file",
-        "video_trim",
-        "video_remove_silence",
-        "video_resize",
-        "video_merge",
-        "video_export",
-        "video_extract_audio",
-        "speech_transcribe",
-        "subtitle_generate",
-        "subtitle_translate",
-        "subtitle_burn",
-        "timeline_reorder",
-        "effect_zoom_on_speaker",
-        "audio_duck_music",
-        "make_shorts",
-        "generate_image",
-        "generate_video",
-    ];
-
-    if is_port_9222_open() {
-        allowed_actions.push("browser_open");
-        allowed_actions.push("browser_click");
-        allowed_actions.push("browser_type");
-        allowed_actions.push("browser_read");
-        allowed_actions.push("browser_mouse_move");
-        allowed_actions.push("browser_mouse_click");
-        allowed_actions.push("browser_key_press");
-        allowed_actions.push("browser_screenshot");
-    }
-
-    allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
-    allowed_actions.push("finish");
-
-    let actions_str = allowed_actions.join("|");
-
-    let mut input_formats = Vec::new();
-    if allowed_actions.contains(&"list_files") {
-        input_formats.push(
-            "- list_files: {\"path\":\".\",\"limit\":100} (workspace path, ~/path, or allowed user folder like Downloads)",
-        );
-    }
-    if allowed_actions.contains(&"read_file") {
-        input_formats
-            .push("- read_file: {\"path\":\"relative/path\",\"startLine\":1,\"endLine\":240}");
-    }
-    if allowed_actions.contains(&"search_code") {
-        input_formats.push("- search_code: {\"query\":\"text\",\"path\":\".\",\"limit\":20}");
-    }
-    if allowed_actions.contains(&"symbols") {
-        input_formats.push("- symbols: {\"path\":\".\",\"limit\":100}");
-    }
-    if allowed_actions.contains(&"semantic_index") {
-        input_formats.push("- semantic_index: {\"path\":\".\"}");
-    }
-    if allowed_actions.contains(&"semantic_search") {
-        input_formats.push(
-            "- semantic_search: {\"query\":\"behavior description\",\"path\":\".\",\"limit\":5}",
-        );
-    }
-    if allowed_actions.contains(&"knowledge_search") {
-        input_formats.push("- knowledge_search: {\"query\":\"local knowledge query\",\"limit\":5}");
-    }
-    if allowed_actions.contains(&"web_search") {
-        input_formats.push("- web_search: {\"query\":\"search terms\",\"limit\":5}");
-    }
-    if allowed_actions.contains(&"weather") {
-        input_formats.push("- weather: {\"city\":\"city or location name\"}");
-    }
-    if allowed_actions.contains(&"stock") {
-        input_formats.push("- stock: {\"query\":\"stock or crypto name/ticker e.g. Apple, TSLA, BTC\"}");
-    }
-    if allowed_actions.contains(&"calculation") {
-        input_formats.push("- calculation: {\"expression\":\"math or percentage expression e.g. 25% of 8500 or 100 * 3.5\"}");
-    }
-    if allowed_actions.contains(&"browser_open") {
-        input_formats.push("- browser_open: {\"url\":\"https://example.com\"}");
-    }
-    if allowed_actions.contains(&"browser_click") {
-        input_formats.push("- browser_click: {\"selector\":\"button.submit-btn\"} (CSS selector, or text=Login, contains=Submit, xpath=//button)");
-    }
-    if allowed_actions.contains(&"browser_type") {
-        input_formats
-            .push("- browser_type: {\"selector\":\"input.search-bar\", \"text\":\"search query\"} (CSS selector, or text=Placeholder, contains=Label)");
-    }
-    if allowed_actions.contains(&"browser_read") {
-        input_formats.push("- browser_read: {}");
-    }
-    if allowed_actions.contains(&"browser_mouse_move") {
-        input_formats.push("- browser_mouse_move: {\"x\":640,\"y\":360}");
-    }
-    if allowed_actions.contains(&"browser_mouse_click") {
-        input_formats.push("- browser_mouse_click: {\"x\":640,\"y\":360,\"button\":\"left\"}");
-    }
-    if allowed_actions.contains(&"browser_key_press") {
-        input_formats.push("- browser_key_press: {\"key\":\"Enter\"} (keys: Enter,Tab,Escape,Backspace,Delete,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,F1-F12,Space)");
-    }
-    if allowed_actions.contains(&"browser_screenshot") {
-        input_formats.push("- browser_screenshot: {}");
-    }
-    if allowed_actions.contains(&"memory_recall") {
-        input_formats.push("- memory_recall: {\"query\":\"what did user say about X\"}");
-    }
-    if allowed_actions.contains(&"git_status") {
-        input_formats.push("- git_status: {}");
-    }
-    if allowed_actions.contains(&"git_diff") {
-        input_formats.push("- git_diff: {\"path\":\"optional/relative/path\"}");
-    }
-    if allowed_actions.contains(&"git_log") {
-        input_formats.push("- git_log: {\"limit\":5}");
-    }
-    if allowed_actions.contains(&"git_branch") {
-        input_formats.push("- git_branch: {}");
-    }
-    if allowed_actions.contains(&"create_plan") {
-        input_formats
-            .push("- create_plan: {\"summary\":\"objective\",\"steps\":[\"step 1\",\"step 2\"]}");
-    }
-    if allowed_actions.contains(&"update_plan") {
-        input_formats.push("- update_plan: {\"steps\":[\"done: step 1\",\"in_progress: step 2\"]}");
-    }
-    if allowed_actions.contains(&"request_user_approval") {
-        input_formats.push("- request_user_approval: {\"title\":\"short title\",\"summary\":\"what needs approval\"}");
-    }
-    if allowed_actions.contains(&"ask_user") {
-        input_formats.push("- ask_user: {\"query\":\"short question\"}");
-    }
-    if allowed_actions.contains(&"detect_project") {
-        input_formats.push("- detect_project: {\"path\":\".\"}");
-    }
-    if allowed_actions.contains(&"list_tests") {
-        input_formats.push("- list_tests: {\"path\":\".\"}");
-    }
-    if allowed_actions.contains(&"read_diagnostics") {
-        input_formats.push("- read_diagnostics: {\"path\":\".\"}");
-    }
-    if allowed_actions.contains(&"view_image") {
-        input_formats.push("- view_image: {\"path\":\"relative/image.png\"}");
-    }
-    if allowed_actions.contains(&"note_write") {
-        input_formats
-            .push("- note_write: {\"path\":\"filename.md\",\"fileContent\":\"note content\"}");
-    }
-    if allowed_actions.contains(&"run_plugin") {
-        input_formats.push("- run_plugin: {\"name\":\"gmail|google_calendar|notion|docker|spotify|obsidian|system_metrics\",\"instruction\":\"instruction string\"}");
-    }
-    let mcp_str;
-    if allowed_actions.contains(&"mcp_tool") {
-        let servers = crate::mcp::list_mcp_servers()
-            .map(|m| m.keys().cloned().collect::<Vec<String>>().join(", "))
-            .unwrap_or_default();
-        mcp_str = format!(
-            "- mcp_tool: {{\"server\":\"<name>\",\"tool\":\"tool-name\",\"arguments\":{{}}}} (Available configured servers: {})",
-            servers
-        );
-        input_formats.push(&mcp_str);
-    }
-    if allowed_actions.contains(&"mcp_list_tools") {
-        input_formats.push("- mcp_list_tools: {\"server\":\"configured-server\"}");
-    }
-    if allowed_actions.contains(&"run_shell") {
-        input_formats.push(
-            "- run_shell: {\"command\":\"read-only or test command allowed by shell policy\"}",
-        );
-    }
-    if allowed_actions.contains(&"verify") {
-        input_formats.push("- verify: {\"commands\":[\"cargo test\",\"npm test\"]}");
-    }
-    if allowed_actions.contains(&"apply_patch") {
-        input_formats.push("- apply_patch: {\"patch\":{\"path\":\"relative/path\",\"hunks\":[{\"oldText\":\"exact text\",\"newText\":\"replacement\"}]}}");
-    }
-    if allowed_actions.contains(&"write_file") {
-        input_formats.push(
-            "- write_file: {\"path\":\"new/relative/path\",\"fileContent\":\"full file content\"}",
-        );
-    }
-    if allowed_actions.contains(&"video_trim") {
-        input_formats.push("- video_trim / video.trim: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"start\":0.0,\"end\":30.0}");
-    }
-    if allowed_actions.contains(&"video_remove_silence") {
-        input_formats.push("- video_remove_silence / video.remove_silence: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"thresholdDb\":-30.0,\"minSilenceSecs\":0.5}");
-    }
-    if allowed_actions.contains(&"video_resize") {
-        input_formats.push("- video_resize: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"width\":1080,\"height\":1920}");
-    }
-    if allowed_actions.contains(&"video_merge") {
-        input_formats.push("- video_merge: {\"commands\":[\"/path/1.mp4\",\"/path/2.mp4\"],\"output\":\"/path/merged.mp4\"}");
-    }
-    if allowed_actions.contains(&"video_export") {
-        input_formats.push("- video_export / video.export: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"resolution\":\"1080p\"}");
-    }
-    if allowed_actions.contains(&"video_extract_audio") {
-        input_formats.push("- video_extract_audio: {\"input\":\"/path/file.mp4\",\"output\":\"/path/audio.wav\"}");
-    }
-    if allowed_actions.contains(&"speech_transcribe") {
-        input_formats.push("- speech_transcribe: {\"input\":\"/path/file.mp4\",\"language\":\"en\"}");
-    }
-    if allowed_actions.contains(&"subtitle_generate") {
-        input_formats.push("- subtitle_generate / subtitle.generate: {\"input\":\"/path/file.mp4\",\"language\":\"en\"}");
-    }
-    if allowed_actions.contains(&"subtitle_translate") {
-        input_formats.push("- subtitle_translate / subtitle.translate: {\"srtContent\":\"...\",\"targetLanguage\":\"th\"}");
-    }
-    if allowed_actions.contains(&"subtitle_burn") {
-        input_formats.push("- subtitle_burn: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"srtContent\":\"...\",\"preset\":\"tiktok\"}");
-    }
-    if allowed_actions.contains(&"timeline_reorder") {
-        input_formats.push("- timeline_reorder / timeline.reorder: {\"inputs\":[\"/path/1.mp4\",\"/path/2.mp4\"],\"order\":[1,0],\"output\":\"/path/out.mp4\"}");
-    }
-    if allowed_actions.contains(&"effect_zoom_on_speaker") {
-        input_formats.push("- effect_zoom_on_speaker / effect.zoom_on_speaker: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"zoomFactor\":1.25}");
-    }
-    if allowed_actions.contains(&"audio_duck_music") {
-        input_formats.push("- audio_duck_music / audio.duck_music: {\"videoInput\":\"/path/file.mp4\",\"musicInput\":\"/path/bg.mp3\",\"output\":\"/path/out.mp4\",\"musicVolume\":0.2}");
-    }
-    if allowed_actions.contains(&"make_shorts") {
-        input_formats.push("- make_shorts / video.make_shorts: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out_folder\",\"maxClips\":3,\"targetDuration\":60}");
-    }
-    if allowed_actions.contains(&"generate_image") {
-        input_formats.push("- generate_image / image_studio.generate: {\"prompt\":\"a cute cat in space\",\"aspectRatio\":\"1:1\"}");
-    }
-    if allowed_actions.contains(&"generate_video") {
-        input_formats.push("- generate_video / veo.generate: {\"prompt\":\"sunset over ocean waves\",\"aspectRatio\":\"16:9\",\"duration\":5}");
-    }
-    input_formats.push("- finish: {\"summary\":\"concise final answer in Thai when the user writes Thai\",\"verification\":\"checks run or not run\"}");
-
-    let input_formats_str = input_formats.join("\n");
-
-    let mut rules = Vec::new();
-    rules.push(
-        "0. For casual conversation or questions that need no local tool, use finish immediately.",
-    );
-    if allowed_actions.contains(&"list_files") || allowed_actions.contains(&"read_file") {
-        rules.push("1. Inspect the workspace before editing.");
-        rules.push("1a. For user folders such as Downloads, Documents, Desktop, Pictures, Music, or Videos, use list_files with that folder name or ~/folder before using shell.");
-    }
-    if allowed_actions.contains(&"search_code") {
-        rules.push(
-            "2. Use search_code before reading many files when searching for a symbol or behavior.",
-        );
-    }
-    if allowed_actions.contains(&"apply_patch") && allowed_actions.contains(&"write_file") {
-        rules.push("3. Use apply_patch for all edits to existing files (write_file is only for creating new files). For edits across multiple sections of a file, supply separate small hunks in the 'hunks' array (one hunk per edit location). Keep oldText in each hunk minimal (only 1-3 exact lines needed to pinpoint the edit). NEVER bundle multiple separate edits into a single giant hunk that spans the entire file.");
-    }
-    if allowed_actions.contains(&"run_shell")
-        || allowed_actions.contains(&"write_file")
-        || allowed_actions.contains(&"apply_patch")
-    {
-        rules.push("4. Shell commands and file edits require user approval. Mint handles approval after you request the tool.");
-    }
-    if allowed_actions.contains(&"run_shell") {
-        rules.push("5. Shell commands are classified as readOnly, test, network, or mutating. Only policy-allowed modes may run after approval. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.");
-    }
-    if allowed_actions.contains(&"verify") {
-        rules.push("6. Verify code changes when possible. If compile or test commands fail (exit status is not 0), analyze the stdout/stderr to locate the bug, edit the code to fix it, and verify again. Do not stop or give up until the errors are resolved.");
-    }
-    if allowed_actions.contains(&"web_search") {
-        rules.push("7. Use web_search when the user asks to look something up online or needs current information.");
-    }
-    if allowed_actions.contains(&"weather") {
-        rules.push("7w. Use weather to check current weather conditions or forecasts for a specific city or region. ALWAYS copy the ```weather_json ... ``` block from the tool observation into your final summary text so the UI card renders.");
-    }
-    if allowed_actions.contains(&"stock") {
-        rules.push("7s. Use stock to look up real-time stock/crypto prices, market performance, or ticker symbols. ALWAYS copy the ```stock_json ... ``` block from the tool observation into your final summary text.");
-    }
-    if allowed_actions.contains(&"calculation") {
-        rules.push("7c. Use calculation to evaluate math expressions, percentages, or conversions. ALWAYS copy the ```calculation_json ... ``` block from the tool observation into your final summary text.");
-    }
-    if allowed_actions.contains(&"browser_open") {
-        rules.push("7a. Use browser_open to navigate the virtual browser to a URL.");
-    }
-    if allowed_actions.contains(&"browser_click") {
-        rules.push("7b. Use browser_click to click elements. Selector can be: CSS selector (button.class, #id, [attr=val]), text=ExactText to find by visible text, contains=PartialText for partial match, or xpath=//expr for XPath. Prefer text= or contains= when the element has visible text but no unique CSS class.");
-    }
-    if allowed_actions.contains(&"browser_type") {
-        rules.push("7c. Use browser_type to enter text into form fields or search boxes. Selector supports the same formats as browser_click.");
-    }
-    if allowed_actions.contains(&"browser_read") {
-        rules.push(
-            "7d. Use browser_read to read the text content of the active page to analyze it.",
-        );
-    }
-    if allowed_actions.contains(&"browser_mouse_move") {
-        rules.push("7e. Use browser_mouse_move to move the real mouse cursor to absolute (x,y) coordinates.");
-    }
-    if allowed_actions.contains(&"browser_mouse_click") {
-        rules.push("7f. Use browser_mouse_click to perform a native mouse click at (x,y) coordinates. Use browser_screenshot first to find the target position.");
-    }
-    if allowed_actions.contains(&"browser_key_press") {
-        rules.push("7g. Use browser_key_press to press a keyboard key (e.g. Enter, Tab, Escape, ArrowDown). Use after browser_type or browser_mouse_click to interact with focused elements.");
-    }
-    if allowed_actions.contains(&"browser_screenshot") {
-        rules.push("7h. Use browser_screenshot to capture the current page as a PNG image (base64). Use it to inspect the visual state of the page before deciding where to click.");
-    }
-    if allowed_actions.contains(&"memory_recall") {
-        rules.push("8. Use memory_recall to search past interactions before asking the user to repeat context.");
-    }
-    if allowed_actions.contains(&"git_status") {
-        rules.push("8a. Use git_status and git_diff before summarizing local code changes.");
-    }
-    if allowed_actions.contains(&"create_plan") || allowed_actions.contains(&"update_plan") {
-        rules.push("8b. Use create_plan/update_plan for multi-step implementation work.");
-    }
-    if allowed_actions.contains(&"note_write") {
-        rules.push("9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.");
-    }
-    if allowed_actions.contains(&"run_plugin") {
-        rules.push("10. Use run_plugin only when the requested native plugin is explicitly allowed by policy.");
-    }
-    rules.push("11. Keep thought short and concrete. Write the thought field in English at all times. Use Thai for the final summary when the task is written in Thai.");
-    rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately.");
-    rules.push("13. You may discuss mature personal topics at a non-explicit level, including adult relationships, sex education, intimacy, emotions, and feelings. Keep the tone respectful and supportive, avoid graphic sexual detail, and do not engage with sexual content involving minors, coercion, exploitation, or sexual violence.");
-
-    let rules_str = rules.join("\n");
-
-    format!(
-        "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
-         You are also Mint: a cute, warm, and helpful Thai assistant. Speak politely, naturally, and sweetly in Thai when the user writes in Thai. Refer to yourself as \"มิ้น\" and use polite particles such as \"ค่ะ\" and \"นะคะ\" where appropriate. Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision. Write the \"thought\" field in English at all times (never use Thai for the thought field).\n\
-         Follow an inspect -> act -> verify loop. Return exactly one JSON object per response, with no markdown:\n\
-         {{\"thought\":\"short user-visible progress note\",\"action\":\"{}\",\"input\":{{...}}}}\n\n\
-         Input formats:\n\
-         {}\n\n\
-         Rules:\n\
-         {}",
-        actions_str, input_formats_str, rules_str
-    )
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentApproval {
@@ -672,6 +304,11 @@ pub enum AgentApproval {
     },
     AskUser {
         question: String,
+        #[serde(default)]
+        options: Vec<String>,
+    },
+    ExitPlanMode {
+        plan: String,
     },
 }
 
@@ -742,6 +379,8 @@ struct AgentInput {
     #[serde(default)]
     query: String,
     #[serde(default)]
+    options: Vec<String>,
+    #[serde(default)]
     city: String,
     #[serde(default)]
     expression: String,
@@ -757,6 +396,8 @@ struct AgentInput {
     summary: String,
     #[serde(default)]
     verification: String,
+    #[serde(default)]
+    plan: String,
     #[serde(default)]
     start_line: Option<usize>,
     #[serde(default)]
@@ -963,6 +604,7 @@ pub async fn orchestrate_agent_loop<Approve, Progress, Chunk>(
     chat_id: Option<&str>,
     agent_id: Option<&str>,
     fast_mode: bool,
+    plan_mode: bool,
     mut approve: Approve,
     mut progress: Progress,
     mut on_chunk: Chunk,
@@ -991,7 +633,9 @@ where
     let mut pending_image = image_data_uri;
     let mut pending_video = video_data_uri;
 
-    let mut system_prompt = build_system_prompt(config);
+    let mut plan_mode = plan_mode;
+    let mut system_prompt = build_system_prompt(config, plan_mode);
+    let hooks = crate::hooks::list_hooks(config);
 
     if let Ok(memory) = MemoryStore::open_default() {
         let mut profile_instructions = String::new();
@@ -1080,6 +724,7 @@ where
                 document_attachment: None,
                 workspace_path: None,
                 agent_id: None,
+                plan_mode: false,
             },
         )
         .await?;
@@ -1110,6 +755,7 @@ where
                         document_attachment: None,
                         workspace_path: None,
                         agent_id: None,
+                        plan_mode: false,
                     },
                 )
                 .await?;
@@ -1272,7 +918,33 @@ where
             *count
         };
 
-        let result = if decision.action == "run_shell" && action_count > 1 {
+        let result = if decision.action == "exit_plan_mode" {
+            let plan_text = decision.input.plan.trim().to_owned();
+            match approve(&AgentApproval::ExitPlanMode {
+                plan: plan_text.clone(),
+            }) {
+                Ok(ApprovalOutcome::Approved) => {
+                    plan_mode = false;
+                    system_prompt = build_system_prompt(config, plan_mode);
+                    "Plan approved by the user. Plan mode is now OFF — write_file, apply_patch, run_shell, and other previously blocked tools are now available. Proceed with implementing the plan.".to_string()
+                }
+                Ok(ApprovalOutcome::Denied) => {
+                    "The user rejected this plan. Plan mode is still ON. Continue investigating or revise the plan, then call exit_plan_mode again when ready.".to_string()
+                }
+                Ok(ApprovalOutcome::Intercepted(feedback)) => {
+                    format!(
+                        "The user did not approve the plan yet and left this feedback: {}\n\nPlan mode is still ON. Revise the plan accordingly and call exit_plan_mode again when ready.",
+                        feedback
+                    )
+                }
+                Err(error) => format!("Error requesting plan approval: {}", error),
+            }
+        } else if plan_mode && !plan_mode_allows(&decision.action, &decision.input) {
+            format!(
+                "Blocked: '{}' is not available in plan mode (read-only investigation only). Call exit_plan_mode with your proposed plan once you are ready to implement it; the user will approve or reject it.",
+                decision.action
+            )
+        } else if decision.action == "run_shell" && action_count > 1 {
             format!(
                 "Skipped duplicate shell command: {}\n\n[System Tip: This exact shell command already ran once in this task. Do not run it again. Use the finish action now and tell the user the action was completed.]",
                 decision.input.command.trim()
@@ -1281,13 +953,43 @@ where
             let input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
             progress(AgentProgress::ToolStart {
                 action: decision.action.clone(),
-                input: input_val,
+                input: input_val.clone(),
             });
 
-            match execute_tool(&root, config, &decision, chat_id, &mut approve).await {
-                Ok(result) => result,
-                Err(error) => {
-                    format!("Error: {}", error)
+            match crate::hooks::run_pre_tool_hooks(&hooks, &decision.action, &input_val, &root) {
+                crate::hooks::PreHookOutcome::Blocked(reason) => {
+                    format!(
+                        "Blocked by hook: {}\n\n[System Tip: A configured PreToolUse hook rejected this action. Adjust your approach or ask the user for guidance.]",
+                        reason
+                    )
+                }
+                crate::hooks::PreHookOutcome::Allowed => {
+                    let (tool_result, success) =
+                        match execute_tool(&root, config, &decision, chat_id, &mut approve).await {
+                            Ok(result) => (result, true),
+                            Err(error) => (format!("Error: {}", error), false),
+                        };
+                    let hook_messages = crate::hooks::run_post_tool_hooks(
+                        &hooks,
+                        &decision.action,
+                        &input_val,
+                        &tool_result,
+                        success,
+                        &root,
+                    );
+                    if hook_messages.is_empty() {
+                        tool_result
+                    } else {
+                        format!(
+                            "{}\n\n{}",
+                            tool_result,
+                            hook_messages
+                                .iter()
+                                .map(|message| format!("[Hook] {}", message))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        )
+                    }
                 }
             }
         };
@@ -1354,6 +1056,51 @@ where
         "code agent reached the limit of {} steps",
         MAX_STEPS
     )))
+}
+
+const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
+    "list_files",
+    "read_file",
+    "search_code",
+    "symbols",
+    "semantic_index",
+    "semantic_search",
+    "knowledge_search",
+    "web_search",
+    "image_search",
+    "weather",
+    "stock",
+    "calculation",
+    "memory_recall",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_branch",
+    "create_plan",
+    "update_plan",
+    "request_user_approval",
+    "ask_user",
+    "detect_project",
+    "list_tests",
+    "read_diagnostics",
+    "view_image",
+    "note_write",
+    "mcp_list_tools",
+    "browser_open",
+    "browser_read",
+    "browser_mouse_move",
+    "browser_screenshot",
+    "finish",
+];
+
+/// Whether `action` may run while plan mode is active. `run_shell` gets a
+/// special case: only commands the safety classifier already tags as
+/// read-only are allowed, everything else requires exiting plan mode first.
+fn plan_mode_allows(action: &str, input: &AgentInput) -> bool {
+    if action == "run_shell" {
+        return classify_shell_command(&input.command).mode.as_str() == "readOnly";
+    }
+    PLAN_MODE_ALLOWED_ACTIONS.contains(&action)
 }
 
 async fn execute_tool<Approve>(
@@ -1474,6 +1221,17 @@ where
                      In your finish summary, explain to the user in Thai that the web search failed (mentioning the search error: {e}), \
                      and then answer their query using your own pre-existing knowledge/database."
                 )),
+            }
+        }
+        "image_search" => {
+            let query = required(&input.query, "query")?;
+            let limit = input.limit.unwrap_or(6);
+            match crate::image_search::image_search(query, limit, config).await {
+                Ok(report) => Ok(format!(
+                    "{}\n\nNote: Image search succeeded. In your finish summary, you MUST include the exact ```image_search_json ... ``` code block from above in your response so the user sees the image results UI.",
+                    report.data
+                )),
+                Err(e) => Ok(format!("Image search failed for '{query}': {e}")),
             }
         }
         "weather" => {
@@ -1765,8 +1523,16 @@ where
         }
         "ask_user" => {
             let question = required(&input.query, "query")?;
+            let options: Vec<String> = input
+                .options
+                .iter()
+                .map(|o| o.trim().to_owned())
+                .filter(|o| !o.is_empty())
+                .take(3)
+                .collect();
             let approved = approve_cb(&AgentApproval::AskUser {
                 question: question.to_owned(),
+                options,
             })
             .map_err(OrchestrationError::Agent)?;
             match approved {
@@ -2808,6 +2574,7 @@ Example response:
         document_attachment: None,
         workspace_path: None,
         agent_id: None,
+        plan_mode: false,
     };
 
     // Send the chat request to LLM
@@ -2869,6 +2636,7 @@ mod tests {
             document_attachment: None,
             workspace_path: None,
             agent_id: None,
+            plan_mode: false,
         };
         let config = MintConfig::default();
         assert!(
