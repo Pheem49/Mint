@@ -40,6 +40,18 @@ pub struct JobRecord {
     pub status: JobStatus,
     pub result: Option<String>,
     pub started_at: Instant,
+    /// Seconds the job took, frozen once it stops running. While `status` is
+    /// `Running` this is `None` and callers should use `started_at.elapsed()`
+    /// instead so the displayed time keeps ticking live.
+    pub finished_secs: Option<u64>,
+}
+
+impl JobRecord {
+    /// Seconds elapsed: live if still running, frozen at completion otherwise.
+    pub fn elapsed_secs(&self) -> u64 {
+        self.finished_secs
+            .unwrap_or_else(|| self.started_at.elapsed().as_secs())
+    }
 }
 
 struct Inner {
@@ -83,6 +95,7 @@ impl BackgroundJobs {
                 status: JobStatus::Running,
                 result: None,
                 started_at: Instant::now(),
+                finished_secs: None,
             });
             id
         };
@@ -93,39 +106,46 @@ impl BackgroundJobs {
         let chat_id = Self::chat_id_for(id);
         let jobs = self.clone();
 
+        // Spawn the actual agent run directly (not nested inside another
+        // spawned task) so its AbortHandle can be registered in
+        // ACTIVE_AGENTS synchronously, before `spawn` returns `id` to the
+        // caller. Registering it from inside a further-nested spawned task
+        // left a window where a `/jobs cancel <id>` issued immediately after
+        // `/bg` could run before the handle was registered and spuriously
+        // report "no such running job".
+        let inner_chat_id = chat_id.clone();
+        let inner_query = query.clone();
+        let join_handle = tokio::spawn(async move {
+            let approve_cb = |_approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+                Ok(ApprovalOutcome::Denied)
+            };
+            let progress_cb = |_progress| {};
+            let on_chunk = |_chunk: String| {};
+
+            orchestrate_agent_loop(
+                &config,
+                &inner_query,
+                &root,
+                None,
+                None,
+                Some(&inner_chat_id),
+                None,
+                false,
+                false,
+                approve_cb,
+                progress_cb,
+                on_chunk,
+            )
+            .await
+        });
+
+        let abort_handle = join_handle.abort_handle();
+        mint_core::ACTIVE_AGENTS
+            .lock()
+            .unwrap()
+            .insert(chat_id.clone(), abort_handle);
+
         tokio::spawn(async move {
-            let inner_chat_id = chat_id.clone();
-            let inner_query = query.clone();
-            let join_handle = tokio::spawn(async move {
-                let approve_cb = |_approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
-                    Ok(ApprovalOutcome::Denied)
-                };
-                let progress_cb = |_progress| {};
-                let on_chunk = |_chunk: String| {};
-
-                orchestrate_agent_loop(
-                    &config,
-                    &inner_query,
-                    &root,
-                    None,
-                    None,
-                    Some(&inner_chat_id),
-                    None,
-                    false,
-                    false,
-                    approve_cb,
-                    progress_cb,
-                    on_chunk,
-                )
-                .await
-            });
-
-            let abort_handle = join_handle.abort_handle();
-            mint_core::ACTIVE_AGENTS
-                .lock()
-                .unwrap()
-                .insert(chat_id.clone(), abort_handle);
-
             let outcome = join_handle.await;
 
             mint_core::ACTIVE_AGENTS.lock().unwrap().remove(&chat_id);
@@ -146,6 +166,7 @@ impl BackgroundJobs {
     fn finish(&self, id: u32, status: JobStatus, result: Option<String>, query: &str) {
         let mut inner = self.inner.lock().unwrap();
         if let Some(job) = inner.jobs.iter_mut().find(|j| j.id == id) {
+            job.finished_secs = Some(job.started_at.elapsed().as_secs());
             job.status = status;
             job.result = result;
         }

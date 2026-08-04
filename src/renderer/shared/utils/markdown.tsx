@@ -330,7 +330,7 @@ const mdComponents = {
     return renderCodeCard(lang, codeText)
   },
   table: ({ children }) => (
-    <div className="chat-table-container" style={{ overflowX: 'auto', margin: '14px 0', width: '100%', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.12)', background: 'rgba(30, 41, 59, 0.35)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' }}>
+    <div className="chat-table-container" style={{ overflowX: 'auto', margin: '14px 0', width: '100%', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.12)', background: 'var(--panel-bg)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' }}>
       <table className="chat-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem', textAlign: 'left', lineHeight: '1.5' }}>
         {children}
       </table>

@@ -682,7 +682,11 @@ fn print_diff_header(action: &str, path: &str, additions: usize, deletions: usiz
 fn print_diff_band(bg: &str, line_num: usize, content: &str, term_width: usize) {
     let line_num_str = format!("{:>5}", line_num);
     let prefix_visible_len = 2 + line_num_str.chars().count() + 1;
-    let content_len = content.chars().count();
+    // Use the app's East-Asian/Thai-combining-mark-aware width, not a raw
+    // char count — a naive count over/under-shoots the true terminal column
+    // width for wide glyphs and zero-width Thai marks, leaving the band short
+    // of (or past) the terminal edge.
+    let content_len = crate::interactive::string_visual_width(content);
     let pad_len = term_width.saturating_sub(prefix_visible_len + content_len);
     println!(
         "  {DIM}{line_num_str}{RESET} {bg}{content}{}{RESET}",

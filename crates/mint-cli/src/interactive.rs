@@ -640,7 +640,7 @@ pub async fn handle_slash_command(
                         println!(
                             "  #{:<3} [{status_str}] {DIM}{:>4}s{RESET}  {preview}{suffix}",
                             job.id,
-                            job.started_at.elapsed().as_secs(),
+                            job.elapsed_secs(),
                         );
                     }
                     println!();
