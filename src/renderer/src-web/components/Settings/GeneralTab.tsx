@@ -720,6 +720,38 @@ export default function GeneralTab({
               </div>
             </div>
           </div>
+
+          {/* SearXNG */}
+          <div className={`provider-card ${config.searchProvider === 'searxng' ? 'active-provider' : ''}`}>
+            <div className="provider-card-header">
+              <div className="provider-card-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                SearXNG (self-hosted)
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {config.searchProvider === 'searxng' && <span className="provider-active-badge">Active</span>}
+                <label className="settings-toggle-switch" style={{ marginBottom: 0 }}>
+                  <input type="radio" name="searchProvider" style={{ display: 'none' }} checked={config.searchProvider === 'searxng'} onChange={() => updateField('searchProvider', 'searxng')} />
+                  <span className="settings-toggle-slider" style={{ cursor: 'pointer' }} onClick={() => updateField('searchProvider', 'searxng')} />
+                </label>
+              </div>
+            </div>
+            <div className="provider-card-body">
+              <div className="setting-row">
+                <label>SearXNG Instance URL</label>
+                <input
+                  type="text"
+                  value={config.searxngBaseUrl}
+                  onChange={(e) => updateField('searxngBaseUrl', e.target.value)}
+                  placeholder="e.g. https://searx.example.com"
+                />
+              </div>
+              <p className="hint" style={{ margin: 0 }}>Self-hosted, no API key needed. The instance must have JSON output enabled (search.formats in settings.yml).</p>
+            </div>
+          </div>
         </div>
       )}
 

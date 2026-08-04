@@ -92,6 +92,7 @@ export const DEFAULT_CONFIG = {
   braveSearchApiKey: '',
   googleSearchApiKey: '',
   googleSearchCx: '',
+  searxngBaseUrl: '',
   
   // Image Generation Settings
   imageGenProvider: 'gemini' as 'gemini' | 'dalle' | 'stability' | 'ideogram' | 'replicate' | 'bfl',

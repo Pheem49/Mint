@@ -583,6 +583,7 @@ fn runtime_extra_defaults() -> BTreeMap<String, Value> {
         "googleSearchApiKey": "",
         "googleSearchCx": "",
         "braveSearchApiKey": "",
+        "searxngBaseUrl": "",
         "googleCalendarClientId": "",
         "googleCalendarClientSecret": "",
         "googleCalendarRefreshToken": "",

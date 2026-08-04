@@ -6,7 +6,9 @@ use crate::MintConfig;
 
 #[derive(Debug, Error)]
 pub enum ImageSearchError {
-    #[error("no image search API key configured (set googleSearchApiKey or braveSearchApiKey)")]
+    #[error(
+        "no image search provider configured (set googleSearchApiKey, braveSearchApiKey, or searxngBaseUrl)"
+    )]
     NoApiKey,
     #[error("image search request failed: {0}")]
     Request(String),
@@ -101,22 +103,51 @@ pub async fn image_search(
         .unwrap_or("")
         .trim()
         .to_owned();
+    let searxng_base_url = config
+        .extra
+        .get("searxngBaseUrl")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('/')
+        .to_owned();
+
+    let selected = config
+        .extra
+        .get("searchProvider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_owned();
+
+    let mut order = ["google", "brave", "searxng"];
+    if let Some(pos) = order.iter().position(|p| *p == selected) {
+        order.swap(0, pos);
+    }
 
     let mut last_err = None;
 
-    if !google_key.is_empty() && !google_cx.is_empty() {
-        match google_image_search(query, limit, &google_key, &google_cx).await {
+    for provider in order {
+        let result = match provider {
+            "google" if !google_key.is_empty() && !google_cx.is_empty() => {
+                google_image_search(query, limit, &google_key, &google_cx).await
+            }
+            "brave" if !brave_key.is_empty() => brave_image_search(query, limit, &brave_key).await,
+            "searxng" if !searxng_base_url.is_empty() => {
+                searxng_image_search(query, limit, &searxng_base_url).await
+            }
+            _ => continue,
+        };
+
+        match result {
             Ok(images) if !images.is_empty() => {
-                return Ok(build_report(query, "Google", images));
+                let name = match provider {
+                    "google" => "Google",
+                    "brave" => "Brave",
+                    _ => "SearXNG",
+                };
+                return Ok(build_report(query, name, images));
             }
             Ok(_) => {}
-            Err(e) => last_err = Some(e),
-        }
-    }
-
-    if !brave_key.is_empty() {
-        match brave_image_search(query, limit, &brave_key).await {
-            Ok(images) => return Ok(build_report(query, "Brave", images)),
             Err(e) => last_err = Some(e),
         }
     }
@@ -231,6 +262,70 @@ async fn brave_image_search(
                 source_url,
                 width: item["properties"]["width"].as_u64().map(|v| v as u32),
                 height: item["properties"]["height"].as_u64().map(|v| v as u32),
+            })
+        })
+        .collect())
+}
+
+/// Query a self-hosted SearXNG instance in the `images` category. `base_url`
+/// should point at the instance root, without a trailing `/search`. Requires
+/// the `json` output format to be enabled (`search.formats` in
+/// `settings.yml`), which is disabled by default.
+async fn searxng_image_search(
+    query: &str,
+    limit: usize,
+    base_url: &str,
+) -> Result<Vec<ImageHit>, ImageSearchError> {
+    let client = crate::HTTP_CLIENT.clone();
+    let url = format!("{base_url}/search");
+    let response: Value = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .query(&[("q", query), ("format", "json"), ("categories", "images")])
+        .send()
+        .await
+        .map_err(sanitize_reqwest_error)?
+        .error_for_status()
+        .map_err(sanitize_reqwest_error)?
+        .json()
+        .await
+        .map_err(sanitize_reqwest_error)?;
+
+    let results = response["results"]
+        .as_array()
+        .ok_or(ImageSearchError::EmptyResponse)?;
+
+    Ok(results
+        .iter()
+        .take(limit)
+        .filter_map(|item| {
+            let image_url = item["img_src"].as_str()?.to_owned();
+            if image_url.is_empty() {
+                return None;
+            }
+            let thumbnail_url = item["thumbnail_src"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(&image_url)
+                .to_owned();
+            let source_url = item["url"].as_str().unwrap_or(&image_url).to_owned();
+
+            // SearXNG reports size as a "WIDTH x HEIGHT" string, e.g. "1600 x 1060".
+            let (width, height) = item["resolution"]
+                .as_str()
+                .and_then(|res| res.split_once('x'))
+                .and_then(|(w, h)| {
+                    Some((w.trim().parse::<u32>().ok()?, h.trim().parse::<u32>().ok()?))
+                })
+                .map_or((None, None), |(w, h)| (Some(w), Some(h)));
+
+            Some(ImageHit {
+                title: item["title"].as_str().unwrap_or("Image").to_owned(),
+                image_url,
+                thumbnail_url,
+                source_url,
+                width,
+                height,
             })
         })
         .collect())

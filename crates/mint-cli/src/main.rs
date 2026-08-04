@@ -17,6 +17,7 @@ use mint_core::{
 
 mod actions;
 mod agent;
+mod background;
 mod gmail;
 mod hooks;
 mod image;

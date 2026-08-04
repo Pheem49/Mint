@@ -201,6 +201,17 @@ pub async fn run() -> Result<()> {
                 .is_empty(),
         },
         OnboardService {
+            category: "Search",
+            name: "SearXNG (self-hosted)",
+            key: "searxng",
+            enabled: !config
+                .extra
+                .get("searxngBaseUrl")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .is_empty(),
+        },
+        OnboardService {
             category: "Messaging Bridges",
             name: "Telegram Bot Bridge",
             key: "telegram",
@@ -564,6 +575,94 @@ pub async fn run() -> Result<()> {
         config.extra.insert(
             "braveSearchApiKey".to_string(),
             serde_json::Value::String(String::new()),
+        );
+    }
+
+    // SearXNG
+    if is_selected("searxng", &services) {
+        println!("\n\x1b[36m--- SearXNG (self-hosted) ---\x1b[0m");
+        let current_url = config
+            .extra
+            .get("searxngBaseUrl")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let url = prompt_input(
+            "SearXNG Instance URL (e.g. https://searx.example.com)",
+            Some(current_url),
+        )?;
+        config.extra.insert(
+            "searxngBaseUrl".to_string(),
+            serde_json::Value::String(url.trim_end_matches('/').to_string()),
+        );
+    } else {
+        config.extra.insert(
+            "searxngBaseUrl".to_string(),
+            serde_json::Value::String(String::new()),
+        );
+    }
+
+    // Preferred search provider — only relevant if more than one is configured.
+    {
+        let configured: Vec<(&str, &str)> = [
+            ("google", "Google Search"),
+            ("brave", "Brave Search"),
+            ("searxng", "SearXNG (self-hosted)"),
+        ]
+        .into_iter()
+        .filter(|(key, _)| match *key {
+            "google" => !config
+                .extra
+                .get("googleSearchApiKey")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .is_empty(),
+            "brave" => !config
+                .extra
+                .get("braveSearchApiKey")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .is_empty(),
+            _ => !config
+                .extra
+                .get("searxngBaseUrl")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .is_empty(),
+        })
+        .collect();
+
+        let provider = if configured.len() > 1 {
+            println!("\n\x1b[36m--- Preferred Search Provider ---\x1b[0m");
+            let current = config
+                .extra
+                .get("searchProvider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let labels: Vec<String> = configured.iter().map(|(_, l)| l.to_string()).collect();
+            let default_idx = configured
+                .iter()
+                .position(|(key, _)| *key == current)
+                .unwrap_or(0);
+            let picked_label = prompt_choice(
+                "Which provider should Mint try first when multiple are configured?",
+                &labels,
+                default_idx,
+            )?;
+            configured
+                .iter()
+                .find(|(_, label)| *label == picked_label)
+                .map(|(key, _)| key.to_string())
+                .unwrap_or_default()
+        } else {
+            configured
+                .first()
+                .map(|(key, _)| key.to_string())
+                .unwrap_or_default()
+        };
+
+        config.extra.insert(
+            "searchProvider".to_string(),
+            serde_json::Value::String(provider),
         );
     }
 
@@ -998,6 +1097,65 @@ fn prompt_select_or_custom(
                                 return prompt_input(label, Some(current));
                             }
                             return Ok(selected);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(error) => {
+                disable_raw_mode()?;
+                return Err(error.into());
+            }
+        }
+    }
+}
+
+/// Simple arrow-key single-choice picker with no "type your own" fallback.
+/// Unlike `prompt_select_or_custom`, every option is a literal, final answer.
+fn prompt_choice(label: &str, options: &[String], default_idx: usize) -> Result<String> {
+    let mut cursor = default_idx.min(options.len().saturating_sub(1));
+
+    println!("{}", label);
+    println!("  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Enter: Select]\x1b[0m");
+    print_select_options(options, cursor);
+    enable_raw_mode()?;
+
+    loop {
+        match event::poll(std::time::Duration::from_millis(100)) {
+            Ok(true) => {
+                if let Event::Key(key_event) = event::read()?
+                    && key_event.kind == event::KeyEventKind::Press
+                {
+                    let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                        && key_event
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL);
+                    if is_ctrl_c {
+                        disable_raw_mode()?;
+                        println!("\n\x1b[31mOnboarding cancelled.\x1b[0m");
+                        bail!("onboarding cancelled");
+                    }
+
+                    match key_event.code {
+                        KeyCode::Up => {
+                            cursor = if cursor > 0 { cursor - 1 } else { options.len() - 1 };
+                            disable_raw_mode()?;
+                            print!("\x1b[{}A\x1b[J", options.len());
+                            print_select_options(options, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Down => {
+                            cursor = if cursor < options.len() - 1 { cursor + 1 } else { 0 };
+                            disable_raw_mode()?;
+                            print!("\x1b[{}A\x1b[J", options.len());
+                            print_select_options(options, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Enter => {
+                            disable_raw_mode()?;
+                            println!();
+                            return Ok(options[cursor].clone());
                         }
                         _ => {}
                     }

@@ -22,6 +22,8 @@ const BLUE: &str = "\x1b[38;2;78;201;216m";
 const CYAN: &str = "\x1b[38;2;56;189;248m";
 const DIM: &str = "\x1b[90m";
 const BRIGHT: &str = "\x1b[1;97m";
+const BG_ADD: &str = "\x1b[48;2;20;53;32m\x1b[38;2;166;226;46m";
+const BG_DEL: &str = "\x1b[48;2;61;23;23m\x1b[38;2;255;121;121m";
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AgentOptions {
@@ -83,19 +85,7 @@ pub async fn run_code_agent_with_options(
         match approval {
             AgentApproval::WriteFile { path, diff, .. } => {
                 let (additions, deletions) = diff_stats(diff);
-                let colored_stats = format!(
-                    "{DIM}({RESET}{GREEN}+{}{RESET} {RED}-{}{RESET}{DIM}){RESET}",
-                    additions, deletions
-                );
-                let target_str = format!("{} {}", path, colored_stats);
-                print_approval_card(
-                    "File Creation / Write",
-                    &[("Target", &target_str), ("Action", "Write File")],
-                );
-                println!(
-                    "  {DIM}Proposed edit for {RESET}{BRIGHT}{}{RESET} {}:",
-                    path, colored_stats
-                );
+                print_diff_header("Create", path, additions, deletions);
                 print_colored_diff(diff);
                 if confirm_pausing_interrupt(
                     &format!("Approve writing file '{}'?", path),
@@ -108,19 +98,7 @@ pub async fn run_code_agent_with_options(
             }
             AgentApproval::ApplyPatch { path, diff, .. } => {
                 let (additions, deletions) = diff_stats(diff);
-                let colored_stats = format!(
-                    "{DIM}({RESET}{GREEN}+{}{RESET} {RED}-{}{RESET}{DIM}){RESET}",
-                    additions, deletions
-                );
-                let target_str = format!("{} {}", path, colored_stats);
-                print_approval_card(
-                    "File Modification",
-                    &[("Target", &target_str), ("Action", "Apply Patch")],
-                );
-                println!(
-                    "  {DIM}Proposed edit for {RESET}{BRIGHT}{}{RESET} {}:",
-                    path, colored_stats
-                );
+                print_diff_header("Update", path, additions, deletions);
                 print_colored_diff(diff);
                 if confirm_pausing_interrupt(
                     &format!("Approve patching file '{}'?", path),
@@ -690,27 +668,50 @@ fn parse_hunk_header(line: &str) -> Option<(usize, usize)> {
     Some((old_start, new_start))
 }
 
+/// Compact single-line approval header, e.g. `Update(src/foo.rs) — +3 -1 lines`.
+fn print_diff_header(action: &str, path: &str, additions: usize, deletions: usize) {
+    println!();
+    println!(
+        "  {BRIGHT}{action}{RESET}({BLUE}{path}{RESET}) {DIM}—{RESET} {GREEN}+{additions}{RESET} {RED}-{deletions}{RESET} {DIM}lines{RESET}"
+    );
+}
+
+/// Prints one diff row as a full-width color band (like a diff viewer's gutter
+/// highlight), padding `content` with spaces out to the terminal width so the
+/// background color fills the row instead of just wrapping the text.
+fn print_diff_band(bg: &str, line_num: usize, content: &str, term_width: usize) {
+    let line_num_str = format!("{:>5}", line_num);
+    let prefix_visible_len = 2 + line_num_str.chars().count() + 1;
+    let content_len = content.chars().count();
+    let pad_len = term_width.saturating_sub(prefix_visible_len + content_len);
+    println!(
+        "  {DIM}{line_num_str}{RESET} {bg}{content}{}{RESET}",
+        " ".repeat(pad_len)
+    );
+}
+
 fn print_colored_diff(diff: &str) {
+    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let term_width = term_width as usize;
     let mut current_old_line = 1;
     let mut current_new_line = 1;
 
     for line in diff.lines() {
         if line.starts_with("@@") {
+            // Still track line numbers from the hunk header, just don't print
+            // the raw unified-diff header/marker lines — they're noise here.
             if let Some((old_s, new_s)) = parse_hunk_header(line) {
                 current_old_line = old_s;
                 current_new_line = new_s;
             }
-            println!("       {BLUE}{line}{RESET}");
         } else if line.starts_with("--- ") || line.starts_with("+++ ") {
-            println!("       {DIM}{line}{RESET}");
-        } else if line.starts_with('-') {
-            let line_num_str = format!("{:>5}", current_old_line);
+            // skip: raw diff file-header lines aren't useful in an approval prompt
+        } else if let Some(content) = line.strip_prefix('-') {
+            print_diff_band(BG_DEL, current_old_line, content, term_width);
             current_old_line += 1;
-            println!("  {DIM}{line_num_str}{RESET} \x1b[31m{line}\x1b[0m");
-        } else if line.starts_with('+') {
-            let line_num_str = format!("{:>5}", current_new_line);
+        } else if let Some(content) = line.strip_prefix('+') {
+            print_diff_band(BG_ADD, current_new_line, content, term_width);
             current_new_line += 1;
-            println!("  {DIM}{line_num_str}{RESET} \x1b[32m{line}\x1b[0m");
         } else {
             let line_num_str = format!("{:>5}", current_new_line);
             current_old_line += 1;

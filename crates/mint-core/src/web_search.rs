@@ -6,7 +6,7 @@ use crate::MintConfig;
 
 #[derive(Debug, Error)]
 pub enum WebSearchError {
-    #[error("no web search API key configured (set googleSearchApiKey or braveSearchApiKey)")]
+    #[error("no web search provider configured (set googleSearchApiKey, braveSearchApiKey, or searxngBaseUrl)")]
     NoApiKey,
     #[error("web search request failed: {0}")]
     Request(String),
@@ -178,8 +178,11 @@ async fn enrich_with_og_images(hits: Vec<SearchHit>, max_fetch: usize) -> Vec<Se
         .collect()
 }
 
-/// Search the web using the first configured provider (Google → Brave).
-
+/// Search the web using the configured provider. The user's `searchProvider`
+/// selection (from Settings) is tried first; if it's unconfigured or returns
+/// no results, the remaining providers are tried in the default order
+/// (Google → Brave → SearXNG) as a fallback.
+///
 /// Returns the search hits and the name of the provider used.
 pub async fn search(
     query: &str,
@@ -207,33 +210,54 @@ pub async fn search(
         .unwrap_or("")
         .trim()
         .to_owned();
+    let searxng_base_url = config
+        .extra
+        .get("searxngBaseUrl")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .trim_end_matches('/')
+        .to_owned();
+
+    let selected = config
+        .extra
+        .get("searchProvider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_owned();
+
+    let mut order = ["google", "brave", "searxng"];
+    if let Some(pos) = order.iter().position(|p| *p == selected) {
+        order.swap(0, pos);
+    }
 
     let mut last_err = None;
 
-    if !google_key.is_empty() && !google_cx.is_empty() {
-        match google_search(query, limit, &google_key, &google_cx).await {
-            Ok(hits) => {
-                if !hits.is_empty() {
-                    // Enrich up to 4 hits with OG image fallback in parallel
-                    let enriched = enrich_with_og_images(hits, 4).await;
-                    return Ok((enriched, "Google".to_owned()));
-                }
+    for provider in order {
+        let result = match provider {
+            "google" if !google_key.is_empty() && !google_cx.is_empty() => {
+                google_search(query, limit, &google_key, &google_cx).await
             }
-            Err(e) => {
-                last_err = Some(e);
+            "brave" if !brave_key.is_empty() => brave_search(query, limit, &brave_key).await,
+            "searxng" if !searxng_base_url.is_empty() => {
+                searxng_search(query, limit, &searxng_base_url).await
             }
-        }
-    }
+            _ => continue,
+        };
 
-    if !brave_key.is_empty() {
-        match brave_search(query, limit, &brave_key).await {
-            Ok(hits) => {
+        match result {
+            Ok(hits) if !hits.is_empty() => {
+                // Enrich up to 4 hits with OG image fallback in parallel
                 let enriched = enrich_with_og_images(hits, 4).await;
-                return Ok((enriched, "Brave".to_owned()));
+                let name = match provider {
+                    "google" => "Google",
+                    "brave" => "Brave",
+                    _ => "SearXNG",
+                };
+                return Ok((enriched, name.to_owned()));
             }
-            Err(e) => {
-                last_err = Some(e);
-            }
+            Ok(_) => {}
+            Err(e) => last_err = Some(e),
         }
     }
 
@@ -325,6 +349,55 @@ async fn brave_search(
                 title: item["title"].as_str()?.to_owned(),
                 url: item["url"].as_str()?.to_owned(),
                 snippet: item["description"].as_str().unwrap_or("").to_owned(),
+                image_url,
+            })
+        })
+        .collect())
+}
+
+/// Query a self-hosted SearXNG instance. `base_url` should point at the
+/// instance root (e.g. `https://searx.example.com`), without a trailing
+/// `/search`. The instance must have the `json` output format enabled
+/// (`search.formats` in `settings.yml`), which is disabled by default.
+async fn searxng_search(
+    query: &str,
+    limit: usize,
+    base_url: &str,
+) -> Result<Vec<SearchHit>, WebSearchError> {
+    let client = crate::HTTP_CLIENT.clone();
+    let url = format!("{base_url}/search");
+    let response: serde_json::Value = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .query(&[("q", query), ("format", "json")])
+        .send()
+        .await
+        .map_err(sanitize_reqwest_error)?
+        .error_for_status()
+        .map_err(sanitize_reqwest_error)?
+        .json()
+        .await
+        .map_err(sanitize_reqwest_error)?;
+
+    let results = response["results"]
+        .as_array()
+        .ok_or(WebSearchError::EmptyResponse)?;
+
+    Ok(results
+        .iter()
+        .take(limit)
+        .filter_map(|item| {
+            // img_src is usually empty for general-category results; the
+            // engine-provided thumbnail is the more reliable field.
+            let image_url = item["img_src"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .or_else(|| item["thumbnail"].as_str().filter(|s| !s.is_empty()))
+                .map(|s| s.to_owned());
+            Some(SearchHit {
+                title: item["title"].as_str()?.to_owned(),
+                url: item["url"].as_str()?.to_owned(),
+                snippet: item["content"].as_str().unwrap_or("").to_owned(),
                 image_url,
             })
         })

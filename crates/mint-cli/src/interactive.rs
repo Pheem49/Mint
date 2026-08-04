@@ -1,5 +1,6 @@
 use crate::{BLUE, COMPOSER_BG, DIM, ERROR, MINT, RESET, WARN};
 use crate::{actions, agent, image, markdown};
+use crate::background::{BackgroundJobs, JobStatus};
 use anyhow::Result;
 use mint_core::{
     CHAT_CLI_ID, ChatRequest, MemoryStore, MintConfig, orchestrate_chat_stream_with_fallback,
@@ -17,6 +18,8 @@ pub struct InteractiveSession {
     pub fast_mode: bool,
     pub plan_mode: bool,
     pub pending_image: Option<String>, // base64 data URI
+    pub history: Vec<String>,          // previously submitted input lines, oldest first
+    pub jobs: BackgroundJobs,          // /bg jobs running (or finished) outside the prompt loop
 }
 
 pub struct InteractiveInput {
@@ -93,6 +96,7 @@ pub async fn handle_slash_command(
                 ("/image <path> [prompt]", "Attach image from file"),
                 ("/paste [prompt]", "Attach image from clipboard"),
                 ("Ctrl+V", "Paste clipboard image as [Image #1]"),
+                ("↑ / ↓", "Recall previously submitted input"),
                 ("/learn <path>", "Import a persistent .md or .txt skill"),
                 (
                     "/skill add <path>",
@@ -115,6 +119,15 @@ pub async fn handle_slash_command(
                 (
                     "/video-provider [name]",
                     "List video gen providers or switch default provider",
+                ),
+                (
+                    "/search-provider [name]",
+                    "List web search providers or switch default provider",
+                ),
+                ("/bg <query>", "Run a query in the background, non-blocking"),
+                (
+                    "/jobs [show|cancel <id>]",
+                    "List, inspect, or cancel background jobs",
                 ),
                 ("/mcp list", "List configured MCP servers"),
                 ("/mcp allow <server> <tool>", "Allow an MCP tool"),
@@ -479,6 +492,186 @@ pub async fn handle_slash_command(
                     }
                     Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
                 }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/search-provider" | "/searchProvider" => {
+            let mut available: Vec<(&str, &str)> = Vec::new();
+            let google_configured = session
+                .config
+                .extra
+                .get("googleSearchApiKey")
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| !v.trim().is_empty())
+                && session
+                    .config
+                    .extra
+                    .get("googleSearchCx")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|v| !v.trim().is_empty());
+            if google_configured {
+                available.push(("google", "Google Search API"));
+            }
+            if session
+                .config
+                .extra
+                .get("braveSearchApiKey")
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| !v.trim().is_empty())
+            {
+                available.push(("brave", "Brave Search API"));
+            }
+            if session
+                .config
+                .extra
+                .get("searxngBaseUrl")
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| !v.trim().is_empty())
+            {
+                available.push(("searxng", "SearXNG (self-hosted)"));
+            }
+
+            if available.is_empty() {
+                println!(
+                    "{ERROR}No search provider is configured yet.{RESET} Run onboarding or set a Google/Brave key or SearXNG URL in Settings first.\n"
+                );
+                return Some(SlashResult::Handled);
+            }
+
+            let current_provider = session
+                .config
+                .extra
+                .get("searchProvider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let selected_provider = if rest.is_empty() {
+                let options: Vec<String> =
+                    available.iter().map(|(_, label)| label.to_string()).collect();
+                let current_display = available
+                    .iter()
+                    .find(|(key, _)| *key == current_provider)
+                    .map(|(_, label)| *label)
+                    .unwrap_or(available[0].1);
+                match prompt_interactive_select(
+                    "Select Web Search provider",
+                    &options,
+                    current_display,
+                ) {
+                    Ok(Some(label)) => available
+                        .iter()
+                        .find(|(_, l)| *l == label)
+                        .map(|(key, _)| key.to_string()),
+                    Ok(None) => {
+                        println!("Cancelled search provider selection.\n");
+                        None
+                    }
+                    Err(e) => {
+                        println!("{ERROR}Error selecting provider:{RESET} {e}\n");
+                        None
+                    }
+                }
+            } else if let Some((key, _)) = available
+                .iter()
+                .find(|(key, label)| *key == rest || *label == rest)
+            {
+                Some(key.to_string())
+            } else {
+                println!("{ERROR}Provider '{rest}' is not configured or invalid.{RESET}\n");
+                None
+            };
+
+            if let Some(provider) = selected_provider {
+                session.config.extra.insert(
+                    "searchProvider".to_string(),
+                    serde_json::Value::String(provider.clone()),
+                );
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => {
+                        let display_name = available
+                            .iter()
+                            .find(|(key, _)| *key == provider)
+                            .map(|(_, label)| *label)
+                            .unwrap_or(&provider);
+                        println!(
+                            "{DIM}Switched default web search provider to: {}{RESET}\n",
+                            display_name
+                        );
+                    }
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/bg" => {
+            if rest.is_empty() {
+                println!("{ERROR}Usage:{RESET} /bg <query>\n");
+                return Some(SlashResult::Handled);
+            }
+            let id = session.jobs.spawn(&session.config, &session.current_dir, rest);
+            println!(
+                "{DIM}Started background job #{id}. Keep chatting — check on it with {RESET}/jobs{DIM}, or view its result with {RESET}/jobs show {id}{DIM}.{RESET}"
+            );
+            println!(
+                "{DIM}Note: /bg runs non-interactively, so file writes/shell/plugin/MCP actions needing approval are declined automatically.{RESET}\n"
+            );
+            Some(SlashResult::Handled)
+        }
+
+        "/jobs" => {
+            if rest.is_empty() {
+                let list = session.jobs.list();
+                if list.is_empty() {
+                    println!("{DIM}No background jobs yet. Start one with /bg <query>.{RESET}\n");
+                } else {
+                    println!("\n{BLUE}Background jobs{RESET}");
+                    for job in &list {
+                        let status_str = match job.status {
+                            JobStatus::Running => format!("{MINT}running{RESET}"),
+                            JobStatus::Done => "done".to_string(),
+                            JobStatus::Failed => format!("{ERROR}failed{RESET}"),
+                            JobStatus::Cancelled => format!("{DIM}cancelled{RESET}"),
+                        };
+                        let preview: String = job.query.chars().take(50).collect();
+                        let suffix = if job.query.chars().count() > 50 { "…" } else { "" };
+                        println!(
+                            "  #{:<3} [{status_str}] {DIM}{:>4}s{RESET}  {preview}{suffix}",
+                            job.id,
+                            job.started_at.elapsed().as_secs(),
+                        );
+                    }
+                    println!();
+                }
+                return Some(SlashResult::Handled);
+            }
+
+            let (sub, arg) = rest
+                .split_once(char::is_whitespace)
+                .map(|(s, a)| (s, a.trim()))
+                .unwrap_or((rest, ""));
+
+            match sub {
+                "show" => match arg.parse::<u32>().ok().and_then(|id| session.jobs.show(id)) {
+                    Some(job) => {
+                        println!("\n{BLUE}Job #{} — {}{RESET}", job.id, job.status);
+                        println!("{DIM}Query:{RESET} {}", job.query);
+                        match job.result {
+                            Some(result) => println!("\n{}\n", result),
+                            None => println!("{DIM}(still running — no result yet){RESET}\n"),
+                        }
+                    }
+                    None => println!("{ERROR}No such job.{RESET}\n"),
+                },
+                "cancel" => match arg.parse::<u32>().ok() {
+                    Some(id) if session.jobs.cancel(id) => {
+                        println!("{DIM}Cancelling job #{id}...{RESET}\n");
+                    }
+                    _ => println!("{ERROR}No such running job.{RESET}\n"),
+                },
+                _ => println!("{ERROR}Usage:{RESET} /jobs [show <id>|cancel <id>]\n"),
             }
             Some(SlashResult::Handled)
         }
@@ -1528,6 +1721,8 @@ pub async fn run_interactive_chat() -> Result<()> {
         fast_mode: false,
         plan_mode: false,
         pending_image: None,
+        history: Vec::new(),
+        jobs: BackgroundJobs::new(),
     };
 
     let mut printed_update = false;
@@ -1566,6 +1761,8 @@ pub async fn run_interactive_chat() -> Result<()> {
             &model_str,
             &path_str,
             &session.current_dir,
+            &session.history,
+            &session.jobs,
         )? {
             if let Some(uri) = input.pasted_image {
                 if let Some(ref mut current) = session.pending_image {
@@ -1578,6 +1775,10 @@ pub async fn run_interactive_chat() -> Result<()> {
             let query_str = input.text.trim().to_owned();
             if query_str.is_empty() {
                 continue;
+            }
+
+            if session.history.last().map(|s| s.as_str()) != Some(query_str.as_str()) {
+                session.history.push(query_str.clone());
             }
 
             if query_str.starts_with('$') {
@@ -1912,6 +2113,7 @@ pub fn load_all_available_skills(current_dir: &Path) -> Vec<mint_core::LearnedSk
 }
 
 const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
+    ("/bg", "Run a query in the background, non-blocking"),
     ("/cd", "Change active workspace directory"),
     ("/clear", "Clear conversation history"),
     ("/code", "Run in code-agent mode"),
@@ -1930,6 +2132,7 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
         "/image-provider",
         "List image gen providers or switch default provider",
     ),
+    ("/jobs", "List, inspect, or cancel background jobs"),
     ("/learn", "Import persistent skill/instruction"),
     ("/mcp", "List configured MCP servers"),
     ("/memory", "Manage long-term memory store"),
@@ -1937,6 +2140,10 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/multi-agent", "Toggle Multi-Agent Collaboration system"),
     ("/paste", "Attach image from clipboard"),
     ("/plugins", "List or generate plugins/skills"),
+    (
+        "/search-provider",
+        "List web search providers or switch default provider",
+    ),
     ("/skill add", "Add or install global skill file or folder"),
     ("/stats", "Show session statistics"),
     ("/veo", "Generate video using Google Veo"),
@@ -2001,7 +2208,12 @@ pub fn draw_input_box(
     println!(" {COMPOSER_BG}{blank_line}{RESET}");
 
     let agent_str = format!(" {DIM}[Agent]{RESET} {MINT}{}{RESET}", model);
-    let path_label = format!("path: {}", path_str);
+    // A `\0`-prefixed path_str is a status override (e.g. history browsing),
+    // rendered as-is instead of the usual "path: ..." label.
+    let path_label = match path_str.strip_prefix('\0') {
+        Some(status) => status.to_string(),
+        None => format!("path: {}", path_str),
+    };
     let agent_visible_len = " [Agent] ".len() + model.chars().count();
     let path_visible_len = path_label.chars().count();
 
@@ -2176,6 +2388,8 @@ pub fn read_line_interactive(
     model: &str,
     path_str: &str,
     current_dir: &Path,
+    history: &[String],
+    jobs: &BackgroundJobs,
 ) -> Result<Option<InteractiveInput>> {
     use crossterm::event::{self, Event, KeyCode};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -2205,6 +2419,12 @@ pub fn read_line_interactive(
     // Track tab autocomplete state
     let mut tab_base_input: Option<String> = None;
     let mut tab_index: Option<usize> = None;
+
+    // Track input-history browsing state (Up/Down over previously submitted lines).
+    // `history_index` counts back from the most recent entry: Some(0) is the
+    // newest, Some(len-1) the oldest. `tab_base_input` (above) doubles as the
+    // saved in-progress draft to restore when navigating back past the newest entry.
+    let mut history_index: Option<usize> = None;
 
     let (match_count, _) = draw_input_box(
         &input_chars,
@@ -2273,13 +2493,15 @@ pub fn read_line_interactive(
                     ctrl_d_pressed = false;
                 }
 
-                // Reset tab autocomplete state if any key other than Tab, Up, or Down is pressed
+                // Reset tab autocomplete / history-browsing state if any key other
+                // than Tab, Up, or Down is pressed
                 if key_event.code != KeyCode::Tab
                     && key_event.code != KeyCode::Up
                     && key_event.code != KeyCode::Down
                 {
                     tab_base_input = None;
                     tab_index = None;
+                    history_index = None;
                 }
 
                 match key_event.code {
@@ -2532,6 +2754,35 @@ pub fn read_line_interactive(
                                 );
                                 enable_raw_mode()?;
                             }
+                        } else if let Some(idx) = history_index {
+                            // Down moves toward more recent entries, then back to the draft.
+                            let status_path;
+                            if idx == 0 {
+                                history_index = None;
+                                input_chars = base.chars().collect();
+                                status_path = path_str.to_string();
+                            } else {
+                                let new_idx = idx - 1;
+                                history_index = Some(new_idx);
+                                input_chars =
+                                    history[history.len() - 1 - new_idx].chars().collect();
+                                status_path =
+                                    format!("\0History {}/{}", new_idx + 1, history.len());
+                            }
+                            cursor_pos = input_chars.len();
+
+                            disable_raw_mode()?;
+                            redraw_input_box(
+                                &input_chars,
+                                cursor_pos,
+                                placeholder,
+                                model,
+                                &status_path,
+                                None,
+                                None,
+                                current_dir,
+                            );
+                            enable_raw_mode()?;
                         }
                     }
                     KeyCode::Up => {
@@ -2617,6 +2868,32 @@ pub fn read_line_interactive(
                                 );
                                 enable_raw_mode()?;
                             }
+                        } else if !history.is_empty() {
+                            // Up moves toward older entries, saving the in-progress
+                            // draft (`base`) the first time history browsing starts.
+                            let new_idx = match history_index {
+                                Some(idx) if idx + 1 < history.len() => idx + 1,
+                                Some(idx) => idx,
+                                None => 0,
+                            };
+                            history_index = Some(new_idx);
+                            input_chars = history[history.len() - 1 - new_idx].chars().collect();
+                            cursor_pos = input_chars.len();
+                            let status_path =
+                                format!("\0History {}/{}", new_idx + 1, history.len());
+
+                            disable_raw_mode()?;
+                            redraw_input_box(
+                                &input_chars,
+                                cursor_pos,
+                                placeholder,
+                                model,
+                                &status_path,
+                                None,
+                                None,
+                                current_dir,
+                            );
+                            enable_raw_mode()?;
                         }
                     }
                     KeyCode::Left => {
@@ -2703,6 +2980,31 @@ pub fn read_line_interactive(
                     }
                     _ => {}
                 }
+            }
+        } else {
+            // Idle tick (no key event within the poll window) — a good place
+            // to surface any /bg job that finished while the user was typing
+            // elsewhere, without disturbing whatever they're mid-edit on.
+            let notices = jobs.take_notices();
+            if !notices.is_empty() {
+                disable_raw_mode()?;
+                clear_input_box();
+                for notice in &notices {
+                    println!(" {DIM}{}{RESET}", notice);
+                }
+                let (match_count, _) = draw_input_box(
+                    &input_chars,
+                    cursor_pos,
+                    placeholder,
+                    model,
+                    path_str,
+                    tab_base_input.as_deref(),
+                    tab_index,
+                    current_dir,
+                );
+                position_input_cursor(&input_chars, cursor_pos, match_count);
+                let _ = io::stdout().flush();
+                enable_raw_mode()?;
             }
         }
     };

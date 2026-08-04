@@ -1,17 +1,17 @@
-# Mint Tauri Migration
+# 🦀 Mint Tauri Migration
 
 Mint 2 now runs on Tauri v2 with a Rust backend and a React TypeScript webview.
 The historical desktop and Node CLI runtime has been removed after the native
 replacement covered the required desktop and CLI workflows.
 
-## New Architecture
+## 🏗️ New Architecture
 
 - `crates/mint-core`: Shared Rust configuration and domain logic.
 - `crates/mint-cli`: Native `mint` command built with Rust.
 - `src-tauri`: Tauri v2 desktop backend and IPC commands.
 - `src/renderer`: React and TypeScript webview UI built with Vite.
 
-## Commands
+## 💻 Commands
 
 ```bash
 npm install
@@ -28,7 +28,7 @@ npm run build:web
 npm run tauri:dev
 ```
 
-## Linux Prerequisites
+## 🐧 Linux Prerequisites
 
 Tauri desktop builds need native Linux development packages. On Debian,
 Ubuntu, or Mint:
@@ -49,7 +49,7 @@ sudo apt-get install -y \
   patchelf
 ```
 
-## Migration Order
+## 🔄 Migration Order
 
 1. Shared config and safety policy. Initial migration complete.
 2. Native CLI command parity. Status, provider, config, memory, task, safety, file, plugin, and chat commands migrated.
@@ -67,12 +67,12 @@ sudo apt-get install -y \
 6. Historical desktop runtime, legacy npm scripts, compatibility sources, and Node-only
    dependencies removed.
 
-## Remaining Compatibility Work
+## ⚠️ Remaining Compatibility Work
 
 - Exercise signed updater installation against a published release endpoint and public key.
 - Package a browser extension that serves the optional smart-context fallback endpoint.
 
-## Webhook Forwarding
+## 🔗 Webhook Forwarding
 
 Mint binds webhook listeners to localhost so the desktop backend is not directly exposed to the
 network. Use a TLS forwarding service such as Cloudflare Tunnel or ngrok and keep signature
@@ -98,7 +98,7 @@ Register the resulting HTTPS URL in Meta Webhooks. Configure `whatsappCloudAcces
 `whatsappPhoneNumberId`, `whatsappVerifyToken`, `whatsappAppSecret`, and
 `enableWhatsappBridge`. The verify token must match Meta's subscription request.
 
-## Browser Extension Context Fallback
+## 🧩 Browser Extension Context Fallback
 
 When Chromium remote debugging is unavailable, Mint attempts to read the active tab from
 `http://127.0.0.1:3212/context`. A browser extension helper may serve JSON in this format:
