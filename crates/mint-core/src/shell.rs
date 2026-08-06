@@ -7,7 +7,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use crate::{
-    Capability, MintConfig, SafetyError, SafetyTier, assert_path_capability,
+    Capability, MintConfig, SafetyError, SafetyTier, ShellCommandMode, assert_path_capability,
     classify_shell_command, shell_mode_allowed,
 };
 
@@ -20,8 +20,34 @@ pub struct ShellOutput {
     pub status: Option<i32>,
     pub success: bool,
     pub sandboxed: bool,
+    /// Set when a mutating/network command ran unconfined because sandboxing was
+    /// unavailable (rather than intentionally disabled via `sandboxMode: "off"`),
+    /// so callers can surface this instead of it happening silently.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_warning: Option<String>,
     pub stdout: String,
     pub stderr: String,
+}
+
+/// Whether OS-level sandboxing is actually usable for the configured
+/// `sandbox_command`, independent of whether `sandbox_mode` calls for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SandboxAvailability {
+    Available,
+    BinaryMissing,
+    UnsupportedPlatform,
+}
+
+pub fn sandbox_availability(config: &MintConfig) -> SandboxAvailability {
+    if cfg!(not(any(target_os = "linux", target_os = "macos"))) {
+        return SandboxAvailability::UnsupportedPlatform;
+    }
+    let sandbox = config.sandbox_command.trim();
+    if sandbox.is_empty() || !command_exists(sandbox) {
+        return SandboxAvailability::BinaryMissing;
+    }
+    SandboxAvailability::Available
 }
 
 #[derive(Debug, Error)]
@@ -72,6 +98,7 @@ pub fn run_shell_command(
 
     let prepared_cmd = prepare_shell_command(command);
     let sandbox_mode = config.sandbox_mode.trim().to_ascii_lowercase();
+    let mut sandbox_warning = None;
     if config.safety_enabled && sandbox_mode != "off" {
         if let Some(output) = run_in_sandbox(&prepared_cmd, &cwd, config)? {
             return Ok(shell_output(
@@ -80,12 +107,38 @@ pub fn run_shell_command(
                 classification.mode.as_str(),
                 true,
                 output,
+                None,
             ));
         }
         if sandbox_mode == "enforce" {
             return Err(ShellError::SandboxUnavailable(
                 config.sandbox_command.clone(),
             ));
+        }
+        // Falling back to unconfined execution (`sandboxMode` is the default
+        // "prefer" or some other non-"enforce" value). Only warn for
+        // higher-risk commands — read-only commands carry little risk either
+        // way, and warning on every `ls`/`cat` would be noise.
+        if matches!(
+            classification.mode,
+            ShellCommandMode::Mutating | ShellCommandMode::Network
+        ) {
+            sandbox_warning = Some(match sandbox_availability(config) {
+                SandboxAvailability::UnsupportedPlatform => {
+                    "Sandboxing is not supported on this platform; this command ran unconfined."
+                        .to_string()
+                }
+                SandboxAvailability::BinaryMissing => format!(
+                    "Sandbox command '{}' was not found; this command ran unconfined. \
+                     Install it, or set sandboxMode to \"enforce\" to block instead of \
+                     falling back.",
+                    config.sandbox_command.trim()
+                ),
+                SandboxAvailability::Available => {
+                    "Sandbox was available but did not run; this command ran unconfined."
+                        .to_string()
+                }
+            });
         }
     }
 
@@ -96,6 +149,7 @@ pub fn run_shell_command(
         classification.mode.as_str(),
         false,
         output,
+        sandbox_warning,
     ))
 }
 
@@ -292,6 +346,7 @@ fn shell_output(
     mode: &str,
     sandboxed: bool,
     output: Output,
+    sandbox_warning: Option<String>,
 ) -> ShellOutput {
     ShellOutput {
         command: command.into(),
@@ -300,6 +355,7 @@ fn shell_output(
         status: output.status.code(),
         success: output.status.success(),
         sandboxed,
+        sandbox_warning,
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
     }
@@ -363,6 +419,63 @@ mod tests {
     fn test_command_exists() {
         assert!(command_exists("sh") || command_exists("bash") || command_exists("cmd"));
         assert!(!command_exists("non_existent_binary_xyz_12345"));
+    }
+
+    #[test]
+    fn sandbox_availability_reports_binary_missing_for_bogus_command() {
+        let config = MintConfig {
+            sandbox_command: "non_existent_binary_xyz_12345".into(),
+            ..MintConfig::default()
+        };
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        assert_eq!(
+            sandbox_availability(&config),
+            SandboxAvailability::BinaryMissing
+        );
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        assert_eq!(
+            sandbox_availability(&config),
+            SandboxAvailability::UnsupportedPlatform
+        );
+    }
+
+    #[test]
+    fn mutating_command_without_sandbox_binary_carries_a_warning() {
+        let mut config = MintConfig {
+            safety_enabled: true,
+            sandbox_mode: "prefer".into(),
+            sandbox_command: "non_existent_binary_xyz_12345".into(),
+            ..MintConfig::default()
+        };
+        config
+            .extra
+            .insert("allowedShellModes".into(), serde_json::json!(["*"]));
+        let out_path = std::env::temp_dir().join("mint-shell-warning-test.txt");
+        let output = run_shell_command(
+            &format!("printf mint > {}", out_path.display()),
+            Path::new("."),
+            true,
+            &config,
+        )
+        .unwrap();
+        assert!(!output.sandboxed);
+        assert!(output.sandbox_warning.is_some());
+        let _ = std::fs::remove_file(&out_path);
+    }
+
+    #[test]
+    fn read_only_command_without_sandbox_binary_carries_no_warning() {
+        let mut config = MintConfig {
+            safety_enabled: true,
+            sandbox_mode: "prefer".into(),
+            sandbox_command: "non_existent_binary_xyz_12345".into(),
+            ..MintConfig::default()
+        };
+        config
+            .extra
+            .insert("allowedShellModes".into(), serde_json::json!(["*"]));
+        let output = run_shell_command("pwd", Path::new("."), true, &config).unwrap();
+        assert!(output.sandbox_warning.is_none());
     }
 
     #[test]

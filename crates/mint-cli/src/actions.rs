@@ -167,12 +167,16 @@ pub fn print_shell_output(output: &mint_core::ShellOutput) {
         println!();
     }
     println!(
-        "{DIM}[exit: {} | sandboxed: {}]{RESET}\n",
+        "{DIM}[exit: {} | sandboxed: {}]{RESET}",
         output
             .status
             .map_or_else(|| "unknown".into(), |status| status.to_string()),
         output.sandboxed
     );
+    if let Some(warning) = &output.sandbox_warning {
+        println!("{WARN}[Warning]{RESET} {warning}");
+    }
+    println!();
 }
 
 pub fn execute_action(action: &str, config: &MintConfig) -> Result<()> {

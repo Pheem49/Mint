@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, anyhow};
 use mint_core::{
     AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, CHAT_CLI_ID, MintConfig,
-    OrchestrationError, orchestrate_agent_loop,
+    OrchestrationError, PermissionDecision, PermissionRule, orchestrate_agent_loop,
+    permission_decision_for, save_config,
 };
 
 use crate::markdown;
@@ -67,6 +68,10 @@ pub async fn run_code_agent_with_options(
     let live_status = Arc::new(Mutex::new(LiveStatus::default()));
     let approve_approval_active = Arc::clone(&approval_active);
     let approve_live_status = Arc::clone(&live_status);
+    // Seeded from disk, then grown in-memory as the user picks "Always allow"
+    // during this run, so a rule added mid-run is honored immediately without
+    // waiting for a fresh process start.
+    let mut permission_rules = config.permission_rules.clone();
 
     let approve_cb = |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         approve_approval_active.store(true, Ordering::Relaxed);
@@ -83,86 +88,97 @@ pub async fn run_code_agent_with_options(
         let _guard = ApprovalGuard(Arc::clone(&approve_approval_active));
 
         match approval {
-            AgentApproval::WriteFile { path, diff, .. } => {
-                let (additions, deletions) = diff_stats(diff);
-                print_diff_header("Create", path, additions, deletions);
-                print_colored_diff(diff);
-                if confirm_pausing_interrupt(
-                    &format!("Approve writing file '{}'?", path),
-                    &approve_approval_active,
-                ) {
-                    Ok(ApprovalOutcome::Approved)
-                } else {
-                    Ok(ApprovalOutcome::Denied)
-                }
-            }
-            AgentApproval::ApplyPatch { path, diff, .. } => {
-                let (additions, deletions) = diff_stats(diff);
-                print_diff_header("Update", path, additions, deletions);
-                print_colored_diff(diff);
-                if confirm_pausing_interrupt(
-                    &format!("Approve patching file '{}'?", path),
-                    &approve_approval_active,
-                ) {
-                    Ok(ApprovalOutcome::Approved)
-                } else {
-                    Ok(ApprovalOutcome::Denied)
-                }
-            }
-            AgentApproval::RunShell { command, mode } => {
-                print_approval_card(
-                    "Local Shell Command",
-                    &[("Command", command), ("Mode", mode)],
-                );
-                if confirm_pausing_interrupt(
-                    "Approve running shell command?",
-                    &approve_approval_active,
-                ) {
-                    Ok(ApprovalOutcome::Approved)
-                } else {
-                    Ok(ApprovalOutcome::Denied)
-                }
-            }
-            AgentApproval::NoteWrite { path, .. } => {
-                print_approval_card("Note Creation", &[("Path", path)]);
-                if confirm_pausing_interrupt("Approve writing this note?", &approve_approval_active)
-                {
-                    Ok(ApprovalOutcome::Approved)
-                } else {
-                    Ok(ApprovalOutcome::Denied)
-                }
-            }
-            AgentApproval::RunPlugin { name, instruction } => {
-                print_approval_card(
-                    "Plugin Execution",
-                    &[("Plugin", name), ("Detail", instruction)],
-                );
-                if confirm_pausing_interrupt(
-                    &format!("Approve running plugin '{}'?", name),
-                    &approve_approval_active,
-                ) {
-                    Ok(ApprovalOutcome::Approved)
-                } else {
-                    Ok(ApprovalOutcome::Denied)
-                }
-            }
+            AgentApproval::WriteFile { path, diff, .. } => confirm_with_persistence(
+                "write_file",
+                path,
+                config,
+                root,
+                &mut permission_rules,
+                &approve_approval_active,
+                || {
+                    let (additions, deletions) = diff_stats(diff);
+                    print_diff_header("Create", path, additions, deletions);
+                    print_colored_diff(diff);
+                },
+            ),
+            AgentApproval::ApplyPatch { path, diff, .. } => confirm_with_persistence(
+                "apply_patch",
+                path,
+                config,
+                root,
+                &mut permission_rules,
+                &approve_approval_active,
+                || {
+                    let (additions, deletions) = diff_stats(diff);
+                    print_diff_header("Update", path, additions, deletions);
+                    print_colored_diff(diff);
+                },
+            ),
+            AgentApproval::RunShell { command, mode } => confirm_with_persistence(
+                "run_shell",
+                command,
+                config,
+                root,
+                &mut permission_rules,
+                &approve_approval_active,
+                || {
+                    print_approval_card(
+                        "Local Shell Command",
+                        &[("Command", command), ("Mode", mode)],
+                    );
+                },
+            ),
+            AgentApproval::NoteWrite { path, .. } => confirm_with_persistence(
+                "note_write",
+                path,
+                config,
+                root,
+                &mut permission_rules,
+                &approve_approval_active,
+                || {
+                    print_approval_card("Note Creation", &[("Path", path)]);
+                },
+            ),
+            AgentApproval::RunPlugin { name, instruction } => confirm_with_persistence(
+                "run_plugin",
+                name,
+                config,
+                root,
+                &mut permission_rules,
+                &approve_approval_active,
+                || {
+                    print_approval_card(
+                        "Plugin Execution",
+                        &[("Plugin", name), ("Detail", instruction)],
+                    );
+                },
+            ),
             AgentApproval::McpTool {
                 server,
                 tool,
                 arguments,
             } => {
-                let mut fields = vec![("Server", server.as_str()), ("Tool", tool.as_str())];
-                let formatted_args = arguments.to_string();
-                if !formatted_args.is_empty() && formatted_args != "{}" && formatted_args != "null"
-                {
-                    fields.push(("Arguments", &formatted_args));
-                }
-                print_approval_card("MCP Tool Call", &fields);
-                if confirm_pausing_interrupt("Approve MCP tool call?", &approve_approval_active) {
-                    Ok(ApprovalOutcome::Approved)
-                } else {
-                    Ok(ApprovalOutcome::Denied)
-                }
+                let subject = format!("{server}:{tool}");
+                confirm_with_persistence(
+                    "mcp_tool",
+                    &subject,
+                    config,
+                    root,
+                    &mut permission_rules,
+                    &approve_approval_active,
+                    || {
+                        let mut fields =
+                            vec![("Server", server.as_str()), ("Tool", tool.as_str())];
+                        let formatted_args = arguments.to_string();
+                        if !formatted_args.is_empty()
+                            && formatted_args != "{}"
+                            && formatted_args != "null"
+                        {
+                            fields.push(("Arguments", &formatted_args));
+                        }
+                        print_approval_card("MCP Tool Call", &fields);
+                    },
+                )
             }
             AgentApproval::UserApproval { title, prompt } => {
                 print_approval_card(
@@ -1457,6 +1473,113 @@ fn print_approval_card(title: &str, fields: &[(&str, &str)]) {
         }
     }
     println!("{}", bot_bar);
+}
+
+/// Approval prompt for the persistable `AgentApproval` variants (`run_shell`,
+/// `write_file`, `apply_patch`, `note_write`, `run_plugin`, `mcp_tool`).
+///
+/// Checks `permission_rules` (in-memory rules from this run, seeded from
+/// disk) first — if `tool`/`subject` already has a saved decision, returns
+/// immediately without prompting or calling `render_card`. Otherwise calls
+/// `render_card` (each approval type prints its own card format — a diff for
+/// file edits, a plain field list for everything else) and shows a 4-option
+/// prompt; an "Always" choice appends the new rule to `permission_rules` and
+/// persists it via `save_config` so it survives past this process, in
+/// addition to taking effect for the rest of this run.
+#[allow(clippy::too_many_arguments)]
+fn confirm_with_persistence(
+    tool: &str,
+    subject: &str,
+    config: &MintConfig,
+    root: &Path,
+    permission_rules: &mut Vec<PermissionRule>,
+    approval_active: &AtomicBool,
+    render_card: impl FnOnce(),
+) -> Result<ApprovalOutcome, String> {
+    if let Some(decision) = permission_decision_for(permission_rules, tool, subject, root) {
+        return Ok(match decision {
+            PermissionDecision::Allow => {
+                println!(
+                    "  {DIM}Auto-approved by saved permission rule ({tool}: {subject}){RESET}"
+                );
+                ApprovalOutcome::Approved
+            }
+            PermissionDecision::Deny => {
+                println!("  {DIM}Auto-denied by saved permission rule ({tool}: {subject}){RESET}");
+                ApprovalOutcome::Denied
+            }
+        });
+    }
+
+    render_card();
+    approval_active.store(true, Ordering::Relaxed);
+    let choice = prompt_persistent_approval();
+    approval_active.store(false, Ordering::Relaxed);
+
+    match choice {
+        0 => Ok(ApprovalOutcome::Approved),
+        1 | 2 => {
+            let rule = PermissionRule {
+                tool: tool.to_string(),
+                pattern: subject.to_string(),
+                decision: PermissionDecision::Allow,
+                project_root: if choice == 1 {
+                    Some(root.to_path_buf())
+                } else {
+                    None
+                },
+            };
+            permission_rules.push(rule.clone());
+            let mut updated = config.clone();
+            updated.permission_rules = permission_rules.clone();
+            if let Err(error) = save_config(&updated) {
+                eprintln!("  {DIM}Warning: could not save permission rule: {error}{RESET}");
+            }
+            Ok(ApprovalOutcome::Approved)
+        }
+        _ => Ok(ApprovalOutcome::Denied),
+    }
+}
+
+/// Renders the 4-option approval choice and returns its index (0 = Once,
+/// 1 = Always this project, 2 = Always everywhere, 3 = Deny). Falls back to a
+/// plain stdin line read (matching `crate::confirm`'s non-TTY behavior, e.g.
+/// piped/CI invocations) when not running in a real terminal, rather than
+/// silently defaulting to deny like the underlying `prompt_interactive_select`
+/// does on its own.
+fn prompt_persistent_approval() -> usize {
+    use crossterm::tty::IsTty;
+
+    let options = [
+        "Approve (Once)".to_string(),
+        "Approve (Always \u{2014} this project)".to_string(),
+        "Approve (Always \u{2014} everywhere)".to_string(),
+        "Deny".to_string(),
+    ];
+
+    if !io::stdout().is_tty() {
+        print!("  Approve? [o]nce / [p]roject-always / [g]lobal-always / [N]deny: ");
+        let _ = io::stdout().flush();
+        let mut answer = String::new();
+        if io::stdin().read_line(&mut answer).is_err() {
+            return 3;
+        }
+        return match answer.trim().to_ascii_lowercase().as_str() {
+            "o" | "once" | "y" | "yes" => 0,
+            "p" | "project" => 1,
+            "g" | "global" | "always" => 2,
+            _ => 3,
+        };
+    }
+
+    match crate::interactive::prompt_interactive_select(
+        "Approve this action?",
+        &options,
+        &options[0],
+    ) {
+        Ok(Some(choice)) => options.iter().position(|o| *o == choice).unwrap_or(3),
+        _ => 3,
+    }
 }
 
 fn confirm_pausing_interrupt(prompt: &str, approval_active: &AtomicBool) -> bool {

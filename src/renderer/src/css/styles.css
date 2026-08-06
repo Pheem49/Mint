@@ -2748,6 +2748,17 @@ input:checked + .slider:before {
   overflow: hidden;
   padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.035);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-chat-list.sidebar-cli-list {
+  flex: 0 0 auto;
+}
+
+.sidebar-chat-list:not(.sidebar-cli-list) {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .sidebar-section-title {
@@ -2795,6 +2806,19 @@ input:checked + .slider:before {
   max-height: min(360px, 42vh);
   overflow-y: auto;
   padding-right: 2px;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 38%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.sidebar-chat-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sidebar-chat-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 38%, transparent);
+  background-clip: padding-box;
 }
 
 .sidebar-chat-item {
@@ -3625,6 +3649,141 @@ input:checked + .slider:before {
   aspect-ratio: 4 / 3;
   object-fit: cover;
   background: var(--panel-soft);
+}
+
+.gemini-live-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(4, 6, 10, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.gemini-live-card {
+  position: relative;
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 40px 28px 28px;
+  border-radius: 24px;
+  background: var(--surface-bg, #1e293b);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+}
+
+.gemini-live-badge {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+}
+
+.gemini-live-orb {
+  width: 88px;
+  height: 88px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 30%, #60a5fa, #6366f1 55%, #a855f7 100%);
+  box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.45);
+  animation: gemini-live-pulse 2.2s ease-in-out infinite;
+}
+
+.gemini-live-orb.listening {
+  animation-duration: 1.4s;
+}
+
+.gemini-live-orb.speaking {
+  animation-duration: 0.9s;
+  background: radial-gradient(circle at 35% 30%, #34d399, #10b981 55%, #059669 100%);
+}
+
+.gemini-live-orb.thinking {
+  animation-duration: 1.8s;
+  background: radial-gradient(circle at 35% 30%, #fbbf24, #f59e0b 55%, #d97706 100%);
+}
+
+.gemini-live-orb.paused {
+  animation: none;
+  opacity: 0.5;
+  background: radial-gradient(circle at 35% 30%, #94a3b8, #64748b 55%, #475569 100%);
+}
+
+@keyframes gemini-live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
+  50% { box-shadow: 0 0 0 16px rgba(99, 102, 241, 0); }
+}
+
+.gemini-live-status {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--system-text-color, #f8fafc);
+}
+
+.gemini-live-transcript {
+  min-height: 44px;
+  text-align: center;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-soft, #94a3b8);
+  overflow-wrap: anywhere;
+}
+
+.gemini-live-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 6px;
+  padding: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+
+.gemini-live-btn {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--system-text-color, #f8fafc);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.gemini-live-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.gemini-live-btn:active {
+  transform: scale(0.94);
+}
+
+.gemini-live-btn.gemini-live-end {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+.gemini-live-btn.gemini-live-end:hover {
+  background: #dc2626;
 }
 
 .picture-card-meta {
@@ -4472,6 +4631,45 @@ input:checked + .slider:before {
 #send-btn {
   grid-column: 5;
   grid-row: 3;
+}
+
+/* Only widen the grid when the Gemini Live button is actually rendered, so the default
+   (feature disabled) layout is unaffected. */
+#chat-form.has-live-btn {
+  grid-template-columns: 32px 32px minmax(0, 1fr) 32px 32px 32px;
+}
+
+#chat-form.has-live-btn #gemini-live-btn {
+  grid-column: 5;
+  grid-row: 3;
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  background: var(--surface-strong);
+  color: var(--text-soft);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+#chat-form.has-live-btn #gemini-live-btn:hover {
+  background: var(--panel-raised);
+  transform: scale(1.08);
+}
+
+#chat-form.has-live-btn #gemini-live-btn:active {
+  transform: scale(0.92);
+}
+
+#chat-form.has-live-btn #send-btn {
+  grid-column: 6;
+}
+
+#chat-form.has-live-btn:not(:has(.mint-attachment)) #gemini-live-btn {
+  grid-row: 2;
 }
 
 #send-btn {

@@ -109,6 +109,17 @@ const VEO_VIDEO_MODEL_PRESETS: &[&str] = &[
     "veo-3.1-lite-generate-preview",
 ];
 
+// ── Realtime Live Model (Gemini Live voice) ─────────────────────────────────
+// Note: gemini-3.1-flash-live-preview requires requesting allowlist access from Google
+// before it works; gemini-2.5-flash-native-audio-preview-12-2025 needs no such request as
+// of writing, so it's listed first and used as the default. gemini-3.1-flash-tts-preview is
+// deliberately NOT offered here — it's a generateContent-only TTS model, not a Live/
+// BidiGenerateContent model, and will never work with this feature.
+const GEMINI_LIVE_MODEL_PRESETS: &[&str] = &[
+    "gemini-2.5-flash-native-audio-preview-12-2025",
+    "gemini-3.1-flash-live-preview",
+];
+
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
 
@@ -310,6 +321,17 @@ pub async fn run() -> Result<()> {
                     .and_then(|v| v.as_str())
                     .map(|s| !s.is_empty())
                     .unwrap_or(false),
+        },
+        // ── Voice ─────────────────────────────────────────────────────────────
+        OnboardService {
+            category: "Voice",
+            name: "Realtime Live Model (Gemini Live)  [uses Gemini key]",
+            key: "gemini_live",
+            enabled: config
+                .extra
+                .get("voiceMode")
+                .and_then(|v| v.as_str())
+                == Some("geminiLive"),
         },
     ];
 
@@ -974,6 +996,33 @@ pub async fn run() -> Result<()> {
         config.extra.insert(
             "videoGenProvider".to_string(),
             serde_json::Value::String("veo".to_string()),
+        );
+    }
+
+    if is_selected("gemini_live", &services) {
+        println!("\n\x1b[36m--- Realtime Live Model (Gemini Live) ---\x1b[0m");
+        println!(
+            "\x1b[90mUses the same Gemini API key as Step 1. Select the model used for realtime voice conversations.\x1b[0m"
+        );
+        let current_live_model = config
+            .extra
+            .get("geminiLiveModel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("gemini-2.5-flash-native-audio-preview-12-2025")
+            .to_string();
+        let selected_live_model = prompt_select_or_custom(
+            "Realtime Live Model",
+            static_model_options(GEMINI_LIVE_MODEL_PRESETS),
+            Some(&current_live_model),
+            "Custom realtime live model...",
+        )?;
+        config.extra.insert(
+            "geminiLiveModel".to_string(),
+            serde_json::Value::String(selected_live_model),
+        );
+        config.extra.insert(
+            "voiceMode".to_string(),
+            serde_json::Value::String("geminiLive".to_string()),
         );
     }
 

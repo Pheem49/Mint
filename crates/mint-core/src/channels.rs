@@ -296,6 +296,8 @@ pub async fn answer_channel(
             workspace_path: workspace_str,
             agent_id: None,
             plan_mode: false,
+            messages: None,
+            tools: None,
         },
     )
     .await

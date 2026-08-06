@@ -64,6 +64,8 @@ where
                 workspace_path: None,
                 agent_id: None,
                 plan_mode: false,
+                messages: None,
+                tools: None,
             },
         )
         .await?;

@@ -5,10 +5,13 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha1::{Digest, Sha1};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio_tungstenite::{WebSocketStream, tungstenite::{Message, protocol::Role}};
 
 use crate::{
     AgentProgress, ApprovalOutcome, AuthError, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID,
@@ -175,6 +178,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                 && route != "/api/video-generate"
                 && route != "/api/action"
                 && route != "/api/config"
+                && route != "/api/gemini-live"
             {
                 log_api_req(method, route, "200 OK", Some(&auth_label));
             }
@@ -1051,6 +1055,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             workspace_path: None,
                             agent_id: req.agent_id,
                             plan_mode: false,
+                            messages: None,
+                            tools: None,
                         };
                         let mut chat_req =
                             chat_req.with_document_context(&config).unwrap_or(chat_req);
@@ -1175,6 +1181,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             workspace_path: None,
                             agent_id: req.agent_id,
                             plan_mode: false,
+                            messages: None,
+                            tools: None,
                         };
                         let mut chat_req =
                             chat_req.with_document_context(&config).unwrap_or(chat_req);
@@ -1349,6 +1357,9 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                                     model: res.model,
                                                     text: res.summary,
                                                     fallback_provider: res.fallback,
+                                                    tool_calls: None,
+                                                    stop_reason: None,
+                                                    total_tokens: None,
                                                 };
                                                 if let Ok(json_val) =
                                                     serde_json::to_string(&serde_json::json!({
@@ -1962,6 +1973,98 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     let response = json!({ "active": active, "available": available });
                     send_json_response(socket, "200 OK", &response.to_string()).await;
                 }
+                ("GET", "/api/gemini-live") => {
+                    let Some(ws_key) = get_header(&request_str, "Sec-WebSocket-Key") else {
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"error\":\"missing Sec-WebSocket-Key\"}",
+                        )
+                        .await;
+                        return;
+                    };
+
+                    // A native browser WebSocket can't set an Authorization header, so the
+                    // token travels as a query param instead.
+                    let authorized = query_param(query, "token")
+                        .and_then(|token| session_user_id(token.trim()))
+                        .is_some();
+                    if !authorized {
+                        send_json_response(
+                            socket,
+                            "401 Unauthorized",
+                            "{\"error\":\"unauthorized\"}",
+                        )
+                        .await;
+                        return;
+                    }
+
+                    let accept_key = websocket_accept_header(&ws_key);
+                    let handshake_response = format!(
+                        "HTTP/1.1 101 Switching Protocols\r\n\
+                         Upgrade: websocket\r\n\
+                         Connection: Upgrade\r\n\
+                         Sec-WebSocket-Accept: {accept_key}\r\n\r\n"
+                    );
+                    if socket.write_all(handshake_response.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    let _ = socket.flush().await;
+
+                    // No handshake I/O is performed here — the raw bytes were already
+                    // consumed off `socket` by the connection loop above, and we just
+                    // answered the upgrade by hand.
+                    let ws_stream = WebSocketStream::from_raw_socket(socket, Role::Server, None).await;
+                    let (mut ws_write, mut ws_read) = ws_stream.split();
+
+                    let config = load_config().unwrap_or_default();
+                    let root = query_param(query, "workspacePath")
+                        .filter(|path| !path.trim().is_empty())
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                    let chat_id = query_param(query, "chatId").unwrap_or_default();
+
+                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+                    let handle = crate::gemini_live::start_session(
+                        config,
+                        root,
+                        chat_id,
+                        |_| Ok(ApprovalOutcome::Denied),
+                        move |event| {
+                            if let Ok(json_val) = serde_json::to_string(&event) {
+                                let _ = tx.send(json_val);
+                            }
+                        },
+                    );
+
+                    let writer_task = tokio::spawn(async move {
+                        while let Some(json_val) = rx.recv().await {
+                            if ws_write.send(Message::Text(json_val.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                        let _ = ws_write.close().await;
+                    });
+
+                    while let Some(msg) = ws_read.next().await {
+                        let Ok(msg) = msg else { break };
+                        match msg {
+                            Message::Text(text) => {
+                                if let Ok(payload) = serde_json::from_str::<Value>(&text)
+                                    && let Some(data) = payload["data"].as_str()
+                                    && let Ok(pcm) = BASE64.decode(data)
+                                {
+                                    let _ = handle.push_audio(pcm);
+                                }
+                            }
+                            Message::Close(_) => break,
+                            _ => {}
+                        }
+                    }
+
+                    drop(handle);
+                    let _ = writer_task.await;
+                }
                 _ => {
                     send_json_response(socket, "404 Not Found", "{\"error\":\"Not Found\"}").await;
                 }
@@ -2002,6 +2105,9 @@ async fn run_web_agent_loop(
         model: result.model,
         text: result.summary,
         fallback_provider: result.fallback,
+        tool_calls: None,
+        stop_reason: None,
+        total_tokens: None,
     })
 }
 
@@ -2185,6 +2291,15 @@ fn query_param(query: &str, key: &str) -> Option<String> {
         let (name, value) = pair.split_once('=')?;
         (percent_decode(name) == key).then(|| percent_decode(value))
     })
+}
+
+/// Computes the `Sec-WebSocket-Accept` response header per RFC 6455: base64(SHA1(key + GUID)).
+fn websocket_accept_header(client_key: &str) -> String {
+    const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    let mut hasher = Sha1::new();
+    hasher.update(client_key.as_bytes());
+    hasher.update(WS_GUID.as_bytes());
+    BASE64.encode(hasher.finalize())
 }
 
 /// Reads a header value from the raw request text (headers + body, as

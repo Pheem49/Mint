@@ -46,6 +46,9 @@ type DesktopStreamEvent =
   | { type: 'chunk'; chunk: string }
   | { type: 'progress'; progress: AgentProgress }
 
+export type { GeminiLiveEvent } from '../shared/utils/useGeminiLiveVoice'
+import type { GeminiLiveEvent } from '../shared/utils/useGeminiLiveVoice'
+
 const AUTH_TOKEN_KEY = 'mint_auth_token'
 
 function getStoredAuthToken(): string | null {
@@ -435,6 +438,41 @@ export async function streamChatMessage(
     })
   }
   return response
+}
+
+/**
+ * Starts a Gemini Live realtime voice session (beta, desktop-only). Returns a session id
+ * used by `sendGeminiLiveAudioChunk`/`stopGeminiLiveSession`; `onEvent` receives audio
+ * replies, transcripts, and tool-call status for the lifetime of the session.
+ */
+export async function startGeminiLiveSession(
+  onEvent: (event: GeminiLiveEvent) => void,
+  workspacePath?: string | null,
+  chatId?: string | null,
+): Promise<string> {
+  if (!isTauriRuntime()) {
+    throw new Error('Gemini Live voice mode is only available in the desktop app.')
+  }
+  const { invoke, Channel } = await import('@tauri-apps/api/core')
+  const channel = new Channel<GeminiLiveEvent>()
+  channel.onmessage = onEvent
+  return invoke<string>('start_gemini_live_session', {
+    request: { workspacePath, chatId },
+    onEvent: channel,
+  })
+}
+
+/** Pushes a chunk of base64-encoded PCM16 (16kHz, mono) mic audio into a running session. */
+export async function sendGeminiLiveAudioChunk(sessionId: string, chunkBase64: string): Promise<void> {
+  if (!isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('send_gemini_live_audio_chunk', { sessionId, chunkBase64 })
+}
+
+export async function stopGeminiLiveSession(sessionId: string): Promise<void> {
+  if (!isTauriRuntime()) return
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('stop_gemini_live_session', { sessionId })
 }
 
 function withImagePlaceholder(message: string, imageDataUri?: string | null, videoDataUri?: string | null) {

@@ -15,6 +15,17 @@ export const GEMINI_MODELS = [
   'gemini-2.5-flash',
 ] as const
 
+/** Models for the Gemini Live realtime voice feature — kept separate since these are
+ *  native-audio/live-specific model ids, not the regular text chat model list above.
+ *  gemini-2.5-flash-native-audio-preview-12-2025 needs no special access as of writing;
+ *  gemini-3.1-flash-live-preview requires requesting allowlist access from Google first.
+ *  gemini-3.1-flash-tts-preview is deliberately excluded — it's a generateContent-only TTS
+ *  model, not a Live/BidiGenerateContent model, and can't work with this feature at all. */
+export const GEMINI_LIVE_MODELS = [
+  'gemini-2.5-flash-native-audio-preview-12-2025',
+  'gemini-3.1-flash-live-preview',
+] as const
+
 export const OPENAI_MODELS = [
   'gpt-5.6-sol',
   'gpt-5.6-terra',

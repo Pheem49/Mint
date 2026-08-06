@@ -1957,6 +1957,8 @@ pub async fn run_interactive_chat() -> Result<()> {
                     workspace_path: None,
                     agent_id: None,
                     plan_mode: false,
+                    messages: None,
+                    tools: None,
                 },
                 |chunk| {
                     if first_chunk {

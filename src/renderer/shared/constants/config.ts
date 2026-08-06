@@ -31,6 +31,8 @@ export const DEFAULT_CONFIG = {
   ttsVolume: 1.0,
   ttsSpeed: 1.0,
   ttsPitch: 1.0,
+  voiceMode: 'legacy',
+  geminiLiveModel: 'gemini-2.5-flash-native-audio-preview-12-2025',
   pluginSpotifyEnabled: true,
   pluginCalendarEnabled: false,
   pluginGmailEnabled: false,

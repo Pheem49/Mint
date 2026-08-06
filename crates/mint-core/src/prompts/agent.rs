@@ -1,7 +1,7 @@
 use super::persona;
 use crate::MintConfig;
 
-fn is_port_9222_open() -> bool {
+pub(crate) fn is_port_9222_open() -> bool {
     use std::net::TcpStream;
     use std::time::Duration;
     if let Ok(addr) = "127.0.0.1:9222".parse() {
@@ -11,7 +11,7 @@ fn is_port_9222_open() -> bool {
     }
 }
 
-const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
+pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "list_files",
     "read_file",
     "search_code",
@@ -46,8 +46,12 @@ const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "run_shell",
 ];
 
-pub fn build_system_prompt(config: &MintConfig, plan_mode: bool) -> String {
-    let mut allowed_actions = vec![
+/// The full set of coding-agent actions before plan-mode/disabled-tools/browser
+/// filtering is applied. Shared by both the legacy JSON-prompt system prompt
+/// (below) and the native tool-calling catalog (`prompts::tool_catalog`) so the
+/// two paths can never drift on which actions exist.
+pub(crate) fn base_allowed_actions() -> Vec<&'static str> {
+    vec![
         "list_files",
         "read_file",
         "search_code",
@@ -97,7 +101,21 @@ pub fn build_system_prompt(config: &MintConfig, plan_mode: bool) -> String {
         "make_shorts",
         "generate_image",
         "generate_video",
-    ];
+    ]
+}
+
+/// `native` must be `true` when the caller is using a provider's real
+/// function/tool-calling API (`ChatRequest.tools`) rather than the legacy
+/// JSON-prompt scheme. This matters, not just cosmetically: when `native` is
+/// `true`, the "Return exactly one JSON object per response: {...}" +
+/// per-action "Input formats" text below is skipped, because sending it
+/// alongside a real `tools` array actively conflicts with native tool-calling
+/// — a model given both an explicit instruction to reply with prose JSON and
+/// a native tools array will often just follow the text instruction and
+/// never emit a real tool call at all (confirmed live: this was silently
+/// breaking Gemini's native tool-calling entirely before this fix).
+pub fn build_system_prompt(config: &MintConfig, plan_mode: bool, native: bool) -> String {
+    let mut allowed_actions = base_allowed_actions();
 
     if is_port_9222_open() {
         allowed_actions.push("browser_open");
@@ -127,7 +145,7 @@ pub fn build_system_prompt(config: &MintConfig, plan_mode: bool) -> String {
     }
     if allowed_actions.contains(&"read_file") {
         input_formats
-            .push("- read_file: {\"path\":\"relative/path\",\"startLine\":1,\"endLine\":240}");
+            .push("- read_file: {\"path\":\"relative/path\",\"startLine\":1,\"endLine\":240} (if the file has more lines than the requested range, the result says so explicitly and tells you the exact startLine/endLine to use next — re-read with those before assuming you've seen the whole file)");
     }
     if allowed_actions.contains(&"search_code") {
         input_formats.push("- search_code: {\"query\":\"text\",\"path\":\".\",\"limit\":20}");
@@ -268,7 +286,7 @@ pub fn build_system_prompt(config: &MintConfig, plan_mode: bool) -> String {
         input_formats.push("- verify: {\"commands\":[\"cargo test\",\"npm test\"]}");
     }
     if allowed_actions.contains(&"apply_patch") {
-        input_formats.push("- apply_patch: {\"patch\":{\"path\":\"relative/path\",\"hunks\":[{\"oldText\":\"exact text\",\"newText\":\"replacement\"}]}}");
+        input_formats.push("- apply_patch: {\"patch\":{\"path\":\"relative/path\",\"hunks\":[{\"oldText\":\"exact text\",\"newText\":\"replacement\",\"replaceAll\":false}]}} (oldText must be unique in the file unless replaceAll is true; if it matches more than once, the edit is rejected — add more context or set replaceAll)");
     }
     if allowed_actions.contains(&"write_file") {
         input_formats.push(
@@ -333,9 +351,15 @@ pub fn build_system_prompt(config: &MintConfig, plan_mode: bool) -> String {
             "0p. PLAN MODE IS ACTIVE: you may only investigate (read files, search, inspect diagnostics, etc.). Mutating tools such as write_file, apply_patch, and most run_shell/mcp_tool/run_plugin calls are unavailable and will be blocked. Once you have a clear implementation plan, call exit_plan_mode with the full plan; the user will approve or reject it. Do not attempt to edit files or run mutating commands before that approval.",
         );
     }
-    rules.push(
-        "0. For casual conversation or questions that need no local tool, use finish immediately.",
-    );
+    if native {
+        rules.push(
+            "0. For casual conversation or questions that need no local tool, just reply directly with your final answer — do not call a tool.",
+        );
+    } else {
+        rules.push(
+            "0. For casual conversation or questions that need no local tool, use finish immediately.",
+        );
+    }
     if allowed_actions.contains(&"list_files") || allowed_actions.contains(&"read_file") {
         rules.push("1. Inspect the workspace before editing.");
         rules.push("1a. For user folders such as Downloads, Documents, Desktop, Pictures, Music, or Videos, use list_files with that folder name or ~/folder before using shell.");
@@ -416,26 +440,48 @@ pub fn build_system_prompt(config: &MintConfig, plan_mode: bool) -> String {
     if allowed_actions.contains(&"run_plugin") {
         rules.push("10. Use run_plugin only when the requested native plugin is explicitly allowed by policy.");
     }
-    rules.push("11. Keep thought short and concrete. Write the thought field in English at all times. Use Thai for the final summary when the task is written in Thai.");
+    if native {
+        rules.push("11. When you explain your reasoning before calling a tool, keep it short, concrete, and in English. Give your final answer in Thai when the task is written in Thai.");
+    } else {
+        rules.push("11. Keep thought short and concrete. Write the thought field in English at all times. Use Thai for the final summary when the task is written in Thai.");
+    }
     rules.push("11a. The final summary must be complete, not just concise. Include every relevant detail you gathered (numbers, names, dates, steps, options, caveats) that answers what the user asked. If the user asked multiple things, address all of them. Only cut filler and repetition, never cut substance. Never truncate a list or explanation just to keep the reply short.");
-    rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately.");
+    if native {
+        rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done — reply with your final answer directly, with no further tool call.");
+    } else {
+        rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately.");
+    }
     let mature_rule = format!("13. {}", persona::MATURE_CONTENT_POLICY);
     rules.push(&mature_rule);
 
     let rules_str = rules.join("\n");
 
-    format!(
-        "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
-         You are also Mint: {persona} Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision. Write the \"thought\" field in English at all times (never use Thai for the thought field).\n\
-         Follow an inspect -> act -> verify loop. Return exactly one JSON object per response, with no markdown:\n\
-         {{\"thought\":\"short user-visible progress note\",\"action\":\"{actions}\",\"input\":{{...}}}}\n\n\
-         Input formats:\n\
-         {inputs}\n\n\
-         Rules:\n\
-         {rules}",
-        persona = persona::PERSONA_TH,
-        actions = actions_str,
-        inputs = input_formats_str,
-        rules = rules_str
-    )
+    if native {
+        format!(
+            "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
+             You are also Mint: {persona} Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision.\n\
+             Follow an inspect -> act -> verify loop using the tools available to you. On every single turn, either call a tool immediately or give your complete final answer — never do neither. \
+             Do not narrate or announce a tool call in plain text (e.g. \"I will now check the file\") — call the tool itself, in the same turn, instead. \
+             Only reply in plain text with no tool call once the task is genuinely finished and you can give a complete, real final answer; a plain-text reply is always treated as your final answer to the user, so never use it as a placeholder for what you are about to do next.\n\n\
+             Rules:\n\
+             {rules}",
+            persona = persona::PERSONA_TH,
+            rules = rules_str
+        )
+    } else {
+        format!(
+            "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
+             You are also Mint: {persona} Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision. Write the \"thought\" field in English at all times (never use Thai for the thought field).\n\
+             Follow an inspect -> act -> verify loop. Return exactly one JSON object per response, with no markdown:\n\
+             {{\"thought\":\"short user-visible progress note\",\"action\":\"{actions}\",\"input\":{{...}}}}\n\n\
+             Input formats:\n\
+             {inputs}\n\n\
+             Rules:\n\
+             {rules}",
+            persona = persona::PERSONA_TH,
+            actions = actions_str,
+            inputs = input_formats_str,
+            rules = rules_str
+        )
+    }
 }

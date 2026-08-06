@@ -264,6 +264,8 @@ pub async fn translate_subtitles(
             workspace_path: None,
             agent_id: None,
             plan_mode: false,
+            messages: None,
+            tools: None,
         };
 
         match crate::chat::send_chat_with_fallback(config, &chat_req).await {

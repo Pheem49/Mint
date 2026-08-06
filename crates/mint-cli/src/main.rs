@@ -12,7 +12,8 @@ use mint_core::{
     fetch_github_repo_summary, find_paths, generate_images, index_semantic_code, initialize_config,
     inspect_code_plan, list_code_files, load_config,
     orchestrate_chat_with_fallback, parse_github_url, propose_code_edits, read_code_file,
-    repository_summary, run_shell_command, search_code, search_semantic_code, set_config_value,
+    list_subagents, repository_summary, run_shell_command, sandbox_availability, save_config,
+    search_code, search_semantic_code, set_config_value,
 };
 
 mod actions;
@@ -453,6 +454,12 @@ enum CodeCommand {
         #[arg(long, default_value_t = 100)]
         limit: usize,
     },
+    /// List subagent definitions available to `dispatch_subagent` (global
+    /// `~/.config/mint/mint-agents/` plus workspace `.agents/subagents/`).
+    Subagents {
+        #[arg(default_value = ".")]
+        root: PathBuf,
+    },
     /// Read a numbered source range.
     Read {
         path: PathBuf,
@@ -553,6 +560,19 @@ enum SafetyCommand {
         #[arg(long)]
         write: bool,
     },
+    /// Manage persistent "always allow"/"always deny" agent approval rules.
+    Permissions {
+        #[command(subcommand)]
+        command: PermissionsCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PermissionsCommand {
+    /// List saved permission rules.
+    List,
+    /// Remove a saved permission rule by its index (see `list`).
+    Remove { index: usize },
 }
 
 #[derive(Debug, Subcommand)]
@@ -747,6 +767,11 @@ async fn main() -> Result<()> {
                             "activeProvider": config.ai_provider,
                             "availableProviders": config.available_providers(),
                             "headlessTaskQueue": config.extra["enableHeadlessTaskQueue"],
+                            "sandbox": {
+                                "mode": config.sandbox_mode,
+                                "command": config.sandbox_command,
+                                "availability": sandbox_availability(&config),
+                            },
                             "updater": {
                                 "enabled": config.extra["enableAutoUpdate"],
                                 "endpointConfigured": configured(&config, &["updaterEndpoint"]),
@@ -1174,6 +1199,8 @@ async fn main() -> Result<()> {
                             workspace_path: None,
                             agent_id: None,
                             plan_mode: false,
+                            messages: None,
+                            tools: None,
                         },
                     )
                     .await?;
@@ -1219,6 +1246,39 @@ async fn main() -> Result<()> {
                         assert_path_capability(&path, capability, &load_config()?)?.display()
                     );
                 }
+                SafetyCommand::Permissions { command } => match command {
+                    PermissionsCommand::List => {
+                        let config = load_config()?;
+                        if config.permission_rules.is_empty() {
+                            println!("No saved permission rules.");
+                        } else {
+                            for (index, rule) in config.permission_rules.iter().enumerate() {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&serde_json::json!({
+                                        "index": index,
+                                        "rule": rule,
+                                    }))?
+                                );
+                            }
+                        }
+                    }
+                    PermissionsCommand::Remove { index } => {
+                        let mut config = load_config()?;
+                        if index >= config.permission_rules.len() {
+                            anyhow::bail!(
+                                "no permission rule at index {index} (have {})",
+                                config.permission_rules.len()
+                            );
+                        }
+                        let removed = config.permission_rules.remove(index);
+                        save_config(&config)?;
+                        println!(
+                            "Removed: {}",
+                            serde_json::to_string_pretty(&removed)?
+                        );
+                    }
+                },
             },
             Command::Run {
                 approve,
@@ -1344,6 +1404,17 @@ async fn main() -> Result<()> {
                         "{}",
                         serde_json::to_string_pretty(&list_code_files(&root, limit, &config)?)?
                     ),
+                    CodeCommand::Subagents { root } => {
+                        let subagents = list_subagents(Some(&root));
+                        if subagents.is_empty() {
+                            println!(
+                                "No subagent definitions found under {}/.agents/subagents/ or ~/.config/mint/mint-agents/.",
+                                root.display()
+                            );
+                        } else {
+                            println!("{}", serde_json::to_string_pretty(&subagents)?);
+                        }
+                    }
                     CodeCommand::Read { path, start, end } => {
                         println!("{}", read_code_file(&path, start, end, &config)?)
                     }
@@ -1403,7 +1474,7 @@ async fn main() -> Result<()> {
                             &[build_code_patch(
                                 &root,
                                 path,
-                                &[CodePatchHunk { old_text, new_text }],
+                                &[CodePatchHunk { old_text, new_text, replace_all: false }],
                                 &config,
                             )?],
                             &config,
@@ -1422,7 +1493,7 @@ async fn main() -> Result<()> {
                             &[build_code_patch(
                                 &root,
                                 path,
-                                &[CodePatchHunk { old_text, new_text }],
+                                &[CodePatchHunk { old_text, new_text, replace_all: false }],
                                 &config,
                             )?],
                             &approval_token,
@@ -1975,6 +2046,8 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
             workspace_path: None,
             agent_id: None,
             plan_mode: false,
+            messages: None,
+            tools: None,
         },
     )
     .await {

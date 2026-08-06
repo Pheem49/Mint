@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     fs,
+    io::Write as _,
     path::{Path, PathBuf},
 };
 
@@ -47,6 +48,15 @@ pub enum CodeInspectionError {
     StaleProposal(PathBuf),
     #[error("patch hunk {index} old text was not found in {path}")]
     PatchTextNotFound { path: PathBuf, index: usize },
+    #[error(
+        "patch hunk {index} old text matches {occurrences} locations in {path}; \
+         supply more surrounding context to make it unique, or set replaceAll to replace all of them"
+    )]
+    AmbiguousPatchText {
+        path: PathBuf,
+        index: usize,
+        occurrences: usize,
+    },
     #[error("edit path escapes workspace root: {0}")]
     OutsideWorkspace(PathBuf),
 }
@@ -96,6 +106,11 @@ pub struct CodeEdit {
 pub struct CodePatchHunk {
     pub old_text: String,
     pub new_text: String,
+    /// Replace every occurrence of `old_text` instead of requiring it to be
+    /// unique. Defaults to `false`, matching the safer default of rejecting
+    /// ambiguous matches rather than silently editing the wrong one.
+    #[serde(default)]
+    pub replace_all: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -175,9 +190,10 @@ pub fn read_code_file(
         path: path.clone(),
         source,
     })?;
+    let total_lines = raw.lines().count();
     let first = start_line.max(1);
     let last = end_line.max(first);
-    Ok(raw
+    let body = raw
         .lines()
         .enumerate()
         .filter(|(index, _)| {
@@ -186,7 +202,22 @@ pub fn read_code_file(
         })
         .map(|(index, line)| format!("{:>6} | {line}", index + 1))
         .collect::<Vec<_>>()
-        .join("\n"))
+        .join("\n");
+
+    // Without this, a truncated read looks identical to "this is the whole
+    // file" — the caller (model or human) has no signal that more content
+    // exists, or what range to ask for next.
+    if last < total_lines {
+        let next_end = (last + (last - first + 1)).min(total_lines);
+        Ok(format!(
+            "{body}\n\n[Showing lines {first}-{last} of {total_lines} total lines — the rest of \
+             the file was NOT included. To continue reading, call read_file again with \
+             startLine={}, endLine={next_end}.]",
+            last + 1,
+        ))
+    } else {
+        Ok(body)
+    }
 }
 
 struct SearchHitSink<'a> {
@@ -306,13 +337,25 @@ pub fn build_code_patch(
     let path = workspace_path(&root, &path, Capability::Write, config)?;
     let mut content = read_existing_content(&path)?;
     for (index, hunk) in hunks.iter().enumerate() {
-        if !content.contains(&hunk.old_text) {
+        let occurrences = content.matches(hunk.old_text.as_str()).count();
+        if occurrences == 0 {
             return Err(CodeInspectionError::PatchTextNotFound {
                 path,
                 index: index + 1,
             });
         }
-        content = content.replacen(&hunk.old_text, &hunk.new_text, 1);
+        if occurrences > 1 && !hunk.replace_all {
+            return Err(CodeInspectionError::AmbiguousPatchText {
+                path,
+                index: index + 1,
+                occurrences,
+            });
+        }
+        content = if hunk.replace_all {
+            content.replace(&hunk.old_text, &hunk.new_text)
+        } else {
+            content.replacen(&hunk.old_text, &hunk.new_text, 1)
+        };
     }
     Ok(CodeEdit { path, content })
 }
@@ -360,10 +403,7 @@ pub fn apply_code_edits(
                 source,
             })?;
         }
-        fs::write(&preview.path, &edit.content).map_err(|source| CodeInspectionError::Write {
-            path: preview.path.clone(),
-            source,
-        })?;
+        write_atomic(&preview.path, &edit.content)?;
         applied.push(AppliedCodeEdit {
             path: preview.path,
             created: !preview.existed,
@@ -406,6 +446,43 @@ fn workspace_path(
         return Err(CodeInspectionError::OutsideWorkspace(path));
     }
     Ok(path)
+}
+
+/// Writes `content` to `path` atomically: writes to a temp file in the same
+/// directory (guaranteeing the same filesystem, required for an atomic rename),
+/// `fsync`s it for durability, then renames it onto `path`. A crash or power
+/// loss mid-write leaves either the old file or the new file intact, never a
+/// truncated/corrupted one. Best-effort cleans up the temp file on failure.
+fn write_atomic(path: &Path, content: &str) -> Result<(), CodeInspectionError> {
+    let write_error = |source: std::io::Error| CodeInspectionError::Write {
+        path: path.to_path_buf(),
+        source,
+    };
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| {
+            write_error(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "path has no file name",
+            ))
+        })?
+        .to_string_lossy();
+    let tmp_path = parent.join(format!(".{file_name}.mint-tmp-{}", std::process::id()));
+
+    let result = (|| -> std::io::Result<()> {
+        let mut file = fs::File::create(&tmp_path)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()
+    })();
+
+    match result {
+        Ok(()) => fs::rename(&tmp_path, path).map_err(write_error),
+        Err(source) => {
+            let _ = fs::remove_file(&tmp_path);
+            Err(write_error(source))
+        }
+    }
 }
 
 fn read_existing_content(path: &Path) -> Result<String, CodeInspectionError> {
@@ -617,6 +694,46 @@ mod tests {
     }
 
     #[test]
+    fn read_code_file_has_no_truncation_note_when_whole_file_fits() {
+        let root = std::env::temp_dir().join("mint-code-tools-read-full");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("small.txt"), "one\ntwo\nthree\n").unwrap();
+        let content = read_code_file(&root.join("small.txt"), 1, 240, &config_for(&root)).unwrap();
+        assert!(content.contains("one"));
+        assert!(content.contains("three"));
+        assert!(!content.contains("Showing lines"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_code_file_notes_truncation_and_the_exact_next_range() {
+        let root = std::env::temp_dir().join("mint-code-tools-read-truncated");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let lines: Vec<String> = (1..=500).map(|n| format!("line{n}")).collect();
+        fs::write(root.join("big.txt"), lines.join("\n") + "\n").unwrap();
+
+        let content = read_code_file(&root.join("big.txt"), 1, 240, &config_for(&root)).unwrap();
+        assert!(content.contains("line240"));
+        assert!(!content.contains("line241"), "must not leak past the requested range");
+        assert!(content.contains("Showing lines 1-240 of 500 total lines"));
+        assert!(content.contains("startLine=241, endLine=480"));
+
+        // Following that exact guidance should reach the end without another
+        // truncation note.
+        let rest = read_code_file(&root.join("big.txt"), 241, 480, &config_for(&root)).unwrap();
+        assert!(rest.contains("line480"));
+        assert!(rest.contains("Showing lines 241-480 of 500 total lines"));
+        let final_chunk =
+            read_code_file(&root.join("big.txt"), 481, 500, &config_for(&root)).unwrap();
+        assert!(final_chunk.contains("line500"));
+        assert!(!final_chunk.contains("Showing lines"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn searches_text_files_and_skips_build_directories() {
         let root = std::env::temp_dir().join("mint-code-tools-search");
         let _ = fs::remove_dir_all(&root);
@@ -709,8 +826,53 @@ mod tests {
     }
 
     #[test]
-    fn patch_replaces_exact_text_once() {
-        let root = std::env::temp_dir().join("mint-code-tools-patch");
+    fn patch_replaces_unique_text_once() {
+        let root = std::env::temp_dir().join("mint-code-tools-patch-unique");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("note.txt"), "one two\n").unwrap();
+        let edit = build_code_patch(
+            &root,
+            PathBuf::from("note.txt"),
+            &[CodePatchHunk {
+                old_text: "one".into(),
+                new_text: "three".into(),
+                replace_all: false,
+            }],
+            &config_for(&root),
+        )
+        .unwrap();
+        assert_eq!(edit.content, "three two\n");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn patch_rejects_ambiguous_old_text_by_default() {
+        let root = std::env::temp_dir().join("mint-code-tools-patch-ambiguous");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("note.txt"), "one one\n").unwrap();
+        let error = build_code_patch(
+            &root,
+            PathBuf::from("note.txt"),
+            &[CodePatchHunk {
+                old_text: "one".into(),
+                new_text: "two".into(),
+                replace_all: false,
+            }],
+            &config_for(&root),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            CodeInspectionError::AmbiguousPatchText { occurrences: 2, .. }
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn patch_replace_all_replaces_every_occurrence() {
+        let root = std::env::temp_dir().join("mint-code-tools-patch-replace-all");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("note.txt"), "one one\n").unwrap();
@@ -720,11 +882,12 @@ mod tests {
             &[CodePatchHunk {
                 old_text: "one".into(),
                 new_text: "two".into(),
+                replace_all: true,
             }],
             &config_for(&root),
         )
         .unwrap();
-        assert_eq!(edit.content, "two one\n");
+        assert_eq!(edit.content, "two two\n");
         let _ = fs::remove_dir_all(root);
     }
 

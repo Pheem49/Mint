@@ -25,8 +25,8 @@ import { AgentActivityDrawer } from '../../shared/components/AgentActivityDrawer
 import type { DiffHunk, FileChange } from '../../shared/types'
 import { numericSetting } from '../../shared/utils/ui'
 import { useSpeechToText } from '../../shared/utils/speech'
-
-
+import { useGeminiLiveVoice } from '../../shared/utils/useGeminiLiveVoice'
+import GeminiLiveOverlay from '../../shared/components/GeminiLiveOverlay'
 
 import {
   APP_ICON_PATH,
@@ -36,6 +36,9 @@ import {
   type ChatResponse,
   type RuntimeStatus,
   getTtsUrls,
+  startGeminiLiveSession,
+  sendGeminiLiveAudioChunk,
+  stopGeminiLiveSession,
 } from '../tauri'
 
 
@@ -278,6 +281,8 @@ export default function ChatPanel({
   }
 
 
+  // The mic button always drives the browser STT flow; Gemini Live is a separate "Live"
+  // button + overlay (see below), not a swap-in replacement for the same button.
   const {
     isRecording,
     voiceMode,
@@ -298,6 +303,14 @@ export default function ChatPanel({
     isSpeaking: Boolean(speakingText),
     onSendVoiceMessage,
     onSetMessage: (val) => onSetMessage(val)
+  })
+
+  const geminiLiveEnabled = settingsConfig?.voiceMode === 'geminiLive'
+  const geminiLive = useGeminiLiveVoice({
+    workspacePath,
+    startSession: startGeminiLiveSession,
+    sendAudioChunk: sendGeminiLiveAudioChunk,
+    stopSession: stopGeminiLiveSession
   })
 
   const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || videoAttachments.length > 0 || documentName)
@@ -637,7 +650,9 @@ export default function ChatPanel({
     if (sending) return
     if (!latest?.aiText || latest.id === lastAutoSpokenIdRef.current) return
 
-    if (!settingsConfig?.enableVoiceReply) {
+    // Gemini Live speaks its own replies over the realtime audio stream — skip the
+    // separate browser/Google TTS pass while a live voice session is active.
+    if (!settingsConfig?.enableVoiceReply || geminiLive.voiceMode) {
       lastAutoSpokenIdRef.current = latest.id
       if (voiceMode) {
         scheduleVoiceListen(350)
@@ -647,7 +662,7 @@ export default function ChatPanel({
 
     lastAutoSpokenIdRef.current = latest.id
     speak(latest.aiText)
-  }, [interactions, sending, settingsConfig?.enableVoiceReply, voiceMode])
+  }, [interactions, sending, settingsConfig?.enableVoiceReply, geminiLive.voiceMode, voiceMode])
   useEffect(() => {
     if (!toolMenuOpen) return
     const closeMenu = (event: MouseEvent) => {
@@ -1219,6 +1234,7 @@ export default function ChatPanel({
 
         <form
           id="chat-form"
+          className={geminiLiveEnabled ? 'has-live-btn' : ''}
           onSubmit={onSubmit}
           onDragOver={(event) => {
             if (event.dataTransfer.types.includes('application/x-mint-workspace-path')) {
@@ -1452,6 +1468,23 @@ export default function ChatPanel({
               </svg>
             )}
           </button>
+          {geminiLiveEnabled && (
+            <button
+              id="gemini-live-btn"
+              type="button"
+              onClick={() => geminiLive.setVoiceMode(true)}
+              title="Start Gemini Live conversation"
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="2"></circle>
+                <path d="M8.5 8.5a5 5 0 0 0 0 7"></path>
+                <path d="M15.5 8.5a5 5 0 0 1 0 7"></path>
+                <path d="M5.5 5.5a9 9 0 0 0 0 13"></path>
+                <path d="M18.5 5.5a9 9 0 0 1 0 13"></path>
+              </svg>
+            </button>
+          )}
           {sending ? (
             <button
               id="send-btn"
@@ -1478,6 +1511,23 @@ export default function ChatPanel({
       <p className="input-disclaimer">
         Mint Agent is an AI gateway. Responses via third-party APIs. Verify critical info.
       </p>
+      {geminiLive.voiceMode && (
+        <GeminiLiveOverlay
+          status={
+            geminiLive.isPaused
+              ? 'paused'
+              : geminiLive.isSpeaking
+              ? 'speaking'
+              : geminiLive.voiceAwaitingResponse
+              ? 'thinking'
+              : 'listening'
+          }
+          transcript={geminiLive.voiceTranscript}
+          isPaused={geminiLive.isPaused}
+          onTogglePause={geminiLive.togglePause}
+          onEndCall={() => geminiLive.setVoiceMode(false)}
+        />
+      )}
     </section>
   )
 }

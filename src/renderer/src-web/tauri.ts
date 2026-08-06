@@ -25,6 +25,9 @@ type DesktopStreamEvent =
   | { type: 'chunk'; chunk: string }
   | { type: 'progress'; progress: AgentProgress }
 
+export type { GeminiLiveEvent } from '../shared/utils/useGeminiLiveVoice'
+import type { GeminiLiveEvent } from '../shared/utils/useGeminiLiveVoice'
+
 
 export const isTauriRuntime = () => (
   typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__)
@@ -443,6 +446,80 @@ export async function getTtsUrls(text: string): Promise<TtsUrl[]> {
   if (!isTauriRuntime()) return []
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<TtsUrl[]>('get_tts_urls', { text })
+}
+
+// Gemini Live has no Tauri IPC to ride on in the browser build, so it talks directly to a
+// WebSocket route on the local API server (crates/mint-core/src/api_server.rs, "/api/gemini-live"),
+// which bridges to the same gemini_live::start_session used by the desktop build.
+const geminiLiveSockets = new Map<string, WebSocket>()
+
+function geminiLiveWsUrl(params: URLSearchParams): string {
+  const wsBase = getLocalApiBase().replace(/^http/, 'ws')
+  return `${wsBase}/gemini-live?${params.toString()}`
+}
+
+/**
+ * Starts a Gemini Live realtime voice session (beta). Returns a session id used by
+ * `sendGeminiLiveAudioChunk`/`stopGeminiLiveSession`; `onEvent` receives audio replies,
+ * transcripts, and tool-call status for the lifetime of the session.
+ */
+export async function startGeminiLiveSession(
+  onEvent: (event: GeminiLiveEvent) => void,
+  workspacePath?: string | null,
+  chatId?: string | null,
+): Promise<string> {
+  const params = new URLSearchParams()
+  const token = getStoredAuthToken()
+  if (token) params.set('token', token)
+  if (workspacePath) params.set('workspacePath', workspacePath)
+  if (chatId) params.set('chatId', chatId)
+
+  const sessionId = `gemini-live-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const ws = new WebSocket(geminiLiveWsUrl(params))
+
+  return new Promise((resolve, reject) => {
+    let opened = false
+    ws.onopen = () => {
+      opened = true
+      geminiLiveSockets.set(sessionId, ws)
+      resolve(sessionId)
+    }
+    ws.onmessage = (event) => {
+      try {
+        onEvent(JSON.parse(event.data as string) as GeminiLiveEvent)
+      } catch (error) {
+        console.error('Failed to parse Gemini Live event', error)
+      }
+    }
+    ws.onclose = () => {
+      geminiLiveSockets.delete(sessionId)
+      if (!opened) {
+        reject(new Error('Failed to connect to Gemini Live (check your Gemini API key and sign-in status).'))
+      } else {
+        // Safety net for abnormal drops — the server also sends an explicit
+        // {"type":"closed"} message on a clean shutdown, so this may fire twice;
+        // the hook's handler is idempotent.
+        onEvent({ type: 'closed' })
+      }
+    }
+    ws.onerror = () => {
+      // onclose always follows onerror for WebSocket; handled there.
+    }
+  })
+}
+
+/** Pushes a chunk of base64-encoded PCM16 (16kHz, mono) mic audio into a running session. */
+export async function sendGeminiLiveAudioChunk(sessionId: string, chunkBase64: string): Promise<void> {
+  const ws = geminiLiveSockets.get(sessionId)
+  if (!ws || ws.readyState !== WebSocket.OPEN) return
+  ws.send(JSON.stringify({ type: 'audio', data: chunkBase64 }))
+}
+
+export async function stopGeminiLiveSession(sessionId: string): Promise<void> {
+  const ws = geminiLiveSockets.get(sessionId)
+  if (!ws) return
+  geminiLiveSockets.delete(sessionId)
+  ws.close()
 }
 
 export async function cancelChatMessage(chatId: string): Promise<void> {

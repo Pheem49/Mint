@@ -38,6 +38,17 @@ static BLOCKED_COMMAND_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock
             r"\b(curl|wget)\b.*\|\s*(sh|bash|zsh)\b",
             "remote script piping",
         ),
+        (
+            // "--force(?:\s|$)" (not "\b--force\b") deliberately excludes
+            // --force-with-lease / --force-if-includes, which are the safe,
+            // recommended alternatives — the regex crate has no lookahead, so
+            // this relies on those flags never being followed by whitespace/EOL
+            // at exactly the "--force" boundary.
+            r"\bgit\s+push\b.*(?:--force(?:\s|$)|\s-f(?:\s|$))",
+            "force push can overwrite remote history",
+        ),
+        (r"\bfind\b.*\s-delete\b", "recursive file deletion via find -delete"),
+        (r"\brsync\b.*\s--delete\b", "destructive rsync mirror delete"),
     ]
     .into_iter()
     .map(|(pattern, reason)| (Regex::new(pattern).unwrap(), reason))
@@ -376,6 +387,38 @@ mod tests {
         let result = classify_shell_command("git reset --hard HEAD");
         assert_eq!(result.tier, SafetyTier::Blocked);
         assert_eq!(result.reason, "destructive git reset");
+    }
+
+    #[test]
+    fn blocks_git_force_push_variants() {
+        for command in [
+            "git push --force origin main",
+            "git push origin main --force",
+            "git push -f origin main",
+        ] {
+            let result = classify_shell_command(command);
+            assert_eq!(result.tier, SafetyTier::Blocked, "{command}");
+        }
+    }
+
+    #[test]
+    fn allows_git_push_force_with_lease() {
+        for command in [
+            "git push --force-with-lease origin main",
+            "git push --force-if-includes origin main",
+        ] {
+            let result = classify_shell_command(command);
+            assert_eq!(result.tier, SafetyTier::Approval, "{command}");
+        }
+    }
+
+    #[test]
+    fn blocks_find_delete_and_rsync_delete() {
+        let find_result = classify_shell_command("find . -name '*.tmp' -delete");
+        assert_eq!(find_result.tier, SafetyTier::Blocked);
+
+        let rsync_result = classify_shell_command("rsync -av --delete src/ dst/");
+        assert_eq!(rsync_result.tier, SafetyTier::Blocked);
     }
 
     #[test]

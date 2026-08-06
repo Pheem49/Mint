@@ -278,6 +278,8 @@ async fn detect_highlights(
             workspace_path: None,
             agent_id: None,
             plan_mode: false,
+            messages: None,
+            tools: None,
         };
 
         if let Ok((res, _)) = crate::chat::send_chat_with_fallback(config, &chat_req).await {

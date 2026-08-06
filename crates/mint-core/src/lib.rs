@@ -7,6 +7,7 @@ pub mod chat;
 pub mod code_tools;
 pub mod config;
 pub mod files;
+pub mod gemini_live;
 pub mod hooks;
 pub mod image_gen;
 pub mod image_search;
@@ -24,6 +25,7 @@ pub mod semantic;
 pub mod shell;
 pub mod skills;
 pub mod speech;
+pub mod subagents;
 pub mod subtitle;
 pub mod symbols;
 pub mod tasks;
@@ -44,8 +46,8 @@ pub use auth::{
     user_db_path,
 };
 pub use chat::{
-    ChatError, ChatRequest, ChatResponse, send_chat, send_chat_with_fallback, stream_chat,
-    stream_chat_with_fallback,
+    ChatError, ChatMessage, ChatRequest, ChatResponse, ChatRole, ContentBlock, ToolCall,
+    ToolSpec, send_chat, send_chat_with_fallback, stream_chat, stream_chat_with_fallback,
 };
 
 pub use browser::{
@@ -61,9 +63,11 @@ pub use code_tools::{
 };
 pub use config::{
     AgentConfig, ConfigError, CustomProvider, CustomProviderHeader, CustomProviderModel,
-    MintConfig, config_path, initialize_config, load_config, save_config, set_config_value,
+    MintConfig, PermissionDecision, PermissionRule, ToolCallingMode, config_path,
+    initialize_config, load_config, permission_decision_for, save_config, set_config_value,
 };
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
+pub use gemini_live::{GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session};
 pub use hooks::{
     HookEntry, HookError, HookEvent, PreHookOutcome, add_hook, clear_hooks, list_hooks,
     remove_hook, run_post_tool_hooks, run_pre_tool_hooks,
@@ -76,7 +80,9 @@ pub use knowledge::{
 };
 pub use mcp::{
     McpError, McpServer, add_mcp_server, call_configured_mcp_tool, call_mcp_tool,
-    clear_mcp_servers, configured_mcp_servers, list_mcp_servers, remove_mcp_server,
+    clear_mcp_servers, close_all_mcp_sessions, close_mcp_session, configured_mcp_servers,
+    drain_mcp_notifications, get_server_prompt, list_mcp_servers, list_server_prompts,
+    list_server_resources, list_server_tools, read_server_resource, remove_mcp_server,
 };
 pub use memory::{
     CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, InteractionMemory, LearnedSkill,
@@ -100,8 +106,11 @@ pub use semantic::{
     SemanticChunk, SemanticError, SemanticHit, SemanticIndex, index_semantic_code,
     search_semantic_code,
 };
-pub use shell::{ShellError, ShellOutput, run_shell_command};
+pub use shell::{
+    SandboxAvailability, ShellError, ShellOutput, run_shell_command, sandbox_availability,
+};
 pub use skills::{SkillError, learn_skill, learned_skills_context};
+pub use subagents::{SubagentDefinition, find_subagent, list_subagents};
 pub use symbols::{CodeSymbol, SymbolError, SymbolIndex, build_symbol_index};
 pub use tasks::{Task, TaskError, TaskStore, tasks_path};
 pub use tts::{TtsUrl, google_tts_urls};
