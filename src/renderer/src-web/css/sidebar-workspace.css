@@ -1,0 +1,762 @@
+/* web: sidebar-workspace.css — split from styles.css, rules kept in original order */
+
+.toggle-model-btn,
+.change-expression-btn,
+.accessory-cycle-btn,
+.toggle-interaction-btn,
+.interaction-guide-btn,
+.clear-btn,
+.settings-btn {
+  -webkit-app-region: no-drag;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.toggle-model-btn svg,
+.change-expression-btn svg,
+.accessory-cycle-btn svg,
+.toggle-interaction-btn svg,
+.interaction-guide-btn svg,
+.clear-btn svg,
+.settings-btn svg {
+  flex: 0 0 auto;
+}
+
+.change-expression-btn:hover {
+  background: rgba(251, 191, 36, 0.15);
+  border-color: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+}
+
+.toggle-interaction-btn .interaction-off-mark {
+  opacity: 0;
+}
+
+.interaction-guide-btn:hover {
+  background: rgba(34, 211, 238, 0.14);
+  border-color: rgba(34, 211, 238, 0.2);
+  color: #67e8f9;
+}
+
+.clear-btn:hover {
+  background: rgba(251, 191, 36, 0.15);
+  border-color: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+}
+
+.settings-btn:hover {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent);
+}
+
+.sidebar-toggle {
+  display: none !important;
+}
+
+.workspace-sidebar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 11;
+  width: 264px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 20px 10px 12px 14px;
+  background: var(--chrome-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+  overflow: visible;
+  transition: width 0.22s ease, padding 0.22s ease, opacity 0.18s ease, transform 0.22s ease;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 16px 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 14px;
+  overflow: hidden;
+  transition: all 0.22s ease;
+}
+
+.sidebar-brand.clickable {
+  cursor: pointer;
+  user-select: none;
+  -webkit-app-region: no-drag;
+  outline: none;
+}
+
+.sidebar-brand.clickable:hover .sidebar-brand-name {
+  color: var(--accent-hover);
+}
+
+.sidebar-brand.clickable:hover .sidebar-logo {
+  filter: brightness(1.15);
+  transform: scale(1.05);
+}
+
+.sidebar-logo {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: 6px;
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+.sidebar-brand-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 0.15s ease;
+}
+
+.workspace-sidebar button {
+  font: inherit;
+  font-size: 0.9rem;
+  -webkit-app-region: no-drag;
+}
+
+.sidebar-new-chat,
+.sidebar-top-action,
+.sidebar-settings,
+.sidebar-bottom-actions .clear-btn,
+.sidebar-bottom-actions .settings-btn {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+  padding: 0 10px;
+  text-align: left;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.sidebar-new-chat {
+  background: var(--surface-strong);
+  color: var(--text-main);
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+}
+
+.sidebar-new-chat:hover,
+.sidebar-chat-btn:hover,
+.sidebar-chat-btn.is-active,
+.sidebar-top-action:hover,
+.sidebar-top-action.is-active,
+.sidebar-settings:hover,
+.sidebar-bottom-actions .clear-btn:hover,
+.sidebar-bottom-actions .settings-btn:hover {
+  background: var(--surface-strong);
+  color: var(--text-main);
+}
+
+.sidebar-account-container {
+  position: relative;
+  margin-top: 10px;
+}
+
+.sidebar-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel-raised);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.sidebar-account:hover {
+  background: var(--surface-strong);
+}
+
+.sidebar-account-chevron {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.sidebar-account-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 1000;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.sidebar-account-menu-header {
+  padding: 6px 10px 8px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-account-menu-divider {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--border);
+}
+
+.sidebar-more-container {
+  position: relative;
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.sidebar-more-popover {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  margin-left: 8px;
+  z-index: 1000;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.sidebar-more-popover .popover-item,
+.sidebar-account-menu .popover-item {
+  width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+  padding: 0 10px;
+  text-align: left;
+  font: inherit;
+  font-size: 0.9rem;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.sidebar-more-popover .popover-item:hover,
+.sidebar-more-popover .popover-item.active,
+.sidebar-account-menu .popover-item:hover,
+.sidebar-account-menu .popover-item.active {
+  background: var(--surface-main);
+  color: var(--text-main);
+}
+
+.sidebar-account-avatar {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #06120c;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.sidebar-account-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sidebar-account-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.sidebar-account-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+.sidebar-top-action {
+  margin-bottom: 4px;
+}
+
+.sidebar-top-action:last-of-type {
+  margin-bottom: 12px;
+}
+
+.sidebar-model-controls {
+  display: grid;
+  width: 100%;
+  align-items: stretch;
+  justify-items: stretch;
+  justify-content: stretch;
+  gap: 2px;
+  padding: 10px 0 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.035);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+  margin-bottom: 6px;
+}
+
+.workspace-sidebar .toggle-model-btn,
+.workspace-sidebar .change-expression-btn,
+.workspace-sidebar .accessory-cycle-btn,
+.workspace-sidebar .toggle-interaction-btn,
+.workspace-sidebar .interaction-guide-btn {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 32px;
+  justify-content: flex-start;
+  padding: 0 10px;
+  color: var(--text-soft);
+  font-weight: 400;
+  gap: 9px;
+}
+
+.workspace-sidebar .toggle-model-btn:hover,
+.workspace-sidebar .toggle-model-btn.active,
+.workspace-sidebar .change-expression-btn:hover,
+.workspace-sidebar .accessory-cycle-btn:hover,
+.workspace-sidebar .accessory-cycle-btn.active,
+.workspace-sidebar .toggle-interaction-btn:hover,
+.workspace-sidebar .toggle-interaction-btn.active,
+.workspace-sidebar .interaction-guide-btn:hover,
+.workspace-sidebar .interaction-guide-btn.active {
+  background: var(--surface-strong);
+  border-color: transparent;
+  color: var(--text-main);
+}
+
+.sidebar-section {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.035);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-chat-list.sidebar-cli-list {
+  flex: 0 0 auto;
+}
+
+.sidebar-chat-list:not(.sidebar-cli-list) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sidebar-section-title {
+  padding: 0 10px 12px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.sidebar-subsection-title {
+  padding-top: 14px;
+  padding-bottom: 8px;
+}
+
+.sidebar-section-title.clickable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.16s ease;
+}
+
+.sidebar-section-title.clickable:hover {
+  color: var(--text-main);
+}
+
+.sidebar-project {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  color: var(--text-muted);
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  cursor: default;
+  text-align: left;
+}
+
+.sidebar-chat-list {
+  display: grid;
+  gap: 0px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 38%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.sidebar-chat-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sidebar-chat-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 38%, transparent);
+  background-clip: padding-box;
+}
+
+.sidebar-chat-item {
+  cursor: pointer;
+}
+
+.sidebar-chat-item:hover {
+  background: var(--surface-strong);
+  color: var(--text-main);
+}
+
+.sidebar-chat-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-chat-delete {
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: var(--text-muted);
+  opacity: 0;
+  flex: 0 0 auto;
+}
+
+.sidebar-chat-edit {
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: var(--text-muted);
+  opacity: 0;
+  flex: 0 0 auto;
+}
+
+.sidebar-chat-item:hover .sidebar-chat-delete,
+.sidebar-chat-delete:focus-visible,
+.sidebar-chat-item:hover .sidebar-chat-edit,
+.sidebar-chat-edit:focus-visible {
+  opacity: 1;
+}
+
+.sidebar-chat-delete:hover {
+  color: var(--hover-delete);
+  background: var(--hover-delete-bg);
+}
+
+.sidebar-chat-edit:hover {
+  color: var(--hover-edit);
+  background: var(--hover-edit-bg);
+}
+
+.sidebar-chat-rename-input {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 0.82rem;
+  padding: 2px 6px;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+  margin-right: 4px;
+}
+
+.sidebar-chat-rename-input:focus {
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.sidebar-chat-item.active:hover .mint-status-pill {
+  display: none;
+}
+
+.app-body.sidebar-collapsed .sidebar-new-chat,
+.app-body.sidebar-collapsed .sidebar-top-action,
+.app-body.sidebar-collapsed .sidebar-settings,
+.app-body.sidebar-collapsed .sidebar-bottom-actions .clear-btn,
+.app-body.sidebar-collapsed .sidebar-bottom-actions .settings-btn,
+.app-body.sidebar-collapsed .workspace-sidebar .toggle-model-btn,
+.app-body.sidebar-collapsed .workspace-sidebar .change-expression-btn,
+.app-body.sidebar-collapsed .workspace-sidebar .accessory-cycle-btn,
+.app-body.sidebar-collapsed .workspace-sidebar .toggle-interaction-btn,
+.app-body.sidebar-collapsed .workspace-sidebar .interaction-guide-btn,
+.app-body.sidebar-collapsed .sidebar-project {
+  width: 40px;
+  height: 34px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+}
+
+.app-body.sidebar-collapsed .sidebar-section-title,
+.app-body.sidebar-collapsed .workspace-sidebar button > span:not([aria-hidden="true"]),
+.app-body.sidebar-collapsed .sidebar-project > span:not([aria-hidden="true"]):not(.mint-status-pill),
+.app-body.sidebar-collapsed .mint-status-label {
+  display: none;
+}
+
+.app-body.sidebar-collapsed .sidebar-more-popover button > span:not([aria-hidden="true"]),
+.app-body.sidebar-collapsed .sidebar-account-menu button > span:not([aria-hidden="true"]) {
+  display: inline;
+}
+
+.app-body.sidebar-collapsed .mint-status-pill {
+  margin-left: 3px;
+  padding: 0;
+  background: transparent;
+}
+
+.app-body.sidebar-collapsed .sidebar-project.active {
+  gap: 4px;
+}
+
+.app-body.sidebar-collapsed .sidebar-account {
+  width: 40px;
+  margin: 0 auto;
+  padding: 4px;
+  justify-content: center;
+  gap: 0;
+}
+
+.app-body.sidebar-collapsed .sidebar-account-info,
+.app-body.sidebar-collapsed .sidebar-account-chevron {
+  display: none;
+}
+
+.app-body.sidebar-collapsed .sidebar-account-menu {
+  left: 100%;
+  right: auto;
+  bottom: 0;
+  margin-left: 8px;
+  min-width: 200px;
+}
+
+.mint-status-pill {
+  margin-left: auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.mint-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.12);
+  flex: 0 0 auto;
+}
+
+.mint-status-pill[data-state="listening"],
+.model-activity-badge[data-state="listening"] {
+  color: var(--status-listening);
+}
+
+.mint-status-pill[data-state="listening"] .mint-status-dot,
+.model-activity-badge[data-state="listening"] .mint-status-dot {
+  background: var(--status-listening);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-listening) 16%, transparent);
+  animation: mintStatusPulse 1.2s ease-in-out infinite;
+}
+
+.mint-status-pill[data-state="thinking"],
+.model-activity-badge[data-state="thinking"] {
+  color: var(--status-thinking);
+}
+
+.mint-status-pill[data-state="thinking"] .mint-status-dot,
+.model-activity-badge[data-state="thinking"] .mint-status-dot {
+  background: var(--status-thinking);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-thinking) 20%, transparent);
+  animation: mintStatusPulse 1s ease-in-out infinite;
+}
+
+.mint-status-pill[data-state="speaking"],
+.model-activity-badge[data-state="speaking"] {
+  color: var(--status-speaking);
+}
+
+.mint-status-pill[data-state="speaking"] .mint-status-dot,
+.model-activity-badge[data-state="speaking"] .mint-status-dot {
+  background: var(--status-speaking);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-speaking) 16%, transparent);
+  animation: mintStatusPulse 0.9s ease-in-out infinite;
+}
+
+.mint-status-pill[data-state="error"],
+.model-activity-badge[data-state="error"] {
+  color: var(--status-error);
+}
+
+.mint-status-pill[data-state="error"] .mint-status-dot,
+.model-activity-badge[data-state="error"] .mint-status-dot {
+  background: var(--status-error);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-error) 16%, transparent);
+}
+
+.sidebar-project.active,
+.sidebar-project.is-active {
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--text-main);
+}
+
+.sidebar-pictures-btn {
+  cursor: pointer;
+}
+
+.sidebar-pictures-btn:hover {
+  background: var(--surface-strong);
+  color: var(--text-main);
+}
+
+.sidebar-settings {
+  margin-top: auto;
+}
+
+.sidebar-bottom-actions {
+  display: grid;
+  width: 100%;
+  align-items: stretch;
+  justify-items: stretch;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.035);
+}
+
+@media (max-width: 760px) {
+
+  .toggle-model-btn,
+  .change-expression-btn,
+.accessory-cycle-btn,
+  .toggle-interaction-btn,
+  .interaction-guide-btn {
+    width: 34px;
+    padding: 0;
+  }
+
+  .toggle-model-btn span,
+  .change-expression-btn span,
+.accessory-cycle-btn span,
+  .toggle-interaction-btn span,
+  .interaction-guide-btn span {
+    display: none;
+  }
+
+  .sidebar-toggle {
+    display: none;
+  }
+
+  .workspace-sidebar {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 260px !important;
+    height: 100%;
+    z-index: 9999;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: var(--chrome-bg);
+    padding: 20px 10px 12px 14px !important;
+  }
+  .app-body.sidebar-collapsed .workspace-sidebar .sidebar-brand-name {
+    display: inline !important;
+    opacity: 1 !important;
+  }
+}
+
+/* Sidebar Search Chats Button */
+
+.sidebar-search-btn {
+  margin-top: 4px;
+}
