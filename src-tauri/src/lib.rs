@@ -32,14 +32,16 @@ use integrations::{channel_inventory, list_plugins};
 use mint_core::{
     AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, AuthUser, ChatRequest,
     ChatResponse, ChatSession, CodeEdit, CodeEditProposal, GeminiLiveEvent, GeminiLiveHandle,
-    ImageGenRequest, InteractionMemory, MemoryStore, MintConfig, PictureEntry, TtsUrl,
-    VideoGenRequest, VideoGenResponse, WeatherReport, apply_code_edits, classify_shell_command,
-    config_path, delete_saved_picture, get_user, google_tts_urls, list_saved_pictures,
-    load_config, load_workflows, login_user, orchestrate_agent_loop,
-    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, propose_code_edits,
-    register_user, save_avatar_file, save_chat_images, save_config, save_workflows,
-    start_channels, start_gemini_live_session as core_start_gemini_live_session, update_profile,
-    weather, workflows_path,
+    ImageGenRequest, InteractionMemory, MemoryStore, MintConfig, PictureEntry, SubagentDefinition,
+    SubagentDraft, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport, apply_code_edits,
+    classify_shell_command, config_path, delete_saved_picture,
+    delete_subagent as core_delete_subagent, get_user, google_tts_urls, list_saved_pictures,
+    list_subagents as core_list_subagents, load_config, load_workflows, login_user,
+    orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    propose_code_edits, register_user, save_avatar_file, save_chat_images, save_config,
+    save_subagent as core_save_subagent, save_workflows, start_channels,
+    start_gemini_live_session as core_start_gemini_live_session, update_profile, weather,
+    workflows_path,
 };
 use plugins::execute_plugin;
 
@@ -432,6 +434,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
     let message_clone = request.message.clone();
     let root_clone = root.clone();
     let image_data_uri_clone = request.image_data_uri.clone();
+    let audio_data_uri_clone = request.audio_data_uri.clone();
     let video_data_uri_clone = request.video_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
     let agent_id_clone = request.agent_id.clone();
@@ -442,9 +445,11 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
             &message_clone,
             &root_clone,
             image_data_uri_clone,
+            audio_data_uri_clone,
             video_data_uri_clone,
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
+            None,
             fast_mode,
             plan_mode,
             approve_cb,
@@ -609,6 +614,7 @@ async fn stream_chat_message(
     let message_clone = request.message.clone();
     let root_clone = root.clone();
     let image_data_uri_clone = request.image_data_uri.clone();
+    let audio_data_uri_clone = request.audio_data_uri.clone();
     let video_data_uri_clone = request.video_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
     let agent_id_clone = request.agent_id.clone();
@@ -619,9 +625,11 @@ async fn stream_chat_message(
             &message_clone,
             &root_clone,
             image_data_uri_clone,
+            audio_data_uri_clone,
             video_data_uri_clone,
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
+            None,
             fast_mode,
             plan_mode,
             approve_cb,
@@ -755,7 +763,11 @@ async fn stop_gemini_live_session(
     state: tauri::State<'_, GeminiLiveState>,
     session_id: String,
 ) -> Result<(), String> {
-    state.sessions.lock().map_err(|e| e.to_string())?.remove(&session_id);
+    state
+        .sessions
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&session_id);
     Ok(())
 }
 
@@ -871,7 +883,11 @@ fn read_desktop_session_user_id() -> Option<String> {
 }
 
 #[tauri::command]
-fn auth_register(name: Option<String>, email: String, password: String) -> Result<AuthUser, String> {
+fn auth_register(
+    name: Option<String>,
+    email: String,
+    password: String,
+) -> Result<AuthUser, String> {
     let user = register_user(name, &email, &password).map_err(|error| error.to_string())?;
     write_desktop_session(&user.id)?;
     Ok(user)
@@ -917,11 +933,7 @@ fn auth_upload_avatar(file_name: String, data_base64: String) -> Result<AuthUser
     let bytes = BASE64
         .decode(data_base64.as_bytes())
         .map_err(|_| "Invalid image data".to_string())?;
-    let extension = file_name
-        .rsplit('.')
-        .next()
-        .unwrap_or("png")
-        .to_lowercase();
+    let extension = file_name.rsplit('.').next().unwrap_or("png").to_lowercase();
     let url = save_avatar_file(&bytes, &extension).map_err(|error| error.to_string())?;
     update_profile(&user_id, None, Some(url)).map_err(|error| error.to_string())
 }
@@ -1014,6 +1026,26 @@ fn add_learned_skill(name: String, content: String) -> Result<LearnedSkillDto, S
 fn delete_learned_skill(name: String) -> Result<usize, String> {
     let store = MemoryStore::open_default().map_err(|e| e.to_string())?;
     store.delete_learned_skill(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_subagents(workspace_path: Option<String>) -> Result<Vec<SubagentDefinition>, String> {
+    let root = workspace_root(workspace_path.as_deref()).ok();
+    Ok(core_list_subagents(root.as_deref()))
+}
+
+#[tauri::command]
+fn save_subagent(
+    draft: SubagentDraft,
+    workspace_path: Option<String>,
+) -> Result<SubagentDefinition, String> {
+    let root = workspace_root(workspace_path.as_deref()).ok();
+    core_save_subagent(&draft, root.as_deref())
+}
+
+#[tauri::command]
+fn delete_subagent(source_path: String) -> Result<(), String> {
+    core_delete_subagent(&source_path)
 }
 
 #[tauri::command]
@@ -1611,6 +1643,9 @@ pub fn run() {
             list_learned_skills,
             add_learned_skill,
             delete_learned_skill,
+            list_subagents,
+            save_subagent,
+            delete_subagent,
             list_pictures,
             delete_picture,
             save_pictures,

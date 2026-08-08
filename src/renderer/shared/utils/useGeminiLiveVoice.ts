@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 export type GeminiLiveEvent =
   | { type: 'audioChunk'; data: string }
   | { type: 'transcript'; role: string; text: string }
+  | { type: 'turnComplete' }
   | { type: 'toolStatus'; action: string; input: unknown; result?: string | null; error?: string | null }
   | { type: 'error'; message: string }
   | { type: 'closed' }
@@ -30,16 +31,23 @@ export interface GeminiLiveVoiceOptions {
  * back the model's spoken reply as it arrives. Voice-driven tool calls (video edit,
  * subtitles, etc.) are executed on the Rust side and reported here as transcript lines.
  *
- * Exposes the same field names as `useSpeechToText` (isRecording, voiceMode, voiceTranscript,
- * startRecognition/stopRecognition) so it can be swapped in without reworking a chat panel's
- * mic button / transcript UI. `startRecognition`/`stopRecognition`/`scheduleVoiceListen` are
- * no-ops here since the Live API keeps one continuous duplex stream instead of discrete
- * listen-then-send cycles — starting/stopping is driven entirely by `setVoiceMode`.
+ * Exposes the same field names as `useSpeechToText` for isRecording/voiceMode/
+ * startRecognition/stopRecognition so it can be swapped in without reworking a chat
+ * panel's mic button, plus its own `userTranscript`/`assistantTranscript` (kept
+ * separate, not one shared line, so the user's last line stays visible under "You:"
+ * once Mint starts replying under "Mint:"). `startRecognition`/`stopRecognition`/
+ * `scheduleVoiceListen` are no-ops here since the Live API keeps one continuous
+ * duplex stream instead of discrete listen-then-send cycles — starting/stopping is
+ * driven entirely by `setVoiceMode`.
  */
 export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAudioChunk, stopSession }: GeminiLiveVoiceOptions) {
   const [isRecording, setIsRecording] = useState(false)
   const [voiceMode, setVoiceMode] = useState(false)
-  const [voiceTranscript, setVoiceTranscript] = useState('')
+  // Kept separate (rather than one shared line) so the user's own speech stays
+  // visible under "You:" once Mint starts replying under "Mint:", instead of
+  // one role's fragments overwriting the other's.
+  const [userTranscript, setUserTranscript] = useState('')
+  const [assistantTranscript, setAssistantTranscript] = useState('')
   const [voiceAwaitingResponse, setVoiceAwaitingResponse] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
@@ -53,6 +61,10 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
   const captureNodesRef = useRef<{ source: MediaStreamAudioSourceNode; processor: ScriptProcessorNode } | null>(null)
   const nextPlaybackTimeRef = useRef(0)
   const speakingTimeoutRef = useRef<number | null>(null)
+  // Gemini streams transcripts as small fragments, not whole lines — this tracks
+  // whose fragment is currently being built so same-role fragments accumulate
+  // into one line and a role change (or `turnComplete`) starts a fresh one.
+  const transcriptRoleRef = useRef<string | null>(null)
 
   useEffect(() => {
     voiceModeRef.current = voiceMode
@@ -101,21 +113,32 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
         setVoiceAwaitingResponse(false)
         playAudioChunk(event.data)
         break
-      case 'transcript':
-        setVoiceTranscript(event.text)
+      case 'transcript': {
+        const setTranscript = event.role === 'user' ? setUserTranscript : setAssistantTranscript
+        setTranscript((prev) => (transcriptRoleRef.current === event.role ? prev + event.text : event.text))
+        transcriptRoleRef.current = event.role
+        break
+      }
+      case 'turnComplete':
+        // Leaves the finished line on screen — only resets which role the next
+        // fragment continues, so the display doesn't flash blank between turns.
+        transcriptRoleRef.current = null
         break
       case 'toolStatus':
-        setVoiceTranscript(event.error ? `${event.action} failed: ${event.error}` : `Running ${event.action}...`)
+        transcriptRoleRef.current = null
+        setAssistantTranscript(event.error ? `${event.action} failed: ${event.error}` : `Running ${event.action}...`)
         break
       case 'error':
         console.error('Gemini Live session error', event.message)
-        setVoiceTranscript(event.message)
+        transcriptRoleRef.current = null
+        setAssistantTranscript(event.message)
         break
       case 'closed':
         setIsRecording(false)
         setVoiceAwaitingResponse(false)
         setIsSpeaking(false)
         sessionIdRef.current = null
+        transcriptRoleRef.current = null
         break
     }
   }, [playAudioChunk])
@@ -155,12 +178,21 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
 
   const start = useCallback(async () => {
     try {
+      transcriptRoleRef.current = null
+      setUserTranscript('')
+      setAssistantTranscript('')
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('This window does not support microphone capture (navigator.mediaDevices.getUserMedia is unavailable).')
       }
 
       console.log('[gemini-live] requesting microphone permission...')
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } })
+      // Without echoCancellation, the model's own spoken reply (played back through
+      // the speakers in playAudioChunk) gets picked up by the mic and re-sent to
+      // Gemini as if the user said it — causing duplicated transcripts and Gemini
+      // interrupting/looping on its own voice.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      })
       console.log('[gemini-live] microphone granted, starting session...')
       micStreamRef.current = stream
 
@@ -199,7 +231,7 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
       console.error('Failed to start Gemini Live voice session', error)
       // Keep voiceMode on so the error stays visible in the voice-mode bar instead of
       // vanishing the instant it appears; the user can dismiss it with the mic button.
-      setVoiceTranscript(`Error: ${error instanceof Error ? error.message : String(error)}`)
+      setAssistantTranscript(`Error: ${error instanceof Error ? error.message : String(error)}`)
       stopCapture()
       setIsRecording(false)
       setVoiceAwaitingResponse(false)
@@ -217,20 +249,29 @@ export function useGeminiLiveVoice({ workspacePath, chatId, startSession, sendAu
 
   useEffect(() => stop, [stop])
 
+  // Reconnects with a fresh session — used when a setting that only takes effect at the
+  // Live API's `setup` handshake (e.g. voice) changes while a call is already in progress.
+  const restart = useCallback(() => {
+    if (!voiceModeRef.current) return
+    stop()
+    start()
+  }, [stop, start])
+
   const noop = useCallback(() => {}, [])
 
   return {
     isRecording,
     voiceMode,
     setVoiceMode,
-    voiceTranscript,
-    setVoiceTranscript,
+    userTranscript,
+    assistantTranscript,
     voiceAwaitingResponse,
     voiceAwaitingResponseRef,
     voiceModeRef,
     isPaused,
     togglePause,
     isSpeaking,
+    restart,
     startRecognition: noop,
     stopRecognition: noop,
     scheduleVoiceListen: noop,

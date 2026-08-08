@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::video_edit::{
-    ExportRequest, MergeRequest, ResizeRequest, TrimRequest, VideoEditError,
-    check_ffmpeg, run_ffmpeg_args, video_export, video_merge, video_resize, video_trim,
+    ExportRequest, MergeRequest, ResizeRequest, TrimRequest, VideoEditError, check_ffmpeg,
+    run_ffmpeg_args, video_export, video_merge, video_resize, video_trim,
 };
 
 // ── Error ──────────────────────────────────────────────────────────────────
@@ -79,10 +79,7 @@ pub enum TimelineEffect {
         at: f64,
     },
     /// Cross-dissolve or cut transition between clips.
-    Transition {
-        kind: String,
-        duration_secs: f64,
-    },
+    Transition { kind: String, duration_secs: f64 },
 }
 
 /// Audio configuration for the timeline.
@@ -283,7 +280,16 @@ pub fn render_timeline(timeline: &Timeline) -> Result<RenderTimelineResult, Time
         let escaped = srt_str.replace('\\', "\\\\").replace(':', "\\:");
         let vf = format!("subtitles='{}'", escaped);
 
-        run_ffmpeg_args(&["-y", "-i", &merged_str, "-vf", &vf, "-c:a", "copy", &subbed_str])?;
+        run_ffmpeg_args(&[
+            "-y",
+            "-i",
+            &merged_str,
+            "-vf",
+            &vf,
+            "-c:a",
+            "copy",
+            &subbed_str,
+        ])?;
         subbed_str
     } else {
         merged_str.clone()

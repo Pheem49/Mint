@@ -130,9 +130,12 @@ pub struct CustomProviderHeader {
 ///
 /// `pattern` is matched against a per-tool "subject" string (the exact shell
 /// command for `run_shell`, the file path for `write_file`/`apply_patch`, the
-/// note path for `note_write`, the plugin name for `run_plugin`, or
-/// `"{server}:{tool}"` for `mcp_tool`) using a simple glob where `*` matches
-/// any run of characters — everything else must match literally.
+/// note path for `note_write`, `"{name}: {instruction}"` for `run_plugin`, or
+/// `"{server}:{tool}:{arguments}"` for `mcp_tool`) using a simple glob where
+/// `*` matches any run of characters — everything else must match literally.
+/// The instruction/arguments are included so a saved rule never covers a
+/// future call to the same plugin/tool with different, possibly riskier
+/// input than what the user actually reviewed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionRule {
@@ -928,7 +931,11 @@ mod tests {
                 ai_provider: provider.into(),
                 ..MintConfig::default()
             };
-            assert_eq!(config.tool_calling_mode(), ToolCallingMode::Native, "{provider}");
+            assert_eq!(
+                config.tool_calling_mode(),
+                ToolCallingMode::Native,
+                "{provider}"
+            );
         }
     }
 

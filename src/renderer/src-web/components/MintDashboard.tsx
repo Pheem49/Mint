@@ -95,6 +95,7 @@ const MOCK_WELCOME_INTERACTION = {
 import SkillsView from '../../shared/components/SkillsView'
 import McpServersView from '../../shared/components/McpServersView'
 import PluginsView from '../../shared/components/PluginsView'
+import { isSupportedDocument } from '../../shared/utils/documentTypes'
 import {
   listLearnedSkills,
   addLearnedSkill,
@@ -624,10 +625,10 @@ export default function MintDashboard() {
           document.getElementById('vision-file-input')?.click()
           return
         } else if (slashResult.action === 'open_plugins') {
-          setView('settings')
+          setView('plugins')
           return
         } else if (slashResult.action === 'generate_veo') {
-          setView('veo_studio')
+          setView('veo')
           return
         } else if (slashResult.action === 'set_provider_model' && slashResult.payload?.target) {
           const target = slashResult.payload.target
@@ -759,8 +760,8 @@ export default function MintDashboard() {
     const file = event.target.files?.[0]
     if (!file) return
     try {
-      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-        throw new Error('Only PDF files are supported')
+      if (!isSupportedDocument(file.name)) {
+        throw new Error('Unsupported document type')
       }
       setDocumentAttachment({
         filename: file.name,
@@ -977,7 +978,17 @@ export default function MintDashboard() {
     }
   }
 
-
+  async function changeGeminiLiveVoice(voiceName: string) {
+    try {
+      const config = await window.settingsApi.getSettings()
+      if (config.geminiLiveVoice === voiceName) return
+      config.geminiLiveVoice = voiceName
+      await window.settingsApi.saveSettings(config)
+      setSettingsConfig(config)
+    } catch (reason) {
+      setError(errorMessage(reason))
+    }
+  }
 
   return (
     <div className={`app-container ${startupReady ? '' : 'is-loading'}`}>
@@ -1057,9 +1068,11 @@ export default function MintDashboard() {
             onSetProvider={changeProvider}
             settingsConfig={settingsConfig}
             onSetModel={changeModel}
+            onSetGeminiLiveVoice={changeGeminiLiveVoice}
             onApproval={handleApproval}
             onCancelMessage={handleCancelMessage}
             onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+            onClearMessages={() => clearHistory('Clear history')}
           />
         </main>
         {view === 'skills' && (

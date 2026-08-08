@@ -171,7 +171,10 @@ pub fn get_server_prompt(
     arguments: Value,
 ) -> Result<Value, McpError> {
     with_session(config, server_name, |session| {
-        session.request("prompts/get", json!({ "name": name, "arguments": arguments }))
+        session.request(
+            "prompts/get",
+            json!({ "name": name, "arguments": arguments }),
+        )
     })
 }
 
@@ -641,11 +644,27 @@ mod tests {
 
         let first = call_mcp_tool(&config, name, "anything", json!({})).unwrap();
         assert_eq!(first["echo"], true);
-        let pid_after_first = SESSIONS.lock().unwrap().get(name).unwrap().lock().unwrap().process.id();
+        let pid_after_first = SESSIONS
+            .lock()
+            .unwrap()
+            .get(name)
+            .unwrap()
+            .lock()
+            .unwrap()
+            .process
+            .id();
 
         let second = call_mcp_tool(&config, name, "anything", json!({})).unwrap();
         assert_eq!(second["echo"], true);
-        let pid_after_second = SESSIONS.lock().unwrap().get(name).unwrap().lock().unwrap().process.id();
+        let pid_after_second = SESSIONS
+            .lock()
+            .unwrap()
+            .get(name)
+            .unwrap()
+            .lock()
+            .unwrap()
+            .process
+            .id();
         assert_eq!(
             pid_after_first, pid_after_second,
             "the same child process should be reused across calls, not respawned"
@@ -662,7 +681,15 @@ mod tests {
         }
         let third = call_mcp_tool(&config, name, "anything", json!({})).unwrap();
         assert_eq!(third["echo"], true);
-        let pid_after_respawn = SESSIONS.lock().unwrap().get(name).unwrap().lock().unwrap().process.id();
+        let pid_after_respawn = SESSIONS
+            .lock()
+            .unwrap()
+            .get(name)
+            .unwrap()
+            .lock()
+            .unwrap()
+            .process
+            .id();
         assert_ne!(
             pid_after_second, pid_after_respawn,
             "a dead session should be respawned with a fresh process"

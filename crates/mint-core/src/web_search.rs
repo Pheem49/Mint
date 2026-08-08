@@ -1,4 +1,4 @@
-use futures_util::{future::join_all, StreamExt};
+use futures_util::{StreamExt, future::join_all};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -6,7 +6,9 @@ use crate::MintConfig;
 
 #[derive(Debug, Error)]
 pub enum WebSearchError {
-    #[error("no web search provider configured (set googleSearchApiKey, braveSearchApiKey, or searxngBaseUrl)")]
+    #[error(
+        "no web search provider configured (set googleSearchApiKey, braveSearchApiKey, or searxngBaseUrl)"
+    )]
     NoApiKey,
     #[error("web search request failed: {0}")]
     Request(String),
@@ -69,7 +71,6 @@ pub struct SearchHit {
 /// Reads at most ~8 KB of the response — enough to cover the <head> section.
 /// Returns `None` on any network/parse error or if no og:image/twitter:image is found.
 async fn og_image_fallback(url: &str) -> Option<String> {
-
     tokio::time::timeout(std::time::Duration::from_secs(4), async move {
         let client = crate::HTTP_CLIENT.clone();
         let resp = client
@@ -157,15 +158,11 @@ async fn enrich_with_og_images(hits: Vec<SearchHit>, max_fetch: usize) -> Vec<Se
         })
         .collect();
 
-    let resolved = match tokio::time::timeout(
-        std::time::Duration::from_secs(30),
-        join_all(futures),
-    )
-    .await
-    {
-        Ok(res) => res,
-        Err(_) => vec![None; hits.len()],
-    };
+    let resolved =
+        match tokio::time::timeout(std::time::Duration::from_secs(30), join_all(futures)).await {
+            Ok(res) => res,
+            Err(_) => vec![None; hits.len()],
+        };
 
     hits.into_iter()
         .enumerate()
@@ -342,9 +339,7 @@ async fn brave_search(
         .take(limit)
         .filter_map(|item| {
             // Brave includes thumbnail.src for most results
-            let image_url = item["thumbnail"]["src"]
-                .as_str()
-                .map(|s| s.to_owned());
+            let image_url = item["thumbnail"]["src"].as_str().map(|s| s.to_owned());
             Some(SearchHit {
                 title: item["title"].as_str()?.to_owned(),
                 url: item["url"].as_str()?.to_owned(),

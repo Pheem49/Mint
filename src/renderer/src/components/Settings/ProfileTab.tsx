@@ -61,9 +61,6 @@ export default function ProfileTab({ name, setName, imageUrl, setImageUrl }: Pro
             <p className="section-kicker">Account</p>
             <h2 className="section-title">Profile</h2>
           </div>
-          <p className="section-description">
-            Manage your name and profile avatar logo. Changes here are saved with the rest of your settings via the Save Settings button below.
-          </p>
         </div>
 
         <div className="form-grid single">

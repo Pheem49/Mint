@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { DEFAULT_CONFIG } from '../SettingsWindow'
-import { GEMINI_LIVE_MODELS } from '../../../shared/constants/models'
+import { GEMINI_LIVE_MODELS, GEMINI_LIVE_VOICES } from '../../../shared/constants/models'
 
 interface AudioTabProps {
   config: typeof DEFAULT_CONFIG
@@ -19,7 +19,6 @@ export default function AudioTab({ config, updateField }: AudioTabProps) {
             <p className="section-kicker">Speech</p>
             <h2 className="section-title">Voice Reply</h2>
           </div>
-          <p className="section-description">Control spoken responses and TTS behavior.</p>
         </div>
 
         <div className="toggle-row">
@@ -103,6 +102,17 @@ export default function AudioTab({ config, updateField }: AudioTabProps) {
                 />
               </div>
             )}
+            <div className="setting-row">
+              <label>Live Voice</label>
+              <select value={config.geminiLiveVoice} onChange={(e) => updateField('geminiLiveVoice', e.target.value)}>
+                {GEMINI_LIVE_VOICES.map((voiceName) => (
+                  <option key={voiceName} value={voiceName}>{voiceName}</option>
+                ))}
+              </select>
+              <p className="hint">
+                The voice Gemini Live speaks with. Can also be changed mid-call from the Live overlay itself.
+              </p>
+            </div>
           </div>
         )}
 

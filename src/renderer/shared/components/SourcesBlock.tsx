@@ -124,7 +124,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
-                  justify: 'space-between',
+                  justifyContent: 'space-between',
                   borderRadius: '10px',
                   background: 'rgba(255, 255, 255, 0.04)',
                   border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -197,7 +197,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      justify: 'space-between',
+                      justifyContent: 'space-between',
                       marginTop: 'auto',
                       paddingTop: '2px',
                     }}
@@ -283,7 +283,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      justify: 'space-between',
+                      justifyContent: 'space-between',
                       padding: '4px 6px',
                       borderBottom: '1px solid rgba(255,255,255,0.06)',
                     }}
@@ -348,7 +348,7 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
             style={{
               display: 'flex',
               alignItems: 'center',
-              justify: 'space-between',
+              justifyContent: 'space-between',
               padding: '10px 14px',
               borderRadius: '10px',
               background: 'rgba(255, 255, 255, 0.03)',

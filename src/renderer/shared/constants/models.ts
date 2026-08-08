@@ -26,6 +26,18 @@ export const GEMINI_LIVE_MODELS = [
   'gemini-3.1-flash-live-preview',
 ] as const
 
+/** Prebuilt voices Gemini Live's `speechConfig.voiceConfig.prebuiltVoiceConfig` accepts. */
+export const GEMINI_LIVE_VOICES = [
+  'Puck',
+  'Charon',
+  'Kore',
+  'Fenrir',
+  'Aoede',
+  'Leda',
+  'Orus',
+  'Zephyr',
+] as const
+
 export const OPENAI_MODELS = [
   'gpt-5.6-sol',
   'gpt-5.6-terra',

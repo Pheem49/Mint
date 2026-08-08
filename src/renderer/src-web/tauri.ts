@@ -1500,6 +1500,66 @@ export async function deleteLearnedSkill(name: string): Promise<number> {
   return invoke<number>('delete_learned_skill', { name })
 }
 
+export interface SubagentDefinition {
+  name: string
+  description: string
+  tools: string[] | null
+  model: string | null
+  provider: string | null
+  systemPrompt: string
+  sourcePath: string
+}
+
+export interface SubagentDraft {
+  name: string
+  description: string
+  tools: string[] | null
+  model: string | null
+  provider: string | null
+  systemPrompt: string
+  scope: 'global' | 'workspace'
+  previousSourcePath?: string | null
+}
+
+export async function listSubagents(workspacePath?: string): Promise<SubagentDefinition[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/subagents`)
+    if (!res.ok) return []
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<SubagentDefinition[]>('list_subagents', { workspacePath })
+}
+
+export async function saveSubagent(draft: SubagentDraft, workspacePath?: string): Promise<SubagentDefinition> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/subagents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft)
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to save subagent.' }))
+      throw new Error(err.error || 'Failed to save subagent.')
+    }
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<SubagentDefinition>('save_subagent', { draft, workspacePath })
+}
+
+export async function deleteSubagent(sourcePath: string): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/subagents/${encodeURIComponent(sourcePath)}`, {
+      method: 'DELETE'
+    })
+    if (!res.ok) throw new Error('Failed to delete subagent.')
+    return
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('delete_subagent', { sourcePath })
+}
+
 export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceTreeEntry> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     return {
@@ -1917,6 +1977,9 @@ const _apiCheck: MintPlatformApi = {
   listLearnedSkills,
   addLearnedSkill,
   deleteLearnedSkill,
+  listSubagents,
+  saveSubagent,
+  deleteSubagent,
   clearChatHistory,
   listSavedPictures,
   deleteSavedPicture,

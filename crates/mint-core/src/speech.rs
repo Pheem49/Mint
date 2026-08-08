@@ -3,7 +3,7 @@ use std::process::Command;
 use thiserror::Error;
 
 use crate::config::MintConfig;
-use crate::video_edit::{check_ffmpeg, video_extract_audio, ExtractAudioRequest};
+use crate::video_edit::{ExtractAudioRequest, check_ffmpeg, video_extract_audio};
 
 #[derive(Debug, Error)]
 pub enum SpeechError {
@@ -138,7 +138,10 @@ pub async fn transcribe(
     if !config.openai_api_key.trim().is_empty() {
         match transcribe_openai_whisper(&config.openai_api_key, &audio_path, req).await {
             Ok(res) => return Ok(res),
-            Err(e) => eprintln!("[mint-speech] OpenAI Whisper API failed: {}, trying fallback...", e),
+            Err(e) => eprintln!(
+                "[mint-speech] OpenAI Whisper API failed: {}, trying fallback...",
+                e
+            ),
         }
     }
 
@@ -157,7 +160,7 @@ async fn transcribe_openai_whisper(
     audio_path: &str,
     req: &TranscribeRequest,
 ) -> Result<TranscriptionResult, SpeechError> {
-    let client = reqwest::Client::new();
+    let client = crate::HTTP_CLIENT.clone();
     let file_bytes = tokio::fs::read(audio_path).await?;
     let file_name = std::path::Path::new(audio_path)
         .file_name()
@@ -169,13 +172,25 @@ async fn transcribe_openai_whisper(
     let mut body = Vec::new();
 
     // Field: model = whisper-1
-    body.extend_from_slice(format!("--{}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n", boundary).as_bytes());
+    body.extend_from_slice(
+        format!(
+            "--{}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n",
+            boundary
+        )
+        .as_bytes(),
+    );
 
     // Field: response_format = verbose_json
     body.extend_from_slice(format!("--{}\r\nContent-Disposition: form-data; name=\"response_format\"\r\n\r\nverbose_json\r\n", boundary).as_bytes());
 
     if let Some(lang) = &req.language {
-        body.extend_from_slice(format!("--{}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n{}\r\n", boundary, lang).as_bytes());
+        body.extend_from_slice(
+            format!(
+                "--{}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\n{}\r\n",
+                boundary, lang
+            )
+            .as_bytes(),
+        );
     }
 
     // Field: file
@@ -186,7 +201,10 @@ async fn transcribe_openai_whisper(
     let response = client
         .post("https://api.openai.com/v1/audio/transcriptions")
         .bearer_auth(api_key)
-        .header("Content-Type", format!("multipart/form-data; boundary={}", boundary))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={}", boundary),
+        )
         .body(body)
         .send()
         .await
@@ -246,7 +264,13 @@ fn transcribe_local_whisper_cli(
     _req: &TranscribeRequest,
 ) -> Result<TranscriptionResult, SpeechError> {
     let output = Command::new("whisper")
-        .args([audio_path, "--output_format", "json", "--output_dir", "/tmp"])
+        .args([
+            audio_path,
+            "--output_format",
+            "json",
+            "--output_dir",
+            "/tmp",
+        ])
         .output()?;
 
     if !output.status.success() {

@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
 use thiserror::Error;
 
-use crate::{assert_path_capability, Capability, MintConfig, SafetyError};
+use crate::{Capability, MintConfig, SafetyError, assert_path_capability};
 
 const IGNORED_DIRECTORIES: &[&str] = &[
     ".git",
@@ -458,7 +458,10 @@ fn write_atomic(path: &Path, content: &str) -> Result<(), CodeInspectionError> {
         path: path.to_path_buf(),
         source,
     };
-    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     let file_name = path
         .file_name()
         .ok_or_else(|| {
@@ -591,15 +594,13 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
 }
 
 pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("mint-core")
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::HTTP_CLIENT.clone();
 
     // 1. Fetch Repository Info
     let repo_url = format!("https://api.github.com/repos/{}/{}", owner, repo);
     let repo_resp = client
         .get(&repo_url)
+        .header("User-Agent", "mint-core")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -636,6 +637,7 @@ pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String
     let contents_url = format!("https://api.github.com/repos/{}/{}/contents", owner, repo);
     let contents_resp = client
         .get(&contents_url)
+        .header("User-Agent", "mint-core")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -657,6 +659,7 @@ pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String
     let readme_url = format!("https://api.github.com/repos/{}/{}/readme", owner, repo);
     let readme_resp = client
         .get(&readme_url)
+        .header("User-Agent", "mint-core")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -716,7 +719,10 @@ mod tests {
 
         let content = read_code_file(&root.join("big.txt"), 1, 240, &config_for(&root)).unwrap();
         assert!(content.contains("line240"));
-        assert!(!content.contains("line241"), "must not leak past the requested range");
+        assert!(
+            !content.contains("line241"),
+            "must not leak past the requested range"
+        );
         assert!(content.contains("Showing lines 1-240 of 500 total lines"));
         assert!(content.contains("startLine=241, endLine=480"));
 

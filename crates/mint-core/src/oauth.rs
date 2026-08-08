@@ -1,12 +1,12 @@
 //! OAuth 2.0 PKCE Authorization & Token Exchange Module for Mint Core.
 //! Manages PKCE state generation, browser authorization URLs, token exchange, and persistence.
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use sha2::{Digest, Sha256};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 
 static PENDING_PKCE: OnceLock<Mutex<HashMap<String, PkceSession>>> = OnceLock::new();
 
@@ -109,7 +109,7 @@ pub fn generate_pkce_pair() -> (String, String) {
         .unwrap_or_default()
         .as_nanos();
     let seed = format!("mint-pkce-{now}-{}", std::process::id());
-    
+
     let mut hasher = Sha256::new();
     hasher.update(seed.as_bytes());
     let verifier = URL_SAFE_NO_PAD.encode(hasher.finalize_reset());
@@ -121,7 +121,11 @@ pub fn generate_pkce_pair() -> (String, String) {
 }
 
 /// Generates OAuth authorization URL for popup / system browser
-pub fn build_auth_url(provider: &str, redirect_uri: &str, custom_client_id: Option<&str>) -> Option<(String, String)> {
+pub fn build_auth_url(
+    provider: &str,
+    redirect_uri: &str,
+    custom_client_id: Option<&str>,
+) -> Option<(String, String)> {
     let cfg = get_provider_config(provider)?;
     let (verifier, challenge) = generate_pkce_pair();
     let now_ms = std::time::SystemTime::now()
@@ -178,9 +182,7 @@ pub async fn exchange_code(
         None
     };
 
-    let verifier = pkce_session
-        .map(|s| s.code_verifier)
-        .unwrap_or_default();
+    let verifier = pkce_session.map(|s| s.code_verifier).unwrap_or_default();
 
     let client_id = custom_client_id
         .filter(|s| !s.trim().is_empty())
@@ -256,7 +258,10 @@ pub async fn exchange_code(
     Ok(token_data)
 }
 
-async fn fetch_google_user_info(client: &reqwest::Client, token: &str) -> Result<(Option<String>, Option<String>), ()> {
+async fn fetch_google_user_info(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<(Option<String>, Option<String>), ()> {
     let res = client
         .get("https://www.googleapis.com/oauth2/v2/userinfo")
         .bearer_auth(token)
@@ -269,7 +274,10 @@ async fn fetch_google_user_info(client: &reqwest::Client, token: &str) -> Result
     Ok((email, name))
 }
 
-async fn fetch_github_user_info(client: &reqwest::Client, token: &str) -> Result<(Option<String>, Option<String>), ()> {
+async fn fetch_github_user_info(
+    client: &reqwest::Client,
+    token: &str,
+) -> Result<(Option<String>, Option<String>), ()> {
     let res = client
         .get("https://api.github.com/user")
         .header("User-Agent", "Mint-Agent")

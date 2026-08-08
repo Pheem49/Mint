@@ -3,7 +3,7 @@ use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use mint_core::{load_config, save_config};
 use std::io::{self, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
 
 struct OnboardService {
@@ -13,7 +13,7 @@ struct OnboardService {
     enabled: bool,
 }
 
-const GEMINI_MODEL_PRESETS: &[&str] = &[
+pub(crate) const GEMINI_MODEL_PRESETS: &[&str] = &[
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
@@ -21,7 +21,7 @@ const GEMINI_MODEL_PRESETS: &[&str] = &[
     "gemini-2.5-flash",
 ];
 
-const ANTHROPIC_MODEL_PRESETS: &[&str] = &[
+pub(crate) const ANTHROPIC_MODEL_PRESETS: &[&str] = &[
     "claude-sonnet-5",
     "claude-opus-5",
     "claude-sonnet-4.6",
@@ -29,7 +29,7 @@ const ANTHROPIC_MODEL_PRESETS: &[&str] = &[
     "claude-haiku-4.5",
 ];
 
-const OPENAI_MODEL_PRESETS: &[&str] = &[
+pub(crate) const OPENAI_MODEL_PRESETS: &[&str] = &[
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -37,7 +37,7 @@ const OPENAI_MODEL_PRESETS: &[&str] = &[
     "gpt-5.5-pro",
 ];
 
-const OPENROUTER_MODEL_PRESETS: &[&str] = &[
+pub(crate) const OPENROUTER_MODEL_PRESETS: &[&str] = &[
     "openai/gpt-5.6-terra",
     "anthropic/claude-sonnet-5",
     "google/gemini-3.6-flash",
@@ -45,14 +45,14 @@ const OPENROUTER_MODEL_PRESETS: &[&str] = &[
     "deepseek/deepseek-v4-pro",
 ];
 
-const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
+pub(crate) const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
     "deepseek-v4-flash",
     "deepseek-v4-pro",
     "deepseek-chat",
     "deepseek-reasoner",
 ];
 
-const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
+pub(crate) const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
     "Qwen/Qwen3.6-27B",
     "deepseek-ai/DeepSeek-V4-Flash",
     "google/gemma-3-27b-it",
@@ -327,11 +327,7 @@ pub async fn run() -> Result<()> {
             category: "Voice",
             name: "Realtime Live Model (Gemini Live)  [uses Gemini key]",
             key: "gemini_live",
-            enabled: config
-                .extra
-                .get("voiceMode")
-                .and_then(|v| v.as_str())
-                == Some("geminiLive"),
+            enabled: config.extra.get("voiceMode").and_then(|v| v.as_str()) == Some("geminiLive"),
         },
     ];
 
@@ -959,8 +955,7 @@ pub async fn run() -> Result<()> {
         println!(
             "\x1b[90mGet your API key at https://api.bfl.ml. Supports flux-pro-1.1, flux-pro-1.1-ultra, flux-dev, and flux-pro-1.0-fill.\x1b[0m"
         );
-        config.bfl_api_key =
-            prompt_sensitive("Black Forest Labs API Key", &config.bfl_api_key)?;
+        config.bfl_api_key = prompt_sensitive("Black Forest Labs API Key", &config.bfl_api_key)?;
         config.bfl_model = prompt_select_or_custom(
             "FLUX Model",
             static_model_options(BFL_MODEL_PRESETS),
@@ -997,6 +992,13 @@ pub async fn run() -> Result<()> {
             "videoGenProvider".to_string(),
             serde_json::Value::String("veo".to_string()),
         );
+    } else if config
+        .extra
+        .get("videoGenProvider")
+        .and_then(|v| v.as_str())
+        == Some("veo")
+    {
+        config.extra.remove("videoGenProvider");
     }
 
     if is_selected("gemini_live", &services) {
@@ -1024,6 +1026,8 @@ pub async fn run() -> Result<()> {
             "voiceMode".to_string(),
             serde_json::Value::String("geminiLive".to_string()),
         );
+    } else if config.extra.get("voiceMode").and_then(|v| v.as_str()) == Some("geminiLive") {
+        config.extra.remove("voiceMode");
     }
 
     save_config(&config)?;
@@ -1188,14 +1192,22 @@ fn prompt_choice(label: &str, options: &[String], default_idx: usize) -> Result<
 
                     match key_event.code {
                         KeyCode::Up => {
-                            cursor = if cursor > 0 { cursor - 1 } else { options.len() - 1 };
+                            cursor = if cursor > 0 {
+                                cursor - 1
+                            } else {
+                                options.len() - 1
+                            };
                             disable_raw_mode()?;
                             print!("\x1b[{}A\x1b[J", options.len());
                             print_select_options(options, cursor);
                             enable_raw_mode()?;
                         }
                         KeyCode::Down => {
-                            cursor = if cursor < options.len() - 1 { cursor + 1 } else { 0 };
+                            cursor = if cursor < options.len() - 1 {
+                                cursor + 1
+                            } else {
+                                0
+                            };
                             disable_raw_mode()?;
                             print!("\x1b[{}A\x1b[J", options.len());
                             print_select_options(options, cursor);
@@ -1223,7 +1235,7 @@ fn static_model_options(presets: &[&str]) -> Vec<String> {
     presets.iter().map(|value| value.to_string()).collect()
 }
 
-fn installed_ollama_models() -> Vec<String> {
+pub(crate) fn installed_ollama_models() -> Vec<String> {
     let output = match Command::new("ollama").arg("list").output() {
         Ok(output) if output.status.success() => output,
         _ => return Vec::new(),
@@ -1256,15 +1268,24 @@ fn ensure_ollama_serving(host: &str) {
         addr.to_string()
     };
 
+    // Resolve once up front — `addr` may be a DNS name (e.g. a Docker
+    // service name), which `SocketAddr::parse` can't handle, so we go
+    // through `ToSocketAddrs` instead of silently falling back to
+    // 127.0.0.1 on parse failure.
+    let resolved_addr = addr.to_socket_addrs().ok().and_then(|mut it| it.next());
+    let is_ollama_reachable = |timeout_secs: u64| -> bool {
+        match resolved_addr {
+            Some(socket_addr) => TcpStream::connect_timeout(
+                &socket_addr,
+                std::time::Duration::from_secs(timeout_secs),
+            )
+            .is_ok(),
+            None => false,
+        }
+    };
+
     // Check if Ollama is already serving
-    if TcpStream::connect_timeout(
-        &addr
-            .parse()
-            .unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap()),
-        std::time::Duration::from_secs(1),
-    )
-    .is_ok()
-    {
+    if is_ollama_reachable(1) {
         println!(
             "\x1b[32m✔ Ollama server is already running at {}\x1b[0m",
             host
@@ -1287,14 +1308,7 @@ fn ensure_ollama_serving(host: &str) {
             let mut ready = false;
             for _ in 0..20 {
                 std::thread::sleep(std::time::Duration::from_millis(500));
-                if TcpStream::connect_timeout(
-                    &addr
-                        .parse()
-                        .unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap()),
-                    std::time::Duration::from_secs(1),
-                )
-                .is_ok()
-                {
+                if is_ollama_reachable(1) {
                     ready = true;
                     break;
                 }

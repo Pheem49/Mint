@@ -128,7 +128,9 @@ impl BackgroundJobs {
                 &root,
                 None,
                 None,
+                None,
                 Some(&inner_chat_id),
+                None,
                 None,
                 false,
                 false,
@@ -171,7 +173,11 @@ impl BackgroundJobs {
             job.result = result;
         }
         let preview: String = query.chars().take(50).collect();
-        let suffix = if query.chars().count() > 50 { "…" } else { "" };
+        let suffix = if query.chars().count() > 50 {
+            "…"
+        } else {
+            ""
+        };
         inner
             .notices
             .push(format!("[bg #{id}] {status} — {preview}{suffix}"));

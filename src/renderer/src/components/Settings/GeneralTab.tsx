@@ -118,17 +118,8 @@ export default function GeneralTab({
     const isOpen = openSections[key] ?? false
 
     return (
-      <section 
+      <section
         className={`setting-section collapsible-section ${isOpen ? 'is-open' : 'is-collapsed'}`}
-        style={{
-          border: '1px solid var(--border)',
-          borderRadius: '12px',
-          padding: '16px 20px',
-          background: 'var(--surface-bg)',
-          marginBottom: '14px',
-          transition: 'all 0.25s ease',
-          overflow: 'hidden'
-        }}
       >
         <div 
           className="section-heading-collapsible"
@@ -150,7 +141,6 @@ export default function GeneralTab({
               {iconSVG}
               {title}
             </h2>
-            {description && <p className="section-description" style={{ margin: '4px 0 0 0', fontSize: '0.82rem' }}>{description}</p>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' }}>
             <span style={{ fontSize: '0.75rem', fontWeight: '500' }}>{isOpen ? 'Collapse' : 'Expand'}</span>

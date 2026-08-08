@@ -170,7 +170,6 @@ fn prepare_shell_command(command: &str) -> String {
     }
 }
 
-
 fn run_in_sandbox(
     command: &str,
     cwd: &Path,
@@ -317,7 +316,6 @@ fn command_exists(command: &str) -> bool {
 }
 
 pub(crate) fn shell_command(command: &str) -> Command {
-
     #[cfg(target_os = "windows")]
     {
         let mut process = Command::new("powershell.exe");
@@ -486,5 +484,3 @@ mod tests {
         assert!(start.elapsed() < std::time::Duration::from_secs(2));
     }
 }
-
-

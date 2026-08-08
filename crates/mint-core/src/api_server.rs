@@ -11,25 +11,77 @@ use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio_tungstenite::{WebSocketStream, tungstenite::{Message, protocol::Role}};
-
-use crate::{
-    AgentProgress, ApprovalOutcome, AuthError, ChatRequest, ChatResponse, DEFAULT_CONVERSATION_ID,
-    ImageGenRequest, MemoryStore, MintConfig, VideoGenRequest,
-    // Video editing & Speech & Subtitles & Auto Shorts
-    AiEditVideoRequest, BurnSubtitleRequest, CropRequest, DetectSilenceRequest, ExportRequest, ExtractAudioRequest,
-    MakeShortsRequest, MergeRequest, RemoveSilenceRequest, RenderTimelineRequest, ResizeRequest,
-    TranscribeRequest, TranslateSubtitleRequest, TrimRequest,
-    ai_edit_video, burn_subtitles, config_path, create_folder, create_session, destroy_session,
-    detect_silence, get_user, login_user, profile_pictures_dir, register_user, save_avatar_file,
-    session_user_id, update_profile,
-    find_paths, generate_images, generate_srt, generate_video, delete_saved_picture, list_saved_pictures, load_config,
-    make_shorts, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    render_timeline, save_chat_images, save_config, transcribe, translate_subtitles,
-    video_crop, video_export, video_extract_audio, video_load, video_merge, video_remove_silence,
-    video_resize, video_trim, weather,
+use tokio_tungstenite::{
+    WebSocketStream,
+    tungstenite::{Message, protocol::Role},
 };
 
+use crate::{
+    AgentProgress,
+    // Video editing & Speech & Subtitles & Auto Shorts
+    AiEditVideoRequest,
+    ApprovalOutcome,
+    AuthError,
+    BurnSubtitleRequest,
+    ChatRequest,
+    ChatResponse,
+    CropRequest,
+    DEFAULT_CONVERSATION_ID,
+    DetectSilenceRequest,
+    ExportRequest,
+    ExtractAudioRequest,
+    ImageGenRequest,
+    MakeShortsRequest,
+    MemoryStore,
+    MergeRequest,
+    MintConfig,
+    RemoveSilenceRequest,
+    RenderTimelineRequest,
+    ResizeRequest,
+    TranscribeRequest,
+    TranslateSubtitleRequest,
+    TrimRequest,
+    VideoGenRequest,
+    ai_edit_video,
+    burn_subtitles,
+    config_path,
+    create_folder,
+    create_session,
+    delete_saved_picture,
+    destroy_session,
+    detect_silence,
+    find_paths,
+    generate_images,
+    generate_srt,
+    generate_video,
+    get_user,
+    list_saved_pictures,
+    load_config,
+    login_user,
+    make_shorts,
+    orchestrate_agent_loop,
+    orchestrate_chat_stream_with_fallback,
+    orchestrate_chat_with_fallback,
+    profile_pictures_dir,
+    register_user,
+    render_timeline,
+    save_avatar_file,
+    save_chat_images,
+    save_config,
+    session_user_id,
+    transcribe,
+    translate_subtitles,
+    update_profile,
+    video_crop,
+    video_export,
+    video_extract_audio,
+    video_load,
+    video_merge,
+    video_remove_silence,
+    video_resize,
+    video_trim,
+    weather,
+};
 
 const MAX_API_REQUEST_BYTES: usize = 32 * 1024 * 1024;
 
@@ -296,8 +348,10 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     return;
                 }
                 ("GET", "/api/auth/session") => {
-                    let user = authorized_user_id(&request_str).and_then(|id| get_user(&id).ok().flatten());
-                    send_json_response(socket, "200 OK", &json!({ "user": user }).to_string()).await;
+                    let user = authorized_user_id(&request_str)
+                        .and_then(|id| get_user(&id).ok().flatten());
+                    send_json_response(socket, "200 OK", &json!({ "user": user }).to_string())
+                        .await;
                     return;
                 }
                 ("GET", "/api/avatar") => {
@@ -342,8 +396,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         image: Option<String>,
                     }
                     let Some(user_id) = authorized_user_id(&request_str) else {
-                        send_json_response(socket, "401 Unauthorized", "{\"message\":\"Unauthorized\"}")
-                            .await;
+                        send_json_response(
+                            socket,
+                            "401 Unauthorized",
+                            "{\"message\":\"Unauthorized\"}",
+                        )
+                        .await;
                         return;
                     };
                     let Ok(req) = serde_json::from_str::<ProfileUpdateRequest>(body) else {
@@ -357,8 +415,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     };
                     match update_profile(&user_id, req.name, req.image) {
                         Ok(user) => {
-                            send_json_response(socket, "200 OK", &json!({ "user": user }).to_string())
-                                .await;
+                            send_json_response(
+                                socket,
+                                "200 OK",
+                                &json!({ "user": user }).to_string(),
+                            )
+                            .await;
                         }
                         Err(err) => {
                             send_json_response(
@@ -379,8 +441,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         data_base64: String,
                     }
                     let Some(user_id) = authorized_user_id(&request_str) else {
-                        send_json_response(socket, "401 Unauthorized", "{\"message\":\"Unauthorized\"}")
-                            .await;
+                        send_json_response(
+                            socket,
+                            "401 Unauthorized",
+                            "{\"message\":\"Unauthorized\"}",
+                        )
+                        .await;
                         return;
                     };
                     let Ok(req) = serde_json::from_str::<AvatarUploadRequest>(body) else {
@@ -411,8 +477,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         .and_then(|url| update_profile(&user_id, None, Some(url)))
                     {
                         Ok(user) => {
-                            send_json_response(socket, "200 OK", &json!({ "user": user }).to_string())
-                                .await;
+                            send_json_response(
+                                socket,
+                                "200 OK",
+                                &json!({ "user": user }).to_string(),
+                            )
+                            .await;
                         }
                         Err(err) => {
                             send_json_response(
@@ -560,6 +630,57 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     .await;
                     return;
                 }
+                ("GET", "/api/subagents") => {
+                    let root = std::env::current_dir().ok();
+                    let list = crate::subagents::list_subagents(root.as_deref());
+                    send_json_response(
+                        socket,
+                        "200 OK",
+                        &serde_json::to_string(&list).unwrap_or_default(),
+                    )
+                    .await;
+                }
+                ("POST", "/api/subagents") => {
+                    match serde_json::from_str::<crate::subagents::SubagentDraft>(body) {
+                        Ok(draft) => {
+                            let root = std::env::current_dir().ok();
+                            match crate::subagents::save_subagent(&draft, root.as_deref()) {
+                                Ok(saved) => {
+                                    send_json_response(
+                                        socket,
+                                        "200 OK",
+                                        &serde_json::to_string(&saved).unwrap_or_default(),
+                                    )
+                                    .await;
+                                }
+                                Err(err) => {
+                                    let err_msg = json!({ "error": err }).to_string();
+                                    send_json_response(socket, "400 Bad Request", &err_msg).await;
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            send_json_response(
+                                socket,
+                                "400 Bad Request",
+                                "{\"error\":\"Invalid request body.\"}",
+                            )
+                            .await;
+                        }
+                    }
+                }
+                ("DELETE", route) if route.starts_with("/api/subagents/") => {
+                    let source_path = percent_decode(route.trim_start_matches("/api/subagents/"));
+                    match crate::subagents::delete_subagent(&source_path) {
+                        Ok(()) => {
+                            send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
+                        }
+                        Err(err) => {
+                            let err_msg = json!({ "error": err }).to_string();
+                            send_json_response(socket, "400 Bad Request", &err_msg).await;
+                        }
+                    }
+                }
                 ("GET", "/api/profile") => {
                     let key = query_param(query, "key").unwrap_or_default();
                     if let Ok(memory) = MemoryStore::open_default() {
@@ -596,32 +717,32 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     .await;
                 }
                 ("GET", "/api/oauth/start") => {
-                    let provider = query_param(query, "provider").unwrap_or_else(|| "google".to_string());
+                    let provider =
+                        query_param(query, "provider").unwrap_or_else(|| "google".to_string());
                     let redirect_uri = format!("http://localhost:3000/api/oauth/callback");
                     let config = load_config().unwrap_or_default();
 
                     let custom_client_id = match provider.as_str() {
-                        "google" | "gmail" | "google_calendar" | "youtube_music" => {
-                            config.extra.get("gmailClientId")
-                                .and_then(Value::as_str)
-                                .or_else(|| config.extra.get("googleCalendarClientId").and_then(Value::as_str))
-                        }
-                        "spotify" => {
-                            config.extra.get("spotifyClientId").and_then(Value::as_str)
-                        }
-                        "github" => {
-                            config.extra.get("githubClientId").and_then(Value::as_str)
-                        }
-                        "vercel" => {
-                            config.extra.get("vercelClientId").and_then(Value::as_str)
-                        }
-                        "notion" => {
-                            config.extra.get("notionApiKey").and_then(Value::as_str)
-                        }
+                        "google" | "gmail" | "google_calendar" | "youtube_music" => config
+                            .extra
+                            .get("gmailClientId")
+                            .and_then(Value::as_str)
+                            .or_else(|| {
+                                config
+                                    .extra
+                                    .get("googleCalendarClientId")
+                                    .and_then(Value::as_str)
+                            }),
+                        "spotify" => config.extra.get("spotifyClientId").and_then(Value::as_str),
+                        "github" => config.extra.get("githubClientId").and_then(Value::as_str),
+                        "vercel" => config.extra.get("vercelClientId").and_then(Value::as_str),
+                        "notion" => config.extra.get("notionApiKey").and_then(Value::as_str),
                         _ => None,
                     };
 
-                    if let Some((auth_url, state)) = crate::oauth::build_auth_url(&provider, &redirect_uri, custom_client_id) {
+                    if let Some((auth_url, state)) =
+                        crate::oauth::build_auth_url(&provider, &redirect_uri, custom_client_id)
+                    {
                         send_json_response(
                             socket,
                             "200 OK",
@@ -630,10 +751,17 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 "auth_url": auth_url,
                                 "state": state,
                                 "redirect_uri": redirect_uri
-                            }).to_string(),
-                        ).await;
+                            })
+                            .to_string(),
+                        )
+                        .await;
                     } else {
-                        send_json_response(socket, "400 Bad Request", "{\"error\":\"Invalid provider\"}").await;
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"error\":\"Invalid provider\"}",
+                        )
+                        .await;
                     }
                     return;
                 }
@@ -646,20 +774,47 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
                     let (custom_client_id, custom_client_secret) = match provider {
                         "google" | "gmail" | "google_calendar" | "youtube_music" => (
-                            config.extra.get("gmailClientId").and_then(Value::as_str).or_else(|| config.extra.get("googleCalendarClientId").and_then(Value::as_str)),
-                            config.extra.get("gmailClientSecret").and_then(Value::as_str).or_else(|| config.extra.get("googleCalendarClientSecret").and_then(Value::as_str)),
+                            config
+                                .extra
+                                .get("gmailClientId")
+                                .and_then(Value::as_str)
+                                .or_else(|| {
+                                    config
+                                        .extra
+                                        .get("googleCalendarClientId")
+                                        .and_then(Value::as_str)
+                                }),
+                            config
+                                .extra
+                                .get("gmailClientSecret")
+                                .and_then(Value::as_str)
+                                .or_else(|| {
+                                    config
+                                        .extra
+                                        .get("googleCalendarClientSecret")
+                                        .and_then(Value::as_str)
+                                }),
                         ),
                         "spotify" => (
                             config.extra.get("spotifyClientId").and_then(Value::as_str),
-                            config.extra.get("spotifyClientSecret").and_then(Value::as_str),
+                            config
+                                .extra
+                                .get("spotifyClientSecret")
+                                .and_then(Value::as_str),
                         ),
                         "github" => (
                             config.extra.get("githubClientId").and_then(Value::as_str),
-                            config.extra.get("githubClientSecret").and_then(Value::as_str),
+                            config
+                                .extra
+                                .get("githubClientSecret")
+                                .and_then(Value::as_str),
                         ),
                         "vercel" => (
                             config.extra.get("vercelClientId").and_then(Value::as_str),
-                            config.extra.get("vercelClientSecret").and_then(Value::as_str),
+                            config
+                                .extra
+                                .get("vercelClientSecret")
+                                .and_then(Value::as_str),
                         ),
                         "notion" => (
                             config.extra.get("notionApiKey").and_then(Value::as_str),
@@ -668,7 +823,15 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         _ => (None, None),
                     };
 
-                    let result = crate::oauth::exchange_code(provider, &code, &state, &redirect_uri, custom_client_id, custom_client_secret).await;
+                    let result = crate::oauth::exchange_code(
+                        provider,
+                        &code,
+                        &state,
+                        &redirect_uri,
+                        custom_client_id,
+                        custom_client_secret,
+                    )
+                    .await;
 
                     let html_body = match result {
                         Ok(tokens) => format!(
@@ -696,7 +859,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         socket,
                         "200 OK",
                         &serde_json::json!({ "statuses": statuses }).to_string(),
-                    ).await;
+                    )
+                    .await;
                     return;
                 }
                 ("POST", "/api/oauth/revoke") => {
@@ -873,7 +1037,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
                         }
                         Err(err) => {
-                            let err_msg = serde_json::json!({ "error": err.to_string() }).to_string();
+                            let err_msg =
+                                serde_json::json!({ "error": err.to_string() }).to_string();
                             send_json_response(socket, "400 Bad Request", &err_msg).await;
                         }
                     }
@@ -1085,7 +1250,10 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     "POST",
                                     "/api/chat",
                                     "200 OK",
-                                    Some(&format!("Model: {} | {}", config.ai_provider, auth_label)),
+                                    Some(&format!(
+                                        "Model: {} | {}",
+                                        config.ai_provider, auth_label
+                                    )),
                                 );
                                 if let Some(image) = sent_image {
                                     let _ = save_chat_images(
@@ -1330,6 +1498,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     let chat_id_str = chat_id.clone().unwrap_or_default();
                                     let message = chat_req.message.clone();
                                     let image_data_uri = chat_req.image_data_uri.clone();
+                                    let audio_data_uri = chat_req.audio_data_uri.clone();
                                     let video_data_uri = chat_req.video_data_uri.clone();
                                     let agent_id = chat_req.agent_id.clone();
 
@@ -1339,9 +1508,11 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                             &message,
                                             &root,
                                             image_data_uri,
+                                            audio_data_uri,
                                             video_data_uri,
                                             chat_id.as_deref(),
                                             agent_id.as_deref(),
+                                            None,
                                             fast_mode,
                                             false,
                                             |_| Ok(ApprovalOutcome::Denied),
@@ -1487,7 +1658,10 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     "POST",
                                     "/api/image-generate",
                                     "200 OK",
-                                    Some(&format!("Provider: {} | {}", result.provider, auth_label)),
+                                    Some(&format!(
+                                        "Provider: {} | {}",
+                                        result.provider, auth_label
+                                    )),
                                 );
                                 let data_uris: Vec<String> = result
                                     .images
@@ -1603,7 +1777,10 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     "POST",
                                     "/api/video-generate",
                                     "200 OK",
-                                    Some(&format!("Provider: {} | {}", result.provider, auth_label)),
+                                    Some(&format!(
+                                        "Provider: {} | {}",
+                                        result.provider, auth_label
+                                    )),
                                 );
                                 send_json_response(socket, "200 OK", &response.to_string()).await;
                             }
@@ -1632,7 +1809,9 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     match route {
                         "/api/video/load" => {
                             #[derive(serde::Deserialize)]
-                            struct VideoLoadReq { path: String }
+                            struct VideoLoadReq {
+                                path: String,
+                            }
                             if let Ok(req) = serde_json::from_str::<VideoLoadReq>(body) {
                                 match video_load(&req.path) {
                                     Ok(info) => {
@@ -1643,11 +1822,21 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     Err(e) => {
                                         log_api_err("/api/video/load", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"expected {\\\"path\\\":\\\"...\\\"}\" }").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"expected {\\\"path\\\":\\\"...\\\"}\" }",
+                                )
+                                .await;
                             }
                         }
                         "/api/video/trim" => {
@@ -1661,11 +1850,21 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     Err(e) => {
                                         log_api_err("/api/video/trim", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid trim request\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid trim request\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/video/crop" => {
@@ -1679,11 +1878,21 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     Err(e) => {
                                         log_api_err("/api/video/crop", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid crop request\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid crop request\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/video/resize" => {
@@ -1697,11 +1906,21 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     Err(e) => {
                                         log_api_err("/api/video/resize", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid resize request\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid resize request\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/video/merge" => {
@@ -1715,11 +1934,21 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     Err(e) => {
                                         log_api_err("/api/video/merge", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid merge request\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid merge request\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/video/extract-audio" => {
@@ -1727,17 +1956,32 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 match video_extract_audio(&req) {
                                     Ok(r) => {
                                         let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req("POST", "/api/video/extract-audio", "200 OK", None);
+                                        log_api_req(
+                                            "POST",
+                                            "/api/video/extract-audio",
+                                            "200 OK",
+                                            None,
+                                        );
                                         send_json_response(socket, "200 OK", &res).await;
                                     }
                                     Err(e) => {
                                         log_api_err("/api/video/extract-audio", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid extract-audio request\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid extract-audio request\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/video/remove-silence" => {
@@ -1745,17 +1989,32 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 match video_remove_silence(&req) {
                                     Ok(r) => {
                                         let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req("POST", "/api/video/remove-silence", "200 OK", None);
+                                        log_api_req(
+                                            "POST",
+                                            "/api/video/remove-silence",
+                                            "200 OK",
+                                            None,
+                                        );
                                         send_json_response(socket, "200 OK", &res).await;
                                     }
                                     Err(e) => {
                                         log_api_err("/api/video/remove-silence", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid remove-silence request\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid remove-silence request\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/video/export" => {
@@ -1769,11 +2028,21 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     Err(e) => {
                                         log_api_err("/api/video/export", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid export request\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid export request\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/video/render-timeline" => {
@@ -1781,17 +2050,32 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 match render_timeline(&req.timeline) {
                                     Ok(r) => {
                                         let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req("POST", "/api/video/render-timeline", "200 OK", Some(&format!("{} clips", r.clips_rendered)));
+                                        log_api_req(
+                                            "POST",
+                                            "/api/video/render-timeline",
+                                            "200 OK",
+                                            Some(&format!("{} clips", r.clips_rendered)),
+                                        );
                                         send_json_response(socket, "200 OK", &res).await;
                                     }
                                     Err(e) => {
                                         log_api_err("/api/video/render-timeline", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid timeline request\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid timeline request\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/video/make-shorts" => {
@@ -1800,17 +2084,32 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 match make_shorts(&config, &req).await {
                                     Ok(r) => {
                                         let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req("POST", "/api/video/make-shorts", "200 OK", Some(&format!("{} shorts clips", r.clips.len())));
+                                        log_api_req(
+                                            "POST",
+                                            "/api/video/make-shorts",
+                                            "200 OK",
+                                            Some(&format!("{} shorts clips", r.clips.len())),
+                                        );
                                         send_json_response(socket, "200 OK", &res).await;
                                     }
                                     Err(e) => {
                                         log_api_err("/api/video/make-shorts", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid make-shorts request body\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid make-shorts request body\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/video/ai-edit" => {
@@ -1819,21 +2118,44 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 match ai_edit_video(&config, &req).await {
                                     Ok(r) => {
                                         let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req("POST", "/api/video/ai-edit", "200 OK", Some(&format!("AI executed prompt: {}", req.instruction)));
+                                        log_api_req(
+                                            "POST",
+                                            "/api/video/ai-edit",
+                                            "200 OK",
+                                            Some(&format!(
+                                                "AI executed prompt: {}",
+                                                req.instruction
+                                            )),
+                                        );
                                         send_json_response(socket, "200 OK", &res).await;
                                     }
                                     Err(e) => {
                                         log_api_err("/api/video/ai-edit", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid ai-edit request body\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid ai-edit request body\"}",
+                                )
+                                .await;
                             }
                         }
                         _ => {
-                            send_json_response(socket, "404 Not Found", "{\"error\":\"unknown video route\"}").await;
+                            send_json_response(
+                                socket,
+                                "404 Not Found",
+                                "{\"error\":\"unknown video route\"}",
+                            )
+                            .await;
                         }
                     }
                 }
@@ -1845,40 +2167,77 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 let config = load_config().unwrap_or_default();
                                 match transcribe(&config, &req).await {
                                     Ok(res) => {
-                                        let json_str = serde_json::to_string(&res).unwrap_or_default();
-                                        log_api_req("POST", "/api/speech/transcribe", "200 OK", None);
+                                        let json_str =
+                                            serde_json::to_string(&res).unwrap_or_default();
+                                        log_api_req(
+                                            "POST",
+                                            "/api/speech/transcribe",
+                                            "200 OK",
+                                            None,
+                                        );
                                         send_json_response(socket, "200 OK", &json_str).await;
                                     }
                                     Err(e) => {
                                         log_api_err("/api/speech/transcribe", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid transcribe request body\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid transcribe request body\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/speech/detect-silence" => {
                             if let Ok(req) = serde_json::from_str::<DetectSilenceRequest>(body) {
                                 match detect_silence(&req) {
                                     Ok(ranges) => {
-                                        let json_str = serde_json::to_string(&ranges).unwrap_or_default();
-                                        log_api_req("POST", "/api/speech/detect-silence", "200 OK", Some(&format!("{} ranges", ranges.len())));
+                                        let json_str =
+                                            serde_json::to_string(&ranges).unwrap_or_default();
+                                        log_api_req(
+                                            "POST",
+                                            "/api/speech/detect-silence",
+                                            "200 OK",
+                                            Some(&format!("{} ranges", ranges.len())),
+                                        );
                                         send_json_response(socket, "200 OK", &json_str).await;
                                     }
                                     Err(e) => {
                                         log_api_err("/api/speech/detect-silence", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid detect-silence request body\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid detect-silence request body\"}",
+                                )
+                                .await;
                             }
                         }
                         _ => {
-                            send_json_response(socket, "404 Not Found", "{\"error\":\"unknown speech route\"}").await;
+                            send_json_response(
+                                socket,
+                                "404 Not Found",
+                                "{\"error\":\"unknown speech route\"}",
+                            )
+                            .await;
                         }
                     }
                 }
@@ -1896,52 +2255,92 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 log_api_req("POST", "/api/subtitle/generate", "200 OK", None);
                                 send_json_response(socket, "200 OK", &res.to_string()).await;
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid subtitle generate request body\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid subtitle generate request body\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/subtitle/translate" => {
-                            if let Ok(req) = serde_json::from_str::<TranslateSubtitleRequest>(body) {
+                            if let Ok(req) = serde_json::from_str::<TranslateSubtitleRequest>(body)
+                            {
                                 let config = load_config().unwrap_or_default();
                                 match translate_subtitles(&config, &req).await {
                                     Ok(srt) => {
                                         let res = json!({ "srt": srt });
-                                        log_api_req("POST", "/api/subtitle/translate", "200 OK", None);
-                                        send_json_response(socket, "200 OK", &res.to_string()).await;
+                                        log_api_req(
+                                            "POST",
+                                            "/api/subtitle/translate",
+                                            "200 OK",
+                                            None,
+                                        );
+                                        send_json_response(socket, "200 OK", &res.to_string())
+                                            .await;
                                     }
                                     Err(e) => {
                                         log_api_err("/api/subtitle/translate", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid subtitle translate request body\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid subtitle translate request body\"}",
+                                )
+                                .await;
                             }
                         }
                         "/api/subtitle/burn" => {
                             if let Ok(req) = serde_json::from_str::<BurnSubtitleRequest>(body) {
                                 match burn_subtitles(&req) {
                                     Ok(res) => {
-                                        let json_str = serde_json::to_string(&res).unwrap_or_default();
+                                        let json_str =
+                                            serde_json::to_string(&res).unwrap_or_default();
                                         log_api_req("POST", "/api/subtitle/burn", "200 OK", None);
                                         send_json_response(socket, "200 OK", &json_str).await;
                                     }
                                     Err(e) => {
                                         log_api_err("/api/subtitle/burn", &e);
                                         let err = json!({ "error": e.to_string() });
-                                        send_json_response(socket, "500 Internal Server Error", &err.to_string()).await;
+                                        send_json_response(
+                                            socket,
+                                            "500 Internal Server Error",
+                                            &err.to_string(),
+                                        )
+                                        .await;
                                     }
                                 }
                             } else {
-                                send_json_response(socket, "400 Bad Request", "{\"error\":\"invalid subtitle burn request body\"}").await;
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    "{\"error\":\"invalid subtitle burn request body\"}",
+                                )
+                                .await;
                             }
                         }
                         _ => {
-                            send_json_response(socket, "404 Not Found", "{\"error\":\"unknown subtitle route\"}").await;
+                            send_json_response(
+                                socket,
+                                "404 Not Found",
+                                "{\"error\":\"unknown subtitle route\"}",
+                            )
+                            .await;
                         }
                     }
                 }
-                (_, "/api/video-gen/providers") | (_, "/api/video/providers") | ("GET", "/api/image-gen/providers") => {
+                (_, "/api/video-gen/providers")
+                | (_, "/api/video/providers")
+                | ("GET", "/api/image-gen/providers") => {
                     let config = load_config().unwrap_or_default();
                     let mut available: Vec<String> = Vec::new();
                     if !config.api_key.trim().is_empty() {
@@ -2006,7 +2405,11 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                          Connection: Upgrade\r\n\
                          Sec-WebSocket-Accept: {accept_key}\r\n\r\n"
                     );
-                    if socket.write_all(handshake_response.as_bytes()).await.is_err() {
+                    if socket
+                        .write_all(handshake_response.as_bytes())
+                        .await
+                        .is_err()
+                    {
                         return;
                     }
                     let _ = socket.flush().await;
@@ -2014,7 +2417,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     // No handshake I/O is performed here — the raw bytes were already
                     // consumed off `socket` by the connection loop above, and we just
                     // answered the upgrade by hand.
-                    let ws_stream = WebSocketStream::from_raw_socket(socket, Role::Server, None).await;
+                    let ws_stream =
+                        WebSocketStream::from_raw_socket(socket, Role::Server, None).await;
                     let (mut ws_write, mut ws_read) = ws_stream.split();
 
                     let config = load_config().unwrap_or_default();
@@ -2088,9 +2492,11 @@ async fn run_web_agent_loop(
         &request.message,
         &root,
         request.image_data_uri.clone(),
+        request.audio_data_uri.clone(),
         request.video_data_uri.clone(),
         request.chat_id.as_deref(),
         request.agent_id.as_deref(),
+        None,
         fast_mode,
         false,
         |_| Ok(ApprovalOutcome::Denied),

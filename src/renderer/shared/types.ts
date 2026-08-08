@@ -134,6 +134,29 @@ export interface LearnedSkill {
   content: string
   updatedAt: string
   location?: string
+  description?: string
+  is_workspace?: boolean
+}
+
+export interface SubagentDefinition {
+  name: string
+  description: string
+  tools: string[] | null
+  model: string | null
+  provider: string | null
+  systemPrompt: string
+  sourcePath: string
+}
+
+export interface SubagentDraft {
+  name: string
+  description: string
+  tools: string[] | null
+  model: string | null
+  provider: string | null
+  systemPrompt: string
+  scope: 'global' | 'workspace'
+  previousSourcePath?: string | null
 }
 
 export interface DiffHunk {

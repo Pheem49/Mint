@@ -21,9 +21,6 @@ export default function MemoryTab({
             <p className="section-kicker">Cross-session Memory</p>
             <h2 className="section-title">User Profile & Preferences</h2>
           </div>
-          <p className="section-description">
-            Information and preferences stored here will be remembered across all conversations. Mint automatically learns and updates your profile details from your chats in the background, but you can also edit them manually.
-          </p>
         </div>
 
         <div className="form-grid single">

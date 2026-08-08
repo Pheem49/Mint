@@ -429,7 +429,10 @@ mod tests {
 
         // Delete picture using read_index/write_index pattern
         let mut entries_to_mod = read_index(&directory).unwrap();
-        let pos = entries_to_mod.iter().position(|e| e.id == *picture_id).unwrap();
+        let pos = entries_to_mod
+            .iter()
+            .position(|e| e.id == *picture_id)
+            .unwrap();
         let removed = entries_to_mod.remove(pos);
         if removed.path.exists() {
             fs::remove_file(&removed.path).unwrap();

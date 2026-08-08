@@ -18,6 +18,8 @@ import type {
   CodeEditProposal,
   DetectedTools,
   LearnedSkill,
+  SubagentDefinition,
+  SubagentDraft,
   AgentProgress,
   AuthUser,
 } from './types'
@@ -82,6 +84,9 @@ export interface MintPlatformApi {
   listLearnedSkills(workspacePath?: string): Promise<LearnedSkill[]>
   addLearnedSkill(name: string, content: string): Promise<LearnedSkill>
   deleteLearnedSkill(name: string): Promise<number>
+  listSubagents(workspacePath?: string): Promise<SubagentDefinition[]>
+  saveSubagent(draft: SubagentDraft, workspacePath?: string): Promise<SubagentDefinition>
+  deleteSubagent(sourcePath: string): Promise<void>
   clearChatHistory(chatId?: string | null): Promise<number>
   listSavedPictures(): Promise<PictureEntry[]>
   deleteSavedPicture(id: string): Promise<void>

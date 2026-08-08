@@ -1,15 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import { renderSkillsSvgIcon } from '../constants/plugins'
 import '../css/management-views.css'
+import type { LearnedSkill } from '../types'
 
-export interface LearnedSkill {
-  name: string
-  source_path: string
-  content: string
-  created_at: string
-  description?: string
-  is_workspace?: boolean
-}
+export type { LearnedSkill }
 
 export interface SkillsViewProps {
   listSkills: (workspacePath?: string) => Promise<LearnedSkill[]>
@@ -202,7 +196,7 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
 
               <div className="management-card-footer">
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #64748b)' }}>
-                  {s.created_at ? new Date(s.created_at).toLocaleDateString() : 'Learned'}
+                  {s.updatedAt ? new Date(s.updatedAt).toLocaleDateString() : 'Learned'}
                 </span>
                 <button
                   type="button"

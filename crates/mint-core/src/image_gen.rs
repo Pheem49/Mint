@@ -128,15 +128,17 @@ pub async fn generate_images(
 
     match provider {
         "nanobanana" => call_nanobanana(&client, config, request).await,
-        "dalle" => {
-            match call_dalle(&client, config, request).await {
-                Err(ImageGenError::MissingOpenAiKey) if !config.api_key.trim().is_empty() || std::env::var("GEMINI_API_KEY").is_ok() => {
-                    eprintln!("[Mint Warning] OpenAI API key missing for DALL-E, falling back to NanoBanana (Gemini)");
-                    call_nanobanana(&client, config, request).await
-                }
-                res => res,
+        "dalle" => match call_dalle(&client, config, request).await {
+            Err(ImageGenError::MissingOpenAiKey)
+                if !config.api_key.trim().is_empty() || std::env::var("GEMINI_API_KEY").is_ok() =>
+            {
+                eprintln!(
+                    "[Mint Warning] OpenAI API key missing for DALL-E, falling back to NanoBanana (Gemini)"
+                );
+                call_nanobanana(&client, config, request).await
             }
-        }
+            res => res,
+        },
         "stability" => call_stability(&client, config, request).await,
         "ideogram" => call_ideogram(&client, config, request).await,
         "replicate" => call_replicate(&client, config, request).await,
@@ -995,9 +997,9 @@ async fn call_bfl(
         .json()
         .await?;
 
-    let task_id = resp["id"]
-        .as_str()
-        .ok_or_else(|| ImageGenError::ModelError("No task ID returned from Black Forest Labs".into()))?;
+    let task_id = resp["id"].as_str().ok_or_else(|| {
+        ImageGenError::ModelError("No task ID returned from Black Forest Labs".into())
+    })?;
 
     let poll_url = format!("https://api.bfl.ml/v1/get_result?id={task_id}");
     let mut sample_url = None;
@@ -1020,7 +1022,9 @@ async fn call_bfl(
                 break;
             }
         } else if status == "Error" || status == "Failed" {
-            let err_msg = poll_resp["error"].as_str().unwrap_or("FLUX generation failed");
+            let err_msg = poll_resp["error"]
+                .as_str()
+                .unwrap_or("FLUX generation failed");
             return Err(ImageGenError::ModelError(err_msg.to_string()));
         }
     }
@@ -1029,12 +1033,7 @@ async fn call_bfl(
         ImageGenError::ModelError("FLUX generation timed out polling for result".into())
     })?;
 
-    let img_bytes = client
-        .get(&image_url)
-        .send()
-        .await?
-        .bytes()
-        .await?;
+    let img_bytes = client.get(&image_url).send().await?.bytes().await?;
 
     let base64_str = STANDARD.encode(&img_bytes);
     let data_uri = format!("data:image/png;base64,{base64_str}");

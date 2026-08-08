@@ -165,7 +165,7 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justify: 'space-between',
+                  justifyContent: 'space-between',
                   padding: '16px 20px',
                   background: isEnabled ? 'rgba(16, 185, 129, 0.04)' : 'transparent',
                   flexWrap: 'wrap',

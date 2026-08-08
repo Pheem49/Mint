@@ -1,15 +1,21 @@
-use crate::{BLUE, COMPOSER_BG, DIM, ERROR, MINT, RESET, WARN};
-use crate::{actions, agent, image, markdown};
 use crate::background::{BackgroundJobs, JobStatus};
+use crate::onboard;
+use crate::{BLUE, COMPOSER_BG, DIM, ERROR, MINT, RESET, WARN};
+use crate::{agent, image};
 use anyhow::Result;
-use mint_core::{
-    CHAT_CLI_ID, ChatRequest, MemoryStore, MintConfig, orchestrate_chat_stream_with_fallback,
-};
+use mint_core::{CHAT_CLI_ID, MemoryStore, MintConfig};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 pub static SESSION_APPROVED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Separate from `SESSION_APPROVED`: gates only the agent's high-risk
+/// "Security Authorization" prompts, so approving "Entire Session" for a
+/// routine shell/skill confirmation can never silently wave through an
+/// unrelated, higher-stakes agent action.
+pub static SECURITY_SESSION_APPROVED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 pub struct InteractiveSession {
@@ -265,8 +271,42 @@ pub async fn handle_slash_command(
             };
 
             if let Some(provider) = selected_provider {
+                // Switch provider first so `active_model()` reflects that
+                // provider's own default/last-used model, then offer a
+                // second picker (when a model list is known for it) so the
+                // user isn't stuck with the default after choosing a provider.
                 match session.config.set_active_model(&provider, None) {
-                    Ok(display_name) => {
+                    Ok(mut display_name) => {
+                        let mut model_options =
+                            model_options_for_provider(&session.config, &provider);
+                        let current_model = session.config.active_model().to_string();
+                        if !current_model.is_empty()
+                            && !model_options.iter().any(|m| m == &current_model)
+                        {
+                            model_options.insert(0, current_model.clone());
+                        }
+
+                        if !model_options.is_empty() {
+                            match prompt_interactive_select(
+                                &format!("Select {provider} model"),
+                                &model_options,
+                                &current_model,
+                            ) {
+                                Ok(Some(model)) if model != current_model => {
+                                    match session.config.set_active_model(&provider, Some(&model)) {
+                                        Ok(name) => display_name = name,
+                                        Err(error) => {
+                                            println!("{ERROR}Config error:{RESET} {error}")
+                                        }
+                                    }
+                                }
+                                Ok(_) => {}
+                                Err(e) => {
+                                    println!("{ERROR}Error selecting model:{RESET} {e}\n")
+                                }
+                            }
+                        }
+
                         println!(
                             "\n{DIM}───{RESET} {MINT}{}{RESET} {DIM}───{RESET}\n",
                             display_name
@@ -316,8 +356,10 @@ pub async fn handle_slash_command(
                             "  {:<15} {}  Provider: {:<12} Model: {}",
                             agent.name, status_label, agent.provider, agent.model
                         );
-                        let truncated_instruction = if agent.system_instruction.len() > 60 {
-                            format!("{}...", &agent.system_instruction[..60].replace('\n', " "))
+                        let truncated_instruction = if agent.system_instruction.chars().count() > 60
+                        {
+                            let head: String = agent.system_instruction.chars().take(60).collect();
+                            format!("{}...", head.replace('\n', " "))
                         } else {
                             agent.system_instruction.replace('\n', " ")
                         };
@@ -548,8 +590,10 @@ pub async fn handle_slash_command(
                 .to_string();
 
             let selected_provider = if rest.is_empty() {
-                let options: Vec<String> =
-                    available.iter().map(|(_, label)| label.to_string()).collect();
+                let options: Vec<String> = available
+                    .iter()
+                    .map(|(_, label)| label.to_string())
+                    .collect();
                 let current_display = available
                     .iter()
                     .find(|(key, _)| *key == current_provider)
@@ -611,7 +655,9 @@ pub async fn handle_slash_command(
                 println!("{ERROR}Usage:{RESET} /bg <query>\n");
                 return Some(SlashResult::Handled);
             }
-            let id = session.jobs.spawn(&session.config, &session.current_dir, rest);
+            let id = session
+                .jobs
+                .spawn(&session.config, &session.current_dir, rest);
             println!(
                 "{DIM}Started background job #{id}. Keep chatting — check on it with {RESET}/jobs{DIM}, or view its result with {RESET}/jobs show {id}{DIM}.{RESET}"
             );
@@ -636,7 +682,11 @@ pub async fn handle_slash_command(
                             JobStatus::Cancelled => format!("{DIM}cancelled{RESET}"),
                         };
                         let preview: String = job.query.chars().take(50).collect();
-                        let suffix = if job.query.chars().count() > 50 { "…" } else { "" };
+                        let suffix = if job.query.chars().count() > 50 {
+                            "…"
+                        } else {
+                            ""
+                        };
                         println!(
                             "  #{:<3} [{status_str}] {DIM}{:>4}s{RESET}  {preview}{suffix}",
                             job.id,
@@ -843,13 +893,8 @@ pub async fn handle_slash_command(
                         mask_data_uri: None,
                         mode: Some("edit".to_owned()),
                     };
-                    let rt = tokio::runtime::Handle::current();
-                    let config = session.config.clone();
-                    let handle = std::thread::spawn(move || {
-                        rt.block_on(mint_core::generate_images(&config, &req))
-                    });
-                    match handle.join() {
-                        Ok(Ok(resp)) => {
+                    match mint_core::generate_images(&session.config, &req).await {
+                        Ok(resp) => {
                             if let Some(first) = resp.images.first() {
                                 println!(
                                     "{DIM}Image edited successfully using {} ({}){RESET}\n",
@@ -861,11 +906,8 @@ pub async fn handle_slash_command(
                                 );
                             }
                         }
-                        Ok(Err(e)) => {
+                        Err(e) => {
                             println!("{ERROR}Image editing failed: {e}{RESET}\n");
-                        }
-                        Err(_) => {
-                            println!("{ERROR}Image editing thread panicked.{RESET}\n");
                         }
                     }
                 }
@@ -882,7 +924,10 @@ pub async fn handle_slash_command(
                 println!("{WARN}Usage: /generate-image <prompt>{RESET}\n");
                 Some(SlashResult::Handled)
             } else {
-                Some(SlashResult::ForwardToAgent(format!("Generate an image of {}", prompt)))
+                Some(SlashResult::ForwardToAgent(format!(
+                    "Generate an image of {}",
+                    prompt
+                )))
             }
         }
 
@@ -1322,11 +1367,11 @@ pub async fn handle_slash_command(
 
             if plugin_name.is_empty() {
                 // Collect all plugins with their OAuth status
-                use mint_core::oauth::list_oauth_statuses;
                 use crossterm::{
                     event::{self, Event, KeyCode},
                     terminal::{disable_raw_mode, enable_raw_mode},
                 };
+                use mint_core::oauth::list_oauth_statuses;
 
                 let oauth_statuses = list_oauth_statuses();
 
@@ -1345,7 +1390,10 @@ pub async fn handle_slash_command(
                     .map(|p| {
                         // Try to find matching OAuth status
                         let (connected, account) = if !p.oauth_provider.is_empty() {
-                            if let Some(st) = oauth_statuses.iter().find(|s| s.provider == p.oauth_provider) {
+                            if let Some(st) = oauth_statuses
+                                .iter()
+                                .find(|s| s.provider == p.oauth_provider)
+                            {
                                 (st.connected, st.account_email.clone())
                             } else {
                                 (false, None)
@@ -1392,16 +1440,25 @@ pub async fn handle_slash_command(
                     account: Option<String>,
                     is_custom: bool,
                 }
-                let display: Vec<PE> = entries.drain(..)
+                let display: Vec<PE> = entries
+                    .drain(..)
                     .map(|e| PE {
                         is_custom: false,
-                        name: e.name, desc: e.desc, is_oauth: e.is_oauth,
-                        oauth_provider: e.oauth_provider, connected: e.connected, account: e.account,
+                        name: e.name,
+                        desc: e.desc,
+                        is_oauth: e.is_oauth,
+                        oauth_provider: e.oauth_provider,
+                        connected: e.connected,
+                        account: e.account,
                     })
                     .chain(custom_entries.drain(..).map(|e| PE {
                         is_custom: true,
-                        name: e.name, desc: e.desc, is_oauth: e.is_oauth,
-                        oauth_provider: e.oauth_provider, connected: e.connected, account: e.account,
+                        name: e.name,
+                        desc: e.desc,
+                        is_oauth: e.is_oauth,
+                        oauth_provider: e.oauth_provider,
+                        connected: e.connected,
+                        account: e.account,
                     }))
                     .collect();
 
@@ -1436,7 +1493,10 @@ pub async fn handle_slash_command(
                 let draw_list = |cur: usize| {
                     for (i, e) in display.iter().enumerate() {
                         let plain_status = if e.connected {
-                            format!("● {}", truncate_str(e.account.as_deref().unwrap_or("yes"), 18))
+                            format!(
+                                "● {}",
+                                truncate_str(e.account.as_deref().unwrap_or("yes"), 18)
+                            )
                         } else if e.is_oauth {
                             "○ Not Connected".to_string()
                         } else {
@@ -1451,16 +1511,24 @@ pub async fn handle_slash_command(
                             } else {
                                 format!("\x1b[36m{:<22}\x1b[0m", plain_status)
                             };
-                            println!("  {BLUE}❯ {:<18}{RESET}{}  {DIM}{short_desc}{RESET}", e.name, status_colored);
+                            println!(
+                                "  {BLUE}❯ {:<18}{RESET}{}  {DIM}{short_desc}{RESET}",
+                                e.name, status_colored
+                            );
                         } else {
-                            println!("    {DIM}{:<18}  {:<22}  {short_desc}{RESET}", e.name, plain_status);
+                            println!(
+                                "    {DIM}{:<18}  {:<22}  {short_desc}{RESET}",
+                                e.name, plain_status
+                            );
                         }
                     }
                 };
 
                 let total_lines = count_menu_lines(&display);
                 // Title pinned above list — printed once, not cleared on redraw (matches /models style)
-                println!("  {BLUE}Plugins & Integrations (↑/↓ navigate, Enter: manage, q: exit):{RESET}");
+                println!(
+                    "  {BLUE}Plugins & Integrations (↑/↓ navigate, Enter: manage, q: exit):{RESET}"
+                );
                 draw_list(cursor);
                 let _ = enable_raw_mode();
 
@@ -1470,14 +1538,25 @@ pub async fn handle_slash_command(
                             if let Ok(Event::Key(key_event)) = event::read() {
                                 if key_event.kind == event::KeyEventKind::Press {
                                     let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
-                                        && key_event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL);
-                                    if is_ctrl_c || matches!(key_event.code, KeyCode::Char('q') | KeyCode::Esc) {
+                                        && key_event
+                                            .modifiers
+                                            .contains(crossterm::event::KeyModifiers::CONTROL);
+                                    if is_ctrl_c
+                                        || matches!(
+                                            key_event.code,
+                                            KeyCode::Char('q') | KeyCode::Esc
+                                        )
+                                    {
                                         let _ = disable_raw_mode();
                                         break None;
                                     }
                                     match key_event.code {
                                         KeyCode::Up => {
-                                            if cursor > 0 { cursor -= 1; } else { cursor = total - 1; }
+                                            if cursor > 0 {
+                                                cursor -= 1;
+                                            } else {
+                                                cursor = total - 1;
+                                            }
                                             let _ = disable_raw_mode();
                                             print!("\x1b[{}A\x1b[0J", total_lines);
                                             let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -1485,7 +1564,11 @@ pub async fn handle_slash_command(
                                             let _ = enable_raw_mode();
                                         }
                                         KeyCode::Down => {
-                                            if cursor < total - 1 { cursor += 1; } else { cursor = 0; }
+                                            if cursor < total - 1 {
+                                                cursor += 1;
+                                            } else {
+                                                cursor = 0;
+                                            }
                                             let _ = disable_raw_mode();
                                             print!("\x1b[{}A\x1b[0J", total_lines);
                                             let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -1502,7 +1585,10 @@ pub async fn handle_slash_command(
                             }
                         }
                         Ok(false) => {}
-                        Err(_) => { let _ = disable_raw_mode(); break None; }
+                        Err(_) => {
+                            let _ = disable_raw_mode();
+                            break None;
+                        }
                     }
                 };
 
@@ -1521,15 +1607,22 @@ pub async fn handle_slash_command(
                                 selected.oauth_provider
                             );
                         } else {
-                            println!("\x1b[1;36m🔑 Sign In to {} via OAuth...\x1b[0m", selected.name);
+                            println!(
+                                "\x1b[1;36m🔑 Sign In to {} via OAuth...\x1b[0m",
+                                selected.name
+                            );
                             println!("{DIM}  Opening browser for authorization...{RESET}\n");
-                            crate::plugins_cli::login_plugin_oauth_public(&selected.oauth_provider).await;
+                            crate::plugins_cli::login_plugin_oauth_public(&selected.oauth_provider)
+                                .await;
                         }
                     } else if selected.is_custom {
                         println!("{BLUE}📄 Custom Skill: {}\x1b[0m", selected.name);
                         println!("{DIM}  Source: {}{RESET}", selected.desc);
                     } else {
-                        println!("{BLUE}⚙️ {} is a native plugin (always available).\x1b[0m", selected.name);
+                        println!(
+                            "{BLUE}⚙️ {} is a native plugin (always available).\x1b[0m",
+                            selected.name
+                        );
                         println!("{DIM}  {}{RESET}", selected.desc);
                     }
                     println!();
@@ -1880,152 +1973,24 @@ pub async fn run_interactive_chat() -> Result<()> {
                 None => {} // Not a slash command, fall through
             }
 
-            // Check if it's a /code or regular agent request
-            if let Some(task) = query_str.strip_prefix("/code ") {
-                println!();
-                if let Err(error) = crate::run_code_agent_with_saved_image(
-                    task.trim(),
-                    &session.current_dir,
-                    &session.config,
-                    session.pending_image.take(),
-                    None,
-                    agent::AgentOptions {
-                        fast_mode: session.fast_mode,
-                        plan_mode: session.plan_mode,
-                    },
-                )
-                .await
-                {
-                    println!("{ERROR}Error:{RESET} {error}\n");
-                }
-                continue;
-            }
-
-            // Regular agent loop (handles both chat and coding)
-            if !query_str.starts_with("/chat ") {
-                if let Err(error) = crate::run_code_agent_with_saved_image(
-                    query_str.trim_start_matches("/chat "),
-                    &session.current_dir,
-                    &session.config,
-                    session.pending_image.take(),
-                    None,
-                    agent::AgentOptions {
-                        fast_mode: session.fast_mode,
-                        plan_mode: session.plan_mode,
-                    },
-                )
-                .await
-                {
-                    println!("{ERROR}Error:{RESET} {error}\n");
-                }
-                continue;
-            }
-
-            // /chat explicit: use streaming chat with fallback
-            let message = query_str
-                .strip_prefix("/chat ")
-                .unwrap_or(&query_str)
-                .trim()
-                .to_owned();
-
-            println!();
-            print!("  {MINT}Mint:{RESET} {DIM}Thinking...{RESET}");
-            let _ = io::stdout().flush();
-
-            let user_name = MemoryStore::open_default()
-                .ok()
-                .and_then(|memory| memory.get_profile("name").ok().flatten());
-            let system_instruction =
-                mint_core::prompts::chat::interactive_system_instruction(user_name.as_deref());
-
-            let image_uri = session.pending_image.take();
-            let sent_image = image_uri.clone();
-            let mut first_chunk = true;
-            let mut filter = actions::ActionStreamFilter::new();
-            let mut formatter = markdown::CliStreamFormatter::new();
-
-            let stream_result = orchestrate_chat_stream_with_fallback(
+            // Regular agent loop (handles both chat and coding).
+            // Note: /code is fully handled by handle_slash_command above
+            // (its "/code" arm always returns Some(...)), so no separate
+            // "/code " fallback is needed here.
+            if let Err(error) = crate::run_code_agent_with_saved_image(
+                &query_str,
+                &session.current_dir,
                 &session.config,
-                &ChatRequest {
-                    message: message.clone(),
-                    system_instruction,
-                    chat_id: Some(CHAT_CLI_ID.to_owned()),
-                    image_data_uri: image_uri,
-                    audio_data_uri: None,
-                    video_data_uri: None,
-                    document_attachment: None,
-                    workspace_path: None,
-                    agent_id: None,
-                    plan_mode: false,
-                    messages: None,
-                    tools: None,
-                },
-                |chunk| {
-                    if first_chunk {
-                        first_chunk = false;
-                        print!("\r\x1b[2K  {MINT}Mint:{RESET} ");
-                    }
-                    filter.process_chunk(&chunk, |text| {
-                        for c in text.chars() {
-                            formatter.process_char(c, |formatted_c| {
-                                print!("{}", formatted_c);
-                            });
-                        }
-                    });
-                    let _ = io::stdout().flush();
+                session.pending_image.take(),
+                None,
+                agent::AgentOptions {
+                    fast_mode: session.fast_mode,
+                    plan_mode: session.plan_mode,
                 },
             )
-            .await;
-
-            let actions = filter.finalize(|text| {
-                for c in text.chars() {
-                    formatter.process_char(c, |formatted_c| {
-                        print!("{}", formatted_c);
-                    });
-                }
-            });
-            formatter.finalize(|formatted_c| {
-                print!("{}", formatted_c);
-            });
-            let _ = io::stdout().flush();
-
-            match stream_result {
-                Ok((response, fallback)) => {
-                    image::save_sent_image_after_send(sent_image.as_deref(), &message);
-                    if first_chunk {
-                        print!("\r\x1b[2K");
-                        let _ = io::stdout().flush();
-                    } else {
-                        println!("\n");
-                        let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
-                        let width = tw as usize;
-                        // Show provider badge (with fallback indicator if applicable)
-                        let badge = if let Some(fb_provider) = &fallback {
-                            format!(
-                                "{DIM}{} • {} → fallback: {} • {}{RESET}",
-                                session.config.ai_provider,
-                                active_model(&session.config.ai_provider, &session.config),
-                                fb_provider,
-                                response.model
-                            )
-                        } else {
-                            format!("{DIM}{} • {}{RESET}", response.provider, response.model)
-                        };
-                        println!("{badge}");
-                        println!("{DIM}{}{RESET}\n", "─".repeat(width));
-                    }
-                    for action in actions {
-                        if let Err(e) = actions::execute_action(&action, &session.config) {
-                            println!("{ERROR}Error executing action:{RESET} {e}\n");
-                        }
-                    }
-                }
-                Err(e) => {
-                    if first_chunk {
-                        print!("\r\x1b[2K");
-                    }
-                    println!("{ERROR}Error:{RESET} {e}\n");
-                }
+            .await
+            {
+                println!("{ERROR}Error:{RESET} {error}\n");
             }
         } else {
             print_exit_message(&session);
@@ -2155,6 +2120,90 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Width, in raw characters, available for input text within the box —
+/// shared by every function that needs to reason about row layout, so the
+/// terminal-width query and margin/prefix math stay in one place.
+fn input_content_width() -> usize {
+    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let width = term_width as usize;
+    let prefix_len = "› ".chars().count();
+    width.saturating_sub(2).saturating_sub(prefix_len).max(1)
+}
+
+/// Splits `input_chars` into visual rows — breaking both at `row_width`
+/// characters (character-count, not visual-width, matching this module's
+/// existing horizontal-scroll convention) and at any explicit `\n` the user
+/// inserted (Alt+Enter) — and reports which row/column the cursor falls in.
+/// A `\n` itself is consumed by the break and never appears in a row's text.
+fn wrap_input_into_rows(
+    input_chars: &[char],
+    row_width: usize,
+    cursor_pos: usize,
+) -> (Vec<String>, usize, usize) {
+    let row_width = row_width.max(1);
+    if input_chars.is_empty() {
+        return (vec![String::new()], 0, 0);
+    }
+
+    let mut rows: Vec<String> = Vec::new();
+    let mut row_starts: Vec<usize> = Vec::new();
+    let mut row_start = 0usize;
+    let mut row_len = 0usize;
+
+    for (i, &c) in input_chars.iter().enumerate() {
+        if c == '\n' {
+            rows.push(input_chars[row_start..i].iter().collect());
+            row_starts.push(row_start);
+            row_start = i + 1;
+            row_len = 0;
+            continue;
+        }
+        row_len += 1;
+        if row_len == row_width {
+            rows.push(input_chars[row_start..=i].iter().collect());
+            row_starts.push(row_start);
+            row_start = i + 1;
+            row_len = 0;
+        }
+    }
+    // Only a trailing `\n` should conjure up a fresh empty row after it —
+    // reaching exactly `row_width` with no more input left should NOT (matches
+    // this box's prior single-row behavior: the cursor just sits at the edge
+    // of the full row until another character is actually typed).
+    if row_start < input_chars.len() || input_chars[input_chars.len() - 1] == '\n' {
+        rows.push(input_chars[row_start..].iter().collect());
+        row_starts.push(row_start);
+    }
+
+    let cursor_pos = cursor_pos.min(input_chars.len());
+    let mut cursor_row = rows.len() - 1;
+    for (idx, &start) in row_starts.iter().enumerate() {
+        let end = start + rows[idx].chars().count();
+        if cursor_pos <= end {
+            cursor_row = idx;
+            break;
+        }
+    }
+    let cursor_col = cursor_pos - row_starts[cursor_row];
+
+    (rows, cursor_row, cursor_col)
+}
+
+/// Visual (1-indexed) terminal column for the cursor within its current row —
+/// column 4 is the first content character (columns 1-3 are the leading
+/// margin space plus the 2-visual-width `"› "`/`"  "` prefix).
+fn cursor_visual_column(input_chars: &[char], cursor_pos: usize, content_width: usize) -> usize {
+    let (_, _, col) = wrap_input_into_rows(input_chars, content_width, cursor_pos);
+    let cursor_pos = cursor_pos.min(input_chars.len());
+    let row_start = cursor_pos - col;
+    let visual: usize = input_chars[row_start..cursor_pos]
+        .iter()
+        .copied()
+        .map(char_visual_width)
+        .sum();
+    4 + visual
+}
+
 pub fn draw_input_box(
     input_chars: &[char],
     cursor_pos: usize,
@@ -2164,49 +2213,39 @@ pub fn draw_input_box(
     tab_base_input: Option<&str>,
     tab_index: Option<usize>,
     current_dir: &Path,
-) -> (usize, usize) {
+) -> usize {
     let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let width = term_width as usize;
     let prefix = "› ";
+    let cont_prefix = "  ";
     let input_width = width.saturating_sub(2);
-    let content_max_len = input_width.saturating_sub(prefix.chars().count());
-
-    let mut start_idx = 0;
-    if input_chars.len() > content_max_len && cursor_pos >= content_max_len {
-        start_idx = (cursor_pos + 5).saturating_sub(content_max_len);
-        if start_idx + content_max_len > input_chars.len() {
-            start_idx = input_chars.len() - content_max_len;
-        }
-    }
-
-    let slice_chars = if input_chars.len() > content_max_len {
-        &input_chars[start_idx..std::cmp::min(start_idx + content_max_len, input_chars.len())]
-    } else {
-        input_chars
-    };
-    let displayed_input: String = slice_chars.iter().collect();
-
-    let display_str = if displayed_input.is_empty() {
-        format!("{DIM}{}\x1b[39m", placeholder)
-    } else {
-        format_placeholders(&displayed_input)
-    };
-
-    let visible_len = if displayed_input.is_empty() {
-        placeholder.chars().count()
-    } else {
-        string_visual_width(&displayed_input)
-    };
-
-    let pad_len = content_max_len.saturating_sub(visible_len);
-    let padding = " ".repeat(pad_len);
+    let content_max_len = input_content_width();
     let blank_line = " ".repeat(input_width);
 
     println!(" {COMPOSER_BG}{blank_line}{RESET}");
-    println!(
-        " {COMPOSER_BG}{MINT}{}{RESET}{COMPOSER_BG}{}{}{RESET}",
-        prefix, display_str, padding
-    );
+
+    if input_chars.is_empty() {
+        let pad_len = content_max_len.saturating_sub(placeholder.chars().count());
+        let padding = " ".repeat(pad_len);
+        println!(
+            " {COMPOSER_BG}{MINT}{prefix}{RESET}{COMPOSER_BG}{DIM}{}\x1b[39m{}{RESET}",
+            placeholder, padding
+        );
+    } else {
+        let (rows, _, _) = wrap_input_into_rows(input_chars, content_max_len, cursor_pos);
+        for (i, row) in rows.iter().enumerate() {
+            let row_prefix = if i == 0 { prefix } else { cont_prefix };
+            let display_row = format_placeholders(row);
+            let visible_len = string_visual_width(row);
+            let pad_len = content_max_len.saturating_sub(visible_len);
+            let padding = " ".repeat(pad_len);
+            println!(
+                " {COMPOSER_BG}{MINT}{}{RESET}{COMPOSER_BG}{}{}{RESET}",
+                row_prefix, display_row, padding
+            );
+        }
+    }
+
     println!(" {COMPOSER_BG}{blank_line}{RESET}");
 
     let agent_str = format!(" {DIM}[Agent]{RESET} {MINT}{}{RESET}", model);
@@ -2319,45 +2358,35 @@ pub fn draw_input_box(
         }
     }
 
-    (match_count, start_idx)
+    match_count
 }
 
-pub fn input_cursor_column(input_chars: &[char], cursor_pos: usize) -> usize {
-    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
-    let width = term_width as usize;
-    let prefix = "› ";
-    let input_width = width.saturating_sub(2);
-    let content_max_len = input_width.saturating_sub(prefix.chars().count());
+/// Moves the terminal cursor onto the correct wrapped input row/column and
+/// returns that row, 1-indexed from the box's top blank line — callers stash
+/// this so a later `clear_input_box` knows how far up to travel regardless of
+/// how many rows the box currently spans.
+pub fn position_input_cursor(input_chars: &[char], cursor_pos: usize, match_count: usize) -> usize {
+    let content_width = input_content_width();
+    let (rows, cursor_row_idx, _) = wrap_input_into_rows(input_chars, content_width, cursor_pos);
+    let row_count = rows.len();
+    let row = cursor_row_idx + 1;
 
-    let mut start_idx = 0;
-    if input_chars.len() > content_max_len && cursor_pos >= content_max_len {
-        start_idx = (cursor_pos + 5).saturating_sub(content_max_len);
-        if start_idx + content_max_len > input_chars.len() {
-            start_idx = input_chars.len() - content_max_len;
-        }
-    }
-
-    let cursor_pos_clamped = std::cmp::min(cursor_pos, input_chars.len());
-    let start_idx_clamped = std::cmp::min(start_idx, cursor_pos_clamped);
-    let visual_cursor_pos: usize = input_chars[start_idx_clamped..cursor_pos_clamped]
-        .iter()
-        .copied()
-        .map(char_visual_width)
-        .sum();
-    4 + visual_cursor_pos
-}
-
-pub fn position_input_cursor(input_chars: &[char], cursor_pos: usize, match_count: usize) {
-    let up_lines = if match_count > 0 { 4 + match_count } else { 2 };
+    let base = if match_count > 0 { 2 + match_count } else { 0 };
+    let up_lines = base + 2 + (row_count - row);
     print!(
         "\x1b[{}A\x1b[{}G",
         up_lines,
-        input_cursor_column(input_chars, cursor_pos)
+        cursor_visual_column(input_chars, cursor_pos, content_width)
     );
+    row
 }
 
-pub fn clear_input_box() {
-    print!("\r\x1b[1A\x1b[J");
+/// `cursor_row` is the value last returned by `position_input_cursor` — how
+/// many lines up from the terminal's current cursor position the top of the
+/// box sits. `\x1b[J` (erase to end of screen) then wipes the whole box
+/// regardless of whether it's growing or shrinking on this redraw.
+pub fn clear_input_box(cursor_row: usize) {
+    print!("\r\x1b[{}A\x1b[J", cursor_row.max(1));
 }
 
 pub fn redraw_input_box(
@@ -2369,9 +2398,10 @@ pub fn redraw_input_box(
     tab_base_input: Option<&str>,
     tab_index: Option<usize>,
     current_dir: &Path,
+    cursor_row: &mut usize,
 ) {
-    clear_input_box();
-    let (match_count, _) = draw_input_box(
+    clear_input_box(*cursor_row);
+    let match_count = draw_input_box(
         input_chars,
         cursor_pos,
         placeholder,
@@ -2381,7 +2411,7 @@ pub fn redraw_input_box(
         tab_index,
         current_dir,
     );
-    position_input_cursor(input_chars, cursor_pos, match_count);
+    *cursor_row = position_input_cursor(input_chars, cursor_pos, match_count);
     let _ = io::stdout().flush();
 }
 
@@ -2428,7 +2458,7 @@ pub fn read_line_interactive(
     // saved in-progress draft to restore when navigating back past the newest entry.
     let mut history_index: Option<usize> = None;
 
-    let (match_count, _) = draw_input_box(
+    let match_count = draw_input_box(
         &input_chars,
         cursor_pos,
         placeholder,
@@ -2438,7 +2468,7 @@ pub fn read_line_interactive(
         None,
         current_dir,
     );
-    position_input_cursor(&input_chars, cursor_pos, match_count);
+    let mut cursor_row = position_input_cursor(&input_chars, cursor_pos, match_count);
     let _ = io::stdout().flush();
 
     enable_raw_mode()?;
@@ -2478,6 +2508,7 @@ pub fn read_line_interactive(
                     None,
                     None,
                     current_dir,
+                    &mut cursor_row,
                 );
                 enable_raw_mode()?;
                 last_paste_time = Some(std::time::Instant::now());
@@ -2524,6 +2555,7 @@ pub fn read_line_interactive(
                             None,
                             None,
                             current_dir,
+                            &mut cursor_row,
                         );
                         enable_raw_mode()?;
                     }
@@ -2534,7 +2566,7 @@ pub fn read_line_interactive(
                     {
                         if ctrl_d_pressed {
                             disable_raw_mode()?;
-                            clear_input_box();
+                            clear_input_box(cursor_row);
                             let _ = io::stdout().flush();
                             break Some(InteractiveInput {
                                 text: "/exit".to_string(),
@@ -2543,10 +2575,17 @@ pub fn read_line_interactive(
                         } else {
                             ctrl_d_pressed = true;
                             disable_raw_mode()?;
+                            let content_width = input_content_width();
+                            let (rows, cursor_row_idx, _) =
+                                wrap_input_into_rows(&input_chars, content_width, cursor_pos);
+                            let down_lines = rows.len() - cursor_row_idx + 2;
                             print!(
-                                "\r\x1b[3B\r\x1b[2K{WARN}Press Ctrl+D again to exit{RESET}\x1b[3A"
+                                "\r\x1b[{down_lines}B\r\x1b[2K{WARN}Press Ctrl+D again to exit{RESET}\x1b[{down_lines}A"
                             );
-                            print!("\x1b[{}G", input_cursor_column(&input_chars, cursor_pos));
+                            print!(
+                                "\x1b[{}G",
+                                cursor_visual_column(&input_chars, cursor_pos, content_width)
+                            );
                             let _ = io::stdout().flush();
                             enable_raw_mode()?;
                         }
@@ -2575,6 +2614,7 @@ pub fn read_line_interactive(
                                 None,
                                 None,
                                 current_dir,
+                                &mut cursor_row,
                             );
                             enable_raw_mode()?;
                         }
@@ -2593,6 +2633,7 @@ pub fn read_line_interactive(
                             None,
                             None,
                             current_dir,
+                            &mut cursor_row,
                         );
                         enable_raw_mode()?;
                     }
@@ -2610,6 +2651,7 @@ pub fn read_line_interactive(
                             None,
                             None,
                             current_dir,
+                            &mut cursor_row,
                         );
                         enable_raw_mode()?;
                     }
@@ -2649,6 +2691,7 @@ pub fn read_line_interactive(
                                     Some(&base),
                                     current_highlight,
                                     current_dir,
+                                    &mut cursor_row,
                                 );
                                 enable_raw_mode()?;
                             }
@@ -2680,6 +2723,7 @@ pub fn read_line_interactive(
                                     Some(&base),
                                     current_highlight,
                                     current_dir,
+                                    &mut cursor_row,
                                 );
                                 enable_raw_mode()?;
                             }
@@ -2721,6 +2765,7 @@ pub fn read_line_interactive(
                                     Some(&base),
                                     Some(new_idx),
                                     current_dir,
+                                    &mut cursor_row,
                                 );
                                 enable_raw_mode()?;
                             }
@@ -2753,6 +2798,7 @@ pub fn read_line_interactive(
                                     Some(&base),
                                     Some(new_idx),
                                     current_dir,
+                                    &mut cursor_row,
                                 );
                                 enable_raw_mode()?;
                             }
@@ -2783,6 +2829,7 @@ pub fn read_line_interactive(
                                 None,
                                 None,
                                 current_dir,
+                                &mut cursor_row,
                             );
                             enable_raw_mode()?;
                         }
@@ -2829,6 +2876,7 @@ pub fn read_line_interactive(
                                     Some(&base),
                                     Some(new_idx),
                                     current_dir,
+                                    &mut cursor_row,
                                 );
                                 enable_raw_mode()?;
                             }
@@ -2867,6 +2915,7 @@ pub fn read_line_interactive(
                                     Some(&base),
                                     Some(new_idx),
                                     current_dir,
+                                    &mut cursor_row,
                                 );
                                 enable_raw_mode()?;
                             }
@@ -2894,6 +2943,7 @@ pub fn read_line_interactive(
                                 None,
                                 None,
                                 current_dir,
+                                &mut cursor_row,
                             );
                             enable_raw_mode()?;
                         }
@@ -2915,6 +2965,7 @@ pub fn read_line_interactive(
                             None,
                             None,
                             current_dir,
+                            &mut cursor_row,
                         );
                         enable_raw_mode()?;
                     }
@@ -2937,6 +2988,33 @@ pub fn read_line_interactive(
                             None,
                             None,
                             current_dir,
+                            &mut cursor_row,
+                        );
+                        enable_raw_mode()?;
+                    }
+                    KeyCode::Enter
+                        if key_event
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::ALT) =>
+                    {
+                        // Alt+Enter inserts a literal newline without submitting —
+                        // Enter alone still submits. Backspace/wrap/echo all treat
+                        // '\n' as just another character already, so no other
+                        // handler needs to change to support this.
+                        input_chars.insert(cursor_pos, '\n');
+                        cursor_pos += 1;
+
+                        disable_raw_mode()?;
+                        redraw_input_box(
+                            &input_chars,
+                            cursor_pos,
+                            placeholder,
+                            model,
+                            path_str,
+                            None,
+                            None,
+                            current_dir,
+                            &mut cursor_row,
                         );
                         enable_raw_mode()?;
                     }
@@ -2947,7 +3025,7 @@ pub fn read_line_interactive(
                             continue;
                         }
                         disable_raw_mode()?;
-                        clear_input_box();
+                        clear_input_box(cursor_row);
                         let input_str: String = input_chars.iter().collect();
 
                         let mut expanded_str = input_str.clone();
@@ -2976,7 +3054,7 @@ pub fn read_line_interactive(
                     }
                     KeyCode::Esc => {
                         disable_raw_mode()?;
-                        clear_input_box();
+                        clear_input_box(cursor_row);
                         let _ = io::stdout().flush();
                         break None;
                     }
@@ -2990,11 +3068,11 @@ pub fn read_line_interactive(
             let notices = jobs.take_notices();
             if !notices.is_empty() {
                 disable_raw_mode()?;
-                clear_input_box();
+                clear_input_box(cursor_row);
                 for notice in &notices {
                     println!(" {DIM}{}{RESET}", notice);
                 }
-                let (match_count, _) = draw_input_box(
+                let match_count = draw_input_box(
                     &input_chars,
                     cursor_pos,
                     placeholder,
@@ -3004,7 +3082,7 @@ pub fn read_line_interactive(
                     tab_index,
                     current_dir,
                 );
-                position_input_cursor(&input_chars, cursor_pos, match_count);
+                cursor_row = position_input_cursor(&input_chars, cursor_pos, match_count);
                 let _ = io::stdout().flush();
                 enable_raw_mode()?;
             }
@@ -3043,8 +3121,8 @@ pub fn format_placeholders(s: &str) -> String {
     let chars = s.chars().collect::<Vec<_>>();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '[' && i + 12 < chars.len() {
-            let slice: String = chars[i..i + 13].iter().collect();
+        if chars[i] == '[' && i + 13 < chars.len() {
+            let slice: String = chars[i..i + 14].iter().collect();
             if slice == "[Pasted text #"
                 && let Some(end_offset) = chars[i..].iter().position(|&c| c == ']')
             {
@@ -3108,13 +3186,27 @@ pub fn active_model<'a>(provider: &str, config: &'a mint_core::MintConfig) -> &'
 }
 
 pub fn confirm(prompt: &str) -> Result<bool> {
+    confirm_scoped(prompt, &SESSION_APPROVED)
+}
+
+/// Same picker as `confirm`, but scoped to the agent's "Security
+/// Authorization" prompts via `SECURITY_SESSION_APPROVED` instead of the
+/// general-purpose `SESSION_APPROVED` flag — see that flag's doc comment.
+pub fn confirm_security(prompt: &str) -> Result<bool> {
+    confirm_scoped(prompt, &SECURITY_SESSION_APPROVED)
+}
+
+fn confirm_scoped(
+    prompt: &str,
+    session_flag: &'static std::sync::atomic::AtomicBool,
+) -> Result<bool> {
     let clean_prompt = prompt
         .replace(" [y/N] ", "")
         .replace(" [y/N]", "")
         .trim()
         .to_string();
 
-    if SESSION_APPROVED.load(std::sync::atomic::Ordering::Relaxed) {
+    if session_flag.load(std::sync::atomic::Ordering::Relaxed) {
         println!("  {} {MINT}Approve (session-wide){RESET}", clean_prompt);
         return Ok(true);
     }
@@ -3260,11 +3352,37 @@ pub fn confirm(prompt: &str) -> Result<bool> {
     match choice {
         0 => Ok(true),
         1 => {
-            SESSION_APPROVED.store(true, std::sync::atomic::Ordering::Relaxed);
+            session_flag.store(true, std::sync::atomic::Ordering::Relaxed);
             Ok(true)
         }
         _ => Ok(false),
     }
+}
+
+/// Known model choices for a given provider, used by `/models` to offer a
+/// second picker after the provider is chosen. Empty means no known list
+/// (e.g. `local_openai`), so `/models` skips straight to that provider's
+/// current/default model instead of showing an empty picker.
+fn model_options_for_provider(config: &mint_core::MintConfig, provider: &str) -> Vec<String> {
+    match provider {
+        "gemini" => onboard::GEMINI_MODEL_PRESETS,
+        "anthropic" => onboard::ANTHROPIC_MODEL_PRESETS,
+        "openai" => onboard::OPENAI_MODEL_PRESETS,
+        "openrouter" => onboard::OPENROUTER_MODEL_PRESETS,
+        "deepseek" => onboard::DEEPSEEK_MODEL_PRESETS,
+        "huggingface" => onboard::HUGGINGFACE_MODEL_PRESETS,
+        "ollama" => return onboard::installed_ollama_models(),
+        p if p.starts_with("custom:") => {
+            return config
+                .resolve_custom_provider(p)
+                .map(|cp| cp.models.iter().map(|m| m.model_id.clone()).collect())
+                .unwrap_or_default();
+        }
+        _ => &[],
+    }
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 pub fn prompt_interactive_select(
@@ -3388,5 +3506,117 @@ mod tests {
 
         assert_eq!(chars.iter().collect::<String>(), "ask [Image #1]");
         assert_eq!(cursor, "ask [Image #1]".chars().count());
+    }
+
+    #[test]
+    fn empty_input_wraps_to_a_single_empty_row() {
+        let (rows, row, col) = wrap_input_into_rows(&[], 10, 0);
+        assert_eq!(rows, vec![String::new()]);
+        assert_eq!((row, col), (0, 0));
+    }
+
+    #[test]
+    fn short_input_stays_on_one_row() {
+        let chars: Vec<char> = "hello".chars().collect();
+        let (rows, row, col) = wrap_input_into_rows(&chars, 10, 3);
+        assert_eq!(rows, vec!["hello".to_string()]);
+        assert_eq!((row, col), (0, 3));
+    }
+
+    #[test]
+    fn input_longer_than_row_width_splits_into_multiple_rows() {
+        let chars: Vec<char> = "0123456789ABCDE".chars().collect(); // 15 chars
+        let (rows, _, _) = wrap_input_into_rows(&chars, 10, 0);
+        assert_eq!(rows, vec!["0123456789".to_string(), "ABCDE".to_string()]);
+    }
+
+    #[test]
+    fn cursor_in_second_row_reports_correct_row_and_column() {
+        let chars: Vec<char> = "0123456789ABCDE".chars().collect();
+        let (_, row, col) = wrap_input_into_rows(&chars, 10, 12);
+        assert_eq!((row, col), (1, 2));
+    }
+
+    #[test]
+    fn cursor_at_exact_row_boundary_clamps_to_the_last_existing_row() {
+        // 10 chars with row_width 10 makes exactly one full row; a cursor at
+        // the end (pos 10) must not index a nonexistent second row.
+        let chars: Vec<char> = "0123456789".chars().collect();
+        let (rows, row, col) = wrap_input_into_rows(&chars, 10, 10);
+        assert_eq!(rows.len(), 1);
+        assert_eq!((row, col), (0, 10));
+    }
+
+    #[test]
+    fn up_lines_for_a_single_row_matches_the_original_hardcoded_constants() {
+        // Before wrapping existed this was hard-coded to 2 (no suggestions)
+        // or 4+match_count (with suggestions); the generalized formula in
+        // `position_input_cursor` must reduce to exactly those values when
+        // there's only one input row.
+        let chars: Vec<char> = "hi".chars().collect();
+        let content_width = 50;
+        let (rows, row_idx, _) = wrap_input_into_rows(&chars, content_width, 2);
+        let row = row_idx + 1;
+        let row_count = rows.len();
+
+        let up_lines_no_suggestions = 0 + 2 + (row_count - row);
+        assert_eq!(up_lines_no_suggestions, 2);
+
+        let match_count = 3;
+        let base = 2 + match_count;
+        let up_lines_with_suggestions = base + 2 + (row_count - row);
+        assert_eq!(up_lines_with_suggestions, 4 + match_count);
+    }
+
+    #[test]
+    fn explicit_newline_forces_a_row_break_even_under_the_width_limit() {
+        let chars: Vec<char> = "ab\ncd".chars().collect();
+        let (rows, _, _) = wrap_input_into_rows(&chars, 10, 0);
+        assert_eq!(rows, vec!["ab".to_string(), "cd".to_string()]);
+    }
+
+    #[test]
+    fn cursor_right_before_a_newline_stays_on_the_preceding_row() {
+        let chars: Vec<char> = "ab\ncd".chars().collect(); // indices: a=0 b=1 \n=2 c=3 d=4
+        let (_, row, col) = wrap_input_into_rows(&chars, 10, 2);
+        assert_eq!((row, col), (0, 2));
+    }
+
+    #[test]
+    fn cursor_right_after_a_newline_starts_the_next_row() {
+        let chars: Vec<char> = "ab\ncd".chars().collect();
+        let (_, row, col) = wrap_input_into_rows(&chars, 10, 3);
+        assert_eq!((row, col), (1, 0));
+    }
+
+    #[test]
+    fn a_long_logical_line_still_wraps_by_width_between_newlines() {
+        let chars: Vec<char> = "0123456789ABCDE\nxyz".chars().collect();
+        let (rows, _, _) = wrap_input_into_rows(&chars, 10, 0);
+        assert_eq!(
+            rows,
+            vec![
+                "0123456789".to_string(),
+                "ABCDE".to_string(),
+                "xyz".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn trailing_newline_produces_an_extra_empty_row() {
+        let chars: Vec<char> = "hi\n".chars().collect();
+        let (rows, row, col) = wrap_input_into_rows(&chars, 10, 3);
+        assert_eq!(rows, vec!["hi".to_string(), String::new()]);
+        assert_eq!((row, col), (1, 0));
+    }
+
+    #[test]
+    fn cursor_visual_column_accounts_for_row_start_after_a_newline() {
+        let chars: Vec<char> = "hello\nworld".chars().collect();
+        let content_width = 20;
+        // cursor after "wor" on the second row (index 5 for '\n' + 1 + 3 = 9)
+        let col = cursor_visual_column(&chars, 9, content_width);
+        assert_eq!(col, 4 + 3);
     }
 }

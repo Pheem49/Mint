@@ -274,9 +274,6 @@ export default function PluginsTab({
             <p className="section-kicker">Knowledge Base</p>
             <h2 className="section-title">Learned AI Skills</h2>
           </div>
-          <p className="section-description">
-            Skills are special instructions or guides taught to Mint. The AI reads active skills before every prompt to align with your guidelines.
-          </p>
         </div>
 
         {skills.length === 0 ? (
@@ -398,7 +395,6 @@ export default function PluginsTab({
             <p className="section-kicker">External tools</p>
             <h2 className="section-title">MCP Servers</h2>
           </div>
-          <p className="section-description">Connect Mint to tools like search, GitHub, or filesystem servers.</p>
         </div>
 
         <div className="mcp-list">
@@ -641,7 +637,6 @@ export default function PluginsTab({
             <p className="section-kicker">Integrations</p>
             <h2 className="section-title">Plugins & Integrations</h2>
           </div>
-          <p className="section-description">Enable and configure credentials for native Mint plugins.</p>
         </div>
         <div className="plugin-list" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {pluginsList.map(p => {

@@ -96,7 +96,6 @@ fn extract_tree_sitter_symbols(
         _ => return false,
     };
 
-
     if parser.set_language(language).is_err() {
         return false;
     }
@@ -192,13 +191,8 @@ pub fn build_symbol_index(
             continue;
         };
 
-        let parsed_by_ts = extract_tree_sitter_symbols(
-            &file.path,
-            &content,
-            extension,
-            &mut symbols,
-            limit,
-        );
+        let parsed_by_ts =
+            extract_tree_sitter_symbols(&file.path, &content, extension, &mut symbols, limit);
 
         if !parsed_by_ts {
             for (index, line) in content.lines().enumerate() {

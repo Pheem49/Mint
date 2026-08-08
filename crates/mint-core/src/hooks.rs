@@ -1,10 +1,4 @@
-use std::{
-    io::Write,
-    path::Path,
-    process::Stdio,
-    sync::mpsc,
-    time::Duration,
-};
+use std::{io::Write, path::Path, process::Stdio, sync::mpsc, time::Duration};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -140,7 +134,12 @@ fn truncate(text: &str) -> String {
     }
 }
 
-fn run_hook_command(command: &str, cwd: &Path, payload: &Value, timeout_secs: u64) -> HookRunOutput {
+fn run_hook_command(
+    command: &str,
+    cwd: &Path,
+    payload: &Value,
+    timeout_secs: u64,
+) -> HookRunOutput {
     let mut child = match shell_command(command)
         .current_dir(cwd)
         .stdin(Stdio::piped())
@@ -210,10 +209,9 @@ pub fn run_pre_tool_hooks(
         "cwd": cwd.to_string_lossy(),
     });
 
-    for hook in hooks
-        .iter()
-        .filter(|hook| hook.event == HookEvent::PreToolUse && matcher_matches(&hook.matcher, action))
-    {
+    for hook in hooks.iter().filter(|hook| {
+        hook.event == HookEvent::PreToolUse && matcher_matches(&hook.matcher, action)
+    }) {
         let output = run_hook_command(&hook.command, cwd, &payload, hook.timeout_secs);
         if output.timed_out {
             continue;
@@ -249,10 +247,9 @@ pub fn run_post_tool_hooks(
     });
 
     let mut messages = Vec::new();
-    for hook in hooks
-        .iter()
-        .filter(|hook| hook.event == HookEvent::PostToolUse && matcher_matches(&hook.matcher, action))
-    {
+    for hook in hooks.iter().filter(|hook| {
+        hook.event == HookEvent::PostToolUse && matcher_matches(&hook.matcher, action)
+    }) {
         let output = run_hook_command(&hook.command, cwd, &payload, hook.timeout_secs);
         if !output.stdout.trim().is_empty() {
             messages.push(output.stdout.trim().to_owned());
@@ -286,12 +283,7 @@ mod tests {
             command: "echo denied >&2; exit 2".into(),
             timeout_secs: 5,
         }];
-        let outcome = run_pre_tool_hooks(
-            &hooks,
-            "write_file",
-            &json!({}),
-            &std::env::temp_dir(),
-        );
+        let outcome = run_pre_tool_hooks(&hooks, "write_file", &json!({}), &std::env::temp_dir());
         match outcome {
             PreHookOutcome::Blocked(reason) => assert!(reason.contains("denied")),
             PreHookOutcome::Allowed => panic!("expected the hook to block this action"),
@@ -306,12 +298,7 @@ mod tests {
             command: "exit 2".into(),
             timeout_secs: 5,
         }];
-        let outcome = run_pre_tool_hooks(
-            &hooks,
-            "write_file",
-            &json!({}),
-            &std::env::temp_dir(),
-        );
+        let outcome = run_pre_tool_hooks(&hooks, "write_file", &json!({}), &std::env::temp_dir());
         assert!(matches!(outcome, PreHookOutcome::Allowed));
     }
 

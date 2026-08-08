@@ -3,9 +3,11 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::config::MintConfig;
-use crate::speech::{transcribe, TranscribeRequest, TranscriptSegment};
-use crate::subtitle::{burn_subtitles, generate_srt, BurnSubtitleRequest};
-use crate::video_edit::{video_load, video_resize, video_trim, ResizeRequest, TrimRequest, VideoEditError};
+use crate::speech::{TranscribeRequest, TranscriptSegment, transcribe};
+use crate::subtitle::{BurnSubtitleRequest, burn_subtitles, generate_srt};
+use crate::video_edit::{
+    ResizeRequest, TrimRequest, VideoEditError, video_load, video_resize, video_trim,
+};
 
 #[derive(Debug, Error)]
 pub enum AutoShortsError {
@@ -145,7 +147,14 @@ pub async fn make_shorts(
     let transcript = transcribe(config, &trans_req).await?;
 
     // Step 2: Use LLM to identify key highlights, or fallback to interval highlights
-    let highlights = detect_highlights(config, &transcript.segments, total_duration, req.max_clips, req.target_duration).await;
+    let highlights = detect_highlights(
+        config,
+        &transcript.segments,
+        total_duration,
+        req.max_clips,
+        req.target_duration,
+    )
+    .await;
 
     // Step 3: Determine output directory
     let out_dir = if let Some(dir) = &req.output_dir {
@@ -169,10 +178,12 @@ pub async fn make_shorts(
     // Step 4: Process each highlight into vertical short video with burned subtitles
     for (idx, moment) in highlights.iter().enumerate() {
         let clip_num = (idx + 1) as u32;
-        let tmp_trim = std::env::temp_dir().join(format!("mint_short_trim_{}_{}.mp4", temp_id(), clip_num));
+        let tmp_trim =
+            std::env::temp_dir().join(format!("mint_short_trim_{}_{}.mp4", temp_id(), clip_num));
         let tmp_trim_str = tmp_trim.to_string_lossy().to_string();
 
-        let tmp_resize = std::env::temp_dir().join(format!("mint_short_resize_{}_{}.mp4", temp_id(), clip_num));
+        let tmp_resize =
+            std::env::temp_dir().join(format!("mint_short_resize_{}_{}.mp4", temp_id(), clip_num));
         let tmp_resize_str = tmp_resize.to_string_lossy().to_string();
 
         let final_out = out_dir.join(format!("{}_short_{}.mp4", file_stem, clip_num));
@@ -251,7 +262,9 @@ async fn detect_highlights(
     max_clips: u32,
     target_duration: f64,
 ) -> Vec<HighlightMoment> {
-    if !segments.is_empty() && (!config.api_key.trim().is_empty() || !config.openai_api_key.trim().is_empty()) {
+    if !segments.is_empty()
+        && (!config.api_key.trim().is_empty() || !config.openai_api_key.trim().is_empty())
+    {
         let text_with_timestamps = segments
             .iter()
             .map(|s| format!("[{:.1}s - {:.1}s] {}", s.start, s.end, s.text))
@@ -269,7 +282,9 @@ async fn detect_highlights(
 
         let chat_req = crate::chat::ChatRequest {
             message: prompt,
-            system_instruction: "You analyze video transcripts and output pure JSON arrays of highlight moments.".into(),
+            system_instruction:
+                "You analyze video transcripts and output pure JSON arrays of highlight moments."
+                    .into(),
             chat_id: None,
             image_data_uri: None,
             audio_data_uri: None,
@@ -300,7 +315,11 @@ async fn detect_highlights(
     fallback_interval_highlights(total_duration, max_clips, target_duration)
 }
 
-fn fallback_interval_highlights(total_duration: f64, max_clips: u32, target_duration: f64) -> Vec<HighlightMoment> {
+fn fallback_interval_highlights(
+    total_duration: f64,
+    max_clips: u32,
+    target_duration: f64,
+) -> Vec<HighlightMoment> {
     let mut moments = Vec::new();
     let clip_dur = target_duration.min(total_duration);
     let step = (total_duration - clip_dur) / (max_clips.max(1) as f64);
@@ -331,51 +350,85 @@ pub async fn ai_edit_video(
     // Out path determination
     let out_file = req.output.clone().unwrap_or_else(|| {
         let path = PathBuf::from(&req.input);
-        let ext = path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("mp4");
-        format!("{}_ai_edited.{}", req.input.trim_end_matches(&format!(".{ext}")), ext)
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("mp4");
+        format!(
+            "{}_ai_edited.{}",
+            req.input.trim_end_matches(&format!(".{ext}")),
+            ext
+        )
     });
 
     // Option 1: Shorts / TikTok generation requested
-    if lower_instruction.contains("short") || lower_instruction.contains("ช็อต") || lower_instruction.contains("tiktok") || lower_instruction.contains("คลิปสั้น") {
-        let max_clips = if lower_instruction.contains("1") { 1 } else if lower_instruction.contains("2") { 2 } else if lower_instruction.contains("5") { 5 } else { 3 };
-        let shorts_res = make_shorts(config, &MakeShortsRequest {
-            input: req.input.clone(),
-            output_dir: req.output.clone(),
-            max_clips,
-            target_duration: 60.0,
-            burn_subtitles: true,
-            width: 1080,
-            height: 1920,
-        }).await?;
+    if lower_instruction.contains("short")
+        || lower_instruction.contains("ช็อต")
+        || lower_instruction.contains("tiktok")
+        || lower_instruction.contains("คลิปสั้น")
+    {
+        let max_clips = if lower_instruction.contains("1") {
+            1
+        } else if lower_instruction.contains("2") {
+            2
+        } else if lower_instruction.contains("5") {
+            5
+        } else {
+            3
+        };
+        let shorts_res = make_shorts(
+            config,
+            &MakeShortsRequest {
+                input: req.input.clone(),
+                output_dir: req.output.clone(),
+                max_clips,
+                target_duration: 60.0,
+                burn_subtitles: true,
+                width: 1080,
+                height: 1920,
+            },
+        )
+        .await?;
 
-        let first_clip = shorts_res.clips.first().map(|c| c.path.clone()).unwrap_or_else(|| out_file.clone());
+        let first_clip = shorts_res
+            .clips
+            .first()
+            .map(|c| c.path.clone())
+            .unwrap_or_else(|| out_file.clone());
         steps_performed.push(AiEditStepResult {
             step: 1,
             operation: "make_shorts".into(),
-            description: format!("Generated {} vertical Shorts clips with burned subtitles", shorts_res.clips.len()),
+            description: format!(
+                "Generated {} vertical Shorts clips with burned subtitles",
+                shorts_res.clips.len()
+            ),
             output_path: first_clip.clone(),
         });
 
         return Ok(AiEditVideoResult {
             output_path: first_clip,
             steps_performed,
-            summary: format!("Successfully created {} Shorts clips based on AI prompt", shorts_res.clips.len()),
+            summary: format!(
+                "Successfully created {} Shorts clips based on AI prompt",
+                shorts_res.clips.len()
+            ),
         });
     }
 
     // Option 2: Trim requested
     let mut current_input = req.input.clone();
-    if lower_instruction.contains("ตัด") || lower_instruction.contains("trim") || lower_instruction.contains("clip") {
+    if lower_instruction.contains("ตัด")
+        || lower_instruction.contains("trim")
+        || lower_instruction.contains("clip")
+    {
         let numbers: Vec<f64> = lower_instruction
             .split(|c: char| !c.is_numeric() && c != '.')
             .filter_map(|s| s.parse::<f64>().ok())
             .collect();
 
         let start = if !numbers.is_empty() { numbers[0] } else { 0.0 };
-        let end = if numbers.len() >= 2 { numbers[1] } else { start + 30.0 };
+        let end = if numbers.len() >= 2 {
+            numbers[1]
+        } else {
+            start + 30.0
+        };
 
         let tmp_trim = std::env::temp_dir().join(format!("mint_ai_trim_{}.mp4", temp_id()));
         let tmp_trim_str = tmp_trim.to_string_lossy().to_string();
@@ -397,7 +450,11 @@ pub async fn ai_edit_video(
     }
 
     // Option 3: Convert to Vertical (9:16) / Resize requested
-    if lower_instruction.contains("แนวตั้ง") || lower_instruction.contains("9:16") || lower_instruction.contains("resize") || lower_instruction.contains("ย่อ") {
+    if lower_instruction.contains("แนวตั้ง")
+        || lower_instruction.contains("9:16")
+        || lower_instruction.contains("resize")
+        || lower_instruction.contains("ย่อ")
+    {
         let tmp_resize = std::env::temp_dir().join(format!("mint_ai_resize_{}.mp4", temp_id()));
         let tmp_resize_str = tmp_resize.to_string_lossy().to_string();
 
@@ -418,12 +475,20 @@ pub async fn ai_edit_video(
     }
 
     // Option 4: Subtitles requested
-    if lower_instruction.contains("ซับ") || lower_instruction.contains("sub") || lower_instruction.contains("คำบรรยาย") || lower_instruction.contains("เสียง") {
-        let trans_res = transcribe(config, &TranscribeRequest {
-            input: current_input.clone(),
-            language: None,
-            prompt: None,
-        }).await?;
+    if lower_instruction.contains("ซับ")
+        || lower_instruction.contains("sub")
+        || lower_instruction.contains("คำบรรยาย")
+        || lower_instruction.contains("เสียง")
+    {
+        let trans_res = transcribe(
+            config,
+            &TranscribeRequest {
+                input: current_input.clone(),
+                language: None,
+                prompt: None,
+            },
+        )
+        .await?;
 
         let srt = generate_srt(&trans_res.segments);
         let burn_res = burn_subtitles(&BurnSubtitleRequest {
@@ -438,7 +503,10 @@ pub async fn ai_edit_video(
         steps_performed.push(AiEditStepResult {
             step: steps_performed.len() + 1,
             operation: "burn_subtitles".into(),
-            description: format!("Transcribed {} speech segments and burned subtitles", trans_res.segments.len()),
+            description: format!(
+                "Transcribed {} speech segments and burned subtitles",
+                trans_res.segments.len()
+            ),
             output_path: current_input.clone(),
         });
     }

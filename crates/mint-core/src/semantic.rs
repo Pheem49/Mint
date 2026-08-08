@@ -172,7 +172,9 @@ fn chunk_text(content: &str) -> Vec<(usize, usize, String)> {
     while start < lines.len() {
         let mut max_end = start;
         let mut chars = 0;
-        while max_end < lines.len() && (max_end == start || chars + lines[max_end].len() + 1 <= MAX_CHARS) {
+        while max_end < lines.len()
+            && (max_end == start || chars + lines[max_end].len() + 1 <= MAX_CHARS)
+        {
             chars += lines[max_end].len() + 1;
             max_end += 1;
         }
@@ -210,13 +212,16 @@ fn chunk_text(content: &str) -> Vec<(usize, usize, String)> {
             }
         }
 
-        let actual_end = if best_split > start { best_split } else { max_end };
+        let actual_end = if best_split > start {
+            best_split
+        } else {
+            max_end
+        };
         chunks.push((start + 1, actual_end, lines[start..actual_end].join("\n")));
         start = actual_end;
     }
     chunks
 }
-
 
 async fn embed_text(config: &MintConfig, text: &str) -> Result<Vec<f64>, SemanticError> {
     let key = if config.api_key.trim().is_empty() {
@@ -302,4 +307,3 @@ mod tests {
         assert!(!chunks[0].2.contains("pub fn bar"));
     }
 }
-

@@ -72,7 +72,8 @@ pub async fn stock(query: &str) -> Result<StockReport, StockError> {
             if let Some(quotes) = json_data["quotes"].as_array() {
                 if let Some(first) = quotes.first() {
                     if let Some(found_symbol) = first["symbol"].as_str() {
-                        if let Ok(report) = fetch_v8_chart(&client, user_agent, found_symbol).await {
+                        if let Ok(report) = fetch_v8_chart(&client, user_agent, found_symbol).await
+                        {
                             return Ok(report);
                         }
                     }
@@ -84,7 +85,11 @@ pub async fn stock(query: &str) -> Result<StockReport, StockError> {
     Err(StockError::NotFound(query.into()))
 }
 
-async fn fetch_v8_chart(client: &reqwest::Client, user_agent: &str, symbol: &str) -> Result<StockReport, StockError> {
+async fn fetch_v8_chart(
+    client: &reqwest::Client,
+    user_agent: &str,
+    symbol: &str,
+) -> Result<StockReport, StockError> {
     let url = format!("https://query1.finance.yahoo.com/v8/finance/chart/{symbol}");
     let res: Value = client
         .get(&url)
@@ -102,9 +107,16 @@ async fn fetch_v8_chart(client: &reqwest::Client, user_agent: &str, symbol: &str
     }
 
     let price = meta["regularMarketPrice"].as_f64().unwrap_or(0.0);
-    let prev_close = meta["chartPreviousClose"].as_f64().or_else(|| meta["previousClose"].as_f64()).unwrap_or(price);
+    let prev_close = meta["chartPreviousClose"]
+        .as_f64()
+        .or_else(|| meta["previousClose"].as_f64())
+        .unwrap_or(price);
     let change = price - prev_close;
-    let change_percent = if prev_close != 0.0 { (change / prev_close) * 100.0 } else { 0.0 };
+    let change_percent = if prev_close != 0.0 {
+        (change / prev_close) * 100.0
+    } else {
+        0.0
+    };
 
     let day_high = meta["regularMarketDayHigh"].as_f64().unwrap_or(price);
     let day_low = meta["regularMarketDayLow"].as_f64().unwrap_or(price);
@@ -146,4 +158,3 @@ async fn fetch_v8_chart(client: &reqwest::Client, user_agent: &str, symbol: &str
         json_payload,
     })
 }
-

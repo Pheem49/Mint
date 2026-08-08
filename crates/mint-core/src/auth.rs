@@ -60,7 +60,11 @@ pub fn profile_pictures_dir() -> Result<PathBuf, AuthError> {
 /// `extension` should be a bare extension like "jpg" or "png" (no dot).
 pub fn save_avatar_file(bytes: &[u8], extension: &str) -> Result<String, AuthError> {
     let dir = profile_pictures_dir()?;
-    let extension = if extension.is_empty() { "png" } else { extension };
+    let extension = if extension.is_empty() {
+        "png"
+    } else {
+        extension
+    };
     let file_name = format!(
         "profile_{}.{}",
         chrono::Utc::now().timestamp_millis(),
@@ -142,10 +146,9 @@ pub fn register_user(
 
     let id = Uuid::new_v4().to_string();
     let password_hash = bcrypt::hash(password, bcrypt::DEFAULT_COST)?;
-    let display_name =
-        name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| {
-            email.split('@').next().unwrap_or(email).to_string()
-        });
+    let display_name = name
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| email.split('@').next().unwrap_or(email).to_string());
 
     conn.execute(
         "INSERT INTO user (id, name, email, passwordHash) VALUES (?1, ?2, ?3, ?4)",
@@ -167,7 +170,13 @@ pub fn login_user(email: &str, password: &str) -> Result<AuthUser, AuthError> {
     }
 
     let conn = open_user_db()?;
-    let row: Option<(String, Option<String>, Option<String>, Option<String>, Option<String>)> = conn
+    let row: Option<(
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> = conn
         .query_row(
             "SELECT id, name, email, image, passwordHash FROM user WHERE email = ?1",
             params![email],
@@ -193,7 +202,12 @@ pub fn login_user(email: &str, password: &str) -> Result<AuthUser, AuthError> {
         return Err(AuthError::InvalidCredentials);
     }
 
-    Ok(AuthUser { id, name, email, image })
+    Ok(AuthUser {
+        id,
+        name,
+        email,
+        image,
+    })
 }
 
 pub fn get_user(id: &str) -> Result<Option<AuthUser>, AuthError> {
@@ -222,10 +236,7 @@ pub fn update_profile(
 ) -> Result<AuthUser, AuthError> {
     let conn = open_user_db()?;
     if let Some(name) = &name {
-        conn.execute(
-            "UPDATE user SET name = ?1 WHERE id = ?2",
-            params![name, id],
-        )?;
+        conn.execute("UPDATE user SET name = ?1 WHERE id = ?2", params![name, id])?;
     }
     if let Some(image) = &image {
         conn.execute(
@@ -248,8 +259,8 @@ const SESSION_LIFETIME_DAYS: i64 = 30;
 pub fn create_session(user_id: &str) -> String {
     let token = Uuid::new_v4().to_string();
     if let Ok(conn) = open_user_db() {
-        let expires = (chrono::Utc::now() + chrono::Duration::days(SESSION_LIFETIME_DAYS))
-            .timestamp_millis();
+        let expires =
+            (chrono::Utc::now() + chrono::Duration::days(SESSION_LIFETIME_DAYS)).timestamp_millis();
         let _ = conn.execute(
             "INSERT INTO session (sessionToken, userId, expires) VALUES (?1, ?2, ?3)",
             params![token, user_id, expires],

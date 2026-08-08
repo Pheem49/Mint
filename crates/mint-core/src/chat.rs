@@ -150,6 +150,11 @@ pub enum ContentBlock {
         id: String,
         name: String,
         input: Value,
+        /// See `ToolCall::thought_signature` — carried on `ToolUse` too so it
+        /// survives being replayed back into `native_messages` history on the
+        /// next turn. `None` for every provider but Gemini.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thought_signature: Option<String>,
     },
     ToolResult {
         tool_use_id: String,
@@ -158,6 +163,12 @@ pub enum ContentBlock {
         is_error: bool,
     },
     Image {
+        data_uri: String,
+    },
+    Audio {
+        data_uri: String,
+    },
+    Video {
         data_uri: String,
     },
 }
@@ -179,6 +190,13 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub input: Value,
+    /// Gemini 3.x's "thinking" models attach an opaque `thoughtSignature` to
+    /// each `functionCall` part; it must be echoed back verbatim on the next
+    /// turn's replayed `functionCall` or the API rejects the request with a
+    /// 400 (`INVALID_ARGUMENT: Function call is missing a thought_signature`).
+    /// `None` for every other provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thought_signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -198,22 +216,30 @@ impl ChatRequest {
             return Ok(self.clone());
         };
 
-        let (mime_type, encoded) = document
+        let (_mime_type, encoded) = document
             .data_uri
             .strip_prefix("data:")
             .and_then(|payload| payload.split_once(";base64,"))
-            .ok_or_else(|| "invalid PDF attachment data URI".to_string())?;
+            .ok_or_else(|| "invalid document attachment data URI".to_string())?;
 
-        if !mime_type.eq_ignore_ascii_case("application/pdf") {
-            return Err("only PDF document attachments are supported".into());
-        }
+        // Dispatch by the filename's extension, not the data URI's MIME type:
+        // browsers report an empty or generic `application/octet-stream` type
+        // for many of these formats (.md, .toml, .yaml, ...), so MIME type
+        // isn't a reliable signal here. `extract_document_text` below performs
+        // the real allowlist check and rejects anything it doesn't recognize.
+        let extension = std::path::Path::new(document.filename.trim())
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .filter(|ext| !ext.is_empty())
+            .unwrap_or_else(|| "txt".to_string());
 
         use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
         let bytes = BASE64_STANDARD
             .decode(encoded)
-            .map_err(|error| format!("invalid PDF attachment encoding: {error}"))?;
+            .map_err(|error| format!("invalid document attachment encoding: {error}"))?;
         if bytes.len() > MAX_DOCUMENT_BYTES {
-            return Err("PDF attachment is too large (> 10 MiB)".into());
+            return Err("document attachment is too large (> 10 MiB)".into());
         }
 
         let directory = crate::config::config_path()
@@ -234,9 +260,10 @@ impl ChatRequest {
         };
 
         let path = directory.join(format!(
-            "mint-pdf-{}-{}.pdf",
+            "mint-doc-{}-{}.{}",
             COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
-            safe_name
+            safe_name,
+            extension
         ));
         std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
 
@@ -247,12 +274,12 @@ impl ChatRequest {
 
         let mut context: String = extracted.chars().take(MAX_DOCUMENT_CONTEXT_CHARS).collect();
         if extracted.chars().count() > MAX_DOCUMENT_CONTEXT_CHARS {
-            context.push_str("\n\n[PDF text truncated because it is long.]");
+            context.push_str("\n\n[Document text truncated because it is long.]");
         }
 
         let filename = document.filename.trim();
         let filename = if filename.is_empty() {
-            "attached.pdf"
+            "attached document"
         } else {
             filename
         };
@@ -260,7 +287,7 @@ impl ChatRequest {
         let mut enriched = self.clone();
         enriched.document_attachment = None;
         enriched.message = format!(
-            "{}\n\nAttached PDF: {filename}\nUse the extracted PDF text below when answering. If the user asks for a summary, summarize this document.\n\n--- Extracted PDF text ---\n{context}\n--- End extracted PDF text ---",
+            "{}\n\nAttached document: {filename}\nUse the extracted document text below when answering. If the user asks for a summary, summarize this document.\n\n--- Extracted document text ---\n{context}\n--- End extracted document text ---",
             self.message
         );
         Ok(enriched)
@@ -479,9 +506,26 @@ fn gemini_native_part(
 ) -> Result<Value, ChatError> {
     Ok(match block {
         ContentBlock::Text { text } => json!({ "text": text }),
-        ContentBlock::ToolUse { name, input, .. } => json!({
-            "functionCall": { "name": name, "args": input }
-        }),
+        ContentBlock::ToolUse {
+            name,
+            input,
+            thought_signature,
+            ..
+        } => {
+            // A `thoughtSignature` captured off the model's own `functionCall`
+            // part must be echoed back verbatim here — a sibling key of
+            // `functionCall`, not nested inside it — or Gemini 3.x rejects the
+            // request outright (400 INVALID_ARGUMENT: "Function call is
+            // missing a thought_signature"), which without this looked like a
+            // recoverable provider error and silently triggered a fallback to
+            // a different (much weaker) provider on every second tool-calling
+            // turn. See `ToolCall::thought_signature`.
+            let mut part = json!({ "functionCall": { "name": name, "args": input } });
+            if let Some(signature) = thought_signature {
+                part["thoughtSignature"] = json!(signature);
+            }
+            part
+        }
         ContentBlock::ToolResult {
             tool_use_id,
             content,
@@ -495,6 +539,14 @@ fn gemini_native_part(
         }
         ContentBlock::Image { data_uri } => {
             let (mime_type, data) = split_data_uri(data_uri, "image/")?;
+            json!({ "inlineData": { "mimeType": mime_type, "data": data } })
+        }
+        ContentBlock::Audio { data_uri } => {
+            let (mime_type, data) = split_data_uri(data_uri, "audio/")?;
+            json!({ "inlineData": { "mimeType": mime_type, "data": data } })
+        }
+        ContentBlock::Video { data_uri } => {
+            let (mime_type, data) = split_data_uri(data_uri, "video/")?;
             json!({ "inlineData": { "mimeType": mime_type, "data": data } })
         }
     })
@@ -521,6 +573,12 @@ fn parse_gemini_reply(model: String, response: &Value) -> Result<ProviderReply, 
                 id: format!("call_{index}"),
                 name: call["name"].as_str().unwrap_or_default().to_string(),
                 input: call["args"].clone(),
+                // Sibling of `functionCall` within the same `part`, not nested
+                // inside it — see the module-level doc on `ToolCall::thought_signature`.
+                thought_signature: part
+                    .get("thoughtSignature")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             });
         }
     }
@@ -615,6 +673,7 @@ fn parse_openai_style_reply(model: String, response: &Value) -> Result<ProviderR
                         id: call["id"].as_str().unwrap_or_default().to_string(),
                         name,
                         input,
+                        thought_signature: None,
                     })
                 })
                 .collect()
@@ -712,9 +771,9 @@ fn ollama_native_messages(messages: &[ChatMessage]) -> Vec<Value> {
                     .content
                     .iter()
                     .filter_map(|block| match block {
-                        ContentBlock::Image { data_uri } => {
-                            split_data_uri(data_uri, "image/").ok().map(|(_, data)| data)
-                        }
+                        ContentBlock::Image { data_uri } => split_data_uri(data_uri, "image/")
+                            .ok()
+                            .map(|(_, data)| data),
                         _ => None,
                     })
                     .collect();
@@ -742,10 +801,30 @@ fn ollama_native_messages(messages: &[ChatMessage]) -> Vec<Value> {
                 result.push(entry);
             }
             ChatRole::Tool => {
+                // Ollama's `/api/chat` `tool` role message has no image field —
+                // like OpenAI, an `Image` block riding along with a tool result
+                // (e.g. a browser screenshot) is emitted as a follow-up `user`
+                // message using the same `images` field regular user turns use.
+                let mut pending_images: Vec<String> = Vec::new();
                 for block in &message.content {
-                    if let ContentBlock::ToolResult { content, .. } = block {
-                        result.push(json!({ "role": "tool", "content": content }));
+                    match block {
+                        ContentBlock::ToolResult { content, .. } => {
+                            result.push(json!({ "role": "tool", "content": content }));
+                        }
+                        ContentBlock::Image { data_uri } => {
+                            if let Ok((_, data)) = split_data_uri(data_uri, "image/") {
+                                pending_images.push(data);
+                            }
+                        }
+                        _ => {}
                     }
+                }
+                if !pending_images.is_empty() {
+                    result.push(json!({
+                        "role": "user",
+                        "content": "",
+                        "images": pending_images,
+                    }));
                 }
             }
         }
@@ -777,7 +856,12 @@ fn parse_ollama_reply(model: String, response: &Value) -> Result<ProviderReply, 
                         .as_str()
                         .map(str::to_owned)
                         .unwrap_or_else(|| format!("call_{index}"));
-                    Some(ToolCall { id, name, input })
+                    Some(ToolCall {
+                        id,
+                        name,
+                        input,
+                        thought_signature: None,
+                    })
                 })
                 .collect()
         })
@@ -827,38 +911,76 @@ async fn call_anthropic(
 /// uses the structured history and (if present) `request.tools` for native
 /// tool-calling; otherwise falls back to the single flat `message` field exactly
 /// as before (legacy JSON-prompt callers are unaffected).
-fn anthropic_chat_payload(model: &str, request: &ChatRequest, stream: bool) -> Result<Value, ChatError> {
+fn anthropic_chat_payload(
+    model: &str,
+    request: &ChatRequest,
+    stream: bool,
+) -> Result<Value, ChatError> {
+    let system = anthropic_system_blocks(&request.system_instruction);
     let mut payload = if let Some(messages) = &request.messages {
         json!({
             "model": model,
             "max_tokens": 8192,
-            "system": request.system_instruction,
+            "system": system,
             "messages": anthropic_messages(messages)?,
         })
     } else {
         json!({
             "model": model,
             "max_tokens": 8192,
-            "system": request.system_instruction,
-            "messages": [{ "role": "user", "content": request.message }]
+            "system": system,
+            "messages": [{
+                "role": "user",
+                "content": anthropic_message_content(&request.message, request.image_data_uri.as_deref())?,
+            }]
         })
     };
     if stream {
         payload["stream"] = json!(true);
     }
     if let Some(tools) = &request.tools {
+        let last_idx = tools.len().saturating_sub(1);
         payload["tools"] = json!(
             tools
                 .iter()
-                .map(|tool| json!({
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": tool.parameters,
-                }))
+                .enumerate()
+                .map(|(i, tool)| {
+                    let mut value = json!({
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.parameters,
+                    });
+                    // The tool catalog is identical on every step of an agent
+                    // run — marking the last tool definition as a cache
+                    // breakpoint caches the whole system+tools prefix (Anthropic
+                    // caches everything up to and including a marked block), so
+                    // repeated steps hit cache instead of reprocessing it.
+                    if i == last_idx {
+                        value["cache_control"] = json!({ "type": "ephemeral" });
+                    }
+                    value
+                })
                 .collect::<Vec<_>>()
         );
     }
     Ok(payload)
+}
+
+/// Anthropic requires `system` to be an array of text blocks (not a bare
+/// string) to attach a `cache_control` breakpoint to it. The system prompt is
+/// identical on every step of an agent run, so marking it cacheable turns
+/// repeated multi-step turns into a cache hit instead of a full reprocess
+/// each time. Falls back to the old bare-string shape when there's no system
+/// prompt at all, since an empty cacheable block isn't useful.
+fn anthropic_system_blocks(system_instruction: &str) -> Value {
+    if system_instruction.is_empty() {
+        return json!(system_instruction);
+    }
+    json!([{
+        "type": "text",
+        "text": system_instruction,
+        "cache_control": { "type": "ephemeral" },
+    }])
 }
 
 fn anthropic_messages(messages: &[ChatMessage]) -> Result<Vec<Value>, ChatError> {
@@ -880,10 +1002,32 @@ fn anthropic_messages(messages: &[ChatMessage]) -> Result<Vec<Value>, ChatError>
         .collect()
 }
 
+/// Builds an Anthropic `content` value for the plain (non-native-messages)
+/// chat path: bare text when there's no image, otherwise a `text` + `image`
+/// parts array. Mirrors `anthropic_content_block`, which handles the same
+/// shape for the native-tool-calling `messages` path. `image_data_uri` may
+/// contain multiple space-separated data URIs, matching Gemini's `gemini_parts`.
+fn anthropic_message_content(text: &str, image_data_uri: Option<&str>) -> Result<Value, ChatError> {
+    let Some(image_data) = image_data_uri else {
+        return Ok(json!(text));
+    };
+    let mut parts = vec![json!({ "type": "text", "text": text })];
+    for img in image_data.split_whitespace() {
+        let (mime_type, data) = split_data_uri(img, "image/")?;
+        parts.push(json!({
+            "type": "image",
+            "source": { "type": "base64", "media_type": mime_type, "data": data },
+        }));
+    }
+    Ok(json!(parts))
+}
+
 fn anthropic_content_block(block: &ContentBlock) -> Result<Value, ChatError> {
     Ok(match block {
         ContentBlock::Text { text } => json!({ "type": "text", "text": text }),
-        ContentBlock::ToolUse { id, name, input } => {
+        ContentBlock::ToolUse {
+            id, name, input, ..
+        } => {
             json!({ "type": "tool_use", "id": id, "name": name, "input": input })
         }
         ContentBlock::ToolResult {
@@ -902,6 +1046,12 @@ fn anthropic_content_block(block: &ContentBlock) -> Result<Value, ChatError> {
                 "type": "image",
                 "source": { "type": "base64", "media_type": mime_type, "data": data },
             })
+        }
+        // Anthropic's Messages API has no inline audio/video content block; this
+        // is unreachable in practice because `require_supported_attachments`
+        // rejects audio/video for "anthropic" before a request gets this far.
+        ContentBlock::Audio { .. } | ContentBlock::Video { .. } => {
+            return Err(ChatError::UnsupportedAttachments("anthropic".into()));
         }
     })
 }
@@ -926,6 +1076,7 @@ fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderRepl
                     id: block["id"].as_str().unwrap_or_default().into(),
                     name: block["name"].as_str().unwrap_or_default().into(),
                     input: block["input"].clone(),
+                    thought_signature: None,
                 });
             }
             _ => {}
@@ -1354,14 +1505,24 @@ fn require_supported_attachments(provider: &str, request: &ChatRequest) -> Resul
             Err(ChatError::UnsupportedAttachments(provider.into()))
         }
         "ollama" => Ok(()),
-        // Custom providers are text-only for now; reject any multimodal content.
-        p if p.starts_with("custom:") => {
-            if has_image || has_audio || has_video {
-                Err(ChatError::UnsupportedAttachments(provider.into()))
-            } else {
-                Ok(())
-            }
+        // These all build their payload via `openai_chat_payload`/`anthropic_chat_payload`,
+        // which support image attachments (see `openai_message_content`/
+        // `anthropic_message_content`). Audio/video are not implemented for them yet.
+        "openai" | "local_openai" | "openrouter" | "deepseek" | "huggingface" | "anthropic"
+            if has_audio || has_video =>
+        {
+            Err(ChatError::UnsupportedAttachments(provider.into()))
         }
+        "openai" | "local_openai" | "openrouter" | "deepseek" | "huggingface" | "anthropic" => {
+            Ok(())
+        }
+        // Custom providers route through `call_custom_provider`, which also uses
+        // `openai_chat_payload`, so images are supported the same way; audio/video
+        // are not implemented for them yet.
+        p if p.starts_with("custom:") && (has_audio || has_video) => {
+            Err(ChatError::UnsupportedAttachments(provider.into()))
+        }
+        p if p.starts_with("custom:") => Ok(()),
         _ if has_image || has_audio || has_video => {
             Err(ChatError::UnsupportedAttachments(provider.into()))
         }
@@ -1527,7 +1688,10 @@ fn openai_chat_payload(model: &str, request: &ChatRequest, stream: bool) -> Valu
     } else {
         vec![
             json!({ "role": "system", "content": request.system_instruction }),
-            json!({ "role": "user", "content": request.message }),
+            json!({
+                "role": "user",
+                "content": openai_message_content(&request.message, request.image_data_uri.as_deref()),
+            }),
         ]
     };
     let mut payload = json!({
@@ -1574,7 +1738,9 @@ fn openai_native_messages(messages: &[ChatMessage]) -> Vec<Value> {
                     .content
                     .iter()
                     .filter_map(|block| match block {
-                        ContentBlock::ToolUse { id, name, input } => Some(json!({
+                        ContentBlock::ToolUse {
+                            id, name, input, ..
+                        } => Some(json!({
                             "id": id,
                             "type": "function",
                             "function": { "name": name, "arguments": input.to_string() }
@@ -1594,19 +1760,38 @@ fn openai_native_messages(messages: &[ChatMessage]) -> Vec<Value> {
                 result.push(entry);
             }
             ChatRole::Tool => {
+                // OpenAI's Chat Completions `tool` role only accepts a plain
+                // string `content` — an image can't be attached to it directly.
+                // Any `Image` block riding along with a tool result (e.g. a
+                // browser screenshot) is instead emitted as a follow-up `user`
+                // message, the same pattern OpenAI's own vision examples use to
+                // let a tool result be "shown" to the model.
+                let mut pending_images: Vec<&str> = Vec::new();
                 for block in &message.content {
-                    if let ContentBlock::ToolResult {
-                        tool_use_id,
-                        content,
-                        ..
-                    } = block
-                    {
-                        result.push(json!({
-                            "role": "tool",
-                            "tool_call_id": tool_use_id,
-                            "content": content,
-                        }));
+                    match block {
+                        ContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                            ..
+                        } => {
+                            result.push(json!({
+                                "role": "tool",
+                                "tool_call_id": tool_use_id,
+                                "content": content,
+                            }));
+                        }
+                        ContentBlock::Image { data_uri } => pending_images.push(data_uri),
+                        _ => {}
                     }
+                }
+                if !pending_images.is_empty() {
+                    let parts: Vec<Value> = pending_images
+                        .iter()
+                        .map(|data_uri| {
+                            json!({ "type": "image_url", "image_url": { "url": data_uri } })
+                        })
+                        .collect();
+                    result.push(json!({ "role": "user", "content": parts }));
                 }
             }
         }
@@ -1628,6 +1813,22 @@ fn message_text(message: &ChatMessage) -> String {
         .join("")
 }
 
+/// Builds an OpenAI `content` value for the plain (non-native-messages) chat
+/// path: bare text when there's no image, otherwise a `text` + `image_url`
+/// parts array. Mirrors `openai_user_content`, which handles the same shape
+/// for the native-tool-calling `messages` path. `image_data_uri` may contain
+/// multiple space-separated data URIs, matching Gemini's `gemini_parts`.
+fn openai_message_content(text: &str, image_data_uri: Option<&str>) -> Value {
+    let Some(image_data) = image_data_uri else {
+        return json!(text);
+    };
+    let mut parts = vec![json!({ "type": "text", "text": text })];
+    for img in image_data.split_whitespace() {
+        parts.push(json!({ "type": "image_url", "image_url": { "url": img } }));
+    }
+    json!(parts)
+}
+
 fn openai_user_content(message: &ChatMessage) -> Value {
     if let [ContentBlock::Text { text }] = message.content.as_slice() {
         return json!(text);
@@ -1640,7 +1841,14 @@ fn openai_user_content(message: &ChatMessage) -> Value {
             ContentBlock::Image { data_uri } => {
                 Some(json!({ "type": "image_url", "image_url": { "url": data_uri } }))
             }
-            ContentBlock::ToolUse { .. } | ContentBlock::ToolResult { .. } => None,
+            // OpenAI Chat Completions has no inline audio/video content part in
+            // this format; unreachable in practice because
+            // `require_supported_attachments` rejects audio/video for these
+            // providers before a request gets this far.
+            ContentBlock::ToolUse { .. }
+            | ContentBlock::ToolResult { .. }
+            | ContentBlock::Audio { .. }
+            | ContentBlock::Video { .. } => None,
         })
         .collect();
     json!(parts)
@@ -1825,6 +2033,7 @@ mod tests {
                     id: "call_1".into(),
                     name: "read_file".into(),
                     input: json!({ "path": "main.rs" }),
+                    thought_signature: None,
                 }],
             },
             ChatMessage {
@@ -1839,7 +2048,7 @@ mod tests {
         let request = native_request(messages, Some(vec![sample_tool()]));
         let payload = anthropic_chat_payload("claude-x", &request, false).unwrap();
 
-        assert_eq!(payload["system"], "You are Mint.");
+        assert_eq!(payload["system"][0]["text"], "You are Mint.");
         assert_eq!(payload["tools"][0]["name"], "read_file");
         assert_eq!(payload["tools"][0]["input_schema"]["type"], "object");
         let msgs = payload["messages"].as_array().unwrap();
@@ -1849,6 +2058,46 @@ mod tests {
         assert_eq!(msgs[2]["role"], "user");
         assert_eq!(msgs[2]["content"][0]["type"], "tool_result");
         assert_eq!(msgs[2]["content"][0]["tool_use_id"], "call_1");
+    }
+
+    #[test]
+    fn anthropic_payload_marks_the_system_prompt_as_cacheable() {
+        let request = native_request(vec![ChatMessage::text(ChatRole::User, "hi")], None);
+        let payload = anthropic_chat_payload("claude-x", &request, false).unwrap();
+
+        assert_eq!(payload["system"][0]["type"], "text");
+        assert_eq!(payload["system"][0]["text"], "You are Mint.");
+        assert_eq!(payload["system"][0]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn anthropic_payload_omits_the_cache_breakpoint_for_an_empty_system_prompt() {
+        let mut request = native_request(vec![ChatMessage::text(ChatRole::User, "hi")], None);
+        request.system_instruction = String::new();
+        let payload = anthropic_chat_payload("claude-x", &request, false).unwrap();
+
+        // Falls back to the plain-string shape rather than an empty cacheable
+        // block, matching the pre-caching behavior exactly for this case.
+        assert_eq!(payload["system"], "");
+    }
+
+    #[test]
+    fn anthropic_payload_marks_only_the_last_tool_as_the_cache_breakpoint() {
+        let second_tool = ToolSpec {
+            name: "write_file".into(),
+            description: "Writes a file".into(),
+            parameters: json!({ "type": "object" }),
+        };
+        let request = native_request(
+            vec![ChatMessage::text(ChatRole::User, "hi")],
+            Some(vec![sample_tool(), second_tool]),
+        );
+        let payload = anthropic_chat_payload("claude-x", &request, false).unwrap();
+
+        let tools = payload["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        assert!(tools[0].get("cache_control").is_none());
+        assert_eq!(tools[1]["cache_control"]["type"], "ephemeral");
     }
 
     #[test]
@@ -1891,6 +2140,7 @@ mod tests {
                     id: "call_1".into(),
                     name: "list_files".into(),
                     input: json!({ "path": "." }),
+                    thought_signature: None,
                 }],
             },
             ChatMessage {
@@ -1914,6 +2164,36 @@ mod tests {
         assert_eq!(msgs[2]["tool_calls"][0]["function"]["name"], "list_files");
         assert_eq!(msgs[3]["role"], "tool");
         assert_eq!(msgs[3]["tool_call_id"], "call_1");
+    }
+
+    #[test]
+    fn openai_native_payload_forwards_a_screenshot_riding_a_tool_result_as_a_user_turn() {
+        // OpenAI's Chat Completions `tool` role only accepts string content, so an
+        // `Image` block attached to a tool result (e.g. `browser_screenshot`) must
+        // surface as a follow-up `user` message instead of being dropped.
+        let messages = vec![ChatMessage {
+            role: ChatRole::Tool,
+            content: vec![
+                ContentBlock::ToolResult {
+                    tool_use_id: "call_1".into(),
+                    content: "[Screenshot captured — see attached image]".into(),
+                    is_error: false,
+                },
+                ContentBlock::Image {
+                    data_uri: "data:image/png;base64,QUJD".into(),
+                },
+            ],
+        }];
+        let built = openai_native_messages(&messages);
+        assert_eq!(built.len(), 2);
+        assert_eq!(built[0]["role"], "tool");
+        assert_eq!(built[0]["tool_call_id"], "call_1");
+        assert_eq!(built[1]["role"], "user");
+        assert_eq!(built[1]["content"][0]["type"], "image_url");
+        assert_eq!(
+            built[1]["content"][0]["image_url"]["url"],
+            "data:image/png;base64,QUJD"
+        );
     }
 
     #[test]
@@ -1948,6 +2228,7 @@ mod tests {
                     id: "call_0".into(),
                     name: "weather".into(),
                     input: json!({ "city": "Bangkok" }),
+                    thought_signature: None,
                 }],
             },
             ChatMessage {
@@ -1978,6 +2259,54 @@ mod tests {
     }
 
     #[test]
+    fn gemini_native_payload_replays_the_thought_signature_on_the_next_turn() {
+        // Gemini 3.x rejects a replayed `functionCall` that's missing the
+        // `thoughtSignature` the model originally attached to it (400
+        // INVALID_ARGUMENT) — without this, every second tool-calling turn
+        // failed and silently fell back to a different, weaker provider.
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "check weather"),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: "call_0".into(),
+                    name: "weather".into(),
+                    input: json!({ "city": "Bangkok" }),
+                    thought_signature: Some("opaque-signature-abc".into()),
+                }],
+            },
+        ];
+        let request = native_request(messages, Some(vec![sample_tool()]));
+        let payload = gemini_native_payload(&request).unwrap();
+
+        let contents = payload["contents"].as_array().unwrap();
+        assert_eq!(
+            contents[1]["parts"][0]["thoughtSignature"],
+            "opaque-signature-abc"
+        );
+        // Sibling of `functionCall`, not nested inside it.
+        assert_eq!(contents[1]["parts"][0]["functionCall"]["name"], "weather");
+    }
+
+    #[test]
+    fn gemini_native_payload_omits_thought_signature_when_absent() {
+        let messages = vec![ChatMessage {
+            role: ChatRole::Assistant,
+            content: vec![ContentBlock::ToolUse {
+                id: "call_0".into(),
+                name: "weather".into(),
+                input: json!({ "city": "Bangkok" }),
+                thought_signature: None,
+            }],
+        }];
+        let request = native_request(messages, Some(vec![sample_tool()]));
+        let payload = gemini_native_payload(&request).unwrap();
+
+        let contents = payload["contents"].as_array().unwrap();
+        assert!(contents[0]["parts"][0].get("thoughtSignature").is_none());
+    }
+
+    #[test]
     fn parses_gemini_reply_with_function_call_parts() {
         let response = json!({
             "candidates": [{
@@ -1998,6 +2327,27 @@ mod tests {
     }
 
     #[test]
+    fn parses_gemini_reply_captures_the_thought_signature_off_the_function_call_part() {
+        let response = json!({
+            "candidates": [{
+                "finishReason": "STOP",
+                "content": {
+                    "parts": [{
+                        "functionCall": { "name": "weather", "args": { "city": "Bangkok" } },
+                        "thoughtSignature": "opaque-signature-abc"
+                    }]
+                }
+            }]
+        });
+        let reply = parse_gemini_reply("gemini-x".into(), &response).unwrap();
+        let calls = reply.tool_calls.unwrap();
+        assert_eq!(
+            calls[0].thought_signature.as_deref(),
+            Some("opaque-signature-abc")
+        );
+    }
+
+    #[test]
     fn ollama_native_messages_send_tool_call_arguments_as_object_not_string() {
         let messages = vec![
             ChatMessage::text(ChatRole::User, "list files"),
@@ -2007,6 +2357,7 @@ mod tests {
                     id: "call_1".into(),
                     name: "list_files".into(),
                     input: json!({ "path": "." }),
+                    thought_signature: None,
                 }],
             },
         ];
@@ -2014,6 +2365,31 @@ mod tests {
         assert_eq!(built[1]["tool_calls"][0]["function"]["name"], "list_files");
         // Ollama expects `arguments` as a JSON object, unlike OpenAI's stringified form.
         assert!(built[1]["tool_calls"][0]["function"]["arguments"].is_object());
+    }
+
+    #[test]
+    fn ollama_native_messages_forward_a_screenshot_riding_a_tool_result_as_a_user_turn() {
+        // Ollama's `/api/chat` `tool` role message has no image field, so an
+        // `Image` block attached to a tool result (e.g. `browser_screenshot`)
+        // must surface as a follow-up `user` message with the `images` field.
+        let messages = vec![ChatMessage {
+            role: ChatRole::Tool,
+            content: vec![
+                ContentBlock::ToolResult {
+                    tool_use_id: "call_1".into(),
+                    content: "[Screenshot captured — see attached image]".into(),
+                    is_error: false,
+                },
+                ContentBlock::Image {
+                    data_uri: "data:image/png;base64,QUJD".into(),
+                },
+            ],
+        }];
+        let built = ollama_native_messages(&messages);
+        assert_eq!(built.len(), 2);
+        assert_eq!(built[0]["role"], "tool");
+        assert_eq!(built[1]["role"], "user");
+        assert_eq!(built[1]["images"][0], "QUJD");
     }
 
     #[test]

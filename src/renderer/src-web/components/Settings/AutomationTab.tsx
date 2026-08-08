@@ -95,7 +95,6 @@ export default function AutomationTab({
               Proactive Assistant
             </h2>
           </div>
-          <p className="section-description">Tune screen analysis frequency and suggestion timing.</p>
         </div>
         <div className="slider-stack">
           <div className="setting-row">
@@ -139,9 +138,6 @@ export default function AutomationTab({
             <p className="section-kicker">Messaging</p>
             <h2 className="section-title">Native Channel Bridges</h2>
           </div>
-          <p className="section-description">
-            Configure messaging credentials and webhooks used by Rust channel workers to enable remote control.
-          </p>
         </div>
 
         {/* Global Instant Ack Notification */}

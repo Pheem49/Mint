@@ -28,7 +28,9 @@ pub fn calculate(expr: &str) -> Result<CalculationReport, CalculationError> {
     let mut parsed_expr = clean_expr.to_string();
 
     // Convert "25% of 8500" -> "(25 / 100) * 8500"
-    if let Ok(re) = regex::Regex::new(r"(?i)^(\d+(?:\.\d+)?)\s*%\s*(?:of|ของ|\*)\s*(\d+(?:\.\d+)?)$") {
+    if let Ok(re) =
+        regex::Regex::new(r"(?i)^(\d+(?:\.\d+)?)\s*%\s*(?:of|ของ|\*)\s*(\d+(?:\.\d+)?)$")
+    {
         if let Some(caps) = re.captures(&parsed_expr) {
             if let (Some(p), Some(v)) = (caps.get(1), caps.get(2)) {
                 parsed_expr = format!("({} / 100) * {}", p.as_str(), v.as_str());
@@ -139,4 +141,3 @@ fn parse_factor(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<f64,
         None => Err("Unexpected end of expression".into()),
     }
 }
-

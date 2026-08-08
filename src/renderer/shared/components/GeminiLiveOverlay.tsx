@@ -1,9 +1,15 @@
+import { useState } from 'react'
+
 interface GeminiLiveOverlayProps {
   status: 'listening' | 'speaking' | 'thinking' | 'paused'
-  transcript: string
+  userTranscript: string
+  assistantTranscript: string
   isPaused: boolean
   onTogglePause: () => void
   onEndCall: () => void
+  voice: string
+  voices: readonly string[]
+  onChangeVoice: (voice: string) => void
 }
 
 const STATUS_LABEL: Record<GeminiLiveOverlayProps['status'], string> = {
@@ -13,14 +19,78 @@ const STATUS_LABEL: Record<GeminiLiveOverlayProps['status'], string> = {
   paused: 'Paused'
 }
 
-export default function GeminiLiveOverlay({ status, transcript, isPaused, onTogglePause, onEndCall }: GeminiLiveOverlayProps) {
+export default function GeminiLiveOverlay({
+  status,
+  userTranscript,
+  assistantTranscript,
+  isPaused,
+  onTogglePause,
+  onEndCall,
+  voice,
+  voices,
+  onChangeVoice
+}: GeminiLiveOverlayProps) {
+  const [voicePickerOpen, setVoicePickerOpen] = useState(false)
+
   return (
     <div className="gemini-live-overlay" role="dialog" aria-modal="true" aria-label="Gemini Live conversation">
       <div className="gemini-live-card">
         <span className="gemini-live-badge">Gemini Live</span>
         <div className={`gemini-live-orb ${status}`} aria-hidden="true" />
         <div className="gemini-live-status">{STATUS_LABEL[status]}</div>
-        <div className="gemini-live-transcript">{transcript || 'Say something to get started...'}</div>
+        <div className="gemini-live-transcript">
+          {userTranscript || assistantTranscript ? (
+            <>
+              {userTranscript && (
+                <p className="gemini-live-transcript-line">
+                  <span className="gemini-live-transcript-speaker">You:</span> {userTranscript}
+                </p>
+              )}
+              {assistantTranscript && (
+                <p className="gemini-live-transcript-line">
+                  <span className="gemini-live-transcript-speaker">Mint:</span> {assistantTranscript}
+                </p>
+              )}
+            </>
+          ) : (
+            'Say something to get started...'
+          )}
+        </div>
+
+        <div className="gemini-live-voice-picker">
+          <button
+            type="button"
+            className="gemini-live-voice-btn"
+            onClick={() => setVoicePickerOpen((open) => !open)}
+            title="Change voice"
+            aria-expanded={voicePickerOpen}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 5 6 9H2v6h4l5 4V5z" />
+              <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+            </svg>
+            <span>{voice}</span>
+          </button>
+          {voicePickerOpen && (
+            <div className="gemini-live-voice-menu" role="listbox">
+              {voices.map((voiceName) => (
+                <button
+                  key={voiceName}
+                  type="button"
+                  role="option"
+                  aria-selected={voiceName === voice}
+                  className={`gemini-live-voice-option ${voiceName === voice ? 'active' : ''}`}
+                  onClick={() => {
+                    setVoicePickerOpen(false)
+                    if (voiceName !== voice) onChangeVoice(voiceName)
+                  }}
+                >
+                  {voiceName}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="gemini-live-controls">
           <button

@@ -114,7 +114,12 @@ pub(crate) fn base_allowed_actions() -> Vec<&'static str> {
 /// a native tools array will often just follow the text instruction and
 /// never emit a real tool call at all (confirmed live: this was silently
 /// breaking Gemini's native tool-calling entirely before this fix).
-pub fn build_system_prompt(config: &MintConfig, plan_mode: bool, native: bool) -> String {
+pub fn build_system_prompt(
+    config: &MintConfig,
+    plan_mode: bool,
+    native: bool,
+    user_name: Option<&str>,
+) -> String {
     let mut allowed_actions = base_allowed_actions();
 
     if is_port_9222_open() {
@@ -168,14 +173,14 @@ pub fn build_system_prompt(config: &MintConfig, plan_mode: bool, native: bool) -
         input_formats.push("- web_search: {\"query\":\"search terms\",\"limit\":5}");
     }
     if allowed_actions.contains(&"image_search") {
-        input_formats
-            .push("- image_search: {\"query\":\"what to find pictures of\",\"limit\":6}");
+        input_formats.push("- image_search: {\"query\":\"what to find pictures of\",\"limit\":6}");
     }
     if allowed_actions.contains(&"weather") {
         input_formats.push("- weather: {\"city\":\"city or location name\"}");
     }
     if allowed_actions.contains(&"stock") {
-        input_formats.push("- stock: {\"query\":\"stock or crypto name/ticker e.g. Apple, TSLA, BTC\"}");
+        input_formats
+            .push("- stock: {\"query\":\"stock or crypto name/ticker e.g. Apple, TSLA, BTC\"}");
     }
     if allowed_actions.contains(&"calculation") {
         input_formats.push("- calculation: {\"expression\":\"math or percentage expression e.g. 25% of 8500 or 100 * 3.5\"}");
@@ -309,10 +314,13 @@ pub fn build_system_prompt(config: &MintConfig, plan_mode: bool, native: bool) -
         input_formats.push("- video_export / video.export: {\"input\":\"/path/file.mp4\",\"output\":\"/path/out.mp4\",\"resolution\":\"1080p\"}");
     }
     if allowed_actions.contains(&"video_extract_audio") {
-        input_formats.push("- video_extract_audio: {\"input\":\"/path/file.mp4\",\"output\":\"/path/audio.wav\"}");
+        input_formats.push(
+            "- video_extract_audio: {\"input\":\"/path/file.mp4\",\"output\":\"/path/audio.wav\"}",
+        );
     }
     if allowed_actions.contains(&"speech_transcribe") {
-        input_formats.push("- speech_transcribe: {\"input\":\"/path/file.mp4\",\"language\":\"en\"}");
+        input_formats
+            .push("- speech_transcribe: {\"input\":\"/path/file.mp4\",\"language\":\"en\"}");
     }
     if allowed_actions.contains(&"subtitle_generate") {
         input_formats.push("- subtitle_generate / subtitle.generate: {\"input\":\"/path/file.mp4\",\"language\":\"en\"}");
@@ -341,7 +349,7 @@ pub fn build_system_prompt(config: &MintConfig, plan_mode: bool, native: bool) -
     if allowed_actions.contains(&"generate_video") {
         input_formats.push("- generate_video / veo.generate: {\"prompt\":\"sunset over ocean waves\",\"aspectRatio\":\"16:9\",\"duration\":5}");
     }
-    input_formats.push("- finish: {\"summary\":\"complete final answer in Thai when the user writes Thai, covering every part of what was asked\",\"verification\":\"checks run or not run\"}");
+    input_formats.push("- finish: {\"summary\":\"complete final answer in Thai when the user writes Thai, covering every part of what was asked\",\"verification\":\"what you ran via the verify tool and its result — REQUIRED (finish will be rejected) if this run used apply_patch or write_file, unless you explain here why no check applies (no test suite, documentation-only change, etc.)\"}");
 
     let input_formats_str = input_formats.join("\n");
 
@@ -456,7 +464,7 @@ pub fn build_system_prompt(config: &MintConfig, plan_mode: bool, native: bool) -
 
     let rules_str = rules.join("\n");
 
-    if native {
+    let mut prompt = if native {
         format!(
             "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
              You are also Mint: {persona} Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision.\n\
@@ -483,5 +491,12 @@ pub fn build_system_prompt(config: &MintConfig, plan_mode: bool, native: bool) -
             inputs = input_formats_str,
             rules = rules_str
         )
+    };
+    if let Some(name) = user_name {
+        prompt.push_str(&format!(
+            "\nThe user's name is {}. Refer to them by their name when appropriate.",
+            name
+        ));
     }
+    prompt
 }

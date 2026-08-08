@@ -13,6 +13,7 @@ futures-util.workspace = true
 grep-matcher.workspace = true
 grep-regex.workspace = true
 grep-searcher.workspace = true
+hmac.workspace = true
 ignore.workspace = true
 image.workspace = true
 quick-xml.workspace = true

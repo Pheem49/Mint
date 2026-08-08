@@ -23,15 +23,27 @@ use crate::orchestration::{AgentApproval, ApprovalOutcome, execute_tool_from_jso
 
 const LIVE_WS_URL: &str = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent";
 const DEFAULT_LIVE_MODEL: &str = "gemini-2.5-flash-native-audio-preview-12-2025";
+const DEFAULT_LIVE_VOICE: &str = "Puck";
 
 /// Events streamed back to the frontend for the lifetime of a Gemini Live session.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GeminiLiveEvent {
     /// Base64 PCM16 audio chunk from the model's spoken reply.
-    AudioChunk { data: String },
-    /// A finalized transcript line, either what the user said or what the model said.
-    Transcript { role: String, text: String },
+    AudioChunk {
+        data: String,
+    },
+    /// An incremental transcript fragment (a few words at a time, not a whole
+    /// sentence) — Gemini streams these as it hears/speaks, so the frontend
+    /// must accumulate fragments of the same role until `TurnComplete` rather
+    /// than treat each one as the full line.
+    Transcript {
+        role: String,
+        text: String,
+    },
+    /// The current turn (user's utterance or the model's reply) has finished —
+    /// the next `Transcript` starts a new line instead of continuing this one.
+    TurnComplete,
     /// Progress/result of a tool call the model triggered mid-conversation.
     ToolStatus {
         action: String,
@@ -39,7 +51,9 @@ pub enum GeminiLiveEvent {
         result: Option<String>,
         error: Option<String>,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
     Closed,
 }
 
@@ -111,6 +125,16 @@ fn resolve_live_model(config: &MintConfig) -> String {
         .to_string()
 }
 
+fn resolve_live_voice(config: &MintConfig) -> String {
+    config
+        .extra
+        .get("geminiLiveVoice")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(DEFAULT_LIVE_VOICE)
+        .to_string()
+}
+
 fn agent_action_tool_declaration() -> Value {
     json!({
         "functionDeclarations": [{
@@ -151,8 +175,9 @@ where
         return Err("Gemini API key is not configured".into());
     }
     let model = resolve_live_model(config);
+    let voice = resolve_live_voice(config);
 
-    eprintln!("[gemini-live] connecting (model={model})...");
+    eprintln!("[gemini-live] connecting (model={model}, voice={voice})...");
     let url = format!("{LIVE_WS_URL}?key={api_key}");
     let ws_stream = match tokio::time::timeout(
         std::time::Duration::from_secs(15),
@@ -173,10 +198,40 @@ where
     eprintln!("[gemini-live] connected, sending setup...");
     let (mut ws_write, mut ws_read) = ws_stream.split();
 
-    let system_instruction = format!(
+    let user_name = crate::MemoryStore::open_default()
+        .ok()
+        .and_then(|memory| memory.get_profile("name").ok().flatten());
+
+    let mut system_instruction = format!(
         "{}\n\nWhen the user asks you to perform an action, call the `agent_action` function with `action` set to the action name and `input` set to a JSON object of its arguments, rather than describing the action in words.",
-        crate::prompts::agent::build_system_prompt(config, false, true)
+        crate::prompts::agent::build_system_prompt(config, false, true, user_name.as_deref())
     );
+    // Same cross-session context (saved profile/preferences + this chat's recent
+    // history) the typed-chat agent loop gets, so a Live call isn't a blank slate
+    // that's forgotten everything the user already told Mint.
+    crate::orchestration::append_memory_context(&mut system_instruction, chat_id);
+    if let Ok(skills) = crate::skills::learned_skills_context(Some(workspace_root), Some(chat_id))
+        && !skills.trim().is_empty()
+    {
+        system_instruction = format!(
+            "{}\n\nLearned skills:\n{}",
+            system_instruction.trim(),
+            skills.trim()
+        );
+    }
+    // Recent conversation history and skills have no size cap of their own (skills
+    // alone can run up to 16KB — see MAX_CONTEXT_BYTES in skills.rs) — a long chat
+    // history would otherwise bloat every Live session's setup message, adding to
+    // the delay before the model starts responding. The core instructions and tool
+    // declaration are built first, so truncating off the end only drops overflow
+    // context, never the instructions themselves.
+    const MAX_LIVE_SYSTEM_INSTRUCTION_CHARS: usize = 12_000;
+    if system_instruction.chars().count() > MAX_LIVE_SYSTEM_INSTRUCTION_CHARS {
+        system_instruction = system_instruction
+            .chars()
+            .take(MAX_LIVE_SYSTEM_INSTRUCTION_CHARS)
+            .collect();
+    }
 
     // Confirmed against a live server rejection: `responseModalities` must be nested under
     // `generationConfig` — the server explicitly rejects it at the top level of `setup`
@@ -184,11 +239,32 @@ where
     let setup = json!({
         "setup": {
             "model": format!("models/{model}"),
-            "generationConfig": { "responseModalities": ["AUDIO"] },
+            "generationConfig": {
+                "responseModalities": ["AUDIO"],
+                "speechConfig": {
+                    "voiceConfig": {
+                        "prebuiltVoiceConfig": { "voiceName": voice }
+                    }
+                }
+            },
             "systemInstruction": { "parts": [{ "text": system_instruction }] },
             "tools": [agent_action_tool_declaration()],
             "outputAudioTranscription": {},
-            "inputAudioTranscription": {}
+            "inputAudioTranscription": {},
+            // Default end-of-speech detection is quick to decide the user is done
+            // talking, which was cutting long utterances into 2-3 separate turns on
+            // a normal mid-sentence breath pause. LOW end-of-speech sensitivity plus
+            // a longer silence requirement gives the user more room to pause without
+            // being cut off. Per Google's Live API docs as of writing; if the server
+            // rejects this field, check docs for the current schema/enum names.
+            "realtimeInputConfig": {
+                "automaticActivityDetection": {
+                    "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
+                    "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
+                    "prefixPaddingMs": 200,
+                    "silenceDurationMs": 800
+                }
+            }
         }
     });
     ws_write
@@ -246,8 +322,18 @@ where
                         return Err(format!("Gemini Live websocket error: {e}"));
                     }
                 };
+                // The server sends JSON payloads as `Binary` frames, not `Text` frames,
+                // despite the content being UTF-8 text — both must be accepted or every
+                // server event (audio, transcripts, tool calls) is silently dropped.
                 let raw = match msg {
-                    Message::Text(text) => text,
+                    Message::Text(text) => text.to_string(),
+                    Message::Binary(bytes) => match String::from_utf8(bytes.to_vec()) {
+                        Ok(text) => text,
+                        Err(e) => {
+                            eprintln!("[gemini-live] received non-UTF8 binary frame, ignoring: {e}");
+                            continue;
+                        }
+                    },
                     Message::Close(frame) => {
                         let reason = frame
                             .map(|f| format!("{} ({})", f.code, f.reason))
@@ -292,6 +378,11 @@ where
                     if !text.is_empty() {
                         on_event(GeminiLiveEvent::Transcript { role: "user".into(), text: text.into() });
                     }
+                }
+                if value["serverContent"]["turnComplete"].as_bool() == Some(true)
+                    || value["serverContent"]["interrupted"].as_bool() == Some(true)
+                {
+                    on_event(GeminiLiveEvent::TurnComplete);
                 }
 
                 if let Some(calls) = value["toolCall"]["functionCalls"].as_array() {

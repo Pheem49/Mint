@@ -47,6 +47,9 @@ pub fn run(check_only: bool, dry_run: bool, approved: bool) -> Result<()> {
         .trim()
         .trim_matches('"')
         .to_owned();
+    if !looks_like_version(&latest) {
+        bail!("unable to parse latest version from npm output: {latest:?}");
+    }
     write_cache(&latest);
     if compare_versions(current, &latest) >= 0 {
         println!("Mint is already up to date ({current}).");
@@ -193,12 +196,27 @@ pub fn check_for_update_quietly() -> Option<(String, String)> {
         .trim()
         .trim_matches('"')
         .to_owned();
+    if !looks_like_version(&latest) {
+        return None;
+    }
     write_cache(&latest);
     if compare_versions(current, &latest) < 0 {
         Some((current.to_owned(), latest))
     } else {
         None
     }
+}
+
+/// Rejects obviously-not-a-version strings (empty, or not starting with a
+/// digit once an optional leading `v` is stripped) so stray npm output
+/// (warnings, proxy-injected notices) can't be silently parsed as `0.0.0`
+/// by `compare_versions` and misreported as "already up to date".
+fn looks_like_version(value: &str) -> bool {
+    value
+        .trim_start_matches('v')
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_digit())
 }
 
 pub fn print_update_notice(current: &str, latest: &str) {

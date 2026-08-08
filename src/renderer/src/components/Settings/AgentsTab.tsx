@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import { 
+import React, { useEffect, useState } from 'react'
+import {
   DEFAULT_CONFIG,
   GEMINI_MODELS,
   OPENAI_MODELS,
@@ -10,6 +10,7 @@ import {
   LOCAL_MODELS,
   CustomProviderConfig,
 } from '../SettingsWindow'
+import { listSubagents, saveSubagent, deleteSubagent, SubagentDefinition, SubagentDraft } from '../../tauri'
 
 export interface Agent {
   id: string
@@ -215,9 +216,6 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
           <div>
             <p className="section-kicker">Multi-Agent System</p>
             <h2 className="section-title">Agent Collaboration Settings</h2>
-            <p className="section-description">
-              Configure multiple distinct AI agents with specific roles. You can adjust the models, system instructions, and credentials for each agent.
-            </p>
           </div>
           {!isEditing && (
             <div style={{ display: 'flex', gap: '10px', height: 'fit-content', flexShrink: 0 }}>
@@ -386,6 +384,288 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
           </div>
         )}
       </section>
+
+      <SubagentsSection />
     </div>
+  )
+}
+
+// The global directory is the uniquely-named `mint-agents` folder segment; anything else
+// is workspace-scoped `.agents/subagents/`. Checking for that one segment name (rather than
+// the two-segment `.agents/subagents` path) avoids depending on the OS path separator.
+const isWorkspaceScoped = (sourcePath: string) => !sourcePath.includes('mint-agents')
+
+const emptySubagentForm = {
+  name: '',
+  description: '',
+  tools: '',
+  model: '',
+  provider: '',
+  systemPrompt: '',
+  scope: 'workspace' as 'workspace' | 'global'
+}
+
+function SubagentsSection() {
+  const [subagents, setSubagents] = useState<SubagentDefinition[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [isEditing, setIsEditing] = useState(false)
+  const [editingSourcePath, setEditingSourcePath] = useState<string | null>(null)
+  const [form, setForm] = useState(emptySubagentForm)
+
+  const workspacePath = typeof window !== 'undefined'
+    ? window.localStorage.getItem('mint:last-workspace-path') || undefined
+    : undefined
+
+  const refresh = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      setSubagents(await listSubagents(workspacePath))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load subagents.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const closeForm = () => {
+    setIsEditing(false)
+    setEditingSourcePath(null)
+    setForm(emptySubagentForm)
+  }
+
+  const handleAddClick = () => {
+    setEditingSourcePath(null)
+    setForm({ ...emptySubagentForm, scope: workspacePath ? 'workspace' : 'global' })
+    setIsEditing(true)
+  }
+
+  const handleEdit = (subagent: SubagentDefinition) => {
+    setEditingSourcePath(subagent.sourcePath)
+    setForm({
+      name: subagent.name,
+      description: subagent.description,
+      tools: subagent.tools?.join(', ') ?? '',
+      model: subagent.model ?? '',
+      provider: subagent.provider ?? '',
+      systemPrompt: subagent.systemPrompt,
+      scope: isWorkspaceScoped(subagent.sourcePath) ? 'workspace' : 'global'
+    })
+    setIsEditing(true)
+  }
+
+  const handleSave = async () => {
+    if (!form.name.trim()) {
+      alert('Please enter a subagent name.')
+      return
+    }
+    if (!form.systemPrompt.trim()) {
+      alert('Please describe what this subagent should do (its system prompt).')
+      return
+    }
+    const draft: SubagentDraft = {
+      name: form.name.trim(),
+      description: form.description.trim(),
+      tools: form.tools.trim()
+        ? form.tools.split(',').map(t => t.trim()).filter(Boolean)
+        : null,
+      model: form.model.trim() || null,
+      provider: form.provider.trim() || null,
+      systemPrompt: form.systemPrompt,
+      scope: form.scope,
+      previousSourcePath: editingSourcePath
+    }
+    try {
+      await saveSubagent(draft, workspacePath)
+      closeForm()
+      await refresh()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to save subagent.')
+    }
+  }
+
+  const handleDelete = async (subagent: SubagentDefinition) => {
+    if (!confirm(`Delete subagent "${subagent.name}"?`)) return
+    try {
+      await deleteSubagent(subagent.sourcePath)
+      await refresh()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to delete subagent.')
+    }
+  }
+
+  return (
+    <section className="setting-section">
+      <div className="section-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <p className="section-kicker">dispatch_subagent</p>
+          <h2 className="section-title">Subagents</h2>
+        </div>
+        {!isEditing && (
+          <button className="btn btn-primary" onClick={handleAddClick} style={{ whiteSpace: 'nowrap' }}>
+            + Add Subagent
+          </button>
+        )}
+      </div>
+      <p className="hint" style={{ margin: '4px 0 16px 0' }}>
+        Focused workers the agent can delegate a sub-task to mid-conversation. Each runs its own isolated
+        conversation — only its final summary comes back, so exploring, reading files, or running tools doesn't
+        bloat the main context.
+      </p>
+
+      {isEditing ? (
+        <div className="form-grid single" style={{ background: 'var(--panel-soft)', padding: '20px', borderRadius: '8px', border: '1px solid var(--panel-raised)' }}>
+          <h3 style={{ margin: '0 0 16px 0', fontSize: '18px', color: 'var(--accent)' }}>
+            {editingSourcePath ? `Edit Subagent: ${form.name}` : 'Create New Subagent'}
+          </h3>
+
+          <div className="setting-row">
+            <label>Name</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="e.g. code-reviewer"
+            />
+          </div>
+
+          <div className="setting-row">
+            <label>Description</label>
+            <input
+              type="text"
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              placeholder="One line: when should the agent reach for this subagent?"
+            />
+          </div>
+
+          <div className="setting-row">
+            <label>System Prompt</label>
+            <textarea
+              value={form.systemPrompt}
+              onChange={(e) => setForm({ ...form, systemPrompt: e.target.value })}
+              placeholder="You are a focused code-review subagent. Read the diff and report bugs concisely..."
+              style={{ minHeight: '120px', resize: 'vertical' }}
+            />
+          </div>
+
+          <div className="setting-row">
+            <label>Allowed Tools (optional)</label>
+            <input
+              type="text"
+              value={form.tools}
+              onChange={(e) => setForm({ ...form, tools: e.target.value })}
+              placeholder="e.g. read_file, search_code, git_diff (leave blank for the full toolset)"
+            />
+          </div>
+
+          <div className="setting-row">
+            <label>Model Override (optional)</label>
+            <input
+              type="text"
+              value={form.model}
+              onChange={(e) => setForm({ ...form, model: e.target.value })}
+              placeholder="Leave blank to use the active model"
+            />
+          </div>
+
+          <div className="setting-row">
+            <label>Provider Override (optional)</label>
+            <input
+              type="text"
+              value={form.provider}
+              onChange={(e) => setForm({ ...form, provider: e.target.value })}
+              placeholder="e.g. gemini, openai, anthropic — leave blank to use the active provider"
+            />
+          </div>
+
+          <div className="setting-row">
+            <label>Scope</label>
+            <select value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value as 'workspace' | 'global' })}>
+              <option value="workspace" disabled={!workspacePath}>
+                This workspace only ({'.agents/subagents/'}){!workspacePath ? ' — no workspace open' : ''}
+              </option>
+              <option value="global">All workspaces (global)</option>
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', marginTop: '16px', justifyContent: 'flex-end' }}>
+            <button className="btn btn-secondary" onClick={closeForm}>Cancel</button>
+            <button className="btn btn-primary" onClick={handleSave}>Save Subagent</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {error && <div style={{ color: 'var(--danger, #ef4444)' }}>{error}</div>}
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-soft)' }}>Loading...</div>
+          ) : (
+            <>
+              {subagents.map((subagent) => (
+                <div
+                  key={subagent.sourcePath}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    padding: '16px',
+                    background: 'var(--panel-bg)',
+                    border: '1px solid var(--panel-raised)',
+                    borderRadius: '8px',
+                    gap: '8px'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: '18px' }}>{subagent.name}</strong>
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          background: isWorkspaceScoped(subagent.sourcePath) ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                          color: isWorkspaceScoped(subagent.sourcePath) ? '#10b981' : '#3b82f6',
+                        }}
+                      >
+                        {isWorkspaceScoped(subagent.sourcePath) ? 'Workspace' : 'Global'}
+                      </span>
+                      {(subagent.provider || subagent.model) && (
+                        <span style={{ fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: 'var(--panel-raised)', color: 'var(--accent)' }}>
+                          {[subagent.provider, subagent.model].filter(Boolean).join(' / ')}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleEdit(subagent)}>Edit</button>
+                      <button className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleDelete(subagent)}>Delete</button>
+                    </div>
+                  </div>
+                  {subagent.description && (
+                    <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--text-soft)', fontStyle: 'italic' }}>
+                      "{subagent.description}"
+                    </p>
+                  )}
+                  {subagent.tools && (
+                    <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-soft)' }}>
+                      Tools: {subagent.tools.join(', ')}
+                    </p>
+                  )}
+                </div>
+              ))}
+              {subagents.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-soft)', fontStyle: 'italic' }}>
+                  No subagents yet. Click "+ Add Subagent" to create one.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </section>
   )
 }

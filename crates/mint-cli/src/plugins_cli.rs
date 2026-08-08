@@ -2,14 +2,14 @@
 //! Provides commands for listing, enabling/disabling, configuring API credentials,
 //! and managing OAuth sign-in for all Built-in Plugins.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use mint_core::{
-    load_config, set_config_value,
+    MintConfig, load_config,
     oauth::{build_auth_url, get_oauth_tokens, list_oauth_statuses, revoke_oauth_tokens},
-    MintConfig,
+    set_config_value,
 };
 use std::io::{self, Write};
 
@@ -118,7 +118,9 @@ pub async fn run_plugins_command(subcommand: Option<PluginsSubcommand>) -> Resul
         Some(PluginsSubcommand::List) => list_plugins(&config)?,
         Some(PluginsSubcommand::Enable { name }) => enable_plugin(&mut config, &name)?,
         Some(PluginsSubcommand::Disable { name }) => disable_plugin(&mut config, &name)?,
-        Some(PluginsSubcommand::Config { name, set }) => configure_plugin(&mut config, &name, set.as_deref())?,
+        Some(PluginsSubcommand::Config { name, set }) => {
+            configure_plugin(&mut config, &name, set.as_deref())?
+        }
         Some(PluginsSubcommand::Login { provider }) => login_plugin_oauth(&provider).await?,
         Some(PluginsSubcommand::Logout { provider }) => logout_plugin_oauth(&provider)?,
         None => run_interactive_plugins_wizard(&mut config).await?,
@@ -137,20 +139,32 @@ fn is_plugin_enabled(config: &MintConfig, field: &str) -> bool {
 
 pub fn list_plugins(config: &MintConfig) -> Result<()> {
     println!("\x1b[1;32m Mint Built-in Plugins & Integrations\x1b[0m\n");
-    println!("  {:<16} {:<12} {:<24} {}", "PLUGIN", "STATUS", "OAUTH CONNECTED", "DESCRIPTION");
+    println!(
+        "  {:<16} {:<12} {:<24} {}",
+        "PLUGIN", "STATUS", "OAUTH CONNECTED", "DESCRIPTION"
+    );
     println!("  {}", "─".repeat(80));
 
     let oauth_statuses = list_oauth_statuses();
 
     for p in BUILTIN_PLUGINS {
         let enabled = is_plugin_enabled(config, p.config_field);
-        let status_str = if enabled { "\x1b[32mEnabled 🟢\x1b[0m" } else { "\x1b[90mDisabled ⚪\x1b[0m" };
+        let status_str = if enabled {
+            "\x1b[32mEnabled 🟢\x1b[0m"
+        } else {
+            "\x1b[90mDisabled ⚪\x1b[0m"
+        };
 
         let oauth_info = if p.is_oauth {
-            let matched = oauth_statuses.iter().find(|s| s.provider == p.oauth_provider);
+            let matched = oauth_statuses
+                .iter()
+                .find(|s| s.provider == p.oauth_provider);
             if let Some(st) = matched {
                 if st.connected {
-                    format!("\x1b[36mConnected ({})\x1b[0m", st.account_email.as_deref().unwrap_or("Yes"))
+                    format!(
+                        "\x1b[36mConnected ({})\x1b[0m",
+                        st.account_email.as_deref().unwrap_or("Yes")
+                    )
                 } else {
                     "\x1b[90mNot Signed In\x1b[0m".to_string()
                 }
@@ -161,10 +175,15 @@ pub fn list_plugins(config: &MintConfig) -> Result<()> {
             "N/A".to_string()
         };
 
-        println!("  {:<16} {:<22} {:<34} {}", p.name, status_str, oauth_info, p.description);
+        println!(
+            "  {:<16} {:<22} {:<34} {}",
+            p.name, status_str, oauth_info, p.description
+        );
     }
 
-    println!("\n  \x1b[90mCommands: mint plugins enable <name> | mint plugins login <name> | mint plugins config <name> --set key=value\x1b[0m\n");
+    println!(
+        "\n  \x1b[90mCommands: mint plugins enable <name> | mint plugins login <name> | mint plugins config <name> --set key=value\x1b[0m\n"
+    );
     Ok(())
 }
 
@@ -172,10 +191,15 @@ fn enable_plugin(_config: &mut MintConfig, name: &str) -> Result<()> {
     let matched = BUILTIN_PLUGINS
         .iter()
         .find(|p| p.key.eq_ignore_ascii_case(name) || p.name.eq_ignore_ascii_case(name))
-        .ok_or_else(|| anyhow!("Plugin '{name}' not found. Run 'mint plugins list' to see available plugins."))?;
+        .ok_or_else(|| {
+            anyhow!("Plugin '{name}' not found. Run 'mint plugins list' to see available plugins.")
+        })?;
 
     set_config_value(matched.config_field, serde_json::Value::Bool(true))?;
-    println!("\x1b[32m✔ Plugin '{}' enabled successfully.\x1b[0m", matched.name);
+    println!(
+        "\x1b[32m✔ Plugin '{}' enabled successfully.\x1b[0m",
+        matched.name
+    );
     Ok(())
 }
 
@@ -202,10 +226,17 @@ fn configure_plugin(_config: &mut MintConfig, name: &str, set_kv: Option<&str>) 
             .ok_or_else(|| anyhow!("Invalid format. Use --set key=value"))?;
 
         set_config_value(k.trim(), serde_json::Value::String(v.trim().to_string()))?;
-        println!("\x1b[32m✔ Set credential {} for plugin '{}'.\x1b[0m", k.trim(), matched.name);
+        println!(
+            "\x1b[32m✔ Set credential {} for plugin '{}'.\x1b[0m",
+            k.trim(),
+            matched.name
+        );
     } else {
         println!("Plugin '{}' configuration instructions:", matched.name);
-        println!("  Use: mint plugins config {} --set <key=value>", matched.key);
+        println!(
+            "  Use: mint plugins config {} --set <key=value>",
+            matched.key
+        );
     }
 
     Ok(())
@@ -213,7 +244,9 @@ fn configure_plugin(_config: &mut MintConfig, name: &str, set_kv: Option<&str>) 
 
 fn open_browser(url: &str) {
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("cmd").args(["/C", "start", url]).spawn();
+    let _ = std::process::Command::new("cmd")
+        .args(["/C", "start", url])
+        .spawn();
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg(url).spawn();
     #[cfg(target_os = "linux")]
@@ -223,12 +256,26 @@ fn open_browser(url: &str) {
 async fn login_plugin_oauth(provider: &str) -> Result<()> {
     let config = load_config().unwrap_or_default();
     let client_id = match provider {
-        "google" | "gmail" | "google_calendar" | "youtube_music" => {
-            config.extra.get("gmailClientId").and_then(serde_json::Value::as_str).map(|s| s.to_string())
-        }
-        "spotify" => config.extra.get("spotifyClientId").and_then(serde_json::Value::as_str).map(|s| s.to_string()),
-        "github" => config.extra.get("githubClientId").and_then(serde_json::Value::as_str).map(|s| s.to_string()),
-        "vercel" => config.extra.get("vercelClientId").and_then(serde_json::Value::as_str).map(|s| s.to_string()),
+        "google" | "gmail" | "google_calendar" | "youtube_music" => config
+            .extra
+            .get("gmailClientId")
+            .and_then(serde_json::Value::as_str)
+            .map(|s| s.to_string()),
+        "spotify" => config
+            .extra
+            .get("spotifyClientId")
+            .and_then(serde_json::Value::as_str)
+            .map(|s| s.to_string()),
+        "github" => config
+            .extra
+            .get("githubClientId")
+            .and_then(serde_json::Value::as_str)
+            .map(|s| s.to_string()),
+        "vercel" => config
+            .extra
+            .get("vercelClientId")
+            .and_then(serde_json::Value::as_str)
+            .map(|s| s.to_string()),
         _ => None,
     };
     let redirect_uri = "http://localhost:3000/api/oauth/callback";
@@ -236,14 +283,19 @@ async fn login_plugin_oauth(provider: &str) -> Result<()> {
         .ok_or_else(|| anyhow!("Invalid OAuth provider: {provider}"))?;
 
     println!("\x1b[1;36m🔑 Mint OAuth Sign-In Authorization\x1b[0m");
-    println!("  Opening browser for provider: \x1b[32m{}\x1b[0m", provider);
+    println!(
+        "  Opening browser for provider: \x1b[32m{}\x1b[0m",
+        provider
+    );
     println!("  If the browser doesn't open automatically, visit this URL:\n");
     println!("  \x1b[4;34m{}\x1b[0m\n", auth_url);
 
     open_browser(&auth_url);
 
-    println!("  \x1b[90mWaiting for browser authorization callback on http://localhost:3000...\x1b[0m");
-    
+    println!(
+        "  \x1b[90mWaiting for browser authorization callback on http://localhost:3000...\x1b[0m"
+    );
+
     // Poll for OAuth completion for up to 60 seconds
     for _ in 0..30 {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -259,7 +311,10 @@ async fn login_plugin_oauth(provider: &str) -> Result<()> {
         }
     }
 
-    println!("\n\x1b[33m⚠️ OAuth sign-in timed out. Please try again with 'mint plugins login {}'.\x1b[0m", provider);
+    println!(
+        "\n\x1b[33m⚠️ OAuth sign-in timed out. Please try again with 'mint plugins login {}'.\x1b[0m",
+        provider
+    );
     Ok(())
 }
 
@@ -272,14 +327,23 @@ pub async fn login_plugin_oauth_public(provider: &str) {
 
 fn logout_plugin_oauth(provider: &str) -> Result<()> {
     revoke_oauth_tokens(provider).map_err(|e| anyhow!(e))?;
-    println!("\x1b[33m✔ Disconnected OAuth account for provider '{}'.\x1b[0m", provider);
+    println!(
+        "\x1b[33m✔ Disconnected OAuth account for provider '{}'.\x1b[0m",
+        provider
+    );
     Ok(())
 }
 
 pub async fn run_interactive_plugins_wizard(config: &mut MintConfig) -> Result<()> {
-    println!("\x1b[1;32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-    println!("\x1b[1;32m                    Mint Native Plugins & Integrations                      \x1b[0m");
-    println!("\x1b[1;32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n");
+    println!(
+        "\x1b[1;32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m"
+    );
+    println!(
+        "\x1b[1;32m                    Mint Native Plugins & Integrations                      \x1b[0m"
+    );
+    println!(
+        "\x1b[1;32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n"
+    );
 
     println!("Select which plugins or bridges you would like to configure:");
     println!(
@@ -386,7 +450,10 @@ pub async fn run_interactive_plugins_wizard(config: &mut MintConfig) -> Result<(
     // Prompt credentials/OAuth choice for newly enabled plugins
     for (plugin, enabled) in &items {
         if *enabled {
-            let title = format!("\x1b[1;36m⚙️ Authentication Setup for {}\x1b[0m", plugin.name);
+            let title = format!(
+                "\x1b[1;36m⚙️ Authentication Setup for {}\x1b[0m",
+                plugin.name
+            );
             if plugin.is_oauth {
                 let options = &[
                     "Sign In via OAuth 🌐 (Browser popup authorization)",
@@ -400,10 +467,7 @@ pub async fn run_interactive_plugins_wizard(config: &mut MintConfig) -> Result<(
                     _ => login_plugin_oauth(plugin.oauth_provider).await?,
                 }
             } else {
-                let options = &[
-                    "Configure Credentials 🔑",
-                    "Skip for now",
-                ];
+                let options = &["Configure Credentials 🔑", "Skip for now"];
                 let selected_idx = prompt_select_option_menu(&title, options)?;
                 if selected_idx == 0 {
                     prompt_manual_plugin_fields(plugin.key)?;
@@ -527,7 +591,10 @@ fn prompt_manual_plugin_fields(key: &str) -> Result<()> {
         "github" => {
             println!("\x1b[33m--- GitHub API Credentials --- \x1b[0m");
             print_and_set_key("githubClientId", "GitHub Client ID (optional for OAuth)")?;
-            print_and_set_key("githubClientSecret", "GitHub Client Secret (optional for OAuth)")?;
+            print_and_set_key(
+                "githubClientSecret",
+                "GitHub Client Secret (optional for OAuth)",
+            )?;
             print_and_set_key("githubToken", "GitHub Personal Access Token (PAT)")?;
         }
         _ => {
@@ -543,12 +610,14 @@ fn format_masked_key(key: &str) -> String {
         return "none".to_string();
     }
     let len = key.chars().count();
-    if len <= 10 {
+    if len <= 8 {
         "***".to_string()
     } else {
-        let first: String = key.chars().take(6).collect();
+        // Reveal only a short suffix (enough to recognize which key is
+        // saved) and mask everything else, rather than the full key minus
+        // a thin strip in the middle.
         let last: String = key.chars().skip(len - 4).collect();
-        format!("{}...****...{}", first, last)
+        format!("***{}", last)
     }
 }
 
@@ -562,7 +631,11 @@ fn print_and_set_key(config_key: &str, label: &str) -> Result<()> {
         .to_string();
 
     if !existing.is_empty() {
-        print!("{} [\x1b[90mkeep existing ({})\x1b[0m]: ", label, format_masked_key(&existing));
+        print!(
+            "{} [\x1b[90mkeep existing ({})\x1b[0m]: ",
+            label,
+            format_masked_key(&existing)
+        );
     } else {
         print!("{}: ", label);
     }
@@ -594,7 +667,10 @@ fn print_plugin_checkbox_items(items: &[(&BuiltinPluginInfo, bool)], cursor: usi
                 checkbox, plugin.name, plugin.description
             );
         } else {
-            println!("    {} {:<18} \x1b[90m({})\x1b[0m", checkbox, plugin.name, plugin.description);
+            println!(
+                "    {} {:<18} \x1b[90m({})\x1b[0m",
+                checkbox, plugin.name, plugin.description
+            );
         }
     }
     let _ = io::stdout().flush();

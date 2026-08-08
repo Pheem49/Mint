@@ -111,4 +111,3 @@ fn number(value: &Value, key: &str) -> Result<f64, WeatherError> {
         .as_f64()
         .ok_or_else(|| WeatherError::MissingValue(key.into()))
 }
-

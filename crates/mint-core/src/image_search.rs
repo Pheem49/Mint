@@ -18,10 +18,7 @@ pub enum ImageSearchError {
 
 fn sanitize_reqwest_error(err: reqwest::Error) -> ImageSearchError {
     let mut msg = err.to_string();
-    for host in [
-        "https://www.googleapis.com",
-        "https://api.search.brave.com",
-    ] {
+    for host in ["https://www.googleapis.com", "https://api.search.brave.com"] {
         if let Some(pos) = msg.find(host) {
             let mut end_pos = msg.len();
             for (idx, ch) in msg[pos..].char_indices() {

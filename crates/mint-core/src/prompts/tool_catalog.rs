@@ -216,7 +216,10 @@ fn all_tools() -> Vec<ToolSpec> {
         tool(
             "calculation",
             "Evaluate a math expression, percentage, or unit conversion.",
-            schema(json!({ "expression": { "type": "string" } }), &["expression"]),
+            schema(
+                json!({ "expression": { "type": "string" } }),
+                &["expression"],
+            ),
         ),
         tool(
             "browser_open",
@@ -310,11 +313,7 @@ fn all_tools() -> Vec<ToolSpec> {
             "Show recent git log entries.",
             schema(json!({ "limit": { "type": "integer" } }), &[]),
         ),
-        tool(
-            "git_branch",
-            "List git branches.",
-            schema(json!({}), &[]),
-        ),
+        tool("git_branch", "List git branches.", schema(json!({}), &[])),
         tool(
             "create_plan",
             "Create a multi-step implementation plan for the user to see.",
@@ -445,7 +444,9 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "verify",
-            "Run verification commands (tests, builds, linters) after making changes.",
+            "Run verification commands (tests, builds, linters) after making changes. \
+             Required before finish in any run where apply_patch or write_file was used, unless \
+             you explicitly state in finish's 'verification' field why no check applies.",
             schema(
                 json!({ "commands": { "type": "array", "items": { "type": "string" } } }),
                 &["commands"],
@@ -706,7 +707,10 @@ mod tests {
     fn catalog_covers_every_base_action_and_exit_plan_mode() {
         let names: Vec<String> = all_tools().into_iter().map(|t| t.name).collect();
         for action in base_allowed_actions() {
-            assert!(names.iter().any(|n| n == action), "missing schema for {action}");
+            assert!(
+                names.iter().any(|n| n == action),
+                "missing schema for {action}"
+            );
         }
         assert!(names.iter().any(|n| n == "exit_plan_mode"));
     }

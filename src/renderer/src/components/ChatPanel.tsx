@@ -9,6 +9,7 @@ import {
   HF_MODELS,
   LOCAL_MODELS,
   OLLAMA_MODELS,
+  GEMINI_LIVE_VOICES,
 } from '../../shared/constants/models'
 import { badge, providerLabel, fallbackNotice } from '../../shared/utils/providers'
 import { activitiesFrom, parseWebSearchSources, type AgentActivity, type AgentActivityView } from '../../shared/utils/agentActivity'
@@ -27,6 +28,7 @@ import { numericSetting } from '../../shared/utils/ui'
 import { useSpeechToText } from '../../shared/utils/speech'
 import { useGeminiLiveVoice } from '../../shared/utils/useGeminiLiveVoice'
 import GeminiLiveOverlay from '../../shared/components/GeminiLiveOverlay'
+import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../../shared/utils/documentTypes'
 
 import {
   APP_ICON_PATH,
@@ -87,6 +89,8 @@ interface ChatPanelProps {
   settingsConfig: any
   onSetModel: (model: string) => void
   onCancelMessage: () => void
+  onClearMessages: () => void
+  onSetGeminiLiveVoice: (voice: string) => Promise<void>
 }
 
 
@@ -135,6 +139,8 @@ export default function ChatPanel({
   settingsConfig,
   onSetModel,
   onCancelMessage,
+  onClearMessages,
+  onSetGeminiLiveVoice,
 }: ChatPanelProps) {
   const agentActivities = activitiesFrom(agentProgress)
   const activeFallbackNotice = fallbackNotice(streamedResponse)
@@ -267,7 +273,7 @@ export default function ChatPanel({
           const event = { target: input } as ChangeEvent<HTMLInputElement>
           onSelectVideo(event)
         }
-      } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      } else if (isSupportedDocument(file.name)) {
         const input = document.getElementById('document-file-input') as HTMLInputElement | null
         if (input) {
           const dt = new DataTransfer()
@@ -999,6 +1005,14 @@ export default function ChatPanel({
           <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
           <span>Mint Agent</span>
         </div>
+        <button className="chat-header-clear-btn" title="Clear Messages" onClick={onClearMessages}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line>
+            <line x1="14" y1="11" x2="14" y2="17"></line>
+          </svg>
+        </button>
       </div>
       <div className="chat-container">
         {interactions.map((interaction) => (
@@ -1376,7 +1390,7 @@ export default function ChatPanel({
             </div>
           <input id="vision-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={onSelectImage} style={{ display: 'none' }} />
           <input id="video-file-input" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" onChange={onSelectVideo} style={{ display: 'none' }} />
-          <input id="document-file-input" type="file" accept="application/pdf,.pdf" onChange={onSelectDocument} style={{ display: 'none' }} />
+          <input id="document-file-input" type="file" accept={SUPPORTED_DOCUMENT_ACCEPT} onChange={onSelectDocument} style={{ display: 'none' }} />
           <button id="screen-capture-btn" type="button" onClick={onCaptureScreen} aria-label="Capture screen">
             <span className="screen-capture-eye" aria-hidden="true" />
           </button>
@@ -1522,10 +1536,17 @@ export default function ChatPanel({
               ? 'thinking'
               : 'listening'
           }
-          transcript={geminiLive.voiceTranscript}
+          userTranscript={geminiLive.userTranscript}
+          assistantTranscript={geminiLive.assistantTranscript}
           isPaused={geminiLive.isPaused}
           onTogglePause={geminiLive.togglePause}
           onEndCall={() => geminiLive.setVoiceMode(false)}
+          voice={settingsConfig?.geminiLiveVoice || 'Puck'}
+          voices={GEMINI_LIVE_VOICES}
+          onChangeVoice={async (voiceName) => {
+            await onSetGeminiLiveVoice(voiceName)
+            geminiLive.restart()
+          }}
         />
       )}
     </section>

@@ -10,10 +10,10 @@ use mint_core::{
     MemoryStore, MintConfig, TaskStore, apply_code_edits, assert_path_capability, build_code_patch,
     build_symbol_index, classify_shell_command, config_path, create_folder,
     fetch_github_repo_summary, find_paths, generate_images, index_semantic_code, initialize_config,
-    inspect_code_plan, list_code_files, load_config,
+    inspect_code_plan, list_code_files, list_subagents, load_config,
     orchestrate_chat_with_fallback, parse_github_url, propose_code_edits, read_code_file,
-    list_subagents, repository_summary, run_shell_command, sandbox_availability, save_config,
-    search_code, search_semantic_code, set_config_value,
+    repository_summary, run_shell_command, sandbox_availability, save_config, search_code,
+    search_semantic_code, set_config_value,
 };
 
 mod actions;
@@ -32,7 +32,8 @@ mod skills;
 mod updater;
 
 pub use interactive::{
-    SESSION_APPROVED, active_model, confirm, print_welcome_banner, run_interactive_chat,
+    SESSION_APPROVED, active_model, confirm, confirm_security, print_welcome_banner,
+    run_interactive_chat,
 };
 
 pub const RESET: &str = "\x1b[0m";
@@ -1273,10 +1274,7 @@ async fn main() -> Result<()> {
                         }
                         let removed = config.permission_rules.remove(index);
                         save_config(&config)?;
-                        println!(
-                            "Removed: {}",
-                            serde_json::to_string_pretty(&removed)?
-                        );
+                        println!("Removed: {}", serde_json::to_string_pretty(&removed)?);
                     }
                 },
             },
@@ -1361,7 +1359,7 @@ async fn main() -> Result<()> {
             }
             Command::Plugins { command } => {
                 plugins_cli::run_plugins_command(command).await?;
-            },
+            }
             Command::Knowledge { command } => {
                 let store = KnowledgeStore::open_default()?;
                 match command {
@@ -1474,7 +1472,11 @@ async fn main() -> Result<()> {
                             &[build_code_patch(
                                 &root,
                                 path,
-                                &[CodePatchHunk { old_text, new_text, replace_all: false }],
+                                &[CodePatchHunk {
+                                    old_text,
+                                    new_text,
+                                    replace_all: false
+                                }],
                                 &config,
                             )?],
                             &config,
@@ -1493,7 +1495,11 @@ async fn main() -> Result<()> {
                             &[build_code_patch(
                                 &root,
                                 path,
-                                &[CodePatchHunk { old_text, new_text, replace_all: false }],
+                                &[CodePatchHunk {
+                                    old_text,
+                                    new_text,
+                                    replace_all: false
+                                }],
                                 &config,
                             )?],
                             &approval_token,
@@ -1711,7 +1717,12 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
-                    VideoCommand::Trim { input, start, end, output } => {
+                    VideoCommand::Trim {
+                        input,
+                        start,
+                        end,
+                        output,
+                    } => {
                         println!("{BLUE}→ Trimming {:.2}s–{:.2}s...{RESET}", start, end);
                         let req = TrimRequest {
                             input: input.to_string_lossy().to_string(),
@@ -1721,10 +1732,18 @@ async fn main() -> Result<()> {
                         };
                         match video_trim(&req) {
                             Ok(r) => println!("{MINT}✓ Trimmed → {}{RESET}", r.output_path),
-                            Err(e) => { eprintln!("{ERROR}✗ Trim failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Trim failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
                         }
                     }
-                    VideoCommand::Resize { input, width, height, output } => {
+                    VideoCommand::Resize {
+                        input,
+                        width,
+                        height,
+                        output,
+                    } => {
                         println!("{BLUE}→ Resizing to {}x{}...{RESET}", width, height);
                         let req = ResizeRequest {
                             input: input.to_string_lossy().to_string(),
@@ -1734,18 +1753,27 @@ async fn main() -> Result<()> {
                         };
                         match video_resize(&req) {
                             Ok(r) => println!("{MINT}✓ Resized → {}{RESET}", r.output_path),
-                            Err(e) => { eprintln!("{ERROR}✗ Resize failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Resize failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
                         }
                     }
                     VideoCommand::Merge { inputs, output } => {
                         println!("{BLUE}→ Merging {} clips...{RESET}", inputs.len());
                         let req = MergeRequest {
-                            inputs: inputs.iter().map(|p| p.to_string_lossy().to_string()).collect(),
+                            inputs: inputs
+                                .iter()
+                                .map(|p| p.to_string_lossy().to_string())
+                                .collect(),
                             output: output.to_string_lossy().to_string(),
                         };
                         match video_merge(&req) {
                             Ok(r) => println!("{MINT}✓ Merged → {}{RESET}", r.output_path),
-                            Err(e) => { eprintln!("{ERROR}✗ Merge failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Merge failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
                         }
                     }
                     VideoCommand::ExtractAudio { input, output } => {
@@ -1756,11 +1784,22 @@ async fn main() -> Result<()> {
                         };
                         match video_extract_audio(&req) {
                             Ok(r) => println!("{MINT}✓ Audio extracted → {}{RESET}", r.output_path),
-                            Err(e) => { eprintln!("{ERROR}✗ Extract failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Extract failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
                         }
                     }
-                    VideoCommand::RemoveSilence { input, output, threshold, min_duration } => {
-                        println!("{BLUE}→ Removing silence (threshold: {}dB, min: {}s)...{RESET}", threshold, min_duration);
+                    VideoCommand::RemoveSilence {
+                        input,
+                        output,
+                        threshold,
+                        min_duration,
+                    } => {
+                        println!(
+                            "{BLUE}→ Removing silence (threshold: {}dB, min: {}s)...{RESET}",
+                            threshold, min_duration
+                        );
                         let req = RemoveSilenceRequest {
                             input: input.to_string_lossy().to_string(),
                             output: output.to_string_lossy().to_string(),
@@ -1769,13 +1808,27 @@ async fn main() -> Result<()> {
                         };
                         match video_remove_silence(&req) {
                             Ok(r) => {
-                                let dur = r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
-                                println!("{MINT}✓ Silence removed → {} ({dur}){RESET}", r.output_path);
+                                let dur =
+                                    r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
+                                println!(
+                                    "{MINT}✓ Silence removed → {} ({dur}){RESET}",
+                                    r.output_path
+                                );
                             }
-                            Err(e) => { eprintln!("{ERROR}✗ Remove silence failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Remove silence failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
                         }
                     }
-                    VideoCommand::Export { input, output, resolution, fps, codec, crf } => {
+                    VideoCommand::Export {
+                        input,
+                        output,
+                        resolution,
+                        fps,
+                        codec,
+                        crf,
+                    } => {
                         println!("{BLUE}→ Exporting video...{RESET}");
                         let req = ExportRequest {
                             input: input.to_string_lossy().to_string(),
@@ -1787,14 +1840,28 @@ async fn main() -> Result<()> {
                         };
                         match video_export(&req) {
                             Ok(r) => {
-                                let dur = r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
-                                let size = r.size_bytes.map(|s| format!("{} bytes", s)).unwrap_or_default();
-                                println!("{MINT}✓ Exported → {} ({dur}, {size}){RESET}", r.output_path);
+                                let dur =
+                                    r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
+                                let size = r
+                                    .size_bytes
+                                    .map(|s| format!("{} bytes", s))
+                                    .unwrap_or_default();
+                                println!(
+                                    "{MINT}✓ Exported → {} ({dur}, {size}){RESET}",
+                                    r.output_path
+                                );
                             }
-                            Err(e) => { eprintln!("{ERROR}✗ Export failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Export failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
                         }
                     }
-                    VideoCommand::Transcribe { input, language, output } => {
+                    VideoCommand::Transcribe {
+                        input,
+                        language,
+                        output,
+                    } => {
                         println!("{BLUE}→ Transcribing audio/speech...{RESET}");
                         let req = mint_core::TranscribeRequest {
                             input: input.to_string_lossy().to_string(),
@@ -1806,12 +1873,24 @@ async fn main() -> Result<()> {
                             Ok(res) => {
                                 let srt = mint_core::generate_srt(&res.segments);
                                 std::fs::write(&output, srt)?;
-                                println!("{MINT}✓ Transcribed {} segments → {}{RESET}", res.segments.len(), output.display());
+                                println!(
+                                    "{MINT}✓ Transcribed {} segments → {}{RESET}",
+                                    res.segments.len(),
+                                    output.display()
+                                );
                             }
-                            Err(e) => { eprintln!("{ERROR}✗ Transcription failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Transcription failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
                         }
                     }
-                    VideoCommand::Subtitle { input, srt, style, output } => {
+                    VideoCommand::Subtitle {
+                        input,
+                        srt,
+                        style,
+                        output,
+                    } => {
                         println!("{BLUE}→ Burning subtitles ({style} preset)...{RESET}");
                         let srt_content = if std::path::Path::new(&srt).exists() {
                             std::fs::read_to_string(&srt)?
@@ -1826,8 +1905,13 @@ async fn main() -> Result<()> {
                             preset: Some(style),
                         };
                         match mint_core::burn_subtitles(&req) {
-                            Ok(r) => println!("{MINT}✓ Subtitles burned → {}{RESET}", r.output_path),
-                            Err(e) => { eprintln!("{ERROR}✗ Subtitle burn failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                            Ok(r) => {
+                                println!("{MINT}✓ Subtitles burned → {}{RESET}", r.output_path)
+                            }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Subtitle burn failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
                         }
                     }
                     VideoCommand::TranslateSubtitle { srt, lang, output } => {
@@ -1841,13 +1925,27 @@ async fn main() -> Result<()> {
                         match mint_core::translate_subtitles(&config, &req).await {
                             Ok(translated_srt) => {
                                 std::fs::write(&output, translated_srt)?;
-                                println!("{MINT}✓ Subtitles translated → {}{RESET}", output.display());
+                                println!(
+                                    "{MINT}✓ Subtitles translated → {}{RESET}",
+                                    output.display()
+                                );
                             }
-                            Err(e) => { eprintln!("{ERROR}✗ Subtitle translation failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Subtitle translation failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
                         }
                     }
-                    VideoCommand::MakeShorts { input, output_dir, clips, duration, no_subtitles } => {
-                        println!("{BLUE}🚀 Generating up to {clips} vertical Shorts clips from video...{RESET}");
+                    VideoCommand::MakeShorts {
+                        input,
+                        output_dir,
+                        clips,
+                        duration,
+                        no_subtitles,
+                    } => {
+                        println!(
+                            "{BLUE}🚀 Generating up to {clips} vertical Shorts clips from video...{RESET}"
+                        );
                         let req = mint_core::MakeShortsRequest {
                             input: input.to_string_lossy().to_string(),
                             output_dir: output_dir.map(|p| p.to_string_lossy().to_string()),
@@ -1860,12 +1958,21 @@ async fn main() -> Result<()> {
                         let config = load_config()?;
                         match mint_core::make_shorts(&config, &req).await {
                             Ok(res) => {
-                                println!("{MINT}✓ Generated {} vertical Shorts!{RESET}", res.clips.len());
+                                println!(
+                                    "{MINT}✓ Generated {} vertical Shorts!{RESET}",
+                                    res.clips.len()
+                                );
                                 for clip in &res.clips {
-                                    println!("  [{}] {} ({:.1}s) → {}", clip.id, clip.title, clip.duration, clip.path);
+                                    println!(
+                                        "  [{}] {} ({:.1}s) → {}",
+                                        clip.id, clip.title, clip.duration, clip.path
+                                    );
                                 }
                             }
-                            Err(e) => { eprintln!("{ERROR}✗ Make Shorts failed: {e}{RESET}"); anyhow::bail!("{e}"); }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Make Shorts failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
                         }
                     }
                 }
@@ -1918,7 +2025,10 @@ async fn launch_mint_target(target: String, dev: bool) -> Result<()> {
                     anyhow::anyhow!("Failed to find project root directory containing package.json")
                 })?
             };
-            let dist_web = project_root.join("out").join("renderer").join("index-web.html");
+            let dist_web = project_root
+                .join("out")
+                .join("renderer")
+                .join("index-web.html");
             let web_cmd = if dev {
                 "dev:web"
             } else if dist_web.exists() {

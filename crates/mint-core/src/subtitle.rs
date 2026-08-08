@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::config::MintConfig;
 use crate::speech::TranscriptSegment;
-use crate::video_edit::{check_ffmpeg, run_ffmpeg_args, video_load, VideoEditResult};
+use crate::video_edit::{VideoEditResult, check_ffmpeg, run_ffmpeg_args, video_load};
 
 #[derive(Debug, Error)]
 pub enum SubtitleError {
@@ -190,14 +190,15 @@ pub fn burn_subtitles(req: &BurnSubtitleRequest) -> Result<VideoEditResult, Subt
     check_ffmpeg().map_err(|e| SubtitleError::Ffmpeg(e.to_string()))?;
 
     // Determine SRT file path
-    let srt_path = if req.srt_input.ends_with(".srt") && std::path::Path::new(&req.srt_input).exists() {
-        req.srt_input.clone()
-    } else {
-        // Write raw content to temp file
-        let tmp_file = std::env::temp_dir().join(format!("mint_burn_sub_{}.srt", temp_id()));
-        std::fs::write(&tmp_file, &req.srt_input)?;
-        tmp_file.to_string_lossy().to_string()
-    };
+    let srt_path =
+        if req.srt_input.ends_with(".srt") && std::path::Path::new(&req.srt_input).exists() {
+            req.srt_input.clone()
+        } else {
+            // Write raw content to temp file
+            let tmp_file = std::env::temp_dir().join(format!("mint_burn_sub_{}.srt", temp_id()));
+            std::fs::write(&tmp_file, &req.srt_input)?;
+            tmp_file.to_string_lossy().to_string()
+        };
 
     // Determine style
     let style = if let Some(preset) = &req.preset {
@@ -280,7 +281,11 @@ pub async fn translate_subtitles(
         if line.contains("-->") || line.trim().parse::<u32>().is_ok() || line.trim().is_empty() {
             translated.push_str(line);
         } else {
-            translated.push_str(&format!("[{}] {}", req.target_language.to_uppercase(), line));
+            translated.push_str(&format!(
+                "[{}] {}",
+                req.target_language.to_uppercase(),
+                line
+            ));
         }
         translated.push('\n');
     }

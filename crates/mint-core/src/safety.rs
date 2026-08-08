@@ -47,8 +47,14 @@ static BLOCKED_COMMAND_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock
             r"\bgit\s+push\b.*(?:--force(?:\s|$)|\s-f(?:\s|$))",
             "force push can overwrite remote history",
         ),
-        (r"\bfind\b.*\s-delete\b", "recursive file deletion via find -delete"),
-        (r"\brsync\b.*\s--delete\b", "destructive rsync mirror delete"),
+        (
+            r"\bfind\b.*\s-delete\b",
+            "recursive file deletion via find -delete",
+        ),
+        (
+            r"\brsync\b.*\s--delete\b",
+            "destructive rsync mirror delete",
+        ),
     ]
     .into_iter()
     .map(|(pattern, reason)| (Regex::new(pattern).unwrap(), reason))
@@ -126,9 +132,8 @@ pub enum SafetyError {
 }
 
 pub fn classify_shell_command(command: &str) -> ShellClassification {
-    let tokens = shlex::split(command).unwrap_or_else(|| {
-        command.split_whitespace().map(|s| s.to_string()).collect()
-    });
+    let tokens = shlex::split(command)
+        .unwrap_or_else(|| command.split_whitespace().map(|s| s.to_string()).collect());
     let normalized = tokens.join(" ");
     if normalized.trim().is_empty() {
         return ShellClassification {

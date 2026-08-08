@@ -215,12 +215,8 @@ pub fn video_load(path: &str) -> Result<VideoInfo, VideoEditError> {
         .filter(|s| s["codec_type"] == "audio")
         .count() as u32;
 
-    let width = video_stream
-        .and_then(|s| s["width"].as_u64())
-        .unwrap_or(0) as u32;
-    let height = video_stream
-        .and_then(|s| s["height"].as_u64())
-        .unwrap_or(0) as u32;
+    let width = video_stream.and_then(|s| s["width"].as_u64()).unwrap_or(0) as u32;
+    let height = video_stream.and_then(|s| s["height"].as_u64()).unwrap_or(0) as u32;
 
     let fps = video_stream
         .and_then(|s| s["r_frame_rate"].as_str())
@@ -625,18 +621,28 @@ pub struct DuckMusicRequest {
     pub music_volume: f32,
 }
 
-fn default_duck_factor() -> f32 { 0.2 }
+fn default_duck_factor() -> f32 {
+    0.2
+}
 
 pub fn audio_duck_music(req: &DuckMusicRequest) -> Result<VideoEditResult, VideoEditError> {
     let args = vec![
         "-y".to_string(),
-        "-i".to_string(), req.video_input.clone(),
-        "-i".to_string(), req.music_input.clone(),
+        "-i".to_string(),
+        req.video_input.clone(),
+        "-i".to_string(),
+        req.music_input.clone(),
         "-filter_complex".to_string(),
-        format!("[1:a]volume={}[bg];[0:a][bg]sidechaincompress=threshold=0.08:ratio=5:attack=150:release=800[aout]", req.music_volume),
-        "-map".to_string(), "0:v".to_string(),
-        "-map".to_string(), "[aout]".to_string(),
-        "-c:v".to_string(), "copy".to_string(),
+        format!(
+            "[1:a]volume={}[bg];[0:a][bg]sidechaincompress=threshold=0.08:ratio=5:attack=150:release=800[aout]",
+            req.music_volume
+        ),
+        "-map".to_string(),
+        "0:v".to_string(),
+        "-map".to_string(),
+        "[aout]".to_string(),
+        "-c:v".to_string(),
+        "copy".to_string(),
         req.output.clone(),
     ];
     let str_args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -658,16 +664,21 @@ pub struct ZoomSpeakerRequest {
     pub zoom_factor: f32,
 }
 
-fn default_zoom_factor() -> f32 { 1.25 }
+fn default_zoom_factor() -> f32 {
+    1.25
+}
 
 pub fn effect_zoom_on_speaker(req: &ZoomSpeakerRequest) -> Result<VideoEditResult, VideoEditError> {
     let zoom = req.zoom_factor.max(1.0).min(3.0);
     let crop_filter = format!("crop=w=iw/{zoom}:h=ih/{zoom}:x=(iw-w)/2:y=(ih-h)/2,scale=1920:1080");
     let args = vec![
         "-y".to_string(),
-        "-i".to_string(), req.input.clone(),
-        "-vf".to_string(), crop_filter,
-        "-c:a".to_string(), "copy".to_string(),
+        "-i".to_string(),
+        req.input.clone(),
+        "-vf".to_string(),
+        crop_filter,
+        "-c:a".to_string(),
+        "copy".to_string(),
         req.output.clone(),
     ];
     let str_args: Vec<&str> = args.iter().map(String::as_str).collect();

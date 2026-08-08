@@ -33,6 +33,7 @@ export const DEFAULT_CONFIG = {
   ttsPitch: 1.0,
   voiceMode: 'legacy',
   geminiLiveModel: 'gemini-2.5-flash-native-audio-preview-12-2025',
+  geminiLiveVoice: 'Puck',
   pluginSpotifyEnabled: true,
   pluginCalendarEnabled: false,
   pluginGmailEnabled: false,
