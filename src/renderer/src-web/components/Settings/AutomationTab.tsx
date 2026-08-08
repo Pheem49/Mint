@@ -22,7 +22,14 @@ export default function AutomationTab({
         <div className="section-heading">
           <div>
             <p className="section-kicker">Browser</p>
-            <h2 className="section-title">Automation Engine</h2>
+            <h2 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+              Automation Engine
+            </h2>
           </div>
         </div>
         <div className="form-grid single">
@@ -50,7 +57,13 @@ export default function AutomationTab({
         <div className="section-heading">
           <div>
             <p className="section-kicker">Background tasks</p>
-            <h2 className="section-title">Native Headless Queue</h2>
+            <h2 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg>
+              Native Headless Queue
+            </h2>
           </div>
         </div>
         <div className="toggle-row">
@@ -73,9 +86,15 @@ export default function AutomationTab({
         <div className="section-heading">
           <div>
             <p className="section-kicker">Awareness</p>
-            <h2 className="section-title">Proactive Assistant</h2>
+            <h2 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+              Proactive Assistant
+            </h2>
           </div>
-          <p className="section-description">Tune screen analysis frequency and suggestion timing.</p>
         </div>
         <div className="slider-stack">
           <div className="setting-row">
@@ -119,9 +138,6 @@ export default function AutomationTab({
             <p className="section-kicker">Messaging</p>
             <h2 className="section-title">Native Channel Bridges</h2>
           </div>
-          <p className="section-description">
-            Configure messaging credentials and webhooks used by Rust channel workers to enable remote control.
-          </p>
         </div>
 
         {/* Global Instant Ack Notification */}

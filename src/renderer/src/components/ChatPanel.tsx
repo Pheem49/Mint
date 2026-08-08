@@ -9,6 +9,7 @@ import {
   HF_MODELS,
   LOCAL_MODELS,
   OLLAMA_MODELS,
+  GEMINI_LIVE_VOICES,
 } from '../../shared/constants/models'
 import { badge, providerLabel, fallbackNotice } from '../../shared/utils/providers'
 import { activitiesFrom, parseWebSearchSources, type AgentActivity, type AgentActivityView } from '../../shared/utils/agentActivity'
@@ -19,20 +20,27 @@ import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../../s
 import { ApprovalCard } from '../../shared/components/ApprovalCard'
 import { renderFormattedMessage, readableAssistantText, cleanSpeechText, renderSpeakerIcon, renderCopyIcon } from '../../shared/utils/markdown'
 import { ThinkingBlock } from '../../shared/components/ThinkingBlock'
+import SourcesBlock from '../../shared/components/SourcesBlock'
+import ChatMessageItem from '../../shared/components/ChatMessageItem'
 import { AgentActivityDrawer } from '../../shared/components/AgentActivityDrawer'
 import type { DiffHunk, FileChange } from '../../shared/types'
 import { numericSetting } from '../../shared/utils/ui'
 import { useSpeechToText } from '../../shared/utils/speech'
-
-
+import { useGeminiLiveVoice } from '../../shared/utils/useGeminiLiveVoice'
+import GeminiLiveOverlay from '../../shared/components/GeminiLiveOverlay'
+import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../../shared/utils/documentTypes'
 
 import {
+  APP_ICON_PATH,
   listLearnedSkills,
   type LearnedSkill,
   type AgentProgress,
   type ChatResponse,
   type RuntimeStatus,
   getTtsUrls,
+  startGeminiLiveSession,
+  sendGeminiLiveAudioChunk,
+  stopGeminiLiveSession,
 } from '../tauri'
 
 
@@ -49,12 +57,13 @@ interface ChatPanelProps {
   thinkingExpanded: Record<string, boolean>
   onThinkingExpandedChange: (key: string, open: boolean) => void
   message: string
-  imageAttachments: Array<{ dataUri: string; name: string; previewDataUri?: string }>
+  imageAttachments: Array<{ dataUri: string; name: string; previewDataUri?: string; objectUrl?: string }>
   videoAttachments: Array<{ dataUri: string; name: string }>
   documentName: string
   pendingApproval: any | null
   smartContext: boolean
   agentMode: boolean
+  planMode: boolean
   status: RuntimeStatus | null
   workspacePath: string
   chatEnd: RefObject<HTMLDivElement | null>
@@ -73,12 +82,15 @@ interface ChatPanelProps {
   onCaptureScreen: () => void
   onSetSmartContext: (enabled: boolean) => void
   onSetAgentMode: (enabled: boolean) => void
+  onSetPlanMode: (enabled: boolean) => void
   onSetProvider: (provider: string) => void
   onSelectWorkspace: () => void
   onApproval: (approved: boolean, autoApproveSession?: boolean, answer?: string) => void
   settingsConfig: any
   onSetModel: (model: string) => void
   onCancelMessage: () => void
+  onClearMessages: () => void
+  onSetGeminiLiveVoice: (voice: string) => Promise<void>
 }
 
 
@@ -101,6 +113,7 @@ export default function ChatPanel({
   pendingApproval,
   smartContext,
   agentMode,
+  planMode,
   status,
   workspacePath,
   chatEnd,
@@ -119,12 +132,15 @@ export default function ChatPanel({
   onCaptureScreen,
   onSetSmartContext,
   onSetAgentMode,
+  onSetPlanMode,
   onSetProvider,
   onSelectWorkspace,
   onApproval,
   settingsConfig,
   onSetModel,
   onCancelMessage,
+  onClearMessages,
+  onSetGeminiLiveVoice,
 }: ChatPanelProps) {
   const agentActivities = activitiesFrom(agentProgress)
   const activeFallbackNotice = fallbackNotice(streamedResponse)
@@ -257,7 +273,7 @@ export default function ChatPanel({
           const event = { target: input } as ChangeEvent<HTMLInputElement>
           onSelectVideo(event)
         }
-      } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      } else if (isSupportedDocument(file.name)) {
         const input = document.getElementById('document-file-input') as HTMLInputElement | null
         if (input) {
           const dt = new DataTransfer()
@@ -271,6 +287,8 @@ export default function ChatPanel({
   }
 
 
+  // The mic button always drives the browser STT flow; Gemini Live is a separate "Live"
+  // button + overlay (see below), not a swap-in replacement for the same button.
   const {
     isRecording,
     voiceMode,
@@ -291,6 +309,14 @@ export default function ChatPanel({
     isSpeaking: Boolean(speakingText),
     onSendVoiceMessage,
     onSetMessage: (val) => onSetMessage(val)
+  })
+
+  const geminiLiveEnabled = settingsConfig?.voiceMode === 'geminiLive'
+  const geminiLive = useGeminiLiveVoice({
+    workspacePath,
+    startSession: startGeminiLiveSession,
+    sendAudioChunk: sendGeminiLiveAudioChunk,
+    stopSession: stopGeminiLiveSession
   })
 
   const canSubmit = Boolean(message.trim() || imageAttachments.length > 0 || videoAttachments.length > 0 || documentName)
@@ -630,7 +656,9 @@ export default function ChatPanel({
     if (sending) return
     if (!latest?.aiText || latest.id === lastAutoSpokenIdRef.current) return
 
-    if (!settingsConfig?.enableVoiceReply) {
+    // Gemini Live speaks its own replies over the realtime audio stream — skip the
+    // separate browser/Google TTS pass while a live voice session is active.
+    if (!settingsConfig?.enableVoiceReply || geminiLive.voiceMode) {
       lastAutoSpokenIdRef.current = latest.id
       if (voiceMode) {
         scheduleVoiceListen(350)
@@ -640,7 +668,7 @@ export default function ChatPanel({
 
     lastAutoSpokenIdRef.current = latest.id
     speak(latest.aiText)
-  }, [interactions, sending, settingsConfig?.enableVoiceReply, voiceMode])
+  }, [interactions, sending, settingsConfig?.enableVoiceReply, geminiLive.voiceMode, voiceMode])
   useEffect(() => {
     if (!toolMenuOpen) return
     const closeMenu = (event: MouseEvent) => {
@@ -692,6 +720,18 @@ export default function ChatPanel({
     setToolMenuOpen(false)
     onStartWebSearch()
   }
+  const startGenerateImagePrompt = () => {
+    setToolMenuOpen(false)
+    if (!agentMode) onSetAgentMode(true)
+    onSetMessage('Generate an image of ')
+    textareaRef.current?.focus()
+  }
+  const startGenerateVideoPrompt = () => {
+    setToolMenuOpen(false)
+    if (!agentMode) onSetAgentMode(true)
+    onSetMessage('Generate a video of ')
+    textareaRef.current?.focus()
+  }
   const appendWorkspaceReference = (reference: string) => {
     const trimmed = reference.trim()
     if (!trimmed) return
@@ -708,7 +748,7 @@ export default function ChatPanel({
   const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
   const renderCompletedActivity = (interaction: any) => {
     const interactionId = String(interaction.id)
-    const activityView = activitiesFrom(agentActivitySnapshots[interactionId] ?? [])
+    const activityView = activitiesFrom(agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? [])
     const isOpen = Boolean(openActivityIds[interactionId])
     return (
       <AgentActivityDrawer
@@ -725,63 +765,13 @@ export default function ChatPanel({
     const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
     const sources = parseWebSearchSources(progress)
     if (sources.length === 0) return null
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
-        <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Sources</span>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-          {sources.map((src, i) => (
-            <a
-              key={i}
-              href={src.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={src.snippet || src.title}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '5px 10px',
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '8px',
-                textDecoration: 'none',
-                color: '#cbd5e1',
-                fontSize: '0.78rem',
-                maxWidth: '220px',
-                overflow: 'hidden',
-                cursor: 'pointer',
-                transition: 'background 0.15s, border-color 0.15s',
-              }}
-              onMouseEnter={e => {
-                (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.08)'
-                ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(255,255,255,0.18)'
-              }}
-              onMouseLeave={e => {
-                (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(255,255,255,0.04)'
-                ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'rgba(255,255,255,0.08)'
-              }}
-            >
-              <img
-                src={src.faviconUrl}
-                alt=""
-                width={14}
-                height={14}
-                style={{ borderRadius: '2px', flexShrink: 0 }}
-                onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-              />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {src.domain}
-              </span>
-            </a>
-          ))}
-        </div>
-      </div>
-    )
+
+    return <SourcesBlock sources={sources} />
   }
 
   const renderFileChanges = (interaction: any) => {
     const interactionId = String(interaction.id)
-    const progress = agentActivitySnapshots[interactionId] ?? []
+    const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
     const changes = parseFileChangesFromProgress(progress)
     if (changes.length === 0) return null
 
@@ -1012,96 +1002,38 @@ export default function ChatPanel({
       )}
       <div className="chat-header">
         <div className="chat-header-title">
-          <img src="./assets/icon.png" alt="Logo" className="chat-header-logo" />
+          <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
           <span>Mint Agent</span>
         </div>
+        <button className="chat-header-clear-btn" title="Clear Messages" onClick={onClearMessages}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            <line x1="10" y1="11" x2="10" y2="17"></line>
+            <line x1="14" y1="11" x2="14" y2="17"></line>
+          </svg>
+        </button>
       </div>
       <div className="chat-container">
-        {interactions.map((interaction) => {
-          const isSystemEvent = interaction.provider === 'system' && interaction.model === 'provider_change';
-          if (isSystemEvent) {
-            const rawText = interaction.userText || ''
-            const cleanText = rawText.replace(/^Changed model to\s*/i, '').trim()
-            return (
-              <div key={interaction.id} className="system-event-divider">
-                <div className="system-event-line" />
-                <div className="system-event-pill">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                  </svg>
-                  <span>{cleanText}</span>
-                </div>
-                <div className="system-event-line" />
-              </div>
-            );
-          }
-          return (
-            <div key={interaction.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-              {interaction.userText && (
-                <div className="message user-message">
-                  <div className="bubble-wrapper">
-                    <div className="message-bubble">{renderFormattedMessage(interaction.userText)}</div>
-                    <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                      <button
-                        type="button"
-                        className={`msg-action-btn copy-btn ${copiedId === `user-${interaction.id}` ? 'is-copied' : ''}`}
-                        onClick={() => handleCopyMessage(`user-${interaction.id}`, interaction.userText)}
-                        title={copiedId === `user-${interaction.id}` ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy)'}
-                      >
-                        {renderCopyIcon(copiedId === `user-${interaction.id}`)}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div className="message ai-message">
-              <div className="bubble-wrapper">
-                {renderCompletedActivity(interaction)}
-                {renderFileChanges(interaction)}
-                {(() => {
-                  const progress = agentActivitySnapshots[String(interaction.id)] ?? interaction.agentActivity ?? []
-                  const thoughts = thoughtsFrom(progress)
-                  return (
-                    <ThinkingBlock
-                      blockKey={String(interaction.id)}
-                      thoughts={thoughts}
-                      expanded={thinkingExpanded[String(interaction.id)] ?? false}
-                      onExpandedChange={onThinkingExpandedChange}
-                      showEmptyHint={hasAgentToolActivity(progress) && thoughts.length === 0}
-                    />
-                  )
-                })()}
-                <div className="message-bubble">{renderFormattedMessage(interaction.aiText)}</div>
-                {renderWebSearchSources(interaction)}
-                <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
-                  {fallbackNotice(interaction) && <span className="provider-fallback-notice">{fallbackNotice(interaction)}</span>}
-                  <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
-                    <button
-                      type="button"
-                      className={`msg-action-btn copy-btn ${copiedId === interaction.id ? 'is-copied' : ''}`}
-                      onClick={() => handleCopyMessage(interaction.id, interaction.aiText)}
-                      title={copiedId === interaction.id ? 'คัดลอกแล้ว (Copied!)' : 'คัดลอกข้อความ (Copy message)'}
-                    >
-                      {renderCopyIcon(copiedId === interaction.id)}
-                    </button>
-                    <button
-                      type="button"
-                      className={`msg-action-btn tts-btn ${speakingText === interaction.aiText ? 'is-speaking' : ''}`}
-                      onClick={() => speak(interaction.aiText)}
-                      title={speakingText === interaction.aiText ? 'Stop reading' : 'Read aloud'}
-                    >
-                      {renderSpeakerIcon(speakingText === interaction.aiText)}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })}
+        {interactions.map((interaction) => (
+          <ChatMessageItem
+            key={interaction.id}
+            interaction={interaction}
+            copiedId={copiedId}
+            speakingText={speakingText}
+            agentActivitySnapshots={agentActivitySnapshots}
+            thinkingExpanded={thinkingExpanded}
+            openActivityIds={openActivityIds}
+            openReviewIds={openReviewIds}
+            openFileDiffs={openFileDiffs}
+            onThinkingExpandedChange={onThinkingExpandedChange}
+            handleCopyMessage={handleCopyMessage}
+            speak={speak}
+            renderCompletedActivity={renderCompletedActivity}
+            renderFileChanges={renderFileChanges}
+            renderWebSearchSources={renderWebSearchSources}
+          />
+        ))}
 
         {sending && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
@@ -1226,6 +1158,13 @@ export default function ChatPanel({
             </label>
             <span>Agent Mode</span>
           </div>
+          <div className="smart-context-label" style={{ display: 'flex', alignItems: 'center', gap: '8px' }} title="Investigate read-only and require plan approval before editing files or running commands">
+            <label className="toggle-switch">
+              <input type="checkbox" checked={planMode} onChange={(event) => onSetPlanMode(event.target.checked)} />
+              <span className="slider round" />
+            </label>
+            <span>Plan Mode</span>
+          </div>
         </div>
         {voiceMode && (
           <div className="voice-mode-bar" data-state={voiceStatus}>
@@ -1309,6 +1248,7 @@ export default function ChatPanel({
 
         <form
           id="chat-form"
+          className={geminiLiveEnabled ? 'has-live-btn' : ''}
           onSubmit={onSubmit}
           onDragOver={(event) => {
             if (event.dataTransfer.types.includes('application/x-mint-workspace-path')) {
@@ -1325,7 +1265,7 @@ export default function ChatPanel({
             <div className="mint-attachment">
               {imageAttachments.map((attachment, idx) => (
                 <div className="mint-image-attachment" key={idx}>
-                  <img className="mint-image-preview" src={attachment.previewDataUri || attachment.dataUri} alt={attachment.name || 'Image attachment'} />
+                  <img className="mint-image-preview" src={attachment.objectUrl || attachment.previewDataUri || attachment.dataUri} alt={attachment.name || 'Image attachment'} />
                   <button className="mint-attachment-remove" type="button" onClick={() => onRemoveImage(idx)} aria-label="Remove image">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -1391,8 +1331,8 @@ export default function ChatPanel({
               </button>
               {toolMenuOpen && (
                 <div className="chat-tool-menu" role="menu">
-                  <button type="button" role="menuitem" onClick={openImagePicker} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  <button type="button" role="menuitem" onClick={openImagePicker}>
+                    <span aria-hidden="true">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                         <circle cx="8.5" cy="8.5" r="1.5"></circle>
@@ -1401,8 +1341,8 @@ export default function ChatPanel({
                     </span>
                     <span>Add image</span>
                   </button>
-                  <button type="button" role="menuitem" onClick={openVideoPicker} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  <button type="button" role="menuitem" onClick={openVideoPicker}>
+                    <span aria-hidden="true">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <polygon points="23 7 16 12 23 17 23 7"></polygon>
                         <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
@@ -1410,8 +1350,8 @@ export default function ChatPanel({
                     </span>
                     <span>Add video</span>
                   </button>
-                  <button type="button" role="menuitem" onClick={openDocumentPicker} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  <button type="button" role="menuitem" onClick={openDocumentPicker}>
+                    <span aria-hidden="true">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                         <polyline points="14 2 14 8 20 8"></polyline>
@@ -1419,8 +1359,8 @@ export default function ChatPanel({
                     </span>
                     <span>Add file</span>
                   </button>
-                  <button type="button" role="menuitem" onClick={startWebSearch} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+                  <button type="button" role="menuitem" onClick={startWebSearch}>
+                    <span aria-hidden="true">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="11" cy="11" r="8"></circle>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
@@ -1428,12 +1368,29 @@ export default function ChatPanel({
                     </span>
                     <span>Search web</span>
                   </button>
+                  <button type="button" role="menuitem" onClick={startGenerateImagePrompt}>
+                    <span aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path>
+                      </svg>
+                    </span>
+                    <span>Generate image</span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={startGenerateVideoPrompt}>
+                    <span aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                      </svg>
+                    </span>
+                    <span>Generate video</span>
+                  </button>
                 </div>
               )}
             </div>
           <input id="vision-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={onSelectImage} style={{ display: 'none' }} />
           <input id="video-file-input" type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" onChange={onSelectVideo} style={{ display: 'none' }} />
-          <input id="document-file-input" type="file" accept="application/pdf,.pdf" onChange={onSelectDocument} style={{ display: 'none' }} />
+          <input id="document-file-input" type="file" accept={SUPPORTED_DOCUMENT_ACCEPT} onChange={onSelectDocument} style={{ display: 'none' }} />
           <button id="screen-capture-btn" type="button" onClick={onCaptureScreen} aria-label="Capture screen">
             <span className="screen-capture-eye" aria-hidden="true" />
           </button>
@@ -1525,6 +1482,23 @@ export default function ChatPanel({
               </svg>
             )}
           </button>
+          {geminiLiveEnabled && (
+            <button
+              id="gemini-live-btn"
+              type="button"
+              onClick={() => geminiLive.setVoiceMode(true)}
+              title="Start Gemini Live conversation"
+              style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="2"></circle>
+                <path d="M8.5 8.5a5 5 0 0 0 0 7"></path>
+                <path d="M15.5 8.5a5 5 0 0 1 0 7"></path>
+                <path d="M5.5 5.5a9 9 0 0 0 0 13"></path>
+                <path d="M18.5 5.5a9 9 0 0 1 0 13"></path>
+              </svg>
+            </button>
+          )}
           {sending ? (
             <button
               id="send-btn"
@@ -1551,6 +1525,30 @@ export default function ChatPanel({
       <p className="input-disclaimer">
         Mint Agent is an AI gateway. Responses via third-party APIs. Verify critical info.
       </p>
+      {geminiLive.voiceMode && (
+        <GeminiLiveOverlay
+          status={
+            geminiLive.isPaused
+              ? 'paused'
+              : geminiLive.isSpeaking
+              ? 'speaking'
+              : geminiLive.voiceAwaitingResponse
+              ? 'thinking'
+              : 'listening'
+          }
+          userTranscript={geminiLive.userTranscript}
+          assistantTranscript={geminiLive.assistantTranscript}
+          isPaused={geminiLive.isPaused}
+          onTogglePause={geminiLive.togglePause}
+          onEndCall={() => geminiLive.setVoiceMode(false)}
+          voice={settingsConfig?.geminiLiveVoice || 'Puck'}
+          voices={GEMINI_LIVE_VOICES}
+          onChangeVoice={async (voiceName) => {
+            await onSetGeminiLiveVoice(voiceName)
+            geminiLive.restart()
+          }}
+        />
+      )}
     </section>
   )
 }

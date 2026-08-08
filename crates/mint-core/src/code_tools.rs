@@ -1,9 +1,12 @@
 use std::{
     collections::BTreeMap,
     fs,
+    io::Write as _,
     path::{Path, PathBuf},
 };
 
+use grep_regex::RegexMatcherBuilder;
+use grep_searcher::{SearcherBuilder, Sink, SinkMatch};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use similar::{ChangeTag, TextDiff};
@@ -45,6 +48,15 @@ pub enum CodeInspectionError {
     StaleProposal(PathBuf),
     #[error("patch hunk {index} old text was not found in {path}")]
     PatchTextNotFound { path: PathBuf, index: usize },
+    #[error(
+        "patch hunk {index} old text matches {occurrences} locations in {path}; \
+         supply more surrounding context to make it unique, or set replaceAll to replace all of them"
+    )]
+    AmbiguousPatchText {
+        path: PathBuf,
+        index: usize,
+        occurrences: usize,
+    },
     #[error("edit path escapes workspace root: {0}")]
     OutsideWorkspace(PathBuf),
 }
@@ -94,6 +106,11 @@ pub struct CodeEdit {
 pub struct CodePatchHunk {
     pub old_text: String,
     pub new_text: String,
+    /// Replace every occurrence of `old_text` instead of requiring it to be
+    /// unique. Defaults to `false`, matching the safer default of rejecting
+    /// ambiguous matches rather than silently editing the wrong one.
+    #[serde(default)]
+    pub replace_all: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -129,7 +146,33 @@ pub fn list_code_files(
 ) -> Result<Vec<CodeFile>, CodeInspectionError> {
     let root = assert_path_capability(root, Capability::Read, config)?;
     let mut files = Vec::new();
-    collect_files(&root, &mut files, limit.max(1), true)?;
+    let walker = ignore::WalkBuilder::new(&root)
+        .hidden(false)
+        .git_ignore(true)
+        .ignore(true)
+        .build();
+
+    for result in walker {
+        if files.len() >= limit.max(1) {
+            break;
+        }
+        let entry = match result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let path = entry.path();
+        if path.is_file() {
+            if contains_ignored_directory(path, &root) {
+                continue;
+            }
+            if let Ok(metadata) = path.metadata() {
+                files.push(CodeFile {
+                    path: path.to_path_buf(),
+                    size: metadata.len(),
+                });
+            }
+        }
+    }
     Ok(files)
 }
 
@@ -147,9 +190,10 @@ pub fn read_code_file(
         path: path.clone(),
         source,
     })?;
+    let total_lines = raw.lines().count();
     let first = start_line.max(1);
     let last = end_line.max(first);
-    Ok(raw
+    let body = raw
         .lines()
         .enumerate()
         .filter(|(index, _)| {
@@ -158,7 +202,47 @@ pub fn read_code_file(
         })
         .map(|(index, line)| format!("{:>6} | {line}", index + 1))
         .collect::<Vec<_>>()
-        .join("\n"))
+        .join("\n");
+
+    // Without this, a truncated read looks identical to "this is the whole
+    // file" — the caller (model or human) has no signal that more content
+    // exists, or what range to ask for next.
+    if last < total_lines {
+        let next_end = (last + (last - first + 1)).min(total_lines);
+        Ok(format!(
+            "{body}\n\n[Showing lines {first}-{last} of {total_lines} total lines — the rest of \
+             the file was NOT included. To continue reading, call read_file again with \
+             startLine={}, endLine={next_end}.]",
+            last + 1,
+        ))
+    } else {
+        Ok(body)
+    }
+}
+
+struct SearchHitSink<'a> {
+    path: &'a Path,
+    hits: &'a mut Vec<CodeSearchHit>,
+    limit: usize,
+}
+
+impl<'a> Sink for SearchHitSink<'a> {
+    type Error = std::io::Error;
+
+    fn matched(
+        &mut self,
+        _searcher: &grep_searcher::Searcher,
+        mat: &SinkMatch<'_>,
+    ) -> Result<bool, Self::Error> {
+        let line = mat.line_number().unwrap_or(0) as usize;
+        let text = String::from_utf8_lossy(mat.bytes()).trim().to_owned();
+        self.hits.push(CodeSearchHit {
+            path: self.path.to_path_buf(),
+            line,
+            text,
+        });
+        Ok(self.hits.len() < self.limit)
+    }
 }
 
 pub fn search_code(
@@ -173,31 +257,23 @@ pub fn search_code(
         return Ok(hits);
     }
     let escaped = regex::escape(query);
-    let re = match regex::RegexBuilder::new(&escaped)
+    let matcher = match RegexMatcherBuilder::new()
         .case_insensitive(true)
-        .build()
+        .build(&escaped)
     {
-        Ok(re) => re,
+        Ok(m) => m,
         Err(_) => return Ok(hits),
     };
+    let mut searcher = SearcherBuilder::new().build();
     for file in files {
-        let Ok(raw) = fs::read_to_string(&file.path) else {
-            continue;
+        let mut sink = SearchHitSink {
+            path: &file.path,
+            hits: &mut hits,
+            limit,
         };
-        if !re.is_match(&raw) {
-            continue;
-        }
-        for (index, line) in raw.lines().enumerate() {
-            if re.is_match(line) {
-                hits.push(CodeSearchHit {
-                    path: file.path.clone(),
-                    line: index + 1,
-                    text: line.trim().to_owned(),
-                });
-                if hits.len() >= limit.max(1) {
-                    return Ok(hits);
-                }
-            }
+        let _ = searcher.search_path(&matcher, &file.path, &mut sink);
+        if hits.len() >= limit.max(1) {
+            break;
         }
     }
     Ok(hits)
@@ -261,13 +337,25 @@ pub fn build_code_patch(
     let path = workspace_path(&root, &path, Capability::Write, config)?;
     let mut content = read_existing_content(&path)?;
     for (index, hunk) in hunks.iter().enumerate() {
-        if !content.contains(&hunk.old_text) {
+        let occurrences = content.matches(hunk.old_text.as_str()).count();
+        if occurrences == 0 {
             return Err(CodeInspectionError::PatchTextNotFound {
                 path,
                 index: index + 1,
             });
         }
-        content = content.replacen(&hunk.old_text, &hunk.new_text, 1);
+        if occurrences > 1 && !hunk.replace_all {
+            return Err(CodeInspectionError::AmbiguousPatchText {
+                path,
+                index: index + 1,
+                occurrences,
+            });
+        }
+        content = if hunk.replace_all {
+            content.replace(&hunk.old_text, &hunk.new_text)
+        } else {
+            content.replacen(&hunk.old_text, &hunk.new_text, 1)
+        };
     }
     Ok(CodeEdit { path, content })
 }
@@ -315,10 +403,7 @@ pub fn apply_code_edits(
                 source,
             })?;
         }
-        fs::write(&preview.path, &edit.content).map_err(|source| CodeInspectionError::Write {
-            path: preview.path.clone(),
-            source,
-        })?;
+        write_atomic(&preview.path, &edit.content)?;
         applied.push(AppliedCodeEdit {
             path: preview.path,
             created: !preview.existed,
@@ -361,6 +446,46 @@ fn workspace_path(
         return Err(CodeInspectionError::OutsideWorkspace(path));
     }
     Ok(path)
+}
+
+/// Writes `content` to `path` atomically: writes to a temp file in the same
+/// directory (guaranteeing the same filesystem, required for an atomic rename),
+/// `fsync`s it for durability, then renames it onto `path`. A crash or power
+/// loss mid-write leaves either the old file or the new file intact, never a
+/// truncated/corrupted one. Best-effort cleans up the temp file on failure.
+fn write_atomic(path: &Path, content: &str) -> Result<(), CodeInspectionError> {
+    let write_error = |source: std::io::Error| CodeInspectionError::Write {
+        path: path.to_path_buf(),
+        source,
+    };
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| {
+            write_error(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "path has no file name",
+            ))
+        })?
+        .to_string_lossy();
+    let tmp_path = parent.join(format!(".{file_name}.mint-tmp-{}", std::process::id()));
+
+    let result = (|| -> std::io::Result<()> {
+        let mut file = fs::File::create(&tmp_path)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()
+    })();
+
+    match result {
+        Ok(()) => fs::rename(&tmp_path, path).map_err(write_error),
+        Err(source) => {
+            let _ = fs::remove_file(&tmp_path);
+            Err(write_error(source))
+        }
+    }
 }
 
 fn read_existing_content(path: &Path) -> Result<String, CodeInspectionError> {
@@ -433,54 +558,18 @@ fn full_file_diff(path: &Path, previous: &str, next: &str) -> String {
     lines.join("\n")
 }
 
-fn collect_files(
-    directory: &Path,
-    files: &mut Vec<CodeFile>,
-    limit: usize,
-    is_root: bool,
-) -> Result<(), CodeInspectionError> {
-    if files.len() >= limit || (!is_root && is_ignored_directory(directory)) {
-        return Ok(());
-    }
-    let entries = fs::read_dir(directory).map_err(|source| CodeInspectionError::Read {
-        path: directory.to_path_buf(),
-        source,
-    })?;
-    for entry in entries {
-        if files.len() >= limit {
-            break;
-        }
-        let entry = entry.map_err(|source| CodeInspectionError::Read {
-            path: directory.to_path_buf(),
-            source,
-        })?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|source| CodeInspectionError::Read {
-                path: path.clone(),
-                source,
-            })?;
-        if file_type.is_dir() {
-            collect_files(&path, files, limit, false)?;
-        } else if file_type.is_file() {
-            let size = entry
-                .metadata()
-                .map_err(|source| CodeInspectionError::Read {
-                    path: path.clone(),
-                    source,
-                })?
-                .len();
-            files.push(CodeFile { path, size });
+fn contains_ignored_directory(path: &Path, root: &Path) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    for component in relative.components() {
+        if let std::path::Component::Normal(name) = component {
+            if let Some(name_str) = name.to_str() {
+                if IGNORED_DIRECTORIES.contains(&name_str) {
+                    return true;
+                }
+            }
         }
     }
-    Ok(())
-}
-
-fn is_ignored_directory(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| IGNORED_DIRECTORIES.contains(&name))
+    false
 }
 
 pub fn parse_github_url(url: &str) -> Option<(String, String)> {
@@ -505,15 +594,13 @@ pub fn parse_github_url(url: &str) -> Option<(String, String)> {
 }
 
 pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("mint-core")
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = crate::HTTP_CLIENT.clone();
 
     // 1. Fetch Repository Info
     let repo_url = format!("https://api.github.com/repos/{}/{}", owner, repo);
     let repo_resp = client
         .get(&repo_url)
+        .header("User-Agent", "mint-core")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -550,6 +637,7 @@ pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String
     let contents_url = format!("https://api.github.com/repos/{}/{}/contents", owner, repo);
     let contents_resp = client
         .get(&contents_url)
+        .header("User-Agent", "mint-core")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -571,6 +659,7 @@ pub async fn fetch_github_repo_summary(owner: &str, repo: &str) -> Result<String
     let readme_url = format!("https://api.github.com/repos/{}/{}/readme", owner, repo);
     let readme_resp = client
         .get(&readme_url)
+        .header("User-Agent", "mint-core")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -605,6 +694,49 @@ mod tests {
             blocked_paths: vec![],
             ..MintConfig::default()
         }
+    }
+
+    #[test]
+    fn read_code_file_has_no_truncation_note_when_whole_file_fits() {
+        let root = std::env::temp_dir().join("mint-code-tools-read-full");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("small.txt"), "one\ntwo\nthree\n").unwrap();
+        let content = read_code_file(&root.join("small.txt"), 1, 240, &config_for(&root)).unwrap();
+        assert!(content.contains("one"));
+        assert!(content.contains("three"));
+        assert!(!content.contains("Showing lines"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_code_file_notes_truncation_and_the_exact_next_range() {
+        let root = std::env::temp_dir().join("mint-code-tools-read-truncated");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let lines: Vec<String> = (1..=500).map(|n| format!("line{n}")).collect();
+        fs::write(root.join("big.txt"), lines.join("\n") + "\n").unwrap();
+
+        let content = read_code_file(&root.join("big.txt"), 1, 240, &config_for(&root)).unwrap();
+        assert!(content.contains("line240"));
+        assert!(
+            !content.contains("line241"),
+            "must not leak past the requested range"
+        );
+        assert!(content.contains("Showing lines 1-240 of 500 total lines"));
+        assert!(content.contains("startLine=241, endLine=480"));
+
+        // Following that exact guidance should reach the end without another
+        // truncation note.
+        let rest = read_code_file(&root.join("big.txt"), 241, 480, &config_for(&root)).unwrap();
+        assert!(rest.contains("line480"));
+        assert!(rest.contains("Showing lines 241-480 of 500 total lines"));
+        let final_chunk =
+            read_code_file(&root.join("big.txt"), 481, 500, &config_for(&root)).unwrap();
+        assert!(final_chunk.contains("line500"));
+        assert!(!final_chunk.contains("Showing lines"));
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -700,8 +832,53 @@ mod tests {
     }
 
     #[test]
-    fn patch_replaces_exact_text_once() {
-        let root = std::env::temp_dir().join("mint-code-tools-patch");
+    fn patch_replaces_unique_text_once() {
+        let root = std::env::temp_dir().join("mint-code-tools-patch-unique");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("note.txt"), "one two\n").unwrap();
+        let edit = build_code_patch(
+            &root,
+            PathBuf::from("note.txt"),
+            &[CodePatchHunk {
+                old_text: "one".into(),
+                new_text: "three".into(),
+                replace_all: false,
+            }],
+            &config_for(&root),
+        )
+        .unwrap();
+        assert_eq!(edit.content, "three two\n");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn patch_rejects_ambiguous_old_text_by_default() {
+        let root = std::env::temp_dir().join("mint-code-tools-patch-ambiguous");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("note.txt"), "one one\n").unwrap();
+        let error = build_code_patch(
+            &root,
+            PathBuf::from("note.txt"),
+            &[CodePatchHunk {
+                old_text: "one".into(),
+                new_text: "two".into(),
+                replace_all: false,
+            }],
+            &config_for(&root),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            CodeInspectionError::AmbiguousPatchText { occurrences: 2, .. }
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn patch_replace_all_replaces_every_occurrence() {
+        let root = std::env::temp_dir().join("mint-code-tools-patch-replace-all");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("note.txt"), "one one\n").unwrap();
@@ -711,11 +888,12 @@ mod tests {
             &[CodePatchHunk {
                 old_text: "one".into(),
                 new_text: "two".into(),
+                replace_all: true,
             }],
             &config_for(&root),
         )
         .unwrap();
-        assert_eq!(edit.content, "two one\n");
+        assert_eq!(edit.content, "two two\n");
         let _ = fs::remove_dir_all(root);
     }
 

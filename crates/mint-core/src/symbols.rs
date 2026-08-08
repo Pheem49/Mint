@@ -78,6 +78,95 @@ pub struct SymbolIndex {
     pub symbols: Vec<CodeSymbol>,
 }
 
+fn extract_tree_sitter_symbols(
+    file_path: &Path,
+    content: &str,
+    extension: &str,
+    symbols: &mut Vec<CodeSymbol>,
+    limit: usize,
+) -> bool {
+    let mut parser = tree_sitter::Parser::new();
+    // Safety: `tree-sitter-rust 0.20.3` depends on `tree-sitter 0.22` while `tree-sitter-typescript 0.20.3`
+    // depends on `tree-sitter 0.20`. Both `Language` structs are identical ABI wrappers around `*const TSLanguage`.
+    let language: tree_sitter::Language = match extension {
+        "rs" => unsafe { std::mem::transmute(tree_sitter_rust::language()) },
+        "ts" | "tsx" | "js" | "jsx" => unsafe {
+            std::mem::transmute(tree_sitter_typescript::language_typescript())
+        },
+        _ => return false,
+    };
+
+    if parser.set_language(language).is_err() {
+        return false;
+    }
+    let Some(tree) = parser.parse(content, None) else {
+        return false;
+    };
+    let root_node = tree.root_node();
+
+    fn walk(
+        node: tree_sitter::Node,
+        content: &str,
+        file_path: &Path,
+        symbols: &mut Vec<CodeSymbol>,
+        limit: usize,
+    ) {
+        if symbols.len() >= limit {
+            return;
+        }
+        let kind = node.kind();
+        let (sym_kind, name_node) = match kind {
+            "function_item" | "function_declaration" => {
+                ("function", node.child_by_field_name("name"))
+            }
+            "struct_item" => ("struct", node.child_by_field_name("name")),
+            "enum_item" => ("enum", node.child_by_field_name("name")),
+            "trait_item" => ("trait", node.child_by_field_name("name")),
+            "class_declaration" => ("class", node.child_by_field_name("name")),
+            "interface_declaration" => ("interface", node.child_by_field_name("name")),
+            "type_alias_declaration" => ("type", node.child_by_field_name("name")),
+            _ => ("", None),
+        };
+
+        if !sym_kind.is_empty() {
+            if let Some(name_n) = name_node {
+                let start = name_n.start_byte();
+                let end = name_n.end_byte();
+                if end <= content.len() {
+                    let name = &content[start..end];
+                    let line = node.start_position().row + 1;
+                    let line_text = content
+                        .lines()
+                        .nth(line - 1)
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string();
+
+                    symbols.push(CodeSymbol {
+                        name: name.to_string(),
+                        kind: sym_kind.to_string(),
+                        file: file_path.to_path_buf(),
+                        line,
+                        signature: line_text,
+                    });
+                }
+            }
+        }
+
+        for i in 0..node.child_count() {
+            if let Some(child) = node.child(i) {
+                walk(child, content, file_path, symbols, limit);
+                if symbols.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+
+    walk(root_node, content, file_path, symbols, limit);
+    true
+}
+
 pub fn build_symbol_index(
     root: &Path,
     limit: usize,
@@ -101,23 +190,29 @@ pub fn build_symbol_index(
         let Ok(content) = fs::read_to_string(&file.path) else {
             continue;
         };
-        for (index, line) in content.lines().enumerate() {
-            for (kind, pattern) in PATTERNS.iter() {
-                let Some(found) = pattern.captures(line).and_then(|captures| captures.get(1))
-                else {
-                    continue;
-                };
-                symbols.push(CodeSymbol {
-                    name: found.as_str().into(),
-                    kind: (*kind).into(),
-                    file: file.path.clone(),
-                    line: index + 1,
-                    signature: line.trim().into(),
-                });
-                break;
-            }
-            if symbols.len() >= limit {
-                break;
+
+        let parsed_by_ts =
+            extract_tree_sitter_symbols(&file.path, &content, extension, &mut symbols, limit);
+
+        if !parsed_by_ts {
+            for (index, line) in content.lines().enumerate() {
+                for (kind, pattern) in PATTERNS.iter() {
+                    let Some(found) = pattern.captures(line).and_then(|captures| captures.get(1))
+                    else {
+                        continue;
+                    };
+                    symbols.push(CodeSymbol {
+                        name: found.as_str().into(),
+                        kind: (*kind).into(),
+                        file: file.path.clone(),
+                        line: index + 1,
+                        signature: line.trim().into(),
+                    });
+                    break;
+                }
+                if symbols.len() >= limit {
+                    break;
+                }
             }
         }
     }

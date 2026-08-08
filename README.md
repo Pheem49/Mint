@@ -16,6 +16,17 @@ The desktop application and native CLI share the same Rust domain layer, so chat
 memory, knowledge, tools, safety policies, and integrations behave consistently
 across both interfaces.
 
+## 🆕 Recent Updates (v1.11.0)
+
+- **Image Search Tool**: New `image_search` agent action (Google Custom Search Image API with a Brave Images API fallback) lets Mint find and show picture results on request, separate from the automatic thumbnail that already appears on regular web searches. Renders as a native image-grid card on Desktop and Web (`ImageSearchCard.tsx`).
+- **Shared Prompt Module**: Consolidated the previously duplicated persona/system-prompt text across the CLI agent loop, CLI chat mode, and the API server into a single `crates/mint-core/src/prompts/` module (`persona.rs`, `agent.rs`, `chat.rs`), so tone, safety policy, and answer-quality rules only need to be edited once.
+- **More Complete Answers**: Tightened the agent's system prompt so final answers cover everything the user asked instead of being cut short for the sake of brevity.
+- **CLI Markdown Tables**: Tables produced by the agent loop (e.g. skill/repo listings) now render as proper box-drawing tables in the terminal instead of raw `|`-pipe text.
+- **Consolidated Sources UI**: Merged the previously duplicated "image strip + domain cards" layout in the chat Sources panel into a single row, with sources that have a thumbnail shown first and the whole card clickable.
+- **SVG Icons Across Result Cards**: Replaced emoji icons with `lucide-react` SVG icons on the Weather, Stock, Calculation, and Image Search cards for a more consistent look across themes.
+- **Accurate Tool Activity Labels**: The "Working through task" activity table on Desktop and Web now shows the real tool/action name (`web_search`, `image_search`, `weather`, …), matching what the CLI already displays.
+- **Web Deep-Link Fix**: Fixed a bug where opening or refreshing a direct chat URL (e.g. `/chat/<conversation-id>`) on `mint web` showed a blank white page — the production web build used a relative asset base path that broke on any URL besides `/`.
+
 ## <img src="assets/features.svg" width="24" height="24" valign="middle" /> What Mint Can Do
 
 Mint is a local-first AI assistant running on your machine, capable of handling tasks via either the desktop application or the terminal interface (CLI):
@@ -53,6 +64,7 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ### 5. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Tool & MCP Integrations
 - Support **Model Context Protocol (MCP)** to connect tools like Google/Brave Search, Filesystem servers, and GitHub context.
+- Dedicated **Image Search** tool (Google Custom Search Image / Brave Images) for finding and browsing pictures on request, rendered as an image-grid card on Desktop and Web.
 - **Auto GitHub Link Resolver:** Automatically detects GitHub URLs in chat messages (CLI, Web, and Desktop) and Code Agent tasks. It fetches and injects the repository's metadata, directory structure, and README as prompt context, serving as an instant fallback when the GitHub MCP server is not active.
 - Local plugins for Spotify playback control, Google Calendar, Gmail drafts, and Notion workspace reading.
 
@@ -345,6 +357,7 @@ You can run individual subcommands by appending them after `mint`:
 ```bash
 mint onboard
 mint setup
+mint plugins
 mint status
 mint web
 mint api
@@ -359,6 +372,7 @@ mint chat "<message>"
 | `mint` | Start the interactive terminal chat assistant |
 | `mint onboard` | Configure Mint for first use |
 | `mint setup` | Interactively manage enabled agent tools |
+| `mint plugins` | Centralized interactive management for built-in ecosystem plugins & skills |
 | `mint web` | Launch the web UI and local API server |
 | `mint api` | Start only the local API server |
 | `mint auto` | Launch the GUI browser automation isolated port |
@@ -416,6 +430,17 @@ mint open README.md
 mint open-app code
 mint learn ./skill.md
 ```
+
+### Ecosystem Plugins (`mint plugins`)
+
+Centralized interactive management for built-in plugins (Spotify, Discord RPC, Gmail, Google Calendar, Notion, YouTube Music, Vercel, GitHub):
+
+```bash
+mint plugins
+```
+* **Interactive Terminal Checklist:** Toggle plugins on or off directly using terminal spacebar navigation.
+* **Credential Prompts:** Automatically prompts for missing OAuth Client IDs, Client Secrets, or API Tokens.
+* **PKCE OAuth & REST Polling:** Starts OAuth authorization flows and polls local REST endpoints (`http://localhost:3000/api/oauth/*`) for seamless Single Sign-On across CLI, Desktop UI, and Web UI.
 
 ### MCP Servers
 

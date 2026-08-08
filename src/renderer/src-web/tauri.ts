@@ -17,6 +17,7 @@ import type {
   CodeEdit,
   CodeEditProposal,
   LearnedSkill,
+  AuthUser,
 } from '../shared/types'
 
 
@@ -24,10 +25,20 @@ type DesktopStreamEvent =
   | { type: 'chunk'; chunk: string }
   | { type: 'progress'; progress: AgentProgress }
 
+export type { GeminiLiveEvent } from '../shared/utils/useGeminiLiveVoice'
+import type { GeminiLiveEvent } from '../shared/utils/useGeminiLiveVoice'
+
 
 export const isTauriRuntime = () => (
   typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__)
 )
+
+/**
+ * Root-relative: the web build's SPA fallback serves index-web.html at deep
+ * paths like /chat/<id>, and a page-relative "./assets/..." would resolve
+ * against that path instead of the site root, 404ing on those routes.
+ */
+export const APP_ICON_PATH = '/assets/icon.png'
 
 export const getLocalApiBase = () => {
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
@@ -36,11 +47,167 @@ export const getLocalApiBase = () => {
 
 const getApiBase = getLocalApiBase
 
+const AUTH_TOKEN_KEY = 'mint_auth_token'
+
+function getStoredAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.localStorage.getItem(AUTH_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+function setStoredAuthToken(token: string | null) {
+  if (typeof window === 'undefined') return
+  try {
+    if (token) window.localStorage.setItem(AUTH_TOKEN_KEY, token)
+    else window.localStorage.removeItem(AUTH_TOKEN_KEY)
+  } catch {
+    // ignore storage errors (e.g. private browsing)
+  }
+}
+
+/**
+ * fetch() wrapper that attaches the signed-in user's session token to every
+ * request to this app's own local API server. Without this, the server has
+ * no way to know who's calling and logs every request as "auth:anonymous"
+ * even while a user is signed in, since only a handful of /auth/* endpoints
+ * used to send the header explicitly.
+ */
+function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const token = getStoredAuthToken()
+  if (!token) return fetch(input, init)
+  const headers = new Headers(init.headers)
+  if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
+  return fetch(input, { ...init, headers })
+}
+
+export async function authRegister(
+  name: string | undefined,
+  email: string,
+  password: string,
+): Promise<AuthUser> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getApiBase()}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to register.')
+    setStoredAuthToken(data.token)
+    return data.user
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<AuthUser>('auth_register', { name, email, password })
+}
+
+export async function authLogin(email: string, password: string): Promise<AuthUser> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getApiBase()}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Invalid email or password.')
+    setStoredAuthToken(data.token)
+    return data.user
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<AuthUser>('auth_login', { email, password })
+}
+
+export async function authLogout(): Promise<void> {
+  if (!isTauriRuntime()) {
+    const token = getStoredAuthToken()
+    setStoredAuthToken(null)
+    if (token) {
+      await authFetch(`${getApiBase()}/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {})
+    }
+    return
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('auth_logout')
+}
+
+export async function authGetCurrentUser(): Promise<AuthUser | null> {
+  if (!isTauriRuntime()) {
+    const token = getStoredAuthToken()
+    if (!token) return null
+    try {
+      const res = await authFetch(`${getApiBase()}/auth/session`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.user ?? null
+    } catch {
+      return null
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<AuthUser | null>('auth_current_user')
+}
+
+export async function authUpdateProfile(name?: string, image?: string): Promise<AuthUser> {
+  if (!isTauriRuntime()) {
+    const token = getStoredAuthToken()
+    if (!token) throw new Error('Not logged in')
+    const res = await authFetch(`${getApiBase()}/auth/profile`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name, image }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to update profile.')
+    return data.user
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<AuthUser>('auth_update_profile', { name, image })
+}
+
+export async function authUploadAvatar(fileDataUri: string, fileName: string): Promise<AuthUser> {
+  const dataBase64 = fileDataUri.split(',')[1] ?? fileDataUri
+  if (!isTauriRuntime()) {
+    const token = getStoredAuthToken()
+    if (!token) throw new Error('Not logged in')
+    const res = await authFetch(`${getApiBase()}/auth/avatar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ fileName, dataBase64 }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to upload avatar.')
+    return data.user
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<AuthUser>('auth_upload_avatar', { fileName, dataBase64 })
+}
+
+/**
+ * `AuthUser.image` is a relative `/api/avatar?key=...` path scoped to
+ * whichever Mint app the account's avatar was uploaded from. Re-point it at
+ * this app's own API server so it resolves regardless of origin (this app's
+ * `/api/avatar` route reads from the same shared Pictures folder).
+ */
+export function resolveAvatarUrl(image?: string | null): string | null {
+  if (!image) return null
+  if (/^https?:\/\//i.test(image)) return image
+  const match = image.match(/[?&]key=([^&]+)/)
+  if (!match) return image
+  return `${getApiBase()}/avatar?key=${match[1]}`
+}
+
 export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/status`);
+      const res = await authFetch(`${API_BASE}/status`);
       return await res.json();
     } catch (e) {
       console.error("Failed to fetch runtime status from local server:", e);
@@ -61,7 +228,7 @@ export async function setActiveModel(provider: string, model?: string): Promise<
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase()
     try {
-      const res = await fetch(`${API_BASE}/active-model`, {
+      const res = await authFetch(`${API_BASE}/active-model`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider, model }),
@@ -79,7 +246,7 @@ export async function setActiveModel(provider: string, model?: string): Promise<
 
 export async function uploadFile(file: File): Promise<string> {
   const API_BASE = getApiBase();
-  const res = await fetch(`${API_BASE}/uploads?filename=${encodeURIComponent(file.name)}`, {
+  const res = await authFetch(`${API_BASE}/uploads?filename=${encodeURIComponent(file.name)}`, {
     method: 'POST',
     body: file,
   });
@@ -102,7 +269,7 @@ export async function detectSystemTools(): Promise<DetectedTools> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/detect-tools`);
+      const res = await authFetch(`${API_BASE}/detect-tools`);
       return await res.json();
     } catch (e) {
       console.error("Failed to detect tools from local server:", e);
@@ -127,7 +294,7 @@ export async function sendChatMessage(
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/chat`, {
+      const res = await authFetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId })
@@ -190,7 +357,7 @@ export async function streamChatMessage(
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     const outgoingMessage = withImagePlaceholder(message, imageDataUri, videoDataUri);
-    const res = await fetch(`${API_BASE}/chat-stream`, {
+    const res = await authFetch(`${API_BASE}/chat-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId })
@@ -281,10 +448,84 @@ export async function getTtsUrls(text: string): Promise<TtsUrl[]> {
   return invoke<TtsUrl[]>('get_tts_urls', { text })
 }
 
+// Gemini Live has no Tauri IPC to ride on in the browser build, so it talks directly to a
+// WebSocket route on the local API server (crates/mint-core/src/api_server.rs, "/api/gemini-live"),
+// which bridges to the same gemini_live::start_session used by the desktop build.
+const geminiLiveSockets = new Map<string, WebSocket>()
+
+function geminiLiveWsUrl(params: URLSearchParams): string {
+  const wsBase = getLocalApiBase().replace(/^http/, 'ws')
+  return `${wsBase}/gemini-live?${params.toString()}`
+}
+
+/**
+ * Starts a Gemini Live realtime voice session (beta). Returns a session id used by
+ * `sendGeminiLiveAudioChunk`/`stopGeminiLiveSession`; `onEvent` receives audio replies,
+ * transcripts, and tool-call status for the lifetime of the session.
+ */
+export async function startGeminiLiveSession(
+  onEvent: (event: GeminiLiveEvent) => void,
+  workspacePath?: string | null,
+  chatId?: string | null,
+): Promise<string> {
+  const params = new URLSearchParams()
+  const token = getStoredAuthToken()
+  if (token) params.set('token', token)
+  if (workspacePath) params.set('workspacePath', workspacePath)
+  if (chatId) params.set('chatId', chatId)
+
+  const sessionId = `gemini-live-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const ws = new WebSocket(geminiLiveWsUrl(params))
+
+  return new Promise((resolve, reject) => {
+    let opened = false
+    ws.onopen = () => {
+      opened = true
+      geminiLiveSockets.set(sessionId, ws)
+      resolve(sessionId)
+    }
+    ws.onmessage = (event) => {
+      try {
+        onEvent(JSON.parse(event.data as string) as GeminiLiveEvent)
+      } catch (error) {
+        console.error('Failed to parse Gemini Live event', error)
+      }
+    }
+    ws.onclose = () => {
+      geminiLiveSockets.delete(sessionId)
+      if (!opened) {
+        reject(new Error('Failed to connect to Gemini Live (check your Gemini API key and sign-in status).'))
+      } else {
+        // Safety net for abnormal drops — the server also sends an explicit
+        // {"type":"closed"} message on a clean shutdown, so this may fire twice;
+        // the hook's handler is idempotent.
+        onEvent({ type: 'closed' })
+      }
+    }
+    ws.onerror = () => {
+      // onclose always follows onerror for WebSocket; handled there.
+    }
+  })
+}
+
+/** Pushes a chunk of base64-encoded PCM16 (16kHz, mono) mic audio into a running session. */
+export async function sendGeminiLiveAudioChunk(sessionId: string, chunkBase64: string): Promise<void> {
+  const ws = geminiLiveSockets.get(sessionId)
+  if (!ws || ws.readyState !== WebSocket.OPEN) return
+  ws.send(JSON.stringify({ type: 'audio', data: chunkBase64 }))
+}
+
+export async function stopGeminiLiveSession(sessionId: string): Promise<void> {
+  const ws = geminiLiveSockets.get(sessionId)
+  if (!ws) return
+  geminiLiveSockets.delete(sessionId)
+  ws.close()
+}
+
 export async function cancelChatMessage(chatId: string): Promise<void> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
-    await fetch(`${API_BASE}/cancel-chat`, {
+    await authFetch(`${API_BASE}/cancel-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chatId })
@@ -301,7 +542,7 @@ export async function getRecentInteractions(limit = 50, chatId?: string | null):
     try {
       const params = new URLSearchParams({ limit: String(limit) });
       if (chatId) params.set('chatId', chatId);
-      const res = await fetch(`${API_BASE}/interactions?${params.toString()}`);
+      const res = await authFetch(`${API_BASE}/interactions?${params.toString()}`);
       return await res.json();
     } catch (e) {
       console.error("Failed to fetch chat history from local server:", e);
@@ -322,7 +563,7 @@ export async function saveSystemInteraction(
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/interactions`, {
+      const res = await authFetch(`${API_BASE}/interactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chatId, userText, aiText, provider, model }),
@@ -344,7 +585,7 @@ export async function saveInteractionAgentActivity(
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/interactions/agent-activity`, {
+      const res = await authFetch(`${API_BASE}/interactions/agent-activity`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ interactionId, activity }),
@@ -365,7 +606,7 @@ export async function listChatSessions(): Promise<ChatSession[]> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/chat-sessions`);
+      const res = await authFetch(`${API_BASE}/chat-sessions`);
       const data = await res.json();
       return Array.isArray(data) ? data : [];
     } catch (e) {
@@ -382,7 +623,7 @@ export async function deleteChatSession(chatId: string): Promise<number> {
     const API_BASE = getApiBase();
     try {
       const params = new URLSearchParams({ chatId });
-      const res = await fetch(`${API_BASE}/chat-sessions/delete?${params.toString()}`, { method: 'POST' });
+      const res = await authFetch(`${API_BASE}/chat-sessions/delete?${params.toString()}`, { method: 'POST' });
       const data = await res.json();
       return typeof data?.deleted === 'number' ? data.deleted : 0;
     } catch (e) {
@@ -398,7 +639,7 @@ export async function renameChatSession(chatId: string, newTitle: string): Promi
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/chat-sessions/rename`, {
+      const res = await authFetch(`${API_BASE}/chat-sessions/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chatId, newTitle })
@@ -419,7 +660,7 @@ export async function getProfileValue(key: string): Promise<string> {
     const API_BASE = getApiBase();
     try {
       const params = new URLSearchParams({ key });
-      const res = await fetch(`${API_BASE}/profile?${params.toString()}`);
+      const res = await authFetch(`${API_BASE}/profile?${params.toString()}`);
       const data = await res.json();
       return data.value || '';
     } catch (e) {
@@ -435,7 +676,7 @@ export async function setProfileValue(key: string, value: string): Promise<boole
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/profile`, {
+      const res = await authFetch(`${API_BASE}/profile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value })
@@ -458,7 +699,7 @@ export async function clearChatHistory(chatId?: string | null): Promise<number> 
       const params = new URLSearchParams();
       if (chatId) params.set('chatId', chatId);
       const suffix = params.toString() ? `?${params.toString()}` : '';
-      const res = await fetch(`${API_BASE}/interactions/clear${suffix}`, { method: 'POST' });
+      const res = await authFetch(`${API_BASE}/interactions/clear${suffix}`, { method: 'POST' });
       const data = await res.json();
       return data.status === 'ok' ? 1 : 0;
     } catch (e) {
@@ -474,7 +715,7 @@ export async function listSavedPictures(): Promise<PictureEntry[]> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await fetch(`${API_BASE}/pictures?_t=${Date.now()}`);
+      const res = await authFetch(`${API_BASE}/pictures?_t=${Date.now()}`);
       const pictures = await res.json();
       const timestamp = Date.now();
       return Array.isArray(pictures)
@@ -498,12 +739,22 @@ export async function listSavedPictures(): Promise<PictureEntry[]> {
   return invoke<PictureEntry[]>('list_pictures')
 }
 
+export async function deleteSavedPicture(id: string): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    await authFetch(`${API_BASE}/pictures/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return;
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<void>('delete_picture', { id })
+}
+
 export async function generateImages(
   request: ImageGenRequest
 ): Promise<ImageGenResponse> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase()
-    const res = await fetch(`${API_BASE}/image-generate`, {
+    const res = await authFetch(`${API_BASE}/image-generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -539,7 +790,7 @@ export async function getImageGenProviders(): Promise<ImageGenProviders> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase()
     try {
-      const res = await fetch(`${API_BASE}/image-gen/providers`)
+      const res = await authFetch(`${API_BASE}/image-gen/providers`)
       if (res.ok) return await res.json()
     } catch (_) { /* ignore */ }
     return { active: 'nanobanana', available: ['nanobanana'] }
@@ -569,11 +820,11 @@ export async function setDefaultImageProvider(provider: string): Promise<boolean
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase()
     try {
-      const getRes = await fetch(`${API_BASE}/config`)
+      const getRes = await authFetch(`${API_BASE}/config`)
       if (!getRes.ok) return false
       const config = await getRes.json()
       config.image_gen_provider = provider
-      const saveRes = await fetch(`${API_BASE}/config`, {
+      const saveRes = await authFetch(`${API_BASE}/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config)
@@ -631,8 +882,13 @@ export async function listen<T>(event: string, handler: (event: { payload: T }) 
 }
 
 export function convertFileSrc(filePath: string, protocol = 'asset'): string {
+  if (!filePath) return ''
   if (typeof window === 'undefined' || !isTauriRuntime()) {
-    return filePath;
+    if (filePath.startsWith('http://') || filePath.startsWith('https://') || filePath.startsWith('blob:')) {
+      return filePath
+    }
+    const API_BASE = getApiBase()
+    return `${API_BASE}/media?path=${encodeURIComponent(filePath)}`
   }
   const internals = (window as any).__TAURI_INTERNALS__;
   if (internals && typeof internals.convertFileSrc === 'function') {
@@ -650,7 +906,7 @@ export function installTauriAdapters() {
     (window as any).settingsApi = {
       getSettings: async () => {
         try {
-          const res = await fetch(`${API_BASE}/config`);
+          const res = await authFetch(`${API_BASE}/config`);
           return await res.json();
         } catch (e) {
           console.error("Failed to fetch settings from local server:", e);
@@ -662,7 +918,7 @@ export function installTauriAdapters() {
       installAvailableUpdate: async () => 'Desktop updates are only available in the Tauri app.',
       saveSettings: async (config: any) => {
         try {
-          const res = await fetch(`${API_BASE}/config`, {
+          const res = await authFetch(`${API_BASE}/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
@@ -690,7 +946,7 @@ export function installTauriAdapters() {
       submit: () => {},
       executeAction: async (action: any) => {
         try {
-          const res = await fetch(`${API_BASE}/action`, {
+          const res = await authFetch(`${API_BASE}/action`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(action)
@@ -705,7 +961,7 @@ export function installTauriAdapters() {
       resize: () => {},
       getSettings: async () => {
         try {
-          const res = await fetch(`${API_BASE}/config`);
+          const res = await authFetch(`${API_BASE}/config`);
           return await res.json();
         } catch (e) {
           return {};
@@ -731,7 +987,7 @@ export function installTauriAdapters() {
     (window as any).api = {
       sendMessage: async (message: string, imageDataUri?: string | null, audioDataUri?: string | null, documentAttachment?: DocumentAttachment | null) => {
         try {
-          const res = await fetch(`${API_BASE}/chat`, {
+          const res = await authFetch(`${API_BASE}/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message, imageDataUri, audioDataUri, documentAttachment })
@@ -759,7 +1015,7 @@ export function installTauriAdapters() {
       maximizeWindow: () => {},
       resetChat: async () => {
         try {
-          const res = await fetch(`${API_BASE}/interactions/clear`, { method: 'POST' });
+          const res = await authFetch(`${API_BASE}/interactions/clear`, { method: 'POST' });
           const data = await res.json();
           return data.status === 'ok' ? 1 : 0;
         } catch (e) {
@@ -768,7 +1024,7 @@ export function installTauriAdapters() {
       },
       getChatHistory: async () => {
         try {
-          const res = await fetch(`${API_BASE}/interactions`);
+          const res = await authFetch(`${API_BASE}/interactions`);
           return await res.json();
         } catch (e) {
           console.error("Failed to fetch chat history from local server:", e);
@@ -776,6 +1032,7 @@ export function installTauriAdapters() {
         }
       },
       listSavedPictures,
+      deleteSavedPicture,
       openSettings: () => {
         window.location.hash = '#/settings';
       },
@@ -786,7 +1043,7 @@ export function installTauriAdapters() {
       writeClipboard: async () => {},
       getSystemInfo: async () => {
         try {
-          const res = await fetch(`${API_BASE}/status`);
+          const res = await authFetch(`${API_BASE}/status`);
           return await res.json();
         } catch (e) {
           return { backend: 'browser-fallback' };
@@ -794,7 +1051,7 @@ export function installTauriAdapters() {
       },
       getWeather: async (city: string) => {
         try {
-          const res = await fetch(`${API_BASE}/weather?city=${encodeURIComponent(city)}`);
+          const res = await authFetch(`${API_BASE}/weather?city=${encodeURIComponent(city)}`);
           return await res.json();
         } catch (e) {
           return { error: String(e) };
@@ -802,7 +1059,7 @@ export function installTauriAdapters() {
       },
       getSettings: async () => {
         try {
-          const res = await fetch(`${API_BASE}/config`);
+          const res = await authFetch(`${API_BASE}/config`);
           return await res.json();
         } catch (e) {
           return {};
@@ -810,7 +1067,7 @@ export function installTauriAdapters() {
       },
       saveSettings: async (config: any) => {
         try {
-          const res = await fetch(`${API_BASE}/config`, {
+          const res = await authFetch(`${API_BASE}/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
@@ -820,13 +1077,18 @@ export function installTauriAdapters() {
           return {};
         }
       },
+      closeSettings: async () => {
+        if (window.location.hash.includes('settings')) {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        }
+      },
       onSettingsChanged: () => {},
       startVision: () => {},
       onVisionReady: async () => () => {},
       captureSilentScreen: async () => '',
       getSmartContext: async () => {
         try {
-          const res = await fetch(`${API_BASE}/smart-context`);
+          const res = await authFetch(`${API_BASE}/smart-context`);
           return await res.json();
         } catch (e) {
           return {};
@@ -838,7 +1100,7 @@ export function installTauriAdapters() {
       recordBehavior: () => {},
       executeProactiveAction: async (action: any) => {
         try {
-          const res = await fetch(`${API_BASE}/action`, {
+          const res = await authFetch(`${API_BASE}/action`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(action)
@@ -850,7 +1112,7 @@ export function installTauriAdapters() {
       },
       executeApprovedAction: async (action: any) => {
         try {
-          const res = await fetch(`${API_BASE}/action`, {
+          const res = await authFetch(`${API_BASE}/action`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(action)
@@ -1052,6 +1314,7 @@ export function installTauriAdapters() {
     resetChat: clearChatHistory,
     getChatHistory: () => getRecentInteractions(50),
     listSavedPictures,
+    deleteSavedPicture,
     openSettings: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('open_window', { kind: 'settings' })
@@ -1179,7 +1442,7 @@ export async function listLearnedSkills(workspacePath?: string): Promise<Learned
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     try {
       const API_BASE = getLocalApiBase()
-      const res = await fetch(`${API_BASE}/learned-skills`)
+      const res = await authFetch(`${API_BASE}/learned-skills`)
       if (res.ok) {
         return await res.json()
       }
@@ -1235,6 +1498,66 @@ export async function deleteLearnedSkill(name: string): Promise<number> {
   }
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<number>('delete_learned_skill', { name })
+}
+
+export interface SubagentDefinition {
+  name: string
+  description: string
+  tools: string[] | null
+  model: string | null
+  provider: string | null
+  systemPrompt: string
+  sourcePath: string
+}
+
+export interface SubagentDraft {
+  name: string
+  description: string
+  tools: string[] | null
+  model: string | null
+  provider: string | null
+  systemPrompt: string
+  scope: 'global' | 'workspace'
+  previousSourcePath?: string | null
+}
+
+export async function listSubagents(workspacePath?: string): Promise<SubagentDefinition[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/subagents`)
+    if (!res.ok) return []
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<SubagentDefinition[]>('list_subagents', { workspacePath })
+}
+
+export async function saveSubagent(draft: SubagentDraft, workspacePath?: string): Promise<SubagentDefinition> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/subagents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft)
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to save subagent.' }))
+      throw new Error(err.error || 'Failed to save subagent.')
+    }
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<SubagentDefinition>('save_subagent', { draft, workspacePath })
+}
+
+export async function deleteSubagent(sourcePath: string): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/subagents/${encodeURIComponent(sourcePath)}`, {
+      method: 'DELETE'
+    })
+    if (!res.ok) throw new Error('Failed to delete subagent.')
+    return
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('delete_subagent', { sourcePath })
 }
 
 export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceTreeEntry> {
@@ -1332,7 +1655,7 @@ export interface VideoGenProviders {
  */
 export async function generateVideo(request: VideoGenRequest): Promise<VideoGenResponse> {
   const apiBase = getLocalApiBase()
-  const response = await fetch(`${apiBase}/video-generate`, {
+  const response = await authFetch(`${apiBase}/video-generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request)
@@ -1348,9 +1671,295 @@ export async function getVideoGenProviders(): Promise<VideoGenProviders> {
   return { active: 'veo', available: ['veo'] }
 }
 
+// ─── AI Video Editor — Edit API ────────────────────────────────────────────
+
+export interface VideoInfo {
+  path: string
+  duration: number
+  fps: number
+  width: number
+  height: number
+  hasAudio: boolean
+  audioStreams: number
+  sizeBytes: number
+  format: string
+}
+
+export interface VideoEditResult {
+  outputPath: string
+  duration?: number
+  sizeBytes?: number
+}
+
+export interface VideoTrimRequest {
+  input: string
+  output: string
+  start: number
+  end: number
+}
+
+export interface VideoResizeRequest {
+  input: string
+  output: string
+  width: number
+  height: number
+}
+
+export interface VideoMergeRequest {
+  inputs: string[]
+  output: string
+}
+
+export interface VideoExtractAudioRequest {
+  input: string
+  output: string
+}
+
+export interface VideoRemoveSilenceRequest {
+  input: string
+  output: string
+  thresholdDb?: number
+  minSilenceSecs?: number
+}
+
+export interface VideoExportRequest {
+  input: string
+  output: string
+  resolution?: string
+  fps?: number
+  codec?: string
+  crf?: number
+}
+
+export interface TimelineClip {
+  source: string
+  trimStart?: number
+  trimEnd?: number
+  order?: number
+  scale?: { width: number; height: number }
+}
+
+export interface TimelineSubtitle {
+  start: number
+  end: number
+  text: string
+}
+
+export interface TimelineAudio {
+  music?: string
+  duck?: boolean
+  musicVolume?: number
+  duckVolume?: number
+}
+
+export interface TimelineOutput {
+  path: string
+  resolution?: string
+  fps?: number
+  codec?: string
+  crf?: number
+}
+
+export interface VideoTimeline {
+  clips: TimelineClip[]
+  subtitles?: TimelineSubtitle[]
+  audio?: TimelineAudio
+  output: TimelineOutput
+}
+
+export interface RenderTimelineResult {
+  outputPath: string
+  clipsRendered: number
+  duration?: number
+  sizeBytes?: number
+}
+
+async function videoEditPost<T>(route: string, body: unknown): Promise<T> {
+  const apiBase = getLocalApiBase()
+  const res = await authFetch(`${apiBase}${route}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as any).error || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function videoLoad(path: string): Promise<VideoInfo> {
+  return videoEditPost<VideoInfo>('/video/load', { path })
+}
+
+export async function videoTrim(req: VideoTrimRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/trim', req)
+}
+
+export async function videoResize(req: VideoResizeRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/resize', req)
+}
+
+export async function videoMerge(req: VideoMergeRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/merge', req)
+}
+
+export async function videoExtractAudio(req: VideoExtractAudioRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/extract-audio', req)
+}
+
+export async function videoRemoveSilence(req: VideoRemoveSilenceRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/remove-silence', req)
+}
+
+export async function videoExport(req: VideoExportRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/video/export', req)
+}
+
+export async function videoRenderTimeline(timeline: VideoTimeline): Promise<RenderTimelineResult> {
+  return videoEditPost<RenderTimelineResult>('/video/render-timeline', { timeline })
+}
+
+// ─── Speech & Subtitle API ──────────────────────────────────────────────────
+
+export interface TranscriptSegment {
+  id: number
+  start: number
+  end: number
+  text: string
+  speaker?: string
+}
+
+export interface TranscriptionResult {
+  text: string
+  language: string
+  duration: number
+  segments: TranscriptSegment[]
+}
+
+export interface TranscribeRequest {
+  input: string
+  language?: string
+  prompt?: string
+}
+
+export interface DetectSilenceRequest {
+  input: string
+  thresholdDb?: number
+  minDurationSecs?: number
+}
+
+export interface SilenceRange {
+  start: number
+  end: number
+  duration: number
+}
+
+export interface SubtitleStyle {
+  fontName?: string
+  fontSize?: number
+  primaryColor?: string
+  outlineColor?: string
+  outline?: number
+  alignment?: number
+  marginV?: number
+}
+
+export interface BurnSubtitleRequest {
+  inputVideo: string
+  srtInput: string
+  outputVideo: string
+  style?: SubtitleStyle
+  preset?: string
+}
+
+export interface TranslateSubtitleRequest {
+  srtContent: string
+  targetLanguage: string
+}
+
+export async function speechTranscribe(req: TranscribeRequest): Promise<TranscriptionResult> {
+  return videoEditPost<TranscriptionResult>('/speech/transcribe', req)
+}
+
+export async function speechDetectSilence(req: DetectSilenceRequest): Promise<SilenceRange[]> {
+  return videoEditPost<SilenceRange[]>('/speech/detect-silence', req)
+}
+
+export async function subtitleGenerate(segments: TranscriptSegment[]): Promise<{ srt: string }> {
+  return videoEditPost<{ srt: string }>('/subtitle/generate', { segments })
+}
+
+export async function subtitleTranslate(req: TranslateSubtitleRequest): Promise<{ srt: string }> {
+  return videoEditPost<{ srt: string }>('/subtitle/translate', req)
+}
+
+export async function subtitleBurn(req: BurnSubtitleRequest): Promise<VideoEditResult> {
+  return videoEditPost<VideoEditResult>('/subtitle/burn', req)
+}
+
+// ─── Auto Shorts API ────────────────────────────────────────────────────────
+
+export interface MakeShortsRequest {
+  input: string
+  outputDir?: string
+  maxClips?: number
+  targetDuration?: number
+  burnSubtitles?: boolean
+  width?: number
+  height?: number
+}
+
+export interface ShortClipInfo {
+  id: number
+  path: string
+  start: number
+  end: number
+  duration: number
+  title: string
+}
+
+export interface MakeShortsResult {
+  clips: ShortClipInfo[]
+}
+
+export async function videoMakeShorts(req: MakeShortsRequest): Promise<MakeShortsResult> {
+  return videoEditPost<MakeShortsResult>('/video/make-shorts', req)
+}
+
+export interface VideoAiEditRequest {
+  input: string
+  output?: string
+  instruction: string
+}
+
+export interface AiEditStepResult {
+  step: number
+  operation: string
+  description: string
+  outputPath: string
+}
+
+export interface AiEditVideoResult {
+  outputPath: string
+  stepsPerformed: AiEditStepResult[]
+  summary: string
+}
+
+export async function videoAiEdit(req: VideoAiEditRequest): Promise<AiEditVideoResult> {
+  return videoEditPost<AiEditVideoResult>('/video/ai-edit', req)
+}
+
+
 
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
+  authRegister,
+  authLogin,
+  authLogout,
+  authGetCurrentUser,
+  authUpdateProfile,
+  authUploadAvatar,
   getRuntimeStatus,
   detectSystemTools,
   sendChatMessage,
@@ -1368,8 +1977,12 @@ const _apiCheck: MintPlatformApi = {
   listLearnedSkills,
   addLearnedSkill,
   deleteLearnedSkill,
+  listSubagents,
+  saveSubagent,
+  deleteSubagent,
   clearChatHistory,
   listSavedPictures,
+  deleteSavedPicture,
   generateImages,
   getImageGenProviders,
   setDefaultImageProvider,

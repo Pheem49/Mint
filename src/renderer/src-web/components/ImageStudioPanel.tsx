@@ -19,51 +19,17 @@ interface ImageStudioPanelProps {
   onToggleMobileSidebar?: () => void
 }
 
-const ASPECT_OPTIONS: { value: AspectRatio; label: string; icon: string }[] = [
-  { value: '1:1',  label: '1:1',  icon: '⬛' },
-  { value: '16:9', label: '16:9', icon: '▬' },
-  { value: '9:16', label: '9:16', icon: '▮' },
-  { value: '4:3',  label: '4:3',  icon: '⬜' },
-]
+import { IMAGE_ASPECT_RATIOS, IMAGE_STYLE_PRESETS } from '../../shared/constants/studio'
 
-const STYLE_SUGGESTIONS = [
-  'photorealistic', 'anime', 'oil painting', 'watercolor',
-  'cinematic', 'digital art', '3D render', 'sketch',
-]
+const ASPECT_OPTIONS = IMAGE_ASPECT_RATIOS
+const STYLE_SUGGESTIONS = IMAGE_STYLE_PRESETS
 
-// Per-provider model presets shown in the model dropdown
-const PROVIDER_MODELS: Record<string, { value: string; label: string }[]> = {
-  nanobanana: [
-    { value: 'gemini-2.5-flash-image', label: 'Gemini 2.5 Flash Image (Default)' },
-    { value: 'gemini-2.0-flash-image', label: 'Gemini 2.0 Flash Image' },
-  ],
-  dalle: [
-    { value: 'dall-e-3',    label: 'DALL·E 3 (Default)' },
-    { value: 'gpt-image-1', label: 'GPT-Image-1' },
-    { value: 'dall-e-2',    label: 'DALL·E 2' },
-  ],
-  stability: [
-    { value: 'sd3.5-large',       label: 'SD 3.5 Large (Default)' },
-    { value: 'sd3.5-large-turbo', label: 'SD 3.5 Large Turbo' },
-    { value: 'sd3-medium',        label: 'SD 3 Medium' },
-    { value: 'core',              label: 'Stable Image Core' },
-  ],
-  ideogram: [
-    { value: 'V_3',       label: 'Ideogram V3 (Default)' },
-    { value: 'V_2',       label: 'Ideogram V2' },
-    { value: 'V_2_TURBO', label: 'Ideogram V2 Turbo' },
-  ],
-  replicate: [
-    { value: 'black-forest-labs/flux-1.1-pro',          label: 'FLUX 1.1 Pro (Default)' },
-    { value: 'timbrooks/instruct-pix2pix',              label: 'InstructPix2Pix (Image Editing)' },
-    { value: 'black-forest-labs/flux-fill-dev',         label: 'FLUX Fill (Inpainting)' },
-    { value: 'black-forest-labs/flux-schnell',          label: 'FLUX Schnell (fast)' },
-    { value: 'stability-ai/sdxl',                       label: 'SDXL' },
-  ],
-}
+import { IMAGE_STUDIO_MODELS } from '../../shared/constants/models'
+const PROVIDER_MODELS = IMAGE_STUDIO_MODELS
 
 const PROVIDER_LABELS: Record<string, string> = {
   nanobanana: '✦ NanoBanana (Gemini)',
+  bfl:        '⚡ Black Forest Labs (FLUX API)',
   dalle:      '⬡ DALL·E (OpenAI)',
   stability:  '◈ Stability AI',
   ideogram:   '◉ Ideogram',
@@ -102,9 +68,9 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
   const loadHistory = useCallback(async () => {
     try {
       const pics = await listSavedPictures()
-      const imageGenSources = ['nanobanana', 'dalle', 'stability', 'ideogram', 'replicate']
+      const imageGenSources = ['nanobanana', 'dalle', 'stability', 'ideogram', 'replicate', 'image_gen']
       const filtered = pics.filter((pic) =>
-        imageGenSources.includes(pic.source?.toLowerCase()),
+        pic.source && imageGenSources.includes(pic.source.toLowerCase()),
       )
       const sorted = [...filtered].sort((a, b) => {
         const da = a.createdAt ? new Date(a.createdAt).getTime() : 0

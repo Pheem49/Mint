@@ -1,4 +1,6 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react'
+import AuthGate from '../shared/components/AuthGate'
+import ChunkErrorBoundary from '../shared/components/ChunkErrorBoundary'
 
 const SettingsWindow = lazy(() => import('./components/SettingsWindow'))
 const SpotlightWindow = lazy(() => import('./components/SpotlightWindow'))
@@ -6,28 +8,67 @@ const WidgetWindow = lazy(() => import('./components/WidgetWindow'))
 const ProactiveGlow = lazy(() => import('./components/ProactiveGlow'))
 const ScreenPicker = lazy(() => import('./components/ScreenPicker'))
 const MintDashboard = lazy(() => import('./components/MintDashboard'))
+function getCurrentRoute(): string {
+  if (typeof window === 'undefined') return '/'
+  const hash = window.location.hash.replace(/^#/, '')
+  const pathname = window.location.pathname
+  return hash || pathname || '/'
+}
+
 export default function App() {
-  const [hash, setHash] = useState(window.location.hash || '#/')
+  const [route, setRoute] = useState(getCurrentRoute)
 
   useEffect(() => {
-    const handleHashChange = () => {
-      setHash(window.location.hash || '#/')
+    const handleUrlChange = () => {
+      setRoute(getCurrentRoute())
     }
-    window.addEventListener('hashchange', handleHashChange)
-    return () => window.removeEventListener('hashchange', handleHashChange)
+    window.addEventListener('popstate', handleUrlChange)
+    window.addEventListener('hashchange', handleUrlChange)
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange)
+      window.removeEventListener('hashchange', handleUrlChange)
+    }
   }, [])
 
-  // Basic route parsing
-  const route = hash.replace(/^#/, '')
+  // Auxiliary overlay windows (spotlight/widget/proactive-glow/screen-picker)
+  // belong to an already-running, already-authenticated main session, so
+  // they render without their own login gate.
+  if (route.startsWith('/spotlight')) {
+    return (
+      <Suspense fallback={null}>
+        <SpotlightWindow />
+      </Suspense>
+    )
+  }
+  if (route.startsWith('/widget')) {
+    return (
+      <Suspense fallback={null}>
+        <WidgetWindow />
+      </Suspense>
+    )
+  }
+  if (route.startsWith('/proactive-glow')) {
+    return (
+      <Suspense fallback={null}>
+        <ProactiveGlow />
+      </Suspense>
+    )
+  }
+  if (route.startsWith('/screen-picker')) {
+    return (
+      <Suspense fallback={null}>
+        <ScreenPicker />
+      </Suspense>
+    )
+  }
 
-  let content = <MintDashboard />
+  const content = route.startsWith('/settings') ? <SettingsWindow /> : <MintDashboard />
 
-  if (route.startsWith('/settings')) content = <SettingsWindow />
-  if (route.startsWith('/spotlight')) content = <SpotlightWindow />
-  if (route.startsWith('/widget')) content = <WidgetWindow />
-  if (route.startsWith('/proactive-glow')) content = <ProactiveGlow />
-  if (route.startsWith('/screen-picker')) content = <ScreenPicker />
-
-
-  return <Suspense fallback={null}>{content}</Suspense>
+  return (
+    <ChunkErrorBoundary>
+      <Suspense fallback={<div className="auth-gate-loading">Loading Mint…</div>}>
+        <AuthGate>{content}</AuthGate>
+      </Suspense>
+    </ChunkErrorBoundary>
+  )
 }

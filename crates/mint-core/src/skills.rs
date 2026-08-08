@@ -70,6 +70,7 @@ pub fn load_agent_rules_file(file_path: &Path, list: &mut Vec<LearnedSkill>) {
                 content,
                 created_at: String::new(),
                 description,
+                is_workspace: false,
             });
         }
     }
@@ -218,6 +219,7 @@ pub fn load_skills_from_dir(dir: &Path, list: &mut Vec<LearnedSkill>) {
                                 content,
                                 created_at: String::new(),
                                 description,
+                                is_workspace: false,
                             });
                         }
                         break;
@@ -241,6 +243,7 @@ pub fn load_skills_from_dir(dir: &Path, list: &mut Vec<LearnedSkill>) {
                     content,
                     created_at: String::new(),
                     description,
+                    is_workspace: false,
                 });
             }
         }

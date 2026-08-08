@@ -164,17 +164,61 @@ pub async fn search_semantic_code(
 
 fn chunk_text(content: &str) -> Vec<(usize, usize, String)> {
     let lines = content.lines().collect::<Vec<_>>();
+    if lines.is_empty() {
+        return Vec::new();
+    }
     let mut chunks = Vec::new();
     let mut start = 0;
     while start < lines.len() {
-        let mut end = start;
+        let mut max_end = start;
         let mut chars = 0;
-        while end < lines.len() && (end == start || chars + lines[end].len() < MAX_CHARS) {
-            chars += lines[end].len() + 1;
-            end += 1;
+        while max_end < lines.len()
+            && (max_end == start || chars + lines[max_end].len() + 1 <= MAX_CHARS)
+        {
+            chars += lines[max_end].len() + 1;
+            max_end += 1;
         }
-        chunks.push((start + 1, end, lines[start..end].join("\n")));
-        start = end;
+
+        if max_end >= lines.len() {
+            let chunk_lines = &lines[start..lines.len()];
+            if !chunk_lines.is_empty() {
+                chunks.push((start + 1, lines.len(), chunk_lines.join("\n")));
+            }
+            break;
+        }
+
+        // Search backwards from max_end to find the best syntax boundary line
+        let mut best_split = max_end;
+        let min_split = start + (max_end - start) / 2;
+
+        for idx in (min_split..max_end).rev() {
+            let line = lines[idx].trim();
+            if line.is_empty() || line == "}" || line.ends_with('}') || line == "};" {
+                best_split = idx + 1;
+                break;
+            }
+            if line.starts_with("pub ")
+                || line.starts_with("fn ")
+                || line.starts_with("def ")
+                || line.starts_with("class ")
+                || line.starts_with("struct ")
+                || line.starts_with("impl ")
+                || line.starts_with("export ")
+                || line.starts_with("///")
+                || line.starts_with("/**")
+            {
+                best_split = idx;
+                break;
+            }
+        }
+
+        let actual_end = if best_split > start {
+            best_split
+        } else {
+            max_end
+        };
+        chunks.push((start + 1, actual_end, lines[start..actual_end].join("\n")));
+        start = actual_end;
     }
     chunks
 }
@@ -250,5 +294,16 @@ mod tests {
     fn computes_cosine_similarity() {
         assert_eq!(cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]), 1.0);
         assert_eq!(cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]), 0.0);
+    }
+
+    #[test]
+    fn chunks_at_syntax_boundaries() {
+        let fn1 = format!("pub fn foo() {{\n{}\n}}", "    let x = 1;\n".repeat(80));
+        let fn2 = format!("pub fn bar() {{\n{}\n}}", "    let y = 2;\n".repeat(40));
+        let code = format!("{}\n\n{}", fn1, fn2);
+        let chunks = chunk_text(&code);
+        assert!(chunks.len() >= 2);
+        assert!(chunks[0].2.contains("pub fn foo"));
+        assert!(!chunks[0].2.contains("pub fn bar"));
     }
 }

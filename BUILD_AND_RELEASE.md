@@ -1,6 +1,6 @@
-# Build and Release
+# 🚀 Build and Release
 
-## ข้อ 1 Validate
+## ✅ ข้อ 1 Validate
 
 ```bash
 npm ci
@@ -9,7 +9,7 @@ cargo test -p mint-core -p mint-cli -p mint-desktop
 cargo check -p mint-desktop
 ```
 
-## ข้อ 2 Build Desktop Bundles
+## 📦 ข้อ 2 Build Desktop Bundles
 
 ```bash
 npm run tauri:build
@@ -17,7 +17,7 @@ npm run tauri:build
 
 Tauri writes platform bundles under `target/release/bundle/`.
 
-## ข้อ 3 Automated GitHub Release
+## 🚀 ข้อ 3 Automated GitHub Release
 
 Pushing a semver tag starts the release workflow:
 
@@ -38,13 +38,13 @@ The same workflow can be started manually from the Actions tab with
 `workflow_dispatch`; manual runs upload workflow artifacts but only tag-triggered
 runs publish a GitHub Release.
 
-## ข้อ 4 Signed Updates
+## 🔐 ข้อ 4 Signed Updates
 
 The updater requires a configured release endpoint, a public key in the Tauri config, and signed
 release artifacts. Exercise update installation against the published endpoint before promoting a
 release.
 
-## ข้อ 5 Publish to npm
+## 📤 ข้อ 5 Publish to npm
 
 To publish the repository package to the npm registry as a public scoped package:
 

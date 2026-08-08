@@ -1,0 +1,70 @@
+/* desktop: settings/general.css — split from settings.css, rules kept in original order */
+
+.setting-actions {
+    display: flex;
+    gap: 12px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+}
+
+.btn-connect {
+    border: 1px solid transparent;
+    background: var(--accent);
+    color: #ffffff;
+}
+
+/* Provider Cards styling */
+
+.provider-cards-container {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.provider-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: transparent;
+    padding: 14px 16px;
+    transition: border-color 0.2s ease;
+}
+
+.provider-card:hover {
+    border-color: var(--border-strong);
+}
+
+.provider-card.active-provider {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.provider-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.provider-card-title {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.provider-active-badge {
+    color: var(--accent-hover);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.provider-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}

@@ -10,6 +10,7 @@ mod updater;
 mod webhooks;
 mod workflows;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use mint_core::browser::{
     BrowserTab, click as browser_click, list_tabs as browser_list_tabs,
     navigate as browser_navigate, read_page_text,
@@ -29,18 +30,28 @@ use tokio::sync::oneshot;
 
 use integrations::{channel_inventory, list_plugins};
 use mint_core::{
-    AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, ChatRequest, ChatResponse,
-    ChatSession, CodeEdit, CodeEditProposal, ImageGenRequest, InteractionMemory, MemoryStore,
-    MintConfig, PictureEntry, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport,
-    apply_code_edits, classify_shell_command, config_path, google_tts_urls, list_saved_pictures,
-    load_config, load_workflows, orchestrate_agent_loop, orchestrate_chat_stream_with_fallback,
-    orchestrate_chat_with_fallback, propose_code_edits, save_chat_images, save_config,
-    save_workflows, start_channels, weather, workflows_path,
+    AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, AuthUser, ChatRequest,
+    ChatResponse, ChatSession, CodeEdit, CodeEditProposal, GeminiLiveEvent, GeminiLiveHandle,
+    ImageGenRequest, InteractionMemory, MemoryStore, MintConfig, PictureEntry, SubagentDefinition,
+    SubagentDraft, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport, apply_code_edits,
+    classify_shell_command, config_path, delete_saved_picture,
+    delete_subagent as core_delete_subagent, get_user, google_tts_urls, list_saved_pictures,
+    list_subagents as core_list_subagents, load_config, load_workflows, login_user,
+    orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    propose_code_edits, register_user, save_avatar_file, save_chat_images, save_config,
+    save_subagent as core_save_subagent, save_workflows, start_channels,
+    start_gemini_live_session as core_start_gemini_live_session, update_profile, weather,
+    workflows_path,
 };
 use plugins::execute_plugin;
 
 pub struct ApprovalsState {
     pub pending: Mutex<HashMap<String, oneshot::Sender<ApprovalOutcome>>>,
+}
+
+#[derive(Default)]
+pub struct GeminiLiveState {
+    pub sessions: Mutex<HashMap<String, GeminiLiveHandle>>,
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -389,6 +400,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
         .get("enableFastMode")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let plan_mode = request.plan_mode;
 
     let app_clone = app.clone();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
@@ -422,6 +434,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
     let message_clone = request.message.clone();
     let root_clone = root.clone();
     let image_data_uri_clone = request.image_data_uri.clone();
+    let audio_data_uri_clone = request.audio_data_uri.clone();
     let video_data_uri_clone = request.video_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
     let agent_id_clone = request.agent_id.clone();
@@ -432,10 +445,13 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
             &message_clone,
             &root_clone,
             image_data_uri_clone,
+            audio_data_uri_clone,
             video_data_uri_clone,
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
+            None,
             fast_mode,
+            plan_mode,
             approve_cb,
             progress_cb,
             on_chunk,
@@ -472,6 +488,9 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
         model: res.model,
         text: res.summary,
         fallback_provider: res.fallback,
+        tool_calls: None,
+        stop_reason: None,
+        total_tokens: None,
     })
 }
 
@@ -546,6 +565,7 @@ async fn stream_chat_message(
         .get("enableFastMode")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let plan_mode = request.plan_mode;
 
     let app_clone = app.clone();
     let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
@@ -594,6 +614,7 @@ async fn stream_chat_message(
     let message_clone = request.message.clone();
     let root_clone = root.clone();
     let image_data_uri_clone = request.image_data_uri.clone();
+    let audio_data_uri_clone = request.audio_data_uri.clone();
     let video_data_uri_clone = request.video_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
     let agent_id_clone = request.agent_id.clone();
@@ -604,10 +625,13 @@ async fn stream_chat_message(
             &message_clone,
             &root_clone,
             image_data_uri_clone,
+            audio_data_uri_clone,
             video_data_uri_clone,
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
+            None,
             fast_mode,
+            plan_mode,
             approve_cb,
             progress_cb,
             on_chunk,
@@ -644,12 +668,106 @@ async fn stream_chat_message(
         model: res.model,
         text: res.summary,
         fallback_provider: res.fallback,
+        tool_calls: None,
+        stop_reason: None,
+        total_tokens: None,
     })
 }
 
 #[tauri::command]
 async fn cancel_chat_message(chat_id: String) -> Result<(), String> {
     mint_core::cancel_agent(&chat_id);
+    Ok(())
+}
+
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct GeminiLiveStartRequest {
+    #[serde(default)]
+    workspace_path: Option<String>,
+    #[serde(default)]
+    chat_id: Option<String>,
+}
+
+/// Starts a Gemini Live realtime voice session (beta, opt-in voice mode) and returns a
+/// session id used by `send_gemini_live_audio_chunk`/`stop_gemini_live_session`. Session
+/// events (audio replies, transcripts, tool-call status) stream back through `on_event`.
+/// Tool calls triggered by voice go through the same approval flow as typed chat, reusing
+/// the existing `tool-approval-requested` event / `ApprovalsState` bridge.
+#[tauri::command]
+async fn start_gemini_live_session(
+    app: AppHandle,
+    state: tauri::State<'_, GeminiLiveState>,
+    request: GeminiLiveStartRequest,
+    on_event: Channel<GeminiLiveEvent>,
+) -> Result<String, String> {
+    let config = load_config().map_err(|error| error.to_string())?;
+    let root = workspace_root(request.workspace_path.as_deref())?;
+    let chat_id = request.chat_id.unwrap_or_default();
+    let session_id = format!("gemini-live-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
+
+    let app_clone = app.clone();
+    let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+        let (tx, rx) = oneshot::channel();
+        let token = format!("tok-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
+
+        let state = app_clone.state::<ApprovalsState>();
+        state.pending.lock().unwrap().insert(token.clone(), tx);
+
+        app_clone
+            .emit(
+                "tool-approval-requested",
+                serde_json::json!({
+                    "token": token,
+                    "approval": approval
+                }),
+            )
+            .map_err(|e| e.to_string())?;
+
+        let outcome =
+            tokio::task::block_in_place(move || tokio::runtime::Handle::current().block_on(rx))
+                .unwrap_or(ApprovalOutcome::Denied);
+        Ok(outcome)
+    };
+
+    let handle = core_start_gemini_live_session(config, root, chat_id, approve_cb, move |event| {
+        let _ = on_event.send(event);
+    });
+
+    state
+        .sessions
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(session_id.clone(), handle);
+    Ok(session_id)
+}
+
+#[tauri::command]
+async fn send_gemini_live_audio_chunk(
+    state: tauri::State<'_, GeminiLiveState>,
+    session_id: String,
+    chunk_base64: String,
+) -> Result<(), String> {
+    let pcm = BASE64
+        .decode(chunk_base64)
+        .map_err(|e| format!("invalid audio chunk: {e}"))?;
+    let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+    let handle = sessions
+        .get(&session_id)
+        .ok_or_else(|| "Gemini Live session not found".to_string())?;
+    handle.push_audio(pcm)
+}
+
+#[tauri::command]
+async fn stop_gemini_live_session(
+    state: tauri::State<'_, GeminiLiveState>,
+    session_id: String,
+) -> Result<(), String> {
+    state
+        .sessions
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&session_id);
     Ok(())
 }
 
@@ -741,6 +859,85 @@ fn set_profile_value(key: String, value: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// Path to the file that remembers which shared-store user is currently
+/// logged into the desktop app (`~/.config/mint/session.json`). Desktop is a
+/// single trusted process per launch, so a bearer token isn't needed here —
+/// unlike the web-mode API server (see mint_core::auth session tokens).
+fn desktop_session_path() -> Result<PathBuf, String> {
+    Ok(config_path()
+        .map_err(|error| error.to_string())?
+        .with_file_name("session.json"))
+}
+
+fn write_desktop_session(user_id: &str) -> Result<(), String> {
+    let path = desktop_session_path()?;
+    let contents = serde_json::json!({ "userId": user_id }).to_string();
+    fs::write(path, contents).map_err(|error| error.to_string())
+}
+
+fn read_desktop_session_user_id() -> Option<String> {
+    let path = desktop_session_path().ok()?;
+    let contents = fs::read_to_string(path).ok()?;
+    let value: Value = serde_json::from_str(&contents).ok()?;
+    value.get("userId")?.as_str().map(str::to_string)
+}
+
+#[tauri::command]
+fn auth_register(
+    name: Option<String>,
+    email: String,
+    password: String,
+) -> Result<AuthUser, String> {
+    let user = register_user(name, &email, &password).map_err(|error| error.to_string())?;
+    write_desktop_session(&user.id)?;
+    Ok(user)
+}
+
+#[tauri::command]
+fn auth_login(email: String, password: String) -> Result<AuthUser, String> {
+    let user = login_user(&email, &password).map_err(|error| error.to_string())?;
+    write_desktop_session(&user.id)?;
+    Ok(user)
+}
+
+#[tauri::command]
+fn auth_logout() -> Result<(), String> {
+    let path = desktop_session_path()?;
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn auth_current_user() -> Result<Option<AuthUser>, String> {
+    let Some(user_id) = read_desktop_session_user_id() else {
+        return Ok(None);
+    };
+    get_user(&user_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn auth_update_profile(name: Option<String>, image: Option<String>) -> Result<AuthUser, String> {
+    let Some(user_id) = read_desktop_session_user_id() else {
+        return Err("Not logged in".to_string());
+    };
+    update_profile(&user_id, name, image).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn auth_upload_avatar(file_name: String, data_base64: String) -> Result<AuthUser, String> {
+    let Some(user_id) = read_desktop_session_user_id() else {
+        return Err("Not logged in".to_string());
+    };
+    let bytes = BASE64
+        .decode(data_base64.as_bytes())
+        .map_err(|_| "Invalid image data".to_string())?;
+    let extension = file_name.rsplit('.').next().unwrap_or("png").to_lowercase();
+    let url = save_avatar_file(&bytes, &extension).map_err(|error| error.to_string())?;
+    update_profile(&user_id, None, Some(url)).map_err(|error| error.to_string())
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 struct LearnedSkillDto {
@@ -829,6 +1026,26 @@ fn add_learned_skill(name: String, content: String) -> Result<LearnedSkillDto, S
 fn delete_learned_skill(name: String) -> Result<usize, String> {
     let store = MemoryStore::open_default().map_err(|e| e.to_string())?;
     store.delete_learned_skill(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_subagents(workspace_path: Option<String>) -> Result<Vec<SubagentDefinition>, String> {
+    let root = workspace_root(workspace_path.as_deref()).ok();
+    Ok(core_list_subagents(root.as_deref()))
+}
+
+#[tauri::command]
+fn save_subagent(
+    draft: SubagentDraft,
+    workspace_path: Option<String>,
+) -> Result<SubagentDefinition, String> {
+    let root = workspace_root(workspace_path.as_deref()).ok();
+    core_save_subagent(&draft, root.as_deref())
+}
+
+#[tauri::command]
+fn delete_subagent(source_path: String) -> Result<(), String> {
+    core_delete_subagent(&source_path)
 }
 
 #[tauri::command]
@@ -942,6 +1159,11 @@ async fn generate_video(request: VideoGenRequest) -> Result<VideoGenResponse, St
 #[tauri::command]
 fn list_pictures() -> Result<Vec<PictureEntry>, String> {
     list_saved_pictures().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn delete_picture(id: String) -> Result<(), String> {
+    delete_saved_picture(&id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1233,6 +1455,42 @@ fn save_custom_workflows(workflows: Vec<serde_json::Value>) -> Result<ActionResu
     })
 }
 
+/// WebKitGTK denies every `permission-request` (microphone, camera, geolocation, ...) by
+/// default unless something handles the signal — Tauri/wry doesn't wire this up on Linux,
+/// which is why `getUserMedia()` rejects with `NotAllowedError` even though the user never
+/// saw (or could act on) a prompt. Auto-allow only mic/camera requests here; everything
+/// else falls through to WebKit's default (deny).
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+fn allow_media_permission_requests(window: &tauri::WebviewWindow) {
+    use webkit2gtk::{PermissionRequestExt, WebViewExt, glib::prelude::ObjectExt};
+    let _ = window.with_webview(|platform_webview| {
+        let webview = platform_webview.inner();
+        webview.connect_permission_request(|_webview, request| {
+            if request.is::<webkit2gtk::UserMediaPermissionRequest>() {
+                request.allow();
+                true
+            } else {
+                false
+            }
+        });
+    });
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+)))]
+fn allow_media_permission_requests(_window: &tauri::WebviewWindow) {}
+
 fn install_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show Mint", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
@@ -1314,11 +1572,16 @@ fn install_shortcuts(app: &AppHandle) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(ApprovalsState {
             pending: Mutex::new(HashMap::new()),
         })
+        .manage(GeminiLiveState::default())
         .setup(|app| {
+            if let Some(main_window) = app.get_webview_window("main") {
+                allow_media_permission_requests(&main_window);
+            }
             install_tray(app.handle())?;
             install_shortcuts(app.handle())?;
             start_monitor(app.handle().clone());
@@ -1327,6 +1590,9 @@ pub fn run() {
             start_proactive_loop(app.handle().clone());
             start_channels();
             start_webhooks();
+            tauri::async_runtime::spawn(async {
+                let _ = mint_core::start_api_server(3000).await;
+            });
             if load_config()
                 .map(|config| config.show_desktop_widget)
                 .unwrap_or(false)
@@ -1356,6 +1622,9 @@ pub fn run() {
             send_chat_message,
             stream_chat_message,
             cancel_chat_message,
+            start_gemini_live_session,
+            send_gemini_live_audio_chunk,
+            stop_gemini_live_session,
             submit_tool_approval,
             get_recent_interactions,
             save_interaction_agent_activity,
@@ -1364,11 +1633,21 @@ pub fn run() {
             rename_chat_session,
             get_profile_value,
             set_profile_value,
+            auth_register,
+            auth_login,
+            auth_logout,
+            auth_current_user,
+            auth_update_profile,
+            auth_upload_avatar,
             clear_chat_history,
             list_learned_skills,
             add_learned_skill,
             delete_learned_skill,
+            list_subagents,
+            save_subagent,
+            delete_subagent,
             list_pictures,
+            delete_picture,
             save_pictures,
             upload_file,
             open_folder,

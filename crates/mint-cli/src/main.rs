@@ -8,27 +8,32 @@ use std::{
 use mint_core::{
     CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, ImageGenRequest, KnowledgeStore,
     MemoryStore, MintConfig, TaskStore, apply_code_edits, assert_path_capability, build_code_patch,
-    build_symbol_index, classify_shell_command, config_path, create_folder, execute_native_plugin,
+    build_symbol_index, classify_shell_command, config_path, create_folder,
     fetch_github_repo_summary, find_paths, generate_images, index_semantic_code, initialize_config,
-    inspect_code_plan, list_code_files, load_config, native_plugins,
+    inspect_code_plan, list_code_files, list_subagents, load_config,
     orchestrate_chat_with_fallback, parse_github_url, propose_code_edits, read_code_file,
-    repository_summary, run_shell_command, search_code, search_semantic_code, set_config_value,
+    repository_summary, run_shell_command, sandbox_availability, save_config, search_code,
+    search_semantic_code, set_config_value,
 };
 
 mod actions;
 mod agent;
+mod background;
 mod gmail;
+mod hooks;
 mod image;
 mod interactive;
 mod markdown;
 mod mcp;
 mod onboard;
+mod plugins_cli;
 mod setup;
 mod skills;
 mod updater;
 
 pub use interactive::{
-    SESSION_APPROVED, active_model, confirm, print_welcome_banner, run_interactive_chat,
+    SESSION_APPROVED, active_model, confirm, confirm_security, print_welcome_banner,
+    run_interactive_chat,
 };
 
 pub const RESET: &str = "\x1b[0m";
@@ -144,10 +149,11 @@ enum Command {
         #[command(subcommand)]
         command: FilesCommand,
     },
-    /// Run built-in native plugins.
-    Plugin {
+    /// Manage built-in plugins & integrations (Gmail, Calendar, Notion, Spotify, Vercel, GitHub).
+    #[command(alias = "plugin")]
+    Plugins {
         #[command(subcommand)]
-        command: PluginCommand,
+        command: Option<plugins_cli::PluginsSubcommand>,
     },
     /// Index and search native local text knowledge.
     Knowledge {
@@ -169,7 +175,11 @@ enum Command {
     /// Start the browser automation environment and enable browser actions.
     Auto,
     /// Launch the web UI and local API server.
-    Web,
+    Web {
+        /// Force development mode with Hot Module Replacement (HMR)
+        #[arg(long, default_value_t = false)]
+        dev: bool,
+    },
     /// Start only the local API server.
     Api {
         #[arg(long, default_value_t = 3000)]
@@ -179,6 +189,11 @@ enum Command {
     Mcp {
         #[command(subcommand)]
         command: McpCommand,
+    },
+    /// Manage PreToolUse/PostToolUse hooks.
+    Hooks {
+        #[command(subcommand)]
+        command: HooksCommand,
     },
     /// Configure Gmail OAuth.
     Gmail {
@@ -272,6 +287,11 @@ enum Command {
         #[arg(long)]
         output: Option<PathBuf>,
     },
+    /// AI Video Editor — inspect, edit, and process local video files with FFmpeg.
+    Video {
+        #[command(subcommand)]
+        command: VideoCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -313,6 +333,25 @@ enum McpCommand {
         #[arg(long, default_value = "{}")]
         arguments: String,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum HooksCommand {
+    /// Add a hook. event: PreToolUse or PostToolUse. matcher: "*" or a comma/pipe-separated
+    /// list of action names (e.g. "write_file,apply_patch"). command: a shell command that
+    /// receives a JSON payload on stdin and, for PreToolUse, exits with code 2 to block.
+    Add {
+        event: String,
+        matcher: String,
+        command: String,
+        #[arg(long)]
+        timeout: Option<u64>,
+    },
+    List,
+    Remove {
+        index: usize,
+    },
+    Clear,
 }
 
 #[derive(Debug, Subcommand)]
@@ -400,6 +439,9 @@ enum CodeCommand {
         task: String,
         #[arg(long, default_value = ".")]
         root: PathBuf,
+        /// Investigate read-only and require plan approval before editing files or running commands.
+        #[arg(long)]
+        plan: bool,
     },
     /// Summarize source files while skipping build and dependency directories.
     Summary {
@@ -412,6 +454,12 @@ enum CodeCommand {
         root: PathBuf,
         #[arg(long, default_value_t = 100)]
         limit: usize,
+    },
+    /// List subagent definitions available to `dispatch_subagent` (global
+    /// `~/.config/mint/mint-agents/` plus workspace `.agents/subagents/`).
+    Subagents {
+        #[arg(default_value = ".")]
+        root: PathBuf,
     },
     /// Read a numbered source range.
     Read {
@@ -513,6 +561,140 @@ enum SafetyCommand {
         #[arg(long)]
         write: bool,
     },
+    /// Manage persistent "always allow"/"always deny" agent approval rules.
+    Permissions {
+        #[command(subcommand)]
+        command: PermissionsCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PermissionsCommand {
+    /// List saved permission rules.
+    List,
+    /// Remove a saved permission rule by its index (see `list`).
+    Remove { index: usize },
+}
+
+#[derive(Debug, Subcommand)]
+enum VideoCommand {
+    /// Inspect a video file and print its metadata (duration, fps, resolution, etc.).
+    Load {
+        /// Path to the video file.
+        path: PathBuf,
+    },
+    /// Trim a video between start and end seconds.
+    Trim {
+        /// Path to the input video.
+        input: PathBuf,
+        /// Trim start in seconds.
+        #[arg(long)]
+        start: f64,
+        /// Trim end in seconds.
+        #[arg(long)]
+        end: f64,
+        /// Output file path.
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Resize a video. Use -1 for width or height to preserve aspect ratio.
+    Resize {
+        input: PathBuf,
+        #[arg(long, default_value_t = -1)]
+        width: i32,
+        #[arg(long, default_value_t = -1)]
+        height: i32,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Merge multiple video files into one.
+    Merge {
+        /// Input video files (space-separated).
+        #[arg(required = true)]
+        inputs: Vec<PathBuf>,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Extract the audio track from a video as a WAV file.
+    ExtractAudio {
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Remove silent sections from a video.
+    RemoveSilence {
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        /// Silence threshold in dB (default: -30)
+        #[arg(long, default_value_t = -30.0)]
+        threshold: f64,
+        /// Minimum silence duration in seconds to remove (default: 0.5)
+        #[arg(long, default_value_t = 0.5)]
+        min_duration: f64,
+    },
+    /// Re-encode a video to a target resolution, fps, and codec.
+    Export {
+        input: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+        /// e.g. "1920x1080", "1280x720"
+        #[arg(long)]
+        resolution: Option<String>,
+        #[arg(long)]
+        fps: Option<u32>,
+        /// Video codec: libx264 (default), libx265, libvpx-vp9
+        #[arg(long)]
+        codec: Option<String>,
+        /// CRF quality 0-51 (lower = better, default 23)
+        #[arg(long)]
+        crf: Option<u32>,
+    },
+    /// Transcribe speech in audio/video to an SRT subtitle file.
+    Transcribe {
+        input: PathBuf,
+        #[arg(long)]
+        language: Option<String>,
+        /// Output .srt file path.
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Burn subtitles into a video with style preset (default, tiktok, minimal).
+    Subtitle {
+        input: PathBuf,
+        /// Path to .srt file or raw SRT string content.
+        #[arg(long)]
+        srt: String,
+        /// Style preset: default, tiktok, minimal
+        #[arg(long, default_value = "default")]
+        style: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Translate an SRT subtitle file to another language.
+    TranslateSubtitle {
+        srt: PathBuf,
+        #[arg(long)]
+        lang: String,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    /// Automatically make viral vertical Shorts clips from a video.
+    MakeShorts {
+        input: PathBuf,
+        /// Destination folder for generated shorts clips.
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        /// Number of clips to generate (default: 3).
+        #[arg(long, default_value_t = 3)]
+        clips: u32,
+        /// Target duration in seconds for each clip (default: 60).
+        #[arg(long, default_value_t = 60.0)]
+        duration: f64,
+        /// Disable burning vertical TikTok-style subtitles.
+        #[arg(long, default_value_t = false)]
+        no_subtitles: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -586,6 +768,11 @@ async fn main() -> Result<()> {
                             "activeProvider": config.ai_provider,
                             "availableProviders": config.available_providers(),
                             "headlessTaskQueue": config.extra["enableHeadlessTaskQueue"],
+                            "sandbox": {
+                                "mode": config.sandbox_mode,
+                                "command": config.sandbox_command,
+                                "availability": sandbox_availability(&config),
+                            },
                             "updater": {
                                 "enabled": config.extra["enableAutoUpdate"],
                                 "endpointConfigured": configured(&config, &["updaterEndpoint"]),
@@ -727,8 +914,8 @@ async fn main() -> Result<()> {
                 tokio::signal::ctrl_c().await.ok();
                 println!("\n👋 Terminating Mint Browser Automation Environment...");
             }
-            Command::Web => {
-                launch_mint_target("web".into()).await?;
+            Command::Web { dev } => {
+                launch_mint_target("web".into(), dev).await?;
             }
             Command::Api { port } => {
                 let config = load_config()?;
@@ -825,6 +1012,50 @@ async fn main() -> Result<()> {
                     let res = mcp::call(&server, &tool, serde_json::from_str(&arguments)?);
                     spinner.finish_and_clear();
                     println!("{}", serde_json::to_string_pretty(&res?)?);
+                }
+            },
+            Command::Hooks { command } => match command {
+                HooksCommand::Add {
+                    event,
+                    matcher,
+                    command,
+                    timeout,
+                } => {
+                    let event = mint_core::HookEvent::parse(&event)?;
+                    hooks::add(event, &matcher, &command, timeout)?;
+                    println!("Added {} hook for '{}'", event.as_str(), matcher);
+                }
+                HooksCommand::List => {
+                    let entries = hooks::list()?;
+                    if entries.is_empty() {
+                        println!("\n{BLUE}No hooks configured.{RESET}");
+                    } else {
+                        println!("\n{BLUE}Hooks:{RESET}");
+                        for (index, hook) in entries.iter().enumerate() {
+                            println!(
+                                "  [{}] {} matcher='{}' timeout={}s command={}",
+                                index,
+                                hook.event.as_str(),
+                                hook.matcher,
+                                hook.timeout_secs,
+                                hook.command
+                            );
+                        }
+                    }
+                }
+                HooksCommand::Remove { index } => {
+                    println!(
+                        "{}",
+                        if hooks::remove(index)? {
+                            "removed"
+                        } else {
+                            "not found"
+                        }
+                    )
+                }
+                HooksCommand::Clear => {
+                    hooks::clear()?;
+                    println!("cleared");
                 }
             },
             Command::Gmail { command } => match command {
@@ -968,6 +1199,9 @@ async fn main() -> Result<()> {
                             document_attachment: None,
                             workspace_path: None,
                             agent_id: None,
+                            plan_mode: false,
+                            messages: None,
+                            tools: None,
                         },
                     )
                     .await?;
@@ -1013,6 +1247,36 @@ async fn main() -> Result<()> {
                         assert_path_capability(&path, capability, &load_config()?)?.display()
                     );
                 }
+                SafetyCommand::Permissions { command } => match command {
+                    PermissionsCommand::List => {
+                        let config = load_config()?;
+                        if config.permission_rules.is_empty() {
+                            println!("No saved permission rules.");
+                        } else {
+                            for (index, rule) in config.permission_rules.iter().enumerate() {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&serde_json::json!({
+                                        "index": index,
+                                        "rule": rule,
+                                    }))?
+                                );
+                            }
+                        }
+                    }
+                    PermissionsCommand::Remove { index } => {
+                        let mut config = load_config()?;
+                        if index >= config.permission_rules.len() {
+                            anyhow::bail!(
+                                "no permission rule at index {index} (have {})",
+                                config.permission_rules.len()
+                            );
+                        }
+                        let removed = config.permission_rules.remove(index);
+                        save_config(&config)?;
+                        println!("Removed: {}", serde_json::to_string_pretty(&removed)?);
+                    }
+                },
             },
             Command::Run {
                 approve,
@@ -1093,17 +1357,9 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            Command::Plugin { command } => match command {
-                PluginCommand::List => {
-                    println!("{}", serde_json::to_string_pretty(&native_plugins())?)
-                }
-                PluginCommand::Run { name, instruction } => {
-                    println!(
-                        "{}",
-                        execute_native_plugin(&load_config()?, &name, &instruction).await?
-                    )
-                }
-            },
+            Command::Plugins { command } => {
+                plugins_cli::run_plugins_command(command).await?;
+            }
             Command::Knowledge { command } => {
                 let store = KnowledgeStore::open_default()?;
                 match command {
@@ -1124,8 +1380,19 @@ async fn main() -> Result<()> {
             Command::Code { command } => {
                 let config = load_config()?;
                 match command {
-                    CodeCommand::Agent { task, root } => {
-                        agent::run_code_agent(&task, &root, &config).await?;
+                    CodeCommand::Agent { task, root, plan } => {
+                        agent::run_code_agent_with_options(
+                            &task,
+                            &root,
+                            &config,
+                            None,
+                            None,
+                            agent::AgentOptions {
+                                fast_mode: false,
+                                plan_mode: plan,
+                            },
+                        )
+                        .await?;
                     }
                     CodeCommand::Summary { root } => println!(
                         "{}",
@@ -1135,6 +1402,17 @@ async fn main() -> Result<()> {
                         "{}",
                         serde_json::to_string_pretty(&list_code_files(&root, limit, &config)?)?
                     ),
+                    CodeCommand::Subagents { root } => {
+                        let subagents = list_subagents(Some(&root));
+                        if subagents.is_empty() {
+                            println!(
+                                "No subagent definitions found under {}/.agents/subagents/ or ~/.config/mint/mint-agents/.",
+                                root.display()
+                            );
+                        } else {
+                            println!("{}", serde_json::to_string_pretty(&subagents)?);
+                        }
+                    }
                     CodeCommand::Read { path, start, end } => {
                         println!("{}", read_code_file(&path, start, end, &config)?)
                     }
@@ -1194,7 +1472,11 @@ async fn main() -> Result<()> {
                             &[build_code_patch(
                                 &root,
                                 path,
-                                &[CodePatchHunk { old_text, new_text }],
+                                &[CodePatchHunk {
+                                    old_text,
+                                    new_text,
+                                    replace_all: false
+                                }],
                                 &config,
                             )?],
                             &config,
@@ -1213,7 +1495,11 @@ async fn main() -> Result<()> {
                             &[build_code_patch(
                                 &root,
                                 path,
-                                &[CodePatchHunk { old_text, new_text }],
+                                &[CodePatchHunk {
+                                    old_text,
+                                    new_text,
+                                    replace_all: false
+                                }],
                                 &config,
                             )?],
                             &approval_token,
@@ -1263,7 +1549,7 @@ async fn main() -> Result<()> {
             }
             Command::Setup => {
                 if let Some(target) = setup::run().await? {
-                    launch_mint_target(target).await?;
+                    launch_mint_target(target, false).await?;
                 }
             }
             Command::Imagine {
@@ -1405,12 +1691,298 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+            Command::Video { command } => {
+                use mint_core::{
+                    ExportRequest, ExtractAudioRequest, MergeRequest, RemoveSilenceRequest,
+                    ResizeRequest, TrimRequest, video_export, video_extract_audio, video_load,
+                    video_merge, video_remove_silence, video_resize, video_trim,
+                };
+                match command {
+                    VideoCommand::Load { path } => {
+                        let path_str = path.to_string_lossy().to_string();
+                        match video_load(&path_str) {
+                            Ok(info) => {
+                                println!("{MINT}✓ Video loaded:{RESET}");
+                                println!("  Path:        {}", info.path);
+                                println!("  Duration:    {:.2}s", info.duration);
+                                println!("  Resolution:  {}x{}", info.width, info.height);
+                                println!("  FPS:         {:.2}", info.fps);
+                                println!("  Audio:       {} stream(s)", info.audio_streams);
+                                println!("  Format:      {}", info.format);
+                                println!("  Size:        {} bytes", info.size_bytes);
+                            }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Failed to load video: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                    VideoCommand::Trim {
+                        input,
+                        start,
+                        end,
+                        output,
+                    } => {
+                        println!("{BLUE}→ Trimming {:.2}s–{:.2}s...{RESET}", start, end);
+                        let req = TrimRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output: output.to_string_lossy().to_string(),
+                            start,
+                            end,
+                        };
+                        match video_trim(&req) {
+                            Ok(r) => println!("{MINT}✓ Trimmed → {}{RESET}", r.output_path),
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Trim failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                    VideoCommand::Resize {
+                        input,
+                        width,
+                        height,
+                        output,
+                    } => {
+                        println!("{BLUE}→ Resizing to {}x{}...{RESET}", width, height);
+                        let req = ResizeRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output: output.to_string_lossy().to_string(),
+                            width,
+                            height,
+                        };
+                        match video_resize(&req) {
+                            Ok(r) => println!("{MINT}✓ Resized → {}{RESET}", r.output_path),
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Resize failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                    VideoCommand::Merge { inputs, output } => {
+                        println!("{BLUE}→ Merging {} clips...{RESET}", inputs.len());
+                        let req = MergeRequest {
+                            inputs: inputs
+                                .iter()
+                                .map(|p| p.to_string_lossy().to_string())
+                                .collect(),
+                            output: output.to_string_lossy().to_string(),
+                        };
+                        match video_merge(&req) {
+                            Ok(r) => println!("{MINT}✓ Merged → {}{RESET}", r.output_path),
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Merge failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                    VideoCommand::ExtractAudio { input, output } => {
+                        println!("{BLUE}→ Extracting audio...{RESET}");
+                        let req = ExtractAudioRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output: output.to_string_lossy().to_string(),
+                        };
+                        match video_extract_audio(&req) {
+                            Ok(r) => println!("{MINT}✓ Audio extracted → {}{RESET}", r.output_path),
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Extract failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                    VideoCommand::RemoveSilence {
+                        input,
+                        output,
+                        threshold,
+                        min_duration,
+                    } => {
+                        println!(
+                            "{BLUE}→ Removing silence (threshold: {}dB, min: {}s)...{RESET}",
+                            threshold, min_duration
+                        );
+                        let req = RemoveSilenceRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output: output.to_string_lossy().to_string(),
+                            threshold_db: threshold,
+                            min_silence_secs: min_duration,
+                        };
+                        match video_remove_silence(&req) {
+                            Ok(r) => {
+                                let dur =
+                                    r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
+                                println!(
+                                    "{MINT}✓ Silence removed → {} ({dur}){RESET}",
+                                    r.output_path
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Remove silence failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                    VideoCommand::Export {
+                        input,
+                        output,
+                        resolution,
+                        fps,
+                        codec,
+                        crf,
+                    } => {
+                        println!("{BLUE}→ Exporting video...{RESET}");
+                        let req = ExportRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output: output.to_string_lossy().to_string(),
+                            resolution,
+                            fps,
+                            codec,
+                            crf,
+                        };
+                        match video_export(&req) {
+                            Ok(r) => {
+                                let dur =
+                                    r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
+                                let size = r
+                                    .size_bytes
+                                    .map(|s| format!("{} bytes", s))
+                                    .unwrap_or_default();
+                                println!(
+                                    "{MINT}✓ Exported → {} ({dur}, {size}){RESET}",
+                                    r.output_path
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Export failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                    VideoCommand::Transcribe {
+                        input,
+                        language,
+                        output,
+                    } => {
+                        println!("{BLUE}→ Transcribing audio/speech...{RESET}");
+                        let req = mint_core::TranscribeRequest {
+                            input: input.to_string_lossy().to_string(),
+                            language,
+                            prompt: None,
+                        };
+                        let config = load_config()?;
+                        match mint_core::transcribe(&config, &req).await {
+                            Ok(res) => {
+                                let srt = mint_core::generate_srt(&res.segments);
+                                std::fs::write(&output, srt)?;
+                                println!(
+                                    "{MINT}✓ Transcribed {} segments → {}{RESET}",
+                                    res.segments.len(),
+                                    output.display()
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Transcription failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                    VideoCommand::Subtitle {
+                        input,
+                        srt,
+                        style,
+                        output,
+                    } => {
+                        println!("{BLUE}→ Burning subtitles ({style} preset)...{RESET}");
+                        let srt_content = if std::path::Path::new(&srt).exists() {
+                            std::fs::read_to_string(&srt)?
+                        } else {
+                            srt.clone()
+                        };
+                        let req = mint_core::BurnSubtitleRequest {
+                            input_video: input.to_string_lossy().to_string(),
+                            srt_input: srt_content,
+                            output_video: output.to_string_lossy().to_string(),
+                            style: None,
+                            preset: Some(style),
+                        };
+                        match mint_core::burn_subtitles(&req) {
+                            Ok(r) => {
+                                println!("{MINT}✓ Subtitles burned → {}{RESET}", r.output_path)
+                            }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Subtitle burn failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                    VideoCommand::TranslateSubtitle { srt, lang, output } => {
+                        println!("{BLUE}→ Translating SRT to {lang}...{RESET}");
+                        let srt_content = std::fs::read_to_string(&srt)?;
+                        let req = mint_core::TranslateSubtitleRequest {
+                            srt_content,
+                            target_language: lang,
+                        };
+                        let config = load_config()?;
+                        match mint_core::translate_subtitles(&config, &req).await {
+                            Ok(translated_srt) => {
+                                std::fs::write(&output, translated_srt)?;
+                                println!(
+                                    "{MINT}✓ Subtitles translated → {}{RESET}",
+                                    output.display()
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Subtitle translation failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                    VideoCommand::MakeShorts {
+                        input,
+                        output_dir,
+                        clips,
+                        duration,
+                        no_subtitles,
+                    } => {
+                        println!(
+                            "{BLUE}🚀 Generating up to {clips} vertical Shorts clips from video...{RESET}"
+                        );
+                        let req = mint_core::MakeShortsRequest {
+                            input: input.to_string_lossy().to_string(),
+                            output_dir: output_dir.map(|p| p.to_string_lossy().to_string()),
+                            max_clips: clips,
+                            target_duration: duration,
+                            burn_subtitles: !no_subtitles,
+                            width: 1080,
+                            height: 1920,
+                        };
+                        let config = load_config()?;
+                        match mint_core::make_shorts(&config, &req).await {
+                            Ok(res) => {
+                                println!(
+                                    "{MINT}✓ Generated {} vertical Shorts!{RESET}",
+                                    res.clips.len()
+                                );
+                                for clip in &res.clips {
+                                    println!(
+                                        "  [{}] {} ({:.1}s) → {}",
+                                        clip.id, clip.title, clip.duration, clip.path
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("{ERROR}✗ Make Shorts failed: {e}{RESET}");
+                                anyhow::bail!("{e}");
+                            }
+                        }
+                    }
+                }
+            }
         },
     }
     Ok(())
 }
 
-async fn launch_mint_target(target: String) -> Result<()> {
+async fn launch_mint_target(target: String, dev: bool) -> Result<()> {
     match target.as_str() {
         "cli" => {
             println!("{MINT}Starting CLI Interactive Chat Assistant...{RESET}\n");
@@ -1453,9 +2025,20 @@ async fn launch_mint_target(target: String) -> Result<()> {
                     anyhow::anyhow!("Failed to find project root directory containing package.json")
                 })?
             };
+            let dist_web = project_root
+                .join("out")
+                .join("renderer")
+                .join("index-web.html");
+            let web_cmd = if dev {
+                "dev:web"
+            } else if dist_web.exists() {
+                "preview:web"
+            } else {
+                "dev:web"
+            };
             std::process::Command::new("npm")
                 .current_dir(&project_root)
-                .args(["run", "dev:web"])
+                .args(["run", web_cmd])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
@@ -1572,6 +2155,9 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
             document_attachment: None,
             workspace_path: None,
             agent_id: None,
+            plan_mode: false,
+            messages: None,
+            tools: None,
         },
     )
     .await {

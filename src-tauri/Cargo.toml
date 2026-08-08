@@ -23,7 +23,11 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-updater = "2"
 tokio.workspace = true
 tokio-tungstenite.workspace = true
+
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+webkit2gtk = "2.0"

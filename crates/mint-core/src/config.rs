@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -70,6 +71,8 @@ pub struct MintConfig {
     pub ideogram_model: String,
     pub replicate_api_key: String,
     pub replicate_model: String,
+    pub bfl_api_key: String,
+    pub bfl_model: String,
     pub show_desktop_widget: bool,
     pub safety_enabled: bool,
     pub sandbox_mode: String,
@@ -83,6 +86,10 @@ pub struct MintConfig {
     pub enable_agent_collaboration: bool,
     /// User-defined OpenAI-compatible providers.
     pub custom_providers: Vec<CustomProvider>,
+    /// Persistent "always allow"/"always deny" rules for agent-loop approvals,
+    /// so a user doesn't have to re-approve the same shell command or file edit
+    /// every single time. See [`MintConfig::permission_decision`].
+    pub permission_rules: Vec<PermissionRule>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -115,6 +122,107 @@ pub struct CustomProviderModel {
 pub struct CustomProviderHeader {
     pub name: String,
     pub value: String,
+}
+
+/// A persistent approval decision for a specific agent-loop tool + subject,
+/// so the same shell command, file path, plugin, or MCP tool doesn't have to
+/// be approved interactively every time it recurs.
+///
+/// `pattern` is matched against a per-tool "subject" string (the exact shell
+/// command for `run_shell`, the file path for `write_file`/`apply_patch`, the
+/// note path for `note_write`, `"{name}: {instruction}"` for `run_plugin`, or
+/// `"{server}:{tool}:{arguments}"` for `mcp_tool`) using a simple glob where
+/// `*` matches any run of characters — everything else must match literally.
+/// The instruction/arguments are included so a saved rule never covers a
+/// future call to the same plugin/tool with different, possibly riskier
+/// input than what the user actually reviewed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionRule {
+    pub tool: String,
+    pub pattern: String,
+    pub decision: PermissionDecision,
+    /// `None` = applies everywhere. `Some(root)` = only applies when the
+    /// agent's current workspace root matches `root` exactly.
+    #[serde(default)]
+    pub project_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PermissionDecision {
+    Allow,
+    Deny,
+}
+
+/// Matches `subject` against a simple glob `pattern` where `*` matches any
+/// run of characters (including none) and every other character must match
+/// literally. Implemented via `regex` (already a workspace dependency) rather
+/// than a dedicated glob crate.
+fn glob_match(pattern: &str, subject: &str) -> bool {
+    let escaped = regex::escape(pattern).replace("\\*", ".*");
+    Regex::new(&format!("^{escaped}$"))
+        .map(|re| re.is_match(subject))
+        .unwrap_or(false)
+}
+
+impl MintConfig {
+    /// Looks up a persistent approval decision for `tool`/`subject` given the
+    /// agent's current `project_root`. Precedence: any matching `Deny` (any
+    /// scope) wins outright; else a matching project-scoped `Allow`; else a
+    /// matching global `Allow`; else `None` (no saved rule — caller should
+    /// fall back to an interactive prompt).
+    pub fn permission_decision(
+        &self,
+        tool: &str,
+        subject: &str,
+        project_root: &Path,
+    ) -> Option<PermissionDecision> {
+        permission_decision_for(&self.permission_rules, tool, subject, project_root)
+    }
+}
+
+/// Core matching logic behind [`MintConfig::permission_decision`], exposed as a
+/// free function so callers that maintain their own in-memory rule list (e.g.
+/// rules added earlier in the current process, not yet persisted) can reuse
+/// the same precedence without round-tripping through a `MintConfig`.
+pub fn permission_decision_for(
+    rules: &[PermissionRule],
+    tool: &str,
+    subject: &str,
+    project_root: &Path,
+) -> Option<PermissionDecision> {
+    let matches = |rule: &&PermissionRule| {
+        rule.tool == tool
+            && glob_match(&rule.pattern, subject)
+            && rule
+                .project_root
+                .as_deref()
+                .is_none_or(|root| root == project_root)
+    };
+
+    if rules
+        .iter()
+        .filter(matches)
+        .any(|rule| rule.decision == PermissionDecision::Deny)
+    {
+        return Some(PermissionDecision::Deny);
+    }
+    if rules
+        .iter()
+        .filter(matches)
+        .any(|rule| rule.decision == PermissionDecision::Allow && rule.project_root.is_some())
+    {
+        return Some(PermissionDecision::Allow);
+    }
+    if rules
+        .iter()
+        .filter(matches)
+        .any(|rule| rule.decision == PermissionDecision::Allow && rule.project_root.is_none())
+    {
+        return Some(PermissionDecision::Allow);
+    }
+    None
 }
 
 /// A fully user-defined, OpenAI-compatible AI provider.
@@ -161,28 +269,30 @@ impl Default for MintConfig {
             api_key: String::new(),
             gemini_model: "gemini-2.5-flash".into(),
             anthropic_api_key: String::new(),
-            anthropic_model: "claude-3-5-sonnet-latest".into(),
+            anthropic_model: "claude-sonnet-5".into(),
             openai_api_key: String::new(),
-            openai_model: "gpt-4o".into(),
+            openai_model: "gpt-5.6-luna".into(),
             openrouter_api_key: String::new(),
-            openrouter_model: "openai/gpt-4o-mini".into(),
+            openrouter_model: "openai/gpt-5.6-terra".into(),
             deepseek_api_key: String::new(),
             deepseek_model: "deepseek-v4-flash".into(),
             hf_api_key: String::new(),
-            hf_model: "meta-llama/Meta-Llama-3-8B-Instruct".into(),
+            hf_model: "Qwen/Qwen3.6-27B".into(),
             local_api_base_url: String::new(),
             local_model_name: "local-model".into(),
             ollama_host: String::new(),
             ollama_model: "llama3:latest".into(),
-            nanobanana_model: "gemini-2.5-flash-image".into(),
+            nanobanana_model: "gemini-3.1-flash-image".into(),
             image_gen_provider: "nanobanana".into(),
-            dalle_model: "dall-e-3".into(),
+            dalle_model: "gpt-image-1".into(),
             stability_api_key: String::new(),
-            stability_model: "sd3.5-large".into(),
+            stability_model: "ultra".into(),
             ideogram_api_key: String::new(),
             ideogram_model: "V_3".into(),
             replicate_api_key: String::new(),
             replicate_model: "black-forest-labs/flux-1.1-pro".into(),
+            bfl_api_key: String::new(),
+            bfl_model: "flux-pro-1.1".into(),
             show_desktop_widget: true,
             safety_enabled: true,
             sandbox_mode: "prefer".into(),
@@ -200,6 +310,7 @@ impl Default for MintConfig {
             agents: default_agents(),
             enable_agent_collaboration: false,
             custom_providers: Vec::new(),
+            permission_rules: Vec::new(),
             extra: runtime_extra_defaults(),
         }
     }
@@ -237,7 +348,90 @@ fn default_agents() -> Vec<AgentConfig> {
     ]
 }
 
+/// Local model families known to support native tool/function calling via
+/// Ollama's `/api/chat` `tools` parameter. Not exhaustive — Ollama's ecosystem
+/// evolves quickly, so this is a conservative allowlist rather than a guarantee.
+const OLLAMA_NATIVE_TOOL_MODEL_PREFIXES: &[&str] = &[
+    "llama3.1",
+    "llama3.2",
+    "llama3.3",
+    "qwen2",
+    "qwen2.5",
+    "qwen3",
+    "mistral-nemo",
+    "mistral-large",
+    "firefunction",
+    "command-r",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolCallingMode {
+    /// Use the provider's native function/tool-calling API.
+    Native,
+    /// Fall back to prompting the model to emit a single JSON action per turn.
+    JsonPrompt,
+}
+
 impl MintConfig {
+    /// Whether the active provider/model should be driven via native
+    /// function/tool-calling, or via the legacy JSON-prompt fallback.
+    ///
+    /// Anthropic, OpenAI-family providers (including OpenAI-compatible custom
+    /// providers), and Gemini always get `Native`. Ollama only gets `Native` for
+    /// model families known to support it reliably (see
+    /// `OLLAMA_NATIVE_TOOL_MODEL_PREFIXES`); anything else falls back to
+    /// `JsonPrompt` so the agent loop can warn the user instead of silently
+    /// producing unreliable output. HuggingFace and unrecognized providers always
+    /// use `JsonPrompt`. `extra["forceJsonPromptMode"] = true` overrides everything
+    /// to `JsonPrompt`, as an escape hatch for debugging or unsupported setups.
+    pub fn tool_calling_mode(&self) -> ToolCallingMode {
+        if self
+            .extra
+            .get("forceJsonPromptMode")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return ToolCallingMode::JsonPrompt;
+        }
+        match self.ai_provider.as_str() {
+            "anthropic" | "gemini" | "openai" | "local_openai" | "openrouter" | "deepseek" => {
+                ToolCallingMode::Native
+            }
+            p if p.starts_with("custom:") => ToolCallingMode::Native,
+            "ollama" => {
+                let model = self.ollama_model.to_ascii_lowercase();
+                if OLLAMA_NATIVE_TOOL_MODEL_PREFIXES
+                    .iter()
+                    .any(|prefix| model.starts_with(prefix))
+                {
+                    ToolCallingMode::Native
+                } else {
+                    ToolCallingMode::JsonPrompt
+                }
+            }
+            _ => ToolCallingMode::JsonPrompt,
+        }
+    }
+
+    /// A conservative estimate of the active provider's context window, in
+    /// tokens. Deliberately provider-level rather than tracking every exact
+    /// model string — not worth the maintenance burden, and erring smaller
+    /// just triggers context compaction earlier (safe), whereas erring larger
+    /// risks an actual context-length error from the provider (not safe).
+    pub fn context_window_tokens(&self) -> usize {
+        match self.ai_provider.as_str() {
+            "anthropic" => 200_000,
+            "gemini" => 1_000_000,
+            "openai" => 128_000,
+            "ollama" => 8_000,
+            "huggingface" => 32_000,
+            // OpenRouter/DeepSeek/local/custom endpoints proxy many different
+            // backing models with widely varying context windows — 32k is a
+            // conservative floor rather than a real measurement.
+            _ => 32_000,
+        }
+    }
+
     pub fn active_model(&self) -> &str {
         match self.ai_provider.as_str() {
             "anthropic" => &self.anthropic_model,
@@ -556,6 +750,8 @@ fn runtime_extra_defaults() -> BTreeMap<String, Value> {
         "ttsVolume": 1.0,
         "ttsSpeed": 1.0,
         "ttsPitch": 1.0,
+        "voiceMode": "legacy",
+        "geminiLiveModel": "gemini-2.5-flash-native-audio-preview-12-2025",
         "pluginCalendarEnabled": false,
         "pluginGmailEnabled": false,
         "pluginNotionEnabled": false,
@@ -579,6 +775,7 @@ fn runtime_extra_defaults() -> BTreeMap<String, Value> {
         "googleSearchApiKey": "",
         "googleSearchCx": "",
         "braveSearchApiKey": "",
+        "searxngBaseUrl": "",
         "googleCalendarClientId": "",
         "googleCalendarClientSecret": "",
         "googleCalendarRefreshToken": "",
@@ -617,6 +814,159 @@ pub fn which(cmd: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn glob_match_supports_exact_and_wildcard_patterns() {
+        assert!(glob_match("cargo test", "cargo test"));
+        assert!(!glob_match("cargo test", "cargo test -p mint-core"));
+        assert!(glob_match("git *", "git status --short"));
+        assert!(glob_match("*.rs", "main.rs"));
+        assert!(!glob_match("*.rs", "main.rs.bak"));
+    }
+
+    #[test]
+    fn permission_decision_falls_back_to_none_without_a_matching_rule() {
+        let config = MintConfig::default();
+        assert_eq!(
+            config.permission_decision("run_shell", "cargo test", Path::new("/repo")),
+            None
+        );
+    }
+
+    #[test]
+    fn permission_decision_prefers_project_allow_over_global_allow() {
+        let config = MintConfig {
+            permission_rules: vec![
+                PermissionRule {
+                    tool: "run_shell".into(),
+                    pattern: "cargo test".into(),
+                    decision: PermissionDecision::Allow,
+                    project_root: None,
+                },
+                PermissionRule {
+                    tool: "run_shell".into(),
+                    pattern: "cargo test".into(),
+                    decision: PermissionDecision::Allow,
+                    project_root: Some(PathBuf::from("/repo")),
+                },
+            ],
+            ..MintConfig::default()
+        };
+        assert_eq!(
+            config.permission_decision("run_shell", "cargo test", Path::new("/repo")),
+            Some(PermissionDecision::Allow)
+        );
+        // A different project root shouldn't get the project-scoped rule, but
+        // still falls through to the global allow rule.
+        assert_eq!(
+            config.permission_decision("run_shell", "cargo test", Path::new("/other")),
+            Some(PermissionDecision::Allow)
+        );
+    }
+
+    #[test]
+    fn permission_decision_deny_always_wins_over_allow() {
+        let config = MintConfig {
+            permission_rules: vec![
+                PermissionRule {
+                    tool: "run_shell".into(),
+                    pattern: "rm *".into(),
+                    decision: PermissionDecision::Allow,
+                    project_root: None,
+                },
+                PermissionRule {
+                    tool: "run_shell".into(),
+                    pattern: "rm *".into(),
+                    decision: PermissionDecision::Deny,
+                    project_root: Some(PathBuf::from("/repo")),
+                },
+            ],
+            ..MintConfig::default()
+        };
+        assert_eq!(
+            config.permission_decision("run_shell", "rm old.txt", Path::new("/repo")),
+            Some(PermissionDecision::Deny)
+        );
+    }
+
+    #[test]
+    fn permission_decision_does_not_cross_tools() {
+        let config = MintConfig {
+            permission_rules: vec![PermissionRule {
+                tool: "write_file".into(),
+                pattern: "notes.md".into(),
+                decision: PermissionDecision::Allow,
+                project_root: None,
+            }],
+            ..MintConfig::default()
+        };
+        assert_eq!(
+            config.permission_decision("apply_patch", "notes.md", Path::new("/repo")),
+            None
+        );
+    }
+
+    #[test]
+    fn context_window_tokens_uses_conservative_provider_defaults() {
+        let window_for = |provider: &str| {
+            MintConfig {
+                ai_provider: provider.into(),
+                ..MintConfig::default()
+            }
+            .context_window_tokens()
+        };
+        assert_eq!(window_for("anthropic"), 200_000);
+        assert_eq!(window_for("gemini"), 1_000_000);
+        assert_eq!(window_for("openai"), 128_000);
+        assert_eq!(window_for("ollama"), 8_000);
+        assert_eq!(window_for("huggingface"), 32_000);
+        assert_eq!(window_for("openrouter"), 32_000);
+        assert_eq!(window_for("custom:some-endpoint"), 32_000);
+    }
+
+    #[test]
+    fn tool_calling_mode_is_native_for_first_class_providers() {
+        for provider in ["anthropic", "gemini", "openai", "openrouter", "deepseek"] {
+            let config = MintConfig {
+                ai_provider: provider.into(),
+                ..MintConfig::default()
+            };
+            assert_eq!(
+                config.tool_calling_mode(),
+                ToolCallingMode::Native,
+                "{provider}"
+            );
+        }
+    }
+
+    #[test]
+    fn tool_calling_mode_gates_ollama_by_model_allowlist() {
+        let allowed = MintConfig {
+            ai_provider: "ollama".into(),
+            ollama_model: "qwen2.5:14b".into(),
+            ..MintConfig::default()
+        };
+        assert_eq!(allowed.tool_calling_mode(), ToolCallingMode::Native);
+
+        let unlisted = MintConfig {
+            ai_provider: "ollama".into(),
+            ollama_model: "gemma2:9b".into(),
+            ..MintConfig::default()
+        };
+        assert_eq!(unlisted.tool_calling_mode(), ToolCallingMode::JsonPrompt);
+    }
+
+    #[test]
+    fn force_json_prompt_mode_overrides_native_providers() {
+        let mut config = MintConfig {
+            ai_provider: "anthropic".into(),
+            ..MintConfig::default()
+        };
+        config
+            .extra
+            .insert("forceJsonPromptMode".into(), serde_json::json!(true));
+        assert_eq!(config.tool_calling_mode(), ToolCallingMode::JsonPrompt);
+    }
 
     #[test]
     fn default_config_always_exposes_ollama() {

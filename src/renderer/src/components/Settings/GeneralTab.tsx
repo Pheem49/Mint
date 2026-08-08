@@ -12,6 +12,7 @@ import {
   CustomProviderModel,
   CustomProviderHeader,
 } from '../SettingsWindow'
+import { setActiveModel } from '../../../shared/utils/modelManager'
 
 interface GeneralTabProps {
   config: typeof DEFAULT_CONFIG
@@ -111,22 +112,14 @@ export default function GeneralTab({
     title: string,
     description: string,
     children: React.ReactNode,
-    badgeContent?: React.ReactNode
+    badgeContent?: React.ReactNode,
+    iconSVG?: React.ReactNode
   ) => {
     const isOpen = openSections[key] ?? false
 
     return (
-      <section 
+      <section
         className={`setting-section collapsible-section ${isOpen ? 'is-open' : 'is-collapsed'}`}
-        style={{
-          border: '1px solid var(--border)',
-          borderRadius: '12px',
-          padding: '16px 20px',
-          background: 'var(--surface-bg)',
-          marginBottom: '14px',
-          transition: 'all 0.25s ease',
-          overflow: 'hidden'
-        }}
       >
         <div 
           className="section-heading-collapsible"
@@ -144,8 +137,10 @@ export default function GeneralTab({
               <p className="section-kicker" style={{ margin: 0 }}>{kicker}</p>
               {badgeContent}
             </div>
-            <h2 className="section-title" style={{ margin: '2px 0 0 0', fontSize: '1.15rem' }}>{title}</h2>
-            {description && <p className="section-description" style={{ margin: '4px 0 0 0', fontSize: '0.82rem' }}>{description}</p>}
+            <h2 className="section-title" style={{ margin: '2px 0 0 0', fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {iconSVG}
+              {title}
+            </h2>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' }}>
             <span style={{ fontSize: '0.75rem', fontWeight: '500' }}>{isOpen ? 'Collapse' : 'Expand'}</span>
@@ -259,7 +254,7 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>Gemini Model</label>
                   <select 
-                    value={GEMINI_MODELS.includes(config.geminiModel) ? config.geminiModel : 'custom'} 
+                    value={(GEMINI_MODELS as readonly string[]).includes(config.geminiModel) ? config.geminiModel : 'custom'} 
                     onChange={(e) => updateField('geminiModel', e.target.value)}
                   >
                     {GEMINI_MODELS.map(model => (
@@ -268,7 +263,7 @@ export default function GeneralTab({
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!GEMINI_MODELS.includes(config.geminiModel) || config.geminiModel === 'custom') && (
+                {(!(GEMINI_MODELS as readonly string[]).includes(config.geminiModel) || config.geminiModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom Gemini Model</label>
                     <input 
@@ -307,7 +302,7 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>Anthropic Model</label>
                   <select 
-                    value={ANTHROPIC_MODELS.includes(config.anthropicModel) ? config.anthropicModel : 'custom'} 
+                    value={(ANTHROPIC_MODELS as readonly string[]).includes(config.anthropicModel) ? config.anthropicModel : 'custom'} 
                     onChange={(e) => updateField('anthropicModel', e.target.value)}
                   >
                     {ANTHROPIC_MODELS.map(model => (
@@ -316,7 +311,7 @@ export default function GeneralTab({
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!ANTHROPIC_MODELS.includes(config.anthropicModel) || config.anthropicModel === 'custom') && (
+                {(!(ANTHROPIC_MODELS as readonly string[]).includes(config.anthropicModel) || config.anthropicModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom Anthropic Model</label>
                     <input 
@@ -356,7 +351,7 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>OpenAI Model</label>
                   <select 
-                    value={OPENAI_MODELS.includes(config.openaiModel) ? config.openaiModel : 'custom'} 
+                    value={(OPENAI_MODELS as readonly string[]).includes(config.openaiModel) ? config.openaiModel : 'custom'} 
                     onChange={(e) => updateField('openaiModel', e.target.value)}
                   >
                     {OPENAI_MODELS.map(model => (
@@ -365,7 +360,7 @@ export default function GeneralTab({
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!OPENAI_MODELS.includes(config.openaiModel) || config.openaiModel === 'custom') && (
+                {(!(OPENAI_MODELS as readonly string[]).includes(config.openaiModel) || config.openaiModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom OpenAI Model</label>
                     <input 
@@ -407,7 +402,7 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>OpenRouter Model</label>
                   <select
-                    value={OPENROUTER_MODELS.includes(config.openrouterModel) ? config.openrouterModel : 'custom'}
+                    value={(OPENROUTER_MODELS as readonly string[]).includes(config.openrouterModel) ? config.openrouterModel : 'custom'}
                     onChange={(e) => updateField('openrouterModel', e.target.value)}
                   >
                     {OPENROUTER_MODELS.map(model => (
@@ -416,7 +411,7 @@ export default function GeneralTab({
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!OPENROUTER_MODELS.includes(config.openrouterModel) || config.openrouterModel === 'custom') && (
+                {(!(OPENROUTER_MODELS as readonly string[]).includes(config.openrouterModel) || config.openrouterModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom OpenRouter Model</label>
                     <input
@@ -455,7 +450,7 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>DeepSeek Model</label>
                   <select
-                    value={DEEPSEEK_MODELS.includes(config.deepseekModel) ? config.deepseekModel : 'custom'}
+                    value={(DEEPSEEK_MODELS as readonly string[]).includes(config.deepseekModel) ? config.deepseekModel : 'custom'}
                     onChange={(e) => updateField('deepseekModel', e.target.value)}
                   >
                     {DEEPSEEK_MODELS.map(model => (
@@ -464,7 +459,7 @@ export default function GeneralTab({
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!DEEPSEEK_MODELS.includes(config.deepseekModel) || config.deepseekModel === 'custom') && (
+                {(!(DEEPSEEK_MODELS as readonly string[]).includes(config.deepseekModel) || config.deepseekModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom DeepSeek Model</label>
                     <input
@@ -505,7 +500,7 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>Hugging Face Model</label>
                   <select 
-                    value={HF_MODELS.includes(config.hfModel) ? config.hfModel : 'custom'} 
+                    value={(HF_MODELS as readonly string[]).includes(config.hfModel) ? config.hfModel : 'custom'} 
                     onChange={(e) => updateField('hfModel', e.target.value)}
                   >
                     {HF_MODELS.map(model => (
@@ -514,7 +509,7 @@ export default function GeneralTab({
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!HF_MODELS.includes(config.hfModel) || config.hfModel === 'custom') && (
+                {(!(HF_MODELS as readonly string[]).includes(config.hfModel) || config.hfModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom Hugging Face Model</label>
                     <input 
@@ -554,7 +549,7 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>LM Studio Model</label>
                   <select 
-                    value={LOCAL_MODELS.includes(config.localModelName) ? config.localModelName : 'custom'} 
+                    value={(LOCAL_MODELS as readonly string[]).includes(config.localModelName) ? config.localModelName : 'custom'} 
                     onChange={(e) => updateField('localModelName', e.target.value)}
                   >
                     {LOCAL_MODELS.map(model => (
@@ -563,7 +558,7 @@ export default function GeneralTab({
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!LOCAL_MODELS.includes(config.localModelName) || config.localModelName === 'custom') && (
+                {(!(LOCAL_MODELS as readonly string[]).includes(config.localModelName) || config.localModelName === 'custom') && (
                   <div className="setting-row">
                     <label>Custom LM Studio Model</label>
                     <input 
@@ -715,160 +710,42 @@ export default function GeneralTab({
               </div>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* ── Section 3: Productivity Integrations ── */}
-      {renderCollapsibleSection(
-        'productivity',
-        'Productivity integrations',
-        'Productivity',
-        'Enable and configure Gmail, Google Calendar, and Notion plugins directly.',
-        <div className="provider-cards-container">
-          {/* Gmail */}
-          <div className={`provider-card ${config.pluginGmailEnabled ? 'active-provider' : ''}`}>
+          {/* SearXNG */}
+          <div className={`provider-card ${config.searchProvider === 'searxng' ? 'active-provider' : ''}`}>
             <div className="provider-card-header">
               <div className="provider-card-title">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                  <polyline points="22,6 12,13 2,6"/>
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
                 </svg>
-                Gmail Plugin
+                SearXNG (self-hosted)
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {config.pluginGmailEnabled && <span className="provider-active-badge">Enabled</span>}
-                <label className="settings-toggle-switch">
-                  <input type="checkbox" checked={config.pluginGmailEnabled} onChange={(e) => updateField('pluginGmailEnabled', e.target.checked)} />
-                  <span className="settings-toggle-slider" />
+                {config.searchProvider === 'searxng' && <span className="provider-active-badge">Active</span>}
+                <label className="settings-toggle-switch" style={{ marginBottom: 0 }}>
+                  <input type="radio" name="searchProvider" style={{ display: 'none' }} checked={config.searchProvider === 'searxng'} onChange={() => updateField('searchProvider', 'searxng')} />
+                  <span className="settings-toggle-slider" style={{ cursor: 'pointer' }} onClick={() => updateField('searchProvider', 'searxng')} />
                 </label>
               </div>
             </div>
             <div className="provider-card-body">
               <div className="setting-row">
-                <label>Gmail Client ID</label>
+                <label>SearXNG Instance URL</label>
                 <input
                   type="text"
-                  placeholder="Enter Gmail Client ID..."
-                  value={config.gmailClientId || ''}
-                  onChange={(e) => updateField('gmailClientId', e.target.value)}
+                  value={config.searxngBaseUrl}
+                  onChange={(e) => updateField('searxngBaseUrl', e.target.value)}
+                  placeholder="e.g. https://searx.example.com"
                 />
               </div>
-              <div className="setting-row">
-                <label>Gmail Client Secret</label>
-                <input
-                  type="password"
-                  placeholder="Enter Gmail Client Secret..."
-                  value={config.gmailClientSecret || ''}
-                  onChange={(e) => updateField('gmailClientSecret', e.target.value)}
-                />
-              </div>
-              <div className="setting-row">
-                <label>Gmail Refresh Token</label>
-                <input
-                  type="password"
-                  placeholder="Enter Gmail Refresh Token..."
-                  value={config.gmailRefreshToken || ''}
-                  onChange={(e) => updateField('gmailRefreshToken', e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Google Calendar */}
-          <div className={`provider-card ${config.pluginCalendarEnabled ? 'active-provider' : ''}`}>
-            <div className="provider-card-header">
-              <div className="provider-card-title">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                  <line x1="16" y1="2" x2="16" y2="6"/>
-                  <line x1="8" y1="2" x2="8" y2="6"/>
-                  <line x1="3" y1="10" x2="21" y2="10"/>
-                </svg>
-                Google Calendar Plugin
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {config.pluginCalendarEnabled && <span className="provider-active-badge">Enabled</span>}
-                <label className="settings-toggle-switch">
-                  <input type="checkbox" checked={config.pluginCalendarEnabled} onChange={(e) => updateField('pluginCalendarEnabled', e.target.checked)} />
-                  <span className="settings-toggle-slider" />
-                </label>
-              </div>
-            </div>
-            <div className="provider-card-body">
-              <div className="setting-row">
-                <label>Google Client ID</label>
-                <input
-                  type="text"
-                  placeholder="Enter Google Client ID..."
-                  value={config.googleCalendarClientId || ''}
-                  onChange={(e) => updateField('googleCalendarClientId', e.target.value)}
-                />
-              </div>
-              <div className="setting-row">
-                <label>Google Client Secret</label>
-                <input
-                  type="password"
-                  placeholder="Enter Google Client Secret..."
-                  value={config.googleCalendarClientSecret || ''}
-                  onChange={(e) => updateField('googleCalendarClientSecret', e.target.value)}
-                />
-              </div>
-              <div className="setting-row">
-                <label>Google Refresh Token</label>
-                <input
-                  type="password"
-                  placeholder="Enter Google Refresh Token..."
-                  value={config.googleCalendarRefreshToken || ''}
-                  onChange={(e) => updateField('googleCalendarRefreshToken', e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Notion */}
-          <div className={`provider-card ${config.pluginNotionEnabled ? 'active-provider' : ''}`}>
-            <div className="provider-card-header">
-              <div className="provider-card-title">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                  <polyline points="14 2 14 8 20 8"/>
-                  <line x1="16" y1="13" x2="8" y2="13"/>
-                  <line x1="16" y1="17" x2="8" y2="17"/>
-                  <polyline points="10 9 9 9 8 9"/>
-                </svg>
-                Notion Plugin
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {config.pluginNotionEnabled && <span className="provider-active-badge">Enabled</span>}
-                <label className="settings-toggle-switch">
-                  <input type="checkbox" checked={config.pluginNotionEnabled} onChange={(e) => updateField('pluginNotionEnabled', e.target.checked)} />
-                  <span className="settings-toggle-slider" />
-                </label>
-              </div>
-            </div>
-            <div className="provider-card-body">
-              <div className="setting-row">
-                <label>Notion API Key</label>
-                <input
-                  type="password"
-                  placeholder="secret_..."
-                  value={config.notionApiKey || ''}
-                  onChange={(e) => updateField('notionApiKey', e.target.value)}
-                />
-              </div>
-              <div className="setting-row">
-                <label>Notion Database ID</label>
-                <input
-                  type="text"
-                  placeholder="Enter Notion Database ID..."
-                  value={config.notionDatabaseId || ''}
-                  onChange={(e) => updateField('notionDatabaseId', e.target.value)}
-                />
-              </div>
+              <p className="hint" style={{ margin: 0 }}>Self-hosted, no API key needed. The instance must have JSON output enabled (search.formats in settings.yml).</p>
             </div>
           </div>
         </div>
       )}
+
+
 
       {/* ── Section 4: Image Generation ── */}
       {renderCollapsibleSection(
@@ -1019,6 +896,36 @@ export default function GeneralTab({
               </div>
             </div>
           </div>
+
+          {/* Black Forest Labs */}
+          <div className={`provider-card ${config.imageGenProvider === 'bfl' ? 'active-provider' : ''}`}>
+            <div className="provider-card-header">
+              <div className="provider-card-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>
+                Black Forest Labs (FLUX API)
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {config.imageGenProvider === 'bfl' && <span className="provider-active-badge">Active</span>}
+                <label className="settings-toggle-switch" style={{ marginBottom: 0 }}>
+                  <input type="radio" name="imageGenProvider" style={{ display: 'none' }} checked={config.imageGenProvider === 'bfl'} onChange={() => updateField('imageGenProvider', 'bfl')} />
+                  <span className="settings-toggle-slider" style={{ cursor: 'pointer' }} onClick={() => updateField('imageGenProvider', 'bfl')} />
+                </label>
+              </div>
+            </div>
+            <div className="provider-card-body">
+              <div className="setting-row">
+                <label>Black Forest Labs API Key</label>
+                <input
+                  type="password"
+                  value={config.bflApiKey}
+                  onChange={(e) => updateField('bflApiKey', e.target.value)}
+                  placeholder="Enter BFL API Key..."
+                />
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1052,12 +959,16 @@ export default function GeneralTab({
               <div className="setting-row" style={{ marginTop: '12px' }}>
                 <label>Default Veo Model</label>
                 <select
-                  value={config.veoModel || 'veo-2.0-generate-001'}
-                  onChange={(e) => updateField('veoModel', e.target.value)}
+                  value={config.veoModel || 'veo-3.1-generate-preview'}
+                  onChange={(e) => {
+                    updateField('veoModel', e.target.value)
+                    setActiveModel('veoModel', e.target.value, 'video')
+                  }}
                   style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', padding: '6px', borderRadius: '4px' }}
                 >
-                  <option value="veo-2.0-generate-001">veo-2.0-generate-001 (Default)</option>
-                  <option value="veo-2.0-flash-001">veo-2.0-flash-001</option>
+                  <option value="veo-3.1-generate-preview">veo-3.1-generate-preview (Default)</option>
+                  <option value="veo-3.1-fast-generate-preview">veo-3.1-fast-generate-preview</option>
+                  <option value="veo-3.1-lite-generate-preview">veo-3.1-lite-generate-preview</option>
                 </select>
               </div>
             </div>

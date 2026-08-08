@@ -1,0 +1,88 @@
+/* desktop: settings/theme.css — split from settings.css, rules kept in original order */
+
+.theme-segmented {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--input-bg);
+}
+
+.theme-segmented-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    width: 34px;
+    height: 42px;
+    padding: 6px 0 5px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.theme-segmented-swatch {
+    width: 18px;
+    height: 5px;
+    border-radius: 3px;
+}
+
+.theme-segmented-btn:hover {
+    color: var(--text-main);
+}
+
+.theme-segmented-btn.active {
+    background: var(--surface-strong);
+    color: var(--text-main);
+}
+
+.custom-theme-panel {
+    margin: 0 14px 14px;
+    padding: 0;
+    border: 1px dashed var(--border-strong);
+    border-radius: 10px;
+    background: var(--input-bg);
+    overflow: hidden;
+}
+
+.color-range,
+.color-inputs {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.color-section {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 14px;
+}
+
+.color-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.color-dot {
+    width: 31px;
+    height: 31px;
+    border: 3px solid transparent;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.color-dot:hover {
+    transform: scale(1.08);
+}

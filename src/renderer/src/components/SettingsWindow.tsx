@@ -1,12 +1,24 @@
 import React, { useState, useEffect } from 'react'
-import { getProfileValue, setProfileValue, setActiveModel } from '../tauri'
+import { getProfileValue, setProfileValue, setActiveModel, authUpdateProfile } from '../tauri'
+import { useAuthUser } from '../../shared/components/AuthGate'
 import GeneralTab from './Settings/GeneralTab'
+import ProfileTab from './Settings/ProfileTab'
 import MemoryTab from './Settings/MemoryTab'
 import AudioTab from './Settings/AudioTab'
 import AutomationTab from './Settings/AutomationTab'
 import ThemeTab from './Settings/ThemeTab'
 import PluginsTab from './Settings/PluginsTab'
 import AgentsTab from './Settings/AgentsTab'
+import {
+  GEMINI_MODELS,
+  OPENAI_MODELS,
+  OPENROUTER_MODELS,
+  DEEPSEEK_MODELS,
+  ANTHROPIC_MODELS,
+  HF_MODELS,
+  LOCAL_MODELS,
+  OLLAMA_MODELS,
+} from '../../shared/constants/models'
 
 // ─── Custom Provider Types ────────────────────────────────────────────────────
 
@@ -29,208 +41,151 @@ export interface CustomProviderConfig {
   headers: CustomProviderHeader[]
 }
 
-export const DEFAULT_CONFIG = {
-  theme: 'dark',
-  accentColor: '#10b981',
-  systemTextColor: '#f8fafc',
-  customBgStart: '#0f172a',
-  customBgEnd: '#1e1b4b',
-  customPanelBg: '#1e293b',
-  glassBlur: 'blur(16px)',
-  fontFamily: "'Outfit', sans-serif",
-  fontSize: '18px',
-  apiKey: '',
-  aiProvider: 'gemini',
-  geminiModel: 'gemini-2.5-flash',
-  openaiModel: 'gpt-4o',
-  openrouterModel: 'openai/gpt-4o-mini',
-  deepseekModel: 'deepseek-v4-flash',
-  anthropicModel: 'claude-3-5-sonnet-latest',
-  ollamaModel: 'llama3:latest',
-  language: 'th-TH',
-  proactiveInterval: 60,
-  proactiveCooldown: 120,
-  enableVoiceReply: true,
-  enableCustomWorkflows: true,
-  enableAgentCollaboration: false,
-  ttsProvider: 'google',
-  ttsVolume: 1.0,
-  ttsSpeed: 1.0,
-  ttsPitch: 1.0,
-  pluginSpotifyEnabled: true,
-  pluginCalendarEnabled: false,
-  pluginGmailEnabled: false,
-  pluginNotionEnabled: false,
-  pluginDiscordEnabled: false,
-  showDesktopWidget: true,
-  mcpServers: {} as Record<string, any>,
-  hfModel: 'meta-llama/Meta-Llama-3-8B-Instruct',
-  localApiBaseUrl: '',
-  localModelName: 'local-model',
-  ollamaHost: '',
-  anthropicApiKey: '',
-  openaiApiKey: '',
-  openrouterApiKey: '',
-  deepseekApiKey: '',
-  hfApiKey: '',
-  automationBrowser: 'chromium',
-  browserDebugUrl: 'http://127.0.0.1:9222/json/list',
-  browserExtensionContextUrl: 'http://127.0.0.1:3212/context',
-  enableHeadlessTaskQueue: false,
-  enableAutoUpdate: false,
-  updaterEndpoint: '',
-  updaterPublicKey: '',
-  telegramBotToken: '',
-  enableTelegramBridge: false,
-  discordBotToken: '',
-  discordApplicationId: '',
-  enableDiscordBridge: false,
-  slackBotToken: '',
-  slackAppToken: '',
-  enableSlackBridge: false,
-  lineChannelAccessToken: '',
-  lineChannelSecret: '',
-  enableLineBridge: false,
-  lineWebhookHost: '127.0.0.1',
-  lineWebhookPort: 3000,
-  whatsappCloudAccessToken: '',
-  whatsappPhoneNumberId: '',
-  whatsappVerifyToken: '',
-  whatsappAppSecret: '',
-  enableWhatsappBridge: false,
-  whatsappWebhookHost: '127.0.0.1',
-  whatsappWebhookPort: 3001,
-  enableBridgeAckNotification: true,
-  bridgeAckMessage: '[Mint Agent] Remote command received, processing...',
-  notionApiKey: '',
-  notionDatabaseId: '',
-  gmailClientId: '',
-  gmailClientSecret: '',
-  gmailRefreshToken: '',
-  googleCalendarClientId: '',
-  googleCalendarClientSecret: '',
-  googleCalendarRefreshToken: '',
-  // Search
-  searchProvider: 'brave' as 'brave' | 'google',
-  googleSearchApiKey: '',
-  googleSearchCx: '',
-  braveSearchApiKey: '',
-  // Image Generation
-  imageGenProvider: 'gemini' as 'gemini' | 'dalle' | 'stability' | 'ideogram' | 'replicate',
-  stabilityApiKey: '',
-  ideogramApiKey: '',
-  replicateApiKey: '',
-  // Video Generation
-  videoGenProvider: 'veo' as 'veo',
-  veoModel: 'veo-2.0-generate-001',
-  // Multi-Agent Configuration
-  agents: [
-    {
-      id: 'planner',
-      name: 'Planner',
-      provider: 'gemini',
-      model: 'gemini-2.5-flash',
-      apiKey: '',
-      systemInstruction: 'You are the Planner agent. Your task is to analyze the user request, inspect the workspace structure, and design a step-by-step implementation plan. Create or update the implementation_plan.md file to document your proposal.',
-      enabled: true
-    },
-    {
-      id: 'coder',
-      name: 'Coder',
-      provider: 'gemini',
-      model: 'gemini-2.5-flash',
-      apiKey: '',
-      systemInstruction: 'You are the Coder agent. Your task is to implement the changes specified in the approved implementation plan. Read relevant files, write clean and efficient code, and run terminal commands to build or verify. Stay focused on execution.',
-      enabled: true
-    },
-    {
-      id: 'reviewer',
-      name: 'Reviewer',
-      provider: 'gemini',
-      model: 'gemini-2.5-flash',
-      apiKey: '',
-      systemInstruction: 'You are the Reviewer agent. Your task is to verify the code modifications made by the Coder. Run the automated tests, check lint errors, and ensure the implementation is correct and complete.',
-      enabled: true
-    }
-  ],
-  // Custom Providers
-  customProviders: [] as CustomProviderConfig[],
-  /// Per-provider model selection: { [providerId]: selectedModelId }
-  customModelSelections: {} as Record<string, string>,
+import { DEFAULT_CONFIG } from '../../shared/constants/config'
+export { DEFAULT_CONFIG }
+
+type TabType = 'sect-general' | 'sect-profile' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
+
+interface SettingsNavItem {
+  id: TabType
+  label: string
+  group: 'Settings' | 'Customize'
+  icon: React.ReactNode
 }
 
-type TabType = 'sect-general' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
-
-export const GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
-  'gemini-3.1-flash-lite',
-  'gemini-3.1-flash-lite-preview'
+const SETTINGS_NAV: SettingsNavItem[] = [
+  {
+    id: 'sect-general',
+    label: 'General',
+    group: 'Settings',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-profile',
+    label: 'Profile',
+    group: 'Settings',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+        <circle cx="12" cy="7" r="4"></circle>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-automation',
+    label: 'Automation',
+    group: 'Settings',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+        <line x1="8" y1="21" x2="16" y2="21"></line>
+        <line x1="12" y1="17" x2="12" y2="21"></line>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-theme',
+    label: 'Theme & UI',
+    group: 'Settings',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-memory',
+    label: 'Memory & Profile',
+    group: 'Customize',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-audio',
+    label: 'Audio & Voice',
+    group: 'Customize',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-plugins',
+    label: 'Plugins',
+    group: 'Customize',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+        <polyline points="2 17 12 22 22 17"></polyline>
+        <polyline points="2 12 12 17 22 12"></polyline>
+      </svg>
+    ),
+  },
+  {
+    id: 'sect-agents',
+    label: 'Multi-Agent (Beta)',
+    group: 'Customize',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+        <circle cx="9" cy="7" r="4"></circle>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+      </svg>
+    ),
+  },
 ]
 
-export const OPENAI_MODELS = [
-  'gpt-4o',
-  'gpt-4o-mini',
-  'o1',
-  'o3-mini',
-  'o1-preview',
-  'o1-mini',
-  'gpt-4-turbo'
-]
+const SETTINGS_NAV_GROUPS: Array<'Settings' | 'Customize'> = ['Settings', 'Customize']
 
-export const OPENROUTER_MODELS = [
-  'openai/gpt-4o-mini',
-  'openai/gpt-4o',
-  'anthropic/claude-3.5-sonnet',
-  'anthropic/claude-3.5-haiku',
-  'google/gemini-2.5-flash',
-  'meta-llama/llama-3.3-70b-instruct',
-  'mistralai/mistral-large'
-]
-
-export const DEEPSEEK_MODELS = [
-  'deepseek-v4-flash',
-  'deepseek-v4-pro',
-  'deepseek-chat',
-  'deepseek-reasoner'
-]
-
-export const ANTHROPIC_MODELS = [
-  'claude-3-7-sonnet-latest',
-  'claude-3-5-sonnet-latest',
-  'claude-3-5-haiku-latest',
-  'claude-3-opus-latest'
-]
-
-export const HF_MODELS = [
-  'meta-llama/Llama-3.3-70B-Instruct',
-  'meta-llama/Meta-Llama-3-8B-Instruct',
-  'meta-llama/Llama-3.2-3B-Instruct',
-  'Qwen/Qwen2.5-72B-Instruct',
-  'Qwen/Qwen2.5-Coder-32B-Instruct',
-  'mistralai/Mistral-7B-Instruct-v0.3',
-  'google/gemma-2-9b-it'
-]
-
-export const LOCAL_MODELS = [
-  'local-model',
-  'Qwen/Qwen2.5-7B-Instruct-GGUF',
-  'meta-llama/Llama-3.2-3B-Instruct-GGUF',
-  'lmstudio-community/gemma-2-9b-it-GGUF'
-]
-
-export const OLLAMA_MODELS: string[] = []
+export {
+  GEMINI_MODELS,
+  OPENAI_MODELS,
+  OPENROUTER_MODELS,
+  DEEPSEEK_MODELS,
+  ANTHROPIC_MODELS,
+  HF_MODELS,
+  LOCAL_MODELS,
+  OLLAMA_MODELS,
+} from '../../shared/constants/models'
 
 export default function SettingsWindow() {
   const [activeTab, setActiveTab] = useState<TabType>('sect-general')
+  const [navSearch, setNavSearch] = useState('')
   const [config, setConfig] = useState(DEFAULT_CONFIG)
   
   // Custom user profile / memory state
   const [userName, setUserName] = useState('')
   const [userPreferences, setUserPreferences] = useState('')
+
+  // Shared Mint account profile (name + avatar), saved together with the
+  // rest of settings via the "Save Settings" button.
+  const { user: authUser, refreshUser } = useAuthUser()
+  const [profileName, setProfileName] = useState('')
+  const [profileImageUrl, setProfileImageUrl] = useState('')
+
+  useEffect(() => {
+    setProfileName(authUser?.name || '')
+    setProfileImageUrl(authUser?.image || '')
+  }, [authUser])
   
   // Custom model helpers for all providers
   const [customGemini, setCustomGemini] = useState('')
@@ -427,6 +382,13 @@ export default function SettingsWindow() {
       await setProfileValue('preferences', userPreferences)
     } catch (e) {
       console.error("Failed to save user profile memory:", e)
+    }
+
+    try {
+      const updated = await authUpdateProfile(profileName, profileImageUrl)
+      refreshUser(updated)
+    } catch (e) {
+      console.error("Failed to save account profile:", e)
     }
 
     if (window.settingsApi) {
@@ -655,79 +617,40 @@ export default function SettingsWindow() {
 
       <main className="settings-body">
         <nav className="settings-sidebar" aria-label="Settings sections">
-          <button className={`tab-btn ${activeTab === 'sect-general' ? 'active' : ''}`} onClick={() => setActiveTab('sect-general')}>
-            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3"></circle>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-              </svg>
-            </span>
-            <strong>General</strong>
-          </button>
-          <button className={`tab-btn ${activeTab === 'sect-memory' ? 'active' : ''}`} onClick={() => setActiveTab('sect-memory')}>
-            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
-              </svg>
-            </span>
-            <strong>Memory & Profile</strong>
-          </button>
-          <button className={`tab-btn ${activeTab === 'sect-audio' ? 'active' : ''}`} onClick={() => setActiveTab('sect-audio')}>
-            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-              </svg>
-            </span>
-            <strong>Audio & Voice</strong>
-          </button>
-          <button className={`tab-btn ${activeTab === 'sect-automation' ? 'active' : ''}`} onClick={() => setActiveTab('sect-automation')}>
-            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                <line x1="8" y1="21" x2="16" y2="21"></line>
-                <line x1="12" y1="17" x2="12" y2="21"></line>
-              </svg>
-            </span>
-            <strong>Automation</strong>
-          </button>
-          <button className={`tab-btn ${activeTab === 'sect-theme' ? 'active' : ''}`} onClick={() => setActiveTab('sect-theme')}>
-            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="5"></circle>
-                <line x1="12" y1="1" x2="12" y2="3"></line>
-                <line x1="12" y1="21" x2="12" y2="23"></line>
-                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                <line x1="1" y1="12" x2="3" y2="12"></line>
-                <line x1="21" y1="12" x2="23" y2="12"></line>
-                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-              </svg>
-            </span>
-            <strong>Theme & UI</strong>
-          </button>
-          <button className={`tab-btn ${activeTab === 'sect-plugins' ? 'active' : ''}`} onClick={() => setActiveTab('sect-plugins')}>
-            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-                <polyline points="2 17 12 22 22 17"></polyline>
-                <polyline points="2 12 12 17 22 12"></polyline>
-              </svg>
-            </span>
-            <strong>Plugins</strong>
-          </button>
-          <button className={`tab-btn ${activeTab === 'sect-agents' ? 'active' : ''}`} onClick={() => setActiveTab('sect-agents')}>
-            <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                <circle cx="9" cy="7" r="4"></circle>
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-              </svg>
-            </span>
-            <strong>Multi-Agent (Beta)</strong>
-          </button>
+          <div className="settings-nav-search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input
+              type="text"
+              placeholder="Search"
+              value={navSearch}
+              onChange={(e) => setNavSearch(e.target.value)}
+              aria-label="Search settings"
+            />
+          </div>
+          {SETTINGS_NAV_GROUPS.map((group) => {
+            const items = SETTINGS_NAV.filter(
+              (item) => item.group === group && item.label.toLowerCase().includes(navSearch.trim().toLowerCase())
+            )
+            if (!items.length) return null
+            return (
+              <div className="settings-nav-group" key={group}>
+                <p className="settings-nav-group-label">{group}</p>
+                {items.map((item) => (
+                  <button
+                    key={item.id}
+                    className={`tab-btn ${activeTab === item.id ? 'active' : ''}`}
+                    onClick={() => setActiveTab(item.id)}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>{item.icon}</span>
+                    <strong>{item.label}</strong>
+                  </button>
+                ))}
+              </div>
+            )
+          })}
         </nav>
 
         <div className="settings-content">
@@ -757,6 +680,15 @@ export default function SettingsWindow() {
               handleCheckUpdates={handleCheckUpdates}
               handleInstallUpdate={handleInstallUpdate}
               onSaveWithoutClosing={handleSaveWithoutClosing}
+            />
+          )}
+
+          {activeTab === 'sect-profile' && (
+            <ProfileTab
+              name={profileName}
+              setName={setProfileName}
+              imageUrl={profileImageUrl}
+              setImageUrl={setProfileImageUrl}
             />
           )}
 
@@ -823,10 +755,30 @@ export default function SettingsWindow() {
       </main>
 
       <footer className="settings-footer">
-        <button className="btn-danger" onClick={handleQuit}>Quit Application</button>
+        <button type="button" className="btn-danger" onClick={handleQuit} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          Quit Application
+        </button>
         <div className="footer-actions">
-          <button className="btn-secondary" onClick={handleReset}>Reset to Default</button>
-          <button className="btn-primary" onClick={handleSave}>Save Settings</button>
+          <button type="button" className="btn-secondary" onClick={handleReset} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="1 4 1 10 7 10"></polyline>
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+            </svg>
+            Reset Defaults
+          </button>
+          <button type="button" className="btn-primary" onClick={(e) => { e.preventDefault(); handleSave(); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+              <polyline points="17 21 17 13 7 13 7 21"></polyline>
+              <polyline points="7 3 7 8 15 8"></polyline>
+            </svg>
+            Save Settings
+          </button>
         </div>
       </footer>
     </div>

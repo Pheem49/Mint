@@ -13,6 +13,20 @@ export function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
 }
 
+export function createObjectUrlPreview(file: File): { objectUrl: string; revoke: () => void } {
+  const objectUrl = URL.createObjectURL(file)
+  return {
+    objectUrl,
+    revoke: () => {
+      try {
+        URL.revokeObjectURL(objectUrl)
+      } catch (e) {
+        // ignore
+      }
+    },
+  }
+}
+
 export function readImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -104,12 +118,16 @@ export const hexToRgb = (hex: string): { r: number; g: number; b: number } => {
 
 export const applyThemeStyles = (cfg: any): void => {
   const theme = cfg.theme || 'dark'
-  const accentColor = cfg.accentColor || '#4f83e6'
+  const accentColor = cfg.accentColor || '#ffffffff'
   const systemTextColor = cfg.systemTextColor || '#f8fafc'
+  const rgb = hexToRgb(accentColor)
 
   document.documentElement.setAttribute('data-theme', theme)
   document.documentElement.style.setProperty('--accent', accentColor)
   document.documentElement.style.setProperty('--accent-hover', lightenColor(accentColor, 20))
+  document.documentElement.style.setProperty('--accent-glow', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`)
+  document.documentElement.style.setProperty('--accent-subtle', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`)
+  document.documentElement.style.setProperty('--accent-border', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3)`)
   document.documentElement.style.setProperty('--text-main', systemTextColor)
   document.documentElement.style.setProperty('--glass-blur', cfg.glassBlur || 'blur(16px)')
   document.body.style.fontFamily = cfg.fontFamily || "'Outfit', sans-serif"

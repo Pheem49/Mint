@@ -1,10 +1,30 @@
 /**
  * shared/utils/markdown.tsx
- * Custom markdown parsing and rendering engine for message bubbles.
+ * Markdown parsing and rendering for message bubbles, built on react-markdown + remark-gfm.
  * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
  */
-import { Fragment, type ReactNode } from 'react'
+import { Children, cloneElement, Fragment, isValidElement, type CSSProperties, type ReactElement, type ReactNode } from 'react'
+import ReactMarkdown, { type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { ChatCodeBlock } from '../components/ChatCodeBlock'
+import WeatherCard from '../components/WeatherCard'
+import StockCard from '../components/StockCard'
+import CalculationCard from '../components/CalculationCard'
+import ImageSearchCard from '../components/ImageSearchCard'
+
+export const resolveMediaUrl = (url: string): string => {
+  if (!url) return ''
+  if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
+    return url
+  }
+  if (url.startsWith('/api/')) {
+    const origin = typeof window !== 'undefined' && window.location.port === '9000'
+      ? 'http://localhost:3000'
+      : (typeof window !== 'undefined' ? window.location.origin : '')
+    return `${origin}${url}`
+  }
+  return url
+}
 
 export const isTableLine = (line: string): boolean => {
   const trimmed = line.trim()
@@ -101,376 +121,328 @@ export function renderCopyIcon(isCopied: boolean): ReactNode {
   )
 }
 
+// --- react-markdown wiring ---------------------------------------------
 
+/** Recursively flattens rendered children back into plain text (for heuristics that need the raw string). */
+function flattenText(node: ReactNode): string {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(flattenText).join('')
+  if (isValidElement(node)) return flattenText((node.props as { children?: ReactNode }).children)
+  return ''
+}
+
+/** Wraps bare "@mention" tokens in plain-text children with a highlight span, without touching already-rendered elements (links, code, bold, ...). */
+function highlightMentions(node: ReactNode, keyPrefix = 'm'): ReactNode {
+  if (typeof node === 'string') {
+    const parts = node.split(/(@[\w\-.\/]+)/g)
+    if (parts.length <= 1) return node
+    return parts.map((part, i) =>
+      i % 2 === 1
+        ? <span key={`${keyPrefix}-${i}`} className="chat-mention">{part}</span>
+        : part ? <Fragment key={`${keyPrefix}-t-${i}`}>{part}</Fragment> : null
+    )
+  }
+  if (Array.isArray(node)) {
+    return node.map((child, i) => <Fragment key={`${keyPrefix}-${i}`}>{highlightMentions(child, `${keyPrefix}-${i}`)}</Fragment>)
+  }
+  return node
+}
+
+/** Section headers like "🚀 ขั้นตอนเริ่มต้น:" — a whole paragraph that's just an emoji-led title ending in a colon. */
+const EMOJI_HEADER_RE = /^(?:[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]).*:$/u
+
+function readHastText(node: unknown): string {
+  const n = node as { type?: string; value?: string; children?: unknown[] } | undefined
+  if (!n) return ''
+  if (n.type === 'text') return n.value ?? ''
+  if (Array.isArray(n.children)) return n.children.map(readHastText).join('')
+  return ''
+}
+
+function findCodeHastNode(preNode: unknown): { properties?: { className?: unknown }; children?: unknown[] } | undefined {
+  const n = preNode as { children?: Array<{ type?: string; tagName?: string }> } | undefined
+  return n?.children?.find((c) => c.type === 'element' && c.tagName === 'code') as
+    | { properties?: { className?: unknown }; children?: unknown[] }
+    | undefined
+}
+
+/** Clones each `<li>` child with `ordered`/`index` props so `li` can render a bullet or a number without shared state. */
+function tagListItems(children: ReactNode, opts: { ordered: boolean; start?: number }): ReactNode {
+  // `Children.toArray` can include stray whitespace text nodes between <li> siblings (from
+  // loose-list formatting) — those must not consume a number, so index only real elements.
+  let n = 0
+  return Children.toArray(children).map((child) => {
+    if (!isValidElement(child)) return child
+    const index = (opts.start ?? 1) + n
+    n += 1
+    return cloneElement(child as ReactElement<{ ordered?: boolean; index?: number }>, {
+      key: child.key ?? index,
+      ordered: opts.ordered,
+      index,
+    })
+  })
+}
+
+/** Strips leading/trailing whitespace-only text-node children (the same stray "\n" nodes
+ * loose-list formatting inserts between siblings, see `tagListItems` above, but here found
+ * as a direct child of a single <li>). `.chat-list-text` renders with `white-space: pre-wrap`
+ * so that whitespace renders as a literal blank line, dropping the actual text onto its own
+ * row below the bullet/number instead of beside it. */
+function trimListItemEdges(children: ReactNode): ReactNode {
+  const arr = Children.toArray(children)
+  while (arr.length && typeof arr[0] === 'string' && arr[0].trim() === '') arr.shift()
+  while (arr.length && typeof arr[arr.length - 1] === 'string' && (arr[arr.length - 1] as string).trim() === '') arr.pop()
+  return arr
+}
+
+function renderCodeCard(lang: string, codeText: string): ReactNode {
+  switch (lang) {
+    case 'weather_json':
+    case 'weather-json':
+      try {
+        return <WeatherCard data={JSON.parse(codeText)} />
+      } catch {
+        return <ChatCodeBlock code={codeText} language={lang} />
+      }
+    case 'stock_json':
+    case 'stock-json':
+      try {
+        return <StockCard data={JSON.parse(codeText)} />
+      } catch {
+        return <ChatCodeBlock code={codeText} language={lang} />
+      }
+    case 'calculation_json':
+    case 'calculation-json':
+      try {
+        return <CalculationCard data={JSON.parse(codeText)} />
+      } catch {
+        return <ChatCodeBlock code={codeText} language={lang} />
+      }
+    case 'image_search_json':
+    case 'image-search-json':
+      try {
+        return <ImageSearchCard data={JSON.parse(codeText)} />
+      } catch {
+        return <ChatCodeBlock code={codeText} language={lang} />
+      }
+    default:
+      return <ChatCodeBlock code={codeText} language={lang} />
+  }
+}
+
+// `ol`/`ul` inject `ordered`/`index` onto their `li` children (via cloneElement below) so each
+// list item knows how to render itself without needing shared state; react-markdown's own
+// component types don't declare these, so the object is cast to `Components` where it's used.
+const mdComponents = {
+  p({ children }) {
+    const text = flattenText(children).trim()
+    if (EMOJI_HEADER_RE.test(text)) {
+      return <div className="chat-heading chat-heading-3 chat-section-title">{children}</div>
+    }
+    // A plain <div> (not <p>) so block-level media cards can nest inside safely.
+    return <div className="chat-paragraph">{highlightMentions(children)}</div>
+  },
+  h1: ({ children }) => <div className="chat-heading chat-heading-1">{highlightMentions(children)}</div>,
+  h2: ({ children }) => <div className="chat-heading chat-heading-2">{highlightMentions(children)}</div>,
+  h3: ({ children }) => <div className="chat-heading chat-heading-3">{highlightMentions(children)}</div>,
+  h4: ({ children }) => <div className="chat-heading chat-heading-3">{highlightMentions(children)}</div>,
+  h5: ({ children }) => <div className="chat-heading chat-heading-3">{highlightMentions(children)}</div>,
+  h6: ({ children }) => <div className="chat-heading chat-heading-3">{highlightMentions(children)}</div>,
+  ul: ({ children }) => <div className="chat-list-block">{tagListItems(children, { ordered: false })}</div>,
+  ol: ({ children, start }) => (
+    <div className="chat-list-block">{tagListItems(children, { ordered: true, start: typeof start === 'number' ? start : 1 })}</div>
+  ),
+  li: ({ children, ordered, index }: { children?: ReactNode; ordered?: boolean; index?: number }) => {
+    const content = trimListItemEdges(children)
+    if (ordered) {
+      return (
+        <div className="chat-list-item chat-ordered-item">
+          <span className="chat-list-number">{index}.</span>
+          <div className="chat-list-text">{highlightMentions(content)}</div>
+        </div>
+      )
+    }
+    // chat-list-text is a div, not a span: "loose" lists (items separated by blank lines)
+    // wrap their content in a block-level <div class="chat-paragraph">, which a <span> can't
+    // contain without forcing a line break onto its own line.
+    return (
+      <div className="chat-list-item chat-bullet-item">
+        <span className="chat-list-bullet">•</span>
+        <div className="chat-list-text">{highlightMentions(content)}</div>
+      </div>
+    )
+  },
+  strong: ({ children }) => <strong className="chat-bold-highlight">{children}</strong>,
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="chat-link">
+      {highlightMentions(children)}
+    </a>
+  ),
+  img: ({ src, alt }) => {
+    const url = String(src || '')
+    const label = alt || 'Generated Image'
+    const isExternal = url.startsWith('https://') || url.startsWith('http://')
+    if (isExternal) {
+      return (
+        <a
+          href={resolveMediaUrl(url)}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={label}
+          className="chat-media-card chat-media-card--thumbnail"
+          style={{ display: 'block', margin: '6px 0 10px 0', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px', textDecoration: 'none', cursor: 'pointer' }}
+        >
+          <img
+            src={resolveMediaUrl(url)}
+            alt={label}
+            loading="lazy"
+            style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', display: 'block' }}
+            onError={(e) => { (e.currentTarget as HTMLImageElement).closest('a')!.style.display = 'none' }}
+          />
+          {label !== 'Generated Image' && (
+            <div style={{ padding: '5px 10px', fontSize: '0.72rem', color: 'var(--text-muted, #64748b)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
+          )}
+        </a>
+      )
+    }
+    return (
+      <div className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
+        <img src={resolveMediaUrl(url)} alt={label} style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
+      </div>
+    )
+  },
+  code({ children }) {
+    // Only reached for inline code — block code is intercepted by `pre` below.
+    return <code className="chat-inline-code">{children}</code>
+  },
+  pre({ node }) {
+    const codeNode = findCodeHastNode(node)
+    const rawClassName = codeNode?.properties?.className
+    const classNames = Array.isArray(rawClassName)
+      ? rawClassName.map(String)
+      : typeof rawClassName === 'string'
+        ? rawClassName.split(/\s+/)
+        : []
+    const langClass = classNames.find((c) => c.startsWith('language-'))
+    const lang = langClass ? langClass.slice('language-'.length) : 'plaintext'
+    const codeText = readHastText(codeNode).replace(/\n$/, '')
+    return renderCodeCard(lang, codeText)
+  },
+  table: ({ children }) => (
+    <div className="chat-table-container" style={{ overflowX: 'auto', margin: '14px 0', width: '100%', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.12)', background: 'var(--panel-bg)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' }}>
+      <table className="chat-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem', textAlign: 'left', lineHeight: '1.5' }}>
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ children }) => (
+    <thead>
+      {Children.map(children, (child) =>
+        isValidElement(child)
+          ? cloneElement(child as ReactElement<{ style?: CSSProperties }>, {
+              style: { background: 'rgba(255, 255, 255, 0.04)', borderBottom: '2px solid rgba(255, 255, 255, 0.15)' },
+            })
+          : child
+      )}
+    </thead>
+  ),
+  tbody: ({ children }) => {
+    // Only real <tr> elements count toward the zebra index — stray whitespace text nodes must not.
+    const rowElements = Children.toArray(children).filter(isValidElement)
+    let n = 0
+    return (
+      <tbody>
+        {Children.toArray(children).map((child) => {
+          if (!isValidElement(child)) return child
+          const idx = n
+          n += 1
+          return cloneElement(child as ReactElement<{ style?: CSSProperties }>, {
+            key: child.key ?? idx,
+            style: {
+              background: idx % 2 === 1 ? 'rgba(255, 255, 255, 0.015)' : 'transparent',
+              borderBottom: idx < rowElements.length - 1 ? '1px solid rgba(255, 255, 255, 0.08)' : 'none',
+            },
+          })
+        })}
+      </tbody>
+    )
+  },
+  // `style` here comes from the cloneElement calls in `thead`/`tbody` above.
+  tr: ({ children, style }: { children?: ReactNode; style?: CSSProperties }) => <tr style={style}>{children}</tr>,
+  th: ({ children }) => (
+    <th style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--accent, #38bdf8)', fontFamily: 'ui-sans-serif, system-ui, sans-serif' }}>
+      {highlightMentions(children)}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td style={{ padding: '12px 16px', color: 'var(--text-main, #e2e8f0)' }}>
+      {highlightMentions(children)}
+    </td>
+  ),
+}
+
+/** Normalizes non-standard list markers ("(1)", "[1]", "•") to plain GFM syntax so remark recognizes them as real lists. */
+function normalizeListMarkers(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => {
+      const bracketOrdered = line.match(/^(\s*)[\(\[](\d+)[\)\]](\s+.*)$/)
+      if (bracketOrdered) return `${bracketOrdered[1]}${bracketOrdered[2]}.${bracketOrdered[3]}`
+      const dotBullet = line.match(/^(\s*)[•](\s+.*)$/)
+      if (dotBullet) return `${dotBullet[1]}-${dotBullet[2]}`
+      return line
+    })
+    .join('\n')
+}
+
+type Segment = { type: 'text'; value: string } | { type: 'video'; src: string }
+
+/** Splits out raw <video src="..."> lines (emitted by the backend for generated videos) since they aren't real markdown. */
+function splitVideoSegments(text: string): Segment[] {
+  const segments: Segment[] = []
+  let buffer: string[] = []
+  const flush = () => {
+    if (buffer.length > 0) {
+      segments.push({ type: 'text', value: buffer.join('\n') })
+      buffer = []
+    }
+  }
+  for (const line of text.split('\n')) {
+    const match = line.match(/<video[^>]*src="([^"]+)"[^>]*>/)
+    if (match) {
+      flush()
+      segments.push({ type: 'video', src: match[1] })
+    } else {
+      buffer.push(line)
+    }
+  }
+  flush()
+  return segments
+}
 
 export function renderFormattedMessage(text: string): ReactNode {
   const displayText = readableAssistantText(text)
   if (!displayText) return null
 
-  const formatInline = (str: string): ReactNode => {
-    if (!str) return null
+  const segments = splitVideoSegments(displayText)
 
-    // Split code backticks first
-    const codeParts = str.split(/`([\s\S]*?)`/g)
-    return codeParts.map((codePart, codeIndex) => {
-      if (codeIndex % 2 === 1) {
+  return (
+    <div className="chat-formatted-body">
+      {segments.map((segment, i) => {
+        if (segment.type === 'video') {
+          return (
+            <div key={`video-${i}`} className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: '#000' }}>
+              <video controls src={resolveMediaUrl(segment.src)} style={{ width: '100%', maxHeight: '400px', borderRadius: '8px', display: 'block' }} />
+            </div>
+          )
+        }
         return (
-          <code key={`code-${codeIndex}`} className="chat-inline-code">
-            {codePart}
-          </code>
+          <ReactMarkdown key={`md-${i}`} remarkPlugins={[remarkGfm]} components={mdComponents as Components}>
+            {normalizeListMarkers(segment.value)}
+          </ReactMarkdown>
         )
-      }
-
-      // Match markdown links [label](url)
-      const linkRegex = /\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g
-      const linkMatches: Array<{ index: number; length: number; label: string; url: string }> = []
-      let match: RegExpExecArray | null
-      while ((match = linkRegex.exec(codePart)) !== null) {
-        linkMatches.push({
-          index: match.index,
-          length: match[0].length,
-          label: match[1],
-          url: match[2],
-        })
-      }
-
-      const renderTextAndFormatting = (subStr: string, keyPrefix: string): ReactNode => {
-        // Process bold **text**
-        const boldParts = subStr.split(/\*\*([\s\S]*?)\*\*/g)
-        return boldParts.map((boldPart, boldIndex) => {
-          if (boldIndex % 2 === 1) {
-            return (
-              <strong key={`${keyPrefix}-bold-${boldIndex}`} className="chat-bold-highlight">
-                {boldPart}
-              </strong>
-            )
-          }
-          // Process mentions (@...)
-          const mentionParts = boldPart.split(/(@[\w\-\.\/]+)/g)
-          return mentionParts.map((mentionPart, mentionIndex) => {
-            if (mentionIndex % 2 === 1) {
-              return (
-                <span key={`${keyPrefix}-mention-${mentionIndex}`} className="chat-mention">
-                  {mentionPart}
-                </span>
-              )
-            }
-            // Process raw URLs (https://... or http://...)
-            const urlRegex = /(https?:\/\/[^\s<>\(\)]+)/g
-            const urlParts = mentionPart.split(urlRegex)
-            return urlParts.map((urlPart, urlIndex) => {
-              if (urlIndex % 2 === 1) {
-                return (
-                  <a
-                    key={`${keyPrefix}-url-${urlIndex}`}
-                    href={urlPart}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="chat-link"
-                  >
-                    {urlPart}
-                  </a>
-                )
-              }
-              return urlPart
-            })
-          })
-        })
-      }
-
-      if (linkMatches.length === 0) {
-        return renderTextAndFormatting(codePart, `c-${codeIndex}`)
-      }
-
-      const linkElements: ReactNode[] = []
-      let lastIdx = 0
-      linkMatches.forEach((lMatch, lIdx) => {
-        if (lMatch.index > lastIdx) {
-          linkElements.push(renderTextAndFormatting(codePart.slice(lastIdx, lMatch.index), `c-${codeIndex}-pre-${lIdx}`))
-        }
-        linkElements.push(
-          <a
-            key={`link-${codeIndex}-${lIdx}`}
-            href={lMatch.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="chat-link"
-          >
-            {renderTextAndFormatting(lMatch.label, `c-${codeIndex}-label-${lIdx}`)}
-          </a>
-        )
-        lastIdx = lMatch.index + lMatch.length
-      })
-      if (lastIdx < codePart.length) {
-        linkElements.push(renderTextAndFormatting(codePart.slice(lastIdx), `c-${codeIndex}-post`))
-      }
-
-      return linkElements
-    })
-  }
-
-  const renderHtmlTable = (tableLines: string[], key: string) => {
-    const rows: string[][] = []
-    for (const line of tableLines) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      const content = trimmed.slice(1, -1)
-      const contentEscaped = content.replace(/\\\|/g, '\u0000')
-      const cols = contentEscaped.split('|').map(s => s.replace(/\u0000/g, '|').trim())
-      rows.push(cols)
-    }
-
-    if (rows.length === 0) return null
-
-    let hasSeparator = false
-    let separatorIdx = -1
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i]
-      if (row.length > 0 && row.every(col => /^[-\s:]+$/.test(col))) {
-        hasSeparator = true
-        separatorIdx = i
-        break
-      }
-    }
-
-    let headerRow: string[] | null = null
-    const dataRows: string[][] = []
-
-    if (hasSeparator) {
-      if (separatorIdx > 0) {
-        headerRow = rows[separatorIdx - 1]
-        for (let i = 0; i < rows.length; i++) {
-          if (i !== separatorIdx && i !== separatorIdx - 1) {
-            dataRows.push(rows[i])
-          }
-        }
-      } else {
-        for (let i = 0; i < rows.length; i++) {
-          if (i !== separatorIdx) {
-            dataRows.push(rows[i])
-          }
-        }
-      }
-    } else {
-      headerRow = rows[0]
-      for (let i = 1; i < rows.length; i++) {
-        dataRows.push(rows[i])
-      }
-    }
-
-    return (
-      <div key={key} className="chat-table-container" style={{
-        overflowX: 'auto',
-        margin: '14px 0',
-        width: '100%',
-        borderRadius: '8px',
-        border: '1px solid rgba(255, 255, 255, 0.12)',
-        background: 'rgba(30, 41, 59, 0.35)',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-      }}>
-        <table className="chat-table" style={{
-          width: '100%',
-          borderCollapse: 'collapse',
-          fontSize: '0.86rem',
-          textAlign: 'left',
-          lineHeight: '1.5',
-        }}>
-          {headerRow && (
-            <thead>
-              <tr style={{
-                background: 'rgba(255, 255, 255, 0.04)',
-                borderBottom: '2px solid rgba(255, 255, 255, 0.15)',
-              }}>
-                {headerRow.map((col, idx) => (
-                  <th key={`th-${idx}`} style={{
-                    padding: '12px 16px',
-                    fontWeight: 700,
-                    color: 'var(--accent, #38bdf8)',
-                    fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-                  }}>
-                    {formatInline(col)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-          )}
-          <tbody>
-            {dataRows.map((row, rIdx) => (
-              <tr key={`tr-${rIdx}`} style={{
-                background: rIdx % 2 === 1 ? 'rgba(255, 255, 255, 0.015)' : 'transparent',
-                borderBottom: rIdx < dataRows.length - 1 ? '1px solid rgba(255, 255, 255, 0.08)' : 'none',
-              }}>
-                {row.map((col, cIdx) => (
-                  <td key={`td-${cIdx}`} style={{
-                    padding: '12px 16px',
-                    color: 'var(--text-main, #e2e8f0)',
-                  }}>
-                    {formatInline(col)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )
-  }
-
-  const lines = displayText.split('\n')
-  const blocks: ReactNode[] = []
-
-  let inCodeBlock = false
-  let codeBlockLang = ''
-  let codeBlockLines: string[] = []
-
-  let inTable = false
-  let tableLines: string[] = []
-
-  const flushTable = (index: number) => {
-    if (tableLines.length > 0) {
-      blocks.push(renderHtmlTable(tableLines, `table-${index}`))
-      tableLines = []
-      inTable = false
-    }
-  }
-
-  let currentParagraphLines: string[] = []
-
-  const flushParagraph = (index: number) => {
-    if (currentParagraphLines.length > 0) {
-      const paragraphText = currentParagraphLines.join('\n')
-      if (paragraphText.trim()) {
-        blocks.push(
-          <div key={`para-${index}`} className="chat-paragraph">
-            {formatInline(paragraphText)}
-          </div>
-        )
-      }
-      currentParagraphLines = []
-    }
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    const trimmedLine = line.trim()
-
-    // Code block toggle
-    if (trimmedLine.startsWith('```')) {
-      if (inTable) flushTable(i)
-      flushParagraph(i)
-
-      if (inCodeBlock) {
-        const codeText = codeBlockLines.join('\n')
-        blocks.push(
-          <ChatCodeBlock
-            key={`code-block-${i}`}
-            code={codeText}
-            language={codeBlockLang}
-          />
-        )
-        inCodeBlock = false
-        codeBlockLines = []
-      } else {
-        inCodeBlock = true
-        codeBlockLang = trimmedLine.slice(3).trim() || 'plaintext'
-      }
-      continue
-    }
-
-    if (inCodeBlock) {
-      codeBlockLines.push(line)
-      continue
-    }
-
-    // Markdown Table
-    if (isTableLine(line)) {
-      flushParagraph(i)
-      inTable = true
-      tableLines.push(line)
-      continue
-    } else if (inTable) {
-      flushTable(i)
-    }
-
-    // Empty line -> flush paragraph (creates paragraph gap)
-    if (!trimmedLine) {
-      flushParagraph(i)
-      continue
-    }
-
-    // Markdown Headers (# Header)
-    const headerMatch = line.match(/^(#{1,6})\s+(.*)$/)
-    if (headerMatch) {
-      flushParagraph(i)
-      const level = Math.min(headerMatch[1].length, 6)
-      const content = headerMatch[2]
-      blocks.push(
-        <div key={`header-${i}`} className={`chat-heading chat-heading-${level}`}>
-          {formatInline(content)}
-        </div>
-      )
-      continue
-    }
-
-    // Numbered list items: "1. ", "2) ", "(1) ", etc.
-    const orderedMatch = line.match(/^(\s*)(?:(\d+)[\.\)]|[\(\[](\d+)[\)\]])\s+(.*)$/)
-    if (orderedMatch) {
-      flushParagraph(i)
-      const num = orderedMatch[2] || orderedMatch[3]
-      const content = orderedMatch[4]
-      blocks.push(
-        <div key={`ordered-${i}`} className="chat-list-item chat-ordered-item">
-          <span className="chat-list-number">{num}.</span>
-          <span className="chat-list-text">{formatInline(content)}</span>
-        </div>
-      )
-      continue
-    }
-
-    // Bullet list items: "- ", "* ", "+ ", "• "
-    const bulletMatch = line.match(/^(\s*)([-*+•])\s+(.*)$/)
-    if (bulletMatch) {
-      flushParagraph(i)
-      const content = bulletMatch[3]
-      blocks.push(
-        <div key={`bullet-${i}`} className="chat-list-item chat-bullet-item">
-          <span className="chat-list-bullet">•</span>
-          <span className="chat-list-text">{formatInline(content)}</span>
-        </div>
-      )
-      continue
-    }
-
-    // Emoji header / Section title (e.g. "🚀 ขั้นตอนเริ่มต้นสำหรับคุณภีม:", "⚠️ ข้อควรระวังจากมัน (สำคัญมาก!):")
-    const isEmojiHeader = /^(?:[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]).*:$/u.test(trimmedLine)
-    if (isEmojiHeader) {
-      flushParagraph(i)
-      blocks.push(
-        <div key={`section-${i}`} className="chat-heading chat-heading-3 chat-section-title">
-          {formatInline(line)}
-        </div>
-      )
-      continue
-    }
-
-    // Regular text line -> append to current paragraph
-    currentParagraphLines.push(line)
-  }
-
-  if (inTable) flushTable(lines.length)
-  flushParagraph(lines.length)
-
-  if (inCodeBlock && codeBlockLines.length > 0) {
-    const codeText = codeBlockLines.join('\n')
-    blocks.push(
-      <ChatCodeBlock
-        key={`code-block-end`}
-        code={codeText}
-        language={codeBlockLang}
-      />
-    )
-  }
-
-  return <div className="chat-formatted-body">{blocks}</div>
+      })}
+    </div>
+  )
 }
-

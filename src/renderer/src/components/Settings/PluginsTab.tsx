@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { DEFAULT_CONFIG } from '../SettingsWindow'
 import { listLearnedSkills, addLearnedSkill, deleteLearnedSkill, LearnedSkill, detectSystemTools, DetectedTools } from '../../tauri'
+import {
+  getOAuthStatuses,
+  startOAuthFlow,
+  revokeOAuth,
+  subscribeOAuthChange,
+  type OAuthStatus,
+} from '../../../shared/utils/oauthManager'
+import { renderMcpSvgIcon, BUILTIN_PLUGINS_LIST } from '../../../shared/constants/plugins'
 
 interface PluginsTabProps {
   config: typeof DEFAULT_CONFIG
@@ -18,119 +26,6 @@ interface PluginsTabProps {
   handleAddMcpServer: () => void
   handleRemoveMcpServer: (name: string) => void
   handleConnectPlugin: (plugin: string) => void
-}
-
-function renderMcpSvgIcon(name: string, customSvgOrUrl?: string) {
-  if (customSvgOrUrl && customSvgOrUrl.trim()) {
-    const trimmed = customSvgOrUrl.trim()
-    if (trimmed.startsWith('<svg') || trimmed.includes('<svg')) {
-      return (
-        <span 
-          style={{ width: '22px', height: '22px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          dangerouslySetInnerHTML={{ __html: trimmed }} 
-        />
-      )
-    }
-    if (trimmed.startsWith('data:image') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      return <img src={trimmed} alt={name} style={{ width: '22px', height: '22px', objectFit: 'contain' }} />
-    }
-    const cleanCustom = trimmed.toLowerCase()
-    if (cleanCustom === 'search') {
-      return (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="11" cy="11" r="8" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
-      )
-    }
-    if (cleanCustom === 'database') {
-      return (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a855f7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <ellipse cx="12" cy="5" rx="9" ry="3"/>
-          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-        </svg>
-      )
-    }
-    if (cleanCustom === 'cloud') {
-      return (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
-        </svg>
-      )
-    }
-    if (cleanCustom === 'code' || cleanCustom === 'terminal') {
-      return (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="16 18 22 12 16 6" />
-          <polyline points="8 6 2 12 8 18" />
-        </svg>
-      )
-    }
-    if (cleanCustom === 'api' || cleanCustom === 'bolt') {
-      return (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-        </svg>
-      )
-    }
-  }
-
-  const cleanName = name.toLowerCase().trim()
-  if (cleanName === 'docker') {
-    return (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="#0db7ed">
-        <path d="M13 8.5h2v2h-2zm-3 0h2v2h-2zm-3 0h2v2H7zm-3 3h2v2H4zm3 0h2v2H7zm3 0h2v2h-2zm3 0h2v2h-2zm3 0h2v2h-2zm-12 3h2v2H4zm3 0h2v2H7zm3 0h2v2h-2zm3 0h2v2h-2zm3 0h2v2h-2zm-6.2 3.8c-.8.5-2.1.8-3.4.6-2.5-.3-4.5-2.2-4.8-4.7h-1c.4 3.4 3.1 6 6.5 6 3 0 5.6-2 6.4-4.8.6-.2 1.4-.4 2.2-.2.3.1.6.3.8.5.6.6 1.4.9 2.2.9h.4c.5-.7.8-1.5.8-2.4 0-.3 0-.6-.1-.9-.7.1-1.4 0-2.1-.3-.6-.3-1.1-.8-1.5-1.4l-.2-.3h-2.1c-.2.7-.6 1.3-1.2 1.7-.6.4-1.3.6-2 .4z"/>
-      </svg>
-    )
-  }
-  if (cleanName === 'git' || cleanName === 'gitkraken') {
-    return (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f05032" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="18" cy="18" r="3" />
-        <circle cx="6" cy="6" r="3" />
-        <circle cx="6" cy="18" r="3" />
-        <path d="M6 9v6" />
-        <path d="M9 18h6" />
-      </svg>
-    )
-  }
-  if (cleanName === 'github') {
-    return (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="#f0f6fc">
-        <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
-      </svg>
-    )
-  }
-  if (cleanName === 'node' || cleanName === 'nodejs') {
-    return (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="#68a063">
-        <path d="M12 2L2 7.5v9L12 22l10-5.5v-9L12 2zm0 2.3l7.7 4.2v7L12 19.7 4.3 15.5v-7L12 4.3zm-1 4.2v3.5l-3-1.7V8.5l3 1.7zm2 0l3-1.7v1.8l-3 1.7V8.5z"/>
-      </svg>
-    )
-  }
-  if (cleanName === 'spotify') {
-    return (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="#1ed760">
-        <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.586 14.424c-.18.295-.563.387-.857.207-2.35-1.434-5.308-1.758-8.793-.963-.335.077-.67-.133-.746-.467-.077-.334.132-.67.467-.746 3.812-.871 7.102-.494 9.722 1.112.294.18.386.563.207.857zm1.233-2.743c-.226.367-.706.482-1.073.257-2.687-1.652-6.785-2.131-9.965-1.166-.413.126-.847-.106-.973-.519-.125-.413.106-.847.519-.973 3.632-1.102 8.147-.568 11.235 1.328.367.226.482.706.257 1.073zm.105-2.835C14.692 8.95 9.375 8.775 6.297 9.71c-.496.15-1.022-.132-1.173-.628-.15-.496.132-1.022.628-1.173 3.535-1.073 9.404-.871 12.984 1.254.446.265.592.844.327 1.29-.265.446-.844.592-1.29.327z"/>
-      </svg>
-    )
-  }
-  if (cleanName === 'discord') {
-    return (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="#5865f2">
-        <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.893.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
-      </svg>
-    )
-  }
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
-      <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
-      <line x1="6" y1="6" x2="6.01" y2="6"/>
-      <line x1="6" y1="18" x2="6.01" y2="18"/>
-    </svg>
-  )
 }
 
 export default function PluginsTab({
@@ -166,127 +61,157 @@ export default function PluginsTab({
   })
   const [detecting, setDetecting] = useState(false)
 
-  // Load skills and detect tools on mount
+  // OAuth statuses
+  const [oauthStatuses, setOauthStatuses] = useState<OAuthStatus[]>([])
+  const [authenticatingProvider, setAuthenticatingProvider] = useState<string | null>(null)
+  const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null)
+  const [expandedMcp, setExpandedMcp] = useState<string | null>(null)
+
   useEffect(() => {
     fetchSkills()
     detectTools()
+    fetchOAuthStatuses()
+    const unsubscribe = subscribeOAuthChange(() => {
+      fetchOAuthStatuses()
+    })
+    return () => {
+      unsubscribe()
+    }
   }, [])
+
+  const fetchOAuthStatuses = async () => {
+    try {
+      const statuses = await getOAuthStatuses()
+      setOauthStatuses(statuses)
+    } catch (err) {
+      console.error('Failed to fetch OAuth statuses:', err)
+    }
+  }
+
+  const handleConnectOAuth = async (provider: string, pluginKey?: string) => {
+    if (provider === 'spotify' && !(config as any).spotifyClientId?.trim()) {
+      setExpandedPlugin(pluginKey || 'spotify')
+      alert('Please click "Configure" below and enter your Spotify Client ID before signing in (Get it from developer.spotify.com/dashboard)')
+      return
+    }
+    if (provider === 'github' && !(config as any).githubClientId?.trim() && !(config as any).githubToken?.trim()) {
+      setExpandedPlugin(pluginKey || 'github')
+      alert('Please click "Configure" below and enter your GitHub Client ID (or Personal Access Token) before signing in.')
+      return
+    }
+    if (provider === 'vercel' && !(config as any).vercelClientId?.trim() && !(config as any).vercelToken?.trim()) {
+      setExpandedPlugin(pluginKey || 'vercel')
+      alert('Please click "Configure" below and enter your Vercel Client ID (or Access Token) before signing in.')
+      return
+    }
+    if ((provider === 'google' || provider === 'gmail' || provider === 'google_calendar') && 
+        !(config as any).gmailClientId?.trim() && !(config as any).googleCalendarClientId?.trim()) {
+      setExpandedPlugin(pluginKey || 'gmail')
+      alert('Please click "Configure" below and enter your Google Client ID before signing in.')
+      return
+    }
+
+    setAuthenticatingProvider(provider)
+    try {
+      await startOAuthFlow(provider)
+    } catch (err) {
+      console.error(`OAuth login error for ${provider}:`, err)
+    } finally {
+      setAuthenticatingProvider(null)
+      fetchOAuthStatuses()
+    }
+  }
+
+  const handleRevokeOAuth = async (provider: string) => {
+    try {
+      await revokeOAuth(provider)
+      await fetchOAuthStatuses()
+    } catch (err) {
+      console.error(`OAuth revoke error for ${provider}:`, err)
+    }
+  }
+
+  const fetchSkills = async () => {
+    setSkillsLoading(true)
+    setSkillsError('')
+    try {
+      const activeWorkspace = window.localStorage.getItem('mint:last-workspace-path') || undefined
+      const list = await listLearnedSkills(activeWorkspace)
+      setSkills(list)
+    } catch (err) {
+      console.error('Failed to fetch learned skills:', err)
+      setSkillsError('Failed to load learned skills')
+    } finally {
+      setSkillsLoading(false)
+    }
+  }
 
   const detectTools = async () => {
     setDetecting(true)
     try {
       const tools = await detectSystemTools()
       setDetectedTools(tools)
-    } catch (e) {
-      console.error("Failed to detect tools:", e)
+    } catch (err) {
+      console.error('Failed to detect system tools:', err)
     } finally {
       setDetecting(false)
     }
   }
 
-  const handleEnableTool = (name: string, command: string, args: string[]) => {
-    const updatedMcp = {
-      ...(config.mcpServers || {}),
-      [name]: {
-        command,
-        args,
-        env: {}
-      }
-    }
-    updateField('mcpServers', updatedMcp)
-  }
-
-  const fetchSkills = async () => {
-    try {
-      const activeWorkspace = window.localStorage.getItem('mint:last-workspace-path') || undefined
-      const list = await listLearnedSkills(activeWorkspace)
-      setSkills(list)
-    } catch (e) {
-      console.error("Failed to load skills:", e)
-    }
-  }
-
   const handleAddSkill = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newSkillName.trim() || !newSkillContent.trim()) {
-      setSkillsError('Please fill in both name and content.')
-      return
-    }
-
-    const cleanName = newSkillName.trim().replace(/\s+/g, '-').toLowerCase()
-    setSkillsLoading(true)
-    setSkillsError('')
-
+    if (!newSkillName.trim() || !newSkillContent.trim()) return
     try {
-      await addLearnedSkill(cleanName, newSkillContent)
+      await addLearnedSkill(newSkillName.trim(), newSkillContent.trim())
       setNewSkillName('')
       setNewSkillContent('')
-      await fetchSkills()
-    } catch (err: any) {
-      setSkillsError(err.message || String(err))
-    } finally {
-      setSkillsLoading(false)
+      fetchSkills()
+    } catch (err) {
+      console.error('Failed to add learned skill:', err)
+      alert('Error saving skill')
     }
   }
 
   const handleDeleteSkill = async (name: string) => {
-    if (confirm(`Forget skill "${name}"?`)) {
-      try {
-        await deleteLearnedSkill(name)
-        await fetchSkills()
-      } catch (e) {
-        console.error("Failed to delete skill:", e)
-      }
+    if (!confirm(`Are you sure you want to forget skill "${name}"?`)) return
+    try {
+      await deleteLearnedSkill(name)
+      fetchSkills()
+    } catch (err) {
+      console.error('Failed to delete skill:', err)
+      alert('Error deleting skill')
     }
   }
 
-  const [expandedMcp, setExpandedMcp] = useState<string | null>(null)
+  const handleEnableTool = (name: string, command: string, args: string[]) => {
+    const updated = { ...(config.mcpServers || {}) };
+    updated[name] = { command, args, env: {} };
+    updateField('mcpServers', updated);
+  };
 
-  const handleUpdateMcpServerField = (serverName: string, field: string, value: any) => {
-    const currentMcp = config.mcpServers?.[serverName] || { command: 'npx', args: [], env: {} }
-    const updatedMcp = {
-      ...(config.mcpServers || {}),
-      [serverName]: {
-        ...currentMcp,
-        [field]: value
-      }
+  const handleUpdateMcpServerField = (name: string, field: string, value: any) => {
+    const updated = { ...(config.mcpServers || {}) };
+    if (updated[name]) {
+      updated[name] = { ...updated[name], [field]: value };
+      updateField('mcpServers', updated);
     }
-    updateField('mcpServers', updatedMcp)
+  };
+
+  const toggleExpand = (key: string) => {
+    setExpandedPlugin(prev => prev === key ? null : key)
   }
 
-  // Local state to toggle expansion of configuration sections
-  const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null)
+  const pluginsList = BUILTIN_PLUGINS_LIST
 
-  const toggleExpand = (pluginKey: string) => {
-    setExpandedPlugin(expandedPlugin === pluginKey ? null : pluginKey)
-  }
-
-  const pluginsList: Array<{
-    key: string
-    name: string
-    desc: string
-    icon: string
-    enabledField: 'pluginSpotifyEnabled' | 'pluginDiscordEnabled'
-    hasCredentials: boolean
-    fields?: Array<{ label: string; field: any; type: string; placeholder: string }>
-  }> = [
-    {
-      key: 'spotify',
-      name: 'Spotify',
-      desc: 'Control playback with AI. Requires playerctl locally.',
-      icon: '🎵',
-      enabledField: 'pluginSpotifyEnabled' as const,
-      hasCredentials: false
-    },
-    {
-      key: 'discord',
-      name: 'Discord RPC',
-      desc: 'Show "Using Mint Assistant" status in your local Discord client.',
-      icon: '💬',
-      enabledField: 'pluginDiscordEnabled' as const,
-      hasCredentials: false
+  const handleToggleMcpServer = (name: string, enabled: boolean, defaultCmd?: string, defaultArgs?: string[]) => {
+    const updated = { ...(config.mcpServers || {}) }
+    if (updated[name]) {
+      updated[name] = { ...updated[name], disabled: !enabled }
+    } else if (enabled && defaultCmd) {
+      updated[name] = { command: defaultCmd, args: defaultArgs || [], env: {}, disabled: false }
     }
-  ]
+    updateField('mcpServers', updated)
+  }
 
   const mcpListItems: Array<{
     name: string
@@ -296,15 +221,13 @@ export default function PluginsTab({
     customIcon?: string
     isEnabled: boolean
     isConfigured: boolean
-    description: string
-  }> = []
+    description?: string
+  }> = [];
 
-  Object.entries(config.mcpServers || {}).forEach(([name, srv]: [string, any]) => {
-    let icon = '⚙';
+  Object.entries(config.mcpServers || {}).forEach(([name, srv]) => {
+    let icon = '🔌';
     if (name === 'docker') icon = '🐳';
-    else if (name === 'git' || name === 'gitkraken') icon = '🐙';
-    else if (name === 'github') icon = '🐱';
-    else if (name === 'node') icon = '🟢';
+    if (name === 'git' || name === 'github') icon = '🐙';
 
     mcpListItems.push({
       name,
@@ -312,7 +235,7 @@ export default function PluginsTab({
       args: srv.args || [],
       icon,
       customIcon: srv.icon,
-      isEnabled: true,
+      isEnabled: (srv as any)?.disabled !== true,
       isConfigured: true,
       description: `Command: ${srv.command} ${(srv.args || []).join(' ')}`
     });
@@ -340,41 +263,17 @@ export default function PluginsTab({
       description: 'Git MCP Server (Discovered)'
     });
   }
-  if (detectedTools.gh && !config.mcpServers?.github) {
-    mcpListItems.push({
-      name: 'github',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-github'],
-      icon: '🐱',
-      isEnabled: false,
-      isConfigured: false,
-      description: 'GitHub MCP Server (Discovered)'
-    });
-  }
-  if (detectedTools.node && !config.mcpServers?.node) {
-    mcpListItems.push({
-      name: 'node',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-node'],
-      icon: '🟢',
-      isEnabled: false,
-      isConfigured: false,
-      description: 'NodeJS Runtime MCP Server (Discovered)'
-    });
-  }
 
   return (
     <div className="tab-pane active" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* ── Learned AI Skills ── */}
+      
+      {/* ── 1. Learned AI Skills ── */}
       <section className="setting-section">
         <div className="section-heading">
           <div>
             <p className="section-kicker">Knowledge Base</p>
             <h2 className="section-title">Learned AI Skills</h2>
           </div>
-          <p className="section-description">
-            Skills are special instructions or guides taught to Mint (equivalent to <code>mint learn</code> in CLI). The AI reads active skills before every prompt to align with your guidelines.
-          </p>
         </div>
 
         {skills.length === 0 ? (
@@ -388,12 +287,12 @@ export default function PluginsTab({
             fontSize: '0.9rem',
             marginBottom: '20px'
           }}>
-            No learned skills found. Teach Mint a skill below or run <code>/learn &lt;path&gt;</code> in chat!
+            No learned skills found. Teach Mint a skill below or run <code>/learn</code> in chat.
           </div>
         ) : (
           <div className="skills-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
             {skills.map((s) => (
-              <div className="skill-card" key={s.id} style={{
+              <div className="skill-card" key={s.name} style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -413,31 +312,28 @@ export default function PluginsTab({
                       padding: '2px 8px',
                       borderRadius: '4px'
                     }}>{s.name}</span>
-                    {s.location && (
-                      <span className="location-badge" style={{
-                        background: s.location === 'workspace' 
-                          ? 'rgba(16, 185, 129, 0.15)' 
-                          : s.location === 'global' 
-                            ? 'rgba(59, 130, 246, 0.15)' 
-                            : 'rgba(139, 92, 246, 0.15)',
-                        color: s.location === 'workspace' 
-                          ? '#10b981' 
-                          : s.location === 'global' 
-                            ? '#3b82f6' 
-                            : '#8b5cf6',
-                        fontSize: '0.7rem',
-                        fontWeight: '600',
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        textTransform: 'capitalize'
-                      }}>
-                        {s.location === 'database' ? 'Taught' : s.location}
-                      </span>
-                    )}
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                      Source: {s.sourcePath}
+                    <span className="location-badge" style={{
+                      background: s.is_workspace ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                      color: s.is_workspace ? '#10b981' : '#3b82f6',
+                      fontSize: '0.7rem',
+                      fontWeight: '600',
+                      padding: '2px 6px',
+                      borderRadius: '4px'
+                    }}>
+                      {s.is_workspace ? 'Workspace' : 'Global'}
                     </span>
                   </div>
+                  <p style={{
+                    fontSize: '0.8rem',
+                    color: 'var(--text-muted)',
+                    margin: '6px 0 0 0',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden'
+                  }}>
+                    {s.description || s.content}
+                  </p>
                 </div>
                 <button 
                   className="btn btn-danger" 
@@ -474,7 +370,7 @@ export default function PluginsTab({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
             <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Skill Instructions / Content</label>
             <textarea
-              placeholder="# Instructions&#10;Write only clean TypeScript. Use async/await. Avoid let where const is possible."
+              placeholder="# Instructions&#10;Write only clean TypeScript. Use async/await."
               value={newSkillContent}
               onChange={(e) => setNewSkillContent(e.target.value)}
               style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.9rem', width: '100%', height: '100px', resize: 'vertical' }}
@@ -492,14 +388,13 @@ export default function PluginsTab({
         </form>
       </section>
 
-      {/* ── External tools (MCP Servers) ── */}
+      {/* ── 2. External tools (MCP Servers) ── */}
       <section className="setting-section" style={{ borderTop: '1px solid var(--border)', paddingTop: '24px' }}>
         <div className="section-heading">
           <div>
             <p className="section-kicker">External tools</p>
             <h2 className="section-title">MCP Servers</h2>
           </div>
-          <p className="section-description">Connect Mint to tools like search, GitHub, or filesystem servers.</p>
         </div>
 
         <div className="mcp-list">
@@ -596,11 +491,7 @@ export default function PluginsTab({
                           type="checkbox"
                           checked={item.isEnabled}
                           onChange={(e) => {
-                            if (e.target.checked) {
-                              handleEnableTool(item.name, item.command, item.args);
-                            } else {
-                              handleRemoveMcpServer(item.name);
-                            }
+                            handleToggleMcpServer(item.name, e.target.checked, item.command, item.args);
                           }}
                         />
                         <span className="settings-toggle-slider" />
@@ -676,16 +567,6 @@ export default function PluginsTab({
           )}
         </div>
 
-        {/* Save settings alert */}
-        {((detectedTools.docker && !config.mcpServers?.docker) || 
-          (detectedTools.git && !config.mcpServers?.git) || 
-          (detectedTools.gh && !config.mcpServers?.github) || 
-          (detectedTools.node && !config.mcpServers?.node)) && (
-          <div style={{ marginTop: '12px', padding: '12px 16px', background: 'rgba(255,193,7,0.1)', border: '1px solid rgba(255,193,7,0.3)', borderRadius: '8px', fontSize: '0.8rem', color: '#ffb300', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>⚠️ After toggling a plugin, please click the "Save Settings" button at the bottom of the window to persist changes.</span>
-          </div>
-        )}
-
         <div className="add-mcp-box" style={{
           marginTop: '20px',
           padding: '20px',
@@ -749,18 +630,17 @@ export default function PluginsTab({
         </div>
       </section>
 
-      {/* ── Built-in Plugins ── */}
+      {/* ── 3. Built-in Plugins ── */}
       <section className="setting-section" style={{ borderTop: '1px solid var(--border)', paddingTop: '24px' }}>
         <div className="section-heading">
           <div>
             <p className="section-kicker">Integrations</p>
-            <h2 className="section-title">Built-in Plugins</h2>
+            <h2 className="section-title">Plugins & Integrations</h2>
           </div>
-          <p className="section-description">Enable and configure credentials for native Mint plugins.</p>
         </div>
         <div className="plugin-list" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {pluginsList.map(p => {
-            const isEnabled = config[p.enabledField]
+            const isEnabled = (config as any)[p.enabledField]
             const isExpanded = expandedPlugin === p.key
 
             return (
@@ -783,16 +663,87 @@ export default function PluginsTab({
                       {renderMcpSvgIcon(p.key)}
                     </div>
                     <div className="plugin-info">
-                      <div className="plugin-name" style={{ fontWeight: '600', color: 'var(--text-main)' }}>{p.name}</div>
-                      <div className="plugin-desc" style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{p.desc}</div>
+                      <div className="plugin-name" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>{p.name}</span>
+                        {p.isOAuth && (() => {
+                          const oauthMatch = oauthStatuses.find(s => s.provider === p.oauthProvider)
+                          const isConn = oauthMatch?.connected
+                          return (
+                            <span style={{
+                              fontSize: '0.72rem',
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              background: isConn ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                              color: isConn ? '#10b981' : 'var(--text-muted)',
+                              border: `1px solid ${isConn ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)'}`,
+                              fontWeight: '500',
+                              whiteSpace: 'nowrap',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px'
+                            }}>
+                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isConn ? '#10b981' : 'var(--text-muted)' }} />
+                              {isConn ? `Connected ${oauthMatch.accountEmail ? `(${oauthMatch.accountEmail})` : ''}` : 'Not Connected'}
+                            </span>
+                          )
+                        })()}
+                      </div>
+                      <div className="plugin-desc" style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '2px' }}>{p.desc}</div>
                     </div>
                   </div>
-                  <div className="plugin-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div className="plugin-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                    {p.isOAuth && (() => {
+                      const oauthMatch = oauthStatuses.find(s => s.provider === p.oauthProvider)
+                      const isConn = oauthMatch?.connected
+                      return isConn ? (
+                        <button
+                          className="btn-danger"
+                          onClick={() => handleRevokeOAuth(p.oauthProvider!)}
+                          style={{ padding: '6px 14px', fontSize: '0.8rem', height: '34px', whiteSpace: 'nowrap', borderRadius: '8px' }}
+                        >
+                          Disconnect
+                        </button>
+                      ) : (
+                        <button
+                          className="btn-primary"
+                          onClick={() => handleConnectOAuth(p.oauthProvider!, p.key)}
+                          disabled={authenticatingProvider === p.oauthProvider}
+                          style={{ 
+                            padding: '6px 14px', 
+                            fontSize: '0.8rem', 
+                            height: '34px', 
+                            whiteSpace: 'nowrap', 
+                            borderRadius: '8px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: '#10b981',
+                            color: '#ffffff',
+                            border: 'none',
+                            fontWeight: '600',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {authenticatingProvider === p.oauthProvider ? (
+                            'Signing In...'
+                          ) : (
+                            <>
+                              Sign In
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                                <circle cx="12" cy="12" r="10"/>
+                                <line x1="2" y1="12" x2="22" y2="12"/>
+                                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                              </svg>
+                            </>
+                          )}
+                        </button>
+                      )
+                    })()}
                     {p.hasCredentials && (
                       <button
                         className="btn-secondary"
                         onClick={() => toggleExpand(p.key)}
-                        style={{ padding: '6px 12px', fontSize: '0.8rem', height: '34px' }}
+                        style={{ padding: '6px 14px', fontSize: '0.8rem', height: '34px', whiteSpace: 'nowrap', borderRadius: '8px' }}
                       >
                         {isExpanded ? 'Hide Config' : 'Configure'}
                       </button>
@@ -811,10 +762,7 @@ export default function PluginsTab({
                         type="checkbox"
                         checked={isEnabled}
                         onChange={(e) => {
-                          updateField(p.enabledField, e.target.checked)
-                          if (!e.target.checked && expandedPlugin === p.key) {
-                            // Don't auto-collapse config on disable so user can still edit
-                          }
+                          updateField(p.enabledField as any, e.target.checked)
                         }}
                       />
                       <span className="settings-toggle-slider" />
@@ -840,7 +788,7 @@ export default function PluginsTab({
                             type={f.type}
                             placeholder={f.placeholder}
                             value={(config as any)[f.field] || ''}
-                            onChange={(e) => updateField(f.field, e.target.value)}
+                            onChange={(e) => updateField(f.field as any, e.target.value)}
                             style={{
                               width: '100%',
                               padding: '10px 14px',

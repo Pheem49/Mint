@@ -3,7 +3,7 @@ use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use mint_core::{load_config, save_config};
 use std::io::{self, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
 
 struct OnboardService {
@@ -13,72 +13,112 @@ struct OnboardService {
     enabled: bool,
 }
 
-const GEMINI_MODEL_PRESETS: &[&str] = &[
+pub(crate) const GEMINI_MODEL_PRESETS: &[&str] = &[
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
     "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
 ];
 
-const ANTHROPIC_MODEL_PRESETS: &[&str] = &[
-    "claude-sonnet-4-20250514",
-    "claude-opus-4-20250514",
-    "claude-haiku-35-20241022",
+pub(crate) const ANTHROPIC_MODEL_PRESETS: &[&str] = &[
+    "claude-sonnet-5",
+    "claude-opus-5",
+    "claude-sonnet-4.6",
+    "claude-opus-4.8",
+    "claude-haiku-4.5",
 ];
 
-const OPENAI_MODEL_PRESETS: &[&str] = &[
-    "gpt-4.1",
-    "gpt-4.1-mini",
-    "gpt-4.1-nano",
-    "gpt-4o",
-    "gpt-4o-mini",
-    "o3",
-    "o4-mini",
+pub(crate) const OPENAI_MODEL_PRESETS: &[&str] = &[
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5-thinking",
+    "gpt-5.5-pro",
 ];
 
-const OPENROUTER_MODEL_PRESETS: &[&str] = &[
-    "openai/gpt-4o-mini",
-    "openai/gpt-4o",
-    "anthropic/claude-sonnet-4",
-    "anthropic/claude-haiku-3.5",
-    "google/gemini-2.5-flash",
-    "meta-llama/llama-3.3-70b-instruct",
-    "mistralai/mistral-large",
+pub(crate) const OPENROUTER_MODEL_PRESETS: &[&str] = &[
+    "openai/gpt-5.6-terra",
+    "anthropic/claude-sonnet-5",
+    "google/gemini-3.6-flash",
+    "x-ai/grok-4.5",
+    "deepseek/deepseek-v4-pro",
 ];
 
-const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
+pub(crate) const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
     "deepseek-v4-flash",
     "deepseek-v4-pro",
     "deepseek-chat",
     "deepseek-reasoner",
 ];
 
-const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "Qwen/Qwen3-235B-A22B",
-    "mistralai/Mistral-Small-24B-Instruct-2501",
+pub(crate) const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
+    "Qwen/Qwen3.6-27B",
+    "deepseek-ai/DeepSeek-V4-Flash",
     "google/gemma-3-27b-it",
+    "meta-llama/Llama-3.3-70B-Instruct",
+    "microsoft/phi-4",
+    "zai-org/GLM-5.2-FP8",
+    "mistralai/Mistral-Large-Instruct",
+    "openai/gpt-oss-120b",
 ];
 
 // ── Image Generation Providers ──────────────────────────────────────────────
-const NANOBANANA_IMAGE_MODEL_PRESETS: &[&str] =
-    &["gemini-2.5-flash-image", "gemini-2.0-flash-image"];
+const NANOBANANA_IMAGE_MODEL_PRESETS: &[&str] = &[
+    "gemini-3.1-flash-image",
+    "gemini-3-pro-image",
+    "gemini-2.5-flash-image",
+];
 
-const DALLE_MODEL_PRESETS: &[&str] = &["dall-e-3", "gpt-image-1", "dall-e-2"];
+const DALLE_MODEL_PRESETS: &[&str] = &["gpt-image-1", "dall-e-3"];
 
-const STABILITY_MODEL_PRESETS: &[&str] =
-    &["sd3.5-large", "sd3.5-large-turbo", "sd3-medium", "core"];
+const STABILITY_MODEL_PRESETS: &[&str] = &[
+    "ultra",
+    "core",
+    "sd3.5-large",
+    "sd3.5-large-turbo",
+    "sd3-medium",
+];
 
 const IDEOGRAM_MODEL_PRESETS: &[&str] = &["V_3", "V_2", "V_2_TURBO"];
 
 const REPLICATE_MODEL_PRESETS: &[&str] = &[
     "black-forest-labs/flux-1.1-pro",
+    "black-forest-labs/flux-kontext-pro",
+    "black-forest-labs/flux-fill-pro",
     "black-forest-labs/flux-schnell",
     "stability-ai/sdxl",
+    "timbrooks/instruct-pix2pix",
+];
+
+const BFL_MODEL_PRESETS: &[&str] = &[
+    "flux-pro-1.1",
+    "flux-pro-1.1-ultra",
+    "flux-pro",
+    "flux-dev",
+    "flux-schnell",
+    "flux-kontext-pro",
+    "flux-kontext-max",
+    "flux-fill-pro",
 ];
 
 // ── Video Generation Providers ──────────────────────────────────────────────
-const VEO_VIDEO_MODEL_PRESETS: &[&str] = &["veo-2.0-generate-001", "veo-2.0-flash-001"];
+const VEO_VIDEO_MODEL_PRESETS: &[&str] = &[
+    "veo-3.1-generate-preview",
+    "veo-3.1-fast-generate-preview",
+    "veo-3.1-lite-generate-preview",
+];
+
+// ── Realtime Live Model (Gemini Live voice) ─────────────────────────────────
+// Note: gemini-3.1-flash-live-preview requires requesting allowlist access from Google
+// before it works; gemini-2.5-flash-native-audio-preview-12-2025 needs no such request as
+// of writing, so it's listed first and used as the default. gemini-3.1-flash-tts-preview is
+// deliberately NOT offered here — it's a generateContent-only TTS model, not a Live/
+// BidiGenerateContent model, and will never work with this feature.
+const GEMINI_LIVE_MODEL_PRESETS: &[&str] = &[
+    "gemini-2.5-flash-native-audio-preview-12-2025",
+    "gemini-3.1-flash-live-preview",
+];
 
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
@@ -172,6 +212,17 @@ pub async fn run() -> Result<()> {
                 .is_empty(),
         },
         OnboardService {
+            category: "Search",
+            name: "SearXNG (self-hosted)",
+            key: "searxng",
+            enabled: !config
+                .extra
+                .get("searxngBaseUrl")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .is_empty(),
+        },
+        OnboardService {
             category: "Messaging Bridges",
             name: "Telegram Bot Bridge",
             key: "telegram",
@@ -221,36 +272,6 @@ pub async fn run() -> Result<()> {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
         },
-        OnboardService {
-            category: "Productivity",
-            name: "Gmail Plugin",
-            key: "gmail",
-            enabled: config
-                .extra
-                .get("pluginGmailEnabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-        },
-        OnboardService {
-            category: "Productivity",
-            name: "Google Calendar Plugin",
-            key: "calendar",
-            enabled: config
-                .extra
-                .get("pluginCalendarEnabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-        },
-        OnboardService {
-            category: "Productivity",
-            name: "Notion Plugin",
-            key: "notion",
-            enabled: config
-                .extra
-                .get("pluginNotionEnabled")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-        },
         // ── Image Generation ─────────────────────────────────────────────────
         OnboardService {
             category: "Image Generation",
@@ -282,6 +303,12 @@ pub async fn run() -> Result<()> {
             key: "img_replicate",
             enabled: !config.replicate_api_key.is_empty(),
         },
+        OnboardService {
+            category: "Image Generation",
+            name: "Black Forest Labs (FLUX API)",
+            key: "img_bfl",
+            enabled: !config.bfl_api_key.is_empty(),
+        },
         // ── Video Generation ─────────────────────────────────────────────────
         OnboardService {
             category: "Video Generation",
@@ -294,6 +321,13 @@ pub async fn run() -> Result<()> {
                     .and_then(|v| v.as_str())
                     .map(|s| !s.is_empty())
                     .unwrap_or(false),
+        },
+        // ── Voice ─────────────────────────────────────────────────────────────
+        OnboardService {
+            category: "Voice",
+            name: "Realtime Live Model (Gemini Live)  [uses Gemini key]",
+            key: "gemini_live",
+            enabled: config.extra.get("voiceMode").and_then(|v| v.as_str()) == Some("geminiLive"),
         },
     ];
 
@@ -562,6 +596,94 @@ pub async fn run() -> Result<()> {
         );
     }
 
+    // SearXNG
+    if is_selected("searxng", &services) {
+        println!("\n\x1b[36m--- SearXNG (self-hosted) ---\x1b[0m");
+        let current_url = config
+            .extra
+            .get("searxngBaseUrl")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let url = prompt_input(
+            "SearXNG Instance URL (e.g. https://searx.example.com)",
+            Some(current_url),
+        )?;
+        config.extra.insert(
+            "searxngBaseUrl".to_string(),
+            serde_json::Value::String(url.trim_end_matches('/').to_string()),
+        );
+    } else {
+        config.extra.insert(
+            "searxngBaseUrl".to_string(),
+            serde_json::Value::String(String::new()),
+        );
+    }
+
+    // Preferred search provider — only relevant if more than one is configured.
+    {
+        let configured: Vec<(&str, &str)> = [
+            ("google", "Google Search"),
+            ("brave", "Brave Search"),
+            ("searxng", "SearXNG (self-hosted)"),
+        ]
+        .into_iter()
+        .filter(|(key, _)| match *key {
+            "google" => !config
+                .extra
+                .get("googleSearchApiKey")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .is_empty(),
+            "brave" => !config
+                .extra
+                .get("braveSearchApiKey")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .is_empty(),
+            _ => !config
+                .extra
+                .get("searxngBaseUrl")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .is_empty(),
+        })
+        .collect();
+
+        let provider = if configured.len() > 1 {
+            println!("\n\x1b[36m--- Preferred Search Provider ---\x1b[0m");
+            let current = config
+                .extra
+                .get("searchProvider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let labels: Vec<String> = configured.iter().map(|(_, l)| l.to_string()).collect();
+            let default_idx = configured
+                .iter()
+                .position(|(key, _)| *key == current)
+                .unwrap_or(0);
+            let picked_label = prompt_choice(
+                "Which provider should Mint try first when multiple are configured?",
+                &labels,
+                default_idx,
+            )?;
+            configured
+                .iter()
+                .find(|(_, label)| *label == picked_label)
+                .map(|(key, _)| key.to_string())
+                .unwrap_or_default()
+        } else {
+            configured
+                .first()
+                .map(|(key, _)| key.to_string())
+                .unwrap_or_default()
+        };
+
+        config.extra.insert(
+            "searchProvider".to_string(),
+            serde_json::Value::String(provider),
+        );
+    }
+
     // Telegram Bot
     if is_selected("telegram", &services) {
         println!("\n\x1b[36m--- Telegram Bot Bridge ---\x1b[0m");
@@ -742,170 +864,6 @@ pub async fn run() -> Result<()> {
         );
     }
 
-    // Gmail
-    if is_selected("gmail", &services) {
-        println!("\n\x1b[36m--- Gmail Plugin ---\x1b[0m");
-        let current_client_id = config
-            .extra
-            .get("gmailClientId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_client_secret = config
-            .extra
-            .get("gmailClientSecret")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_refresh_token = config
-            .extra
-            .get("gmailRefreshToken")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_user_id = config
-            .extra
-            .get("gmailUserId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("me");
-        let client_id = prompt_input("Gmail Client ID", Some(current_client_id))?;
-        let client_secret = prompt_sensitive("Gmail Client Secret", current_client_secret)?;
-        let refresh_token = prompt_sensitive("Gmail Refresh Token", current_refresh_token)?;
-        let user_id = prompt_input("Gmail User ID", Some(current_user_id))?;
-        config.extra.insert(
-            "gmailClientId".to_string(),
-            serde_json::Value::String(client_id),
-        );
-        config.extra.insert(
-            "gmailClientSecret".to_string(),
-            serde_json::Value::String(client_secret),
-        );
-        config.extra.insert(
-            "gmailRefreshToken".to_string(),
-            serde_json::Value::String(refresh_token),
-        );
-        config.extra.insert(
-            "gmailUserId".to_string(),
-            serde_json::Value::String(user_id),
-        );
-        config.extra.insert(
-            "pluginGmailEnabled".to_string(),
-            serde_json::Value::Bool(true),
-        );
-    } else {
-        config.extra.insert(
-            "pluginGmailEnabled".to_string(),
-            serde_json::Value::Bool(false),
-        );
-    }
-
-    // Google Calendar
-    if is_selected("calendar", &services) {
-        println!("\n\x1b[36m--- Google Calendar Plugin ---\x1b[0m");
-        let current_client_id = config
-            .extra
-            .get("googleCalendarClientId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_client_secret = config
-            .extra
-            .get("googleCalendarClientSecret")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_refresh_token = config
-            .extra
-            .get("googleCalendarRefreshToken")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_cal_id = config
-            .extra
-            .get("googleCalendarId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("primary");
-        let client_id = prompt_input("Google Calendar Client ID", Some(current_client_id))?;
-        let client_secret =
-            prompt_sensitive("Google Calendar Client Secret", current_client_secret)?;
-        let refresh_token =
-            prompt_sensitive("Google Calendar Refresh Token", current_refresh_token)?;
-        let cal_id = prompt_input("Google Calendar ID", Some(current_cal_id))?;
-        config.extra.insert(
-            "googleCalendarClientId".to_string(),
-            serde_json::Value::String(client_id),
-        );
-        config.extra.insert(
-            "googleCalendarClientSecret".to_string(),
-            serde_json::Value::String(client_secret),
-        );
-        config.extra.insert(
-            "googleCalendarRefreshToken".to_string(),
-            serde_json::Value::String(refresh_token),
-        );
-        config.extra.insert(
-            "googleCalendarId".to_string(),
-            serde_json::Value::String(cal_id),
-        );
-        config.extra.insert(
-            "pluginCalendarEnabled".to_string(),
-            serde_json::Value::Bool(true),
-        );
-    } else {
-        config.extra.insert(
-            "pluginCalendarEnabled".to_string(),
-            serde_json::Value::Bool(false),
-        );
-    }
-
-    // Notion
-    if is_selected("notion", &services) {
-        println!("\n\x1b[36m--- Notion Plugin ---\x1b[0m");
-        let current_api_key = config
-            .extra
-            .get("notionApiKey")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_db_id = config
-            .extra
-            .get("notionDatabaseId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_page_id = config
-            .extra
-            .get("notionPageId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let current_title = config
-            .extra
-            .get("notionTitleProperty")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Name");
-        let api_key = prompt_sensitive("Notion API Key", current_api_key)?;
-        let db_id = prompt_input("Notion Database ID", Some(current_db_id))?;
-        let page_id = prompt_input("Notion Page ID", Some(current_page_id))?;
-        let title_prop = prompt_input("Notion Title Property", Some(current_title))?;
-        config.extra.insert(
-            "notionApiKey".to_string(),
-            serde_json::Value::String(api_key),
-        );
-        config.extra.insert(
-            "notionDatabaseId".to_string(),
-            serde_json::Value::String(db_id),
-        );
-        config.extra.insert(
-            "notionPageId".to_string(),
-            serde_json::Value::String(page_id),
-        );
-        config.extra.insert(
-            "notionTitleProperty".to_string(),
-            serde_json::Value::String(title_prop),
-        );
-        config.extra.insert(
-            "pluginNotionEnabled".to_string(),
-            serde_json::Value::Bool(true),
-        );
-    } else {
-        config.extra.insert(
-            "pluginNotionEnabled".to_string(),
-            serde_json::Value::Bool(false),
-        );
-    }
-
     // ────────────────────────────────────────────────────────────────────────
     // Image Generation providers
     // ────────────────────────────────────────────────────────────────────────
@@ -991,6 +949,23 @@ pub async fn run() -> Result<()> {
         config.replicate_api_key = String::new();
     }
 
+    // Black Forest Labs (FLUX API)
+    if is_selected("img_bfl", &services) {
+        println!("\n\x1b[36m--- Black Forest Labs (FLUX API) ---\x1b[0m");
+        println!(
+            "\x1b[90mGet your API key at https://api.bfl.ml. Supports flux-pro-1.1, flux-pro-1.1-ultra, flux-dev, and flux-pro-1.0-fill.\x1b[0m"
+        );
+        config.bfl_api_key = prompt_sensitive("Black Forest Labs API Key", &config.bfl_api_key)?;
+        config.bfl_model = prompt_select_or_custom(
+            "FLUX Model",
+            static_model_options(BFL_MODEL_PRESETS),
+            Some(&config.bfl_model),
+            "Custom FLUX model...",
+        )?;
+    } else {
+        config.bfl_api_key = String::new();
+    }
+
     // Google Veo (Gemini Videos)
     if is_selected("vid_veo", &services) {
         println!("\n\x1b[36m--- Google Veo (Gemini Videos) ---\x1b[0m");
@@ -1001,7 +976,7 @@ pub async fn run() -> Result<()> {
             .extra
             .get("veoModel")
             .and_then(|v| v.as_str())
-            .unwrap_or("veo-2.0-generate-001")
+            .unwrap_or("veo-3.1-generate-preview")
             .to_string();
         let selected_veo_model = prompt_select_or_custom(
             "Veo Model",
@@ -1017,6 +992,42 @@ pub async fn run() -> Result<()> {
             "videoGenProvider".to_string(),
             serde_json::Value::String("veo".to_string()),
         );
+    } else if config
+        .extra
+        .get("videoGenProvider")
+        .and_then(|v| v.as_str())
+        == Some("veo")
+    {
+        config.extra.remove("videoGenProvider");
+    }
+
+    if is_selected("gemini_live", &services) {
+        println!("\n\x1b[36m--- Realtime Live Model (Gemini Live) ---\x1b[0m");
+        println!(
+            "\x1b[90mUses the same Gemini API key as Step 1. Select the model used for realtime voice conversations.\x1b[0m"
+        );
+        let current_live_model = config
+            .extra
+            .get("geminiLiveModel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("gemini-2.5-flash-native-audio-preview-12-2025")
+            .to_string();
+        let selected_live_model = prompt_select_or_custom(
+            "Realtime Live Model",
+            static_model_options(GEMINI_LIVE_MODEL_PRESETS),
+            Some(&current_live_model),
+            "Custom realtime live model...",
+        )?;
+        config.extra.insert(
+            "geminiLiveModel".to_string(),
+            serde_json::Value::String(selected_live_model),
+        );
+        config.extra.insert(
+            "voiceMode".to_string(),
+            serde_json::Value::String("geminiLive".to_string()),
+        );
+    } else if config.extra.get("voiceMode").and_then(|v| v.as_str()) == Some("geminiLive") {
+        config.extra.remove("voiceMode");
     }
 
     save_config(&config)?;
@@ -1153,11 +1164,78 @@ fn prompt_select_or_custom(
     }
 }
 
+/// Simple arrow-key single-choice picker with no "type your own" fallback.
+/// Unlike `prompt_select_or_custom`, every option is a literal, final answer.
+fn prompt_choice(label: &str, options: &[String], default_idx: usize) -> Result<String> {
+    let mut cursor = default_idx.min(options.len().saturating_sub(1));
+
+    println!("{}", label);
+    println!("  \x1b[90m[Keyboard Controls: ↑/↓: Navigate | Enter: Select]\x1b[0m");
+    print_select_options(options, cursor);
+    enable_raw_mode()?;
+
+    loop {
+        match event::poll(std::time::Duration::from_millis(100)) {
+            Ok(true) => {
+                if let Event::Key(key_event) = event::read()?
+                    && key_event.kind == event::KeyEventKind::Press
+                {
+                    let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c'))
+                        && key_event
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL);
+                    if is_ctrl_c {
+                        disable_raw_mode()?;
+                        println!("\n\x1b[31mOnboarding cancelled.\x1b[0m");
+                        bail!("onboarding cancelled");
+                    }
+
+                    match key_event.code {
+                        KeyCode::Up => {
+                            cursor = if cursor > 0 {
+                                cursor - 1
+                            } else {
+                                options.len() - 1
+                            };
+                            disable_raw_mode()?;
+                            print!("\x1b[{}A\x1b[J", options.len());
+                            print_select_options(options, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Down => {
+                            cursor = if cursor < options.len() - 1 {
+                                cursor + 1
+                            } else {
+                                0
+                            };
+                            disable_raw_mode()?;
+                            print!("\x1b[{}A\x1b[J", options.len());
+                            print_select_options(options, cursor);
+                            enable_raw_mode()?;
+                        }
+                        KeyCode::Enter => {
+                            disable_raw_mode()?;
+                            println!();
+                            return Ok(options[cursor].clone());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Ok(false) => {}
+            Err(error) => {
+                disable_raw_mode()?;
+                return Err(error.into());
+            }
+        }
+    }
+}
+
 fn static_model_options(presets: &[&str]) -> Vec<String> {
     presets.iter().map(|value| value.to_string()).collect()
 }
 
-fn installed_ollama_models() -> Vec<String> {
+pub(crate) fn installed_ollama_models() -> Vec<String> {
     let output = match Command::new("ollama").arg("list").output() {
         Ok(output) if output.status.success() => output,
         _ => return Vec::new(),
@@ -1190,15 +1268,24 @@ fn ensure_ollama_serving(host: &str) {
         addr.to_string()
     };
 
+    // Resolve once up front — `addr` may be a DNS name (e.g. a Docker
+    // service name), which `SocketAddr::parse` can't handle, so we go
+    // through `ToSocketAddrs` instead of silently falling back to
+    // 127.0.0.1 on parse failure.
+    let resolved_addr = addr.to_socket_addrs().ok().and_then(|mut it| it.next());
+    let is_ollama_reachable = |timeout_secs: u64| -> bool {
+        match resolved_addr {
+            Some(socket_addr) => TcpStream::connect_timeout(
+                &socket_addr,
+                std::time::Duration::from_secs(timeout_secs),
+            )
+            .is_ok(),
+            None => false,
+        }
+    };
+
     // Check if Ollama is already serving
-    if TcpStream::connect_timeout(
-        &addr
-            .parse()
-            .unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap()),
-        std::time::Duration::from_secs(1),
-    )
-    .is_ok()
-    {
+    if is_ollama_reachable(1) {
         println!(
             "\x1b[32m✔ Ollama server is already running at {}\x1b[0m",
             host
@@ -1221,14 +1308,7 @@ fn ensure_ollama_serving(host: &str) {
             let mut ready = false;
             for _ in 0..20 {
                 std::thread::sleep(std::time::Duration::from_millis(500));
-                if TcpStream::connect_timeout(
-                    &addr
-                        .parse()
-                        .unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap()),
-                    std::time::Duration::from_secs(1),
-                )
-                .is_ok()
-                {
+                if is_ollama_reachable(1) {
                     ready = true;
                     break;
                 }

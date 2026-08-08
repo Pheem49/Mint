@@ -32,22 +32,13 @@ import {
   readImage,
   readDocument,
   createTrimmedImagePreview,
+  createObjectUrlPreview,
   applyThemeStyles,
 } from '../../shared/utils/ui'
 import { executeSlashCommand } from '../../shared/utils/slashCommandProcessor'
 
 
-const DEFAULT_CONFIG = {
-  theme: 'dark',
-  accentColor: '#10b981',
-  systemTextColor: '#f8fafc',
-  customBgStart: '#0f172a',
-  customBgEnd: '#1e1b4b',
-  customPanelBg: '#1e293b',
-  glassBlur: 'blur(16px)',
-  fontFamily: "'Outfit', sans-serif",
-  fontSize: '18px',
-}
+import { DEFAULT_CONFIG } from '../../shared/constants/config'
 
 const ACTIVE_CONVERSATION_ID_KEY = 'mint:web-active-conversation-id'
 
@@ -56,7 +47,30 @@ function createConversationId() {
   return `conversation-${Date.now().toString(36)}-${random}`
 }
 
+function getConversationIdFromUrl(): string | null {
+  if (typeof window === 'undefined') return null
+  const pathname = window.location.pathname || ''
+  const hash = (window.location.hash || '').replace(/^#/, '')
+  const target = pathname || hash
+
+  const match = target.match(/^\/chat\/(.+)$/i) || target.match(/^\/c\/(.+)$/i)
+  if (match && match[1]) {
+    return decodeURIComponent(match[1])
+  }
+
+  const searchParams = new URLSearchParams(window.location.search)
+  const queryId = searchParams.get('id')
+  if (queryId) return queryId
+
+  return null
+}
+
 function activeConversationId() {
+  const fromUrl = getConversationIdFromUrl()
+  if (fromUrl) {
+    window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, fromUrl)
+    return fromUrl
+  }
   const existing = window.localStorage.getItem(ACTIVE_CONVERSATION_ID_KEY)
   if (existing === 'conversation-default') {
     window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, 'cli')
@@ -78,8 +92,77 @@ const MOCK_WELCOME_INTERACTION = {
 }
 
 
+import SkillsView from '../../shared/components/SkillsView'
+import McpServersView from '../../shared/components/McpServersView'
+import PluginsView from '../../shared/components/PluginsView'
+import { isSupportedDocument } from '../../shared/utils/documentTypes'
+import {
+  listLearnedSkills,
+  addLearnedSkill,
+  deleteLearnedSkill,
+  detectSystemTools,
+  setProfileValue,
+} from '../tauri'
+
+function getInitialViewFromUrl(): DashboardView {
+  if (typeof window === 'undefined') return 'chat'
+  const hash = (window.location.hash || '').toLowerCase().replace(/^#/, '')
+  const pathname = (window.location.pathname || '').toLowerCase()
+  const target = hash || pathname
+
+  if (target.includes('skills')) return 'skills'
+  if (target.includes('mcp')) return 'mcp'
+  if (target.includes('plugins')) return 'plugins'
+  if (target.includes('picture')) return 'pictures'
+  if (target.includes('image-studio') || target.includes('imagine')) return 'imagine'
+  if (target.includes('veo-studio') || target.includes('veo')) return 'veo'
+  return 'chat'
+}
+
+function getCleanPathForView(v: DashboardView, activeId?: string): string {
+  if (v === 'skills') return '/skills'
+  if (v === 'mcp') return '/mcp'
+  if (v === 'plugins') return '/plugins'
+  if (v === 'pictures') return '/pictures'
+  if (v === 'imagine') return '/image-studio'
+  if (v === 'veo') return '/veo-studio'
+  if (activeId) return `/chat/${encodeURIComponent(activeId)}`
+  return '/chat'
+}
+
 export default function MintDashboard() {
-  const [view, setView] = useState<DashboardView>('chat')
+  const [view, setView] = useState<DashboardView>(getInitialViewFromUrl)
+  const [conversationId, setConversationId] = useState(activeConversationId)
+
+  useEffect(() => {
+    const handleUrlChange = () => {
+      if (window.location.hash === '#' || window.location.hash === '#/') {
+        window.history.replaceState({}, '', window.location.pathname + window.location.search)
+      }
+      const pathname = (window.location.pathname || '').toLowerCase()
+      const hash = (window.location.hash || '').toLowerCase()
+      if (pathname.includes('/settings') || hash.includes('/settings')) return
+      const nextView = getInitialViewFromUrl()
+      setView(nextView)
+
+      const urlSessionId = getConversationIdFromUrl()
+      if (urlSessionId && urlSessionId !== conversationId) {
+        window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, urlSessionId)
+        setConversationId(urlSessionId)
+        getRecentInteractions(50, urlSessionId).then((history) => {
+          const reversed = history.reverse()
+          setInteractions(reversed)
+          setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
+        })
+      }
+    }
+    window.addEventListener('popstate', handleUrlChange)
+    window.addEventListener('hashchange', handleUrlChange)
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange)
+      window.removeEventListener('hashchange', handleUrlChange)
+    }
+  }, [conversationId])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -100,6 +183,7 @@ export default function MintDashboard() {
   const [videoAttachments, setVideoAttachments] = useState<Array<{ dataUri: string; name: string }>>([])
   const [documentAttachment, setDocumentAttachment] = useState<DocumentAttachment | null>(null)
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
+  const sessionAutoApprovedRef = useRef(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
@@ -108,10 +192,76 @@ export default function MintDashboard() {
   const [dashboardDataReady, setDashboardDataReady] = useState(false)
   const [startupTimedOut, setStartupTimedOut] = useState(false)
   const [settingsConfig, setSettingsConfig] = useState<any>(null)
-  const [conversationId, setConversationId] = useState(activeConversationId)
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const startupReady = dashboardDataReady || startupTimedOut
+
+  const [mcpName, setMcpName] = useState('')
+  const [mcpCmd, setMcpCmd] = useState('')
+  const [mcpArgs, setMcpArgs] = useState('')
+  const [mcpEnv, setMcpEnv] = useState('')
+  const [mcpIcon, setMcpIcon] = useState('')
+
+  const handleUpdateSettingsField = async (field: string, value: any) => {
+    const currentConfig = settingsConfig || DEFAULT_CONFIG
+    const updatedConfig = { ...currentConfig, [field]: value }
+    setSettingsConfig(updatedConfig)
+
+    if ((window as any).settingsApi) {
+      await (window as any).settingsApi.saveSettings(updatedConfig)
+    } else {
+      try {
+        await setProfileValue('user-settings', JSON.stringify(updatedConfig))
+      } catch (e) {
+        console.error('Failed to save settings field:', e)
+      }
+    }
+  }
+
+  const handleAddMcpServer = async () => {
+    if (!mcpName.trim() || !mcpCmd.trim()) {
+      alert('Please provide at least a server name and command.')
+      return
+    }
+
+    let parsedEnv = {}
+    if (mcpEnv.trim()) {
+      try {
+        parsedEnv = JSON.parse(mcpEnv)
+      } catch {
+        alert('Invalid JSON in Environment variable field.')
+        return
+      }
+    }
+
+    const argList = mcpArgs.split(/\s+/).filter(Boolean)
+    const currentConfig = settingsConfig || DEFAULT_CONFIG
+    const updatedMcp = {
+      ...currentConfig?.mcpServers,
+      [mcpName.trim()]: {
+        command: mcpCmd.trim(),
+        args: argList,
+        env: parsedEnv,
+        icon: mcpIcon.trim() || undefined,
+      },
+    }
+
+    await handleUpdateSettingsField('mcpServers', updatedMcp)
+    setMcpName('')
+    setMcpCmd('')
+    setMcpArgs('')
+    setMcpEnv('')
+    setMcpIcon('')
+  }
+
+  const handleRemoveMcpServer = async (name: string) => {
+    const currentConfig = settingsConfig || DEFAULT_CONFIG
+    const updated = { ...(currentConfig?.mcpServers || {}) }
+    delete updated[name]
+    await handleUpdateSettingsField('mcpServers', updated)
+  }
+
+  const handleConnectPlugin = (_plugin: string) => {}
 
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -247,8 +397,20 @@ export default function MintDashboard() {
       applyThemeStyles(loaded)
       getRuntimeStatus().then(setStatus).catch(() => {})
     })
+
+    const unlistenPromise = listen<any>('tool-approval-requested', (event) => {
+      if (sessionAutoApprovedRef.current) {
+        submitToolApproval(event.payload.token, true).catch((err) => {
+          console.error("Auto approval failed:", err)
+        })
+      } else {
+        setPendingApproval(event.payload)
+      }
+    })
+
     return () => {
       window.removeEventListener('focus', handleWindowFocus)
+      unlistenPromise?.then?.((unlisten) => unlisten?.())
     }
   }, [])
 
@@ -270,9 +432,13 @@ export default function MintDashboard() {
     setTimeout(() => setToastMessage((current) => current === nextMessage ? '' : current), 3000)
   }
 
-  const changeView = (newView: DashboardView) => {
+  const changeView = (newView: DashboardView, targetConversationId?: string) => {
     setView(newView)
     setMobileSidebarOpen(false)
+    const targetPath = getCleanPathForView(newView, targetConversationId || conversationId)
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath)
+    }
   }
 
   const toggleSidebar = () => {
@@ -459,10 +625,10 @@ export default function MintDashboard() {
           document.getElementById('vision-file-input')?.click()
           return
         } else if (slashResult.action === 'open_plugins') {
-          setView('settings')
+          setView('plugins')
           return
         } else if (slashResult.action === 'generate_veo') {
-          setView('veo_studio')
+          setView('veo')
           return
         } else if (slashResult.action === 'set_provider_model' && slashResult.payload?.target) {
           const target = slashResult.payload.target
@@ -515,9 +681,10 @@ export default function MintDashboard() {
     const file = event.target.files?.[0]
     if (!file) return
     try {
+      const objectUrl = createObjectUrlPreview(file).objectUrl
       const dataUri = await readImage(file)
       const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
-      setImageAttachments((current) => [...current, { dataUri, previewDataUri, name: file.name }])
+      setImageAttachments((current) => [...current, { dataUri, previewDataUri, objectUrl, name: file.name }])
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -593,8 +760,8 @@ export default function MintDashboard() {
     const file = event.target.files?.[0]
     if (!file) return
     try {
-      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-        throw new Error('Only PDF files are supported')
+      if (!isSupportedDocument(file.name)) {
+        throw new Error('Unsupported document type')
       }
       setDocumentAttachment({
         filename: file.name,
@@ -624,9 +791,8 @@ export default function MintDashboard() {
     try {
       if (action === 'New chat') {
         const next = createConversationId()
-        window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, next)
-        setConversationId(next)
-        await refreshChatSessions(next)
+        selectConversation(next)
+        return
       } else {
         if (!window.confirm(`${action} will clear the current conversation history. Continue?`)) return
         await clearChatHistory(conversationId)
@@ -648,13 +814,9 @@ export default function MintDashboard() {
   }
 
   async function selectConversation(id: string) {
-    if (id === conversationId) {
-      changeView('chat')
-      return
-    }
     window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, id)
     setConversationId(id)
-    changeView('chat')
+    changeView('chat', id)
     setStreamedReply('')
     setStreamedResponse(null)
     setMessage('')
@@ -816,7 +978,17 @@ export default function MintDashboard() {
     }
   }
 
-
+  async function changeGeminiLiveVoice(voiceName: string) {
+    try {
+      const config = await window.settingsApi.getSettings()
+      if (config.geminiLiveVoice === voiceName) return
+      config.geminiLiveVoice = voiceName
+      await window.settingsApi.saveSettings(config)
+      setSettingsConfig(config)
+    } catch (reason) {
+      setError(errorMessage(reason))
+    }
+  }
 
   return (
     <div className={`app-container ${startupReady ? '' : 'is-loading'}`}>
@@ -852,7 +1024,7 @@ export default function MintDashboard() {
           isSearchOpen={isSearchOpen}
           onSetSearchOpen={setIsSearchOpen}
         />
-        <main className="assistant-workspace model-hidden">
+        <main className="assistant-workspace model-hidden" style={view !== 'chat' ? { display: 'none' } : undefined}>
           <ChatPanel
             interactions={interactions}
             sending={sending && streamingConversationId === conversationId}
@@ -896,11 +1068,53 @@ export default function MintDashboard() {
             onSetProvider={changeProvider}
             settingsConfig={settingsConfig}
             onSetModel={changeModel}
+            onSetGeminiLiveVoice={changeGeminiLiveVoice}
             onApproval={handleApproval}
             onCancelMessage={handleCancelMessage}
             onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+            onClearMessages={() => clearHistory('Clear history')}
           />
         </main>
+        {view === 'skills' && (
+          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+            <SkillsView
+              listSkills={listLearnedSkills}
+              addSkill={addLearnedSkill}
+              deleteSkill={deleteLearnedSkill}
+              workspacePath={window.localStorage.getItem('mint:last-workspace-path') || undefined}
+            />
+          </div>
+        )}
+        {view === 'mcp' && (
+          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+            <McpServersView
+              config={settingsConfig || DEFAULT_CONFIG}
+              updateField={handleUpdateSettingsField}
+              mcpName={mcpName}
+              setMcpName={setMcpName}
+              mcpCmd={mcpCmd}
+              setMcpCmd={setMcpCmd}
+              mcpArgs={mcpArgs}
+              setMcpArgs={setMcpArgs}
+              mcpEnv={mcpEnv}
+              setMcpEnv={setMcpEnv}
+              mcpIcon={mcpIcon}
+              setMcpIcon={setMcpIcon}
+              handleAddMcpServer={handleAddMcpServer}
+              handleRemoveMcpServer={handleRemoveMcpServer}
+              detectTools={detectSystemTools}
+            />
+          </div>
+        )}
+        {view === 'plugins' && (
+          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+            <PluginsView
+              config={settingsConfig || DEFAULT_CONFIG}
+              updateField={handleUpdateSettingsField}
+              handleConnectPlugin={handleConnectPlugin}
+            />
+          </div>
+        )}
         <PicturesLibrary view={view} pictures={pictures} onSetView={changeView} onRefreshPictures={refreshPictures} />
         <ImageStudioPanel
           view={view}

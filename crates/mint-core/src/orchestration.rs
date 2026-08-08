@@ -1,19 +1,26 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::process::Command;
 use std::time::Instant;
 use thiserror::Error;
 
-use crate::chat::{send_chat_with_fallback, stream_chat_with_fallback};
+use crate::chat::{
+    ChatMessage, ChatRole, ContentBlock, send_chat_with_fallback, stream_chat_with_fallback,
+};
 use crate::code_tools::{
     CodeEdit, CodePatchHunk, apply_code_edits, build_code_patch, list_code_files,
     propose_code_edits, read_code_file, search_code,
 };
+use crate::config::ToolCallingMode;
 use crate::knowledge::KnowledgeStore;
 use crate::plugins::execute_native_plugin;
+use crate::prompts::tool_catalog::tool_catalog;
 use crate::semantic::{index_semantic_code, search_semantic_code};
 use crate::shell::run_shell_command;
 use crate::symbols::build_symbol_index;
@@ -264,293 +271,16 @@ fn request_chat_id(request: &ChatRequest) -> &str {
         .unwrap_or(DEFAULT_CONVERSATION_ID)
 }
 
+use crate::prompts::agent::build_system_prompt;
+
 const MAX_STEPS: usize = 32;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
-fn is_port_9222_open() -> bool {
-    use std::net::TcpStream;
-    use std::time::Duration;
-    if let Ok(addr) = "127.0.0.1:9222".parse() {
-        TcpStream::connect_timeout(&addr, Duration::from_millis(50)).is_ok()
-    } else {
-        false
-    }
-}
-
-pub fn build_system_prompt(config: &MintConfig) -> String {
-    let mut allowed_actions = vec![
-        "list_files",
-        "read_file",
-        "search_code",
-        "symbols",
-        "semantic_index",
-        "semantic_search",
-        "knowledge_search",
-        "web_search",
-        "memory_recall",
-        "git_status",
-        "git_diff",
-        "git_log",
-        "git_branch",
-        "create_plan",
-        "update_plan",
-        "request_user_approval",
-        "ask_user",
-        "detect_project",
-        "list_tests",
-        "read_diagnostics",
-        "view_image",
-        "note_write",
-        "run_plugin",
-        "mcp_tool",
-        "mcp_list_tools",
-        "run_shell",
-        "verify",
-        "apply_patch",
-        "write_file",
-    ];
-
-    if is_port_9222_open() {
-        allowed_actions.push("browser_open");
-        allowed_actions.push("browser_click");
-        allowed_actions.push("browser_type");
-        allowed_actions.push("browser_read");
-        allowed_actions.push("browser_mouse_move");
-        allowed_actions.push("browser_mouse_click");
-        allowed_actions.push("browser_key_press");
-        allowed_actions.push("browser_screenshot");
-    }
-
-    allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
-    allowed_actions.push("finish");
-
-    let actions_str = allowed_actions.join("|");
-
-    let mut input_formats = Vec::new();
-    if allowed_actions.contains(&"list_files") {
-        input_formats.push(
-            "- list_files: {\"path\":\".\",\"limit\":100} (workspace path, ~/path, or allowed user folder like Downloads)",
-        );
-    }
-    if allowed_actions.contains(&"read_file") {
-        input_formats
-            .push("- read_file: {\"path\":\"relative/path\",\"startLine\":1,\"endLine\":240}");
-    }
-    if allowed_actions.contains(&"search_code") {
-        input_formats.push("- search_code: {\"query\":\"text\",\"path\":\".\",\"limit\":20}");
-    }
-    if allowed_actions.contains(&"symbols") {
-        input_formats.push("- symbols: {\"path\":\".\",\"limit\":100}");
-    }
-    if allowed_actions.contains(&"semantic_index") {
-        input_formats.push("- semantic_index: {\"path\":\".\"}");
-    }
-    if allowed_actions.contains(&"semantic_search") {
-        input_formats.push(
-            "- semantic_search: {\"query\":\"behavior description\",\"path\":\".\",\"limit\":5}",
-        );
-    }
-    if allowed_actions.contains(&"knowledge_search") {
-        input_formats.push("- knowledge_search: {\"query\":\"local knowledge query\",\"limit\":5}");
-    }
-    if allowed_actions.contains(&"web_search") {
-        input_formats.push("- web_search: {\"query\":\"search terms\",\"limit\":5}");
-    }
-    if allowed_actions.contains(&"browser_open") {
-        input_formats.push("- browser_open: {\"url\":\"https://example.com\"}");
-    }
-    if allowed_actions.contains(&"browser_click") {
-        input_formats.push("- browser_click: {\"selector\":\"button.submit-btn\"} (CSS selector, or text=Login, contains=Submit, xpath=//button)");
-    }
-    if allowed_actions.contains(&"browser_type") {
-        input_formats
-            .push("- browser_type: {\"selector\":\"input.search-bar\", \"text\":\"search query\"} (CSS selector, or text=Placeholder, contains=Label)");
-    }
-    if allowed_actions.contains(&"browser_read") {
-        input_formats.push("- browser_read: {}");
-    }
-    if allowed_actions.contains(&"browser_mouse_move") {
-        input_formats.push("- browser_mouse_move: {\"x\":640,\"y\":360}");
-    }
-    if allowed_actions.contains(&"browser_mouse_click") {
-        input_formats.push("- browser_mouse_click: {\"x\":640,\"y\":360,\"button\":\"left\"}");
-    }
-    if allowed_actions.contains(&"browser_key_press") {
-        input_formats.push("- browser_key_press: {\"key\":\"Enter\"} (keys: Enter,Tab,Escape,Backspace,Delete,ArrowUp,ArrowDown,ArrowLeft,ArrowRight,F1-F12,Space)");
-    }
-    if allowed_actions.contains(&"browser_screenshot") {
-        input_formats.push("- browser_screenshot: {}");
-    }
-    if allowed_actions.contains(&"memory_recall") {
-        input_formats.push("- memory_recall: {\"query\":\"what did user say about X\"}");
-    }
-    if allowed_actions.contains(&"git_status") {
-        input_formats.push("- git_status: {}");
-    }
-    if allowed_actions.contains(&"git_diff") {
-        input_formats.push("- git_diff: {\"path\":\"optional/relative/path\"}");
-    }
-    if allowed_actions.contains(&"git_log") {
-        input_formats.push("- git_log: {\"limit\":5}");
-    }
-    if allowed_actions.contains(&"git_branch") {
-        input_formats.push("- git_branch: {}");
-    }
-    if allowed_actions.contains(&"create_plan") {
-        input_formats
-            .push("- create_plan: {\"summary\":\"objective\",\"steps\":[\"step 1\",\"step 2\"]}");
-    }
-    if allowed_actions.contains(&"update_plan") {
-        input_formats.push("- update_plan: {\"steps\":[\"done: step 1\",\"in_progress: step 2\"]}");
-    }
-    if allowed_actions.contains(&"request_user_approval") {
-        input_formats.push("- request_user_approval: {\"title\":\"short title\",\"summary\":\"what needs approval\"}");
-    }
-    if allowed_actions.contains(&"ask_user") {
-        input_formats.push("- ask_user: {\"query\":\"short question\"}");
-    }
-    if allowed_actions.contains(&"detect_project") {
-        input_formats.push("- detect_project: {\"path\":\".\"}");
-    }
-    if allowed_actions.contains(&"list_tests") {
-        input_formats.push("- list_tests: {\"path\":\".\"}");
-    }
-    if allowed_actions.contains(&"read_diagnostics") {
-        input_formats.push("- read_diagnostics: {\"path\":\".\"}");
-    }
-    if allowed_actions.contains(&"view_image") {
-        input_formats.push("- view_image: {\"path\":\"relative/image.png\"}");
-    }
-    if allowed_actions.contains(&"note_write") {
-        input_formats
-            .push("- note_write: {\"path\":\"filename.md\",\"fileContent\":\"note content\"}");
-    }
-    if allowed_actions.contains(&"run_plugin") {
-        input_formats.push("- run_plugin: {\"name\":\"gmail|google_calendar|notion|docker|spotify|obsidian|system_metrics\",\"instruction\":\"instruction string\"}");
-    }
-    let mcp_str;
-    if allowed_actions.contains(&"mcp_tool") {
-        let servers = crate::mcp::list_mcp_servers()
-            .map(|m| m.keys().cloned().collect::<Vec<String>>().join(", "))
-            .unwrap_or_default();
-        mcp_str = format!(
-            "- mcp_tool: {{\"server\":\"<name>\",\"tool\":\"tool-name\",\"arguments\":{{}}}} (Available configured servers: {})",
-            servers
-        );
-        input_formats.push(&mcp_str);
-    }
-    if allowed_actions.contains(&"mcp_list_tools") {
-        input_formats.push("- mcp_list_tools: {\"server\":\"configured-server\"}");
-    }
-    if allowed_actions.contains(&"run_shell") {
-        input_formats.push(
-            "- run_shell: {\"command\":\"read-only or test command allowed by shell policy\"}",
-        );
-    }
-    if allowed_actions.contains(&"verify") {
-        input_formats.push("- verify: {\"commands\":[\"cargo test\",\"npm test\"]}");
-    }
-    if allowed_actions.contains(&"apply_patch") {
-        input_formats.push("- apply_patch: {\"patch\":{\"path\":\"relative/path\",\"hunks\":[{\"oldText\":\"exact text\",\"newText\":\"replacement\"}]}}");
-    }
-    if allowed_actions.contains(&"write_file") {
-        input_formats.push(
-            "- write_file: {\"path\":\"new/relative/path\",\"fileContent\":\"full file content\"}",
-        );
-    }
-    input_formats.push("- finish: {\"summary\":\"concise final answer in Thai when the user writes Thai\",\"verification\":\"checks run or not run\"}");
-
-    let input_formats_str = input_formats.join("\n");
-
-    let mut rules = Vec::new();
-    rules.push(
-        "0. For casual conversation or questions that need no local tool, use finish immediately.",
-    );
-    if allowed_actions.contains(&"list_files") || allowed_actions.contains(&"read_file") {
-        rules.push("1. Inspect the workspace before editing.");
-        rules.push("1a. For user folders such as Downloads, Documents, Desktop, Pictures, Music, or Videos, use list_files with that folder name or ~/folder before using shell.");
-    }
-    if allowed_actions.contains(&"search_code") {
-        rules.push(
-            "2. Use search_code before reading many files when searching for a symbol or behavior.",
-        );
-    }
-    if allowed_actions.contains(&"apply_patch") && allowed_actions.contains(&"write_file") {
-        rules.push("3. Use apply_patch for all edits to existing files (write_file is only for creating new files). For edits across multiple sections of a file, supply separate small hunks in the 'hunks' array (one hunk per edit location). Keep oldText in each hunk minimal (only 1-3 exact lines needed to pinpoint the edit). NEVER bundle multiple separate edits into a single giant hunk that spans the entire file.");
-    }
-    if allowed_actions.contains(&"run_shell")
-        || allowed_actions.contains(&"write_file")
-        || allowed_actions.contains(&"apply_patch")
-    {
-        rules.push("4. Shell commands and file edits require user approval. Mint handles approval after you request the tool.");
-    }
-    if allowed_actions.contains(&"run_shell") {
-        rules.push("5. Shell commands are classified as readOnly, test, network, or mutating. Only policy-allowed modes may run after approval. Never request destructive commands such as rm -rf, git reset --hard, git checkout --, or git clean -f.");
-    }
-    if allowed_actions.contains(&"verify") {
-        rules.push("6. Verify code changes when possible. If compile or test commands fail (exit status is not 0), analyze the stdout/stderr to locate the bug, edit the code to fix it, and verify again. Do not stop or give up until the errors are resolved.");
-    }
-    if allowed_actions.contains(&"web_search") {
-        rules.push("7. Use web_search when the user asks to look something up online or needs current information.");
-    }
-    if allowed_actions.contains(&"browser_open") {
-        rules.push("7a. Use browser_open to navigate the virtual browser to a URL.");
-    }
-    if allowed_actions.contains(&"browser_click") {
-        rules.push("7b. Use browser_click to click elements. Selector can be: CSS selector (button.class, #id, [attr=val]), text=ExactText to find by visible text, contains=PartialText for partial match, or xpath=//expr for XPath. Prefer text= or contains= when the element has visible text but no unique CSS class.");
-    }
-    if allowed_actions.contains(&"browser_type") {
-        rules.push("7c. Use browser_type to enter text into form fields or search boxes. Selector supports the same formats as browser_click.");
-    }
-    if allowed_actions.contains(&"browser_read") {
-        rules.push(
-            "7d. Use browser_read to read the text content of the active page to analyze it.",
-        );
-    }
-    if allowed_actions.contains(&"browser_mouse_move") {
-        rules.push("7e. Use browser_mouse_move to move the real mouse cursor to absolute (x,y) coordinates.");
-    }
-    if allowed_actions.contains(&"browser_mouse_click") {
-        rules.push("7f. Use browser_mouse_click to perform a native mouse click at (x,y) coordinates. Use browser_screenshot first to find the target position.");
-    }
-    if allowed_actions.contains(&"browser_key_press") {
-        rules.push("7g. Use browser_key_press to press a keyboard key (e.g. Enter, Tab, Escape, ArrowDown). Use after browser_type or browser_mouse_click to interact with focused elements.");
-    }
-    if allowed_actions.contains(&"browser_screenshot") {
-        rules.push("7h. Use browser_screenshot to capture the current page as a PNG image (base64). Use it to inspect the visual state of the page before deciding where to click.");
-    }
-    if allowed_actions.contains(&"memory_recall") {
-        rules.push("8. Use memory_recall to search past interactions before asking the user to repeat context.");
-    }
-    if allowed_actions.contains(&"git_status") {
-        rules.push("8a. Use git_status and git_diff before summarizing local code changes.");
-    }
-    if allowed_actions.contains(&"create_plan") || allowed_actions.contains(&"update_plan") {
-        rules.push("8b. Use create_plan/update_plan for multi-step implementation work.");
-    }
-    if allowed_actions.contains(&"note_write") {
-        rules.push("9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.");
-    }
-    if allowed_actions.contains(&"run_plugin") {
-        rules.push("10. Use run_plugin only when the requested native plugin is explicitly allowed by policy.");
-    }
-    rules.push("11. Keep thought short and concrete. Write the thought field in English at all times. Use Thai for the final summary when the task is written in Thai.");
-    rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done. Use the 'finish' action immediately.");
-    rules.push("13. You may discuss mature personal topics at a non-explicit level, including adult relationships, sex education, intimacy, emotions, and feelings. Keep the tone respectful and supportive, avoid graphic sexual detail, and do not engage with sexual content involving minors, coercion, exploitation, or sexual violence.");
-
-    let rules_str = rules.join("\n");
-
-    format!(
-        "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
-         You are also Mint: a cute, warm, and helpful Thai assistant. Speak politely, naturally, and sweetly in Thai when the user writes in Thai. Refer to yourself as \"มิ้น\" and use polite particles such as \"ค่ะ\" and \"นะคะ\" where appropriate. Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision. Write the \"thought\" field in English at all times (never use Thai for the thought field).\n\
-         Follow an inspect -> act -> verify loop. Return exactly one JSON object per response, with no markdown:\n\
-         {{\"thought\":\"short user-visible progress note\",\"action\":\"{}\",\"input\":{{...}}}}\n\n\
-         Input formats:\n\
-         {}\n\n\
-         Rules:\n\
-         {}",
-        actions_str, input_formats_str, rules_str
-    )
-}
+/// Compact `native_messages` once reported token usage crosses this fraction
+/// of the active model's context window.
+const COMPACTION_TRIGGER_RATIO: f64 = 0.8;
+/// Number of most-recent Assistant/Tool step-pairs kept verbatim (uncompacted)
+/// in `native_messages`.
+const COMPACTION_KEEP_RECENT_STEPS: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentApproval {
@@ -587,6 +317,11 @@ pub enum AgentApproval {
     },
     AskUser {
         question: String,
+        #[serde(default)]
+        options: Vec<String>,
+    },
+    ExitPlanMode {
+        plan: String,
     },
 }
 
@@ -657,6 +392,12 @@ struct AgentInput {
     #[serde(default)]
     query: String,
     #[serde(default)]
+    options: Vec<String>,
+    #[serde(default)]
+    city: String,
+    #[serde(default)]
+    expression: String,
+    #[serde(default)]
     command: String,
     #[serde(default)]
     commands: Vec<String>,
@@ -668,6 +409,8 @@ struct AgentInput {
     summary: String,
     #[serde(default)]
     verification: String,
+    #[serde(default)]
+    plan: String,
     #[serde(default)]
     start_line: Option<usize>,
     #[serde(default)]
@@ -706,6 +449,56 @@ struct AgentInput {
     button: String,
     #[serde(default)]
     key: String,
+    // Video tools input fields
+    #[serde(default)]
+    input: String,
+    #[serde(default)]
+    output: String,
+    #[serde(default)]
+    start: Option<f64>,
+    #[serde(default)]
+    end: Option<f64>,
+    #[serde(default)]
+    width: Option<i32>,
+    #[serde(default)]
+    height: Option<i32>,
+    #[serde(default)]
+    threshold_db: Option<f64>,
+    #[serde(default)]
+    min_silence_secs: Option<f64>,
+    #[serde(default)]
+    language: Option<String>,
+    #[serde(default)]
+    target_language: Option<String>,
+    #[serde(default)]
+    srt_content: Option<String>,
+    #[serde(default)]
+    preset: Option<String>,
+    #[serde(default)]
+    max_clips: Option<u32>,
+    #[serde(default)]
+    target_duration: Option<f64>,
+    #[serde(default)]
+    inputs: Vec<String>,
+    #[serde(default)]
+    order: Vec<usize>,
+    #[serde(default)]
+    music_input: Option<String>,
+    #[serde(default)]
+    video_input: Option<String>,
+    #[serde(default)]
+    music_volume: Option<f32>,
+    #[serde(default)]
+    zoom_factor: Option<f32>,
+    // Image & Video generation input fields
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    aspect_ratio: String,
+    #[serde(default)]
+    provider: String,
+    #[serde(default)]
+    duration: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -815,154 +608,193 @@ fn resolve_agent_config(
     )
 }
 
-pub async fn orchestrate_agent_loop<Approve, Progress, Chunk>(
-    config: &MintConfig,
-    task: &str,
-    root: &Path,
+/// Returns a boxed `dyn Future` trait object rather than being a plain
+/// `async fn` (whose return type would otherwise be an opaque, compiler-
+/// inferred type). This is required, not just a style choice: `execute_tool`
+/// (called from this function's own loop body) can itself recurse back into
+/// `orchestrate_agent_loop` via the `dispatch_subagent` tool, and Rust cannot
+/// check whether an opaque `async fn` return type satisfies `Send` from code
+/// that lives inside that same function's own defining scope — it's a
+/// "cannot check whether the hidden type of opaque type satisfies auto
+/// traits" compile error. Making the return type concrete (not opaque) up
+/// front sidesteps that entirely. `.await` works identically on this as on a
+/// plain `async fn`, so none of this function's existing callers need to
+/// change.
+pub fn orchestrate_agent_loop<'a, Approve, Progress, Chunk>(
+    config: &'a MintConfig,
+    task: &'a str,
+    root: &'a Path,
     image_data_uri: Option<String>,
+    audio_data_uri: Option<String>,
     video_data_uri: Option<String>,
-    chat_id: Option<&str>,
-    agent_id: Option<&str>,
+    chat_id: Option<&'a str>,
+    agent_id: Option<&'a str>,
+    user_name: Option<&'a str>,
     fast_mode: bool,
+    plan_mode: bool,
     mut approve: Approve,
     mut progress: Progress,
     mut on_chunk: Chunk,
-) -> Result<AgentResult, OrchestrationError>
+) -> Pin<Box<dyn Future<Output = Result<AgentResult, OrchestrationError>> + Send + 'a>>
 where
-    Approve: FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send,
-    Progress: FnMut(AgentProgress) + Send,
-    Chunk: FnMut(String) + Send,
+    Approve: FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send + 'a,
+    Progress: FnMut(AgentProgress) + Send + 'a,
+    Chunk: FnMut(String) + Send + 'a,
 {
-    let started_at = Instant::now();
-    let root = root.canonicalize().map_err(|e| {
-        OrchestrationError::Agent(format!(
-            "unable to resolve workspace root {}: {}",
-            root.display(),
-            e
-        ))
-    })?;
-    let resolved_task = resolve_github_links(task, config).await;
-    let chat_id = chat_id
-        .map(str::trim)
-        .filter(|chat_id| !chat_id.is_empty())
-        .unwrap_or(DEFAULT_CONVERSATION_ID);
-    let skills =
-        crate::skills::learned_skills_context(Some(&root), Some(chat_id)).unwrap_or_default();
-    let mut observation = initial_observation(&resolved_task, &root, &skills);
-    let mut pending_image = image_data_uri;
-    let mut pending_video = video_data_uri;
+    Box::pin(async move {
+        let started_at = Instant::now();
+        let root = root.canonicalize().map_err(|e| {
+            OrchestrationError::Agent(format!(
+                "unable to resolve workspace root {}: {}",
+                root.display(),
+                e
+            ))
+        })?;
+        let resolved_task = resolve_github_links(task, config).await;
+        let chat_id = chat_id
+            .map(str::trim)
+            .filter(|chat_id| !chat_id.is_empty())
+            .unwrap_or(DEFAULT_CONVERSATION_ID);
+        // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
+        // (see the `dispatch_subagent` arm in `execute_tool`) so their own memory
+        // interaction doesn't leak into the parent conversation's history. That
+        // same marker doubles as the depth-limit signal here: a subagent's own
+        // nested loop never offers `dispatch_subagent` in its tool catalog, so it
+        // can't recurse into further subagents.
+        let allow_subagent_dispatch = !chat_id.contains("::subagent::");
+        let skills =
+            crate::skills::learned_skills_context(Some(&root), Some(chat_id)).unwrap_or_default();
+        let mut observation = initial_observation(&resolved_task, &root, &skills);
+        let mut pending_image = image_data_uri;
+        let mut pending_audio = audio_data_uri;
+        let mut pending_video = video_data_uri;
 
-    let mut system_prompt = build_system_prompt(config);
+        let mut plan_mode = plan_mode;
+        // Determined once from the base `config` (not the per-step `active_config`
+        // multi-agent collaboration can substitute) — matches how `system_prompt`
+        // itself is only rebuilt on plan-mode transitions, not every step.
+        let system_prompt_native = config.tool_calling_mode() == ToolCallingMode::Native;
+        let mut system_prompt =
+            build_system_prompt(config, plan_mode, system_prompt_native, user_name);
+        let hooks = crate::hooks::list_hooks(config);
 
-    if let Ok(memory) = MemoryStore::open_default() {
-        let mut profile_instructions = String::new();
-        if let Ok(Some(name)) = memory.get_profile("name")
-            && !name.trim().is_empty()
-        {
-            profile_instructions.push_str(&format!("User Name: {}\n", name.trim()));
-        }
-        if let Ok(Some(preferences)) = memory.get_profile("preferences")
-            && !preferences.trim().is_empty()
-        {
-            profile_instructions.push_str(&format!(
-                "User Preferences & Profile:\n{}\n",
-                preferences.trim()
-            ));
-        }
+        append_memory_context(&mut system_prompt, chat_id);
 
-        if !profile_instructions.is_empty() {
-            system_prompt = format!(
-                "{}\n\nUser Profile Information:\n{}",
-                system_prompt.trim(),
-                profile_instructions.trim()
-            );
-        }
+        #[allow(unused_assignments)]
+        let mut final_provider = config.ai_provider.clone();
+        #[allow(unused_assignments)]
+        let mut final_model = "".to_string();
+        let mut final_fallback = None;
+        let mut action_counts = BTreeMap::<String, usize>::new();
+        // Track the most recent step (if any) that successfully modified a file
+        // (`apply_patch`/`write_file`) and the most recent step that ran `verify`,
+        // so `finish` can be rejected when code was changed but never checked —
+        // see the gate right before the `finish` handling block below.
+        let mut last_modify_step: Option<usize> = None;
+        let mut last_verify_step: Option<usize> = None;
+        let mut trajectory: Vec<String> = Vec::new();
+        // Structured history for native tool-calling providers, maintained alongside
+        // `trajectory`/`observation` (which remain the source of truth for the
+        // JSON-prompt fallback path and for the web-search/media-append scans in the
+        // finish handler below, which operate on flattened text either way).
+        let mut native_messages: Vec<ChatMessage> = Vec::new();
+        // Gemini's `thoughtSignature` (see `ToolCall::thought_signature`) arrives on
+        // `response.tool_calls`, keyed by call id, but the `ContentBlock::ToolUse`
+        // that gets pushed onto `native_messages` for this call is only rebuilt
+        // later from `step_tool_results` (itself derived from `decisions`, which
+        // drops the original `ToolCall`). Stashing it here by call id — persisting
+        // across the whole loop, since every past turn must keep replaying its own
+        // signature on every subsequent request — avoids threading it through
+        // `AgentDecision` just for this one Gemini-specific quirk.
+        let mut step_thought_signatures: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let mut warned_json_prompt_fallback = false;
 
-        if let Ok(mut interactions) = memory.recent_interactions_for_chat(chat_id, 6) {
-            interactions.reverse();
-            let transcript = interactions
-                .into_iter()
-                .map(|item| format!("User: {}\nAssistant: {}", item.user_text, item.ai_text))
-                .collect::<Vec<_>>()
-                .join("\n\n");
-            if !transcript.is_empty() {
-                system_prompt = format!(
-                    "{}\n\nRecent conversation context:\n{}",
-                    system_prompt.trim(),
-                    transcript
-                );
-            }
-        }
-    }
+        'steps: for step in 1..=MAX_STEPS {
+            let (active_config, agent_instruction, active_agent_name, active_model_name) =
+                resolve_agent_config(config, agent_id, &trajectory);
 
-    #[allow(unused_assignments)]
-    let mut final_provider = config.ai_provider.clone();
-    #[allow(unused_assignments)]
-    let mut final_model = "".to_string();
-    let mut final_fallback = None;
-    let mut action_counts = BTreeMap::<String, usize>::new();
-    let mut trajectory: Vec<String> = Vec::new();
+            progress(AgentProgress::Thinking {
+                elapsed_secs: started_at.elapsed().as_secs(),
+                agent_name: active_agent_name,
+                model_name: active_model_name.clone(),
+            });
 
-    for step in 1..=MAX_STEPS {
-        let (active_config, agent_instruction, active_agent_name, active_model_name) =
-            resolve_agent_config(config, agent_id, &trajectory);
-
-        progress(AgentProgress::Thinking {
-            elapsed_secs: started_at.elapsed().as_secs(),
-            agent_name: active_agent_name,
-            model_name: active_model_name.clone(),
-        });
-
-        let mut active_system_prompt = system_prompt.clone();
-        if let Some(ref model_name) = active_model_name {
-            active_system_prompt.push_str(&format!(
-                "\n\n[Active Environment Context]\n\
+            let mut active_system_prompt = system_prompt.clone();
+            if let Some(ref model_name) = active_model_name {
+                active_system_prompt.push_str(&format!(
+                    "\n\n[Active Environment Context]\n\
                  You are running on: {}\n\
                  Using AI Model: {}\n",
-                active_config.ai_provider, model_name
-            ));
-        }
-        if !agent_instruction.is_empty() {
-            active_system_prompt.push_str(&format!(
-                "\n\nYour Current Role & System Instructions:\n{}",
-                agent_instruction
-            ));
-        }
+                    active_config.ai_provider, model_name
+                ));
+            }
+            if !agent_instruction.is_empty() {
+                active_system_prompt.push_str(&format!(
+                    "\n\nYour Current Role & System Instructions:\n{}",
+                    agent_instruction
+                ));
+            }
 
-        let (response, fallback) = send_chat_with_fallback(
-            &active_config,
-            &ChatRequest {
-                message: observation.clone(),
-                system_instruction: active_system_prompt.clone(),
-                chat_id: Some(chat_id.to_owned()),
-                image_data_uri: pending_image.take(),
-                audio_data_uri: None,
-                video_data_uri: pending_video.take(),
-                document_attachment: None,
-                workspace_path: None,
-                agent_id: None,
-            },
-        )
-        .await?;
+            let tool_mode = active_config.tool_calling_mode();
 
-        final_provider = response.provider.clone();
-        final_model = response.model.clone();
-        if fallback.is_some() {
-            final_fallback = response.fallback_provider.clone();
-        }
+            if tool_mode == ToolCallingMode::JsonPrompt
+                && active_config.ai_provider == "ollama"
+                && !warned_json_prompt_fallback
+            {
+                warned_json_prompt_fallback = true;
+                progress(AgentProgress::Thought {
+                    thought: format!(
+                        "[Warning] Model '{}' is not on the verified native tool-calling allowlist; \
+                     falling back to prompt-based JSON mode, which is less reliable than native \
+                     tool calling. Switch to a Llama 3.1+/Qwen2.5+-family model for more reliable \
+                     agent runs.",
+                        active_config.ollama_model
+                    ),
+                });
+            }
 
-        let decision = match parse_decision_or_finish(&response.text) {
-            Ok(decision) => decision,
-            Err(_) => {
-                let (repaired, _) = send_chat_with_fallback(
+            let (response, fallback) = if tool_mode == ToolCallingMode::Native {
+                if native_messages.is_empty() {
+                    // Native tool-calling providers build the request from `messages`
+                    // and ignore ChatRequest.image_data_uri/audio_data_uri/video_data_uri
+                    // entirely, so any pending attachment must be embedded as content
+                    // blocks on the first user turn here, not left for the (unused)
+                    // top-level fields — otherwise Agent Mode would silently drop
+                    // attachments that work fine with Agent Mode off.
+                    let mut content = vec![ContentBlock::Text {
+                        text: observation.clone(),
+                    }];
+                    if let Some(image_data) = pending_image.take() {
+                        for img in image_data.split_whitespace() {
+                            content.push(ContentBlock::Image {
+                                data_uri: img.to_owned(),
+                            });
+                        }
+                    }
+                    if let Some(audio_data) = pending_audio.take() {
+                        for aud in audio_data.split_whitespace() {
+                            content.push(ContentBlock::Audio {
+                                data_uri: aud.to_owned(),
+                            });
+                        }
+                    }
+                    if let Some(video_data) = pending_video.take() {
+                        for vid in video_data.split_whitespace() {
+                            content.push(ContentBlock::Video {
+                                data_uri: vid.to_owned(),
+                            });
+                        }
+                    }
+                    native_messages.push(ChatMessage {
+                        role: ChatRole::User,
+                        content,
+                    });
+                }
+                send_chat_with_fallback(
                     &active_config,
                     &ChatRequest {
-                        message: format!(
-                            "Your previous response was not valid Mint agent JSON.\n\
-                             Return exactly one corrected JSON object with an action and input. \
-                             Do not use markdown.\n\nPrevious response:\n{}",
-                            truncate(&response.text)
-                        ),
+                        message: String::new(),
                         system_instruction: active_system_prompt.clone(),
                         chat_id: Some(chat_id.to_owned()),
                         image_data_uri: None,
@@ -971,205 +803,819 @@ where
                         document_attachment: None,
                         workspace_path: None,
                         agent_id: None,
+                        plan_mode: false,
+                        messages: Some(native_messages.clone()),
+                        tools: Some(tool_catalog(
+                            &active_config,
+                            plan_mode,
+                            &root,
+                            allow_subagent_dispatch,
+                        )),
                     },
                 )
-                .await?;
-                parse_decision_or_finish(&repaired.text).map_err(|e| {
-                    OrchestrationError::Agent(format!(
-                        "unable to repair invalid agent response: {}",
-                        e
-                    ))
-                })?
+                .await?
+            } else {
+                send_chat_with_fallback(
+                    &active_config,
+                    &ChatRequest {
+                        message: observation.clone(),
+                        system_instruction: active_system_prompt.clone(),
+                        chat_id: Some(chat_id.to_owned()),
+                        image_data_uri: pending_image.take(),
+                        audio_data_uri: pending_audio.take(),
+                        video_data_uri: pending_video.take(),
+                        document_attachment: None,
+                        workspace_path: None,
+                        agent_id: None,
+                        plan_mode: false,
+                        messages: None,
+                        tools: None,
+                    },
+                )
+                .await?
+            };
+
+            final_provider = response.provider.clone();
+            final_model = response.model.clone();
+            if fallback.is_some() {
+                // `fallback` (this function's own return value) is the provider
+                // that actually served this response; `response.fallback_provider`
+                // is a same-shaped but differently-populated field that
+                // `send_chat_with_fallback` sets to the *original* provider that
+                // failed over — using it here showed e.g. "gemini → fallback:
+                // gemini • Qwen..." in the CLI badge instead of "gemini →
+                // fallback: huggingface • Qwen...".
+                final_fallback = fallback.clone();
             }
-        };
-
-        if !fast_mode && decision.action != "finish" && !decision.thought.trim().is_empty() {
-            progress(AgentProgress::Thought {
-                thought: decision.thought.trim().to_owned(),
-            });
-        }
-
-        if decision.action == "finish" {
-            let mut summary = decision.input.summary.trim().to_owned();
-            let is_thai_task = task.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
-            if let Some(err_line) = observation
-                .lines()
-                .find(|l| l.contains("Web search error:"))
-            {
-                let clean_err = err_line
-                    .replace("Web search error: ", "")
-                    .replace("Web search is currently unavailable.", "")
-                    .trim()
-                    .to_string();
-                if summary.is_empty() {
-                    if is_thai_task {
-                        summary = format!(
-                            "การค้นหาข้อมูลจากเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {}\nมิ้นท์ขออภัยด้วยนะคะที่ไม่สามารถค้นหาข้อมูลเรียลไทม์ให้ได้ในขณะนี้ค่ะ",
-                            clean_err
-                        );
-                    } else {
-                        summary = format!(
-                            "Web search failed due to error: {}\nI apologize, but I cannot retrieve real-time information at the moment.",
-                            clean_err
-                        );
-                    }
-                } else {
-                    let err_lower = clean_err.to_lowercase();
-                    let summary_lower = summary.to_lowercase();
-                    let already_mentions_error = if is_thai_task {
-                        summary_lower.contains("ล้มเหลว")
-                            || summary_lower.contains("ข้อผิดพลาด")
-                            || summary_lower.contains(&err_lower)
-                    } else {
-                        summary_lower.contains("fail")
-                            || summary_lower.contains("error")
-                            || summary_lower.contains(&err_lower)
-                    };
-                    if !already_mentions_error {
-                        if is_thai_task {
-                            summary.push_str(&format!(
-                                "\n\n(การค้นหาเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {})",
-                                clean_err
-                            ));
-                        } else {
-                            summary.push_str(&format!(
-                                "\n\n(Web search failed due to error: {})",
-                                clean_err
-                            ));
-                        }
+            if let Some(calls) = &response.tool_calls {
+                for call in calls {
+                    if let Some(signature) = &call.thought_signature {
+                        step_thought_signatures.insert(call.id.clone(), signature.clone());
                     }
                 }
+            }
+
+            // `decisions` is normally a single `(call_id, AgentDecision)`, matching the
+            // original one-action-per-step design. Native tool-calling can return
+            // several tool calls in one model turn, in which case they're executed
+            // sequentially and all their results are fed back before the next call —
+            // `finish` never appears alongside real tool calls (see below), so this
+            // never conflicts with the early-return finish handling.
+            let decisions: Vec<(String, AgentDecision)> = if tool_mode == ToolCallingMode::Native {
+                match response.tool_calls.clone() {
+                    Some(calls) if !calls.is_empty() => calls
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, call)| {
+                            let thought = if index == 0 {
+                                response.text.trim().to_string()
+                            } else {
+                                String::new()
+                            };
+                            let input: AgentInput =
+                                serde_json::from_value(call.input).unwrap_or_default();
+                            (
+                                call.id,
+                                AgentDecision {
+                                    thought,
+                                    action: call.name,
+                                    input,
+                                },
+                            )
+                        })
+                        .collect(),
+                    // No tool calls means the model answered directly — treat exactly
+                    // like the JSON-prompt path's fallback for plain, non-JSON text
+                    // (see `parse_decision_or_finish`): finish with that text as the
+                    // summary.
+                    _ => vec![(
+                        format!("call_{step}_finish"),
+                        AgentDecision {
+                            thought: String::new(),
+                            action: "finish".to_string(),
+                            input: AgentInput {
+                                summary: response.text.trim().to_string(),
+                                ..AgentInput::default()
+                            },
+                        },
+                    )],
+                }
             } else {
-                if summary.is_empty() {
-                    let err_msg = "Error: Your finish action summary was empty. \
-                                   You MUST provide a final answer, explanation, or response to the user's query \
-                                   in the 'summary' field of the 'finish' action input. Do not leave it empty.";
+                let decision = match parse_decision_or_finish(&response.text) {
+                    Ok(decision) => decision,
+                    Err(_) => {
+                        let (repaired, _) = send_chat_with_fallback(
+                        &active_config,
+                        &ChatRequest {
+                            message: format!(
+                                "Your previous response was not valid Mint agent JSON.\n\
+                                 Return exactly one corrected JSON object with an action and input. \
+                                 Do not use markdown.\n\nPrevious response:\n{}",
+                                truncate(&response.text)
+                            ),
+                            system_instruction: active_system_prompt.clone(),
+                            chat_id: Some(chat_id.to_owned()),
+                            image_data_uri: None,
+                            audio_data_uri: None,
+                            video_data_uri: None,
+                            document_attachment: None,
+                            workspace_path: None,
+                            agent_id: None,
+                            plan_mode: false,
+                            messages: None,
+                            tools: None,
+                        },
+                    )
+                    .await?;
+                        parse_decision_or_finish(&repaired.text).map_err(|e| {
+                            OrchestrationError::Agent(format!(
+                                "unable to repair invalid agent response: {}",
+                                e
+                            ))
+                        })?
+                    }
+                };
+                vec![(format!("call_{step}"), decision)]
+            };
+
+            let mut step_tool_results: Vec<(String, String, Value, String)> = Vec::new();
+            // Screenshots (and any future binary/image tool result) are kept out of
+            // `step_tool_results`'s plain-text `final_result` — that string is what
+            // both the text `trajectory` and the JSON-prompt `observation` are built
+            // from, and a multi-hundred-KB base64 PNG would blow straight through
+            // `MAX_OBSERVATION_BYTES` and get silently chopped mid-base64. The full
+            // data URI is stashed here by `call_id` instead, and re-attached as a
+            // real `ContentBlock::Image` when building `native_messages` below, so
+            // the model actually sees the pixels instead of a truncated text blob.
+            let mut step_images: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
+
+            if decisions_are_parallel_subagent_batch(&decisions) {
+                step_tool_results = run_parallel_subagent_batch(
+                    &decisions,
+                    step,
+                    &root,
+                    config,
+                    chat_id,
+                    &mut approve,
+                    &mut progress,
+                    &mut action_counts,
+                    &mut trajectory,
+                )
+                .await;
+            } else {
+                for (call_id, decision) in decisions {
+                    if !fast_mode
+                        && decision.action != "finish"
+                        && !decision.thought.trim().is_empty()
+                    {
+                        progress(AgentProgress::Thought {
+                            thought: decision.thought.trim().to_owned(),
+                        });
+                    }
+
+                    if decision.action == "finish" {
+                        let mut summary = decision.input.summary.trim().to_owned();
+                        let is_thai_task =
+                            task.chars().any(|c| ('\u{0e00}'..='\u{0e7f}').contains(&c));
+                        if let Some(err_line) = observation
+                            .lines()
+                            .find(|l| l.contains("Web search error:"))
+                        {
+                            let clean_err = err_line
+                                .replace("Web search error: ", "")
+                                .replace("Web search is currently unavailable.", "")
+                                .trim()
+                                .to_string();
+                            if summary.is_empty() {
+                                if is_thai_task {
+                                    summary = format!(
+                                        "การค้นหาข้อมูลจากเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {}\nมิ้นท์ขออภัยด้วยนะคะที่ไม่สามารถค้นหาข้อมูลเรียลไทม์ให้ได้ในขณะนี้ค่ะ",
+                                        clean_err
+                                    );
+                                } else {
+                                    summary = format!(
+                                        "Web search failed due to error: {}\nI apologize, but I cannot retrieve real-time information at the moment.",
+                                        clean_err
+                                    );
+                                }
+                            } else {
+                                let err_lower = clean_err.to_lowercase();
+                                let summary_lower = summary.to_lowercase();
+                                let already_mentions_error = if is_thai_task {
+                                    summary_lower.contains("ล้มเหลว")
+                                        || summary_lower.contains("ข้อผิดพลาด")
+                                        || summary_lower.contains(&err_lower)
+                                } else {
+                                    summary_lower.contains("fail")
+                                        || summary_lower.contains("error")
+                                        || summary_lower.contains(&err_lower)
+                                };
+                                if !already_mentions_error {
+                                    if is_thai_task {
+                                        summary.push_str(&format!(
+                                            "\n\n(การค้นหาเว็บล้มเหลวเนื่องจากข้อผิดพลาด: {})",
+                                            clean_err
+                                        ));
+                                    } else {
+                                        summary.push_str(&format!(
+                                            "\n\n(Web search failed due to error: {})",
+                                            clean_err
+                                        ));
+                                    }
+                                }
+                            }
+                        } else {
+                            if summary.is_empty() {
+                                let err_msg = "Error: Your finish action summary was empty. \
+                                       You MUST provide a final answer, explanation, or response to the user's query \
+                                       in the 'summary' field of the 'finish' action input. Do not leave it empty.";
+                                trajectory.push(format!(
+                                    "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
+                                    decision.thought.trim(),
+                                    decision.action,
+                                    err_msg
+                                ));
+                                let history_str = trajectory.join("\n\n");
+                                observation = format!(
+                                    "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
+                                    root.display(),
+                                    history_str
+                                );
+                                reject_native_finish(
+                                    tool_mode,
+                                    &mut native_messages,
+                                    &response.text,
+                                    err_msg,
+                                );
+                                continue 'steps;
+                            }
+                            if unverified_modification(
+                                last_modify_step,
+                                last_verify_step,
+                                &decision.input.verification,
+                            ) {
+                                let err_msg = "Error: You modified a file (apply_patch/write_file) in this \
+                                       run but finished without verifying it. Call the verify tool \
+                                       with build/test/lint commands appropriate for this project \
+                                       before finishing. If no check genuinely applies (e.g. no test \
+                                       suite, documentation-only change), say so explicitly in the \
+                                       finish action's 'verification' field and finish again.";
+                                trajectory.push(format!(
+                                    "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
+                                    decision.thought.trim(),
+                                    decision.action,
+                                    err_msg
+                                ));
+                                let history_str = trajectory.join("\n\n");
+                                observation = format!(
+                                    "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
+                                    root.display(),
+                                    history_str
+                                );
+                                reject_native_finish(
+                                    tool_mode,
+                                    &mut native_messages,
+                                    &response.text,
+                                    err_msg,
+                                );
+                                continue 'steps;
+                            }
+                            let mut provider_used = None;
+                            for line in observation.lines() {
+                                if line.contains("Web search succeeded using Google Search") {
+                                    provider_used = Some("Google");
+                                } else if line.contains("Web search succeeded using Brave Search") {
+                                    provider_used = Some("Brave");
+                                }
+                            }
+                            if let Some(prov) = provider_used {
+                                let summary_lower = summary.to_lowercase();
+                                if !summary_lower.contains("google")
+                                    && !summary_lower.contains("brave")
+                                {
+                                    if is_thai_task {
+                                        summary.push_str(&format!(
+                                            "\n\n(มิ้นท์หาข้อมูลนี้มาจาก {} Search นะคะ 💖)",
+                                            prov
+                                        ));
+                                    } else {
+                                        summary.push_str(&format!(
+                                            "\n\n(Information retrieved via {} Search 💖)",
+                                            prov
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+
+                        // Auto-append generated media (image/video) and model feedback to summary if LLM omitted it
+                        let mut media_blocks = Vec::new();
+                        for step in trajectory.iter() {
+                            for line in step.lines() {
+                                let trimmed = line.trim();
+                                if trimmed.starts_with("![Generated Image](")
+                                    || trimmed.starts_with("✓ Image generated successfully")
+                                    || trimmed.starts_with("Saved to:")
+                                    || trimmed.starts_with("<video")
+                                    || trimmed.starts_with("✓ Video generated successfully")
+                                {
+                                    if !summary.contains(trimmed) {
+                                        media_blocks.push(trimmed.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        if !media_blocks.is_empty() {
+                            summary.push_str("\n\n");
+                            summary.push_str(&media_blocks.join("\n\n"));
+                        }
+
+                        let verification =
+                            meaningful_verification(&decision.input.verification).to_owned();
+
+                        on_chunk(summary.clone());
+
+                        let memory = MemoryStore::open_default()?;
+                        memory.add_interaction_for_chat_with_fallback(
+                            chat_id,
+                            task,
+                            &summary,
+                            &final_provider,
+                            &final_model,
+                            final_fallback.as_deref(),
+                        )?;
+                        memory.save_workspace_session(
+                            &root.to_string_lossy(),
+                            &summary,
+                            &verification,
+                        )?;
+                        spawn_auto_memory_update(config.clone(), task.to_string(), summary.clone());
+
+                        return Ok(AgentResult {
+                            provider: final_provider,
+                            model: final_model,
+                            summary,
+                            verification,
+                            fallback: final_fallback,
+                        });
+                    }
+
+                    let action_key = action_fingerprint(&decision);
+                    let action_count = {
+                        let count = action_counts.entry(action_key).or_insert(0);
+                        *count += 1;
+                        *count
+                    };
+
+                    // Set only on the real `execute_tool` path below (PreHookOutcome::Allowed);
+                    // stays false for plan-mode/hook blocks and the duplicate-shell skip, since
+                    // those don't actually run anything and shouldn't count toward verification.
+                    let mut action_succeeded = false;
+                    let result = if decision.action == "exit_plan_mode" {
+                        let plan_text = decision.input.plan.trim().to_owned();
+                        match approve(&AgentApproval::ExitPlanMode {
+                    plan: plan_text.clone(),
+                }) {
+                    Ok(ApprovalOutcome::Approved) => {
+                        plan_mode = false;
+                        system_prompt = build_system_prompt(config, plan_mode, system_prompt_native, user_name);
+                        "Plan approved by the user. Plan mode is now OFF — write_file, apply_patch, run_shell, and other previously blocked tools are now available. Proceed with implementing the plan.".to_string()
+                    }
+                    Ok(ApprovalOutcome::Denied) => {
+                        "The user rejected this plan. Plan mode is still ON. Continue investigating or revise the plan, then call exit_plan_mode again when ready.".to_string()
+                    }
+                    Ok(ApprovalOutcome::Intercepted(feedback)) => {
+                        format!(
+                            "The user did not approve the plan yet and left this feedback: {}\n\nPlan mode is still ON. Revise the plan accordingly and call exit_plan_mode again when ready.",
+                            feedback
+                        )
+                    }
+                    Err(error) => format!("Error requesting plan approval: {}", error),
+                }
+                    } else if plan_mode && !plan_mode_allows(&decision.action, &decision.input) {
+                        format!(
+                            "Blocked: '{}' is not available in plan mode (read-only investigation only). Call exit_plan_mode with your proposed plan once you are ready to implement it; the user will approve or reject it.",
+                            decision.action
+                        )
+                    } else if decision.action == "run_shell" && action_count > 1 {
+                        format!(
+                            "Skipped duplicate shell command: {}\n\n[System Tip: This exact shell command already ran once in this task. Do not run it again. Use the finish action now and tell the user the action was completed.]",
+                            decision.input.command.trim()
+                        )
+                    } else {
+                        let input_val =
+                            serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+                        progress(AgentProgress::ToolStart {
+                            action: decision.action.clone(),
+                            input: input_val.clone(),
+                        });
+
+                        match crate::hooks::run_pre_tool_hooks(
+                            &hooks,
+                            &decision.action,
+                            &input_val,
+                            &root,
+                        ) {
+                            crate::hooks::PreHookOutcome::Blocked(reason) => {
+                                format!(
+                                    "Blocked by hook: {}\n\n[System Tip: A configured PreToolUse hook rejected this action. Adjust your approach or ask the user for guidance.]",
+                                    reason
+                                )
+                            }
+                            crate::hooks::PreHookOutcome::Allowed => {
+                                let (tool_result, success) = match execute_tool(
+                                    &root,
+                                    config,
+                                    &decision,
+                                    chat_id,
+                                    &mut approve,
+                                )
+                                .await
+                                {
+                                    Ok(result) => (result, true),
+                                    Err(error) => (format!("Error: {}", error), false),
+                                };
+                                action_succeeded = success;
+                                let hook_messages = crate::hooks::run_post_tool_hooks(
+                                    &hooks,
+                                    &decision.action,
+                                    &input_val,
+                                    &tool_result,
+                                    success,
+                                    &root,
+                                );
+                                if hook_messages.is_empty() {
+                                    tool_result
+                                } else {
+                                    format!(
+                                        "{}\n\n{}",
+                                        tool_result,
+                                        hook_messages
+                                            .iter()
+                                            .map(|message| format!("[Hook] {}", message))
+                                            .collect::<Vec<_>>()
+                                            .join("\n")
+                                    )
+                                }
+                            }
+                        }
+                    };
+
+                    progress(AgentProgress::ToolEnd {
+                        action: decision.action.clone(),
+                        input: serde_json::to_value(&decision.input).unwrap_or(Value::Null),
+                        result: result.clone(),
+                    });
+
+                    if action_succeeded {
+                        match decision.action.as_str() {
+                            "apply_patch" | "write_file" => last_modify_step = Some(step),
+                            // Counts even if the commands it ran failed — an attempted check
+                            // still counts as verification having been attempted; a failing
+                            // exit code is separately flagged below and prompts a fix.
+                            "verify" => last_verify_step = Some(step),
+                            _ => {}
+                        }
+                    }
+
+                    let mut final_result = if decision.action == "browser_screenshot"
+                        && result.starts_with("data:image/")
+                    {
+                        step_images.insert(call_id.clone(), result.clone());
+                        "[Screenshot captured — see attached image]".to_string()
+                    } else {
+                        truncate(&result)
+                    };
+                    if decision.action == "run_shell" || decision.action == "verify" {
+                        let mut failed = false;
+                        for line in result.lines() {
+                            if line.starts_with("exit: ") {
+                                let exit_code = line.replace("exit: ", "").trim().to_string();
+                                if exit_code != "0" && exit_code != "unknown" {
+                                    failed = true;
+                                }
+                                break;
+                            }
+                        }
+                        if failed {
+                            final_result.push_str(
+                        "\n\n[System Tip: The command failed with a non-zero exit code. \
+                         Analyze the stdout/stderr above to locate the error, read the offending files, \
+                         apply corrected edits (using apply_patch), and run the verification command again. \
+                         Do not finish or stop until the compilation or test errors are resolved!]"
+                    );
+                        }
+                    }
+                    if decision.action == "apply_patch" || decision.action == "write_file" {
+                        final_result.push_str(
+                    "\n\n[System Tip: The file edit was approved and applied successfully. \
+                     Before finishing, verify this change with the verify tool (build/test/lint, \
+                     whatever fits this project) — finish will be rejected until you do, unless you \
+                     state in the finish action's verification field why no check applies (e.g. no \
+                     test suite, documentation-only change). Do not broaden the scope, do not make \
+                     additional unrelated edits, and do not reread the same file unless you need one \
+                     concise verification read.]",
+                );
+                    }
+                    if action_count >= 3 {
+                        final_result.push_str(
+                    "\n\n[System Tip: You repeated the same tool action three or more times. \
+                     Stop repeating it. If you already have enough information or the requested edit is done, \
+                     use the finish action now. Otherwise choose a different necessary action.]",
+                );
+                    }
+
                     trajectory.push(format!(
                         "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
                         decision.thought.trim(),
                         decision.action,
-                        err_msg
+                        final_result
                     ));
-                    let history_str = trajectory.join("\n\n");
-                    observation = format!(
-                        "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
-                        root.display(),
-                        history_str
-                    );
-                    continue;
+
+                    step_tool_results.push((
+                        call_id,
+                        decision.action.clone(),
+                        serde_json::to_value(&decision.input).unwrap_or(Value::Null),
+                        final_result,
+                    ));
+                } // end `for (call_id, decision) in decisions`
+            } // end `else` (sequential path)
+
+            if tool_mode == ToolCallingMode::Native {
+                let mut assistant_content: Vec<ContentBlock> = Vec::new();
+                let response_text = response.text.trim();
+                if !response_text.is_empty() {
+                    assistant_content.push(ContentBlock::Text {
+                        text: response_text.to_string(),
+                    });
                 }
-                let mut provider_used = None;
-                for line in observation.lines() {
-                    if line.contains("Web search succeeded using Google Search") {
-                        provider_used = Some("Google");
-                    } else if line.contains("Web search succeeded using Brave Search") {
-                        provider_used = Some("Brave");
+                let mut tool_result_content: Vec<ContentBlock> = Vec::new();
+                for (call_id, action, input_value, final_result) in &step_tool_results {
+                    assistant_content.push(ContentBlock::ToolUse {
+                        id: call_id.clone(),
+                        name: action.clone(),
+                        input: input_value.clone(),
+                        thought_signature: step_thought_signatures.get(call_id).cloned(),
+                    });
+                    tool_result_content.push(ContentBlock::ToolResult {
+                        tool_use_id: call_id.clone(),
+                        content: final_result.clone(),
+                        is_error: false,
+                    });
+                    if let Some(data_uri) = step_images.get(call_id) {
+                        tool_result_content.push(ContentBlock::Image {
+                            data_uri: data_uri.clone(),
+                        });
                     }
                 }
-                if let Some(prov) = provider_used {
-                    let summary_lower = summary.to_lowercase();
-                    if !summary_lower.contains("google") && !summary_lower.contains("brave") {
-                        if is_thai_task {
-                            summary.push_str(&format!(
-                                "\n\n(มิ้นท์หาข้อมูลนี้มาจาก {} Search นะคะ 💖)",
-                                prov
-                            ));
-                        } else {
-                            summary.push_str(&format!(
-                                "\n\n(Information retrieved via {} Search 💖)",
-                                prov
-                            ));
+                if !assistant_content.is_empty() {
+                    native_messages.push(ChatMessage {
+                        role: ChatRole::Assistant,
+                        content: assistant_content,
+                    });
+                }
+                if !tool_result_content.is_empty() {
+                    native_messages.push(ChatMessage {
+                        role: ChatRole::Tool,
+                        content: tool_result_content,
+                    });
+                }
+
+                if let Some(total_tokens) = response.total_tokens {
+                    let window = active_config.context_window_tokens();
+                    if (total_tokens as f64) >= (window as f64) * COMPACTION_TRIGGER_RATIO {
+                        match compact_native_messages(&active_config, &native_messages).await {
+                            Ok(Some(compacted)) => {
+                                native_messages = compacted;
+                                progress(AgentProgress::Thought {
+                                    thought: format!(
+                                        "[Context] Compacted earlier steps to stay under the \
+                                     context window ({total_tokens}/{window} tokens before \
+                                     compaction)."
+                                    ),
+                                });
+                            }
+                            // Nothing worth compacting yet (too little history) — routine, no warning.
+                            Ok(None) => {}
+                            Err(error) => {
+                                progress(AgentProgress::Thought {
+                                    thought: format!(
+                                        "[Context] Context is approaching the model's window \
+                                     ({total_tokens}/{window} tokens) but compaction failed: \
+                                     {error}. Continuing without compacting this step."
+                                    ),
+                                });
+                            }
                         }
                     }
                 }
             }
-            let verification = meaningful_verification(&decision.input.verification).to_owned();
 
-            on_chunk(summary.clone());
-
-            let memory = MemoryStore::open_default()?;
-            memory.add_interaction_for_chat_with_fallback(
-                chat_id,
-                task,
-                &summary,
-                &final_provider,
-                &final_model,
-                final_fallback.as_deref(),
-            )?;
-            memory.save_workspace_session(&root.to_string_lossy(), &summary, &verification)?;
-            spawn_auto_memory_update(config.clone(), task.to_string(), summary.clone());
-
-            return Ok(AgentResult {
-                provider: final_provider,
-                model: final_model,
-                summary,
-                verification,
-                fallback: final_fallback,
-            });
+            let history_str = trajectory.join("\n\n");
+            observation = format!(
+                "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
+                root.display(),
+                history_str
+            );
         }
 
-        let action_key = action_fingerprint(&decision);
+        Err(OrchestrationError::Agent(format!(
+            "code agent reached the limit of {} steps",
+            MAX_STEPS
+        )))
+    })
+}
+
+/// Whether `action` may run while plan mode is active. `run_shell` gets a
+/// special case: only commands the safety classifier already tags as
+/// read-only are allowed, everything else requires exiting plan mode first.
+/// `finish` is always allowed regardless of plan mode. The rest of the
+/// allowlist is shared with the system-prompt builder and the native
+/// tool-calling catalog via `crate::prompts::agent::PLAN_MODE_ALLOWED_ACTIONS`
+/// so the three can never drift on which actions are plan-mode-safe.
+fn plan_mode_allows(action: &str, input: &AgentInput) -> bool {
+    if action == "run_shell" {
+        return classify_shell_command(&input.command).mode.as_str() == "readOnly";
+    }
+    action == "finish" || crate::prompts::agent::PLAN_MODE_ALLOWED_ACTIONS.contains(&action)
+}
+
+/// Runs one subagent to completion and returns its formatted result text.
+/// Extracted from `execute_tool`'s `"dispatch_subagent"` arm so both the plain
+/// sequential path (a single subagent call, or one mixed in with other actions)
+/// and the parallel path (`decisions_are_parallel_subagent_batch`, driven by
+/// `buffer_unordered` in the main step loop) share one implementation. Takes
+/// the same `&mut dyn FnMut(...)` trait object as `execute_tool` — see the
+/// comment on that function for why a trait object rather than a generic —
+/// which lets the parallel path pass a small Mutex-backed adapter closure so
+/// concurrently-running subagents still share one real approval gate.
+async fn dispatch_one_subagent(
+    root: &Path,
+    config: &MintConfig,
+    chat_id: &str,
+    name: &str,
+    task: &str,
+    approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+) -> Result<String, OrchestrationError> {
+    let Some(definition) = crate::subagents::find_subagent(name, Some(root)) else {
+        return Err(OrchestrationError::Agent(format!(
+            "no subagent named '{name}' found (check .agents/subagents/ or \
+             ~/.config/mint/mint-agents/)"
+        )));
+    };
+
+    let mut sub_config = config.clone();
+    if let Some(provider) = &definition.provider {
+        sub_config.ai_provider = provider.clone();
+    }
+    if let Some(model) = &definition.model {
+        match sub_config.ai_provider.as_str() {
+            "anthropic" => sub_config.anthropic_model = model.clone(),
+            "openai" => sub_config.openai_model = model.clone(),
+            "openrouter" => sub_config.openrouter_model = model.clone(),
+            "deepseek" => sub_config.deepseek_model = model.clone(),
+            "huggingface" => sub_config.hf_model = model.clone(),
+            "local_openai" => sub_config.local_model_name = model.clone(),
+            "ollama" => sub_config.ollama_model = model.clone(),
+            "gemini" => sub_config.gemini_model = model.clone(),
+            _ => {}
+        }
+    }
+
+    // The subagent's own persona/instructions are folded into the task
+    // framing rather than replacing Mint's system prompt (which
+    // `orchestrate_agent_loop` builds internally and isn't a parameter),
+    // so the subagent still follows the same tool-use protocol and
+    // safety rules as any other agent run.
+    let sub_task = format!(
+        "{}\n\nTask from parent agent: {task}",
+        definition.system_prompt
+    );
+    let sub_chat_id = format!("{chat_id}::subagent::{}", definition.name);
+
+    // Recursing into `orchestrate_agent_loop` from inside `execute_tool`
+    // (which it itself calls) requires boxing this one call — Rust
+    // can't compute a finite size for a directly self-referential
+    // async fn cycle otherwise. `approve_cb` is reborrowed rather than
+    // moved so the subagent's mutating actions still go through the
+    // same approval gate as the caller's; `progress`/`chunk` are no-ops
+    // so the subagent's internal steps never reach the parent's UI or
+    // context — only its final summary is returned below.
+    // `orchestrate_agent_loop` itself returns a boxed `dyn Future`
+    // (see its doc comment) specifically so this recursive call can
+    // just be awaited directly, with no manual boxing needed here.
+    let result = orchestrate_agent_loop(
+        &sub_config,
+        &sub_task,
+        root,
+        None,
+        None,
+        None,
+        Some(&sub_chat_id),
+        None,
+        None,
+        true,
+        false,
+        &mut *approve_cb,
+        |_| {},
+        |_| {},
+    )
+    .await;
+
+    match result {
+        Ok(agent_result) => Ok(format!(
+            "[Subagent '{}' result]\n{}",
+            definition.name, agent_result.summary
+        )),
+        Err(error) => Err(OrchestrationError::Agent(format!(
+            "subagent '{}' failed: {error}",
+            definition.name
+        ))),
+    }
+}
+
+/// Runs a step's `dispatch_subagent` decisions concurrently (see
+/// `decisions_are_parallel_subagent_batch` for when this is used instead of
+/// the normal one-at-a-time loop), capped at `PARALLEL_SUBAGENT_LIMIT` in
+/// flight at once. `progress`/`action_counts`/`trajectory` are only touched
+/// after every future has completed — back in single-threaded code, in the
+/// decisions' original order — so this never needs to share those across
+/// concurrent tasks. `approve` is the one resource genuinely needed *during*
+/// concurrent execution (a subagent's own risky actions still need real user
+/// approval), so it's wrapped in a `std::sync::Mutex` for the batch: each
+/// concurrent subagent gets a small adapter closure over a shared `&Mutex`,
+/// serializing just the moment of invoking it rather than the whole call.
+#[allow(clippy::too_many_arguments)]
+async fn run_parallel_subagent_batch(
+    decisions: &[(String, AgentDecision)],
+    step: usize,
+    root: &Path,
+    config: &MintConfig,
+    chat_id: &str,
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+    action_counts: &mut BTreeMap<String, usize>,
+    trajectory: &mut Vec<String>,
+) -> Vec<(String, String, Value, String)> {
+    let approve_mutex = std::sync::Mutex::new(approve);
+
+    let mut dispatches = Vec::with_capacity(decisions.len());
+    for (index, (call_id, decision)) in decisions.iter().enumerate() {
+        let call_id = call_id.clone();
+        let thought = decision.thought.clone();
+        let action = decision.action.clone();
+        let input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+        let action_key = action_fingerprint(decision);
+        let name = decision.input.name.clone();
+        let task_text = decision.input.instruction.clone();
+        let approve_mutex = &approve_mutex;
+        dispatches.push(async move {
+            let result: Result<String, OrchestrationError> = if name.trim().is_empty() {
+                Err(OrchestrationError::Agent("name is required".into()))
+            } else if task_text.trim().is_empty() {
+                Err(OrchestrationError::Agent("instruction is required".into()))
+            } else {
+                let mut adapter = |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+                    let mut guard = approve_mutex.lock().unwrap();
+                    (*guard)(approval)
+                };
+                dispatch_one_subagent(root, config, chat_id, &name, &task_text, &mut adapter).await
+            };
+            (
+                index, call_id, thought, action, input_val, action_key, result,
+            )
+        });
+    }
+
+    let mut results = futures_util::stream::iter(dispatches)
+        .buffer_unordered(PARALLEL_SUBAGENT_LIMIT)
+        .collect::<Vec<_>>()
+        .await;
+    results.sort_by_key(|(index, ..)| *index);
+
+    let mut step_tool_results = Vec::with_capacity(results.len());
+    for (_, call_id, thought, action, input_val, action_key, result) in results {
+        progress(AgentProgress::ToolStart {
+            action: action.clone(),
+            input: input_val.clone(),
+        });
+        let tool_result = match result {
+            Ok(text) => text,
+            Err(error) => format!("Error: {}", error),
+        };
+        progress(AgentProgress::ToolEnd {
+            action: action.clone(),
+            input: input_val.clone(),
+            result: tool_result.clone(),
+        });
+
         let action_count = {
             let count = action_counts.entry(action_key).or_insert(0);
             *count += 1;
             *count
         };
-
-        let result = if decision.action == "run_shell" && action_count > 1 {
-            format!(
-                "Skipped duplicate shell command: {}\n\n[System Tip: This exact shell command already ran once in this task. Do not run it again. Use the finish action now and tell the user the action was completed.]",
-                decision.input.command.trim()
-            )
-        } else {
-            let input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
-            progress(AgentProgress::ToolStart {
-                action: decision.action.clone(),
-                input: input_val,
-            });
-
-            match execute_tool(&root, config, &decision, chat_id, &mut approve).await {
-                Ok(result) => result,
-                Err(error) => {
-                    format!("Error: {}", error)
-                }
-            }
-        };
-
-        progress(AgentProgress::ToolEnd {
-            action: decision.action.clone(),
-            input: serde_json::to_value(&decision.input).unwrap_or(Value::Null),
-            result: result.clone(),
-        });
-
-        let mut final_result = truncate(&result);
-        if decision.action == "run_shell" || decision.action == "verify" {
-            let mut failed = false;
-            for line in result.lines() {
-                if line.starts_with("exit: ") {
-                    let exit_code = line.replace("exit: ", "").trim().to_string();
-                    if exit_code != "0" && exit_code != "unknown" {
-                        failed = true;
-                    }
-                    break;
-                }
-            }
-            if failed {
-                final_result.push_str(
-                    "\n\n[System Tip: The command failed with a non-zero exit code. \
-                     Analyze the stdout/stderr above to locate the error, read the offending files, \
-                     apply corrected edits (using apply_patch), and run the verification command again. \
-                     Do not finish or stop until the compilation or test errors are resolved!]"
-                );
-            }
-        }
-        if decision.action == "apply_patch" || decision.action == "write_file" {
-            final_result.push_str(
-                "\n\n[System Tip: The file edit was approved and applied successfully. \
-                 If this satisfies the user's request, use the finish action now. \
-                 Do not broaden the scope, do not make additional unrelated edits, and do not reread \
-                 the same file unless you need one concise verification read.]",
-            );
-        }
+        let mut final_result = truncate(&tool_result);
         if action_count >= 3 {
             final_result.push_str(
                 "\n\n[System Tip: You repeated the same tool action three or more times. \
@@ -1180,35 +1626,32 @@ where
 
         trajectory.push(format!(
             "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
-            decision.thought.trim(),
-            decision.action,
+            thought.trim(),
+            action,
             final_result
         ));
-
-        let history_str = trajectory.join("\n\n");
-        observation = format!(
-            "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
-            root.display(),
-            history_str
-        );
+        step_tool_results.push((call_id, action, input_val, final_result));
     }
-
-    Err(OrchestrationError::Agent(format!(
-        "code agent reached the limit of {} steps",
-        MAX_STEPS
-    )))
+    step_tool_results
 }
 
-async fn execute_tool<Approve>(
+// Takes a trait object rather than being generic over `Approve` like it used
+// to be: `dispatch_subagent` recurses back into `orchestrate_agent_loop`
+// (which is itself generic over its own `Approve`), and reborrowing a generic
+// `&mut Approve` into that recursive call makes the type grow by one `&mut`
+// layer per nesting level during monomorphization — `&mut Approve`, then
+// `&mut &mut Approve`, then `&mut &mut &mut Approve`, forever, since the type
+// system has no way to know the runtime depth limit that
+// `tool_catalog`/`allow_subagent_dispatch` enforces. A `&mut dyn FnMut(...)`
+// trait object is a single fixed type regardless of recursion depth, so it
+// doesn't hit that.
+async fn execute_tool(
     root: &Path,
     config: &MintConfig,
     decision: &AgentDecision,
     chat_id: &str,
-    approve_cb: &mut Approve,
-) -> Result<String, OrchestrationError>
-where
-    Approve: FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send,
-{
+    approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+) -> Result<String, OrchestrationError> {
     let input = &decision.input;
     match decision.action.as_str() {
         "list_files" => {
@@ -1290,18 +1733,24 @@ where
                             .iter()
                             .enumerate()
                             .map(|(i, h)| {
+                                let image_line = h
+                                    .image_url
+                                    .as_deref()
+                                    .map(|img| format!("   Image: {img}\n"))
+                                    .unwrap_or_default();
                                 format!(
-                                    "{}. {}\n   URL: {}\n   {}\n",
+                                    "{}. {}\n   URL: {}\n{}{}\n",
                                     i + 1,
                                     h.title,
                                     h.url,
+                                    image_line,
                                     h.snippet
                                 )
                             })
                             .collect::<Vec<_>>()
                             .join("\n");
                         Ok(format!(
-                            "{formatted}\n\nNote: Web search succeeded using {provider} Search. In your finish summary, you MUST:\n1. Answer the user's question using the information above.\n2. Mention that you found this information via {provider} Search (e.g. \"I found this information using {provider} Search.\").\nDo NOT list sources manually — the UI will display them automatically."
+                            "{formatted}\n\nNote: Web search succeeded using {provider} Search. In your finish summary, you MUST:\n1. Answer the user's question using the information above.\n2. Mention that you found this information via {provider} Search (e.g. \"I found this information using {provider} Search.\").\n3. INLINE IMAGES: For each result that includes an 'Image:' URL, embed it in your summary using standard markdown image syntax:\n   ![result title](image_url)\n   Place the image tag on its OWN LINE, immediately AFTER the bullet point or paragraph that references that result.\n   Only embed images when they add visual value — e.g. food, restaurants, travel, products, people, art, profiles.\n   Do NOT embed images for code snippets, math, API docs, or pure text answers.\nDo NOT list source URLs manually — the UI will display them automatically."
                         ))
                     }
                 }
@@ -1311,6 +1760,71 @@ where
                      In your finish summary, explain to the user in Thai that the web search failed (mentioning the search error: {e}), \
                      and then answer their query using your own pre-existing knowledge/database."
                 )),
+            }
+        }
+        "image_search" => {
+            let query = required(&input.query, "query")?;
+            let limit = input.limit.unwrap_or(6);
+            match crate::image_search::image_search(query, limit, config).await {
+                Ok(report) => Ok(format!(
+                    "{}\n\nNote: Image search succeeded. In your finish summary, you MUST include the exact ```image_search_json ... ``` code block from above in your response so the user sees the image results UI.",
+                    report.data
+                )),
+                Err(e) => Ok(format!("Image search failed for '{query}': {e}")),
+            }
+        }
+        "weather" => {
+            let city = if !input.city.trim().is_empty() {
+                input.city.trim()
+            } else if !input.query.trim().is_empty() {
+                input.query.trim()
+            } else if !input.path.trim().is_empty() {
+                input.path.trim()
+            } else {
+                "Thailand"
+            };
+            match crate::weather::weather(city).await {
+                Ok(report) => Ok(format!(
+                    "{}\n\nNote: Weather lookup succeeded. In your finish summary, you MUST include the exact ```weather_json ... ``` code block from above in your response so the user sees the weather card UI.",
+                    report.data
+                )),
+                Err(e) => Ok(format!("Weather lookup failed for {city}: {e}")),
+            }
+        }
+        "stock" => {
+            let symbol = if !input.query.trim().is_empty() {
+                input.query.trim()
+            } else if !input.name.trim().is_empty() {
+                input.name.trim()
+            } else if !input.path.trim().is_empty() {
+                input.path.trim()
+            } else {
+                "AAPL"
+            };
+            match crate::stock::stock(symbol).await {
+                Ok(report) => Ok(format!(
+                    "{}\n\nNote: Stock lookup succeeded. In your finish summary, you MUST include the exact ```stock_json ... ``` code block from above in your response so the user sees the stock card UI.",
+                    report.data
+                )),
+                Err(e) => Ok(format!("Stock lookup failed for {symbol}: {e}")),
+            }
+        }
+        "calculation" => {
+            let expr = if !input.expression.trim().is_empty() {
+                input.expression.trim()
+            } else if !input.query.trim().is_empty() {
+                input.query.trim()
+            } else if !input.command.trim().is_empty() {
+                input.command.trim()
+            } else {
+                "0"
+            };
+            match crate::calculation::calculate(expr) {
+                Ok(report) => Ok(format!(
+                    "{}\n\nNote: Calculation succeeded. In your finish summary, you MUST include the exact ```calculation_json ... ``` code block from above in your response so the user sees the calculation card UI.",
+                    report.data
+                )),
+                Err(e) => Ok(format!("Calculation failed for {expr}: {e}")),
             }
         }
         "browser_open" => {
@@ -1548,8 +2062,16 @@ where
         }
         "ask_user" => {
             let question = required(&input.query, "query")?;
+            let options: Vec<String> = input
+                .options
+                .iter()
+                .map(|o| o.trim().to_owned())
+                .filter(|o| !o.is_empty())
+                .take(3)
+                .collect();
             let approved = approve_cb(&AgentApproval::AskUser {
                 question: question.to_owned(),
+                options,
             })
             .map_err(OrchestrationError::Agent)?;
             match approved {
@@ -1631,6 +2153,11 @@ where
                 ApprovalOutcome::Denied => Ok(format!("User denied plugin execution: {}", name)),
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
             }
+        }
+        "dispatch_subagent" => {
+            let name = required(&input.name, "name")?;
+            let task = required(&input.instruction, "instruction")?;
+            dispatch_one_subagent(root, config, chat_id, name, task, approve_cb).await
         }
         "mcp_tool" => {
             let server = required(&input.server, "server")?;
@@ -1774,11 +2301,300 @@ where
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
             }
         }
+        "video_trim" | "video.trim" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::TrimRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                start: input.start.unwrap_or(0.0),
+                end: input.end.unwrap_or(0.0),
+            };
+            let res = crate::video_edit::video_trim(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "video_remove_silence" | "video.remove_silence" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::RemoveSilenceRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                threshold_db: input.threshold_db.unwrap_or(-30.0),
+                min_silence_secs: input.min_silence_secs.unwrap_or(0.5),
+            };
+            let res = crate::video_edit::video_remove_silence(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "video_resize" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::ResizeRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                width: input.width.unwrap_or(1920),
+                height: input.height.unwrap_or(1080),
+            };
+            let res = crate::video_edit::video_resize(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "video_merge" => {
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::MergeRequest {
+                inputs: if input.inputs.is_empty() {
+                    input.commands.clone()
+                } else {
+                    input.inputs.clone()
+                },
+                output: output_path.to_string(),
+            };
+            let res = crate::video_edit::video_merge(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "video_export" | "video.export" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::ExportRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                resolution: input.preset.clone(),
+                fps: None,
+                codec: None,
+                crf: None,
+            };
+            let res = crate::video_edit::video_export(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "video_extract_audio" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::ExtractAudioRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+            };
+            let out = crate::video_edit::video_extract_audio(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(format!("Audio extracted to {}", out.output_path))
+        }
+        "speech_transcribe" | "subtitle_generate" | "subtitle.generate" => {
+            let input_path = required(&input.input, "input")?;
+            let req = crate::speech::TranscribeRequest {
+                input: input_path.to_string(),
+                language: input.language.clone(),
+                prompt: None,
+            };
+            let res = crate::speech::transcribe(config, &req)
+                .await
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "subtitle_translate" | "subtitle.translate" => {
+            let srt = input.srt_content.as_deref().unwrap_or_default();
+            let target = input.target_language.as_deref().unwrap_or("th");
+            let req = crate::subtitle::TranslateSubtitleRequest {
+                srt_content: srt.to_string(),
+                target_language: target.to_string(),
+            };
+            let translated = crate::subtitle::translate_subtitles(config, &req)
+                .await
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(translated)
+        }
+        "subtitle_burn" => {
+            let input_video = required(&input.input, "input")?;
+            let output_video = required(&input.output, "output")?;
+            let srt_input = input.srt_content.as_deref().unwrap_or_default();
+            let req = crate::subtitle::BurnSubtitleRequest {
+                input_video: input_video.to_string(),
+                srt_input: srt_input.to_string(),
+                output_video: output_video.to_string(),
+                style: None,
+                preset: input.preset.clone(),
+            };
+            let res = crate::subtitle::burn_subtitles(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "timeline_reorder" | "timeline.reorder" => {
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::ReorderClipsRequest {
+                inputs: input.inputs.clone(),
+                order: input.order.clone(),
+                output: output_path.to_string(),
+            };
+            let res = crate::video_edit::timeline_reorder(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "effect_zoom_on_speaker" | "effect.zoom_on_speaker" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::ZoomSpeakerRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                zoom_factor: input.zoom_factor.unwrap_or(1.25),
+            };
+            let res = crate::video_edit::effect_zoom_on_speaker(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "audio_duck_music" | "audio.duck_music" => {
+            let video_in = input.video_input.as_deref().unwrap_or(&input.input);
+            let music_in = input.music_input.as_deref().unwrap_or("");
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::DuckMusicRequest {
+                video_input: video_in.to_string(),
+                music_input: music_in.to_string(),
+                output: output_path.to_string(),
+                music_volume: input.music_volume.unwrap_or(0.2),
+            };
+            let res = crate::video_edit::audio_duck_music(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "make_shorts" | "video.make_shorts" => {
+            let input_path = required(&input.input, "input")?;
+            let req = crate::auto_shorts::MakeShortsRequest {
+                input: input_path.to_string(),
+                output_dir: if input.output.is_empty() {
+                    None
+                } else {
+                    Some(input.output.clone())
+                },
+                max_clips: input.max_clips.unwrap_or(3),
+                target_duration: input.target_duration.unwrap_or(60.0),
+                burn_subtitles: true,
+                width: input.width.unwrap_or(1080),
+                height: input.height.unwrap_or(1920),
+            };
+            let res = crate::auto_shorts::make_shorts(config, &req)
+                .await
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(serde_json::to_string(&res).unwrap_or_default())
+        }
+        "generate_image" | "image_studio.generate" | "image_generate" => {
+            let prompt_text = if !input.prompt.trim().is_empty() {
+                input.prompt.trim()
+            } else if !input.query.trim().is_empty() {
+                input.query.trim()
+            } else {
+                required(&input.text, "prompt")?
+            };
+            let req = crate::image_gen::ImageGenRequest {
+                prompt: prompt_text.to_string(),
+                aspect_ratio: if input.aspect_ratio.is_empty() {
+                    Some("1:1".to_string())
+                } else {
+                    Some(input.aspect_ratio.clone())
+                },
+                provider: if input.provider.is_empty() {
+                    None
+                } else {
+                    Some(input.provider.clone())
+                },
+                num_images: Some(1),
+                ..Default::default()
+            };
+            let res = crate::image_gen::generate_images(config, &req)
+                .await
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            let data_uris: Vec<String> = res.images.iter().map(|i| i.data_uri.clone()).collect();
+            if let Ok(saved) = crate::pictures::save_chat_images(
+                data_uris,
+                Some(res.provider.clone()),
+                Some(prompt_text.to_string()),
+            ) {
+                if let Some(first_saved) = saved.first() {
+                    let img_url = format!("/api/pictures/{}", first_saved.filename);
+                    let saved_path = first_saved.path.display();
+                    let img_md = format!(
+                        "![Generated Image]({})\n\n✓ Image generated successfully with model `{}` ({})\nSaved to: {}\n\nNote: In your final response or finish summary, you MUST copy the exact image markdown (`![Generated Image]({})`), model feedback (`✓ Image generated successfully...`), and saved path line (`Saved to: {}`) so the user can see them in their chat bubble.",
+                        img_url, res.model, res.provider, saved_path, img_url, saved_path
+                    );
+                    return Ok(img_md);
+                }
+            }
+            if let Some(first) = res.images.first() {
+                let img_md = format!(
+                    "![Generated Image]({})\n\n✓ Image generated successfully with model `{}` ({})",
+                    first.data_uri, res.model, res.provider
+                );
+                Ok(img_md)
+            } else {
+                Ok("No image returned from provider".to_string())
+            }
+        }
+        "generate_video" | "veo.generate" | "video_generate" => {
+            let prompt_text = if !input.prompt.trim().is_empty() {
+                input.prompt.trim()
+            } else if !input.query.trim().is_empty() {
+                input.query.trim()
+            } else {
+                required(&input.text, "prompt")?
+            };
+            let req = crate::video_gen::VideoGenRequest {
+                prompt: prompt_text.to_string(),
+                negative_prompt: None,
+                aspect_ratio: if input.aspect_ratio.is_empty() {
+                    "16:9".to_string()
+                } else {
+                    input.aspect_ratio.clone()
+                },
+                duration: input.duration.unwrap_or(5.0) as u32,
+                model: None,
+                provider: if input.provider.is_empty() {
+                    "veo".to_string()
+                } else {
+                    input.provider.clone()
+                },
+            };
+            let res = crate::video_gen::generate_video(config, &req)
+                .await
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            if let Some(first) = res.videos.first() {
+                let vid_md = format!(
+                    "<video controls src=\"{}\" width=\"100%\" style=\"max-height:400px; border-radius:8px;\"></video>\n\n✓ Video generated successfully with Veo `{}` ({})",
+                    first.path.to_string_lossy(),
+                    res.model,
+                    res.provider
+                );
+                Ok(vid_md)
+            } else {
+                Ok("No video returned from provider".to_string())
+            }
+        }
         other => Err(OrchestrationError::Agent(format!(
             "unsupported code-agent action '{}'",
             other
         ))),
     }
+}
+
+/// Bridge for callers outside this module (e.g. the Gemini Live realtime voice
+/// session) that receive an action name and raw JSON input rather than a parsed
+/// `AgentDecision`, and so can't construct one directly since its fields are
+/// private to this module.
+pub(crate) async fn execute_tool_from_json<Approve>(
+    root: &Path,
+    config: &MintConfig,
+    action: &str,
+    input: Value,
+    chat_id: &str,
+    approve_cb: &mut Approve,
+) -> Result<String, OrchestrationError>
+where
+    Approve: FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send,
+{
+    let decision = AgentDecision {
+        thought: String::new(),
+        action: action.to_string(),
+        input: serde_json::from_value(input).unwrap_or_default(),
+    };
+    execute_tool(root, config, &decision, chat_id, approve_cb).await
 }
 
 fn validate_new_workspace_file(
@@ -1964,6 +2780,122 @@ fn view_image(path: &Path, config: &MintConfig) -> Result<String, OrchestrationE
     .map_err(|e| OrchestrationError::Agent(e.to_string()))
 }
 
+/// Renders a slice of `native_messages` back into readable text for the
+/// compaction summarizer prompt. Self-contained to `ChatMessage`/`ContentBlock`
+/// rather than reusing the parallel `trajectory: Vec<String>` log, since that
+/// log gets one entry per *tool call* while `native_messages` gets one
+/// Assistant/Tool pair per *step* (a step can batch multiple tool calls) —
+/// keeping the two aligned would need extra bookkeeping for no real benefit.
+fn render_messages_as_text(messages: &[ChatMessage]) -> String {
+    messages
+        .iter()
+        .map(|message| {
+            let rendered = message
+                .content
+                .iter()
+                .map(|block| match block {
+                    ContentBlock::Text { text } => text.clone(),
+                    ContentBlock::ToolUse { name, input, .. } => {
+                        format!("Called {name} with {input}")
+                    }
+                    ContentBlock::ToolResult { content, .. } => format!("Result: {content}"),
+                    ContentBlock::Image { .. } => "[image]".to_string(),
+                    ContentBlock::Audio { .. } => "[audio]".to_string(),
+                    ContentBlock::Video { .. } => "[video]".to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("{:?}: {rendered}", message.role)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Compacts the older portion of `native_messages` into a single synthetic
+/// step-pair summary once the conversation is approaching the model's context
+/// window, keeping the last `COMPACTION_KEEP_RECENT_STEPS` step-pairs verbatim.
+///
+/// `messages[0]` is always the initial task/observation message, and every
+/// message after it is a strict repeating `[Assistant, Tool]` pair — one pair
+/// per outer agent-loop step, even when that step batched multiple tool calls
+/// (see the loop body). Cutting only on pair boundaries means the result
+/// always preserves valid role alternation for every provider, with no
+/// special-casing needed elsewhere.
+///
+/// `Ok(None)` means there was nothing worth compacting yet (too little history)
+/// — not a failure, just a no-op. `Err` means compaction was attempted but the
+/// summarization call itself failed; compaction is a best-effort optimization,
+/// so callers should fall back to the uncompacted messages rather than failing
+/// the agent run, but may want to surface the failure differently than a
+/// routine no-op.
+async fn compact_native_messages(
+    config: &MintConfig,
+    messages: &[ChatMessage],
+) -> Result<Option<Vec<ChatMessage>>, ChatError> {
+    let step_pairs = messages.len().saturating_sub(1) / 2;
+    if step_pairs <= COMPACTION_KEEP_RECENT_STEPS || messages.is_empty() {
+        return Ok(None);
+    }
+    let compact_pairs = step_pairs - COMPACTION_KEEP_RECENT_STEPS;
+    let compact_message_count = compact_pairs * 2;
+    let compacted_range = &messages[1..1 + compact_message_count];
+
+    let transcript = render_messages_as_text(compacted_range);
+    let summary_prompt = format!(
+        "Summarize the following part of an autonomous coding agent's work log concisely but \
+         completely. Preserve: exact file paths touched and their resulting state, exact \
+         commands run and whether they succeeded, key findings from searches/reads, and any \
+         decisions or open threads still relevant to finishing the task. Omit verbose \
+         stdout/stderr detail that isn't load-bearing. Write it as dense prose, not a copy of \
+         the log.\n\n{transcript}"
+    );
+
+    let (summary_response, _) = send_chat_with_fallback(
+        config,
+        &ChatRequest {
+            message: summary_prompt,
+            system_instruction: "You compress agent work logs into dense, factual summaries."
+                .into(),
+            chat_id: None,
+            image_data_uri: None,
+            audio_data_uri: None,
+            video_data_uri: None,
+            document_attachment: None,
+            workspace_path: None,
+            agent_id: None,
+            plan_mode: false,
+            messages: None,
+            tools: None,
+        },
+    )
+    .await?;
+
+    let mut compacted = Vec::with_capacity(messages.len() - compact_message_count + 3);
+    compacted.push(messages[0].clone());
+    compacted.push(ChatMessage {
+        role: ChatRole::Assistant,
+        content: vec![ContentBlock::ToolUse {
+            id: "compacted_summary".into(),
+            name: "conversation_summary".into(),
+            input: serde_json::json!({}),
+            thought_signature: None,
+        }],
+    });
+    compacted.push(ChatMessage {
+        role: ChatRole::Tool,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: "compacted_summary".into(),
+            content: format!(
+                "[Summary of steps 1-{compact_pairs}, compacted to save context]\n{}",
+                summary_response.text.trim()
+            ),
+            is_error: false,
+        }],
+    });
+    compacted.extend_from_slice(&messages[1 + compact_message_count..]);
+    Ok(Some(compacted))
+}
+
 fn run_shell(
     root: &Path,
     config: &MintConfig,
@@ -1986,9 +2918,15 @@ fn run_shell(
         hint = "\nNote: Opening URLs, files, folders, or launching applications are background processes. Even if there are warnings or stdout/stderr outputs, since the command exited successfully with status 0, the operation has succeeded and you should now use the 'finish' action to inform the user.";
     }
 
+    let warning_line = output
+        .sandbox_warning
+        .as_deref()
+        .map(|warning| format!("\n[Warning] {warning}"))
+        .unwrap_or_default();
+
     Ok(format!(
-        "exit: {}\nmode: {}\nsandboxed: {}\nstdout:\n{}\nstderr:\n{}{}",
-        status_str, output.mode, output.sandboxed, output.stdout, output.stderr, hint
+        "exit: {}\nmode: {}\nsandboxed: {}{}\nstdout:\n{}\nstderr:\n{}{}",
+        status_str, output.mode, output.sandboxed, warning_line, output.stdout, output.stderr, hint
     ))
 }
 
@@ -2024,6 +2962,55 @@ fn action_fingerprint(decision: &AgentDecision) -> String {
             .unwrap_or_else(|| "apply_patch:<missing>".to_owned()),
         "write_file" => format!("write_file:{}", input.path.trim()),
         other => other.to_owned(),
+    }
+}
+
+/// Appends saved cross-session memory — the user's profile/preferences (Settings
+/// → Memory) and this chat's recent interaction history — onto `system_prompt`.
+/// Shared by the typed-chat agent loop and the Gemini Live bridge so a Live
+/// session starts with the same "who is this user, what have we already
+/// discussed" context instead of starting blank every call.
+pub(crate) fn append_memory_context(system_prompt: &mut String, chat_id: &str) {
+    let Ok(memory) = MemoryStore::open_default() else {
+        return;
+    };
+
+    let mut profile_instructions = String::new();
+    if let Ok(Some(name)) = memory.get_profile("name")
+        && !name.trim().is_empty()
+    {
+        profile_instructions.push_str(&format!("User Name: {}\n", name.trim()));
+    }
+    if let Ok(Some(preferences)) = memory.get_profile("preferences")
+        && !preferences.trim().is_empty()
+    {
+        profile_instructions.push_str(&format!(
+            "User Preferences & Profile:\n{}\n",
+            preferences.trim()
+        ));
+    }
+    if !profile_instructions.is_empty() {
+        *system_prompt = format!(
+            "{}\n\nUser Profile Information:\n{}",
+            system_prompt.trim(),
+            profile_instructions.trim()
+        );
+    }
+
+    if let Ok(mut interactions) = memory.recent_interactions_for_chat(chat_id, 6) {
+        interactions.reverse();
+        let transcript = interactions
+            .into_iter()
+            .map(|item| format!("User: {}\nAssistant: {}", item.user_text, item.ai_text))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if !transcript.is_empty() {
+            *system_prompt = format!(
+                "{}\n\nRecent conversation context:\n{}",
+                system_prompt.trim(),
+                transcript
+            );
+        }
     }
 }
 
@@ -2269,6 +3256,76 @@ fn agent_read_path(
     )))
 }
 
+/// When a `finish` attempt is rejected (empty summary, missing verification, ...),
+/// native tool-calling mode's `messages` history must record both the model's
+/// attempted finish and the rejection, or the next request would just resend the
+/// same history with no signal anything was wrong: the JSON-prompt path gets the
+/// rejection via `observation` (rebuilt from `trajectory` at each call site above),
+/// but native mode stops reading `observation` once `native_messages` is non-empty
+/// (see the `native_messages.is_empty()` guard near the top of the step loop).
+/// No-op outside native mode, where `observation` alone is sufficient.
+fn reject_native_finish(
+    tool_mode: ToolCallingMode,
+    native_messages: &mut Vec<ChatMessage>,
+    response_text: &str,
+    rejection: &str,
+) {
+    if tool_mode != ToolCallingMode::Native {
+        return;
+    }
+    if !response_text.trim().is_empty() {
+        native_messages.push(ChatMessage {
+            role: ChatRole::Assistant,
+            content: vec![ContentBlock::Text {
+                text: response_text.trim().to_string(),
+            }],
+        });
+    }
+    native_messages.push(ChatMessage {
+        role: ChatRole::User,
+        content: vec![ContentBlock::Text {
+            text: rejection.to_string(),
+        }],
+    });
+}
+
+/// Maximum number of `dispatch_subagent` calls run concurrently when a single
+/// model turn requests several of them at once (see `orchestrate_agent_loop`'s
+/// parallel-dispatch branch). Kept low: each subagent makes its own AI-provider
+/// API calls, so a higher cap risks tripping the configured provider's rate
+/// limit, and most tasks don't naturally decompose into more than a couple of
+/// truly independent pieces anyway.
+const PARALLEL_SUBAGENT_LIMIT: usize = 2;
+
+/// Whether this step's decisions should run as a concurrency-limited batch of
+/// subagent dispatches instead of the normal one-at-a-time loop: 2 or more
+/// decisions, every one of them a `dispatch_subagent` call with nothing else
+/// mixed in. A lone subagent call, or one mixed with other actions, stays on
+/// the sequential path — keeps ordering between subagent results and other
+/// tool results simple, and avoids parallelizing tools that were never
+/// verified to be safe to run concurrently.
+fn decisions_are_parallel_subagent_batch(decisions: &[(String, AgentDecision)]) -> bool {
+    decisions.len() >= 2
+        && decisions
+            .iter()
+            .all(|(_, d)| d.action == "dispatch_subagent")
+}
+
+/// Whether `finish` should be rejected because the run modified a file
+/// (`apply_patch`/`write_file`) without a subsequent `verify` call and without
+/// an explicit written reason in the `finish` action's `verification` field.
+fn unverified_modification(
+    last_modify_step: Option<usize>,
+    last_verify_step: Option<usize>,
+    verification_field: &str,
+) -> bool {
+    let Some(modify_step) = last_modify_step else {
+        return false;
+    };
+    let verified_since = last_verify_step.is_some_and(|verify_step| verify_step >= modify_step);
+    !verified_since && meaningful_verification(verification_field).is_empty()
+}
+
 fn meaningful_verification(value: &str) -> &str {
     let value = value.trim();
     if matches!(
@@ -2384,6 +3441,9 @@ Example response:
         document_attachment: None,
         workspace_path: None,
         agent_id: None,
+        plan_mode: false,
+        messages: None,
+        tools: None,
     };
 
     // Send the chat request to LLM
@@ -2445,6 +3505,9 @@ mod tests {
             document_attachment: None,
             workspace_path: None,
             agent_id: None,
+            plan_mode: false,
+            messages: None,
+            tools: None,
         };
         let config = MintConfig::default();
         assert!(
@@ -2599,5 +3662,156 @@ mod tests {
         assert_eq!(instr, "Coder instruction");
         assert_eq!(name, Some("Coder".to_string()));
         assert_eq!(model, Some("gemini-2.5-flash".to_string()));
+    }
+
+    fn step_pair(index: usize) -> [ChatMessage; 2] {
+        [
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: vec![ContentBlock::ToolUse {
+                    id: format!("call_{index}"),
+                    name: "read_file".into(),
+                    input: serde_json::json!({ "path": format!("file{index}.rs") }),
+                    thought_signature: None,
+                }],
+            },
+            ChatMessage {
+                role: ChatRole::Tool,
+                content: vec![ContentBlock::ToolResult {
+                    tool_use_id: format!("call_{index}"),
+                    content: format!("contents of file{index}.rs"),
+                    is_error: false,
+                }],
+            },
+        ]
+    }
+
+    fn native_messages_with_steps(step_count: usize) -> Vec<ChatMessage> {
+        let mut messages = vec![ChatMessage::text(ChatRole::User, "do the task")];
+        for i in 0..step_count {
+            messages.extend(step_pair(i));
+        }
+        messages
+    }
+
+    #[tokio::test]
+    async fn compact_native_messages_is_a_noop_when_history_is_short() {
+        // COMPACTION_KEEP_RECENT_STEPS = 3, so exactly 3 step-pairs is nothing to compact yet.
+        let messages = native_messages_with_steps(3);
+        let config = MintConfig::default();
+        let result = compact_native_messages(&config, &messages).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn compact_native_messages_is_a_noop_for_empty_history() {
+        let config = MintConfig::default();
+        let result = compact_native_messages(&config, &[]).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn render_messages_as_text_includes_tool_calls_and_results() {
+        let messages = native_messages_with_steps(1);
+        let rendered = render_messages_as_text(&messages);
+        assert!(rendered.contains("Called read_file with"));
+        assert!(rendered.contains("Result: contents of file0.rs"));
+        assert!(rendered.contains("do the task"));
+    }
+
+    #[test]
+    fn no_modification_means_finish_never_needs_verification() {
+        // A pure Q&A run that never touched apply_patch/write_file can finish
+        // immediately, regardless of what (if anything) is in `verification`.
+        assert!(!unverified_modification(None, None, ""));
+        assert!(!unverified_modification(None, Some(1), ""));
+    }
+
+    #[test]
+    fn modification_without_any_verify_call_blocks_finish() {
+        assert!(unverified_modification(Some(2), None, ""));
+    }
+
+    #[test]
+    fn verify_called_before_the_modification_does_not_count() {
+        // Editing again after the last verify invalidates that earlier check.
+        assert!(unverified_modification(Some(3), Some(1), ""));
+    }
+
+    #[test]
+    fn verify_called_after_the_modification_satisfies_the_gate() {
+        assert!(!unverified_modification(Some(2), Some(3), ""));
+    }
+
+    #[test]
+    fn verify_on_the_same_step_as_the_modification_satisfies_the_gate() {
+        // Both markers can land on the same step if a single turn issues
+        // multiple tool calls (apply_patch then verify back to back).
+        assert!(!unverified_modification(Some(2), Some(2), ""));
+    }
+
+    #[test]
+    fn explicit_written_justification_satisfies_the_gate_without_a_verify_call() {
+        assert!(!unverified_modification(
+            Some(2),
+            None,
+            "Documentation-only change; no test suite in this repo."
+        ));
+    }
+
+    #[test]
+    fn placeholder_verification_text_does_not_satisfy_the_gate() {
+        // Mirrors `meaningful_verification`'s own placeholder filter — "n/a" etc.
+        // must not be treated as a real justification.
+        assert!(unverified_modification(Some(2), None, "n/a"));
+        assert!(unverified_modification(Some(2), None, "not run"));
+    }
+
+    fn decision_with_action(action: &str) -> (String, AgentDecision) {
+        (
+            "call_0".to_string(),
+            AgentDecision {
+                thought: String::new(),
+                action: action.to_string(),
+                input: AgentInput::default(),
+            },
+        )
+    }
+
+    #[test]
+    fn two_or_more_subagent_only_decisions_qualify_for_the_parallel_batch() {
+        let decisions = vec![
+            decision_with_action("dispatch_subagent"),
+            decision_with_action("dispatch_subagent"),
+        ];
+        assert!(decisions_are_parallel_subagent_batch(&decisions));
+
+        let decisions = vec![
+            decision_with_action("dispatch_subagent"),
+            decision_with_action("dispatch_subagent"),
+            decision_with_action("dispatch_subagent"),
+        ];
+        assert!(decisions_are_parallel_subagent_batch(&decisions));
+    }
+
+    #[test]
+    fn a_lone_subagent_dispatch_stays_sequential() {
+        let decisions = vec![decision_with_action("dispatch_subagent")];
+        assert!(!decisions_are_parallel_subagent_batch(&decisions));
+    }
+
+    #[test]
+    fn subagent_dispatch_mixed_with_another_action_stays_sequential() {
+        let decisions = vec![
+            decision_with_action("dispatch_subagent"),
+            decision_with_action("dispatch_subagent"),
+            decision_with_action("read_file"),
+        ];
+        assert!(!decisions_are_parallel_subagent_batch(&decisions));
+    }
+
+    #[test]
+    fn empty_decisions_never_qualify_for_the_parallel_batch() {
+        assert!(!decisions_are_parallel_subagent_batch(&[]));
     }
 }

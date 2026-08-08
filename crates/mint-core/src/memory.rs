@@ -60,6 +60,8 @@ pub struct LearnedSkill {
     pub created_at: String,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default, rename = "is_workspace")]
+    pub is_workspace: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -635,6 +637,7 @@ fn learned_skill_row(row: &rusqlite::Row<'_>) -> Result<LearnedSkill, rusqlite::
         content,
         created_at: row.get(4)?,
         description,
+        is_workspace: false,
     })
 }
 

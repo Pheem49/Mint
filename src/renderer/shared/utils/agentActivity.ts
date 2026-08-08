@@ -11,6 +11,8 @@ export interface AgentActivity {
   kind: 'file' | 'folder' | 'search' | 'terminal' | 'tool'
   state: 'active' | 'done' | 'error'
   action?: string
+  /** Raw ToolEnd output text, shown when the row is expanded in the UI. */
+  result?: string
 }
 
 export interface AgentActivityView {
@@ -29,7 +31,7 @@ export function formatActivityTarget(value: string): string {
 }
 
 export function activityKind(action: string, target: string): AgentActivity['kind'] {
-  if (['search_code', 'semantic_search', 'knowledge_search', 'web_search', 'memory_recall'].includes(action)) return 'search'
+  if (['search_code', 'semantic_search', 'knowledge_search', 'web_search', 'image_search', 'memory_recall'].includes(action)) return 'search'
   if (['run_shell', 'verify'].includes(action)) return 'terminal'
   if (['list_files', 'detect_project'].includes(action)) return 'folder'
   if (['read_file', 'symbols', 'read_diagnostics', 'git_diff', 'apply_patch', 'write_file', 'note_write', 'view_image'].includes(action)) return 'file'
@@ -56,38 +58,9 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
     }
   }
 
-  const labels: Record<string, string> = {
-    apply_patch: 'Applying patch',
-    ask_user: 'Asking user',
-    create_plan: 'Creating plan',
-    detect_project: 'Detecting project',
-    git_branch: 'Reading branch',
-    git_diff: 'Reading diff',
-    git_log: 'Reading log',
-    git_status: 'Reading git status',
-    knowledge_search: 'Searching knowledge',
-    list_files: 'Listing files',
-    list_tests: 'Listing tests',
-    mcp_tool: 'Calling MCP tool',
-    memory_recall: 'Recalling memory',
-    note_write: 'Writing note',
-    read_diagnostics: 'Reading diagnostics',
-    read_file: 'Reading file',
-    request_user_approval: 'Requesting approval',
-    run_plugin: 'Running plugin',
-    run_shell: 'Running command',
-    search_code: 'Searching code',
-    semantic_index: 'Indexing code',
-    semantic_search: 'Searching code',
-    symbols: 'Inspecting symbols',
-    update_plan: 'Updating plan',
-    verify: 'Verifying',
-    view_image: 'Viewing image',
-    web_search: 'Searching web',
-    write_file: 'Writing file',
-  }
   return {
-    label: labels[action] ?? 'Using tool',
+    // Raw tool/action identifier, matching how the CLI labels activity (e.g. "[web_search]").
+    label: action,
     target: formatActivityTarget(target),
     kind: activityKind(action, target),
     state: 'active',
@@ -118,6 +91,7 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
       for (let index = activities.length - 1; index >= 0; index -= 1) {
         if (activities[index].state !== 'active') continue
         activities[index].state = event.data.result.startsWith('Error:') ? 'error' : 'done'
+        activities[index].result = event.data.result
         if (activities[index].state === 'error') {
           activities[index].label = 'Failed'
         }
@@ -139,6 +113,7 @@ export interface WebSearchSource {
   snippet: string
   domain: string
   faviconUrl: string
+  imageUrl?: string
 }
 
 /**
@@ -163,12 +138,14 @@ export function parseWebSearchSources(progress: AgentProgress[]): WebSearchSourc
       const lines = block.split('\n').map((l: string) => l.trim()).filter(Boolean)
       const titleLine = lines.find((l: string) => /^\d+\.\s/.test(l))
       const urlLine = lines.find((l: string) => l.startsWith('URL:'))
+      const imageLine = lines.find((l: string) => l.startsWith('Image:'))
       if (!titleLine || !urlLine) continue
 
       const title = titleLine.replace(/^\d+\.\s/, '').trim()
       const url = urlLine.replace(/^URL:\s*/, '').trim()
+      const imageUrl = imageLine ? imageLine.replace(/^Image:\s*/, '').trim() : undefined
       const snippet = lines
-        .filter((l: string) => l !== titleLine && l !== urlLine)
+        .filter((l: string) => l !== titleLine && l !== urlLine && l !== imageLine)
         .join(' ')
         .trim()
 
@@ -176,7 +153,7 @@ export function parseWebSearchSources(progress: AgentProgress[]): WebSearchSourc
         const { hostname } = new URL(url)
         const domain = hostname.replace(/^www\./, '')
         const faviconUrl = `https://www.google.com/s2/favicons?sz=32&domain=${hostname}`
-        sources.push({ title, url, snippet, domain, faviconUrl })
+        sources.push({ title, url, snippet, domain, faviconUrl, imageUrl })
       } catch {
         // skip malformed URLs
       }

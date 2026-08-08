@@ -1,0 +1,143 @@
+/* desktop: misc.css — split from styles.css, rules kept in original order */
+
+/* Header - Drag Region */
+
+.drag-region {
+  -webkit-app-region: no-drag;
+  min-height: 34px;
+  padding: 0 8px;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  background: var(--chrome-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+  z-index: 10;
+}
+
+.close-btn,
+.maximize-btn,
+.minimize-btn {
+  -webkit-app-region: no-drag;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  width: 34px;
+  height: 28px;
+  padding: 0;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.close-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.toggle-model-btn.active {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+  color: white;
+}
+
+.accessory-cycle-btn:hover,
+.accessory-cycle-btn.active {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.24);
+  color: #a7f3d0;
+}
+
+.toggle-interaction-btn:hover,
+.toggle-interaction-btn.active {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.24);
+  color: #86efac;
+}
+
+.toggle-interaction-btn:not(.active) {
+  color: #f87171;
+}
+
+.toggle-interaction-btn:not(.active):hover {
+  background: rgba(248, 113, 113, 0.14);
+  border-color: rgba(248, 113, 113, 0.22);
+  color: #f87171;
+}
+
+.toggle-interaction-btn:not(.active) .interaction-off-mark {
+  opacity: 1;
+}
+
+.interaction-guide-btn.active {
+  background: rgba(34, 211, 238, 0.22);
+  border-color: rgba(34, 211, 238, 0.34);
+  color: #67e8f9;
+}
+
+.toggle-model-btn:hover,
+.toggle-model-btn.active,
+.change-expression-btn:hover,
+.accessory-cycle-btn:hover,
+.accessory-cycle-btn.active,
+.toggle-interaction-btn:hover,
+.toggle-interaction-btn.active,
+.interaction-guide-btn:hover,
+.interaction-guide-btn.active,
+.clear-btn:hover,
+.settings-btn:hover,
+.minimize-btn:hover,
+.maximize-btn:hover {
+  background: var(--surface-strong);
+  border-color: transparent;
+  color: var(--text-main);
+}
+
+.toggle-interaction-btn:not(.active) {
+  color: #ff7b7b;
+}
+
+.close-btn:hover {
+  background: var(--close-btn-hover-bg);
+  color: var(--close-btn-hover-color);
+}
+
+@media (max-width: 760px) {
+  .drag-region {
+    grid-template-columns: auto 1fr auto;
+    gap: 8px;
+    padding: 9px 10px 9px 12px;
+  }
+}
+
+/* Mobile Menu Button (Hamburger ☰) — hidden on desktop, shown on mobile */
+
+.mobile-menu-btn {
+  display: none;
+  background: transparent;
+  border: none;
+  color: var(--text-main);
+  font-size: 1.35rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.mobile-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 768px) {
+  .mobile-menu-btn {
+    display: flex;
+  }
+}

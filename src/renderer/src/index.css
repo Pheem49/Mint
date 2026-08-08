@@ -1,5 +1,16 @@
-@import './css/styles.css';
-@import './css/settings.css';
+@import './css/app-shell.css';
+@import './css/chat.css';
+@import './css/sidebar-workspace.css';
+@import './css/model.css';
+@import './css/pictures.css';
+@import './css/misc.css';
+@import './css/settings/base.css';
+@import './css/settings/general.css';
+@import './css/settings/profile.css';
+@import './css/settings/automation.css';
+@import './css/settings/theme.css';
+@import './css/settings/plugins.css';
+@import './css/settings/shortcuts.css';
 @import './css/spotlight.css';
 @import './css/widget.css';
 @import './css/image-studio.css';
@@ -504,7 +515,7 @@ button {
   width: 100%;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(30, 41, 59, 0.35);
+  background: var(--panel-bg);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 

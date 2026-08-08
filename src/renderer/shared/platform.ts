@@ -18,10 +18,27 @@ import type {
   CodeEditProposal,
   DetectedTools,
   LearnedSkill,
+  SubagentDefinition,
+  SubagentDraft,
   AgentProgress,
+  AuthUser,
 } from './types'
 
+export function getLocalApiBase(): string {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname || 'localhost'
+    return `http://${host}:3000/api`
+  }
+  return 'http://localhost:3000/api'
+}
+
 export interface MintPlatformApi {
+  authRegister(name: string | undefined, email: string, password: string): Promise<AuthUser>
+  authLogin(email: string, password: string): Promise<AuthUser>
+  authLogout(): Promise<void>
+  authGetCurrentUser(): Promise<AuthUser | null>
+  authUpdateProfile(name?: string, image?: string): Promise<AuthUser>
+  authUploadAvatar(fileDataUri: string, fileName: string): Promise<AuthUser>
   getRuntimeStatus(): Promise<RuntimeStatus>
   detectSystemTools(): Promise<DetectedTools>
   sendChatMessage(
@@ -67,8 +84,12 @@ export interface MintPlatformApi {
   listLearnedSkills(workspacePath?: string): Promise<LearnedSkill[]>
   addLearnedSkill(name: string, content: string): Promise<LearnedSkill>
   deleteLearnedSkill(name: string): Promise<number>
+  listSubagents(workspacePath?: string): Promise<SubagentDefinition[]>
+  saveSubagent(draft: SubagentDraft, workspacePath?: string): Promise<SubagentDefinition>
+  deleteSubagent(sourcePath: string): Promise<void>
   clearChatHistory(chatId?: string | null): Promise<number>
   listSavedPictures(): Promise<PictureEntry[]>
+  deleteSavedPicture(id: string): Promise<void>
   generateImages(req: ImageGenRequest): Promise<ImageGenResponse>
   getImageGenProviders(): Promise<ImageGenProviders>
   setDefaultImageProvider(provider: string): Promise<boolean>

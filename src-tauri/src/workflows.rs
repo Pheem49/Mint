@@ -83,6 +83,9 @@ pub fn start_monitor(app: AppHandle) {
                             document_attachment: None,
                             workspace_path: None,
                             agent_id: None,
+                            plan_mode: false,
+                            messages: None,
+                            tools: None,
                         };
 
                         tauri::async_runtime::block_on(async {

@@ -208,7 +208,8 @@ fn decode(value: &str) -> String {
     while index < bytes.len() {
         if bytes[index] == b'%'
             && index + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&value[index + 1..index + 3], 16)
+            && let Ok(hex_str) = std::str::from_utf8(&bytes[index + 1..index + 3])
+            && let Ok(byte) = u8::from_str_radix(hex_str, 16)
         {
             output.push(byte);
             index += 3;

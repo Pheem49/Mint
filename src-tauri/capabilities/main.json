@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Capabilities for Mint desktop windows managed by the Rust backend.",
   "windows": ["main", "settings", "spotlight", "widget", "screen-picker"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:default"]
 }
