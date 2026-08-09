@@ -347,42 +347,31 @@ export default function PluginsTab({
           </div>
         )}
 
-        <form className="add-skill-box" onSubmit={handleAddSkill} style={{
-          padding: '20px',
-          border: '1px solid var(--border)',
-          borderRadius: '12px',
-          background: 'var(--surface-bg)'
-        }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', marginBottom: '14px' }}>Teach New Skill</h3>
-          {skillsError && <div style={{ color: '#ef4444', fontSize: '0.85rem', marginBottom: '12px', fontWeight: '500' }}>{skillsError}</div>}
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
-            <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Skill Name (e.g. coding-guidelines)</label>
+        <form className="add-skill-box" onSubmit={handleAddSkill}>
+          <h3>Teach New Skill</h3>
+          {skillsError && <p className="profile-message-error">{skillsError}</p>}
+
+          <div className="setting-row stacked">
+            <label>Skill Name (e.g. coding-guidelines)</label>
             <input
               type="text"
               placeholder="e.g. angular-standard"
               value={newSkillName}
               onChange={(e) => setNewSkillName(e.target.value)}
-              style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.9rem' }}
             />
           </div>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
-            <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Skill Instructions / Content</label>
+
+          <div className="setting-row stacked">
+            <label>Skill Instructions / Content</label>
             <textarea
               placeholder="# Instructions&#10;Write only clean TypeScript. Use async/await."
               value={newSkillContent}
               onChange={(e) => setNewSkillContent(e.target.value)}
-              style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.9rem', width: '100%', height: '100px', resize: 'vertical' }}
+              style={{ height: '100px' }}
             />
           </div>
 
-          <button 
-            type="submit" 
-            className="btn-primary" 
-            disabled={skillsLoading}
-            style={{ width: '100%', padding: '10px 16px', borderRadius: '8px', border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: '600', cursor: 'pointer' }}
-          >
+          <button type="submit" className="btn-primary" disabled={skillsLoading} style={{ width: '100%' }}>
             {skillsLoading ? 'Learning...' : 'Teach Skill'}
           </button>
         </form>
@@ -500,52 +489,42 @@ export default function PluginsTab({
                   </div>
 
                   {item.isConfigured && isExpanded && (
-                    <div className="plugin-config-panel" style={{
-                      padding: '16px 20px',
-                      borderTop: '1px solid var(--border)',
-                      background: 'rgba(0, 0, 0, 0.18)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '12px'
-                    }}>
+                    <div className="plugin-config-panel">
                       <h4 style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                         Edit Settings for {item.name}
                       </h4>
 
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Command</label>
+                      <div className="form-grid two-col">
+                        <div className="setting-row stacked">
+                          <label>Command</label>
                           <input
                             type="text"
                             value={srvConfig.command || ''}
                             onChange={(e) => handleUpdateMcpServerField(item.name, 'command', e.target.value)}
-                            style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.85rem' }}
                           />
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Icon (Optional)</label>
+                        <div className="setting-row stacked">
+                          <label>Icon (Optional)</label>
                           <input
                             type="text"
                             placeholder="SVG code, URL, or preset: search/database/cloud/code/api"
                             value={srvConfig.icon || ''}
                             onChange={(e) => handleUpdateMcpServerField(item.name, 'icon', e.target.value)}
-                            style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.85rem' }}
                           />
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Arguments (Space separated)</label>
+                      <div className="setting-row stacked">
+                        <label>Arguments (Space separated)</label>
                         <input
                           type="text"
                           value={(srvConfig.args || []).join(' ')}
                           onChange={(e) => handleUpdateMcpServerField(item.name, 'args', e.target.value.split(/\s+/).filter(Boolean))}
-                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.85rem', width: '100%' }}
                         />
                       </div>
 
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Environment Variables (JSON format)</label>
+                      <div className="setting-row stacked">
+                        <label>Environment Variables (JSON format)</label>
                         <textarea
                           value={typeof srvConfig.env === 'object' ? JSON.stringify(srvConfig.env, null, 2) : (srvConfig.env || '')}
                           onChange={(e) => {
@@ -556,7 +535,7 @@ export default function PluginsTab({
                               // allow live typing
                             }
                           }}
-                          style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.85rem', fontFamily: 'monospace', height: '65px', resize: 'vertical' }}
+                          style={{ height: '65px' }}
                         />
                       </div>
                     </div>
@@ -567,66 +546,56 @@ export default function PluginsTab({
           )}
         </div>
 
-        <div className="add-mcp-box" style={{
-          marginTop: '20px',
-          padding: '20px',
-          border: '1px solid var(--border)',
-          borderRadius: '12px',
-          background: 'var(--surface-bg)'
-        }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: '600', color: 'var(--text-main)', marginBottom: '14px' }}>Add MCP Server</h3>
-          <div className="form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Server Name</label>
+        <div className="add-mcp-box">
+          <h3>Add MCP Server</h3>
+          <div className="form-grid two-col">
+            <div className="setting-row stacked">
+              <label>Server Name</label>
               <input
                 type="text"
                 placeholder="e.g. google-search"
                 value={mcpName}
                 onChange={(e) => setMcpName(e.target.value)}
-                style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.9rem' }}
               />
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Command</label>
+            <div className="setting-row stacked">
+              <label>Command</label>
               <input
                 type="text"
                 placeholder="e.g. npx"
                 value={mcpCmd}
                 onChange={(e) => setMcpCmd(e.target.value)}
-                style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.9rem' }}
               />
             </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
-            <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Arguments</label>
+          <div className="setting-row stacked">
+            <label>Arguments</label>
             <input
               type="text"
               placeholder="e.g. -y @modelcontextprotocol/server-brave-search"
               value={mcpArgs}
               onChange={(e) => setMcpArgs(e.target.value)}
-              style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.9rem', width: '100%' }}
             />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
-            <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Icon (Optional)</label>
+          <div className="setting-row stacked">
+            <label>Icon (Optional)</label>
             <input
               type="text"
               placeholder="SVG code, URL, or preset: search/database/cloud/code/api"
               value={mcpIcon}
               onChange={(e) => setMcpIcon && setMcpIcon(e.target.value)}
-              style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.9rem', width: '100%' }}
             />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
-            <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Environment Variables (JSON)</label>
+          <div className="setting-row stacked">
+            <label>Environment Variables (JSON)</label>
             <textarea
               placeholder='e.g. {"BRAVE_API_KEY": "your_key_here"}'
               value={mcpEnv}
               onChange={(e) => setMcpEnv(e.target.value)}
-              style={{ padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-main)', fontSize: '0.9rem', width: '100%', height: '70px', resize: 'vertical' }}
+              style={{ height: '70px' }}
             />
           </div>
-          <button className="btn-primary" onClick={handleAddMcpServer} style={{ width: '100%', padding: '10px 16px', borderRadius: '8px', border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: '600', cursor: 'pointer' }}>Add MCP Server</button>
+          <button className="btn-primary" onClick={handleAddMcpServer} style={{ width: '100%' }}>Add MCP Server</button>
         </div>
       </section>
 
@@ -771,33 +740,17 @@ export default function PluginsTab({
                 </div>
 
                 {p.hasCredentials && isExpanded && (
-                  <div className="plugin-config-panel" style={{
-                    padding: '20px',
-                    borderTop: '1px solid var(--border)',
-                    background: 'rgba(0,0,0,0.12)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '12px'
-                  }}>
+                  <div className="plugin-config-panel">
                     <h4 style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-soft)', marginBottom: '4px' }}>Credentials Configuration</h4>
-                    <div className="form-grid compact" style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
+                    <div className="form-grid compact">
                       {p.fields?.map(f => (
-                        <div className="setting-row" key={f.field} style={{ display: 'flex', flexDirection: 'column', gap: '6px', border: 'none', padding: 0 }}>
-                          <label style={{ fontSize: '0.8rem', fontWeight: '500', color: 'var(--text-muted)' }}>{f.label}</label>
+                        <div className="setting-row stacked" key={f.field}>
+                          <label>{f.label}</label>
                           <input
                             type={f.type}
                             placeholder={f.placeholder}
                             value={(config as any)[f.field] || ''}
                             onChange={(e) => updateField(f.field as any, e.target.value)}
-                            style={{
-                              width: '100%',
-                              padding: '10px 14px',
-                              borderRadius: '8px',
-                              border: '1px solid var(--border)',
-                              background: 'var(--input-bg)',
-                              color: 'var(--text-main)',
-                              fontSize: '0.9rem'
-                            }}
                           />
                         </div>
                       ))}

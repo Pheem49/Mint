@@ -304,3 +304,22 @@ export function renderPluginsSvgIcon(size = 20, color = 'currentColor') {
     </svg>
   )
 }
+
+export function renderScheduledTasksSvgIcon(size = 20, color = 'currentColor') {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="13" r="8" />
+      <polyline points="12 9 12 13 15 15" />
+      <path d="M9 2h6M5 5l-1.5-1.5M19 5l1.5-1.5" />
+    </svg>
+  )
+}
+
+export function renderLinkedFoldersSvgIcon(size = 20, color = 'currentColor') {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07l-1.5 1.5" />
+      <path d="M14 11a5 5 0 0 0-7.07 0l-2.83 2.83a5 5 0 0 0 7.07 7.07l1.5-1.5" />
+    </svg>
+  )
+}

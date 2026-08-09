@@ -6,14 +6,15 @@ use std::{
 };
 
 use mint_core::{
-    CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, ImageGenRequest, KnowledgeStore,
-    MemoryStore, MintConfig, TaskStore, apply_code_edits, assert_path_capability, build_code_patch,
+    CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, CronStore, ImageGenRequest,
+    KnowledgeStore, MemoryStore, MintConfig, TaskStore, add_linked_folder, apply_code_edits,
+    assert_path_capability, build_code_patch,
     build_symbol_index, classify_shell_command, config_path, create_folder,
     fetch_github_repo_summary, find_paths, generate_images, index_semantic_code, initialize_config,
-    inspect_code_plan, list_code_files, list_subagents, load_config,
+    inspect_code_plan, list_code_files, list_linked_folders, list_subagents, load_config,
     orchestrate_chat_with_fallback, parse_github_url, propose_code_edits, read_code_file,
-    repository_summary, run_shell_command, sandbox_availability, save_config, search_code,
-    search_semantic_code, set_config_value,
+    remove_linked_folder, repository_summary, run_shell_command, sandbox_availability, save_config,
+    search_code, search_semantic_code, set_config_value,
 };
 
 mod actions;
@@ -144,6 +145,11 @@ enum Command {
         #[command(subcommand)]
         command: TaskCommand,
     },
+    /// Manage scheduled/recurring agent tasks (cron jobs).
+    Cron {
+        #[command(subcommand)]
+        command: CronCommand,
+    },
     /// Search and create local folders through the native safety policy.
     Files {
         #[command(subcommand)]
@@ -189,6 +195,11 @@ enum Command {
     Mcp {
         #[command(subcommand)]
         command: McpCommand,
+    },
+    /// Manage linked folders that chat can auto-write notes into.
+    Link {
+        #[command(subcommand)]
+        command: LinkCommand,
     },
     /// Manage PreToolUse/PostToolUse hooks.
     Hooks {
@@ -336,6 +347,20 @@ enum McpCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum LinkCommand {
+    Add {
+        name: String,
+        path: PathBuf,
+        #[arg(long)]
+        description: Option<String>,
+    },
+    List,
+    Remove {
+        name: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum HooksCommand {
     /// Add a hook. event: PreToolUse or PostToolUse. matcher: "*" or a comma/pipe-separated
     /// list of action names (e.g. "write_file,apply_patch"). command: a shell command that
@@ -397,6 +422,40 @@ enum TaskCommand {
         result: Option<String>,
     },
     ClearCompleted,
+}
+
+#[derive(Debug, Subcommand)]
+enum CronCommand {
+    /// Create a new scheduled job. `schedule` accepts 5-field unix cron
+    /// ("min hour dom month dow", e.g. "0 8 * * *" for every day at 08:00),
+    /// or 6/7-field forms with seconds/year.
+    Add {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        schedule: String,
+        #[arg(long)]
+        task: String,
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+    },
+    List,
+    Show {
+        id: String,
+    },
+    Remove {
+        id: String,
+    },
+    Enable {
+        id: String,
+    },
+    Disable {
+        id: String,
+    },
+    /// Run a job immediately, without waiting for its schedule.
+    RunNow {
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -732,6 +791,7 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         None => {
             mint_core::channels::start_channels();
+            mint_core::start_cron_scheduler();
             run_interactive_chat().await?;
         }
         Some(cmd) => match cmd {
@@ -1012,6 +1072,30 @@ async fn main() -> Result<()> {
                     let res = mcp::call(&server, &tool, serde_json::from_str(&arguments)?);
                     spinner.finish_and_clear();
                     println!("{}", serde_json::to_string_pretty(&res?)?);
+                }
+            },
+            Command::Link { command } => match command {
+                LinkCommand::Add {
+                    name,
+                    path,
+                    description,
+                } => {
+                    add_linked_folder(&name, &path, description)?;
+                    println!("Linked folder: {name}");
+                }
+                LinkCommand::List => {
+                    let folders = list_linked_folders()?;
+                    println!("{}", serde_json::to_string_pretty(&folders)?);
+                }
+                LinkCommand::Remove { name } => {
+                    println!(
+                        "{}",
+                        if remove_linked_folder(&name)? {
+                            "removed"
+                        } else {
+                            "not found"
+                        }
+                    )
                 }
             },
             Command::Hooks { command } => match command {
@@ -1329,6 +1413,71 @@ async fn main() -> Result<()> {
                         )
                     }
                     TaskCommand::ClearCompleted => println!("{}", tasks.clear_completed()?),
+                }
+            }
+            Command::Cron { command } => {
+                let cron_jobs = CronStore::open_default()?;
+                match command {
+                    CronCommand::Add {
+                        name,
+                        schedule,
+                        task,
+                        workspace,
+                    } => {
+                        let workspace = match workspace {
+                            Some(path) => path,
+                            None => std::env::current_dir()?,
+                        };
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&cron_jobs.add(
+                                name, schedule, task, workspace
+                            )?)?
+                        );
+                    }
+                    CronCommand::List => {
+                        println!("{}", serde_json::to_string_pretty(&cron_jobs.list()?)?)
+                    }
+                    CronCommand::Show { id } => {
+                        println!("{}", serde_json::to_string_pretty(&cron_jobs.get(&id)?)?)
+                    }
+                    CronCommand::Remove { id } => {
+                        println!("{}", serde_json::to_string_pretty(&cron_jobs.remove(&id)?)?)
+                    }
+                    CronCommand::Enable { id } => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&cron_jobs.set_enabled(&id, true)?)?
+                        )
+                    }
+                    CronCommand::Disable { id } => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&cron_jobs.set_enabled(&id, false)?)?
+                        )
+                    }
+                    CronCommand::RunNow { id } => {
+                        let job = cron_jobs
+                            .get(&id)?
+                            .ok_or_else(|| anyhow::anyhow!("no cron job with id {id}"))?;
+                        println!("Running cron job {}: {}", job.id, job.name);
+                        match agent::run_code_agent(&job.task, &job.workspace, &load_config()?)
+                            .await
+                        {
+                            Ok(result) => {
+                                cron_jobs.record_run(
+                                    &job.id,
+                                    "success",
+                                    Some(result.summary.clone()),
+                                )?;
+                                println!("Job completed: {}", result.summary);
+                            }
+                            Err(error) => {
+                                cron_jobs.record_run(&job.id, "failed", Some(error.to_string()))?;
+                                return Err(error);
+                            }
+                        }
+                    }
                 }
             }
             Command::Files { command } => {

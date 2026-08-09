@@ -84,6 +84,12 @@ pub struct MintConfig {
     pub disabled_tools: Vec<String>,
     pub agents: Vec<AgentConfig>,
     pub enable_agent_collaboration: bool,
+    /// When true, a background reflection call runs after a task finishes and may
+    /// write a new `.agents/skills/<slug>/SKILL.md` file if the task looks like a
+    /// non-trivial, reusable problem. Off by default: it costs an extra LLM call
+    /// and writes files without interactive approval. See
+    /// [`crate::orchestration::spawn_auto_skill_write`].
+    pub auto_skill_writing: bool,
     /// User-defined OpenAI-compatible providers.
     pub custom_providers: Vec<CustomProvider>,
     /// Persistent "always allow"/"always deny" rules for agent-loop approvals,
@@ -309,6 +315,7 @@ impl Default for MintConfig {
             disabled_tools: Vec::new(),
             agents: default_agents(),
             enable_agent_collaboration: false,
+            auto_skill_writing: false,
             custom_providers: Vec::new(),
             permission_rules: Vec::new(),
             extra: runtime_extra_defaults(),

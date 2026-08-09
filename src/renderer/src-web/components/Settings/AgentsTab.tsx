@@ -327,41 +327,20 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
+          <div className="entity-list" style={{ marginTop: '16px' }}>
             {agents.map((agent) => (
-              <div 
-                key={agent.id} 
-                style={{ 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  padding: '16px', 
-                  background: 'var(--panel-bg)', 
-                  border: '1px solid var(--panel-raised)', 
-                  borderRadius: '8px',
-                  gap: '8px'
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <strong style={{ fontSize: '18px' }}>{agent.name}</strong>
-                    <span 
-                      style={{ 
-                        fontSize: '11px', 
-                        padding: '2px 6px', 
-                        borderRadius: '4px', 
-                        background: 'var(--panel-raised)',
-                        color: 'var(--accent)'
-                      }}
-                    >
-                      {agent.provider} ({agent.model})
-                    </span>
+              <div key={agent.id} className="entity-card">
+                <div className="entity-card-header">
+                  <div className="entity-card-header-left">
+                    <strong className="entity-card-name">{agent.name}</strong>
+                    <span className="entity-card-badge">{agent.provider} ({agent.model})</span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                  <div className="entity-card-header-actions">
                     <label className="settings-toggle-switch">
-                      <input 
-                        type="checkbox" 
-                        checked={agent.enabled} 
-                        onChange={(e) => handleToggleAgent(agent.id, e.target.checked)} 
+                      <input
+                        type="checkbox"
+                        checked={agent.enabled}
+                        onChange={(e) => handleToggleAgent(agent.id, e.target.checked)}
                       />
                       <span className="settings-toggle-slider"></span>
                     </label>
@@ -371,15 +350,11 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
                     )}
                   </div>
                 </div>
-                <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--text-soft)', fontStyle: 'italic' }}>
-                  "{agent.systemInstruction}"
-                </p>
+                <p className="entity-card-desc">"{agent.systemInstruction}"</p>
               </div>
             ))}
             {agents.length === 0 && (
-              <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-soft)', fontStyle: 'italic' }}>
-                No agents configured. Click "+ Add Custom Agent" to get started.
-              </div>
+              <div className="entity-empty">No agents configured. Click "+ Add Custom Agent" to get started.</div>
             )}
           </div>
         )}
@@ -601,66 +576,37 @@ function SubagentsSection() {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className="entity-list">
           {error && <div style={{ color: 'var(--danger, #ef4444)' }}>{error}</div>}
           {loading ? (
             <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-soft)' }}>Loading...</div>
           ) : (
             <>
               {subagents.map((subagent) => (
-                <div
-                  key={subagent.sourcePath}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    padding: '16px',
-                    background: 'var(--panel-bg)',
-                    border: '1px solid var(--panel-raised)',
-                    borderRadius: '8px',
-                    gap: '8px'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                      <strong style={{ fontSize: '18px' }}>{subagent.name}</strong>
-                      <span
-                        style={{
-                          fontSize: '11px',
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          background: isWorkspaceScoped(subagent.sourcePath) ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                          color: isWorkspaceScoped(subagent.sourcePath) ? '#10b981' : '#3b82f6',
-                        }}
-                      >
+                <div key={subagent.sourcePath} className="entity-card">
+                  <div className="entity-card-header">
+                    <div className="entity-card-header-left">
+                      <strong className="entity-card-name">{subagent.name}</strong>
+                      <span className={`entity-card-badge ${isWorkspaceScoped(subagent.sourcePath) ? 'scope-workspace' : 'scope-global'}`}>
                         {isWorkspaceScoped(subagent.sourcePath) ? 'Workspace' : 'Global'}
                       </span>
                       {(subagent.provider || subagent.model) && (
-                        <span style={{ fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: 'var(--panel-raised)', color: 'var(--accent)' }}>
+                        <span className="entity-card-badge">
                           {[subagent.provider, subagent.model].filter(Boolean).join(' / ')}
                         </span>
                       )}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div className="entity-card-header-actions">
                       <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleEdit(subagent)}>Edit</button>
                       <button className="btn btn-danger" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleDelete(subagent)}>Delete</button>
                     </div>
                   </div>
-                  {subagent.description && (
-                    <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--text-soft)', fontStyle: 'italic' }}>
-                      "{subagent.description}"
-                    </p>
-                  )}
-                  {subagent.tools && (
-                    <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-soft)' }}>
-                      Tools: {subagent.tools.join(', ')}
-                    </p>
-                  )}
+                  {subagent.description && <p className="entity-card-desc">"{subagent.description}"</p>}
+                  {subagent.tools && <p className="entity-card-meta">Tools: {subagent.tools.join(', ')}</p>}
                 </div>
               ))}
               {subagents.length === 0 && (
-                <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-soft)', fontStyle: 'italic' }}>
-                  No subagents yet. Click "+ Add Subagent" to create one.
-                </div>
+                <div className="entity-empty">No subagents yet. Click "+ Add Subagent" to create one.</div>
               )}
             </>
           )}

@@ -93,6 +93,8 @@ const MOCK_WELCOME_INTERACTION = {
 
 
 import SkillsView from '../../shared/components/SkillsView'
+import ScheduledTasksView from '../../shared/components/ScheduledTasksView'
+import LinkedFoldersView from '../../shared/components/LinkedFoldersView'
 import McpServersView from '../../shared/components/McpServersView'
 import PluginsView from '../../shared/components/PluginsView'
 import { isSupportedDocument } from '../../shared/utils/documentTypes'
@@ -102,6 +104,13 @@ import {
   deleteLearnedSkill,
   detectSystemTools,
   setProfileValue,
+  listCronJobs,
+  addCronJob,
+  removeCronJob,
+  setCronJobEnabled,
+  listLinkedFolders,
+  addLinkedFolder,
+  removeLinkedFolder,
 } from '../tauri'
 
 function getInitialViewFromUrl(): DashboardView {
@@ -1112,6 +1121,26 @@ export default function MintDashboard() {
               config={settingsConfig || DEFAULT_CONFIG}
               updateField={handleUpdateSettingsField}
               handleConnectPlugin={handleConnectPlugin}
+            />
+          </div>
+        )}
+        {view === 'cron' && (
+          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+            <ScheduledTasksView
+              listCronJobs={listCronJobs}
+              addCronJob={addCronJob}
+              removeCronJob={removeCronJob}
+              setCronJobEnabled={setCronJobEnabled}
+              workspacePath={window.localStorage.getItem('mint:last-workspace-path') || undefined}
+            />
+          </div>
+        )}
+        {view === 'link' && (
+          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+            <LinkedFoldersView
+              listLinkedFolders={listLinkedFolders}
+              addLinkedFolder={addLinkedFolder}
+              removeLinkedFolder={removeLinkedFolder}
             />
           </div>
         )}

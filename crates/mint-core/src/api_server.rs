@@ -122,6 +122,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
     // Start background messaging bridges (Telegram, Discord, Slack)
     crate::start_channels();
+    // Start the cron scheduler so scheduled agent tasks fire while this server is up
+    crate::start_cron_scheduler();
 
     loop {
         let (mut socket, _) = match listener.accept().await {
@@ -681,6 +683,198 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         }
                     }
                 }
+                ("GET", "/api/cron") => {
+                    let jobs = crate::CronStore::open_default()
+                        .and_then(|store| store.list())
+                        .unwrap_or_default();
+                    send_json_response(
+                        socket,
+                        "200 OK",
+                        &serde_json::to_string(&jobs).unwrap_or_default(),
+                    )
+                    .await;
+                }
+                ("POST", "/api/cron") => {
+                    match serde_json::from_str::<crate::CronJobDraft>(body) {
+                        Ok(draft) => match crate::CronStore::open_default() {
+                            Ok(store) => {
+                                match store.add(draft.name, draft.schedule, draft.task, draft.workspace)
+                                {
+                                    Ok(job) => {
+                                        send_json_response(
+                                            socket,
+                                            "200 OK",
+                                            &serde_json::to_string(&job).unwrap_or_default(),
+                                        )
+                                        .await;
+                                    }
+                                    Err(err) => {
+                                        let err_msg = json!({ "error": err.to_string() }).to_string();
+                                        send_json_response(socket, "400 Bad Request", &err_msg).await;
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                let err_msg = json!({ "error": err.to_string() }).to_string();
+                                send_json_response(socket, "400 Bad Request", &err_msg).await;
+                            }
+                        },
+                        Err(_) => {
+                            send_json_response(
+                                socket,
+                                "400 Bad Request",
+                                "{\"error\":\"Invalid request body.\"}",
+                            )
+                            .await;
+                        }
+                    }
+                }
+                ("DELETE", route) if route.starts_with("/api/cron/") => {
+                    let id = percent_decode(route.trim_start_matches("/api/cron/"));
+                    match crate::CronStore::open_default().and_then(|store| store.remove(&id)) {
+                        Ok(removed) => {
+                            send_json_response(
+                                socket,
+                                "200 OK",
+                                &json!({ "status": "ok", "removed": removed }).to_string(),
+                            )
+                            .await;
+                        }
+                        Err(err) => {
+                            let err_msg = json!({ "error": err.to_string() }).to_string();
+                            send_json_response(socket, "400 Bad Request", &err_msg).await;
+                        }
+                    }
+                }
+                ("POST", route)
+                    if route.starts_with("/api/cron/") && route.ends_with("/enable") =>
+                {
+                    let id = percent_decode(
+                        route
+                            .trim_start_matches("/api/cron/")
+                            .trim_end_matches("/enable"),
+                    );
+                    match crate::CronStore::open_default()
+                        .and_then(|store| store.set_enabled(&id, true))
+                    {
+                        Ok(Some(job)) => {
+                            send_json_response(
+                                socket,
+                                "200 OK",
+                                &serde_json::to_string(&job).unwrap_or_default(),
+                            )
+                            .await;
+                        }
+                        Ok(None) => {
+                            send_json_response(
+                                socket,
+                                "404 Not Found",
+                                "{\"error\":\"No cron job with that id.\"}",
+                            )
+                            .await;
+                        }
+                        Err(err) => {
+                            let err_msg = json!({ "error": err.to_string() }).to_string();
+                            send_json_response(socket, "400 Bad Request", &err_msg).await;
+                        }
+                    }
+                }
+                ("POST", route)
+                    if route.starts_with("/api/cron/") && route.ends_with("/disable") =>
+                {
+                    let id = percent_decode(
+                        route
+                            .trim_start_matches("/api/cron/")
+                            .trim_end_matches("/disable"),
+                    );
+                    match crate::CronStore::open_default()
+                        .and_then(|store| store.set_enabled(&id, false))
+                    {
+                        Ok(Some(job)) => {
+                            send_json_response(
+                                socket,
+                                "200 OK",
+                                &serde_json::to_string(&job).unwrap_or_default(),
+                            )
+                            .await;
+                        }
+                        Ok(None) => {
+                            send_json_response(
+                                socket,
+                                "404 Not Found",
+                                "{\"error\":\"No cron job with that id.\"}",
+                            )
+                            .await;
+                        }
+                        Err(err) => {
+                            let err_msg = json!({ "error": err.to_string() }).to_string();
+                            send_json_response(socket, "400 Bad Request", &err_msg).await;
+                        }
+                    }
+                }
+                ("GET", "/api/linked-folders") => {
+                    let folders = load_config()
+                        .ok()
+                        .and_then(|config| {
+                            crate::linked_folders::configured_linked_folders(&config).ok()
+                        })
+                        .unwrap_or_default();
+                    send_json_response(
+                        socket,
+                        "200 OK",
+                        &serde_json::to_string(&folders).unwrap_or_default(),
+                    )
+                    .await;
+                }
+                ("POST", "/api/linked-folders") => {
+                    match serde_json::from_str::<crate::LinkedFolderDraft>(body) {
+                        Ok(draft) => {
+                            match crate::add_linked_folder(
+                                &draft.name,
+                                &draft.path,
+                                draft.description,
+                            ) {
+                                Ok(()) => {
+                                    send_json_response(
+                                        socket,
+                                        "200 OK",
+                                        "{\"status\":\"ok\"}",
+                                    )
+                                    .await;
+                                }
+                                Err(err) => {
+                                    let err_msg = json!({ "error": err.to_string() }).to_string();
+                                    send_json_response(socket, "400 Bad Request", &err_msg).await;
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            send_json_response(
+                                socket,
+                                "400 Bad Request",
+                                "{\"error\":\"Invalid request body.\"}",
+                            )
+                            .await;
+                        }
+                    }
+                }
+                ("DELETE", route) if route.starts_with("/api/linked-folders/") => {
+                    let name = percent_decode(route.trim_start_matches("/api/linked-folders/"));
+                    match crate::remove_linked_folder(&name) {
+                        Ok(removed) => {
+                            send_json_response(
+                                socket,
+                                "200 OK",
+                                &json!({ "status": "ok", "removed": removed }).to_string(),
+                            )
+                            .await;
+                        }
+                        Err(err) => {
+                            let err_msg = json!({ "error": err.to_string() }).to_string();
+                            send_json_response(socket, "400 Bad Request", &err_msg).await;
+                        }
+                    }
+                }
                 ("GET", "/api/profile") => {
                     let key = query_param(query, "key").unwrap_or_default();
                     if let Ok(memory) = MemoryStore::open_default() {
@@ -1223,8 +1417,22 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             messages: None,
                             tools: None,
                         };
-                        let mut chat_req =
-                            chat_req.with_document_context(&config).unwrap_or(chat_req);
+                        let mut chat_req = match chat_req.with_document_context(&config) {
+                            Ok(req) => req,
+                            Err(error) => {
+                                log_api_err("API /api/chat document error", &error);
+                                let err_json = serde_json::json!({
+                                    "text": format!("Could not read the attached document: {error}")
+                                });
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    &err_json.to_string(),
+                                )
+                                .await;
+                                return;
+                            }
+                        };
                         let sent_image = chat_req.image_data_uri.clone();
                         let sent_video = chat_req.video_data_uri.clone();
                         let sent_message = chat_req.message.clone();
@@ -1352,8 +1560,22 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             messages: None,
                             tools: None,
                         };
-                        let mut chat_req =
-                            chat_req.with_document_context(&config).unwrap_or(chat_req);
+                        let mut chat_req = match chat_req.with_document_context(&config) {
+                            Ok(req) => req,
+                            Err(error) => {
+                                log_api_err("API /api/chat-stream document error", &error);
+                                let err_json = serde_json::json!({
+                                    "text": format!("Could not read the attached document: {error}")
+                                });
+                                send_json_response(
+                                    socket,
+                                    "400 Bad Request",
+                                    &err_json.to_string(),
+                                )
+                                .await;
+                                return;
+                            }
+                        };
                         let sent_image = chat_req.image_data_uri.clone();
                         let sent_video = chat_req.video_data_uri.clone();
                         let sent_message = chat_req.message.clone();

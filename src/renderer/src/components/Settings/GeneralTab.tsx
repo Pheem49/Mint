@@ -1093,10 +1093,10 @@ export default function GeneralTab({
                       />
                     </div>
 
-                    <div style={{ marginTop: '12px' }}>
-                      <label style={{ fontWeight: 600, fontSize: '13px', display: 'block', marginBottom: '8px' }}>Model list</label>
+                    <div>
+                      <label className="provider-sublist-label">Model list</label>
                       {cp.models.map((m, mIdx) => (
-                        <div key={mIdx} style={{ display: 'flex', gap: '8px', marginBottom: '6px', alignItems: 'center' }}>
+                        <div key={mIdx} className="provider-sublist-row">
                           <input
                             type="text"
                             value={m.modelId}
@@ -1121,10 +1121,10 @@ export default function GeneralTab({
                       </button>
                     </div>
 
-                    <div style={{ marginTop: '12px' }}>
-                      <label style={{ fontWeight: 600, fontSize: '13px', display: 'block', marginBottom: '8px' }}>Headers (optional)</label>
+                    <div>
+                      <label className="provider-sublist-label">Headers (optional)</label>
                       {cp.headers.map((h, hIdx) => (
-                        <div key={hIdx} style={{ display: 'flex', gap: '8px', marginBottom: '6px', alignItems: 'center' }}>
+                        <div key={hIdx} className="provider-sublist-row">
                           <input
                             type="text"
                             value={h.name}

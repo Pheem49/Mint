@@ -38,6 +38,10 @@ pub enum KnowledgeError {
     Extract { path: PathBuf, message: String },
     #[error("knowledge file does not contain readable text: {0}")]
     Empty(PathBuf),
+    #[error(
+        "this PDF has no extractable text layer, so it could not be read: {0}. It is likely a scanned or image-only PDF — OCR is not supported, so text can't be pulled from it."
+    )]
+    ScannedPdf(PathBuf),
 }
 
 #[derive(Debug, Clone)]
@@ -230,6 +234,9 @@ pub fn extract_document_text(path: &Path, config: &MintConfig) -> Result<String,
     }
     let content = extract_text(&path)?;
     if content.trim().is_empty() {
+        if extension(&path) == "pdf" {
+            return Err(KnowledgeError::ScannedPdf(path));
+        }
         return Err(KnowledgeError::Empty(path));
     }
     Ok(content)
@@ -304,9 +311,23 @@ fn command_text(
     if let Some(suffix) = suffix {
         command.arg(suffix);
     }
-    let output = command.output().map_err(|error| KnowledgeError::Extract {
-        path: path.to_path_buf(),
-        message: format!("unable to run {program}: {error}"),
+    let output = command.output().map_err(|error| {
+        let message = if error.kind() == std::io::ErrorKind::NotFound {
+            let package_hint = match program {
+                "pdftotext" => "the 'poppler-utils' package (`apt install poppler-utils` on Debian/Ubuntu, `brew install poppler` on macOS)",
+                "unzip" => "the 'unzip' package (`apt install unzip` on Debian/Ubuntu, `brew install unzip` on macOS)",
+                _ => "the corresponding package for your OS",
+            };
+            format!(
+                "'{program}' is not installed or not on PATH. Install {package_hint} and try again."
+            )
+        } else {
+            format!("unable to run {program}: {error}")
+        };
+        KnowledgeError::Extract {
+            path: path.to_path_buf(),
+            message,
+        }
     })?;
     if !output.status.success() {
         return Err(KnowledgeError::Extract {

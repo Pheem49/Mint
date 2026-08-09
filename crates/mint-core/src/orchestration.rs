@@ -114,6 +114,11 @@ pub async fn orchestrate_chat(
         request.message.clone(),
         response.text.clone(),
     );
+    crate::linked_folders::spawn_linked_folder_note(
+        config.clone(),
+        request.message.clone(),
+        response.text.clone(),
+    );
     Ok(response)
 }
 
@@ -143,6 +148,11 @@ where
         request.message.clone(),
         response.text.clone(),
     );
+    crate::linked_folders::spawn_linked_folder_note(
+        config.clone(),
+        request.message.clone(),
+        response.text.clone(),
+    );
     Ok(response)
 }
 
@@ -164,6 +174,11 @@ pub async fn orchestrate_chat_with_fallback(
         response.fallback_provider.as_deref(),
     )?;
     spawn_auto_memory_update(
+        config.clone(),
+        request.message.clone(),
+        response.text.clone(),
+    );
+    crate::linked_folders::spawn_linked_folder_note(
         config.clone(),
         request.message.clone(),
         response.text.clone(),
@@ -193,6 +208,11 @@ where
         response.fallback_provider.as_deref(),
     )?;
     spawn_auto_memory_update(
+        config.clone(),
+        request.message.clone(),
+        response.text.clone(),
+    );
+    crate::linked_folders::spawn_linked_folder_note(
         config.clone(),
         request.message.clone(),
         response.text.clone(),
@@ -1151,6 +1171,20 @@ where
                             &verification,
                         )?;
                         spawn_auto_memory_update(config.clone(), task.to_string(), summary.clone());
+                        crate::linked_folders::spawn_linked_folder_note(
+                            config.clone(),
+                            task.to_string(),
+                            summary.clone(),
+                        );
+                        if config.auto_skill_writing && looks_skill_worthy(step, &action_counts) {
+                            spawn_auto_skill_write(
+                                config.clone(),
+                                task.to_string(),
+                                summary.clone(),
+                                root.clone(),
+                                skills.clone(),
+                            );
+                        }
 
                         return Ok(AgentResult {
                             provider: final_provider,
@@ -2930,6 +2964,27 @@ fn run_shell(
     ))
 }
 
+/// Cheap pre-filter run before the (costlier) auto-skill-writing reflection call:
+/// only tasks that took several steps and did real work (edited files, ran shell
+/// commands, drove the browser, or delegated to a subagent) are worth asking the
+/// LLM to judge for skill-worthiness. Keeps trivial one-shot chats from spawning an
+/// extra reflection call every time `auto_skill_writing` is enabled.
+fn looks_skill_worthy(step: usize, action_counts: &BTreeMap<String, usize>) -> bool {
+    const SUBSTANTIVE_ACTIONS: &[&str] = &[
+        "apply_patch",
+        "write_file",
+        "run_shell",
+        "browser_open",
+        "browser_click",
+        "browser_type",
+        "dispatch_subagent",
+    ];
+    step >= 3
+        && action_counts
+            .keys()
+            .any(|key| SUBSTANTIVE_ACTIONS.iter().any(|action| key.starts_with(action)))
+}
+
 fn action_fingerprint(decision: &AgentDecision) -> String {
     let input = &decision.input;
     match decision.action.as_str() {
@@ -3390,6 +3445,149 @@ pub fn spawn_auto_memory_update(config: MintConfig, user_text: String, ai_text: 
     });
 }
 
+/// Fire-and-forget: after a task finishes and passes [`looks_skill_worthy`], ask the
+/// model (in a second, separate call) whether the task was a genuinely reusable
+/// problem worth turning into a skill, and if so write
+/// `<root>/.agents/skills/<slug>/SKILL.md`. Mirrors [`spawn_auto_memory_update`] —
+/// never blocks or fails the already-returned [`AgentResult`].
+pub fn spawn_auto_skill_write(
+    config: MintConfig,
+    task: String,
+    summary: String,
+    root: PathBuf,
+    existing_skills: String,
+) {
+    tokio::spawn(async move {
+        if let Err(e) = auto_write_skill(&config, &task, &summary, &root, &existing_skills).await
+        {
+            eprintln!("Auto skill write failed: {:?}", e);
+        }
+    });
+}
+
+async fn auto_write_skill(
+    config: &MintConfig,
+    task: &str,
+    summary: &str,
+    root: &Path,
+    existing_skills: &str,
+) -> Result<(), OrchestrationError> {
+    let system_instruction = r#"You are a background agent that decides whether a just-completed
+coding/agent task is worth turning into a reusable skill for future sessions.
+
+A task is skill-worthy only if it was non-trivial (took real investigation or multiple
+steps to solve) AND the solution generalizes beyond this one-off instance (a pattern,
+workaround, command sequence, or gotcha that will plausibly recur). Do NOT save trivial
+tasks, one-off questions, or anything already covered by an existing skill listed below
+(reuse that skill's slug to update it instead of creating a near-duplicate).
+
+You must return strictly valid JSON with no other text, markers, or markdown, and do NOT
+wrap it in ```json fences. Two shapes are allowed:
+
+Not worth saving:
+{"should_save": false}
+
+Worth saving:
+{
+  "should_save": true,
+  "slug": "kebab-case-name",
+  "description": "one-line summary of when this skill applies",
+  "content": "full SKILL.md body as markdown, starting with YAML frontmatter:\n---\ndescription: one-line summary\n---\nthen step-by-step reusable instructions"
+}"#
+        .to_string();
+
+    let message = format!(
+        "Existing skills already known (avoid duplicating these; reuse a slug below to update it instead):\n{}\n\nTask:\n{}\n\nOutcome:\n{}",
+        existing_skills, task, summary
+    );
+
+    let request = ChatRequest {
+        message,
+        system_instruction,
+        chat_id: None,
+        image_data_uri: None,
+        audio_data_uri: None,
+        video_data_uri: None,
+        document_attachment: None,
+        workspace_path: None,
+        agent_id: None,
+        plan_mode: false,
+        messages: None,
+        tools: None,
+    };
+
+    let response = send_chat(config, &request).await?;
+    let text_reply = response.text.trim();
+
+    let clean_json = if text_reply.starts_with("```") {
+        let lines: Vec<&str> = text_reply.lines().collect();
+        let mut filtered = Vec::new();
+        for line in lines {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("```") {
+                filtered.push(trimmed);
+            }
+        }
+        filtered.join("\n")
+    } else {
+        text_reply.to_string()
+    };
+
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&clean_json) else {
+        return Ok(());
+    };
+    let Some(obj) = value.as_object() else {
+        return Ok(());
+    };
+    if !obj
+        .get("should_save")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let (Some(slug), Some(content)) = (
+        obj.get("slug").and_then(|v| v.as_str()),
+        obj.get("content").and_then(|v| v.as_str()),
+    ) else {
+        return Ok(());
+    };
+
+    let slug = slugify(slug);
+    if slug.is_empty() {
+        return Ok(());
+    }
+
+    let skill_dir = root.join(".agents").join("skills").join(&slug);
+    std::fs::create_dir_all(&skill_dir)
+        .map_err(|e| OrchestrationError::Agent(format!("unable to create {skill_dir:?}: {e}")))?;
+    std::fs::write(skill_dir.join("SKILL.md"), content)
+        .map_err(|e| OrchestrationError::Agent(format!("unable to write SKILL.md: {e}")))?;
+
+    Ok(())
+}
+
+/// Lowercases, replaces runs of non-alphanumeric characters with a single `-`, and
+/// trims leading/trailing `-` — turns an arbitrary model-provided name into a safe
+/// directory name under `.agents/skills/`.
+fn slugify(value: &str) -> String {
+    let mut slug = String::with_capacity(value.len());
+    let mut last_was_dash = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            last_was_dash = false;
+        } else if !last_was_dash && !slug.is_empty() {
+            slug.push('-');
+            last_was_dash = true;
+        }
+    }
+    if slug.ends_with('-') {
+        slug.pop();
+    }
+    slug
+}
+
 pub async fn auto_extract_and_update_memory(
     config: &MintConfig,
     user_text: &str,
@@ -3489,6 +3687,32 @@ Example response:
 mod tests {
     use super::*;
     use crate::config::AgentConfig;
+
+    #[test]
+    fn slugify_lowercases_and_collapses_separators() {
+        assert_eq!(slugify("Retry Flaky Playwright Tests!!"), "retry-flaky-playwright-tests");
+        assert_eq!(slugify("  leading/trailing --dashes--  "), "leading-trailing-dashes");
+        assert_eq!(slugify("already-a-slug"), "already-a-slug");
+        assert_eq!(slugify("***"), "");
+    }
+
+    #[test]
+    fn skill_worthy_requires_enough_steps_and_substantive_work() {
+        let mut counts = BTreeMap::new();
+        counts.insert("read_file:foo.rs".to_string(), 1);
+        counts.insert("apply_patch:foo.rs".to_string(), 1);
+
+        // Too few steps, even with a substantive action.
+        assert!(!looks_skill_worthy(2, &counts));
+        // Enough steps, has a substantive action.
+        assert!(looks_skill_worthy(3, &counts));
+
+        let mut read_only = BTreeMap::new();
+        read_only.insert("read_file:foo.rs".to_string(), 5);
+        read_only.insert("web_search::rust patterns".to_string(), 2);
+        // Enough steps, but nothing substantive happened.
+        assert!(!looks_skill_worthy(5, &read_only));
+    }
 
     #[test]
     fn preserves_request_without_history() {

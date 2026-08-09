@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon } from '../../shared/constants/plugins'
+import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon, renderScheduledTasksSvgIcon, renderLinkedFoldersSvgIcon } from '../../shared/constants/plugins'
 import { useAuthUser } from '../../shared/components/AuthGate'
 import { APP_ICON_PATH } from '../tauri'
 
-export type DashboardView = 'chat' | 'pictures' | 'model' | 'imagine' | 'workflows' | 'veo' | 'skills' | 'mcp' | 'plugins'
+export type DashboardView = 'chat' | 'pictures' | 'model' | 'imagine' | 'workflows' | 'veo' | 'skills' | 'mcp' | 'plugins' | 'cron' | 'link'
 
 interface ChatSessionItem {
   id: string
@@ -158,7 +158,7 @@ export default function DashboardSidebar({
       </button>
 
       <div className="sidebar-more-container" ref={moreContainerRef}>
-        <button className={`sidebar-top-action ${isMoreOpen || view === 'skills' || view === 'mcp' || view === 'plugins' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)}>
+        <button className={`sidebar-top-action ${isMoreOpen || view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)}>
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="1.5"></circle>
@@ -181,6 +181,14 @@ export default function DashboardSidebar({
             <button className={`popover-item ${view === 'plugins' ? 'active' : ''}`} onClick={() => { onSetView('plugins'); setIsMoreOpen(false); }}>
               <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderPluginsSvgIcon(15)}</span>
               <span>Plugins</span>
+            </button>
+            <button className={`popover-item ${view === 'cron' ? 'active' : ''}`} onClick={() => { onSetView('cron'); setIsMoreOpen(false); }}>
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderScheduledTasksSvgIcon(15)}</span>
+              <span>Scheduled Tasks</span>
+            </button>
+            <button className={`popover-item ${view === 'link' ? 'active' : ''}`} onClick={() => { onSetView('link'); setIsMoreOpen(false); }}>
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderLinkedFoldersSvgIcon(15)}</span>
+              <span>Linked Folders</span>
             </button>
           </div>
         )}
@@ -332,6 +340,14 @@ export default function DashboardSidebar({
               <button className={`popover-item ${view === 'plugins' ? 'active' : ''}`} onClick={() => { onSetView('plugins'); setIsAccountMenuOpen(false); }}>
                 <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderPluginsSvgIcon(15)}</span>
                 <span>Plugins</span>
+              </button>
+              <button className={`popover-item ${view === 'cron' ? 'active' : ''}`} onClick={() => { onSetView('cron'); setIsAccountMenuOpen(false); }}>
+                <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderScheduledTasksSvgIcon(15)}</span>
+                <span>Scheduled Tasks</span>
+              </button>
+              <button className={`popover-item ${view === 'link' ? 'active' : ''}`} onClick={() => { onSetView('link'); setIsAccountMenuOpen(false); }}>
+                <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>{renderLinkedFoldersSvgIcon(15)}</span>
+                <span>Linked Folders</span>
               </button>
               <div className="sidebar-account-menu-divider" />
               <button className="popover-item" onClick={() => { setIsAccountMenuOpen(false); logout(); }}>

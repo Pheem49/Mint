@@ -31,15 +31,16 @@ use tokio::sync::oneshot;
 use integrations::{channel_inventory, list_plugins};
 use mint_core::{
     AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, AuthUser, ChatRequest,
-    ChatResponse, ChatSession, CodeEdit, CodeEditProposal, GeminiLiveEvent, GeminiLiveHandle,
-    ImageGenRequest, InteractionMemory, MemoryStore, MintConfig, PictureEntry, SubagentDefinition,
-    SubagentDraft, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport, apply_code_edits,
+    ChatResponse, ChatSession, CodeEdit, CodeEditProposal, CronJob, CronJobDraft, CronStore,
+    GeminiLiveEvent, GeminiLiveHandle, ImageGenRequest, InteractionMemory, LinkedFolder,
+    LinkedFolderDraft, MemoryStore, MintConfig, PictureEntry, SubagentDefinition, SubagentDraft,
+    TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport, apply_code_edits,
     classify_shell_command, config_path, delete_saved_picture,
     delete_subagent as core_delete_subagent, get_user, google_tts_urls, list_saved_pictures,
     list_subagents as core_list_subagents, load_config, load_workflows, login_user,
     orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
     propose_code_edits, register_user, save_avatar_file, save_chat_images, save_config,
-    save_subagent as core_save_subagent, save_workflows, start_channels,
+    save_subagent as core_save_subagent, save_workflows, start_channels, start_cron_scheduler,
     start_gemini_live_session as core_start_gemini_live_session, update_profile, weather,
     workflows_path,
 };
@@ -1049,6 +1050,51 @@ fn delete_subagent(source_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn list_cron_jobs() -> Result<Vec<CronJob>, String> {
+    CronStore::open_default()
+        .and_then(|store| store.list())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_cron_job(draft: CronJobDraft) -> Result<CronJob, String> {
+    let store = CronStore::open_default().map_err(|e| e.to_string())?;
+    store
+        .add(draft.name, draft.schedule, draft.task, draft.workspace)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_cron_job(id: String) -> Result<bool, String> {
+    CronStore::open_default()
+        .and_then(|store| store.remove(&id))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_cron_job_enabled(id: String, enabled: bool) -> Result<Option<CronJob>, String> {
+    CronStore::open_default()
+        .and_then(|store| store.set_enabled(&id, enabled))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_linked_folders() -> Result<std::collections::BTreeMap<String, LinkedFolder>, String> {
+    mint_core::list_linked_folders().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_linked_folder(draft: LinkedFolderDraft) -> Result<(), String> {
+    mint_core::add_linked_folder(&draft.name, &draft.path, draft.description)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_linked_folder(name: String) -> Result<bool, String> {
+    mint_core::remove_linked_folder(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn clear_chat_history(chat_id: Option<String>) -> Result<usize, String> {
     MemoryStore::open_default()
         .and_then(|memory| {
@@ -1589,6 +1635,7 @@ pub fn run() {
             start_headless_queue(app.handle().clone());
             start_proactive_loop(app.handle().clone());
             start_channels();
+            start_cron_scheduler();
             start_webhooks();
             tauri::async_runtime::spawn(async {
                 let _ = mint_core::start_api_server(3000).await;
@@ -1646,6 +1693,13 @@ pub fn run() {
             list_subagents,
             save_subagent,
             delete_subagent,
+            list_cron_jobs,
+            add_cron_job,
+            remove_cron_job,
+            set_cron_job_enabled,
+            list_linked_folders,
+            add_linked_folder,
+            remove_linked_folder,
             list_pictures,
             delete_picture,
             save_pictures,

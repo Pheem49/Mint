@@ -2,6 +2,7 @@
 
 .theme-segmented {
     display: inline-flex;
+    justify-self: start;
     align-items: center;
     gap: 2px;
     padding: 3px;
@@ -51,20 +52,10 @@
     overflow: hidden;
 }
 
-.color-range,
-.color-inputs {
+.color-range {
     display: flex;
     align-items: center;
     gap: 10px;
-}
-
-.color-section {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 14px;
 }
 
 .color-presets {

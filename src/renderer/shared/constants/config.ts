@@ -27,6 +27,7 @@ export const DEFAULT_CONFIG = {
   enableVoiceReply: true,
   enableCustomWorkflows: true,
   enableAgentCollaboration: false,
+  autoSkillWriting: false,
   ttsProvider: 'google',
   ttsVolume: 1.0,
   ttsSpeed: 1.0,

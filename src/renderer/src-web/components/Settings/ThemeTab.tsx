@@ -16,7 +16,7 @@ export default function ThemeTab({ config, updateField }: ThemeTabProps) {
             <h2 className="section-title">Theme</h2>
           </div>
         </div>
-        <div className="setting-row">
+        <div className="setting-row stacked">
           <label>Appearance</label>
           <div className="theme-segmented" role="radiogroup" aria-label="Theme">
             {[
@@ -115,27 +115,19 @@ export default function ThemeTab({ config, updateField }: ThemeTabProps) {
             <h2 className="section-title">Accent & Text</h2>
           </div>
         </div>
-        <div className="color-section">
-          <div>
+        <div className="form-grid">
+          <div className="setting-row">
             <label>Accent Color</label>
-            <div className="color-presets" style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+            <div className="color-presets">
               {['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899'].map(c => (
-                <button 
+                <button
                   key={c}
-                  className="color-dot" 
-                  style={{ 
-                    backgroundColor: c, 
-                    width: '28px',
-                    height: '28px',
-                    borderRadius: '50%',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                  className="color-dot"
+                  style={{
+                    backgroundColor: c,
                     border: config.accentColor === c ? '2px solid white' : '2px solid transparent',
                     boxShadow: config.accentColor === c ? `0 0 10px ${c}` : 'none',
-                    transition: 'all 0.2s ease'
-                  }} 
+                  }}
                   onClick={() => updateField('accentColor', c)}
                   aria-label={`Select accent color ${c}`}
                 >
@@ -148,15 +140,13 @@ export default function ThemeTab({ config, updateField }: ThemeTabProps) {
               ))}
             </div>
           </div>
-          <div className="color-inputs" style={{ display: 'flex', gap: '15px', marginTop: '12px' }}>
-            <div>
-              <label>Custom Accent</label>
-              <input type="color" value={config.accentColor} onChange={(e) => updateField('accentColor', e.target.value)} style={{ display: 'block', marginTop: '4px' }} />
-            </div>
-            <div>
-              <label>System Text</label>
-              <input type="color" value={config.systemTextColor} onChange={(e) => updateField('systemTextColor', e.target.value)} style={{ display: 'block', marginTop: '4px' }} />
-            </div>
+          <div className="setting-row">
+            <label>Custom Accent</label>
+            <input type="color" value={config.accentColor} onChange={(e) => updateField('accentColor', e.target.value)} />
+          </div>
+          <div className="setting-row">
+            <label>System Text</label>
+            <input type="color" value={config.systemTextColor} onChange={(e) => updateField('systemTextColor', e.target.value)} />
           </div>
         </div>
       </section>

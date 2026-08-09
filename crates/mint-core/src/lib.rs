@@ -8,12 +8,14 @@ pub mod calculation;
 pub mod chat;
 pub mod code_tools;
 pub mod config;
+pub mod cron;
 pub mod files;
 pub mod gemini_live;
 pub mod hooks;
 pub mod image_gen;
 pub mod image_search;
 pub mod knowledge;
+pub mod linked_folders;
 pub mod mcp;
 pub mod memory;
 pub mod oauth;
@@ -71,6 +73,7 @@ pub use config::{
     MintConfig, PermissionDecision, PermissionRule, ToolCallingMode, config_path,
     initialize_config, load_config, permission_decision_for, save_config, set_config_value,
 };
+pub use cron::{CronError, CronJob, CronJobDraft, CronStore, start_cron_scheduler};
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
 pub use gemini_live::{
     GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session,
@@ -85,6 +88,11 @@ pub use image_gen::{
 pub use image_search::{ImageHit, ImageSearchError, ImageSearchReport, image_search};
 pub use knowledge::{
     KnowledgeError, KnowledgeHit, KnowledgeSource, KnowledgeStore, extract_document_text,
+};
+pub use linked_folders::{
+    LinkedFolder, LinkedFolderDraft, LinkedFolderError, add_linked_folder,
+    configured_linked_folders, list_linked_folders, remove_linked_folder,
+    spawn_linked_folder_note,
 };
 pub use mcp::{
     McpError, McpServer, add_mcp_server, call_configured_mcp_tool, call_mcp_tool,
@@ -168,5 +176,42 @@ pub fn cancel_agent(chat_id: &str) -> bool {
         true
     } else {
         false
+    }
+}
+
+/// Plain-text notices from detached background tasks (currently just
+/// [`linked_folders::spawn_linked_folder_note`]) that a UI surface can drain
+/// and display whenever convenient — mirrors how `crates/mint-cli`'s `/bg`
+/// job queue works, just at the process level since linked-folder notes can
+/// be written from any of the CLI/desktop/web chat paths, not CLI-only code.
+pub static LINKED_FOLDER_NOTICES: std::sync::LazyLock<std::sync::Mutex<Vec<String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+
+pub fn push_linked_folder_notice(message: String) {
+    LINKED_FOLDER_NOTICES.lock().unwrap().push(message);
+}
+
+pub fn take_linked_folder_notices() -> Vec<String> {
+    std::mem::take(&mut *LINKED_FOLDER_NOTICES.lock().unwrap())
+}
+
+#[cfg(test)]
+mod linked_folder_notice_tests {
+    use super::*;
+
+    #[test]
+    fn pushed_notices_are_drained_exactly_once() {
+        // Isolate from other tests touching the same process-global queue.
+        let _ = take_linked_folder_notices();
+
+        push_linked_folder_notice("Saved note to Food (Food/mint-notes/2026-08-09.md)".into());
+        push_linked_folder_notice("Saved note to YouTube (YouTube/mint-notes/2026-08-09.md)".into());
+
+        let notices = take_linked_folder_notices();
+        assert_eq!(notices.len(), 2);
+        assert!(notices[0].contains("Food"));
+
+        // Draining empties the queue.
+        assert!(take_linked_folder_notices().is_empty());
     }
 }

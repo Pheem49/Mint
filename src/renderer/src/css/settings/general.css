@@ -68,3 +68,18 @@
     flex-direction: column;
     gap: 12px;
 }
+
+.provider-sublist-label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--text-main);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.provider-sublist-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}

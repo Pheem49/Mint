@@ -45,17 +45,41 @@
     margin-bottom: 16px;
 }
 
+.add-skill-box,
 .add-mcp-box {
-    display: grid;
-    gap: 10px;
-    padding: 14px;
-    border: 1px dashed var(--border-strong);
-    border-radius: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
     background: var(--surface-bg);
 }
 
+.add-skill-box h3,
 .add-mcp-box h3 {
-    color: var(--accent-hover);
-    font-size: 0.94rem;
+    color: var(--text-main);
+    font-size: 1rem;
     font-weight: 600;
+}
+
+.add-skill-box .setting-row.stacked,
+.add-mcp-box .setting-row.stacked {
+    border-top: 0;
+    min-height: 0;
+    padding: 0;
+    gap: 6px;
+}
+
+.plugin-config-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px 20px;
+    border-top: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.plugin-config-panel .setting-row.stacked {
+    gap: 6px;
 }

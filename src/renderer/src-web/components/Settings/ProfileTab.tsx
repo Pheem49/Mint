@@ -63,42 +63,40 @@ export default function ProfileTab({ name, setName, imageUrl, setImageUrl }: Pro
           </div>
         </div>
 
-        <div className="form-grid single">
-          <div className="setting-row wide">
-            <label>Profile Logo / Avatar</label>
-            <div className="memory-field-container">
-              <p className="hint">Click the picture or use the upload button to select an image from your device. Uploads are saved immediately.</p>
-              <div className="profile-avatar-row">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={handleFileChange}
-                />
-                <div className="profile-avatar" onClick={() => fileInputRef.current?.click()}>
-                  {avatarUrl ? (
-                    <img src={avatarUrl} alt={name || 'User'} />
-                  ) : (
-                    (name?.[0] || user.email?.[0] || 'U').toUpperCase()
-                  )}
-                </div>
-                <div className="profile-avatar-meta">
-                  <button
-                    type="button"
-                    className="btn-secondary btn-small"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploading}
-                  >
-                    {isUploading ? 'Uploading…' : 'Upload Photo'}
-                  </button>
-                  {user.email && <span className="hint">{user.email}</span>}
-                </div>
-              </div>
-              {uploadError && <p className="profile-message-error">{uploadError}</p>}
-            </div>
+        <div className="profile-header-card">
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
+          <div className="profile-avatar profile-avatar-lg" onClick={() => fileInputRef.current?.click()}>
+            {avatarUrl ? (
+              <img src={avatarUrl} alt={name || 'User'} />
+            ) : (
+              (name?.[0] || user.email?.[0] || 'U').toUpperCase()
+            )}
           </div>
+          <div className="profile-header-meta">
+            <p className="profile-header-name">{name || user.email || 'User'}</p>
+            {user.email && <p className="profile-header-email">{user.email}</p>}
+            <div className="profile-header-actions">
+              <button
+                type="button"
+                className="btn-secondary btn-small"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+              >
+                {isUploading ? 'Uploading…' : 'Upload Photo'}
+              </button>
+              <span className="hint">Click the picture or use the button to change it. Uploads are saved immediately.</span>
+            </div>
+            {uploadError && <p className="profile-message-error">{uploadError}</p>}
+          </div>
+        </div>
 
+        <div className="form-grid single">
           <div className="setting-row">
             <label>Display Name</label>
             <div className="memory-field-container">

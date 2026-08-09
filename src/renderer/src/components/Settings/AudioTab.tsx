@@ -49,11 +49,7 @@ export default function AudioTab({ config, updateField }: AudioTabProps) {
         <div className="toggle-row">
           <div>
             <label>Enable Gemini Live (Beta)</label>
-            <p className="hint">
-              Adds a separate "Live" button next to the mic that streams your voice straight to Google's realtime
-              voice model for faster, more natural back-and-forth — including running Mint's tools by voice.
-              Requires a Gemini API key and is desktop-only.
-            </p>
+            <p className="hint">Adds a "Live" button for real-time voice conversation with Gemini, including running Mint's tools by voice. Requires a Gemini API key and is desktop-only.</p>
           </div>
           <label className="settings-toggle-switch">
             <input

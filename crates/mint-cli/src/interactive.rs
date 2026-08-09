@@ -117,6 +117,18 @@ pub async fn handle_slash_command(
                 ("/memory get <key>", "Read a profile value"),
                 ("/memory set <key> <val>", "Store a profile value"),
                 (
+                    "/autoskill [on|off]",
+                    "Toggle auto-writing a SKILL.md after hard tasks",
+                ),
+                (
+                    "/cron add <name> | <sched> | <task>",
+                    "Create/list/remove/enable/disable scheduled agent tasks",
+                ),
+                (
+                    "/link add <name> | <path> | <desc>",
+                    "Link a folder chat can auto-write notes into",
+                ),
+                (
                     "/image-provider [name]",
                     "List image gen providers or switch default provider",
                 ),
@@ -395,6 +407,54 @@ pub async fn handle_slash_command(
                         }
                     }
                     _ => {}
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/autoskill" => {
+            if rest == "on" || rest == "off" {
+                session.config.auto_skill_writing = rest == "on";
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => println!(
+                        "{DIM}Auto skill writing set to: {}{RESET}\n",
+                        if session.config.auto_skill_writing {
+                            "Enabled"
+                        } else {
+                            "Disabled"
+                        }
+                    ),
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                }
+            } else if !rest.is_empty() {
+                println!("{WARN}Usage: /autoskill [on|off]{RESET}\n");
+            } else {
+                println!(
+                    "{DIM}When enabled, the agent may write a new .agents/skills/<name>/SKILL.md after finishing a non-trivial, reusable task.{RESET}"
+                );
+                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
+                let current = if session.config.auto_skill_writing {
+                    &options[0]
+                } else {
+                    &options[1]
+                };
+                match prompt_interactive_select("Auto Skill Writing", &options, current) {
+                    Ok(Some(sel)) => {
+                        session.config.auto_skill_writing = sel.starts_with("on");
+                        match mint_core::save_config(&session.config) {
+                            Ok(()) => println!(
+                                "{DIM}Auto skill writing set to: {}{RESET}\n",
+                                if session.config.auto_skill_writing {
+                                    "Enabled"
+                                } else {
+                                    "Disabled"
+                                }
+                            ),
+                            Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                        }
+                    }
+                    Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
+                    Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
                 }
             }
             Some(SlashResult::Handled)
@@ -1177,6 +1237,163 @@ pub async fn handle_slash_command(
                 },
                 _ => println!(
                     "{WARN}/memory usage: list | clear | get <key> | set <key> <val> | skills{RESET}\n"
+                ),
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/cron" => {
+            let cron_jobs = match mint_core::CronStore::open_default() {
+                Ok(store) => store,
+                Err(e) => {
+                    println!("{ERROR}Cron error:{RESET} {e}\n");
+                    return Some(SlashResult::Handled);
+                }
+            };
+            let (subcmd, args) = rest
+                .split_once(char::is_whitespace)
+                .map(|(c, a)| (c, a.trim()))
+                .unwrap_or((rest, ""));
+            match subcmd {
+                "list" | "" => match cron_jobs.list() {
+                    Ok(jobs) => {
+                        if jobs.is_empty() {
+                            println!("{DIM}No cron jobs.{RESET}\n");
+                        } else {
+                            println!("\n{BLUE}Cron jobs:{RESET}");
+                            for job in &jobs {
+                                let status = if job.enabled {
+                                    format!("{MINT}on{RESET}")
+                                } else {
+                                    format!("{DIM}off{RESET}")
+                                };
+                                println!(
+                                    "  [{}] {} {DIM}({}){RESET} next: {} {DIM}last: {}{RESET}",
+                                    job.id,
+                                    job.name,
+                                    status,
+                                    job.next_run,
+                                    job.last_status.as_deref().unwrap_or("never run")
+                                );
+                            }
+                            println!();
+                        }
+                    }
+                    Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                },
+                "add" => {
+                    let fields: Vec<&str> = args.splitn(3, '|').map(str::trim).collect();
+                    match fields.as_slice() {
+                        [name, schedule, task] if !name.is_empty() && !task.is_empty() => {
+                            match cron_jobs.add(
+                                *name,
+                                *schedule,
+                                *task,
+                                session.current_dir.clone(),
+                            ) {
+                                Ok(job) => println!(
+                                    "{DIM}Created cron job {} — next run: {}{RESET}\n",
+                                    job.id, job.next_run
+                                ),
+                                Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                            }
+                        }
+                        _ => println!(
+                            "{WARN}/cron add <name> | <schedule> | <task>{RESET}\n{DIM}e.g. /cron add stock report | 0 8 * * * | fetch today's stock prices and summarize{RESET}\n"
+                        ),
+                    }
+                }
+                "remove" => {
+                    if args.is_empty() {
+                        println!("{WARN}/cron remove <id>{RESET}\n");
+                    } else {
+                        match cron_jobs.remove(args) {
+                            Ok(true) => println!("{DIM}Removed {args}.{RESET}\n"),
+                            Ok(false) => println!("{WARN}No cron job with id {args}.{RESET}\n"),
+                            Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                        }
+                    }
+                }
+                "enable" | "disable" => {
+                    if args.is_empty() {
+                        println!("{WARN}/cron {subcmd} <id>{RESET}\n");
+                    } else {
+                        match cron_jobs.set_enabled(args, subcmd == "enable") {
+                            Ok(Some(_)) => println!("{DIM}{subcmd}d {args}.{RESET}\n"),
+                            Ok(None) => println!("{WARN}No cron job with id {args}.{RESET}\n"),
+                            Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                        }
+                    }
+                }
+                _ => println!(
+                    "{WARN}/cron usage: list | add <name> | <schedule> | <task> | remove <id> | enable <id> | disable <id>{RESET}\n{DIM}For run-now, use `mint cron run-now <id>` in a terminal.{RESET}\n"
+                ),
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/link" => {
+            let (subcmd, args) = rest
+                .split_once(char::is_whitespace)
+                .map(|(c, a)| (c, a.trim()))
+                .unwrap_or((rest, ""));
+            match subcmd {
+                "list" | "" => match mint_core::list_linked_folders() {
+                    Ok(folders) => {
+                        if folders.is_empty() {
+                            println!("{DIM}No linked folders.{RESET}\n");
+                        } else {
+                            println!("\n{BLUE}Linked folders:{RESET}");
+                            for folder in folders.values() {
+                                println!(
+                                    "  {} → {} {DIM}{}{RESET}",
+                                    folder.name,
+                                    folder.path.display(),
+                                    folder.description.as_deref().unwrap_or("")
+                                );
+                            }
+                            println!();
+                        }
+                    }
+                    Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                },
+                "add" => {
+                    let fields: Vec<&str> = args.splitn(3, '|').map(str::trim).collect();
+                    match fields.as_slice() {
+                        [name, path] | [name, path, ""] if !name.is_empty() && !path.is_empty() => {
+                            match mint_core::add_linked_folder(name, Path::new(path), None) {
+                                Ok(()) => println!("{DIM}Linked folder: {name}{RESET}\n"),
+                                Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                            }
+                        }
+                        [name, path, description] if !name.is_empty() && !path.is_empty() => {
+                            match mint_core::add_linked_folder(
+                                name,
+                                Path::new(path),
+                                Some(description.to_string()),
+                            ) {
+                                Ok(()) => println!("{DIM}Linked folder: {name}{RESET}\n"),
+                                Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                            }
+                        }
+                        _ => println!(
+                            "{WARN}/link add <name> | <path> | <description>{RESET}\n{DIM}e.g. /link add Food | ~/notes/food | restaurant reviews and recipes{RESET}\n"
+                        ),
+                    }
+                }
+                "remove" => {
+                    if args.is_empty() {
+                        println!("{WARN}/link remove <name>{RESET}\n");
+                    } else {
+                        match mint_core::remove_linked_folder(args) {
+                            Ok(true) => println!("{DIM}Removed {args}.{RESET}\n"),
+                            Ok(false) => println!("{WARN}No linked folder named {args}.{RESET}\n"),
+                            Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                        }
+                    }
+                }
+                _ => println!(
+                    "{WARN}/link usage: list | add <name> | <path> | <description> | remove <name>{RESET}\n"
                 ),
             }
             Some(SlashResult::Handled)
@@ -2080,8 +2297,17 @@ pub fn load_all_available_skills(current_dir: &Path) -> Vec<mint_core::LearnedSk
 }
 
 const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
+    (
+        "/autoskill",
+        "Toggle auto-writing a SKILL.md after hard tasks",
+    ),
     ("/bg", "Run a query in the background, non-blocking"),
     ("/cd", "Change active workspace directory"),
+    (
+        "/cron",
+        "Create/list/remove/enable/disable scheduled agent tasks",
+    ),
+    ("/link", "Link a folder chat can auto-write notes into"),
     ("/clear", "Clear conversation history"),
     ("/code", "Run in code-agent mode"),
     ("/edit-image", "Edit attached image with prompt instruction"),
@@ -3063,9 +3289,11 @@ pub fn read_line_interactive(
             }
         } else {
             // Idle tick (no key event within the poll window) — a good place
-            // to surface any /bg job that finished while the user was typing
-            // elsewhere, without disturbing whatever they're mid-edit on.
-            let notices = jobs.take_notices();
+            // to surface any /bg job, or a linked-folder note write, that
+            // finished while the user was typing elsewhere, without
+            // disturbing whatever they're mid-edit on.
+            let mut notices = jobs.take_notices();
+            notices.extend(mint_core::take_linked_folder_notices());
             if !notices.is_empty() {
                 disable_raw_mode()?;
                 clear_input_box(cursor_row);

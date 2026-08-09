@@ -373,6 +373,11 @@ h1 {
     max-width: 100%;
 }
 
+.form-grid.two-col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
 .setting-row {
     min-width: 0;
     display: grid;
@@ -394,8 +399,13 @@ h1 {
     grid-column: 1 / -1;
 }
 
+.setting-row.stacked {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+}
+
 .setting-row label,
-.color-section label,
 .toggle-row label {
     display: block;
     margin-bottom: 0;
@@ -897,7 +907,6 @@ kbd {
     }
 
     .section-heading,
-    .color-section,
     .settings-footer {
         align-items: stretch;
         flex-direction: column;
