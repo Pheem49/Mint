@@ -22,9 +22,9 @@ body {
     background: var(--bg-color);
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
-    border-radius: 16px;
+    border-radius: var(--radius-2xl);
     border: 1px solid var(--border);
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.05);
     overflow: hidden;
 }
 
@@ -58,7 +58,7 @@ body {
     color: var(--text-muted);
     background: rgba(255, 255, 255, 0.05);
     padding: 4px 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -75,7 +75,7 @@ body {
     display: flex;
     align-items: center;
     padding: 12px 14px;
-    border-radius: 12px;
+    border-radius: var(--radius-xl);
     gap: 12px;
     cursor: pointer;
     transition: all 0.2s;
@@ -92,7 +92,7 @@ body {
     align-items: center;
     justify-content: center;
     background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     font-size: 1.1rem;
 }
 

@@ -24,7 +24,7 @@ import SourcesBlock from '../../shared/components/SourcesBlock'
 import ChatMessageItem from '../../shared/components/ChatMessageItem'
 import { AgentActivityDrawer } from '../../shared/components/AgentActivityDrawer'
 import type { DiffHunk, FileChange } from '../../shared/types'
-import { numericSetting } from '../../shared/utils/ui'
+import { numericSetting, shouldShowSessionDivider, formatSessionDividerLabel } from '../../shared/utils/ui'
 import { useSpeechToText } from '../../shared/utils/speech'
 import { useGeminiLiveVoice } from '../../shared/utils/useGeminiLiveVoice'
 import GeminiLiveOverlay from '../../shared/components/GeminiLiveOverlay'
@@ -1004,24 +1004,38 @@ export default function ChatPanel({
       )}
 
       <div className="chat-container">
-        {interactions.map((interaction) => (
-          <ChatMessageItem
-            key={interaction.id}
-            interaction={interaction}
-            copiedId={copiedId}
-            speakingText={speakingText}
-            agentActivitySnapshots={agentActivitySnapshots}
-            thinkingExpanded={thinkingExpanded}
-            openActivityIds={openActivityIds}
-            openReviewIds={openReviewIds}
-            openFileDiffs={openFileDiffs}
-            onThinkingExpandedChange={onThinkingExpandedChange}
-            handleCopyMessage={handleCopyMessage}
-            speak={speak}
-            renderCompletedActivity={renderCompletedActivity}
-            renderFileChanges={renderFileChanges}
-            renderWebSearchSources={renderWebSearchSources}
-          />
+        {interactions.map((interaction, index) => (
+          <Fragment key={interaction.id}>
+            {index > 0 && shouldShowSessionDivider(interactions[index - 1].createdAt, interaction.createdAt) && (
+              <div className="system-event-divider">
+                <div className="system-event-line" />
+                <div className="system-event-pill">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="9" />
+                    <polyline points="12 7 12 12 15.5 14" />
+                  </svg>
+                  <span>{formatSessionDividerLabel(interaction.createdAt)}</span>
+                </div>
+                <div className="system-event-line" />
+              </div>
+            )}
+            <ChatMessageItem
+              interaction={interaction}
+              copiedId={copiedId}
+              speakingText={speakingText}
+              agentActivitySnapshots={agentActivitySnapshots}
+              thinkingExpanded={thinkingExpanded}
+              openActivityIds={openActivityIds}
+              openReviewIds={openReviewIds}
+              openFileDiffs={openFileDiffs}
+              onThinkingExpandedChange={onThinkingExpandedChange}
+              handleCopyMessage={handleCopyMessage}
+              speak={speak}
+              renderCompletedActivity={renderCompletedActivity}
+              renderFileChanges={renderFileChanges}
+              renderWebSearchSources={renderWebSearchSources}
+            />
+          </Fragment>
         ))}
 
         {sending && (

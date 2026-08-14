@@ -12,7 +12,7 @@
     gap: 8px;
     padding: 16px;
     border: 1px solid var(--panel-raised);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     background: var(--panel-bg);
 }
 
@@ -42,7 +42,7 @@
 
 .entity-card-badge {
     padding: 2px 6px;
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     background: var(--panel-raised);
     color: var(--accent);
     font-size: 11px;

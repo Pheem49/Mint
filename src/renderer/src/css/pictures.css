@@ -10,7 +10,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-soft);
   border: 1px solid var(--border);
@@ -87,7 +87,7 @@
   height: 36px;
   padding: 0 16px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-main);
   font-size: 0.82rem;
@@ -121,7 +121,7 @@
   contain-intrinsic-size: 220px 210px;
   color: inherit;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--surface-bg);
 }
 
@@ -136,7 +136,7 @@
   z-index: 5;
   width: 26px;
   height: 26px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(15, 23, 42, 0.75);
   color: #ef4444;
@@ -179,9 +179,9 @@
   max-width: 400px;
   background: var(--surface-bg, #1e293b);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  border-radius: 14px;
+  border-radius: var(--radius-2xl);
   padding: 20px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -212,7 +212,7 @@
 
 .picture-modal-btn {
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 0.85rem;
   font-weight: 500;
   cursor: pointer;
@@ -265,7 +265,7 @@
   height: 36px;
   padding: 0 16px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-main);
   font-size: 0.82rem;
@@ -302,7 +302,7 @@
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
-  border-radius: 20px;
+  border-radius: var(--radius-3xl);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
   color: var(--text-soft);
@@ -354,7 +354,7 @@
   width: 48px;
   height: 48px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   background: var(--surface-bg);
   color: var(--accent-hover);
   font-size: 1.2rem;
@@ -383,7 +383,7 @@
   height: 40px;
   padding: 0 24px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: var(--card-bg, rgba(255, 255, 255, 0.04));
   color: var(--text-main);
   font-size: 0.88rem;

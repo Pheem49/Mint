@@ -421,21 +421,28 @@ impl MintConfig {
     }
 
     /// A conservative estimate of the active provider's context window, in
-    /// tokens. Deliberately provider-level rather than tracking every exact
-    /// model string — not worth the maintenance burden, and erring smaller
-    /// just triggers context compaction earlier (safe), whereas erring larger
-    /// risks an actual context-length error from the provider (not safe).
+    /// tokens. Provider-level rather than tracking every exact model string,
+    /// except where two tiers within a provider differ enough to matter
+    /// (Anthropic's Haiku line vs. Opus/Sonnet/Fable). Erring smaller just
+    /// triggers context compaction earlier (safe); erring larger risks an
+    /// actual context-length error from the provider (not safe).
     pub fn context_window_tokens(&self) -> usize {
         match self.ai_provider.as_str() {
-            "anthropic" => 200_000,
+            "anthropic" => {
+                if self.anthropic_model.to_ascii_lowercase().contains("haiku") {
+                    200_000
+                } else {
+                    1_000_000
+                }
+            }
             "gemini" => 1_000_000,
-            "openai" => 128_000,
+            "openai" => 1_000_000,
             "ollama" => 8_000,
-            "huggingface" => 32_000,
-            // OpenRouter/DeepSeek/local/custom endpoints proxy many different
-            // backing models with widely varying context windows — 32k is a
-            // conservative floor rather than a real measurement.
-            _ => 32_000,
+            // Huggingface/OpenRouter/DeepSeek/local/custom endpoints proxy many
+            // different backing models with widely varying context windows —
+            // 128k is a conservative floor rather than a real measurement.
+            "huggingface" => 128_000,
+            _ => 128_000,
         }
     }
 
@@ -922,13 +929,24 @@ mod tests {
             }
             .context_window_tokens()
         };
-        assert_eq!(window_for("anthropic"), 200_000);
+        // Default anthropic_model is claude-sonnet-5 (non-Haiku).
+        assert_eq!(window_for("anthropic"), 1_000_000);
         assert_eq!(window_for("gemini"), 1_000_000);
-        assert_eq!(window_for("openai"), 128_000);
+        assert_eq!(window_for("openai"), 1_000_000);
         assert_eq!(window_for("ollama"), 8_000);
-        assert_eq!(window_for("huggingface"), 32_000);
-        assert_eq!(window_for("openrouter"), 32_000);
-        assert_eq!(window_for("custom:some-endpoint"), 32_000);
+        assert_eq!(window_for("huggingface"), 128_000);
+        assert_eq!(window_for("openrouter"), 128_000);
+        assert_eq!(window_for("custom:some-endpoint"), 128_000);
+    }
+
+    #[test]
+    fn context_window_tokens_uses_smaller_window_for_anthropic_haiku() {
+        let config = MintConfig {
+            ai_provider: "anthropic".into(),
+            anthropic_model: "claude-haiku-4-5".into(),
+            ..MintConfig::default()
+        };
+        assert_eq!(config.context_window_tokens(), 200_000);
     }
 
     #[test]

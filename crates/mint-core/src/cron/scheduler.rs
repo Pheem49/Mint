@@ -60,16 +60,29 @@ async fn tick() {
         // Advance `next_run` before running: if this job's execution outlasts
         // the tick interval, the next tick will see a future `next_run` and
         // skip it, instead of firing it a second time while it's still busy.
+        // If there's no further occurrence (e.g. a one-time job whose fixed
+        // year has arrived), this due run is its last one ever — disable it
+        // so it stops being "due" every tick from here on, but still run it
+        // below instead of silently dropping its only/final firing.
         if store.advance_next_run(&job.id).is_err() {
-            continue;
+            let _ = store.set_enabled(&job.id, false);
         }
 
         run_job(&config, &store, &job).await;
     }
 }
 
+/// A scheduled task's own conversation thread — same id scheme
+/// `CronStore::add` uses to register the chat session up front (see there
+/// for why: each task keeps its own history instead of all tasks sharing
+/// one thread, so a task's context on each run is its own past runs, not
+/// whatever unrelated task happened to run most recently).
+pub(super) fn chat_id_for_job(job_id: &str) -> String {
+    format!("cron::{job_id}")
+}
+
 async fn run_job(config: &MintConfig, store: &CronStore, job: &CronJob) {
-    let chat_id = format!("cron::{}", job.id);
+    let chat_id = chat_id_for_job(&job.id);
     let root = job.workspace.clone();
     let approve_cb = cron_approve_callback(config.clone(), root.clone());
     let progress_cb = |_progress: AgentProgress| {};

@@ -337,6 +337,13 @@ enum McpCommand {
         server: String,
         tool: String,
     },
+    /// Re-run a server's OAuth flow in the foreground (e.g. after an
+    /// expired/invalid refresh token) by invoking `<command> <args...> auth`.
+    /// Only works for servers whose underlying package supports that
+    /// convention (e.g. @pouyanafisi/gmail-mcp).
+    Reauth {
+        server: String,
+    },
     Clear,
     Call {
         server: String,
@@ -1043,6 +1050,14 @@ async fn main() -> Result<()> {
                         println!("allowed {server}/{tool}");
                     } else {
                         println!("already allowed {server}/{tool}");
+                    }
+                }
+                McpCommand::Reauth { server } => {
+                    println!("Re-authenticating MCP server '{server}'...");
+                    if mcp::reauth(&server)? {
+                        println!("Re-authentication succeeded for '{server}'.");
+                    } else {
+                        println!("Re-authentication failed for '{server}' (see output above).");
                     }
                 }
                 McpCommand::Clear => {

@@ -84,7 +84,7 @@ body {
     width: 12px;
     height: 4px;
     background: var(--accent);
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     transition: all 0.2s;
 }
 
@@ -95,7 +95,7 @@ body {
     color: white;
     font-size: 0.65rem;
     padding: 2px 6px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     opacity: 0;
     transition: opacity 0.3s;
     pointer-events: none;

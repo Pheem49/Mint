@@ -13,7 +13,7 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: var(--bg-gradient, var(--bg-color, #0b0b0c));
+  background: var(--bg-gradient, var(--bg-color, #0a0a0b));
   padding: 24px;
   overflow: hidden;
 }
@@ -52,17 +52,17 @@
   z-index: 1;
   width: 100%;
   max-width: 400px;
-  background: var(--panel-bg, #1d1d1f);
+  background: var(--panel-bg, #1e1e20);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border-light, rgba(255, 255, 255, 0.11));
-  border-radius: 20px;
+  border-radius: var(--radius-3xl);
   padding: 36px 32px 32px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   box-shadow:
-    0 24px 70px rgba(0, 0, 0, 0.4),
+    var(--shadow-lg, 0 20px 40px rgba(0, 0, 0, 0.5)),
     0 0 0 1px rgba(255, 255, 255, 0.02) inset;
   animation: auth-gate-rise 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -81,9 +81,9 @@
 .auth-gate-logo {
   width: 40px;
   height: 40px;
-  border-radius: 11px;
+  border-radius: var(--radius-lg);
   margin-bottom: 4px;
-  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent, #10b981) 35%, transparent);
+  box-shadow: var(--glow-accent-md, 0 6px 18px color-mix(in srgb, var(--accent, #10b981) 28%, transparent));
 }
 
 .auth-gate-title {
@@ -112,9 +112,9 @@
 
 .auth-gate-field input {
   padding: 11px 13px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border-light, rgba(255, 255, 255, 0.11));
-  background: var(--input-bg, #242425);
+  background: var(--input-bg, #2c2c2e);
   color: var(--text-main, #e8e8ea);
   font-size: 0.9rem;
   font-family: inherit;
@@ -141,14 +141,14 @@
 .auth-gate-field input:-webkit-autofill:hover,
 .auth-gate-field input:-webkit-autofill:focus {
   -webkit-text-fill-color: var(--text-main, #e8e8ea);
-  -webkit-box-shadow: 0 0 0 1000px var(--input-bg, #242425) inset;
-  box-shadow: 0 0 0 1000px var(--input-bg, #242425) inset;
+  -webkit-box-shadow: 0 0 0 1000px var(--input-bg, #2c2c2e) inset;
+  box-shadow: 0 0 0 1000px var(--input-bg, #2c2c2e) inset;
   transition: background-color 9999s ease-in-out 0s;
 }
 
 .auth-gate-field input:autofill {
   -webkit-text-fill-color: var(--text-main, #e8e8ea);
-  box-shadow: 0 0 0 1000px var(--input-bg, #242425) inset;
+  box-shadow: 0 0 0 1000px var(--input-bg, #2c2c2e) inset;
 }
 
 .auth-gate-error {
@@ -156,14 +156,14 @@
   color: #ef4444;
   background: rgba(239, 68, 68, 0.1);
   border: 1px solid rgba(239, 68, 68, 0.2);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px 10px;
 }
 
 .auth-gate-submit {
   margin-top: 6px;
   padding: 11px 16px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   border: none;
   background: var(--accent, #10b981);
   color: #06120c;
@@ -171,7 +171,7 @@
   font-size: 0.92rem;
   cursor: pointer;
   transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--accent, #10b981) 30%, transparent);
+  box-shadow: var(--glow-accent-sm, 0 4px 14px color-mix(in srgb, var(--accent, #10b981) 22%, transparent));
 }
 
 .auth-gate-submit:disabled {
@@ -183,7 +183,7 @@
 .auth-gate-submit:hover:not(:disabled) {
   background: var(--accent-hover, #34d399);
   transform: translateY(-1px);
-  box-shadow: 0 10px 26px color-mix(in srgb, var(--accent, #10b981) 40%, transparent);
+  box-shadow: var(--glow-accent-md, 0 6px 18px color-mix(in srgb, var(--accent, #10b981) 28%, transparent));
 }
 
 .auth-gate-submit:active:not(:disabled) {

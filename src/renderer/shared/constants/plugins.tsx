@@ -323,3 +323,122 @@ export function renderLinkedFoldersSvgIcon(size = 20, color = 'currentColor') {
     </svg>
   )
 }
+
+// A fixed palette (not derived from --accent) so items sitting side by side
+// in the same grid are visually distinguishable from each other — a single
+// accent-tinted color for every card would defeat the point of an identity
+// icon. Kept in the same rgba(color, 0.15)/0.3-border/solid-text shape as
+// `.management-badge` so a monogram sits comfortably next to those badges.
+const MONOGRAM_PALETTE: { bg: string; border: string; text: string }[] = [
+  { bg: 'rgba(16, 185, 129, 0.15)', border: 'rgba(16, 185, 129, 0.3)', text: '#34d399' },
+  { bg: 'rgba(59, 130, 246, 0.15)', border: 'rgba(59, 130, 246, 0.3)', text: '#60a5fa' },
+  { bg: 'rgba(168, 85, 247, 0.15)', border: 'rgba(168, 85, 247, 0.3)', text: '#c084fc' },
+  { bg: 'rgba(236, 72, 153, 0.15)', border: 'rgba(236, 72, 153, 0.3)', text: '#f472b6' },
+  { bg: 'rgba(245, 158, 11, 0.15)', border: 'rgba(245, 158, 11, 0.3)', text: '#fbbf24' },
+  { bg: 'rgba(14, 165, 233, 0.15)', border: 'rgba(14, 165, 233, 0.3)', text: '#38bdf8' },
+  { bg: 'rgba(244, 63, 94, 0.15)', border: 'rgba(244, 63, 94, 0.3)', text: '#fb7185' },
+]
+
+function hashString(str: string): number {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash)
+}
+
+/**
+ * A colored monogram (first letter, deterministic color from the name) for
+ * items that have no real brand logo to show — a user-named skill or linked
+ * folder, unlike a Gmail/GitHub plugin. Same visual slot as
+ * `renderMcpSvgIcon`: drop it into a `.management-card-icon` box.
+ */
+export function renderMonogramIcon(name: string, size = 38) {
+  const clean = (name || '').trim()
+  const letter = (clean[0] || '?').toUpperCase()
+  const palette = MONOGRAM_PALETTE[hashString(clean) % MONOGRAM_PALETTE.length]
+  return (
+    <div
+      className="management-card-icon"
+      style={{
+        width: size,
+        height: size,
+        background: palette.bg,
+        borderColor: palette.border,
+        color: palette.text,
+        fontWeight: 700,
+        fontSize: size * 0.42,
+      }}
+    >
+      {letter}
+    </div>
+  )
+}
+
+/**
+ * A flat app-icon-style logo tile — solid accent-colored background, no
+ * border, glyph in a light color — rather than the outline-icon-in-a-
+ * bordered-box treatment `.management-card-icon` gives everything else.
+ * For a view where every item is the same *kind* of thing (a folder, a
+ * skill), one consistent logo tile reads clearer than a per-name monogram
+ * whose colors have nothing to do with each other, or a boxed outline icon.
+ */
+function renderLogoTile(glyph: React.ReactNode, size: number) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 'var(--radius-lg)',
+        background: 'var(--accent, #10b981)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}
+    >
+      {glyph}
+    </div>
+  )
+}
+
+export function renderFolderIcon(size = 38) {
+  return renderLogoTile(
+    <svg width={size * 0.56} height={size * 0.56} viewBox="0 0 24 24" fill="rgba(255, 255, 255, 0.92)">
+      <path d="M3 7a2 2 0 0 1 2-2h4.17a2 2 0 0 1 1.41.59L12 7h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+    </svg>,
+    size
+  )
+}
+
+/**
+ * Same tile treatment as `renderFolderIcon`, mortarboard glyph — the same
+ * shape as `renderSkillsSvgIcon` used in the Skills page header, so the
+ * per-card icon reads as "the same kind of thing" as the page it's on
+ * instead of a per-name monogram whose colors don't relate to each other.
+ */
+export function renderSkillLogoIcon(size = 38) {
+  return renderLogoTile(
+    <svg width={size * 0.56} height={size * 0.56} viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.92)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+      <path d="M6 12v5c3 3 9 3 12 0v-5" />
+    </svg>,
+    size
+  )
+}
+
+/**
+ * Same tile treatment as `renderFolderIcon`/`renderSkillLogoIcon`, stopwatch
+ * glyph matching `renderScheduledTasksSvgIcon` in the page header.
+ */
+export function renderTaskLogoIcon(size = 38) {
+  return renderLogoTile(
+    <svg width={size * 0.56} height={size * 0.56} viewBox="0 0 24 24" fill="none" stroke="rgba(255, 255, 255, 0.92)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="13" r="8" />
+      <polyline points="12 9 12 13 15 15" />
+      <path d="M9 2h6M5 5l-1.5-1.5M19 5l1.5-1.5" />
+    </svg>,
+    size
+  )
+}

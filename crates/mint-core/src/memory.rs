@@ -208,6 +208,27 @@ impl MemoryStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Registers a chat session with an explicit title/kind up front instead
+    /// of the "New chat" placeholder — used to give a scheduled task's
+    /// conversation its task name immediately (visible in the sidebar even
+    /// before it has run once), rather than waiting for the generic
+    /// first-message-based rename in `add_interaction_for_chat_with_fallback`
+    /// to kick in. A no-op if the session already exists.
+    pub fn ensure_named_chat_session(
+        &self,
+        chat_id: &str,
+        title: &str,
+        kind: &str,
+    ) -> Result<(), MemoryError> {
+        let connection = self.connection()?;
+        connection.execute(
+            "INSERT OR IGNORE INTO chat_sessions (id, title, kind)
+             VALUES (?1, ?2, ?3)",
+            params![chat_id, title, kind],
+        )?;
+        Ok(())
+    }
+
     pub fn set_interaction_agent_activity_json(
         &self,
         interaction_id: i64,
@@ -688,15 +709,10 @@ fn ensure_builtin_chat_sessions(connection: &Connection) -> Result<(), rusqlite:
 }
 
 fn ensure_chat_session_row(connection: &Connection, chat_id: &str) -> Result<(), rusqlite::Error> {
-    let kind = if chat_id == CHAT_CLI_ID {
-        "cli"
+    let (title, kind) = if chat_id == CHAT_CLI_ID {
+        ("Chat CLI", "cli")
     } else {
-        "conversation"
-    };
-    let title = if chat_id == CHAT_CLI_ID {
-        "Chat CLI"
-    } else {
-        "New chat"
+        ("New chat", "conversation")
     };
     connection.execute(
         "INSERT OR IGNORE INTO chat_sessions (id, title, kind)
@@ -705,3 +721,4 @@ fn ensure_chat_session_row(connection: &Connection, chat_id: &str) -> Result<(),
     )?;
     Ok(())
 }
+

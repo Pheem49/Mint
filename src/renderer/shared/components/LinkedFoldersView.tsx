@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { renderLinkedFoldersSvgIcon } from '../constants/plugins'
+import { renderLinkedFoldersSvgIcon, renderFolderIcon } from '../constants/plugins'
 import '../css/management-views.css'
 import type { LinkedFolder, LinkedFolderDraft } from '../types'
 
@@ -28,6 +28,7 @@ export const LinkedFoldersView: React.FC<LinkedFoldersViewProps> = React.memo(
     const [newDescription, setNewDescription] = useState('')
     const [adding, setAdding] = useState(false)
     const [showAddModal, setShowAddModal] = useState(false)
+    const [detailFolder, setDetailFolder] = useState<LinkedFolder | null>(null)
 
     const fetchFolders = async () => {
       setLoading(true)
@@ -84,6 +85,7 @@ export const LinkedFoldersView: React.FC<LinkedFoldersViewProps> = React.memo(
       if (!window.confirm(`Unlink folder "${name}"? (The folder and its notes are not deleted.)`)) return
       try {
         await removeLinkedFolder(name)
+        setDetailFolder((current) => (current?.name === name ? null : current))
         fetchFolders()
       } catch (err: any) {
         console.error('Failed to remove linked folder:', err)
@@ -165,31 +167,78 @@ export const LinkedFoldersView: React.FC<LinkedFoldersViewProps> = React.memo(
         ) : (
           <div className="management-grid">
             {filteredFolders.map((folder) => (
-              <div key={folder.name} className="management-card">
+              <div
+                key={folder.name}
+                className="management-card"
+                onClick={() => setDetailFolder(folder)}
+                style={{ cursor: 'pointer' }}
+              >
                 <div>
                   <div className="management-card-header">
-                    <span className="management-card-title-badge">{folder.name}</span>
+                    <div className="management-card-title-group">
+                      {renderFolderIcon()}
+                      <h3 className="management-card-title">{folder.name}</h3>
+                    </div>
                   </div>
 
                   <p className="management-card-desc">{folder.description || 'No description'}</p>
 
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted, #94a3b8)', marginTop: '8px' }}>
+                  <div
+                    style={{
+                      fontSize: '0.8rem',
+                      color: 'var(--text-muted, #94a3b8)',
+                      marginTop: '8px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
                     {folder.path}
                   </div>
                 </div>
-
-                <div className="management-card-footer">
-                  <span />
-                  <button
-                    type="button"
-                    className="management-action-btn danger"
-                    onClick={() => handleRemoveFolder(folder.name)}
-                  >
-                    Unlink
-                  </button>
-                </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Folder Detail */}
+        {detailFolder && (
+          <div className="management-modal-overlay" onClick={() => setDetailFolder(null)}>
+            <div className="management-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="management-modal-header">
+                <div className="management-card-title-group">
+                  {renderFolderIcon(44)}
+                  <h2 className="management-modal-title">{detailFolder.name}</h2>
+                </div>
+                <button
+                  type="button"
+                  className="management-modal-close"
+                  onClick={() => setDetailFolder(null)}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="management-modal-body">
+                <p style={{ color: 'var(--text-soft, #d1d1d4)', lineHeight: 1.55 }}>
+                  {detailFolder.description || 'No description'}
+                </p>
+                <div className="management-code-snippet" style={{ marginTop: '14px' }}>
+                  {detailFolder.path}
+                </div>
+              </div>
+
+              <div className="management-modal-footer">
+                <span />
+                <button
+                  type="button"
+                  className="management-action-btn danger"
+                  onClick={() => handleRemoveFolder(detailFolder.name)}
+                >
+                  Unlink
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

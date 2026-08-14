@@ -196,6 +196,81 @@ pub fn drain_mcp_notifications(server_name: &str) -> Vec<Value> {
     }
 }
 
+/// Re-runs a configured server's OAuth flow in the foreground, for servers
+/// (like `@pouyanafisi/gmail-mcp`) that expose a conventional `<command>
+/// <args...> auth` invocation separate from normal stdio-MCP mode — the fix
+/// for a stale/expired token that the persistent JSON-RPC session has no way
+/// to trigger on its own. Output streams live to stdout/stderr as the child
+/// runs (so the user sees the OAuth URL and any success/failure message);
+/// any OAuth-looking URL is also auto-opened in the browser, same as the
+/// persistent session's own detection.
+///
+/// Drops any existing persistent session first, since the stale one would
+/// otherwise keep holding whatever process/tokens were there before.
+pub fn reauth_mcp_server(server_name: &str) -> Result<bool, McpError> {
+    let config = load_config()?;
+    let servers = configured_mcp_servers(&config)?;
+    let server = servers
+        .get(server_name)
+        .ok_or_else(|| McpError::MissingServer(server_name.to_string()))?;
+
+    close_mcp_session(server_name);
+
+    let mut args = server.args.clone();
+    args.push("auth".to_string());
+
+    let mut child = Command::new(&server.command)
+        .args(&args)
+        .envs(&server.env)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| McpError::Start {
+            command: server.command.clone(),
+            source,
+        })?;
+
+    let stdout_handle = child
+        .stdout
+        .take()
+        .map(|out| std::thread::spawn(move || stream_and_watch_for_oauth_url(out)));
+    let stderr_handle = child
+        .stderr
+        .take()
+        .map(|err| std::thread::spawn(move || stream_and_watch_for_oauth_url(err)));
+
+    let status = child.wait().map_err(|source| McpError::Start {
+        command: server.command.clone(),
+        source,
+    })?;
+    if let Some(handle) = stdout_handle {
+        let _ = handle.join();
+    }
+    if let Some(handle) = stderr_handle {
+        let _ = handle.join();
+    }
+
+    Ok(status.success())
+}
+
+/// Echoes every line from a reauth child process's stdout/stderr to this
+/// process's own stdout (so the user sees the tool's own OAuth prompts and
+/// completion message), opening the browser the same way the persistent
+/// session's reader threads do when an OAuth-looking URL appears.
+fn stream_and_watch_for_oauth_url(pipe: impl std::io::Read) {
+    for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+        println!("{line}");
+        if let Some(url) = find_url(&line) {
+            println!(
+                "\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n",
+                url
+            );
+            let _ = open_url_in_browser(&url);
+        }
+    }
+}
+
 /// Closes and removes one server's persistent session, if one is running.
 pub fn close_mcp_session(server_name: &str) {
     if let Some(session) = SESSIONS.lock().unwrap().remove(server_name) {
@@ -457,10 +532,14 @@ impl McpSession {
             notifications,
         };
 
-        // Matches the previous behavior: the `initialize` response isn't
-        // explicitly awaited before proceeding (many servers tolerate this),
-        // it'll just be routed to nowhere via `classify_mcp_line` since id 1
-        // is never registered in `pending`.
+        // Some servers (e.g. `@pouyanafisi/gmail-mcp`) don't tolerate
+        // `notifications/initialized` arriving before they've actually sent
+        // their `initialize` response, and silently stop answering every
+        // request afterward if we don't wait here — so, unlike a regular
+        // `request()` call, register id 1 and block on it before sending the
+        // `initialized` notification.
+        let (sender, receiver) = mpsc::channel();
+        session.pending.lock().unwrap().insert(1, sender);
         session.write(&json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -471,6 +550,10 @@ impl McpSession {
                 "clientInfo": { "name": "mint", "version": env!("CARGO_PKG_VERSION") }
             }
         }))?;
+        if receiver.recv_timeout(MCP_TIMEOUT).is_err() {
+            session.pending.lock().unwrap().remove(&1);
+            return Err(McpError::Timeout);
+        }
         session.write(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))?;
 
         Ok(session)

@@ -10,7 +10,7 @@ use anyhow::{Result, anyhow};
 use mint_core::{
     AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, CHAT_CLI_ID, MemoryStore,
     MintConfig, OrchestrationError, PermissionDecision, PermissionRule, orchestrate_agent_loop,
-    permission_decision_for, save_config,
+    permission_decision_for,
 };
 use syntect::easy::HighlightLines;
 use syntect::highlighting::ThemeSet;
@@ -96,7 +96,6 @@ pub async fn run_code_agent_with_options(
             AgentApproval::WriteFile { path, diff, .. } => confirm_with_persistence(
                 "write_file",
                 path,
-                config,
                 root,
                 &mut permission_rules,
                 &approve_approval_active,
@@ -109,7 +108,6 @@ pub async fn run_code_agent_with_options(
             AgentApproval::ApplyPatch { path, diff, .. } => confirm_with_persistence(
                 "apply_patch",
                 path,
-                config,
                 root,
                 &mut permission_rules,
                 &approve_approval_active,
@@ -119,16 +117,23 @@ pub async fn run_code_agent_with_options(
                     print_colored_diff(diff);
                 },
             ),
-            AgentApproval::RunShell { command, mode } => confirm_with_persistence(
+            AgentApproval::RunShell {
+                command,
+                mode,
+                background,
+            } => confirm_with_persistence(
                 "run_shell",
                 command,
-                config,
                 root,
                 &mut permission_rules,
                 &approve_approval_active,
                 || {
                     print_approval_card(
-                        "Local Shell Command",
+                        if *background {
+                            "Local Shell Command (background)"
+                        } else {
+                            "Local Shell Command"
+                        },
                         &[("Command", command), ("Mode", mode)],
                     );
                 },
@@ -136,7 +141,6 @@ pub async fn run_code_agent_with_options(
             AgentApproval::NoteWrite { path, .. } => confirm_with_persistence(
                 "note_write",
                 path,
-                config,
                 root,
                 &mut permission_rules,
                 &approve_approval_active,
@@ -154,7 +158,6 @@ pub async fn run_code_agent_with_options(
                 confirm_with_persistence(
                     "run_plugin",
                     &subject,
-                    config,
                     root,
                     &mut permission_rules,
                     &approve_approval_active,
@@ -178,7 +181,6 @@ pub async fn run_code_agent_with_options(
                 confirm_with_persistence(
                     "mcp_tool",
                     &subject,
-                    config,
                     root,
                     &mut permission_rules,
                     &approve_approval_active,
@@ -279,6 +281,7 @@ pub async fn run_code_agent_with_options(
         });
     }
     let progress_live_status = Arc::clone(&live_status);
+    let progress_approval_active = Arc::clone(&approval_active);
     let progress_cb = |progress: AgentProgress| match progress {
         AgentProgress::Thinking {
             elapsed_secs,
@@ -286,6 +289,7 @@ pub async fn run_code_agent_with_options(
             model_name,
         } => {
             if !options.fast_mode
+                && !progress_approval_active.load(Ordering::Relaxed)
                 && let Ok(mut status) = progress_live_status.lock()
             {
                 let label = if let (Some(a), Some(m)) = (agent_name, model_name) {
@@ -308,6 +312,7 @@ pub async fn run_code_agent_with_options(
         }
         AgentProgress::Thought { thought } => {
             if !options.fast_mode
+                && !progress_approval_active.load(Ordering::Relaxed)
                 && let Ok(mut status) = progress_live_status.lock()
             {
                 commit_activity_snapshot(&mut status);
@@ -317,7 +322,7 @@ pub async fn run_code_agent_with_options(
             }
         }
         AgentProgress::ToolStart { action, input } => {
-            if !options.fast_mode {
+            if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
                 if (action == "create_plan" || action == "update_plan")
                     && let Some(steps) = extract_plan_steps(&input)
                 {
@@ -326,6 +331,16 @@ pub async fn run_code_agent_with_options(
                         status.plan_steps = steps;
                         render_live_status(&mut status);
                     }
+                    return;
+                }
+                if action == "read_file"
+                    && let Some(path) = input.get("path").and_then(|v| v.as_str())
+                    && skill_name_for_read_path(path).is_some()
+                {
+                    // The agent chose to read a skill file on its own initiative
+                    // (as opposed to the human typing `$skillname`). Skip the
+                    // generic explored-files grouping — ToolEnd below renders a
+                    // dedicated Skill(...) card for this instead.
                     return;
                 }
                 if let Some(label) = explored_action_label(&action, &input) {
@@ -347,9 +362,31 @@ pub async fn run_code_agent_with_options(
                     }
                     "run_shell" => {
                         let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
+                        let background = input
+                            .get("background")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
                         (
                             false,
-                            format!("[run_shell] Running command: `{}`...", command),
+                            if background {
+                                format!("[run_shell] Starting background command: `{}`...", command)
+                            } else {
+                                format!("[run_shell] Running command: `{}`...", command)
+                            },
+                        )
+                    }
+                    "shell_output" => {
+                        let job_id = input.get("job_id").and_then(|v| v.as_str()).unwrap_or("");
+                        (
+                            false,
+                            format!("[shell_output] Checking background job {}...", job_id),
+                        )
+                    }
+                    "kill_shell" => {
+                        let job_id = input.get("job_id").and_then(|v| v.as_str()).unwrap_or("");
+                        (
+                            false,
+                            format!("[kill_shell] Stopping background job {}...", job_id),
                         )
                     }
                     "git_status" | "git_diff" | "git_log" | "git_branch" => {
@@ -416,7 +453,7 @@ pub async fn run_code_agent_with_options(
             input,
             result,
         } => {
-            if !options.fast_mode {
+            if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
                 if action == "create_plan" || action == "update_plan" {
                     if let Some(steps) = extract_plan_steps(&input)
                         && let Ok(mut status) = progress_live_status.lock()
@@ -443,6 +480,25 @@ pub async fn run_code_agent_with_options(
                         });
                     }
                     render_live_status(&mut status);
+                } else if action == "read_file"
+                    && let Some(path) = input.get("path").and_then(|v| v.as_str())
+                    && let Some(skill_name) = skill_name_for_read_path(path)
+                    && let Ok(mut status) = progress_live_status.lock()
+                {
+                    status.thinking = None;
+                    status.tasks.push(skill_card(&skill_name));
+                    render_live_status(&mut status);
+                } else if action == "memory_recall" {
+                    let skill_names = skill_names_from_memory_recall(&result);
+                    if !skill_names.is_empty()
+                        && let Ok(mut status) = progress_live_status.lock()
+                    {
+                        status.thinking = None;
+                        for name in skill_names {
+                            status.tasks.push(skill_card(&name));
+                        }
+                        render_live_status(&mut status);
+                    }
                 }
             }
             // Parse web search sources from the result and store them for display
@@ -1352,6 +1408,11 @@ fn ran_command_labels(action: &str, input: &serde_json::Value) -> Option<Vec<Str
             .and_then(|v| v.as_str())
             .filter(|command| !command.trim().is_empty())
             .map(|command| vec![command.trim().to_owned()]),
+        "shell_output" | "kill_shell" => input
+            .get("job_id")
+            .and_then(|v| v.as_str())
+            .filter(|job_id| !job_id.trim().is_empty())
+            .map(|job_id| vec![job_id.trim().to_owned()]),
         "verify" => input
             .get("commands")
             .and_then(|v| v.as_array())
@@ -1368,6 +1429,60 @@ fn ran_command_labels(action: &str, input: &serde_json::Value) -> Option<Vec<Str
     }
 }
 
+/// If `path` looks like a skill file — `<skills-dir>/<name>/SKILL.md` (or
+/// SKILL.txt / lowercase variants), or a flat `<skills-dir>/<name>.md` in the
+/// global skills folder — returns the skill's name. Mirrors the file shapes
+/// `mint_core::skills::load_skills_from_dir` recognizes. Used to tell a
+/// skill file read apart from an ordinary `read_file` call so it renders as
+/// a `Skill(name)` card instead of a generic "explored files" line.
+fn skill_name_for_read_path(path: &str) -> Option<String> {
+    let path = Path::new(path);
+    let file_name = path.file_name()?.to_str()?;
+    let parent = path.parent()?;
+    let parent_name = parent.file_name()?.to_str()?;
+
+    if matches!(file_name, "SKILL.md" | "SKILL.txt" | "skill.md" | "skill.txt") {
+        let grandparent_name = parent
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str());
+        if matches!(grandparent_name, Some("skills") | Some("mint-skills")) {
+            return Some(parent_name.to_string());
+        }
+    }
+
+    if matches!(parent_name, "skills" | "mint-skills") {
+        let ext = path.extension().and_then(|e| e.to_str())?;
+        if matches!(ext.to_ascii_lowercase().as_str(), "md" | "txt") {
+            return path.file_stem().and_then(|n| n.to_str()).map(str::to_owned);
+        }
+    }
+
+    None
+}
+
+/// Skill names the `memory_recall` tool matched, parsed out of its
+/// `"[Skill: {name}]\n{content}"` result blocks (see the `"memory_recall"`
+/// arm in `orchestration.rs`) — lets ToolEnd render a `Skill(name)` card
+/// when the agent found and is about to use a learned skill this way.
+fn skill_names_from_memory_recall(result: &str) -> Vec<String> {
+    result
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("[Skill: ")
+                .and_then(|rest| rest.strip_suffix(']'))
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+fn skill_card(skill_name: &str) -> TaskEntry {
+    TaskEntry {
+        label: format!("Skill({skill_name})"),
+        output: vec!["Successfully loaded skill".to_string()],
+    }
+}
+
 fn command_was_run(result: &str) -> bool {
     result.lines().any(|line| line.starts_with("exit: "))
 }
@@ -1376,7 +1491,11 @@ fn command_was_run(result: &str) -> bool {
 /// "Finished command" label. Drops internal bookkeeping lines (`mode:`, `sandboxed:`)
 /// and caps the output so a noisy command can't flood the terminal.
 fn command_output_preview(result: &str) -> Vec<String> {
-    const MAX_LINES: usize = 8;
+    const MAX_LINES: usize = 7;
+    // A single very long line (a full `pgrep -af` invocation, a minified
+    // JSON blob, ...) still wraps across many terminal rows even though it
+    // only counts as one line against MAX_LINES above — cut it down too.
+    const MAX_LINE_WIDTH: usize = 120;
 
     let filtered: Vec<&str> = result
         .lines()
@@ -1399,12 +1518,20 @@ fn command_output_preview(result: &str) -> Vec<String> {
     let mut preview: Vec<String> = trimmed
         .iter()
         .take(MAX_LINES)
-        .map(|s| s.to_string())
+        .map(|line| truncate_line(line, MAX_LINE_WIDTH))
         .collect();
     if trimmed.len() > MAX_LINES {
         preview.push(format!("... {} more lines", trimmed.len() - MAX_LINES));
     }
     preview
+}
+
+fn truncate_line(line: &str, max_chars: usize) -> String {
+    if line.chars().count() <= max_chars {
+        return line.to_string();
+    }
+    let head: String = line.chars().take(max_chars).collect();
+    format!("{head}…")
 }
 
 fn activities_lines(activities: &[String]) -> Vec<String> {
@@ -1696,15 +1823,16 @@ fn print_approval_card(title: &str, fields: &[(&str, &str)]) {
 /// disk) first — if `tool`/`subject` already has a saved decision, returns
 /// immediately without prompting or calling `render_card`. Otherwise calls
 /// `render_card` (each approval type prints its own card format — a diff for
-/// file edits, a plain field list for everything else) and shows a 4-option
-/// prompt; an "Always" choice appends the new rule to `permission_rules` and
-/// persists it via `save_config` so it survives past this process, in
-/// addition to taking effect for the rest of this run.
-#[allow(clippy::too_many_arguments)]
+/// file edits, a plain field list for everything else) and shows a 3-option
+/// prompt (Yes / Yes-and-don't-ask-again-this-session / No); the middle
+/// choice appends the new rule to `permission_rules` for the rest of this
+/// run only — deliberately *not* persisted via `save_config`, so it doesn't
+/// outlive the process. Rules already on disk from before this change (or
+/// added via `mint safety permissions`) are still honored by the lookup
+/// above; this prompt just no longer creates new durable ones.
 fn confirm_with_persistence(
     tool: &str,
     subject: &str,
-    config: &MintConfig,
     root: &Path,
     permission_rules: &mut Vec<PermissionRule>,
     approval_active: &AtomicBool,
@@ -1727,62 +1855,58 @@ fn confirm_with_persistence(
 
     render_card();
     approval_active.store(true, Ordering::Relaxed);
-    let choice = prompt_persistent_approval();
+    let choice = prompt_persistent_approval(subject);
     approval_active.store(false, Ordering::Relaxed);
 
     match choice {
         0 => Ok(ApprovalOutcome::Approved),
-        1 | 2 => {
+        1 => {
             let rule = PermissionRule {
                 tool: tool.to_string(),
                 pattern: subject.to_string(),
                 decision: PermissionDecision::Allow,
-                project_root: if choice == 1 {
-                    Some(root.to_path_buf())
-                } else {
-                    None
-                },
+                project_root: None,
             };
-            permission_rules.push(rule.clone());
-            let mut updated = config.clone();
-            updated.permission_rules = permission_rules.clone();
-            if let Err(error) = save_config(&updated) {
-                eprintln!("  {DIM}Warning: could not save permission rule: {error}{RESET}");
-            }
+            permission_rules.push(rule);
             Ok(ApprovalOutcome::Approved)
         }
         _ => Ok(ApprovalOutcome::Denied),
     }
 }
 
-/// Renders the 4-option approval choice and returns its index (0 = Once,
-/// 1 = Always this project, 2 = Always everywhere, 3 = Deny). Falls back to a
-/// plain stdin line read (matching `crate::confirm`'s non-TTY behavior, e.g.
+/// Renders the 3-option approval choice and returns its index (0 = Yes,
+/// 1 = Yes and don't ask again this session, 2 = No). Falls back to a plain
+/// stdin line read (matching `crate::confirm`'s non-TTY behavior, e.g.
 /// piped/CI invocations) when not running in a real terminal, rather than
 /// silently defaulting to deny like the underlying `prompt_interactive_select`
 /// does on its own.
-fn prompt_persistent_approval() -> usize {
+fn prompt_persistent_approval(subject: &str) -> usize {
     use crossterm::tty::IsTty;
 
+    // Kept short so the option still fits on one line in the picker.
+    let truncated: String = if subject.chars().count() > 60 {
+        subject.chars().take(60).collect::<String>() + "…"
+    } else {
+        subject.to_string()
+    };
+
     let options = [
-        "Approve (Once)".to_string(),
-        "Approve (Always \u{2014} this project)".to_string(),
-        "Approve (Always \u{2014} everywhere)".to_string(),
-        "Deny".to_string(),
+        "Yes".to_string(),
+        format!("Yes, and don't ask again for: {truncated}"),
+        "No".to_string(),
     ];
 
     if !io::stdout().is_tty() {
-        print!("  Approve? [o]nce / [p]roject-always / [g]lobal-always / [N]deny: ");
+        print!("  Approve? [y]es / [d]on't ask again this session / [N]o: ");
         let _ = io::stdout().flush();
         let mut answer = String::new();
         if io::stdin().read_line(&mut answer).is_err() {
-            return 3;
+            return 2;
         }
         return match answer.trim().to_ascii_lowercase().as_str() {
-            "o" | "once" | "y" | "yes" => 0,
-            "p" | "project" => 1,
-            "g" | "global" | "always" => 2,
-            _ => 3,
+            "y" | "yes" => 0,
+            "d" | "dont" | "don't" => 1,
+            _ => 2,
         };
     }
 
@@ -1791,8 +1915,8 @@ fn prompt_persistent_approval() -> usize {
         &options,
         &options[0],
     ) {
-        Ok(Some(choice)) => options.iter().position(|o| *o == choice).unwrap_or(3),
-        _ => 3,
+        Ok(Some(choice)) => options.iter().position(|o| *o == choice).unwrap_or(2),
+        _ => 2,
     }
 }
 
@@ -2125,5 +2249,106 @@ mod format_markdown_bold_tests {
             strip_ansi(&out).contains("some text"),
             "code content dropped: {out}"
         );
+    }
+}
+
+#[cfg(test)]
+mod command_output_preview_tests {
+    use super::*;
+
+    #[test]
+    fn caps_at_seven_lines_and_notes_the_rest() {
+        let stdout: String = (1..=25).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        let result = format!("exit: 0\nmode: readOnly\nsandboxed: false\nstdout:\n{stdout}\nstderr:\n");
+
+        let preview = command_output_preview(&result);
+
+        assert_eq!(preview.len(), 8, "7 lines + 1 truncation-note line: {preview:?}");
+        assert_eq!(preview[0], "exit: 0");
+        assert_eq!(preview[6], "line 5");
+        assert_eq!(preview[7], "... 21 more lines");
+    }
+
+    #[test]
+    fn a_single_very_long_line_is_cut_down_too() {
+        let long_line = "x".repeat(400);
+        let result = format!("exit: 0\nstdout:\n{long_line}\nstderr:\n");
+
+        let preview = command_output_preview(&result);
+
+        let content_line = &preview[2];
+        assert!(
+            content_line.chars().count() <= 121,
+            "expected the long line truncated to ~120 chars, got {} chars",
+            content_line.chars().count()
+        );
+        assert!(content_line.ends_with('…'));
+    }
+
+    #[test]
+    fn short_output_is_left_untouched() {
+        let result = "exit: 0\nstdout:\nhello\nstderr:\n";
+        assert_eq!(
+            command_output_preview(result),
+            vec!["exit: 0", "stdout:", "hello", "stderr:"]
+        );
+    }
+}
+
+#[cfg(test)]
+mod skill_card_tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_workspace_skill_paths() {
+        assert_eq!(
+            skill_name_for_read_path("/repo/.agents/skills/daily-report/SKILL.md"),
+            Some("daily-report".to_string())
+        );
+        assert_eq!(
+            skill_name_for_read_path("/repo/skills/refactor-helper/skill.md"),
+            Some("refactor-helper".to_string())
+        );
+    }
+
+    #[test]
+    fn recognizes_global_flat_skill_files() {
+        assert_eq!(
+            skill_name_for_read_path("/home/user/.config/mint/mint-skills/notes.md"),
+            Some("notes".to_string())
+        );
+    }
+
+    #[test]
+    fn recognizes_global_skill_subdirectories_too() {
+        assert_eq!(
+            skill_name_for_read_path("/home/user/.config/mint/mint-skills/daily-report/SKILL.md"),
+            Some("daily-report".to_string())
+        );
+    }
+
+    #[test]
+    fn an_ordinary_file_read_is_not_mistaken_for_a_skill() {
+        assert_eq!(
+            skill_name_for_read_path("/repo/src/main.rs"),
+            None,
+            "a plain source file must never render as a Skill(...) card"
+        );
+        assert_eq!(skill_name_for_read_path("/repo/README.md"), None);
+    }
+
+    #[test]
+    fn parses_skill_names_out_of_a_memory_recall_result() {
+        let result = "[Skill: daily-report]\nSome content here\n\n[Skill: refactor-helper]\nMore content";
+        assert_eq!(
+            skill_names_from_memory_recall(result),
+            vec!["daily-report", "refactor-helper"]
+        );
+    }
+
+    #[test]
+    fn memory_recall_result_with_no_skill_hits_yields_nothing() {
+        let result = "[2026-08-01] You: hi\nMint: hello";
+        assert!(skill_names_from_memory_recall(result).is_empty());
     }
 }

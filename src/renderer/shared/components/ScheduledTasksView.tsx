@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { renderScheduledTasksSvgIcon } from '../constants/plugins'
+import { renderScheduledTasksSvgIcon, renderTaskLogoIcon } from '../constants/plugins'
 import '../css/management-views.css'
 import type { CronJob, CronJobDraft } from '../types'
 
@@ -33,6 +33,59 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
     const [newWorkspace, setNewWorkspace] = useState(workspacePath || '')
     const [adding, setAdding] = useState(false)
     const [showAddModal, setShowAddModal] = useState(false)
+    const [detailJob, setDetailJob] = useState<CronJob | null>(null)
+
+    // Picker inputs for the "New Scheduled Task" form — build the cron
+    // expression `newSchedule` from a clock/calendar UI instead of asking
+    // everyone to type raw cron syntax. "custom" leaves newSchedule as a
+    // free-text field for anyone who wants to type cron directly.
+    const [repeatMode, setRepeatMode] = useState<'daily' | 'weekly' | 'monthly' | 'once' | 'custom'>('daily')
+    const [timeOfDay, setTimeOfDay] = useState('08:00')
+    const [weekdays, setWeekdays] = useState<number[]>([1])
+    const [monthDay, setMonthDay] = useState(1)
+    const [onceDate, setOnceDate] = useState('')
+
+    useEffect(() => {
+      if (repeatMode === 'custom') return
+      const [hh, mm] = timeOfDay.split(':').map((v) => parseInt(v, 10))
+      const H = Number.isFinite(hh) ? hh : 8
+      const M = Number.isFinite(mm) ? mm : 0
+
+      if (repeatMode === 'daily') {
+        setNewSchedule(`${M} ${H} * * *`)
+      } else if (repeatMode === 'weekly') {
+        setNewSchedule(`${M} ${H} * * ${weekdays.length ? [...weekdays].sort().join(',') : '*'}`)
+      } else if (repeatMode === 'monthly') {
+        setNewSchedule(`${M} ${H} ${monthDay} * *`)
+      } else if (repeatMode === 'once') {
+        if (!onceDate) {
+          setNewSchedule('')
+          return
+        }
+        const [y, mo, d] = onceDate.split('-').map((v) => parseInt(v, 10))
+        // 7-field form (sec min hour day month dow year) with the year
+        // pinned — the schedule has no occurrence after that date, so the
+        // scheduler runs it exactly once and then disables it.
+        setNewSchedule(`0 ${M} ${H} ${d} ${mo} * ${y}`)
+      }
+    }, [repeatMode, timeOfDay, weekdays, monthDay, onceDate])
+
+    const toggleWeekday = (day: number) => {
+      setWeekdays((current) =>
+        current.includes(day) ? current.filter((d) => d !== day) : [...current, day].sort()
+      )
+    }
+
+    const resetAddForm = () => {
+      setNewName('')
+      setNewSchedule('')
+      setNewTask('')
+      setRepeatMode('daily')
+      setTimeOfDay('08:00')
+      setWeekdays([1])
+      setMonthDay(1)
+      setOnceDate('')
+    }
 
     const fetchJobs = async () => {
       setLoading(true)
@@ -67,9 +120,7 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
           task: newTask.trim(),
           workspace: newWorkspace.trim() || workspacePath || '.'
         })
-        setNewName('')
-        setNewSchedule('')
-        setNewTask('')
+        resetAddForm()
         setShowAddModal(false)
         fetchJobs()
       } catch (err: any) {
@@ -84,6 +135,7 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
       if (!window.confirm(`Remove scheduled task "${name}"?`)) return
       try {
         await removeCronJob(id)
+        setDetailJob((current) => (current?.id === id ? null : current))
         fetchJobs()
       } catch (err: any) {
         console.error('Failed to remove scheduled task:', err)
@@ -175,10 +227,18 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
         ) : (
           <div className="management-grid">
             {filteredJobs.map((job) => (
-              <div key={job.id} className="management-card">
+              <div
+                key={job.id}
+                className="management-card"
+                onClick={() => setDetailJob(job)}
+                style={{ cursor: 'pointer' }}
+              >
                 <div>
                   <div className="management-card-header">
-                    <span className="management-card-title-badge">{job.name}</span>
+                    <div className="management-card-title-group">
+                      {renderTaskLogoIcon()}
+                      <h3 className="management-card-title">{job.name}</h3>
+                    </div>
                     <span className={`management-badge ${job.enabled ? 'active' : 'inactive'}`}>
                       <span className="management-dot" />
                       {job.enabled ? 'Enabled' : 'Disabled'}
@@ -186,28 +246,13 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
                   </div>
 
                   <p className="management-card-desc">{job.task}</p>
-
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted, #94a3b8)', marginTop: '8px' }}>
-                    <div>
-                      Schedule: <code>{job.schedule}</code>
-                    </div>
-                    <div>Next run: {formatTimestamp(job.nextRun)}</div>
-                    <div>
-                      Last run: {formatTimestamp(job.lastRunAt)}
-                      {job.lastStatus && (
-                        <span
-                          className={`management-badge ${job.lastStatus === 'success' ? 'active' : 'inactive'}`}
-                          style={{ marginLeft: '6px' }}
-                        >
-                          {job.lastStatus}
-                        </span>
-                      )}
-                    </div>
-                  </div>
                 </div>
 
                 <div className="management-card-footer">
-                  <label className="settings-toggle-switch">
+                  <code style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)' }}>
+                    {job.schedule}
+                  </code>
+                  <label className="settings-toggle-switch" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={job.enabled}
@@ -215,16 +260,87 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
                     />
                     <span className="settings-toggle-slider"></span>
                   </label>
-                  <button
-                    type="button"
-                    className="management-action-btn danger"
-                    onClick={() => handleRemoveJob(job.id, job.name)}
-                  >
-                    Remove
-                  </button>
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Scheduled Task Detail */}
+        {detailJob && (
+          <div className="management-modal-overlay" onClick={() => setDetailJob(null)}>
+            <div className="management-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="management-modal-header">
+                <div className="management-card-title-group">
+                  {renderTaskLogoIcon(44)}
+                  <h2 className="management-modal-title">{detailJob.name}</h2>
+                </div>
+                <button type="button" className="management-modal-close" onClick={() => setDetailJob(null)}>
+                  ✕
+                </button>
+              </div>
+
+              <div className="management-modal-body">
+                <span className={`management-badge ${detailJob.enabled ? 'active' : 'inactive'}`}>
+                  <span className="management-dot" />
+                  {detailJob.enabled ? 'Enabled' : 'Disabled'}
+                </span>
+
+                <p style={{ color: 'var(--text-soft, #d1d1d4)', lineHeight: 1.55, marginTop: '14px' }}>
+                  {detailJob.task}
+                </p>
+
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted, #94a3b8)', marginTop: '14px', display: 'grid', gap: '6px' }}>
+                  <div>
+                    Schedule: <code>{detailJob.schedule}</code>
+                  </div>
+                  <div>Next run: {formatTimestamp(detailJob.nextRun)}</div>
+                  <div>
+                    Last run: {formatTimestamp(detailJob.lastRunAt)}
+                    {detailJob.lastStatus && (
+                      <span
+                        className={`management-badge ${detailJob.lastStatus === 'success' ? 'active' : 'inactive'}`}
+                        style={{ marginLeft: '6px' }}
+                      >
+                        {detailJob.lastStatus}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {detailJob.lastSummary && (
+                  <div style={{ marginTop: '16px' }}>
+                    <label className="management-label" style={{ display: 'block', marginBottom: '6px' }}>
+                      Last response
+                    </label>
+                    <div
+                      className="management-code-snippet"
+                      style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', maxHeight: '260px', overflowY: 'auto' }}
+                    >
+                      {detailJob.lastSummary}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="management-modal-footer">
+                <label className="settings-toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={detailJob.enabled}
+                    onChange={() => handleToggleEnabled(detailJob)}
+                  />
+                  <span className="settings-toggle-slider"></span>
+                </label>
+                <button
+                  type="button"
+                  className="management-action-btn danger"
+                  onClick={() => handleRemoveJob(detailJob.id, detailJob.name)}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -253,16 +369,99 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
                   </div>
 
                   <div className="management-form-group">
-                    <label className="management-label">Schedule (cron expression)</label>
-                    <input
-                      type="text"
-                      className="management-input-field"
-                      placeholder="0 8 * * *  (every day at 08:00)"
-                      value={newSchedule}
-                      onChange={(e) => setNewSchedule(e.target.value)}
-                      required
-                    />
+                    <label className="management-label">Repeat</label>
+                    <div className="management-filter-pills" style={{ flexWrap: 'wrap' }}>
+                      {(['daily', 'weekly', 'monthly', 'once', 'custom'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={`management-pill-btn ${repeatMode === mode ? 'active' : ''}`}
+                          onClick={() => setRepeatMode(mode)}
+                        >
+                          {mode === 'once' ? 'One-time' : mode}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+
+                  {repeatMode !== 'custom' && (
+                    <div className="management-form-group">
+                      <label className="management-label">Time</label>
+                      <input
+                        type="time"
+                        className="management-input-field"
+                        value={timeOfDay}
+                        onChange={(e) => setTimeOfDay(e.target.value)}
+                        required
+                      />
+                    </div>
+                  )}
+
+                  {repeatMode === 'weekly' && (
+                    <div className="management-form-group">
+                      <label className="management-label">On these days</label>
+                      <div className="management-filter-pills" style={{ flexWrap: 'wrap' }}>
+                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((label, idx) => (
+                          <button
+                            key={label}
+                            type="button"
+                            className={`management-pill-btn ${weekdays.includes(idx) ? 'active' : ''}`}
+                            onClick={() => toggleWeekday(idx)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {repeatMode === 'monthly' && (
+                    <div className="management-form-group">
+                      <label className="management-label">Day of month</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={31}
+                        className="management-input-field"
+                        value={monthDay}
+                        onChange={(e) => setMonthDay(Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1)))}
+                        required
+                      />
+                    </div>
+                  )}
+
+                  {repeatMode === 'once' && (
+                    <div className="management-form-group">
+                      <label className="management-label">Date</label>
+                      <input
+                        type="date"
+                        className="management-input-field"
+                        value={onceDate}
+                        onChange={(e) => setOnceDate(e.target.value)}
+                        required
+                      />
+                    </div>
+                  )}
+
+                  {repeatMode === 'custom' && (
+                    <div className="management-form-group">
+                      <label className="management-label">Schedule (cron expression)</label>
+                      <input
+                        type="text"
+                        className="management-input-field"
+                        placeholder="0 8 * * *  (every day at 08:00)"
+                        value={newSchedule}
+                        onChange={(e) => setNewSchedule(e.target.value)}
+                        required
+                      />
+                    </div>
+                  )}
+
+                  {repeatMode !== 'custom' && (
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)' }}>
+                      Cron: <code>{newSchedule || '—'}</code>
+                    </div>
+                  )}
 
                   <div className="management-form-group">
                     <label className="management-label">Task / prompt</label>

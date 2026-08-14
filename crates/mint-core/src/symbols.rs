@@ -86,17 +86,13 @@ fn extract_tree_sitter_symbols(
     limit: usize,
 ) -> bool {
     let mut parser = tree_sitter::Parser::new();
-    // Safety: `tree-sitter-rust 0.20.3` depends on `tree-sitter 0.22` while `tree-sitter-typescript 0.20.3`
-    // depends on `tree-sitter 0.20`. Both `Language` structs are identical ABI wrappers around `*const TSLanguage`.
     let language: tree_sitter::Language = match extension {
-        "rs" => unsafe { std::mem::transmute(tree_sitter_rust::language()) },
-        "ts" | "tsx" | "js" | "jsx" => unsafe {
-            std::mem::transmute(tree_sitter_typescript::language_typescript())
-        },
+        "rs" => tree_sitter_rust::LANGUAGE.into(),
+        "ts" | "tsx" | "js" | "jsx" => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         _ => return false,
     };
 
-    if parser.set_language(language).is_err() {
+    if parser.set_language(&language).is_err() {
         return false;
     }
     let Some(tree) = parser.parse(content, None) else {
@@ -153,7 +149,7 @@ fn extract_tree_sitter_symbols(
             }
         }
 
-        for i in 0..node.child_count() {
+        for i in 0..node.child_count() as u32 {
             if let Some(child) = node.child(i) {
                 walk(child, content, file_path, symbols, limit);
                 if symbols.len() >= limit {

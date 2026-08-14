@@ -426,8 +426,31 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "run_shell",
-            "Run a local shell command. Subject to safety classification and user approval; destructive commands are blocked outright.",
-            schema(json!({ "command": { "type": "string" } }), &["command"]),
+            "Run a local shell command. Subject to safety classification and user approval; destructive commands are blocked outright. \
+             Set 'background' to true for a long-running command (a dev server, a watcher, ...) so it doesn't \
+             block you — it returns a job_id immediately instead of waiting for the command to exit. Use the \
+             'shell_output' tool to check on it later and 'kill_shell' to stop it.",
+            schema(
+                json!({
+                    "command": { "type": "string" },
+                    "background": {
+                        "type": "boolean",
+                        "description": "Run detached and return immediately with a job_id instead of waiting for the command to exit. Defaults to false."
+                    }
+                }),
+                &["command"],
+            ),
+        ),
+        tool(
+            "shell_output",
+            "Check on a background shell job started via run_shell(background: true): its status (running/exited/killed) \
+             and any stdout/stderr produced since the last time you polled it.",
+            schema(json!({ "job_id": { "type": "string" } }), &["job_id"]),
+        ),
+        tool(
+            "kill_shell",
+            "Stop a background shell job started via run_shell(background: true).",
+            schema(json!({ "job_id": { "type": "string" } }), &["job_id"]),
         ),
         tool(
             "exit_plan_mode",

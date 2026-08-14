@@ -683,6 +683,51 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         }
                     }
                 }
+                ("POST", "/api/mcp/reauth") => {
+                    #[derive(Deserialize)]
+                    struct ReauthRequest {
+                        #[serde(rename = "serverName")]
+                        server_name: String,
+                    }
+                    match serde_json::from_str::<ReauthRequest>(body) {
+                        Ok(req) => {
+                            let server_name = req.server_name;
+                            let result = tokio::task::spawn_blocking(move || {
+                                crate::reauth_mcp_server(&server_name)
+                            })
+                            .await;
+                            match result {
+                                Ok(Ok(success)) => {
+                                    send_json_response(
+                                        socket,
+                                        "200 OK",
+                                        &json!({ "success": success }).to_string(),
+                                    )
+                                    .await;
+                                }
+                                Ok(Err(err)) => {
+                                    let err_msg = json!({ "error": err.to_string() }).to_string();
+                                    send_json_response(socket, "400 Bad Request", &err_msg).await;
+                                }
+                                Err(err) => {
+                                    let err_msg =
+                                        json!({ "error": format!("reauth task failed: {err}") })
+                                            .to_string();
+                                    send_json_response(socket, "500 Internal Server Error", &err_msg)
+                                        .await;
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            send_json_response(
+                                socket,
+                                "400 Bad Request",
+                                "{\"error\":\"Invalid request body.\"}",
+                            )
+                            .await;
+                        }
+                    }
+                }
                 ("GET", "/api/cron") => {
                     let jobs = crate::CronStore::open_default()
                         .and_then(|store| store.list())

@@ -149,6 +149,11 @@ pub async fn handle_slash_command(
                 ),
                 ("/mcp list", "List configured MCP servers"),
                 ("/mcp allow <server> <tool>", "Allow an MCP tool"),
+                (
+                    "/mcp reauth <server>",
+                    "Re-run a server's OAuth login (e.g. expired token)",
+                ),
+                ("/release-notes", "Show release notes for the current version"),
                 ("/stats", "Show session statistics"),
                 ("/exit", "Exit Mint"),
                 ("/code <task>", "Run in code-agent mode"),
@@ -786,6 +791,73 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/shells" => {
+            if rest.is_empty() {
+                let jobs = mint_core::bg_shell::list_jobs();
+                if jobs.is_empty() {
+                    println!(
+                        "{DIM}No background shell jobs. The agent starts one when it calls run_shell with background: true.{RESET}\n"
+                    );
+                } else {
+                    println!("\n{BLUE}Background shell jobs{RESET}");
+                    for job in &jobs {
+                        let status_str = match &job.status {
+                            mint_core::bg_shell::JobStatus::Running => {
+                                format!("{MINT}running{RESET}")
+                            }
+                            mint_core::bg_shell::JobStatus::Exited(0) => "exited(0)".to_string(),
+                            mint_core::bg_shell::JobStatus::Exited(code) => {
+                                format!("{ERROR}exited({code}){RESET}")
+                            }
+                            mint_core::bg_shell::JobStatus::Killed => {
+                                format!("{DIM}killed{RESET}")
+                            }
+                            mint_core::bg_shell::JobStatus::Failed(err) => {
+                                format!("{ERROR}failed: {err}{RESET}")
+                            }
+                        };
+                        let preview: String = job.command.chars().take(50).collect();
+                        let suffix = if job.command.chars().count() > 50 {
+                            "…"
+                        } else {
+                            ""
+                        };
+                        println!(
+                            "  {:<6} [{status_str}] {DIM}{:>4}s{RESET}  {preview}{suffix}",
+                            job.id, job.elapsed_secs,
+                        );
+                    }
+                    println!();
+                }
+                return Some(SlashResult::Handled);
+            }
+
+            let (sub, arg) = rest
+                .split_once(char::is_whitespace)
+                .map(|(s, a)| (s, a.trim()))
+                .unwrap_or((rest, ""));
+
+            match sub {
+                "show" if !arg.is_empty() => match mint_core::bg_shell::snapshot(arg) {
+                    Ok(job) => {
+                        println!("\n{BLUE}Job {} — {}{RESET}", job.id, job.command);
+                        if let Some(pid) = job.pid {
+                            println!("{DIM}pid: {pid}  cwd: {}{RESET}", job.cwd.display());
+                        }
+                        println!("{DIM}stdout:{RESET}\n{}", job.stdout);
+                        println!("{DIM}stderr:{RESET}\n{}\n", job.stderr);
+                    }
+                    Err(_) => println!("{ERROR}No such job.{RESET}\n"),
+                },
+                "kill" if !arg.is_empty() => match mint_core::bg_shell::kill_job(arg) {
+                    Ok(msg) => println!("{DIM}{msg}{RESET}\n"),
+                    Err(_) => println!("{ERROR}No such job.{RESET}\n"),
+                },
+                _ => println!("{ERROR}Usage:{RESET} /shells [show <id>|kill <id>]\n"),
+            }
+            Some(SlashResult::Handled)
+        }
+
         "/clear" | "/reset" => {
             let options = vec![
                 "No (keep history)".to_string(),
@@ -1272,7 +1344,7 @@ pub async fn handle_slash_command(
                                     job.id,
                                     job.name,
                                     status,
-                                    job.next_run,
+                                    format_local_time(&job.next_run),
                                     job.last_status.as_deref().unwrap_or("never run")
                                 );
                             }
@@ -1293,7 +1365,8 @@ pub async fn handle_slash_command(
                             ) {
                                 Ok(job) => println!(
                                     "{DIM}Created cron job {} — next run: {}{RESET}\n",
-                                    job.id, job.next_run
+                                    job.id,
+                                    format_local_time(&job.next_run)
                                 ),
                                 Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                             }
@@ -1464,17 +1537,39 @@ pub async fn handle_slash_command(
                                         {
                                             let server_name = &server_names[pos - 1];
 
+                                            println!(
+                                                "{DIM}Checking connection to '{server_name}'...{RESET}"
+                                            );
+                                            let is_connected = mint_core::list_server_tools(
+                                                &session.config,
+                                                server_name,
+                                            )
+                                            .is_ok();
+                                            if is_connected {
+                                                println!("{MINT}● Connected{RESET}\n");
+                                            } else {
+                                                println!(
+                                                    "{ERROR}● Not connected{RESET} {DIM}(token may be expired, or the server is unreachable){RESET}\n"
+                                                );
+                                            }
+
                                             let auth_options = vec![
                                                 "Keep current settings".to_string(),
                                                 "Allow all tools (*)".to_string(),
+                                                "Re-authenticate (re-run OAuth login)".to_string(),
                                             ];
+                                            let default_choice = if is_connected {
+                                                &auth_options[0]
+                                            } else {
+                                                &auth_options[2]
+                                            };
 
                                             let title =
                                                 format!("Authorize MCP Server '{}'?", server_name);
                                             match prompt_interactive_select(
                                                 &title,
                                                 &auth_options,
-                                                &auth_options[0],
+                                                default_choice,
                                             ) {
                                                 Ok(Some(auth_choice)) => {
                                                     if auth_choice == auth_options[1] {
@@ -1497,6 +1592,21 @@ pub async fn handle_slash_command(
                                                                     "{DIM}MCP tools already allowed for {server_name}{RESET}\n"
                                                                 );
                                                             }
+                                                            Err(e) => println!(
+                                                                "{ERROR}MCP error:{RESET} {e}\n"
+                                                            ),
+                                                        }
+                                                    } else if auth_choice == auth_options[2] {
+                                                        println!(
+                                                            "{DIM}Re-authenticating MCP server '{server_name}'... (a browser tab may open){RESET}\n"
+                                                        );
+                                                        match crate::mcp::reauth(server_name) {
+                                                            Ok(true) => println!(
+                                                                "{MINT}Re-authentication succeeded for '{server_name}'.{RESET}\n"
+                                                            ),
+                                                            Ok(false) => println!(
+                                                                "{ERROR}Re-authentication failed for '{server_name}' (see output above).{RESET}\n"
+                                                            ),
                                                             Err(e) => println!(
                                                                 "{ERROR}MCP error:{RESET} {e}\n"
                                                             ),
@@ -1535,8 +1645,26 @@ pub async fn handle_slash_command(
                         println!("{WARN}/mcp allow usage: <server> <tool>{RESET}\n");
                     }
                 }
+                "reauth" => {
+                    if args.is_empty() {
+                        println!("{WARN}/mcp reauth usage: <server>{RESET}\n");
+                    } else {
+                        println!(
+                            "{DIM}Re-authenticating MCP server '{args}'... (a browser tab may open){RESET}\n"
+                        );
+                        match crate::mcp::reauth(args) {
+                            Ok(true) => println!(
+                                "{MINT}Re-authentication succeeded for '{args}'.{RESET}\n"
+                            ),
+                            Ok(false) => println!(
+                                "{ERROR}Re-authentication failed for '{args}' (see output above).{RESET}\n"
+                            ),
+                            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                        }
+                    }
+                }
                 _ => println!(
-                    "{WARN}/mcp usage: list | allow <server> <tool> | remove <name> | clear{RESET}\n"
+                    "{WARN}/mcp usage: list | allow <server> <tool> | reauth <server> | remove <name> | clear{RESET}\n"
                 ),
             }
             Some(SlashResult::Handled)
@@ -1571,6 +1699,14 @@ pub async fn handle_slash_command(
             }
 
             println!();
+            Some(SlashResult::Handled)
+        }
+
+        "/release-notes" => {
+            const RELEASE_NOTES: &str = include_str!("../../../Release_Note.md");
+            println!("\n{BLUE}────────────────────────────────────────────{RESET}");
+            println!("{}", RELEASE_NOTES.trim());
+            println!("{BLUE}────────────────────────────────────────────{RESET}\n");
             Some(SlashResult::Handled)
         }
 
@@ -2135,6 +2271,9 @@ pub async fn run_interactive_chat() -> Result<()> {
                         );
 
                         println!();
+                        println!("{MINT}●{RESET} \x1b[1mSkill({}){RESET}", skill.name);
+                        println!("  {DIM}└ Successfully loaded skill{RESET}");
+                        println!();
                         if let Err(error) = crate::run_code_agent_with_saved_image(
                             &task_with_skill,
                             &session.current_dir,
@@ -2334,8 +2473,16 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/paste", "Attach image from clipboard"),
     ("/plugins", "List or generate plugins/skills"),
     (
+        "/release-notes",
+        "Show release notes for the current version",
+    ),
+    (
         "/search-provider",
         "List web search providers or switch default provider",
+    ),
+    (
+        "/shells",
+        "List, inspect, or kill background shell jobs run_shell started",
     ),
     ("/skill add", "Add or install global skill file or folder"),
     ("/stats", "Show session statistics"),
@@ -2475,21 +2622,40 @@ pub fn draw_input_box(
     println!(" {COMPOSER_BG}{blank_line}{RESET}");
 
     let agent_str = format!(" {DIM}[Agent]{RESET} {MINT}{}{RESET}", model);
+    // Background shell jobs (run_shell(background: true)) still running —
+    // shown so they're never invisible between the start and finish notice.
+    let bg_running = mint_core::bg_shell::running_count();
+    let jobs_prefix = if bg_running > 0 {
+        format!(
+            "{bg_running} bg shell{} · ",
+            if bg_running == 1 { "" } else { "s" }
+        )
+    } else {
+        String::new()
+    };
     // A `\0`-prefixed path_str is a status override (e.g. history browsing),
     // rendered as-is instead of the usual "path: ..." label.
-    let path_label = match path_str.strip_prefix('\0') {
+    let path_rest = match path_str.strip_prefix('\0') {
         Some(status) => status.to_string(),
         None => format!("path: {}", path_str),
     };
     let agent_visible_len = " [Agent] ".len() + model.chars().count();
-    let path_visible_len = path_label.chars().count();
+    let path_visible_len = jobs_prefix.chars().count() + path_rest.chars().count();
 
     let status_pad_len = (width - 1).saturating_sub(agent_visible_len + path_visible_len);
     let status_padding = " ".repeat(status_pad_len);
 
+    // The job-count prefix gets its own BLUE so it stands out from the DIM
+    // path text next to it, instead of blending into the status line.
+    let colored_jobs_prefix = if bg_running > 0 {
+        format!("{BLUE}{jobs_prefix}{RESET}")
+    } else {
+        String::new()
+    };
+
     print!(
-        "{}{}{}{}{}",
-        agent_str, status_padding, DIM, path_label, RESET
+        "{}{}{}{}{}{}",
+        agent_str, status_padding, colored_jobs_prefix, DIM, path_rest, RESET
     );
 
     // Compute and draw suggestions
@@ -3289,10 +3455,12 @@ pub fn read_line_interactive(
             }
         } else {
             // Idle tick (no key event within the poll window) — a good place
-            // to surface any /bg job, or a linked-folder note write, that
-            // finished while the user was typing elsewhere, without
+            // to surface any /bg job, a background shell job (started via
+            // run_shell(background: true)), or a linked-folder note write,
+            // that finished while the user was typing elsewhere, without
             // disturbing whatever they're mid-edit on.
             let mut notices = jobs.take_notices();
+            notices.extend(mint_core::bg_shell::take_finished_notices());
             notices.extend(mint_core::take_linked_folder_notices());
             if !notices.is_empty() {
                 disable_raw_mode()?;
@@ -3331,6 +3499,23 @@ pub fn insert_image_placeholder(input_chars: &mut Vec<char>, cursor_pos: &mut us
     let placeholder_chars = placeholder.chars().collect::<Vec<_>>();
     input_chars.splice(*cursor_pos..*cursor_pos, placeholder_chars.iter().copied());
     *cursor_pos += placeholder_chars.len();
+}
+
+/// Renders a stored UTC RFC3339 timestamp (e.g. a cron job's `next_run`) in
+/// the local system timezone with an explicit offset, so `/cron list` shown
+/// in a terminal reads the same "when" a human means as the web/desktop
+/// app's already-localized display, instead of a raw UTC instant that looks
+/// like a different time even though it isn't. Falls back to the raw string
+/// if it doesn't parse as RFC3339 (defensive only — cron timestamps are
+/// always written by `CronStore` in that format).
+fn format_local_time(rfc3339: &str) -> String {
+    match chrono::DateTime::parse_from_rfc3339(rfc3339) {
+        Ok(utc_time) => utc_time
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M %:z")
+            .to_string(),
+        Err(_) => rfc3339.to_string(),
+    }
 }
 
 pub fn format_path_with_tilde(path: &Path) -> String {

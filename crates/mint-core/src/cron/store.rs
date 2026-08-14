@@ -127,6 +127,20 @@ impl CronStore {
         let mut jobs = self.list()?;
         jobs.push(job.clone());
         self.write(&jobs)?;
+
+        // Best-effort: give the task's conversation its name up front so it
+        // shows up in the sidebar immediately, titled, instead of waiting
+        // for the generic "New chat" -> first-message rename to happen on
+        // its first run. Not fatal if the memory store is unavailable — the
+        // scheduled task itself is still created either way.
+        if let Ok(memory) = crate::memory::MemoryStore::open_default() {
+            let _ = memory.ensure_named_chat_session(
+                &super::scheduler::chat_id_for_job(&job.id),
+                &job.name,
+                "conversation",
+            );
+        }
+
         Ok(job)
     }
 

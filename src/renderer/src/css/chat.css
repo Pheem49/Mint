@@ -14,8 +14,8 @@
   border: 1px solid var(--border);
   border-top-color: var(--border-light);
   border-left-color: var(--border-light);
-  border-radius: 16px;
-  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.24);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-md);
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -42,7 +42,7 @@
 
 .chat-container::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
 }
 
 .message {
@@ -123,10 +123,10 @@
   width: min(280px, calc(100vw - 48px));
   padding: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--panel-raised);
   color: var(--text-main);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.32);
+  box-shadow: var(--shadow-md);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   opacity: 1;
@@ -161,7 +161,7 @@
   height: 30px;
   margin-top: 8px;
   border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--text-main);
   font: inherit;
@@ -183,7 +183,7 @@
 
 .message-bubble {
   padding: 14px 18px;
-  border-radius: 18px;
+  border-radius: var(--radius-2xl);
   font-size: 0.95rem;
   line-height: 1.5;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
@@ -224,8 +224,8 @@
 .user-message .message-bubble {
   background: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 70%, #000000) 100%);
   color: white;
-  border-bottom-right-radius: 4px;
-  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 25%, transparent), inset 1px 1px 0 rgba(255, 255, 255, 0.2);
+  border-bottom-right-radius: var(--radius-xs);
+  box-shadow: var(--glow-accent-md), inset 1px 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .ai-message {
@@ -378,7 +378,7 @@
 .chat-inline-code {
   background: rgba(255, 255, 255, 0.08);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: monospace;
   font-size: 0.88em;
   color: #38bdf8;
@@ -393,8 +393,8 @@
   background: var(--panel-bg);
   backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  border-bottom-left-radius: 4px;
+  border-radius: var(--radius-2xl);
+  border-bottom-left-radius: var(--radius-xs);
   align-self: flex-start;
   max-width: fit-content;
 }
@@ -437,7 +437,7 @@
   max-height: 250px;
   background: color-mix(in srgb, var(--card-bg, #18191c) 92%, #000 8%);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
-  border-radius: 14px;
+  border-radius: var(--radius-2xl);
   box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(45, 212, 191, 0.15);
   display: flex;
   flex-direction: column;
@@ -475,7 +475,7 @@
   align-items: center;
   gap: 12px;
   padding: 9px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: transparent;
   border: none;
   text-align: left;
@@ -512,7 +512,7 @@
   color: var(--accent, #2dd4bf);
   background: rgba(45, 212, 191, 0.16);
   padding: 2px 7px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   flex-shrink: 0;
 }
 
@@ -578,7 +578,7 @@
   width: 28px;
   height: 28px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -594,7 +594,7 @@
   display: flex;
   gap: 12px;
   background: rgba(0, 0, 0, 0.15);
-  border-radius: 14px;
+  border-radius: var(--radius-2xl);
   padding: 6px;
   border: 1px solid var(--border);
   border-top: 1px solid var(--border-light);
@@ -642,7 +642,7 @@
   border: none;
   width: 44px;
   height: 40px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -691,7 +691,7 @@
   padding: 10px;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 0.85rem;
   display: flex;
   align-items: center;
@@ -765,7 +765,7 @@
 
 .approval-btn {
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-main);
   cursor: pointer;
   font-size: 0.82rem;
@@ -800,7 +800,7 @@
 .approval-option-btn {
   text-align: left;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-main);
   cursor: pointer;
@@ -892,7 +892,7 @@
 
 .agent-activity-status {
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--text-muted);
   font-size: 0.7rem;
   font-weight: 600;
@@ -970,7 +970,7 @@
 .agent-activity-list {
   display: grid;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   gap: 0;
   overflow: hidden;
 }
@@ -1171,7 +1171,7 @@
 
 .thinking-block {
   margin-bottom: 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(148, 163, 184, 0.04);
   overflow: hidden;
@@ -1355,7 +1355,7 @@ input:checked + .slider:before {
 }
 
 .slider.round {
-  border-radius: 20px;
+  border-radius: var(--radius-3xl);
 }
 
 .slider.round:before {
@@ -1388,21 +1388,25 @@ input:checked + .slider:before {
 .suggestion-card {
   background: var(--panel-bg);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-2xl);
   padding: 16px 20px;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 16px;
   transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-xs);
 }
 
 .suggestion-card:hover {
-  background: rgba(143, 108, 245, 0.08);
+  /* background/shadow were a fixed purple (rgba(143, 108, 245, ...))
+     unrelated to border-color right below, which already used
+     var(--accent) — switched both to match so the whole hover state
+     tracks whatever accent color the user picks. */
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   border-color: var(--accent);
   transform: translateY(-3px);
-  box-shadow: 0 10px 25px rgba(143, 108, 245, 0.15);
+  box-shadow: 0 10px 25px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .suggestion-icon {
@@ -1489,7 +1493,7 @@ input:checked + .slider:before {
 
 .message-bubble {
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 0.9rem;
   line-height: 1.48;
   box-shadow: none;
@@ -1513,7 +1517,7 @@ input:checked + .slider:before {
 .user-message .message-bubble {
   background: linear-gradient(135deg, var(--surface-strong), color-mix(in srgb, var(--accent) 16%, var(--surface-strong)));
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--text-main);
   box-shadow: none;
 }
@@ -1551,7 +1555,7 @@ input:checked + .slider:before {
   margin: 0 0 8px 2px;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--input-bg);
   color: var(--text-soft);
   font-size: 0.86rem;
@@ -1579,7 +1583,7 @@ input:checked + .slider:before {
   background: var(--input-bg);
   border: 1px solid var(--border);
   border-bottom: 0;
-  border-radius: 14px 14px 0 0;
+  border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -1613,7 +1617,7 @@ input:checked + .slider:before {
   width: 8px;
   height: 8px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--accent);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
 }
@@ -1661,7 +1665,7 @@ input:checked + .slider:before {
   padding: 8px;
   background: var(--input-bg);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-2xl);
   box-shadow: none;
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -1700,7 +1704,7 @@ input:checked + .slider:before {
   height: 80px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface-strong) 78%, rgba(0, 0, 0, 0.22));
 }
 
@@ -1781,7 +1785,7 @@ input:checked + .slider:before {
 #screen-capture-btn {
   width: 32px;
   height: 32px;
-  border-radius: 16px;
+  border-radius: var(--radius-2xl);
   background: var(--surface-strong);
   color: var(--text-soft);
 }
@@ -1870,8 +1874,8 @@ input:checked + .slider:before {
   padding: 8px;
   background: color-mix(in srgb, var(--panel-raised) 92%, #000 8%);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(45, 212, 191, 0.12);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-md), 0 0 0 1px rgba(45, 212, 191, 0.12);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   transform-origin: bottom left;
@@ -1888,7 +1892,7 @@ input:checked + .slider:before {
   gap: 8px;
   padding: 0 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: transparent;
   color: var(--text-main);
   font: inherit;
@@ -1920,7 +1924,7 @@ input:checked + .slider:before {
   padding: 0 24px 0 6px;
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--text-soft);
   cursor: pointer;
   font-family: inherit;
@@ -1981,7 +1985,7 @@ input:checked + .slider:before {
   grid-row: 3;
   width: 32px;
   height: 32px;
-  border-radius: 16px;
+  border-radius: var(--radius-2xl);
   background: var(--surface-strong);
   color: var(--text-soft);
   border: none;
@@ -2012,7 +2016,7 @@ input:checked + .slider:before {
 #send-btn {
   background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   color: white;
-  box-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 28%, transparent);
+  box-shadow: var(--glow-accent-md);
 }
 
 #send-btn:hover,
@@ -2090,13 +2094,13 @@ input:checked + .slider:before {
   padding: 4px 14px;
   background: var(--panel-raised, rgba(30, 41, 59, 0.6));
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
   color: var(--text-soft, #94a3b8);
   font-size: 0.78rem;
   font-weight: 500;
   margin: 0 12px;
   white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-xs);
 }
 
 [data-theme="light"] .system-event-pill {
@@ -2140,7 +2144,7 @@ input:checked + .slider:before {
   border: none;
   color: var(--text-soft, #94a3b8);
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   display: inline-flex;
   align-items: center;

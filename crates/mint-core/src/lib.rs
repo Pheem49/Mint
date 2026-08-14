@@ -3,6 +3,7 @@
 pub mod agent_loop;
 pub mod auth;
 pub mod auto_shorts;
+pub mod bg_shell;
 pub mod browser;
 pub mod calculation;
 pub mod chat;
@@ -98,7 +99,8 @@ pub use mcp::{
     McpError, McpServer, add_mcp_server, call_configured_mcp_tool, call_mcp_tool,
     clear_mcp_servers, close_all_mcp_sessions, close_mcp_session, configured_mcp_servers,
     drain_mcp_notifications, get_server_prompt, list_mcp_servers, list_server_prompts,
-    list_server_resources, list_server_tools, read_server_resource, remove_mcp_server,
+    list_server_resources, list_server_tools, read_server_resource, reauth_mcp_server,
+    remove_mcp_server,
 };
 pub use memory::{
     CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, InteractionMemory, LearnedSkill,

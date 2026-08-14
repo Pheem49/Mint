@@ -44,6 +44,9 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "browser_mouse_move",
     "browser_screenshot",
     "run_shell",
+    // Read-only poll of a background job's buffered output; the run_shell
+    // call that started it is still gated to read-only commands above.
+    "shell_output",
 ];
 
 /// The full set of coding-agent actions before plan-mode/disabled-tools/browser

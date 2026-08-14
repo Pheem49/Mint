@@ -58,7 +58,6 @@
     "mint": "src/bin/index.js"
   },
   "dependencies": {
-    "@pouyanafisi/gmail-mcp": "^2.0.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@vitejs/plugin-react": "^6.0.1",

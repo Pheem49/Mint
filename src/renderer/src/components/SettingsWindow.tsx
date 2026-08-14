@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { getProfileValue, setProfileValue, setActiveModel, authUpdateProfile } from '../tauri'
 import { useAuthUser } from '../../shared/components/AuthGate'
 import GeneralTab from './Settings/GeneralTab'
@@ -181,10 +181,20 @@ export default function SettingsWindow() {
   const { user: authUser, refreshUser } = useAuthUser()
   const [profileName, setProfileName] = useState('')
   const [profileImageUrl, setProfileImageUrl] = useState('')
+  // Seeds the fields from the signed-in user exactly once. `authUser` is
+  // refetched (as a new object) on every AuthGate mount, e.g. a page
+  // reload — without this guard, that refetch would fire on every such
+  // change and clobber whatever the user has typed but not yet saved with
+  // "Save Settings", resetting it back to the last-saved (possibly empty)
+  // server value.
+  const profileSeededRef = useRef(false)
 
   useEffect(() => {
-    setProfileName(authUser?.name || '')
-    setProfileImageUrl(authUser?.image || '')
+    if (authUser && !profileSeededRef.current) {
+      setProfileName(authUser.name || '')
+      setProfileImageUrl(authUser.image || '')
+      profileSeededRef.current = true
+    }
   }, [authUser])
   
   // Custom model helpers for all providers

@@ -69,7 +69,7 @@
   padding: 10px 12px;
   background: rgba(30, 41, 59, 0.4);
   border: 1px solid rgba(148, 163, 184, 0.1);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -113,7 +113,7 @@
   opacity: 0.6;
   padding: 4px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -156,7 +156,7 @@
 .workflow-name-input {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: #f8fafc;
   font-size: 1.1rem;
   font-weight: 600;
@@ -185,11 +185,11 @@
 .custom-node {
   background: var(--panel-bg);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 14px;
   color: var(--text-main);
   width: 280px;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  box-shadow: var(--shadow-md);
   backdrop-filter: var(--glass-blur);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -251,7 +251,7 @@
 .node-select {
   background: var(--input-bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
   color: #f1f5f9;
   font-size: 0.85rem;
@@ -334,7 +334,7 @@
   padding: 10px;
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   border: 1px dashed color-mix(in srgb, var(--accent) 40%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--accent);
   font-size: 0.85rem;
   font-weight: 500;
@@ -351,7 +351,7 @@
   background: var(--accent);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 16px;
   font-size: 0.85rem;
   font-weight: 500;
@@ -367,7 +367,7 @@
   background: rgba(30, 41, 59, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.2);
   color: #cbd5e1;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 16px;
   font-size: 0.85rem;
   font-weight: 500;
@@ -393,7 +393,7 @@
 .field-hint code {
   background: rgba(15, 23, 42, 0.6);
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: monospace;
   color: var(--accent);
 }
@@ -403,7 +403,7 @@
   background: rgba(30, 41, 59, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.2);
   color: #cbd5e1;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 12px;
   font-size: 0.85rem;
   font-weight: 500;
@@ -477,7 +477,7 @@
   padding: 4px;
   display: flex;
   align-items: center;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .workflow-help-close-btn:hover {
@@ -537,6 +537,6 @@
 .help-steps code {
   background: rgba(255, 255, 255, 0.06);
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--accent);
 }

@@ -1,15 +1,22 @@
 /* web: app-shell.css — split from styles.css, rules kept in original order */
 
 :root {
-  --bg-color: #0b0b0c;
-  --bg-gradient: #0b0b0c;
-  --panel-bg: #1d1d1f;
-  --panel-raised: #242426;
-  --panel-soft: #151516;
-  --chrome-bg: #171718;
-  --surface-bg: #1f1f21;
-  --surface-strong: #333335;
-  --input-bg: #242425;
+  /* Surface ladder — same relative order as before (bg < panel-soft <
+     chrome-bg < panel-bg < surface-bg < input-bg < panel-raised <
+     surface-strong), just spaced further apart. The old values sat within
+     ~25 points of each other on a 0-255 scale (input-bg and panel-raised
+     were literally the same lightness), so adjacent layers — a panel next
+     to the surface behind it, an input next to its panel — were hard to
+     tell apart. Each step here is a clear ~6-12 point jump. */
+  --bg-color: #0a0a0b;
+  --bg-gradient: #0a0a0b;
+  --panel-bg: #1e1e20;
+  --panel-raised: #343436;
+  --panel-soft: #121214;
+  --chrome-bg: #18181a;
+  --surface-bg: #252527;
+  --surface-strong: #404042;
+  --input-bg: #2c2c2e;
   --text-main: #e8e8ea;
   --text-muted: #8f8f94;
   --text-soft: #d1d1d4;
@@ -30,6 +37,43 @@
   --hover-edit-bg: rgba(99, 102, 241, 0.12);
   --close-btn-hover-bg: #3a2020;
   --close-btn-hover-color: #ff8a8a;
+
+  /* Radius scale — same across all themes. Values are the dominant sizes
+     already in use across the app; stray one-off values (5px, 7px, 9px,
+     11px, 14px, 18px, 24px, 99px, 9999px, ...) were consolidated onto the
+     nearest step here so cards/buttons/panels of the same visual weight
+     share the same corner radius. Sub-4px radii are left as raw px values
+     where they appear — those are deliberate micro-details (e.g. a small
+     square-ish status dot), not part of this scale. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+  --radius-full: 999px;
+
+  /* Elevation scale — border-first: most resting surfaces lean on --border
+     (or --border-light) for their edge and don't need a shadow at all
+     (--shadow itself is `none` in dark mode). These tokens are for the
+     minority of cases that do want a lift — a toolbar raised above
+     scrolling content, a dropdown, a modal — consolidated from a long tail
+     of one-off rgba(0,0,0,N) values that varied in blur/opacity for no
+     reason tied to their actual elevation. --glow-accent-* replaces
+     one-off `color-mix(in srgb, var(--accent) NN%, transparent)` shadows
+     used for accent-tinted hover/active glows (buttons, chips) — capped
+     around ~28% so the glow reads as an accent, not a flash. Reserve
+     --shadow-lg for real modals/dialogs; @keyframes pulse/breathe rings
+     (status/recording/voice-active indicators) are a different thing —
+     motion communicating state, not elevation — and are left alone. */
+  --shadow-xs: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.16);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.22);
+  --shadow-lg: 0 20px 40px rgba(0, 0, 0, 0.5);
+  --glow-accent-xs: 0 2px 8px color-mix(in srgb, var(--accent) 15%, transparent);
+  --glow-accent-sm: 0 4px 14px color-mix(in srgb, var(--accent) 22%, transparent);
+  --glow-accent-md: 0 6px 18px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 [data-theme="light"] {
@@ -157,7 +201,7 @@ body {
   height: 22px;
   flex: 0 0 22px;
   object-fit: contain;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   user-select: none;
   -webkit-user-drag: none;
   filter: none;
@@ -344,7 +388,7 @@ h1 {
   width: min(1180px, 95vw);
   max-height: 92vh;
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   box-shadow: 0 30px 80px rgba(0,0,0,0.6);
 }
 
@@ -484,7 +528,7 @@ h1 {
   padding: 12px 16px 14px;
   position: relative;
   z-index: 5;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-sm);
 }
 
 .proactive-bar::before {
@@ -537,7 +581,7 @@ h1 {
   cursor: pointer;
   font-size: 0.85rem;
   padding: 2px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   transition: all 0.2s;
   flex-shrink: 0;
 }
@@ -559,7 +603,7 @@ h1 {
   -webkit-app-region: no-drag;
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-  border-radius: 20px;
+  border-radius: var(--radius-3xl);
   color: var(--text-main);
   cursor: pointer;
   font-family: inherit;
@@ -570,7 +614,7 @@ h1 {
   animation: chipPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
   opacity: 0;
   transform: scale(0.8);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-xs);
 }
 
 @keyframes chipPop {
@@ -581,7 +625,7 @@ h1 {
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, #000000));
   border-color: rgba(255, 255, 255, 0.3);
   color: white;
-  box-shadow: 0 6px 15px color-mix(in srgb, var(--accent) 40%, transparent), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  box-shadow: var(--glow-accent-md), inset 0 1px 1px rgba(255, 255, 255, 0.2);
   transform: translateY(-3px) scale(1.05);
 }
 
@@ -966,8 +1010,8 @@ h1 {
   max-width: 520px;
   background: var(--surface-strong, #1e293b);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  border-radius: 12px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1025,7 +1069,7 @@ h1 {
   align-items: center;
   justify-content: center;
   padding: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   transition: color 0.15s ease, background 0.15s ease;
 }
 
@@ -1051,7 +1095,7 @@ h1 {
   gap: 10px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--text-main, #f8fafc);
   padding: 10px 14px;
   cursor: pointer;
@@ -1092,7 +1136,7 @@ h1 {
   gap: 10px;
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--text-soft, #94a3b8);
   padding: 8px 12px;
   cursor: pointer;

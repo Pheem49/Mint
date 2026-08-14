@@ -284,6 +284,31 @@ export async function detectSystemTools(): Promise<DetectedTools> {
   return invoke<DetectedTools>('detect_system_tools')
 }
 
+/**
+ * Re-runs a configured MCP server's OAuth login in the foreground — fixes a
+ * stale/expired refresh token (e.g. `invalid_grant` from a Gmail MCP
+ * server). Opens the OAuth URL in the user's browser and blocks server-side
+ * until the flow completes, so callers should keep the UI responsive
+ * (disable just the triggering button) rather than blocking the whole view.
+ */
+export async function reauthMcpServer(serverName: string): Promise<boolean> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase()
+    const res = await authFetch(`${API_BASE}/mcp/reauth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serverName }),
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) {
+      throw new Error(data?.error || `Re-authentication failed: HTTP ${res.status}`)
+    }
+    return Boolean(data?.success)
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<boolean>('reauth_mcp_server', { serverName })
+}
+
 export async function sendChatMessage(
   message: string,
   imageDataUri?: string | null,

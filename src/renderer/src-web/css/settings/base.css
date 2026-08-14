@@ -97,7 +97,7 @@ button {
     overflow: hidden;
     background: var(--panel-bg);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     opacity: 1;
 }
@@ -143,7 +143,7 @@ button {
     width: 34px;
     height: 34px;
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     background: var(--surface-strong);
     color: var(--accent-hover);
     font-size: 1rem;
@@ -173,7 +173,7 @@ h1 {
     width: 32px;
     height: 32px;
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
@@ -211,7 +211,7 @@ h1 {
     gap: 10px;
     padding: 9px 10px;
     border: 1px solid transparent;
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
@@ -289,7 +289,7 @@ h1 {
 .settings-content::-webkit-scrollbar-thumb,
 .settings-sidebar::-webkit-scrollbar-thumb {
     background: var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
 }
 
 .tab-pane {
@@ -424,7 +424,7 @@ textarea {
     min-height: 32px;
     padding: 6px 10px;
     border: 1px solid var(--border);
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     outline: none;
     background: var(--input-bg);
     color: var(--text-main);
@@ -484,7 +484,7 @@ input[type="color"] {
     height: 34px;
     padding: 3px;
     border: 1px solid var(--border);
-    border-radius: 9px;
+    border-radius: var(--radius-md);
     background: var(--input-bg);
     cursor: pointer;
 }
@@ -500,7 +500,7 @@ input[type="color"] {
 
 #sect-theme select {
     height: 36px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     background: var(--input-bg);
 }
 
@@ -516,7 +516,7 @@ input[type="color"] {
     width: 42px;
     min-width: 42px;
     border: 1px solid var(--border);
-    border-radius: 9px;
+    border-radius: var(--radius-md);
     background: var(--input-bg);
     color: var(--text-muted);
     cursor: pointer;
@@ -557,7 +557,7 @@ input[type="color"] {
     min-height: 58px;
     padding: 10px 12px;
     border: 1px solid var(--border);
-    border-radius: 11px;
+    border-radius: var(--radius-lg);
     background: transparent;
 }
 
@@ -598,7 +598,7 @@ input[type="color"] {
     cursor: pointer;
     background: var(--input-bg);
     border: 1px solid var(--border-strong);
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     transition: background 0.18s, border-color 0.18s;
 }
 
@@ -647,7 +647,7 @@ input:checked + .settings-toggle-slider::before {
 
 .range-slider::-webkit-slider-runnable-track {
     height: 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     background: var(--border-strong);
 }
 
@@ -660,14 +660,14 @@ input:checked + .settings-toggle-slider::before {
     border: 3px solid var(--panel-bg);
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.5), 0 6px 16px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.5), var(--shadow-sm);
 }
 
 .range-value {
     min-width: 68px;
     padding: 5px 9px;
     border: 1px solid rgba(16, 185, 129, 0.3);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     background: var(--accent-soft);
     color: var(--accent-hover);
     font-size: 0.78rem;
@@ -690,7 +690,7 @@ input:checked + .settings-toggle-slider::before {
 .btn-disconnect {
     min-height: 38px;
     padding: 9px 15px;
-    border-radius: 9px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     font-size: 0.86rem;
     font-weight: 600;
@@ -768,7 +768,7 @@ input:checked + .settings-toggle-slider::before {
     right: 10px;
     width: 8px;
     height: 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-full);
     background: var(--accent);
     box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 70%, transparent);
 }
@@ -814,7 +814,7 @@ input:checked + .settings-toggle-slider::before {
 .mcp-empty {
     padding: 16px;
     border: 1px dashed var(--border);
-    border-radius: 11px;
+    border-radius: var(--radius-lg);
     color: var(--text-muted);
     font-size: 0.82rem;
     text-align: center;
@@ -827,7 +827,7 @@ input:checked + .settings-toggle-slider::before {
     gap: 14px;
     padding: 12px;
     border: 1px solid var(--border);
-    border-radius: 11px;
+    border-radius: var(--radius-lg);
     background: var(--surface-bg);
 }
 
@@ -855,7 +855,7 @@ kbd {
     min-width: 30px;
     padding: 4px 8px;
     border: 1px solid var(--border-strong);
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     background: var(--input-bg);
     color: var(--accent-hover);
     font-family: 'Outfit', sans-serif;
@@ -955,7 +955,7 @@ kbd {
     margin: 0 2px 16px;
     padding: 7px 10px;
     border: 1px solid var(--border);
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     background: var(--input-bg);
     color: var(--text-muted);
 }

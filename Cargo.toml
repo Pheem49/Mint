@@ -39,9 +39,9 @@ srtlib = "0.1"
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time", "signal"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
-tree-sitter = "0.20.10"
-tree-sitter-rust = "0.20.3"
-tree-sitter-typescript = "0.20.3"
+tree-sitter = "0.26"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
 uuid = { version = "1", features = ["v4"] }
 
 

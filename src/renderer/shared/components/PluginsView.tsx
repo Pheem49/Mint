@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import '../css/management-views.css'
-import { renderMcpSvgIcon, BUILTIN_PLUGINS_LIST, renderPluginsSvgIcon } from '../constants/plugins'
+import { renderMcpSvgIcon, BUILTIN_PLUGINS_LIST, renderPluginsSvgIcon, type BuiltinPluginDefinition } from '../constants/plugins'
 import {
   getOAuthStatuses,
   startOAuthFlow,
@@ -22,7 +22,7 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
 }) {
   const [oauthStatuses, setOauthStatuses] = useState<OAuthStatus[]>([])
   const [authenticatingProvider, setAuthenticatingProvider] = useState<string | null>(null)
-  const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null)
+  const [detailPlugin, setDetailPlugin] = useState<BuiltinPluginDefinition | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
 
   const fetchOAuthStatuses = async () => {
@@ -44,20 +44,27 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
     }
   }, [])
 
+  const pluginsList = BUILTIN_PLUGINS_LIST
+
+  const openForConfig = (pluginKey: string) => {
+    const plugin = pluginsList.find((item) => item.key === pluginKey)
+    if (plugin) setDetailPlugin(plugin)
+  }
+
   const handleConnectOAuth = async (provider: string, pluginKey?: string) => {
     if (provider === 'spotify' && !(config as any).spotifyClientId?.trim()) {
-      setExpandedPlugin(pluginKey || 'spotify')
-      alert('Please click "Configure" below and enter your Spotify Client ID before signing in (Get it from developer.spotify.com/dashboard)')
+      openForConfig(pluginKey || 'spotify')
+      alert('Please enter your Spotify Client ID below before signing in (get it from developer.spotify.com/dashboard)')
       return
     }
     if (provider === 'github' && !(config as any).githubClientId?.trim() && !(config as any).githubToken?.trim()) {
-      setExpandedPlugin(pluginKey || 'github')
-      alert('Please click "Configure" below and enter your GitHub Client ID (or Personal Access Token) before signing in.')
+      openForConfig(pluginKey || 'github')
+      alert('Please enter your GitHub Client ID (or Personal Access Token) below before signing in.')
       return
     }
     if (provider === 'vercel' && !(config as any).vercelClientId?.trim() && !(config as any).vercelToken?.trim()) {
-      setExpandedPlugin(pluginKey || 'vercel')
-      alert('Please click "Configure" below and enter your Vercel Client ID (or Access Token) before signing in.')
+      openForConfig(pluginKey || 'vercel')
+      alert('Please enter your Vercel Client ID (or Access Token) below before signing in.')
       return
     }
     if (
@@ -65,8 +72,8 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
       !(config as any).gmailClientId?.trim() &&
       !(config as any).googleCalendarClientId?.trim()
     ) {
-      setExpandedPlugin(pluginKey || 'gmail')
-      alert('Please click "Configure" below and enter your Google Client ID before signing in.')
+      openForConfig(pluginKey || 'gmail')
+      alert('Please enter your Google Client ID below before signing in.')
       return
     }
 
@@ -90,17 +97,13 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
     }
   }
 
-  const toggleExpand = (key: string) => {
-    setExpandedPlugin((prev) => (prev === key ? null : key))
-  }
-
-  const pluginsList = BUILTIN_PLUGINS_LIST
-
   const filteredPlugins = pluginsList.filter(
     (p) =>
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.desc.toLowerCase().includes(searchQuery.toLowerCase())
   )
+
+  const installedPlugins = pluginsList.filter((p) => Boolean((config as any)[p.enabledField]))
 
   return (
     <div className="management-container">
@@ -144,185 +147,176 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
         </div>
       </div>
 
+      {/* Installed */}
+      {installedPlugins.length > 0 && (
+        <div className="management-installed-section">
+          <h2 className="management-section-title">Installed</h2>
+          <div className="management-installed-row">
+            {installedPlugins.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                className="management-plugin-avatar"
+                title={p.name}
+                onClick={() => setDetailPlugin(p)}
+              >
+                {renderMcpSvgIcon(p.key)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Plugin Grid */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <h2 className="management-section-title">Recommended</h2>
+      <div className="management-grid">
         {filteredPlugins.map((p) => {
           const isEnabled = Boolean((config as any)[p.enabledField])
-          const isExpanded = expandedPlugin === p.key
+          const oauthMatch = p.isOAuth ? oauthStatuses.find((s) => s.provider === p.oauthProvider) : undefined
+          const isConn = Boolean(oauthMatch?.connected)
 
           return (
             <div
               key={p.key}
-              style={{
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '12px',
-                background: 'rgba(255, 255, 255, 0.03)',
-                overflow: 'hidden',
-                transition: 'all 0.15s ease',
-              }}
+              className="management-plugin-row"
+              onClick={() => setDetailPlugin(p)}
             >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '16px 20px',
-                  background: isEnabled ? 'rgba(16, 185, 129, 0.04)' : 'transparent',
-                  flexWrap: 'wrap',
-                  gap: '12px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0 }}>
-                  <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: 'rgba(255, 255, 255, 0.06)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                    {renderMcpSvgIcon(p.key)}
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#f8fafc' }}>
-                        {p.name}
-                      </span>
-                      {p.isOAuth && (() => {
-                        const oauthMatch = oauthStatuses.find((s) => s.provider === p.oauthProvider)
-                        const isConn = oauthMatch?.connected
-                        return (
-                          <span
-                            style={{
-                              fontSize: '0.72rem',
-                              padding: '2px 8px',
-                              borderRadius: '6px',
-                              background: isConn ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                              color: isConn ? '#10b981' : '#94a3b8',
-                              border: `1px solid ${isConn ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`,
-                              fontWeight: 600,
-                              whiteSpace: 'nowrap',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '5px',
-                            }}
-                          >
-                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isConn ? '#10b981' : '#94a3b8' }} />
-                            {isConn ? `Connected ${oauthMatch.accountEmail ? `(${oauthMatch.accountEmail})` : ''}` : 'Not Connected'}
-                          </span>
-                        )
-                      })()}
-                    </div>
-                    <div style={{ fontSize: '0.82rem', color: '#94a3b8', marginTop: '3px' }}>
-                      {p.desc}
-                    </div>
-                  </div>
+              <div className="management-card-icon" style={{ background: 'rgba(255, 255, 255, 0.06)', borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+                {renderMcpSvgIcon(p.key)}
+              </div>
+              <div className="management-plugin-info">
+                <div className="management-plugin-name">
+                  {p.name}
+                  {p.isOAuth && <span className={`management-dot ${isConn ? 'connected' : ''}`} title={isConn ? 'Connected' : 'Not connected'} />}
                 </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, marginLeft: 'auto' }}>
-                  {p.isOAuth && (() => {
-                    const oauthMatch = oauthStatuses.find((s) => s.provider === p.oauthProvider)
-                    const isConn = oauthMatch?.connected
-                    return isConn ? (
-                      <button
-                        type="button"
-                        onClick={() => handleRevokeOAuth(p.oauthProvider!)}
-                        style={{
-                          padding: '6px 12px',
-                          fontSize: '0.8rem',
-                          borderRadius: '8px',
-                          border: '1px solid rgba(239, 68, 68, 0.3)',
-                          background: 'rgba(239, 68, 68, 0.1)',
-                          color: '#ef4444',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Disconnect
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleConnectOAuth(p.oauthProvider!, p.key)}
-                        disabled={authenticatingProvider === p.oauthProvider}
-                        style={{
-                          padding: '6px 14px',
-                          fontSize: '0.8rem',
-                          borderRadius: '8px',
-                          border: 'none',
-                          background: '#10b981',
-                          color: '#ffffff',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                        }}
-                      >
-                        {authenticatingProvider === p.oauthProvider ? 'Signing In...' : 'Sign In'}
-                      </button>
-                    )
-                  })()}
-
-                  {p.hasCredentials && (
-                    <button
-                      type="button"
-                      className="management-action-btn"
-                      onClick={() => toggleExpand(p.key)}
-                    >
-                      Configure
-                    </button>
-                  )}
-
-                  <label className="settings-toggle-switch" title={isEnabled ? 'Disable plugin' : 'Enable plugin'}>
-                    <input
-                      type="checkbox"
-                      checked={isEnabled}
-                      onChange={(e) => {
-                        updateField(p.enabledField as any, e.target.checked)
-                      }}
-                    />
-                    <span className="settings-toggle-slider" />
-                  </label>
-                </div>
+                <div className="management-plugin-desc">{p.desc}</div>
               </div>
 
-              {p.hasCredentials && isExpanded && (
-                <div
-                  style={{
-                    padding: '20px',
-                    borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-                    background: 'rgba(0, 0, 0, 0.2)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '12px',
+              {isEnabled ? (
+                <button
+                  type="button"
+                  className="management-plugin-icon-btn"
+                  title="View details"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setDetailPlugin(p)
                   }}
                 >
-                  <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: '#10b981', textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0 }}>
-                    Credentials Configuration
-                  </h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
-                    {p.fields?.map((f) => (
-                      <div key={f.field}>
-                        <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px' }}>{f.label}</label>
-                        <input
-                          type={f.type}
-                          placeholder={f.placeholder}
-                          value={(config as any)[f.field] || ''}
-                          onChange={(e) => updateField(f.field as any, e.target.value)}
-                          style={{
-                            width: '100%',
-                            padding: '10px 14px',
-                            borderRadius: '8px',
-                            border: '1px solid rgba(255, 255, 255, 0.1)',
-                            background: 'rgba(255, 255, 255, 0.04)',
-                            color: '#f8fafc',
-                            fontSize: '0.88rem',
-                            boxSizing: 'border-box',
-                          }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="5" cy="12" r="2" />
+                    <circle cx="12" cy="12" r="2" />
+                    <circle cx="19" cy="12" r="2" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="management-plugin-icon-btn"
+                  title="Enable"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    updateField(p.enabledField as any, true)
+                    setDetailPlugin(p)
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </button>
               )}
             </div>
           )
         })}
       </div>
+
+      {/* Plugin Detail */}
+      {detailPlugin && (() => {
+        const p = detailPlugin
+        const isEnabled = Boolean((config as any)[p.enabledField])
+        const oauthMatch = p.isOAuth ? oauthStatuses.find((s) => s.provider === p.oauthProvider) : undefined
+        const isConn = Boolean(oauthMatch?.connected)
+
+        return (
+          <div className="management-modal-overlay" onClick={() => setDetailPlugin(null)}>
+            <div className="management-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="management-modal-header">
+                <div className="management-card-title-group">
+                  <div className="management-card-icon" style={{ width: 44, height: 44, background: 'rgba(255, 255, 255, 0.06)', borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+                    {renderMcpSvgIcon(p.key)}
+                  </div>
+                  <h2 className="management-modal-title">{p.name}</h2>
+                </div>
+                <button type="button" className="management-modal-close" onClick={() => setDetailPlugin(null)}>
+                  ✕
+                </button>
+              </div>
+
+              <div className="management-modal-body">
+                <p style={{ color: 'var(--text-soft, #d1d1d4)', lineHeight: 1.55 }}>{p.desc}</p>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '16px', flexWrap: 'wrap' }}>
+                  <label className="settings-toggle-switch" title={isEnabled ? 'Disable plugin' : 'Enable plugin'}>
+                    <input
+                      type="checkbox"
+                      checked={isEnabled}
+                      onChange={(e) => updateField(p.enabledField as any, e.target.checked)}
+                    />
+                    <span className="settings-toggle-slider" />
+                  </label>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted, #94a3b8)' }}>
+                    {isEnabled ? 'Enabled' : 'Disabled'}
+                  </span>
+
+                  {p.isOAuth &&
+                    (isConn ? (
+                      <button
+                        type="button"
+                        className="management-action-btn danger"
+                        style={{ marginLeft: 'auto' }}
+                        onClick={() => handleRevokeOAuth(p.oauthProvider!)}
+                      >
+                        Disconnect{oauthMatch?.accountEmail ? ` (${oauthMatch.accountEmail})` : ''}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="management-primary-btn"
+                        style={{ marginLeft: 'auto' }}
+                        onClick={() => handleConnectOAuth(p.oauthProvider!, p.key)}
+                        disabled={authenticatingProvider === p.oauthProvider}
+                      >
+                        {authenticatingProvider === p.oauthProvider ? 'Signing In...' : 'Sign In'}
+                      </button>
+                    ))}
+                </div>
+
+                {p.hasCredentials && p.fields && (
+                  <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border, rgba(255, 255, 255, 0.08))' }}>
+                    <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent, #10b981)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 12px' }}>
+                      Credentials
+                    </h4>
+                    <div style={{ display: 'grid', gap: '12px' }}>
+                      {p.fields.map((f) => (
+                        <div key={f.field} className="management-form-group">
+                          <label className="management-label">{f.label}</label>
+                          <input
+                            type={f.type}
+                            className="management-input-field"
+                            placeholder={f.placeholder}
+                            value={(config as any)[f.field] || ''}
+                            onChange={(e) => updateField(f.field as any, e.target.value)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 })

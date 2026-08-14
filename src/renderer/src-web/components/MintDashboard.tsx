@@ -103,6 +103,7 @@ import {
   addLearnedSkill,
   deleteLearnedSkill,
   detectSystemTools,
+  reauthMcpServer,
   setProfileValue,
   listCronJobs,
   addCronJob,
@@ -1112,6 +1113,7 @@ export default function MintDashboard() {
               handleAddMcpServer={handleAddMcpServer}
               handleRemoveMcpServer={handleRemoveMcpServer}
               detectTools={detectSystemTools}
+              onReauth={reauthMcpServer}
             />
           </div>
         )}

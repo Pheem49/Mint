@@ -39,8 +39,9 @@ use mint_core::{
     delete_subagent as core_delete_subagent, get_user, google_tts_urls, list_saved_pictures,
     list_subagents as core_list_subagents, load_config, load_workflows, login_user,
     orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    propose_code_edits, register_user, save_avatar_file, save_chat_images, save_config,
-    save_subagent as core_save_subagent, save_workflows, start_channels, start_cron_scheduler,
+    propose_code_edits, reauth_mcp_server as core_reauth_mcp_server, register_user,
+    save_avatar_file, save_chat_images, save_config, save_subagent as core_save_subagent,
+    save_workflows, start_channels, start_cron_scheduler,
     start_gemini_live_session as core_start_gemini_live_session, update_profile, weather,
     workflows_path,
 };
@@ -143,6 +144,19 @@ async fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, 
     tokio::task::spawn_blocking(move || build_workspace_tree(path))
         .await
         .map_err(|error| format!("workspace tree task failed: {error}"))?
+}
+
+/// Re-runs a configured MCP server's OAuth login in the foreground (fixes an
+/// expired/invalid refresh token, e.g. `invalid_grant` from a Gmail MCP
+/// server). The underlying core call is blocking (spawns a child process and
+/// waits on it while streaming its output), so it runs on a blocking thread
+/// pool task rather than the async runtime.
+#[tauri::command]
+async fn reauth_mcp_server(server_name: String) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || core_reauth_mcp_server(&server_name))
+        .await
+        .map_err(|error| format!("reauth task failed: {error}"))?
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1652,6 +1666,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
             detect_system_tools,
+            reauth_mcp_server,
             get_workspace_tree,
             create_workspace_file,
             create_workspace_folder,
