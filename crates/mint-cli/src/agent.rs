@@ -317,7 +317,7 @@ pub async fn run_code_agent_with_options(
                 && let Ok(mut status) = progress_live_status.lock()
             {
                 commit_activity_snapshot(&mut status);
-                print_timeline_note(&thought);
+                print_timeline_note(&mut status, &thought);
                 status.thinking = None;
                 render_live_status(&mut status);
             }
@@ -963,6 +963,41 @@ struct InlineTui {
     height: u16,
 }
 
+/// Set for the duration of a `ratatui`/`crossterm` cursor-position query
+/// (see [`with_raw_mode_for_cursor_query`]) so [`wait_for_escape_interrupt`]
+/// — which polls the *same* stdin for an Esc key every 80ms for the entire
+/// agent turn — knows to back off instead of racing to read the terminal's
+/// `\x1b[row;colR` reply first. Without this, `event::read()` over there
+/// can consume the reply before the query's own reader sees it (it doesn't
+/// look like a recognized key event so it's silently swallowed), leaving
+/// the query to time out or read whatever garbled remainder is left —
+/// which is what the literal `^[[49;9R` text some users saw came from.
+static CURSOR_QUERY_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Runs `f` with raw mode temporarily forced on, restoring whatever state
+/// was in effect before. Any `ratatui`/`crossterm` call that queries the
+/// terminal's cursor position sends `\x1b[6n` and reads the reply off
+/// stdin — a reply that only reaches that read if raw mode is on; in cooked
+/// mode the terminal instead local-echoes it as literal `^[[row;colR` text
+/// into whatever's currently on screen. The rest of the interactive loop
+/// only enables raw mode while reading a key, not during agent-turn output
+/// (where the inline-viewport code runs), so every such call has to
+/// bracket it like this itself. Also claims [`CURSOR_QUERY_ACTIVE`] for the
+/// duration, so the Esc-watcher doesn't steal the reply off stdin.
+fn with_raw_mode_for_cursor_query<T>(f: impl FnOnce() -> T) -> T {
+    CURSOR_QUERY_ACTIVE.store(true, Ordering::Relaxed);
+    let was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
+    if !was_raw {
+        let _ = crossterm::terminal::enable_raw_mode();
+    }
+    let result = f();
+    if !was_raw {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+    CURSOR_QUERY_ACTIVE.store(false, Ordering::Relaxed);
+    result
+}
+
 impl InlineTui {
     fn ensure(
         &mut self,
@@ -972,12 +1007,14 @@ impl InlineTui {
         if self.terminal.is_none() || self.height != desired_height {
             self.drop_and_erase();
             let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
-            let terminal = ratatui::Terminal::with_options(
-                backend,
-                ratatui::TerminalOptions {
-                    viewport: ratatui::Viewport::Inline(desired_height),
-                },
-            )?;
+            let terminal = with_raw_mode_for_cursor_query(move || {
+                ratatui::Terminal::with_options(
+                    backend,
+                    ratatui::TerminalOptions {
+                        viewport: ratatui::Viewport::Inline(desired_height),
+                    },
+                )
+            })?;
             self.terminal = Some(terminal);
             self.height = desired_height;
         }
@@ -1261,19 +1298,26 @@ fn render_live_status(status: &mut LiveStatus) {
     let Ok(terminal) = status.inline_tui.ensure(physical_lines_count) else {
         return;
     };
-    let _ = terminal.draw(|frame| {
-        let area = frame.area();
-        frame.render_widget(ratatui::widgets::Paragraph::new(text).wrap(ratatui::widgets::Wrap { trim: false }), area);
+    // `draw()` itself only queries the cursor position on the rare path
+    // where it detects the terminal window was actually resized since the
+    // last frame — bracket it too, defensively, for that case.
+    let _ = with_raw_mode_for_cursor_query(|| {
+        terminal.draw(|frame| {
+            let area = frame.area();
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new(text).wrap(ratatui::widgets::Wrap { trim: false }),
+                area,
+            );
+        })
     });
 }
 
 fn commit_activity_snapshot(status: &mut LiveStatus) {
-    clear_live_status(status);
     let explored_start = status.committed_explored.min(status.explored.len());
     let activities_start = status.committed_activities.min(status.activities.len());
     let tasks_start = status.committed_tasks.min(status.tasks.len());
 
-    let lines = activity_block_lines(
+    let mut lines = activity_block_lines(
         &status.tasks[tasks_start..],
         &status.activities[activities_start..],
         &status.explored[explored_start..],
@@ -1283,17 +1327,20 @@ fn commit_activity_snapshot(status: &mut LiveStatus) {
     if lines.is_empty() {
         return;
     }
-    for line in &lines {
-        println!("{line}");
-    }
-    print_timeline_separator();
+
+    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let width = tw as usize;
+    lines.push(String::new());
+    lines.push(format!("{DIM}{}{RESET}", "─".repeat(width)));
+    lines.push(String::new());
+    print_permanent_lines(status, &lines);
+
     status.committed_explored = status.explored.len();
     status.committed_activities = status.activities.len();
     status.committed_tasks = status.tasks.len();
-    let _ = io::stdout().flush();
 }
 
-fn print_timeline_note(thought: &str) {
+fn print_timeline_note(status: &mut LiveStatus, thought: &str) {
     let thought = thought.trim();
     if thought.is_empty() {
         return;
@@ -1305,13 +1352,33 @@ fn print_timeline_note(thought: &str) {
         .subsequent_indent("    ")
         .break_words(true);
     let wrapped = textwrap::fill(thought, &options);
-    println!("{DIM}{wrapped}{RESET}");
+    print_permanent_lines(status, &[format!("{DIM}{wrapped}{RESET}")]);
 }
 
-fn print_timeline_separator() {
-    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
-    let width = term_width as usize;
-    println!("\n{DIM}{}{RESET}\n", "─".repeat(width));
+/// Prints already ANSI-formatted `lines` as permanent content, used by
+/// [`commit_activity_snapshot`] and [`print_timeline_note`] to "freeze"
+/// in-flight status into real scrollback.
+///
+/// This was originally written against `Terminal::insert_before` (keeping
+/// the shared inline terminal alive across the print instead of tearing it
+/// down), matching the Phase 2 migration plan. That path turned out to be
+/// unsafe in practice: `insert_before`'s internal scroll bookkeeping
+/// (`last_known_area`/`viewport_area`) drifts out of sync with the real
+/// terminal after enough calls interleaved with `InlineTui::ensure()`'s own
+/// reconstructions, and it was observed overwriting *already-printed
+/// conversation history* — not just live-status content — as a session went
+/// on. That's a correctness bug much worse than the cosmetic redraw issues
+/// this migration exists to fix, so this reverted to the plain, proven-safe
+/// approach: tear the inline terminal down first (exactly like every other
+/// not-yet-migrated print site), then print normally. Revisiting the
+/// `insert_before` path is future work, not blocking — see the TUI
+/// migration plan.
+fn print_permanent_lines(status: &mut LiveStatus, lines: &[String]) {
+    status.inline_tui.teardown();
+    for line in lines {
+        println!("{line}");
+    }
+    let _ = io::stdout().flush();
 }
 
 /// Tears down the shared inline `ratatui` terminal (if one is currently
@@ -1716,7 +1783,8 @@ async fn wait_for_escape_interrupt(approval_active: Arc<AtomicBool>) {
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
     loop {
-        if approval_active.load(Ordering::Relaxed) {
+        if approval_active.load(Ordering::Relaxed) || CURSOR_QUERY_ACTIVE.load(Ordering::Relaxed)
+        {
             tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         }
