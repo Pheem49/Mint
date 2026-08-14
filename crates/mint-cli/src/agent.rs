@@ -954,13 +954,28 @@ struct LiveStatus {
 /// [`clear_live_status`] before any other code prints raw lines, since a
 /// live `Terminal` desyncs (and corrupts the next redraw) if the screen
 /// changes underneath it without going through the terminal's own API.
+///
+/// Deliberately constructed **once** per live stretch (not resized/rebuilt
+/// as content grows) and held for the rest of the turn, including across
+/// [`commit_activity_snapshot`]/[`print_timeline_note`]'s `insert_before`
+/// calls. An earlier version reconstructed the whole `Terminal` (a fresh
+/// cursor-position query + fresh `viewport_area`/`last_known_area`) every
+/// time live content grew even slightly, and combined with `insert_before`
+/// that measurably corrupted already-printed conversation history — the
+/// repeated resets desynced `insert_before`'s internal scroll bookkeeping
+/// from where content actually was on screen. A single long-lived instance
+/// per turn is the pattern ratatui's own inline example uses (many
+/// `insert_before` calls against one `Terminal`, never rebuilt mid-run),
+/// so this follows that instead of inventing a resize dance the library
+/// wasn't built around. The tradeoff: the live viewport's height is fixed
+/// generously up front rather than tracking content exactly, so unusually
+/// long in-flight content (e.g. a very long plan) can get visually clipped
+/// in the *live* view — but nothing is lost, since it still prints in full
+/// once committed (`insert_before`'s own per-call height isn't capped by
+/// this).
 #[derive(Debug, Default)]
 struct InlineTui {
     terminal: Option<ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>>,
-    /// Height (in terminal rows) the current `terminal` was constructed
-    /// with — `Viewport::Inline` is fixed at construction time, so a
-    /// content-height change means reconstructing, not just redrawing.
-    height: u16,
 }
 
 /// Set for the duration of a `ratatui`/`crossterm` cursor-position query
@@ -984,7 +999,7 @@ static CURSOR_QUERY_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// (where the inline-viewport code runs), so every such call has to
 /// bracket it like this itself. Also claims [`CURSOR_QUERY_ACTIVE`] for the
 /// duration, so the Esc-watcher doesn't steal the reply off stdin.
-fn with_raw_mode_for_cursor_query<T>(f: impl FnOnce() -> T) -> T {
+pub(crate) fn with_raw_mode_for_cursor_query<T>(f: impl FnOnce() -> T) -> T {
     CURSOR_QUERY_ACTIVE.store(true, Ordering::Relaxed);
     let was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
     if !was_raw {
@@ -999,24 +1014,30 @@ fn with_raw_mode_for_cursor_query<T>(f: impl FnOnce() -> T) -> T {
 }
 
 impl InlineTui {
+    /// Returns the live terminal, constructing it once (sized generously
+    /// from the current window height, not from content) if this is the
+    /// first call since the last [`teardown`](Self::teardown). Never
+    /// reconstructs for an already-live terminal — see the struct docs for
+    /// why that matters for `insert_before`'s correctness.
     fn ensure(
         &mut self,
-        desired_height: u16,
     ) -> io::Result<&mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>>
     {
-        if self.terminal.is_none() || self.height != desired_height {
-            self.drop_and_erase();
+        if self.terminal.is_none() {
+            let (_, term_rows) = crossterm::terminal::size().unwrap_or((80, 24));
+            // Generous enough for realistic in-flight content between two
+            // commits, capped so it can't dominate a short terminal.
+            let height = term_rows.saturating_sub(6).clamp(3, 20);
             let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
             let terminal = with_raw_mode_for_cursor_query(move || {
                 ratatui::Terminal::with_options(
                     backend,
                     ratatui::TerminalOptions {
-                        viewport: ratatui::Viewport::Inline(desired_height),
+                        viewport: ratatui::Viewport::Inline(height),
                     },
                 )
             })?;
             self.terminal = Some(terminal);
-            self.height = desired_height;
         }
         Ok(self.terminal.as_mut().expect("just set above"))
     }
@@ -1272,30 +1293,10 @@ fn render_live_status(status: &mut LiveStatus) {
         return;
     }
 
-    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
-    let width = tw as usize;
-
-    // How many terminal rows this content needs — the inline viewport's
-    // height is fixed at construction (ratatui doesn't auto-grow it), so
-    // this decides both whether `ensure()` needs to reconstruct it and how
-    // many lines the widget below actually gets to draw into.
-    let mut physical_lines_count: u16 = 0;
-    for line in &lines {
-        let stripped = strip_ansi_escapes(line);
-        let line_len = stripped.chars().filter(|&c| !is_thai_combining(c)).count();
-        let physical_lines = if width > 0 {
-            line_len.div_ceil(width)
-        } else {
-            1
-        }
-        .max(1);
-        physical_lines_count = physical_lines_count.saturating_add(physical_lines as u16);
-    }
-
     let Ok(text) = lines.join("\n").into_text() else {
         return;
     };
-    let Ok(terminal) = status.inline_tui.ensure(physical_lines_count) else {
+    let Ok(terminal) = status.inline_tui.ensure() else {
         return;
     };
     // `draw()` itself only queries the cursor position on the rare path
@@ -1333,7 +1334,7 @@ fn commit_activity_snapshot(status: &mut LiveStatus) {
     lines.push(String::new());
     lines.push(format!("{DIM}{}{RESET}", "─".repeat(width)));
     lines.push(String::new());
-    print_permanent_lines(status, &lines);
+    insert_permanent_lines(status, &lines);
 
     status.committed_explored = status.explored.len();
     status.committed_activities = status.activities.len();
@@ -1352,33 +1353,58 @@ fn print_timeline_note(status: &mut LiveStatus, thought: &str) {
         .subsequent_indent("    ")
         .break_words(true);
     let wrapped = textwrap::fill(thought, &options);
-    print_permanent_lines(status, &[format!("{DIM}{wrapped}{RESET}")]);
+    insert_permanent_lines(status, &[format!("{DIM}{wrapped}{RESET}")]);
 }
 
-/// Prints already ANSI-formatted `lines` as permanent content, used by
-/// [`commit_activity_snapshot`] and [`print_timeline_note`] to "freeze"
-/// in-flight status into real scrollback.
+/// Inserts already ANSI-formatted `lines` as permanent content above the
+/// live inline region — used by [`commit_activity_snapshot`] and
+/// [`print_timeline_note`] to "freeze" in-flight status into real
+/// scrollback, via `Terminal::insert_before`.
 ///
-/// This was originally written against `Terminal::insert_before` (keeping
-/// the shared inline terminal alive across the print instead of tearing it
-/// down), matching the Phase 2 migration plan. That path turned out to be
-/// unsafe in practice: `insert_before`'s internal scroll bookkeeping
-/// (`last_known_area`/`viewport_area`) drifts out of sync with the real
-/// terminal after enough calls interleaved with `InlineTui::ensure()`'s own
-/// reconstructions, and it was observed overwriting *already-printed
-/// conversation history* — not just live-status content — as a session went
-/// on. That's a correctness bug much worse than the cosmetic redraw issues
-/// this migration exists to fix, so this reverted to the plain, proven-safe
-/// approach: tear the inline terminal down first (exactly like every other
-/// not-yet-migrated print site), then print normally. Revisiting the
-/// `insert_before` path is future work, not blocking — see the TUI
-/// migration plan.
-fn print_permanent_lines(status: &mut LiveStatus, lines: &[String]) {
-    status.inline_tui.teardown();
+/// A first attempt at this kept `insert_before`'s target `Terminal` alive
+/// correctly, but `InlineTui::ensure` at the time *also* reconstructed that
+/// same `Terminal` from scratch every time live-status content grew even
+/// slightly — a fresh cursor-position query and fresh `viewport_area`/
+/// `last_known_area` on every reconstruction, discarding what
+/// `insert_before` had been tracking. Interleaved with enough
+/// reconstructions, that measurably corrupted already-printed conversation
+/// history, not just live-status content. `ensure` no longer reconstructs
+/// once a terminal is live (see its docs), so this is safe to use again:
+/// exactly one `Terminal` instance persists for the whole live stretch, and
+/// only `draw`/`insert_before` — never a full rebuild — touch it in between.
+/// Falls back to plain `println!` if no inline terminal is currently live
+/// (e.g. committing before anything has rendered yet this turn).
+fn insert_permanent_lines(status: &mut LiveStatus, lines: &[String]) {
+    let Some(terminal) = status.inline_tui.terminal.as_mut() else {
+        for line in lines {
+            println!("{line}");
+        }
+        let _ = io::stdout().flush();
+        return;
+    };
+
+    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let width = tw as usize;
+    let mut height: u16 = 0;
     for line in lines {
-        println!("{line}");
+        let stripped = strip_ansi_escapes(line);
+        let line_len = stripped.chars().filter(|&c| !is_thai_combining(c)).count();
+        let physical_lines = if width > 0 {
+            line_len.div_ceil(width)
+        } else {
+            1
+        }
+        .max(1);
+        height = height.saturating_add(physical_lines as u16);
     }
-    let _ = io::stdout().flush();
+
+    let Ok(text) = lines.join("\n").into_text() else {
+        return;
+    };
+    let _ = terminal.insert_before(height, |buf| {
+        use ratatui::widgets::Widget as _;
+        ratatui::widgets::Paragraph::new(text).render(buf.area, buf);
+    });
 }
 
 /// Tears down the shared inline `ratatui` terminal (if one is currently
