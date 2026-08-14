@@ -7,6 +7,7 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
+use ansi_to_tui::IntoText;
 use mint_core::{
     AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, CHAT_CLI_ID, MemoryStore,
     MintConfig, OrchestrationError, PermissionDecision, PermissionRule, orchestrate_agent_loop,
@@ -941,10 +942,64 @@ struct LiveStatus {
     committed_explored: usize,
     committed_activities: usize,
     committed_tasks: usize,
-    rendered_lines: usize,
     spinner_tick: usize,
     /// Sources collected from web_search ToolEnd results (title, url)
     web_sources: Vec<(String, String)>,
+    inline_tui: InlineTui,
+}
+
+/// A `ratatui` inline-viewport terminal for the live status region — the
+/// only part of the interactive chat migrated to `ratatui` so far (see the
+/// TUI migration plan). Lazily constructed on first use and torn down by
+/// [`clear_live_status`] before any other code prints raw lines, since a
+/// live `Terminal` desyncs (and corrupts the next redraw) if the screen
+/// changes underneath it without going through the terminal's own API.
+#[derive(Debug, Default)]
+struct InlineTui {
+    terminal: Option<ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>>,
+    /// Height (in terminal rows) the current `terminal` was constructed
+    /// with — `Viewport::Inline` is fixed at construction time, so a
+    /// content-height change means reconstructing, not just redrawing.
+    height: u16,
+}
+
+impl InlineTui {
+    fn ensure(
+        &mut self,
+        desired_height: u16,
+    ) -> io::Result<&mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>>
+    {
+        if self.terminal.is_none() || self.height != desired_height {
+            self.drop_and_erase();
+            let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
+            let terminal = ratatui::Terminal::with_options(
+                backend,
+                ratatui::TerminalOptions {
+                    viewport: ratatui::Viewport::Inline(desired_height),
+                },
+            )?;
+            self.terminal = Some(terminal);
+            self.height = desired_height;
+        }
+        Ok(self.terminal.as_mut().expect("just set above"))
+    }
+
+    fn teardown(&mut self) {
+        self.drop_and_erase();
+    }
+
+    /// Erases the current terminal's drawn rows *before* dropping it — a
+    /// bare `self.terminal = None` leaves last frame's content sitting on
+    /// screen, so a freshly-constructed `Terminal`'s cursor-position query
+    /// lands below it instead of on top of it, stacking a new copy under
+    /// the old one every time. `Terminal::clear()` moves the cursor back to
+    /// the top of its own viewport and clears from there, so the *next*
+    /// construction's cursor query sees a clean slate in the right place.
+    fn drop_and_erase(&mut self) {
+        if let Some(mut terminal) = self.terminal.take() {
+            let _ = terminal.clear();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1128,7 +1183,6 @@ fn apply_wave_effect(text: &str, tick: usize) -> String {
 }
 
 fn render_live_status(status: &mut LiveStatus) {
-    clear_live_status(status);
     let mut lines = Vec::new();
     let explored_start = status.committed_explored.min(status.explored.len());
     let activities_start = status.committed_activities.min(status.activities.len());
@@ -1177,13 +1231,18 @@ fn render_live_status(status: &mut LiveStatus) {
         lines.push(format!("  {MINT}{frame}{RESET} {waved_thinking}"));
     }
     if lines.is_empty() {
+        status.inline_tui.teardown();
         return;
     }
 
     let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let width = tw as usize;
 
-    let mut physical_lines_count = 0;
+    // How many terminal rows this content needs — the inline viewport's
+    // height is fixed at construction (ratatui doesn't auto-grow it), so
+    // this decides both whether `ensure()` needs to reconstruct it and how
+    // many lines the widget below actually gets to draw into.
+    let mut physical_lines_count: u16 = 0;
     for line in &lines {
         let stripped = strip_ansi_escapes(line);
         let line_len = stripped.chars().filter(|&c| !is_thai_combining(c)).count();
@@ -1193,11 +1252,19 @@ fn render_live_status(status: &mut LiveStatus) {
             1
         }
         .max(1);
-        physical_lines_count += physical_lines;
-        println!("{line}");
+        physical_lines_count = physical_lines_count.saturating_add(physical_lines as u16);
     }
-    status.rendered_lines = physical_lines_count;
-    let _ = io::stdout().flush();
+
+    let Ok(text) = lines.join("\n").into_text() else {
+        return;
+    };
+    let Ok(terminal) = status.inline_tui.ensure(physical_lines_count) else {
+        return;
+    };
+    let _ = terminal.draw(|frame| {
+        let area = frame.area();
+        frame.render_widget(ratatui::widgets::Paragraph::new(text).wrap(ratatui::widgets::Wrap { trim: false }), area);
+    });
 }
 
 fn commit_activity_snapshot(status: &mut LiveStatus) {
@@ -1247,16 +1314,20 @@ fn print_timeline_separator() {
     println!("\n{DIM}{}{RESET}\n", "─".repeat(width));
 }
 
+/// Tears down the shared inline `ratatui` terminal (if one is currently
+/// live), so whatever prints next — an approval card, a committed activity
+/// snapshot, the final AI answer — starts from a clean, un-managed cursor
+/// position instead of colliding with content the inline viewport still
+/// thinks it owns. Dropping the `Terminal` doesn't itself touch the screen
+/// (its `Drop` impl only restores cursor visibility); the next
+/// `render_live_status` call reconstructs it fresh, re-querying the
+/// terminal for where the cursor actually is now.
 fn clear_live_status(status: &mut LiveStatus) {
-    if status.rendered_lines == 0 {
+    if status.inline_tui.terminal.is_none() {
         clear_working_status();
         return;
     }
-    for _ in 0..status.rendered_lines {
-        print!("\x1b[1A\r\x1b[2K");
-    }
-    status.rendered_lines = 0;
-    let _ = io::stdout().flush();
+    status.inline_tui.teardown();
 }
 
 fn bullet_char(is_thinking: bool, tick: usize) -> &'static str {
