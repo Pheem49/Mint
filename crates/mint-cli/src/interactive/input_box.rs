@@ -62,7 +62,7 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
 /// shared by every function that needs to reason about row layout, so the
 /// terminal-width query and margin/prefix math stay in one place.
 fn input_content_width() -> usize {
-    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (term_width, _) = crate::markdown::terminal_size_or_default();
     let width = term_width as usize;
     let prefix_len = "› ".chars().count();
     width.saturating_sub(2).saturating_sub(prefix_len).max(1)
@@ -159,7 +159,7 @@ fn compose_input_box(
     tab_index: Option<usize>,
     current_dir: &Path,
 ) -> (Vec<String>, u16, u16) {
-    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (term_width, _) = crate::markdown::terminal_size_or_default();
     let width = term_width as usize;
     let prefix = "› ";
     let cont_prefix = "  ";

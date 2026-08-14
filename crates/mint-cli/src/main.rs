@@ -793,8 +793,49 @@ pub(crate) fn print_mcp_servers(
     println!();
 }
 
+/// Installs a global panic hook, as early as possible in `main()` so it
+/// covers the whole process lifetime. Two things previously had no safety
+/// net at all: (1) a panic while raw mode is enabled (key reads, inline
+/// `ratatui` draws in the interactive REPL) left the user's shell stuck in
+/// raw mode with no explanation, since raw mode is only ever disabled on the
+/// normal, non-panicking exit path; (2) there was no record of a crash
+/// anywhere — a user hitting a panic had no way to report *what* happened
+/// beyond whatever scrolled off their terminal.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = crossterm::terminal::disable_raw_mode();
+        log_panic_to_file(&info.to_string());
+        default_hook(info);
+    }));
+}
+
+/// Appends one panic entry to a local, machine-only log file — deliberately
+/// not sent anywhere off the user's disk, matching Mint's local-first
+/// positioning. Best-effort throughout: a failure to log a panic must never
+/// itself panic or block the real panic handling that follows it.
+fn log_panic_to_file(message: &str) {
+    let Some(config_dir) = dirs::config_dir() else {
+        return;
+    };
+    let log_path = config_dir.join("mint").join("error.log");
+    let Some(parent) = log_path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let entry = format!("[{timestamp}] {message}\n");
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+        use std::io::Write as _;
+        let _ = file.write_all(entry.as_bytes());
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    install_panic_hook();
     match Cli::parse().command {
         None => {
             mint_core::channels::start_channels();

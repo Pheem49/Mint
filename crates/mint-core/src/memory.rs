@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -400,10 +400,26 @@ impl MemoryStore {
                 &connection,
                 memory_path().is_ok_and(|default_path| default_path == self.path),
             )?;
+            // This database holds OAuth tokens (see `oauth::save_oauth_tokens`,
+            // stored in `user_profile`) alongside chat history — restrict it
+            // to owner-only rather than leaving it at default (typically
+            // world-readable) permissions. `needs_init` already gates this to
+            // once per path per process, and any pre-existing database from
+            // before this fix gets tightened the same way on its first open.
+            restrict_to_owner(&self.path);
         }
         Ok(connection)
     }
 }
+
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &Path) {}
 
 pub fn memory_path() -> Result<PathBuf, MemoryError> {
     dirs::config_dir()

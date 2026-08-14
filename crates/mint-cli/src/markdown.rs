@@ -1,3 +1,16 @@
+/// Terminal (cols, rows), defaulting to 80x24 both when the query errors
+/// *and* when it succeeds but reports a degenerate 0-sized dimension — the
+/// latter has been observed for real (not just theoretically) when running
+/// under certain pty layers with no attached terminal emulator to answer the
+/// underlying ioctl meaningfully. `unwrap_or` alone only catches the `Err`
+/// case, not an `Ok((0, 0))`, so every caller that used
+/// `crossterm::terminal::size().unwrap_or((80, 24))` directly was exposed to
+/// wrapping every line down to one character when that happened.
+pub fn terminal_size_or_default() -> (u16, u16) {
+    let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+    (if cols == 0 { 80 } else { cols }, if rows == 0 { 24 } else { rows })
+}
+
 pub fn is_table_line(line: &str) -> bool {
     let trimmed = line.trim();
     trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.len() > 1
@@ -213,7 +226,7 @@ pub fn render_markdown_table(table_lines: &[String]) -> String {
     // that no longer fits gets word-wrapped below rather than left to overflow
     // and break the border characters (see `wrap_cell_text`).
     if num_cols > 0 {
-        let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+        let (term_width, _) = terminal_size_or_default();
         // Each column contributes `width + 2` (one space of padding either
         // side) plus one border character; there's one extra border character
         // closing the row.

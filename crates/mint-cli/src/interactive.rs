@@ -131,7 +131,7 @@ pub fn print_welcome_banner(config: &MintConfig) {
     let content_width = std::cmp::max(len1, len2);
     let border_len = content_width + 2;
 
-    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (term_width, _) = crate::markdown::terminal_size_or_default();
     let term_width = term_width as usize;
     let ascii_width = 34;
     let spacing = 3;

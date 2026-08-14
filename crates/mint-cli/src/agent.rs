@@ -632,7 +632,7 @@ pub async fn run_code_agent_with_options(
         format_elapsed(started_at.elapsed())
     );
 
-    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (tw, _) = markdown::terminal_size_or_default();
     let width = tw as usize;
     println!("  {DIM}{}{RESET}", "─".repeat(width.saturating_sub(2)));
 
@@ -737,7 +737,7 @@ fn format_elapsed(duration: Duration) -> String {
 }
 
 fn render_live_summary(summary: &str) {
-    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (tw, _) = markdown::terminal_size_or_default();
     let width = tw as usize;
 
     let mut is_first = true;
@@ -873,7 +873,7 @@ fn print_diff_band(bg: &str, line_num: usize, content: &str, term_width: usize) 
 }
 
 fn print_colored_diff(diff: &str) {
-    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (term_width, _) = markdown::terminal_size_or_default();
     let term_width = term_width as usize;
     let mut current_old_line = 1;
     let mut current_new_line = 1;
@@ -902,6 +902,7 @@ fn print_colored_diff(diff: &str) {
         }
     }
 }
+
 
 fn should_show_verification(verification: &str) -> bool {
     let normalized = verification.trim().to_ascii_lowercase();
@@ -1024,7 +1025,7 @@ impl InlineTui {
     ) -> io::Result<&mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>>
     {
         if self.terminal.is_none() {
-            let (_, term_rows) = crossterm::terminal::size().unwrap_or((80, 24));
+            let (_, term_rows) = markdown::terminal_size_or_default();
             // Generous enough for realistic in-flight content between two
             // commits, capped so it can't dominate a short terminal.
             let height = term_rows.saturating_sub(6).clamp(3, 20);
@@ -1329,7 +1330,7 @@ fn commit_activity_snapshot(status: &mut LiveStatus) {
         return;
     }
 
-    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (tw, _) = markdown::terminal_size_or_default();
     let width = tw as usize;
     lines.push(String::new());
     lines.push(format!("{DIM}{}{RESET}", "─".repeat(width)));
@@ -1346,7 +1347,7 @@ fn print_timeline_note(status: &mut LiveStatus, thought: &str) {
     if thought.is_empty() {
         return;
     }
-    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (tw, _) = markdown::terminal_size_or_default();
     let width = tw as usize;
     let options = textwrap::Options::new(width)
         .initial_indent("  • ")
@@ -1383,7 +1384,7 @@ fn insert_permanent_lines(status: &mut LiveStatus, lines: &[String]) {
         return;
     };
 
-    let (tw, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (tw, _) = markdown::terminal_size_or_default();
     let width = tw as usize;
     let mut height: u16 = 0;
     for line in lines {
@@ -2157,7 +2158,7 @@ fn highlight_code_line(highlighter: &mut HighlightLines, line: &str) -> String {
 }
 
 fn format_markdown_bold(text: &str) -> String {
-    let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let (term_width, _) = markdown::terminal_size_or_default();
     let term_width = term_width as usize;
 
     let mut formatted_lines = Vec::new();

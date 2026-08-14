@@ -729,8 +729,26 @@ fn save_config_to(path: &Path, config: &MintConfig) -> Result<(), ConfigError> {
     fs::write(path, format!("{raw}\n")).map_err(|source| ConfigError::Write {
         path: path.to_path_buf(),
         source,
-    })
+    })?;
+    restrict_to_owner(path);
+    Ok(())
 }
+
+/// This file holds every configured provider's API key in plaintext, so it's
+/// restricted to owner-only (rw-------) rather than left at the default
+/// umask-derived permissions, which are typically world-readable. Best
+/// effort: a permission-set failure shouldn't block saving the config
+/// itself, and there's no equivalent ACL-based restriction applied on
+/// Windows here (out of scope for this pass — NTFS files already default to
+/// the owning user's profile directory on a normal single-user system).
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &Path) {}
 
 fn has_value(value: &str) -> bool {
     let value = value.trim();

@@ -44,26 +44,40 @@ pub fn format_path_with_tilde(path: &Path) -> String {
     }
     path_str
 }
+/// Placeholder prefixes that get colored when they appear in the input box —
+/// currently `[Pasted text #N]`/`[Pasted text #N +K lines]` (inserted by
+/// large-paste detection) and `[Image #N]` (inserted by Ctrl+V image paste).
+/// Both are literal markers the input box itself writes into the buffer, so
+/// matching on a fixed prefix is safe — user-typed text starting with the
+/// same characters is vanishingly unlikely and, worst case, only affects
+/// display color, not the text actually sent.
+const PLACEHOLDER_PREFIXES: [&str; 2] = ["[Pasted text #", "[Image #"];
+
+fn matches_placeholder_prefix(chars: &[char], i: usize) -> bool {
+    PLACEHOLDER_PREFIXES.iter().any(|prefix| {
+        let prefix_chars: Vec<char> = prefix.chars().collect();
+        chars[i..].starts_with(&prefix_chars)
+    })
+}
+
 pub fn format_placeholders(s: &str) -> String {
     let mut result = String::new();
     let chars = s.chars().collect::<Vec<_>>();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '[' && i + 13 < chars.len() {
-            let slice: String = chars[i..i + 14].iter().collect();
-            if slice == "[Pasted text #"
-                && let Some(end_offset) = chars[i..].iter().position(|&c| c == ']')
-            {
-                let end_idx = i + end_offset;
-                let inside: String = chars[i + 1..end_idx].iter().collect();
-                result.push('[');
-                result.push_str(BLUE);
-                result.push_str(&inside);
-                result.push_str("\x1b[39m");
-                result.push(']');
-                i = end_idx + 1;
-                continue;
-            }
+        if chars[i] == '['
+            && matches_placeholder_prefix(&chars, i)
+            && let Some(end_offset) = chars[i..].iter().position(|&c| c == ']')
+        {
+            let end_idx = i + end_offset;
+            let inside: String = chars[i + 1..end_idx].iter().collect();
+            result.push('[');
+            result.push_str(BLUE);
+            result.push_str(&inside);
+            result.push_str("\x1b[39m");
+            result.push(']');
+            i = end_idx + 1;
+            continue;
         }
         result.push(chars[i]);
         i += 1;
@@ -106,5 +120,30 @@ pub fn active_model<'a>(provider: &str, config: &'a mint_core::MintConfig) -> &'
                 .unwrap_or("")
         }
         _ => &config.gemini_model,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_placeholders_colors_pasted_text() {
+        let out = format_placeholders("hi [Pasted text #1 +5 lines] end");
+        assert!(out.contains(BLUE));
+        assert!(out.contains("Pasted text #1 +5 lines"));
+    }
+
+    #[test]
+    fn format_placeholders_colors_image() {
+        let out = format_placeholders("[Pasted text #1] [Image #1]");
+        // Both placeholders get their own BLUE...reset pair — two of each.
+        assert_eq!(out.matches(BLUE).count(), 2);
+        assert!(out.contains("Image #1"));
+    }
+
+    #[test]
+    fn format_placeholders_leaves_plain_text_untouched() {
+        assert_eq!(format_placeholders("just typing normally"), "just typing normally");
     }
 }
