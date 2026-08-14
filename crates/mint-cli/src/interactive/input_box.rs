@@ -1,4 +1,5 @@
 use super::*;
+use ansi_to_tui::IntoText;
 
 const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     (
@@ -138,7 +139,17 @@ fn cursor_visual_column(input_chars: &[char], cursor_pos: usize, content_width: 
         .sum();
     4 + visual
 }
-pub fn draw_input_box(
+/// Builds the input box's full content as ANSI-formatted lines (composer
+/// blank/input rows/blank/status/suggestions) plus where within those lines
+/// the terminal's cursor should sit — everything one `ratatui` draw call
+/// needs, computed without touching the screen so it's cheap to call on
+/// every keystroke. Pure/testable by design: the old implementation
+/// interleaved this math with `println!`s, which is why it used to need a
+/// second pass (`position_input_cursor`) to re-derive the cursor's on-screen
+/// position from "how many lines did I just print" — `ratatui`'s
+/// `Frame::set_cursor_position` takes an (x, y) directly, so this can just
+/// hand that over instead of recomputing it via up/down ANSI motion.
+fn compose_input_box(
     input_chars: &[char],
     cursor_pos: usize,
     placeholder: &str,
@@ -147,7 +158,7 @@ pub fn draw_input_box(
     tab_base_input: Option<&str>,
     tab_index: Option<usize>,
     current_dir: &Path,
-) -> usize {
+) -> (Vec<String>, u16, u16) {
     let (term_width, _) = crossterm::terminal::size().unwrap_or((80, 24));
     let width = term_width as usize;
     let prefix = "› ";
@@ -156,31 +167,38 @@ pub fn draw_input_box(
     let content_max_len = input_content_width();
     let blank_line = " ".repeat(input_width);
 
-    println!(" {COMPOSER_BG}{blank_line}{RESET}");
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!(" {COMPOSER_BG}{blank_line}{RESET}"));
 
+    let (cursor_row_idx, cursor_col);
     if input_chars.is_empty() {
+        cursor_row_idx = 0;
+        cursor_col = 0;
         let pad_len = content_max_len.saturating_sub(placeholder.chars().count());
         let padding = " ".repeat(pad_len);
-        println!(
+        lines.push(format!(
             " {COMPOSER_BG}{MINT}{prefix}{RESET}{COMPOSER_BG}{DIM}{}\x1b[39m{}{RESET}",
             placeholder, padding
-        );
+        ));
     } else {
-        let (rows, _, _) = wrap_input_into_rows(input_chars, content_max_len, cursor_pos);
+        let (rows, c_row, c_col) = wrap_input_into_rows(input_chars, content_max_len, cursor_pos);
+        cursor_row_idx = c_row;
+        cursor_col = c_col;
         for (i, row) in rows.iter().enumerate() {
             let row_prefix = if i == 0 { prefix } else { cont_prefix };
             let display_row = format_placeholders(row);
             let visible_len = string_visual_width(row);
             let pad_len = content_max_len.saturating_sub(visible_len);
             let padding = " ".repeat(pad_len);
-            println!(
+            lines.push(format!(
                 " {COMPOSER_BG}{MINT}{}{RESET}{COMPOSER_BG}{}{}{RESET}",
                 row_prefix, display_row, padding
-            );
+            ));
         }
     }
+    let _ = cursor_col; // visual column is derived below via `cursor_visual_column`
 
-    println!(" {COMPOSER_BG}{blank_line}{RESET}");
+    lines.push(format!(" {COMPOSER_BG}{blank_line}{RESET}"));
 
     let agent_str = format!(" {DIM}[Agent]{RESET} {MINT}{}{RESET}", model);
     // Background shell jobs (run_shell(background: true)) still running —
@@ -203,7 +221,9 @@ pub fn draw_input_box(
     let agent_visible_len = " [Agent] ".len() + model.chars().count();
     let path_visible_len = jobs_prefix.chars().count() + path_rest.chars().count();
 
-    let status_pad_len = (width - 1).saturating_sub(agent_visible_len + path_visible_len);
+    let status_pad_len = width
+        .saturating_sub(1)
+        .saturating_sub(agent_visible_len + path_visible_len);
     let status_padding = " ".repeat(status_pad_len);
 
     // The job-count prefix gets its own BLUE so it stands out from the DIM
@@ -214,15 +234,14 @@ pub fn draw_input_box(
         String::new()
     };
 
-    print!(
+    lines.push(format!(
         "{}{}{}{}{}{}",
         agent_str, status_padding, colored_jobs_prefix, DIM, path_rest, RESET
-    );
+    ));
 
-    // Compute and draw suggestions
+    // Compute and append suggestions
     let raw_input: String = input_chars.iter().collect();
     let search_query = tab_base_input.unwrap_or(&raw_input);
-    let mut match_count = 0;
     if search_query.starts_with('/') {
         let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
             .iter()
@@ -236,20 +255,19 @@ pub fn draw_input_box(
             let current_page = selected_idx / 5;
             let s_start_idx = current_page * 5;
             let s_end_idx = std::cmp::min(s_start_idx + 5, matches.len());
-            match_count = s_end_idx - s_start_idx;
 
-            println!();
-            println!(
+            lines.push(String::new());
+            lines.push(format!(
                 " {BLUE}Suggestions ({}/{}){RESET}",
                 current_page + 1,
                 total_pages
-            );
+            ));
             for i in s_start_idx..s_end_idx {
                 let (cmd, desc) = matches[i];
                 if Some(i) == highlight_idx {
-                    println!("  {BLUE}▶ {:<16}{RESET} {DIM}- {}{RESET}", cmd, desc);
+                    lines.push(format!("  {BLUE}▶ {:<16}{RESET} {DIM}- {}{RESET}", cmd, desc));
                 } else {
-                    println!("    {DIM}{:<16} - {}{RESET}", cmd, desc);
+                    lines.push(format!("    {DIM}{:<16} - {}{RESET}", cmd, desc));
                 }
             }
         }
@@ -273,14 +291,13 @@ pub fn draw_input_box(
             let current_page = selected_idx / 5;
             let s_start_idx = current_page * 5;
             let s_end_idx = std::cmp::min(s_start_idx + 5, matches.len());
-            match_count = s_end_idx - s_start_idx;
 
-            println!();
-            println!(
+            lines.push(String::new());
+            lines.push(format!(
                 " {BLUE}Suggestions ({}/{}){RESET}",
                 current_page + 1,
                 total_pages
-            );
+            ));
             for i in s_start_idx..s_end_idx {
                 let skill = matches[i];
                 let desc = skill
@@ -297,70 +314,29 @@ pub fn draw_input_box(
                 };
 
                 if Some(i) == highlight_idx {
-                    println!(
+                    lines.push(format!(
                         "  {BLUE}▶ ${:<20}{RESET} {MINT}[Skill]{RESET} {DIM}{}{RESET}",
                         skill.name, truncated_desc
-                    );
+                    ));
                 } else {
-                    println!(
+                    lines.push(format!(
                         "    {DIM}${:<20} [Skill] {}{RESET}",
                         skill.name, truncated_desc
-                    );
+                    ));
                 }
             }
         }
     }
 
-    match_count
-}
-/// returns that row, 1-indexed from the box's top blank line — callers stash
-/// this so a later `clear_input_box` knows how far up to travel regardless of
-/// how many rows the box currently spans.
-pub fn position_input_cursor(input_chars: &[char], cursor_pos: usize, match_count: usize) -> usize {
-    let content_width = input_content_width();
-    let (rows, cursor_row_idx, _) = wrap_input_into_rows(input_chars, content_width, cursor_pos);
-    let row_count = rows.len();
-    let row = cursor_row_idx + 1;
+    // Row 0 is the leading composer-background blank line, so input rows
+    // start at y=1; `cursor_visual_column` already returns a 1-indexed
+    // absolute column (it's what the old `\x1b[{}G` code used directly), so
+    // subtracting 1 gives `ratatui`'s 0-indexed x.
+    let cursor_y = 1 + cursor_row_idx as u16;
+    let cursor_x = (cursor_visual_column(input_chars, cursor_pos, content_max_len) as u16)
+        .saturating_sub(1);
 
-    let base = if match_count > 0 { 2 + match_count } else { 0 };
-    let up_lines = base + 2 + (row_count - row);
-    print!(
-        "\x1b[{}A\x1b[{}G",
-        up_lines,
-        cursor_visual_column(input_chars, cursor_pos, content_width)
-    );
-    row
-}
-/// many lines up from the terminal's current cursor position the top of the
-/// box sits. `\x1b[J` (erase to end of screen) then wipes the whole box
-/// regardless of whether it's growing or shrinking on this redraw.
-pub fn clear_input_box(cursor_row: usize) {
-    print!("\r\x1b[{}A\x1b[J", cursor_row.max(1));
-}
-pub fn redraw_input_box(
-    input_chars: &[char],
-    cursor_pos: usize,
-    placeholder: &str,
-    model: &str,
-    path_str: &str,
-    tab_base_input: Option<&str>,
-    tab_index: Option<usize>,
-    current_dir: &Path,
-    cursor_row: &mut usize,
-) {
-    clear_input_box(*cursor_row);
-    let match_count = draw_input_box(
-        input_chars,
-        cursor_pos,
-        placeholder,
-        model,
-        path_str,
-        tab_base_input,
-        tab_index,
-        current_dir,
-    );
-    *cursor_row = position_input_cursor(input_chars, cursor_pos, match_count);
-    let _ = io::stdout().flush();
+    (lines, cursor_x, cursor_y)
 }
 pub fn read_line_interactive(
     _provider: &str,
@@ -405,7 +381,96 @@ pub fn read_line_interactive(
     // saved in-progress draft to restore when navigating back past the newest entry.
     let mut history_index: Option<usize> = None;
 
-    let match_count = draw_input_box(
+    // The box's own `ratatui` inline terminal — lives only for this one call
+    // (unlike `agent.rs`'s `InlineTui`, which is shared across a whole agent
+    // turn), so it's just a local here rather than a struct field. Safe to
+    // reconstruct on every height change (unlike the agent-turn code): this
+    // never calls `insert_before`, which is what made repeated reconstruction
+    // dangerous there — see the TUI migration plan's Phase 2 notes.
+    //
+    // Held in a `RefCell` (not plain locals) so both closures below can each
+    // borrow it independently — two separate `FnMut` closures can't each
+    // hold their own `&mut` to the same locals at once, but they can each
+    // `borrow_mut()` the same `RefCell` at different times.
+    type BoxTerminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>;
+    let tui_state: std::cell::RefCell<(Option<BoxTerminal>, u16)> =
+        std::cell::RefCell::new((None, 0));
+
+    // Shadows the free functions of the same name for the rest of this call,
+    // so every existing `redraw_input_box(...)`/`clear_input_box(...)` call
+    // site below keeps working unchanged — only what happens inside changed.
+    let redraw_input_box = |input_chars: &[char],
+                             cursor_pos: usize,
+                             placeholder: &str,
+                             model: &str,
+                             path_str: &str,
+                             tab_base_input: Option<&str>,
+                             tab_index: Option<usize>,
+                             current_dir: &Path,
+                             _cursor_row: &mut usize| {
+        let (lines, cursor_x, cursor_y) = compose_input_box(
+            input_chars,
+            cursor_pos,
+            placeholder,
+            model,
+            path_str,
+            tab_base_input,
+            tab_index,
+            current_dir,
+        );
+        let desired_height = lines.len() as u16;
+        let mut state = tui_state.borrow_mut();
+        let (terminal, viewport_height) = &mut *state;
+        if terminal.is_none() || *viewport_height != desired_height {
+            if let Some(mut old) = terminal.take() {
+                let _ = old.clear();
+            }
+            let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
+            if let Ok(new_terminal) = agent::with_raw_mode_for_cursor_query(move || {
+                ratatui::Terminal::with_options(
+                    backend,
+                    ratatui::TerminalOptions {
+                        viewport: ratatui::Viewport::Inline(desired_height),
+                    },
+                )
+            }) {
+                *terminal = Some(new_terminal);
+                *viewport_height = desired_height;
+            }
+        }
+        if let Some(t) = terminal.as_mut()
+            && let Ok(text) = lines.join("\n").into_text()
+        {
+            let _ = agent::with_raw_mode_for_cursor_query(|| {
+                t.draw(|frame| {
+                    let area = frame.area();
+                    frame.render_widget(ratatui::widgets::Paragraph::new(text), area);
+                    // `set_cursor_position` takes an *absolute* screen
+                    // coordinate (it's passed straight through to the
+                    // backend, unlike `render_widget`'s `area` which is
+                    // already the viewport's real on-screen `Rect`) — so
+                    // `cursor_x`/`cursor_y` (relative to the box's own top
+                    // row) need `area`'s own offset added, or this places
+                    // the cursor wherever the viewport happened to be at
+                    // (0, 0) instead of where the box actually is.
+                    frame.set_cursor_position(ratatui::layout::Position::new(
+                        area.x + cursor_x,
+                        area.y + cursor_y,
+                    ));
+                })
+            });
+        }
+    };
+    let clear_input_box = |_cursor_row: usize| {
+        let mut state = tui_state.borrow_mut();
+        if let Some(mut t) = state.0.take() {
+            let _ = t.clear();
+        }
+        state.1 = 0;
+    };
+
+    let mut cursor_row: usize = 0;
+    redraw_input_box(
         &input_chars,
         cursor_pos,
         placeholder,
@@ -414,9 +479,8 @@ pub fn read_line_interactive(
         None,
         None,
         current_dir,
+        &mut cursor_row,
     );
-    let mut cursor_row = position_input_cursor(&input_chars, cursor_pos, match_count);
-    let _ = io::stdout().flush();
 
     enable_raw_mode()?;
     let _ = crossterm::execute!(io::stdout(), crossterm::event::EnableBracketedPaste);
@@ -1023,7 +1087,7 @@ pub fn read_line_interactive(
                 for notice in &notices {
                     println!(" {DIM}{}{RESET}", notice);
                 }
-                let match_count = draw_input_box(
+                redraw_input_box(
                     &input_chars,
                     cursor_pos,
                     placeholder,
@@ -1032,9 +1096,8 @@ pub fn read_line_interactive(
                     tab_base_input.as_deref(),
                     tab_index,
                     current_dir,
+                    &mut cursor_row,
                 );
-                cursor_row = position_input_cursor(&input_chars, cursor_pos, match_count);
-                let _ = io::stdout().flush();
                 enable_raw_mode()?;
             }
         }
