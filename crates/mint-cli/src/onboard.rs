@@ -1166,7 +1166,7 @@ fn prompt_select_or_custom(
 
 /// Simple arrow-key single-choice picker with no "type your own" fallback.
 /// Unlike `prompt_select_or_custom`, every option is a literal, final answer.
-fn prompt_choice(label: &str, options: &[String], default_idx: usize) -> Result<String> {
+pub(crate) fn prompt_choice(label: &str, options: &[String], default_idx: usize) -> Result<String> {
     let mut cursor = default_idx.min(options.len().saturating_sub(1));
 
     println!("{}", label);
@@ -1333,7 +1333,7 @@ fn ensure_ollama_serving(host: &str) {
     }
 }
 
-fn print_select_options(options: &[String], cursor: usize) {
+pub(crate) fn print_select_options(options: &[String], cursor: usize) {
     for (i, option) in options.iter().enumerate() {
         if i == cursor {
             println!("  \x1b[36m❯\x1b[0m \x1b[36m{}\x1b[0m", option);
@@ -1344,7 +1344,7 @@ fn print_select_options(options: &[String], cursor: usize) {
     let _ = io::stdout().flush();
 }
 
-fn prompt_input(label: &str, default: Option<&str>) -> Result<String> {
+pub(crate) fn prompt_input(label: &str, default: Option<&str>) -> Result<String> {
     print!("{}", label);
     if let Some(d) = default
         && !d.is_empty()

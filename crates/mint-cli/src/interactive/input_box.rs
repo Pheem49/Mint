@@ -12,6 +12,10 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
         "/cron",
         "Create/list/remove/enable/disable scheduled agent tasks",
     ),
+    (
+        "/cron add",
+        "Create a scheduled task — walks through a wizard if you don't type more",
+    ),
     ("/link", "Link a folder chat can auto-write notes into"),
     ("/clear", "Clear conversation history"),
     ("/code", "Run in code-agent mode"),
@@ -158,6 +162,7 @@ fn compose_input_box(
     tab_base_input: Option<&str>,
     tab_index: Option<usize>,
     current_dir: &Path,
+    plan_mode: bool,
 ) -> (Vec<String>, u16, u16) {
     let (term_width, _) = crate::markdown::terminal_size_or_default();
     let width = term_width as usize;
@@ -200,7 +205,10 @@ fn compose_input_box(
 
     lines.push(format!(" {COMPOSER_BG}{blank_line}{RESET}"));
 
-    let agent_str = format!(" {DIM}[Agent]{RESET} {MINT}{}{RESET}", model);
+    // Plan mode is read-only until the user approves a plan, so the status
+    // bar swaps [Agent] for [Plan] to keep that state visible at a glance.
+    let mode_label = if plan_mode { "[Plan]" } else { "[Agent]" };
+    let agent_str = format!(" {DIM}{mode_label}{RESET} {MINT}{}{RESET}", model);
     // Background shell jobs (run_shell(background: true)) still running —
     // shown so they're never invisible between the start and finish notice.
     let bg_running = mint_core::bg_shell::running_count();
@@ -218,7 +226,7 @@ fn compose_input_box(
         Some(status) => status.to_string(),
         None => format!("path: {}", path_str),
     };
-    let agent_visible_len = " [Agent] ".len() + model.chars().count();
+    let agent_visible_len = format!(" {mode_label} ").len() + model.chars().count();
     let path_visible_len = jobs_prefix.chars().count() + path_rest.chars().count();
 
     let status_pad_len = width
@@ -345,6 +353,7 @@ pub fn read_line_interactive(
     current_dir: &Path,
     history: &[String],
     jobs: &BackgroundJobs,
+    plan_mode: bool,
 ) -> Result<Option<InteractiveInput>> {
     use crossterm::event::{self, Event, KeyCode};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -417,6 +426,7 @@ pub fn read_line_interactive(
             tab_base_input,
             tab_index,
             current_dir,
+            plan_mode,
         );
         let desired_height = lines.len() as u16;
         let mut state = tui_state.borrow_mut();

@@ -140,6 +140,8 @@ pub fn build_system_prompt(
     if plan_mode {
         allowed_actions.retain(|action| PLAN_MODE_ALLOWED_ACTIONS.contains(action));
         allowed_actions.push("exit_plan_mode");
+    } else {
+        allowed_actions.push("enter_plan_mode");
     }
     allowed_actions.push("finish");
 
@@ -290,6 +292,11 @@ pub fn build_system_prompt(
             "- exit_plan_mode: {\"plan\":\"full plan describing your investigation findings and the exact steps you will take to implement the task, in the language the user wrote in\"}",
         );
     }
+    if allowed_actions.contains(&"enter_plan_mode") {
+        input_formats.push(
+            "- enter_plan_mode: {\"reason\":\"short explanation of why this task is risky/complex enough to investigate before touching anything\"} (asks the user to switch you into read-only plan mode; they may approve, decline, or leave feedback instead)",
+        );
+    }
     if allowed_actions.contains(&"verify") {
         input_formats.push("- verify: {\"commands\":[\"cargo test\",\"npm test\"]}");
     }
@@ -360,6 +367,10 @@ pub fn build_system_prompt(
     if plan_mode {
         rules.push(
             "0p. PLAN MODE IS ACTIVE: you may only investigate (read files, search, inspect diagnostics, etc.). Mutating tools such as write_file, apply_patch, and most run_shell/mcp_tool/run_plugin calls are unavailable and will be blocked. Once you have a clear implementation plan, call exit_plan_mode with the full plan; the user will approve or reject it. Do not attempt to edit files or run mutating commands before that approval.",
+        );
+    } else {
+        rules.push(
+            "0o. Before your first mutating action (write_file, apply_patch, or a destructive/hard-to-reverse run_shell command), judge whether this task is risky or complex: a multi-file refactor, a migration, deletions, schema/API changes, or anything else hard to undo. If it is, call enter_plan_mode with a short reason first — the user will approve or decline switching you into read-only investigation. Skip it for small, obviously-safe, single-file changes; do not call it more than once per task unless the user declined and circumstances changed.",
         );
     }
     if native {

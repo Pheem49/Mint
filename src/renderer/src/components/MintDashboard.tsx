@@ -355,6 +355,40 @@ export default function MintDashboard() {
     }
   }, [isSearchOpen])
 
+  // Another process — the CLI's interactive chat, a scheduled task, a
+  // messaging bridge — can add messages to this same conversation while
+  // this page is open, and nothing here would otherwise notice: Mint's
+  // surfaces only share a SQLite file, not a live event bus, so this polls
+  // for changes instead of requiring a manual refresh. Kept in a ref rather
+  // than the effect's own dependency array so a poll landing doesn't tear
+  // down and recreate the interval on every tick.
+  const interactionsRef = useRef(interactions)
+  useEffect(() => {
+    interactionsRef.current = interactions
+  }, [interactions])
+
+  useEffect(() => {
+    if (view !== 'chat' || !conversationId) return
+    const interval = window.setInterval(async () => {
+      // Skip while backgrounded (nothing to show anyone) or mid-send (a
+      // fetch landing here would clobber the in-flight optimistic/streamed
+      // reply with stale history).
+      if (document.visibilityState !== 'visible' || sending) return
+      try {
+        const history = (await getRecentInteractions(50, conversationId)).reverse()
+        const current = interactionsRef.current
+        const currentLast = current[current.length - 1]
+        const nextLast = history[history.length - 1]
+        if (current.length === history.length && currentLast?.id === nextLast?.id) return
+        setInteractions(history)
+        setAgentActivitySnapshots((snapshots) => mergeActivitySnapshots(snapshots, history))
+      } catch {
+        // Best-effort — a transient fetch failure just waits for the next tick.
+      }
+    }, 3000)
+    return () => window.clearInterval(interval)
+  }, [view, conversationId, sending])
+
   const filteredSessions = chatSessions.filter((session) => {
     if (session.kind === 'cli' || session.id === 'conversation-default') return false
     return session.title.toLowerCase().includes(searchQuery.toLowerCase())

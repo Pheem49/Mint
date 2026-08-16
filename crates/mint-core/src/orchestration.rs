@@ -344,6 +344,9 @@ pub enum AgentApproval {
     ExitPlanMode {
         plan: String,
     },
+    EnterPlanMode {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -436,6 +439,8 @@ struct AgentInput {
     verification: String,
     #[serde(default)]
     plan: String,
+    #[serde(default)]
+    reason: String,
     #[serde(default)]
     start_line: Option<usize>,
     #[serde(default)]
@@ -717,6 +722,11 @@ where
         // see the gate right before the `finish` handling block below.
         let mut last_modify_step: Option<usize> = None;
         let mut last_verify_step: Option<usize> = None;
+        // Whether the most recent `verify` call actually passed — separate from
+        // `last_verify_step`, which only records that one *ran*. Lets `finish` be
+        // rejected when the agent ignores a real failure and claims success anyway;
+        // see `unacknowledged_verify_failure` right before the `finish` handling block.
+        let mut last_verify_failed: Option<bool> = None;
         let mut trajectory: Vec<String> = Vec::new();
         // Structured history for native tool-calling providers, maintained alongside
         // `trajectory`/`observation` (which remain the source of truth for the
@@ -1106,6 +1116,39 @@ where
                                 );
                                 continue 'steps;
                             }
+                            if unacknowledged_verify_failure(
+                                last_verify_failed,
+                                &decision.input.verification,
+                            ) {
+                                let err_msg = "Error: Your last verify call reported a failure \
+                                       (non-zero exit code), but you're finishing without \
+                                       addressing it. Read the stdout/stderr from that verify \
+                                       call, fix the actual problem, and run verify again until \
+                                       it passes. Do not report success in the finish summary \
+                                       while a real check is failing — if the failure is genuinely \
+                                       unrelated to your change (e.g. pre-existing), say so \
+                                       explicitly in the finish action's 'verification' field and \
+                                       finish again.";
+                                trajectory.push(format!(
+                                    "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
+                                    decision.thought.trim(),
+                                    decision.action,
+                                    err_msg
+                                ));
+                                let history_str = trajectory.join("\n\n");
+                                observation = format!(
+                                    "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
+                                    root.display(),
+                                    history_str
+                                );
+                                reject_native_finish(
+                                    tool_mode,
+                                    &mut native_messages,
+                                    &response.text,
+                                    err_msg,
+                                );
+                                continue 'steps;
+                            }
                             let mut provider_used = None;
                             for line in observation.lines() {
                                 if line.contains("Web search succeeded using Google Search") {
@@ -1211,7 +1254,43 @@ where
                     // stays false for plan-mode/hook blocks and the duplicate-shell skip, since
                     // those don't actually run anything and shouldn't count toward verification.
                     let mut action_succeeded = false;
-                    let result = if decision.action == "exit_plan_mode" {
+                    let result = if decision.action == "enter_plan_mode" {
+                        let reason = decision.input.reason.trim().to_owned();
+                        match approve(&AgentApproval::EnterPlanMode {
+                            reason: reason.clone(),
+                        }) {
+                            Ok(ApprovalOutcome::Approved) => {
+                                plan_mode = true;
+                                system_prompt = build_system_prompt(
+                                    config,
+                                    plan_mode,
+                                    system_prompt_native,
+                                    user_name,
+                                );
+                                progress(AgentProgress::Thought {
+                                    thought: format!(
+                                        "[Plan] Switched to plan mode before acting: {}",
+                                        if reason.is_empty() {
+                                            "this task looked risky or complex enough to investigate first."
+                                        } else {
+                                            reason.as_str()
+                                        }
+                                    ),
+                                });
+                                "Plan mode is now ON. Investigate read-only (list_files, read_file, search_code, etc.) and once you have a clear implementation plan, call exit_plan_mode with the full plan; the user will approve or reject it.".to_string()
+                            }
+                            Ok(ApprovalOutcome::Denied) => {
+                                "The user declined to enter plan mode. Plan mode stays OFF — proceed with the task directly. If new information later makes this feel too risky to continue without a plan, you may call enter_plan_mode again.".to_string()
+                            }
+                            Ok(ApprovalOutcome::Intercepted(feedback)) => {
+                                format!(
+                                    "The user did not approve entering plan mode and left this feedback: {}\n\nPlan mode stays OFF. Take this feedback into account and proceed with the task.",
+                                    feedback
+                                )
+                            }
+                            Err(error) => format!("Error requesting plan-mode approval: {}", error),
+                        }
+                    } else if decision.action == "exit_plan_mode" {
                         let plan_text = decision.input.plan.trim().to_owned();
                         match approve(&AgentApproval::ExitPlanMode {
                     plan: plan_text.clone(),
@@ -1311,9 +1390,13 @@ where
                         match decision.action.as_str() {
                             "apply_patch" | "write_file" => last_modify_step = Some(step),
                             // Counts even if the commands it ran failed — an attempted check
-                            // still counts as verification having been attempted; a failing
-                            // exit code is separately flagged below and prompts a fix.
-                            "verify" => last_verify_step = Some(step),
+                            // still counts as verification having been attempted; whether it
+                            // actually passed is tracked separately in `last_verify_failed`
+                            // and enforced by `unacknowledged_verify_failure` at finish time.
+                            "verify" => {
+                                last_verify_step = Some(step);
+                                last_verify_failed = Some(shell_result_failed(&result));
+                            }
                             _ => {}
                         }
                     }
@@ -1327,17 +1410,7 @@ where
                         truncate(&result)
                     };
                     if decision.action == "run_shell" || decision.action == "verify" {
-                        let mut failed = false;
-                        for line in result.lines() {
-                            if line.starts_with("exit: ") {
-                                let exit_code = line.replace("exit: ", "").trim().to_string();
-                                if exit_code != "0" && exit_code != "unknown" {
-                                    failed = true;
-                                }
-                                break;
-                            }
-                        }
-                        if failed {
+                        if shell_result_failed(&result) {
                             final_result.push_str(
                         "\n\n[System Tip: The command failed with a non-zero exit code. \
                          Analyze the stdout/stderr above to locate the error, read the offending files, \
@@ -3404,6 +3477,31 @@ fn unverified_modification(
     !verified_since && meaningful_verification(verification_field).is_empty()
 }
 
+/// Whether any `run_shell`/`verify` command in `result` — which may join
+/// several `"exit: N\n..."` blocks, one per command in a multi-command
+/// `verify` call — reported a non-zero, known exit code. Scans every
+/// `"exit: "` line rather than just the first, so a `verify` call where an
+/// earlier command passed but a later one failed still counts as a failure.
+fn shell_result_failed(result: &str) -> bool {
+    result.lines().any(|line| {
+        line.strip_prefix("exit: ")
+            .is_some_and(|code| !matches!(code.trim(), "0" | "unknown"))
+    })
+}
+
+/// Whether `finish` should be rejected because the most recent `verify` call
+/// reported a failure and the agent said nothing about it in the `finish`
+/// action's `verification` field. Unlike `unverified_modification` (which
+/// only checks that `verify` was *called*), this catches the agent claiming
+/// success while ignoring a real failure that's sitting right there in
+/// `verify`'s own last result — the specific "reports success when it
+/// wasn't" failure mode that matters more here than in an
+/// interactively-supervised session, since a scheduled or messaging-bridge
+/// run has nobody watching live to catch it.
+fn unacknowledged_verify_failure(last_verify_failed: Option<bool>, verification_field: &str) -> bool {
+    last_verify_failed == Some(true) && meaningful_verification(verification_field).is_empty()
+}
+
 fn meaningful_verification(value: &str) -> &str {
     let value = value.trim();
     if matches!(
@@ -3735,6 +3833,55 @@ mod tests {
         read_only.insert("web_search::rust patterns".to_string(), 2);
         // Enough steps, but nothing substantive happened.
         assert!(!looks_skill_worthy(5, &read_only));
+    }
+
+    #[test]
+    fn shell_result_failed_reads_the_exit_line() {
+        assert!(!shell_result_failed("exit: 0\nmode: normal\nsandboxed: true\nstdout:\nok\nstderr:\n"));
+        assert!(shell_result_failed("exit: 1\nmode: normal\nsandboxed: true\nstdout:\nfail\nstderr:\n"));
+        // A killed/unknown-status process isn't treated as a confirmed failure.
+        assert!(!shell_result_failed("exit: unknown\nmode: normal\nsandboxed: true\nstdout:\nstderr:\n"));
+    }
+
+    #[test]
+    fn shell_result_failed_catches_a_later_command_failing_in_a_multi_command_verify() {
+        // A multi-command `verify` joins each command's own `run_shell` block with
+        // "\n\n" — the first command here passes, the second fails, and the scan
+        // must not stop after the first "exit: " line it finds.
+        let joined = "exit: 0\nmode: normal\nsandboxed: true\nstdout:\ncargo check ok\nstderr:\n\n\
+                       exit: 1\nmode: normal\nsandboxed: true\nstdout:\n\nstderr:\n2 tests failed";
+        assert!(shell_result_failed(joined));
+    }
+
+    #[test]
+    fn unverified_modification_requires_a_verify_call_after_the_last_edit() {
+        // No edit at all this run — nothing to verify.
+        assert!(!unverified_modification(None, None, ""));
+        // Edited, never verified, no explanation given.
+        assert!(unverified_modification(Some(2), None, ""));
+        // Edited, verified *before* the edit (stale) — still unverified.
+        assert!(unverified_modification(Some(2), Some(1), ""));
+        // Edited, verified after — satisfied regardless of what verify found.
+        assert!(!unverified_modification(Some(2), Some(3), ""));
+        // Edited, never verified, but explicitly explained why no check applies.
+        assert!(!unverified_modification(Some(2), None, "Docs-only change, no test suite."));
+    }
+
+    #[test]
+    fn unacknowledged_verify_failure_requires_the_agent_to_address_a_real_failure() {
+        // No verify ran yet, or it passed — nothing to block on.
+        assert!(!unacknowledged_verify_failure(None, ""));
+        assert!(!unacknowledged_verify_failure(Some(false), ""));
+        // Verify failed and the agent said nothing about it — this is the
+        // "claims success while a check is actually failing" case.
+        assert!(unacknowledged_verify_failure(Some(true), ""));
+        assert!(unacknowledged_verify_failure(Some(true), "n/a"));
+        // Verify failed, but the agent explicitly addressed it in the finish
+        // action's verification field (e.g. explaining it's pre-existing).
+        assert!(!unacknowledged_verify_failure(
+            Some(true),
+            "2 pre-existing test failures unrelated to this change; see notes."
+        ));
     }
 
     #[test]

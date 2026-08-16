@@ -165,6 +165,73 @@
   box-shadow: 0 2px 8px var(--accent-glow, rgba(59, 130, 246, 0.3));
 }
 
+/* Scheduled task "When to run" row — repeat-type select, inline
+   weekday/day/date picker, and (on the row below) time + timezone selects,
+   all on one line instead of stacked labeled fields. */
+.schedule-inline-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.schedule-inline-word {
+  font-size: 0.85rem;
+  color: var(--text-muted, #94a3b8);
+  white-space: nowrap;
+}
+
+.schedule-repeat-select {
+  width: auto;
+  min-width: 130px;
+}
+
+.schedule-day-input {
+  width: auto;
+  min-width: 90px;
+}
+
+.schedule-time-input {
+  width: auto;
+  min-width: 110px;
+}
+
+.schedule-timezone-select {
+  width: auto;
+  min-width: 180px;
+  max-width: 260px;
+}
+
+.schedule-weekday-circles {
+  display: flex;
+  gap: 6px;
+}
+
+.management-pill-btn-circle {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: 50%;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  background: var(--input-bg, rgba(15, 23, 42, 0.6));
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.management-pill-btn-circle:hover {
+  color: var(--text-main, #f8fafc);
+}
+
+.management-pill-btn-circle.active {
+  background: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  color: #ffffff;
+  box-shadow: 0 2px 8px var(--accent-glow, rgba(59, 130, 246, 0.3));
+}
+
 /* Grid & Cards */
 .management-grid {
   display: grid;

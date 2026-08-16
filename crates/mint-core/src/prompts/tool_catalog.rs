@@ -69,6 +69,8 @@ pub fn tool_catalog(
     if plan_mode {
         allowed.retain(|action| PLAN_MODE_ALLOWED_ACTIONS.contains(action));
         allowed.push("exit_plan_mode");
+    } else {
+        allowed.push("enter_plan_mode");
     }
 
     let mut tools: Vec<ToolSpec> = allowed
@@ -466,6 +468,20 @@ fn all_tools() -> Vec<ToolSpec> {
             ),
         ),
         tool(
+            "enter_plan_mode",
+            "Ask the user to switch into read-only plan mode before acting, when the task looks risky or complex (multi-file refactor, migration, deletions, schema/API changes, or anything hard to reverse). \
+             The user may approve, decline, or leave feedback instead; both entering and exiting plan mode (via exit_plan_mode) require approval.",
+            schema(
+                json!({
+                    "reason": {
+                        "type": "string",
+                        "description": "Short explanation of why this task warrants investigating before touching anything."
+                    }
+                }),
+                &["reason"],
+            ),
+        ),
+        tool(
             "verify",
             "Run verification commands (tests, builds, linters) after making changes. \
              Required before finish in any run where apply_patch or write_file was used, unless \
@@ -765,6 +781,20 @@ mod tests {
         let config = MintConfig::default();
         let tools = tool_catalog(&config, false, Path::new("."), true);
         assert!(!tools.iter().any(|t| t.name == "exit_plan_mode"));
+    }
+
+    #[test]
+    fn non_plan_mode_catalog_offers_enter_plan_mode() {
+        let config = MintConfig::default();
+        let tools = tool_catalog(&config, false, Path::new("."), true);
+        assert!(tools.iter().any(|t| t.name == "enter_plan_mode"));
+    }
+
+    #[test]
+    fn plan_mode_catalog_never_offers_enter_plan_mode() {
+        let config = MintConfig::default();
+        let tools = tool_catalog(&config, true, Path::new("."), true);
+        assert!(!tools.iter().any(|t| t.name == "enter_plan_mode"));
     }
 
     fn write_subagent(dir: &std::path::Path, name: &str, content: &str) {

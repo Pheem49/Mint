@@ -63,6 +63,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "@xyflow/react": "^12.11.1",
     "lucide-react": "^1.28.0",
+    "luxon": "^3.7.2",
     "material-icon-theme": "5.34.0",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
@@ -74,7 +75,8 @@
     "vite": "^8.0.16"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0"
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/luxon": "^3.7.4"
   },
   "overrides": {
     "gh-pages": "^5.0.0",

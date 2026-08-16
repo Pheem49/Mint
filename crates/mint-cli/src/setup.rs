@@ -61,6 +61,26 @@ pub async fn run() -> Result<Option<String>> {
             enabled: !config.disabled_tools.contains(&"web_search".to_string()),
         },
         ToolOption {
+            name: "image_search (Search Images)",
+            key: "image_search",
+            enabled: !config.disabled_tools.contains(&"image_search".to_string()),
+        },
+        ToolOption {
+            name: "weather (Check Weather)",
+            key: "weather",
+            enabled: !config.disabled_tools.contains(&"weather".to_string()),
+        },
+        ToolOption {
+            name: "stock (Check Stock Prices)",
+            key: "stock",
+            enabled: !config.disabled_tools.contains(&"stock".to_string()),
+        },
+        ToolOption {
+            name: "calculation (Perform Calculations)",
+            key: "calculation",
+            enabled: !config.disabled_tools.contains(&"calculation".to_string()),
+        },
+        ToolOption {
             name: "memory_recall (Recall Long-term Memory)",
             key: "memory_recall",
             enabled: !config.disabled_tools.contains(&"memory_recall".to_string()),
@@ -147,6 +167,11 @@ pub async fn run() -> Result<Option<String>> {
             enabled: !config.disabled_tools.contains(&"mcp_tool".to_string()),
         },
         ToolOption {
+            name: "mcp_list_tools (List MCP Server Tools)",
+            key: "mcp_list_tools",
+            enabled: !config.disabled_tools.contains(&"mcp_list_tools".to_string()),
+        },
+        ToolOption {
             name: "run_shell (Run Shell Commands)",
             key: "run_shell",
             enabled: !config.disabled_tools.contains(&"run_shell".to_string()),
@@ -165,6 +190,102 @@ pub async fn run() -> Result<Option<String>> {
             name: "write_file (Write Files)",
             key: "write_file",
             enabled: !config.disabled_tools.contains(&"write_file".to_string()),
+        },
+        ToolOption {
+            name: "video_trim (Trim Video)",
+            key: "video_trim",
+            enabled: !config.disabled_tools.contains(&"video_trim".to_string()),
+        },
+        ToolOption {
+            name: "video_remove_silence (Remove Silence from Video)",
+            key: "video_remove_silence",
+            enabled: !config
+                .disabled_tools
+                .contains(&"video_remove_silence".to_string()),
+        },
+        ToolOption {
+            name: "video_resize (Resize Video)",
+            key: "video_resize",
+            enabled: !config.disabled_tools.contains(&"video_resize".to_string()),
+        },
+        ToolOption {
+            name: "video_merge (Merge Videos)",
+            key: "video_merge",
+            enabled: !config.disabled_tools.contains(&"video_merge".to_string()),
+        },
+        ToolOption {
+            name: "video_export (Export Video)",
+            key: "video_export",
+            enabled: !config.disabled_tools.contains(&"video_export".to_string()),
+        },
+        ToolOption {
+            name: "video_extract_audio (Extract Audio from Video)",
+            key: "video_extract_audio",
+            enabled: !config
+                .disabled_tools
+                .contains(&"video_extract_audio".to_string()),
+        },
+        ToolOption {
+            name: "speech_transcribe (Transcribe Speech)",
+            key: "speech_transcribe",
+            enabled: !config
+                .disabled_tools
+                .contains(&"speech_transcribe".to_string()),
+        },
+        ToolOption {
+            name: "subtitle_generate (Generate Subtitles)",
+            key: "subtitle_generate",
+            enabled: !config
+                .disabled_tools
+                .contains(&"subtitle_generate".to_string()),
+        },
+        ToolOption {
+            name: "subtitle_translate (Translate Subtitles)",
+            key: "subtitle_translate",
+            enabled: !config
+                .disabled_tools
+                .contains(&"subtitle_translate".to_string()),
+        },
+        ToolOption {
+            name: "subtitle_burn (Burn Subtitles into Video)",
+            key: "subtitle_burn",
+            enabled: !config.disabled_tools.contains(&"subtitle_burn".to_string()),
+        },
+        ToolOption {
+            name: "timeline_reorder (Reorder Video Timeline)",
+            key: "timeline_reorder",
+            enabled: !config
+                .disabled_tools
+                .contains(&"timeline_reorder".to_string()),
+        },
+        ToolOption {
+            name: "effect_zoom_on_speaker (Auto-zoom on Speaker)",
+            key: "effect_zoom_on_speaker",
+            enabled: !config
+                .disabled_tools
+                .contains(&"effect_zoom_on_speaker".to_string()),
+        },
+        ToolOption {
+            name: "audio_duck_music (Duck Background Music)",
+            key: "audio_duck_music",
+            enabled: !config
+                .disabled_tools
+                .contains(&"audio_duck_music".to_string()),
+        },
+        ToolOption {
+            name: "make_shorts (Generate Short Clips)",
+            key: "make_shorts",
+            enabled: !config.disabled_tools.contains(&"make_shorts".to_string()),
+        },
+        ToolOption {
+            name: "generate_image (Generate Image)",
+            key: "generate_image",
+            enabled: !config.disabled_tools.contains(&"generate_image".to_string()),
+        },
+        ToolOption {
+            name: "generate_video (Generate Video)",
+            key: "generate_video",
+            enabled: !config.disabled_tools.contains(&"generate_video".to_string()),
         },
     ];
 

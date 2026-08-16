@@ -249,6 +249,7 @@ pub async fn run_interactive_chat() -> Result<()> {
             &session.current_dir,
             &session.history,
             &session.jobs,
+            session.plan_mode,
         )? {
             if let Some(uri) = input.pasted_image {
                 if let Some(ref mut current) = session.pending_image {

@@ -135,6 +135,7 @@ fn approval_subject(approval: &AgentApproval) -> Option<(&'static str, String)> 
         } => Some(("mcp_tool", format!("{server}:{tool}:{arguments}"))),
         AgentApproval::UserApproval { .. }
         | AgentApproval::ExitPlanMode { .. }
+        | AgentApproval::EnterPlanMode { .. }
         | AgentApproval::AskUser { .. } => None,
     }
 }

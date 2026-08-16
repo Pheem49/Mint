@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::{ChatRequest, MintConfig, load_config, orchestrate_chat};
+use crate::{ChatRequest, MintConfig, load_config, orchestrate_chat, set_config_value};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
@@ -70,6 +70,13 @@ async fn telegram_loop() -> Result<(), String> {
             ) else {
                 continue;
             };
+            let sender_id = update["message"]["from"]["id"]
+                .as_i64()
+                .map(|id| id.to_string())
+                .unwrap_or_default();
+            if !authorize_sender("telegramOwnerChatId", &sender_id) {
+                continue;
+            }
             let formatted_chat_id = format!("telegram:{chat_id}");
             if let Ok(config) = load_config() {
                 if config.bridge_ack_enabled() {
@@ -142,6 +149,8 @@ async fn discord_loop() -> Result<(), String> {
                         mentions.iter().any(|mention| mention["id"].as_str() == Some(&bot_id))
                     });
                     if !direct_message && !mentioned { continue }
+                    let sender_id = value["d"]["author"]["id"].as_str().unwrap_or_default();
+                    if !authorize_sender("discordOwnerUserId", sender_id) { continue }
                     if let Ok(config) = load_config() {
                         if config.bridge_ack_enabled() {
                             let _ = crate::HTTP_CLIENT.clone().post(format!("https://discord.com/api/v10/channels/{channel}/typing"))
@@ -201,6 +210,10 @@ async fn slack_loop() -> Result<(), String> {
         else {
             continue;
         };
+        let sender_id = event["user"].as_str().unwrap_or_default();
+        if !authorize_sender("slackOwnerUserId", sender_id) {
+            continue;
+        }
         let formatted_chat_id = format!("slack:{channel}");
         let reply = answer_channel(
             text,
@@ -278,6 +291,9 @@ async fn line_webhook_loop() -> Result<(), String> {
                     continue;
                 };
                 let user_id = event["source"]["userId"].as_str().unwrap_or_default();
+                if !authorize_sender("lineOwnerUserId", user_id) {
+                    continue;
+                }
                 let formatted_chat_id = format!("line:{user_id}");
                 let reply = answer_channel(
                     text,
@@ -379,6 +395,9 @@ async fn whatsapp_webhook_loop() -> Result<(), String> {
                     else {
                         continue;
                     };
+                    if !authorize_sender("whatsappOwnerPhone", from) {
+                        continue;
+                    }
                     let formatted_chat_id = format!("whatsapp:{from}");
                     let reply = answer_channel(
                         text,
@@ -543,6 +562,63 @@ fn extra_string(config: &MintConfig, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Guards every bridge against strangers: none of Telegram/Discord/Slack/
+/// LINE/WhatsApp verify *who* is messaging the bot on their own — a
+/// Telegram bot can be DMed by anyone who finds it, a Discord/Slack bot can
+/// be @-mentioned by anyone sharing a server/workspace with it, and LINE/
+/// WhatsApp accounts can be messaged by anyone with the number/QR code.
+/// Without this check, any of those strangers could trigger
+/// `answer_channel`'s agent loop — which auto-approves every action,
+/// including `write_file`/`apply_patch`/`run_shell`, since there's no human
+/// present on a bridge to click "approve" — on the *owner's* machine.
+///
+/// The fix needs zero setup: the first sender ever seen on a given platform
+/// is claimed as its owner (persisted under `owner_key` in `config.extra`,
+/// e.g. `"telegramOwnerChatId"`) and everyone else is rejected from then on.
+/// To let a different sender claim it later, clear the stored id — e.g.
+/// `mint config set telegramOwnerChatId ""`.
+fn authorize_sender(owner_key: &str, sender_id: &str) -> bool {
+    if sender_id.is_empty() {
+        return false;
+    }
+    let Ok(config) = load_config() else {
+        return false;
+    };
+    match sender_authorization(extra_string(&config, owner_key).as_deref(), sender_id) {
+        SenderAuthorization::Authorized => true,
+        SenderAuthorization::Claim => {
+            let _ = set_config_value(owner_key, Value::String(sender_id.to_string()));
+            true
+        }
+        SenderAuthorization::Rejected => false,
+    }
+}
+
+/// The decision core of [`authorize_sender`], split out so it's testable
+/// without touching the real on-disk config (`load_config`/`set_config_value`
+/// always resolve to the user's actual config file — there's no test-scoped
+/// override for them, unlike `MemoryStore`/`CronStore`, which is exactly the
+/// class of bug that let earlier `cargo test` runs leave real orphaned rows
+/// in this user's own database; see the `cfg!(test)` guards in
+/// `cron::store`).
+#[derive(Debug, PartialEq, Eq)]
+enum SenderAuthorization {
+    /// Matches the stored owner.
+    Authorized,
+    /// No owner stored yet — this sender should be claimed as the owner.
+    Claim,
+    /// A different owner is already stored.
+    Rejected,
+}
+
+fn sender_authorization(stored_owner: Option<&str>, sender_id: &str) -> SenderAuthorization {
+    match stored_owner {
+        Some(owner) if owner == sender_id => SenderAuthorization::Authorized,
+        Some(_) => SenderAuthorization::Rejected,
+        None => SenderAuthorization::Claim,
+    }
+}
+
 fn request_error(error: reqwest::Error) -> String {
     error.to_string()
 }
@@ -673,4 +749,38 @@ fn verify_hmac_sha256_hex(secret: &str, body: &str, signature_hex: &str) -> bool
         let expected: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
         expected.eq_ignore_ascii_case(signature_hex)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_stored_owner_claims_the_sender() {
+        assert_eq!(sender_authorization(None, "user-1"), SenderAuthorization::Claim);
+    }
+
+    #[test]
+    fn matching_stored_owner_is_authorized() {
+        assert_eq!(
+            sender_authorization(Some("user-1"), "user-1"),
+            SenderAuthorization::Authorized
+        );
+    }
+
+    #[test]
+    fn a_different_sender_than_the_stored_owner_is_rejected() {
+        assert_eq!(
+            sender_authorization(Some("user-1"), "user-2"),
+            SenderAuthorization::Rejected
+        );
+    }
+
+    #[test]
+    fn an_empty_sender_id_is_rejected_without_touching_config() {
+        // Bails out before `load_config()`/`set_config_value()` — a missing
+        // sender id (a field the platform didn't send) must never fall
+        // through to "no owner stored yet, claim it".
+        assert!(!authorize_sender("telegramOwnerChatId", ""));
+    }
 }

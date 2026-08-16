@@ -6,6 +6,6 @@ mod schedule;
 mod scheduler;
 mod store;
 
-pub use schedule::parse_schedule;
+pub use schedule::{localize_schedule, parse_schedule};
 pub use scheduler::start_cron_scheduler;
 pub use store::{CronError, CronJob, CronJobDraft, CronStore};

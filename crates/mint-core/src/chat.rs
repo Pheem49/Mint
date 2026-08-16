@@ -641,7 +641,7 @@ async fn call_openai(
     let response: Value = client
         .post(format!("{base_url}/chat/completions"))
         .bearer_auth(if local { "not-needed" } else { &api_key })
-        .json(&openai_chat_payload(&model, request, false))
+        .json(&openai_chat_payload(&model, request, false)?)
         .send()
         .await?
         .error_for_status()?
@@ -1205,7 +1205,7 @@ where
     let response = client
         .post(format!("{base_url}/chat/completions"))
         .bearer_auth(if local { "not-needed" } else { &api_key })
-        .json(&openai_chat_payload(&model, request, true))
+        .json(&openai_chat_payload(&model, request, true)?)
         .send()
         .await?
         .error_for_status()?;
@@ -1421,7 +1421,7 @@ async fn call_custom_provider(
 
     let base_url = provider.base_url.trim_end_matches('/');
     let model = resolve_custom_model(config);
-    let payload = openai_chat_payload(&model, request, false);
+    let payload = openai_chat_payload(&model, request, false)?;
 
     let mut builder = client
         .post(format!("{base_url}/chat/completions"))
@@ -1456,7 +1456,7 @@ where
 
     let base_url = provider.base_url.trim_end_matches('/');
     let model = resolve_custom_model(config);
-    let payload = openai_chat_payload(&model, request, true);
+    let payload = openai_chat_payload(&model, request, true)?;
 
     let mut builder = client
         .post(format!("{base_url}/chat/completions"))
@@ -1505,17 +1505,21 @@ fn require_supported_attachments(provider: &str, request: &ChatRequest) -> Resul
             Err(ChatError::UnsupportedAttachments(provider.into()))
         }
         "ollama" => Ok(()),
+        // The real OpenAI API supports audio input natively (`input_audio` content
+        // parts, see `openai_audio_part`) — video still isn't implemented for it.
+        "openai" if has_video => Err(ChatError::UnsupportedAttachments(provider.into())),
+        "openai" => Ok(()),
         // These all build their payload via `openai_chat_payload`/`anthropic_chat_payload`,
         // which support image attachments (see `openai_message_content`/
-        // `anthropic_message_content`). Audio/video are not implemented for them yet.
-        "openai" | "local_openai" | "openrouter" | "deepseek" | "huggingface" | "anthropic"
+        // `anthropic_message_content`). Unlike literal `"openai"` above, these are
+        // separate services/proxies that aren't confirmed to speak the same
+        // `input_audio` schema, so audio/video stay unsupported for them.
+        "local_openai" | "openrouter" | "deepseek" | "huggingface" | "anthropic"
             if has_audio || has_video =>
         {
             Err(ChatError::UnsupportedAttachments(provider.into()))
         }
-        "openai" | "local_openai" | "openrouter" | "deepseek" | "huggingface" | "anthropic" => {
-            Ok(())
-        }
+        "local_openai" | "openrouter" | "deepseek" | "huggingface" | "anthropic" => Ok(()),
         // Custom providers route through `call_custom_provider`, which also uses
         // `openai_chat_payload`, so images are supported the same way; audio/video
         // are not implemented for them yet.
@@ -1675,7 +1679,7 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
     })
 }
 
-fn openai_chat_payload(model: &str, request: &ChatRequest, stream: bool) -> Value {
+fn openai_chat_payload(model: &str, request: &ChatRequest, stream: bool) -> Result<Value, ChatError> {
     let messages = if let Some(messages) = &request.messages {
         let mut built = Vec::new();
         if !request.system_instruction.is_empty()
@@ -1683,14 +1687,18 @@ fn openai_chat_payload(model: &str, request: &ChatRequest, stream: bool) -> Valu
         {
             built.push(json!({ "role": "system", "content": request.system_instruction }));
         }
-        built.extend(openai_native_messages(messages));
+        built.extend(openai_native_messages(messages)?);
         built
     } else {
         vec![
             json!({ "role": "system", "content": request.system_instruction }),
             json!({
                 "role": "user",
-                "content": openai_message_content(&request.message, request.image_data_uri.as_deref()),
+                "content": openai_message_content(
+                    &request.message,
+                    request.image_data_uri.as_deref(),
+                    request.audio_data_uri.as_deref(),
+                )?,
             }),
         ]
     };
@@ -1717,12 +1725,12 @@ fn openai_chat_payload(model: &str, request: &ChatRequest, stream: bool) -> Valu
                 .collect::<Vec<_>>()
         );
     }
-    payload
+    Ok(payload)
 }
 
 /// Converts structured history into OpenAI Chat Completions message objects,
 /// including assistant `tool_calls` and `role: "tool"` tool-result messages.
-fn openai_native_messages(messages: &[ChatMessage]) -> Vec<Value> {
+fn openai_native_messages(messages: &[ChatMessage]) -> Result<Vec<Value>, ChatError> {
     let mut result = Vec::new();
     for message in messages {
         match message.role {
@@ -1730,7 +1738,7 @@ fn openai_native_messages(messages: &[ChatMessage]) -> Vec<Value> {
                 result.push(json!({ "role": "system", "content": message_text(message) }));
             }
             ChatRole::User => {
-                result.push(json!({ "role": "user", "content": openai_user_content(message) }));
+                result.push(json!({ "role": "user", "content": openai_user_content(message)? }));
             }
             ChatRole::Assistant => {
                 let text = message_text(message);
@@ -1796,7 +1804,7 @@ fn openai_native_messages(messages: &[ChatMessage]) -> Vec<Value> {
             }
         }
     }
-    result
+    Ok(result)
 }
 
 /// Concatenates all `Text` blocks in a message (tool-use/result/image blocks
@@ -1814,44 +1822,79 @@ fn message_text(message: &ChatMessage) -> String {
 }
 
 /// Builds an OpenAI `content` value for the plain (non-native-messages) chat
-/// path: bare text when there's no image, otherwise a `text` + `image_url`
-/// parts array. Mirrors `openai_user_content`, which handles the same shape
-/// for the native-tool-calling `messages` path. `image_data_uri` may contain
-/// multiple space-separated data URIs, matching Gemini's `gemini_parts`.
-fn openai_message_content(text: &str, image_data_uri: Option<&str>) -> Value {
-    let Some(image_data) = image_data_uri else {
-        return json!(text);
-    };
+/// path: bare text when there's no image/audio, otherwise a `text` +
+/// `image_url`/`input_audio` parts array. Mirrors `openai_user_content`,
+/// which handles the same shape for the native-tool-calling `messages` path.
+/// `image_data_uri`/`audio_data_uri` may each contain multiple
+/// space-separated data URIs, matching Gemini's `gemini_parts`.
+fn openai_message_content(
+    text: &str,
+    image_data_uri: Option<&str>,
+    audio_data_uri: Option<&str>,
+) -> Result<Value, ChatError> {
+    if image_data_uri.is_none() && audio_data_uri.is_none() {
+        return Ok(json!(text));
+    }
     let mut parts = vec![json!({ "type": "text", "text": text })];
-    for img in image_data.split_whitespace() {
+    for img in image_data_uri.into_iter().flat_map(str::split_whitespace) {
         parts.push(json!({ "type": "image_url", "image_url": { "url": img } }));
     }
-    json!(parts)
+    for aud in audio_data_uri.into_iter().flat_map(str::split_whitespace) {
+        parts.push(openai_audio_part(aud)?);
+    }
+    Ok(json!(parts))
 }
 
-fn openai_user_content(message: &ChatMessage) -> Value {
+fn openai_user_content(message: &ChatMessage) -> Result<Value, ChatError> {
     if let [ContentBlock::Text { text }] = message.content.as_slice() {
-        return json!(text);
+        return Ok(json!(text));
     }
     let parts: Vec<Value> = message
         .content
         .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text { text } => Some(json!({ "type": "text", "text": text })),
-            ContentBlock::Image { data_uri } => {
-                Some(json!({ "type": "image_url", "image_url": { "url": data_uri } }))
-            }
-            // OpenAI Chat Completions has no inline audio/video content part in
-            // this format; unreachable in practice because
-            // `require_supported_attachments` rejects audio/video for these
-            // providers before a request gets this far.
-            ContentBlock::ToolUse { .. }
-            | ContentBlock::ToolResult { .. }
-            | ContentBlock::Audio { .. }
-            | ContentBlock::Video { .. } => None,
+        .map(|block| -> Result<Value, ChatError> {
+            Ok(match block {
+                ContentBlock::Text { text } => json!({ "type": "text", "text": text }),
+                ContentBlock::Image { data_uri } => {
+                    json!({ "type": "image_url", "image_url": { "url": data_uri } })
+                }
+                ContentBlock::Audio { data_uri } => openai_audio_part(data_uri)?,
+                // OpenAI Chat Completions has no inline video content part in this
+                // format; unreachable in practice because
+                // `require_supported_attachments` rejects video for these
+                // providers before a request gets this far. `Value::Null` here
+                // is a "skip this block" sentinel, filtered out below.
+                ContentBlock::ToolUse { .. }
+                | ContentBlock::ToolResult { .. }
+                | ContentBlock::Video { .. } => Value::Null,
+            })
         })
-        .collect();
-    json!(parts)
+        .filter_map(|part| match part {
+            Ok(Value::Null) => None,
+            other => Some(other),
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(json!(parts))
+}
+
+/// Builds an OpenAI `input_audio` content part. Unlike `image_url`, which
+/// takes the whole `data:` URI as-is, OpenAI's audio input wants the base64
+/// payload and format split apart, so the URI has to be parsed here instead
+/// of just passed through.
+fn openai_audio_part(data_uri: &str) -> Result<Value, ChatError> {
+    let (mime_type, data) = split_data_uri(data_uri, "audio/")?;
+    Ok(json!({
+        "type": "input_audio",
+        "input_audio": { "data": data, "format": openai_audio_format(&mime_type) }
+    }))
+}
+
+/// OpenAI's `input_audio.format` only accepts `"wav"` or `"mp3"` — anything
+/// else (webm, ogg, m4a, …) is mapped to `"mp3"` as the closest-effort
+/// fallback rather than rejected outright; the API itself is the final judge
+/// of whether the actual bytes decode.
+fn openai_audio_format(mime_type: &str) -> &'static str {
+    if mime_type.contains("wav") { "wav" } else { "mp3" }
 }
 
 /// Splits a `data:<mime>;base64,<data>` URI into `(mime_type, base64_data)`,
@@ -2153,7 +2196,7 @@ mod tests {
             },
         ];
         let request = native_request(messages, Some(vec![sample_tool()]));
-        let payload = openai_chat_payload("gpt-x", &request, false);
+        let payload = openai_chat_payload("gpt-x", &request, false).unwrap();
 
         assert_eq!(payload["tools"][0]["type"], "function");
         assert_eq!(payload["tools"][0]["function"]["name"], "read_file");
@@ -2184,7 +2227,7 @@ mod tests {
                 },
             ],
         }];
-        let built = openai_native_messages(&messages);
+        let built = openai_native_messages(&messages).unwrap();
         assert_eq!(built.len(), 2);
         assert_eq!(built[0]["role"], "tool");
         assert_eq!(built[0]["tool_call_id"], "call_1");
@@ -2194,6 +2237,104 @@ mod tests {
             built[1]["content"][0]["image_url"]["url"],
             "data:image/png;base64,QUJD"
         );
+    }
+
+    #[test]
+    fn openai_allows_audio_attachments() {
+        let request = ChatRequest {
+            message: "transcribe this".into(),
+            system_instruction: String::new(),
+            chat_id: None,
+            image_data_uri: None,
+            audio_data_uri: Some("data:audio/wav;base64,QUJD".into()),
+            video_data_uri: None,
+            document_attachment: None,
+            workspace_path: None,
+            agent_id: None,
+            plan_mode: false,
+            messages: None,
+            tools: None,
+        };
+        assert!(require_supported_attachments("openai", &request).is_ok());
+    }
+
+    #[test]
+    fn non_openai_openai_family_providers_still_reject_audio() {
+        // Only the real OpenAI API is confirmed to speak the `input_audio`
+        // schema — proxies/other services built on the same wire format
+        // (local_openai, openrouter, deepseek, huggingface) and Anthropic
+        // (no audio modality at all) must stay rejected.
+        let request = ChatRequest {
+            message: "transcribe this".into(),
+            system_instruction: String::new(),
+            chat_id: None,
+            image_data_uri: None,
+            audio_data_uri: Some("data:audio/wav;base64,QUJD".into()),
+            video_data_uri: None,
+            document_attachment: None,
+            workspace_path: None,
+            agent_id: None,
+            plan_mode: false,
+            messages: None,
+            tools: None,
+        };
+        for provider in ["local_openai", "openrouter", "deepseek", "huggingface", "anthropic"] {
+            let error = require_supported_attachments(provider, &request).unwrap_err();
+            assert!(
+                matches!(&error, ChatError::UnsupportedAttachments(p) if p == provider),
+                "expected {provider} to reject audio, got {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn openai_audio_part_splits_the_data_uri_and_maps_wav_format() {
+        let part = openai_audio_part("data:audio/wav;base64,QUJD").unwrap();
+        assert_eq!(part["type"], "input_audio");
+        assert_eq!(part["input_audio"]["data"], "QUJD");
+        assert_eq!(part["input_audio"]["format"], "wav");
+    }
+
+    #[test]
+    fn openai_audio_part_defaults_unrecognized_formats_to_mp3() {
+        let part = openai_audio_part("data:audio/webm;base64,QUJD").unwrap();
+        assert_eq!(part["input_audio"]["format"], "mp3");
+    }
+
+    #[test]
+    fn openai_audio_part_rejects_a_malformed_data_uri() {
+        assert!(openai_audio_part("not-a-data-uri").is_err());
+    }
+
+    #[test]
+    fn openai_message_content_embeds_audio_alongside_text() {
+        let content =
+            openai_message_content("what is this?", None, Some("data:audio/mp3;base64,QUJD"))
+                .unwrap();
+        let parts = content.as_array().unwrap();
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[1]["type"], "input_audio");
+        assert_eq!(parts[1]["input_audio"]["data"], "QUJD");
+    }
+
+    #[test]
+    fn openai_user_content_encodes_an_audio_content_block() {
+        let message = ChatMessage {
+            role: ChatRole::User,
+            content: vec![
+                ContentBlock::Text {
+                    text: "what is this?".into(),
+                },
+                ContentBlock::Audio {
+                    data_uri: "data:audio/wav;base64,QUJD".into(),
+                },
+            ],
+        };
+        let content = openai_user_content(&message).unwrap();
+        let parts = content.as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[1]["type"], "input_audio");
+        assert_eq!(parts[1]["input_audio"]["format"], "wav");
     }
 
     #[test]

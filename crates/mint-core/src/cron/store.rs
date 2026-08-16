@@ -133,7 +133,17 @@ impl CronStore {
         // for the generic "New chat" -> first-message rename to happen on
         // its first run. Not fatal if the memory store is unavailable — the
         // scheduled task itself is still created either way.
-        if let Ok(memory) = crate::memory::MemoryStore::open_default() {
+        //
+        // Skipped under `cfg!(test)`: unlike `self` (an isolated `temp_store`
+        // in every test), `MemoryStore::open_default()` always resolves to
+        // the real user config dir — there is no test-scoped override for
+        // it — so without this guard, every test run of this function leaves
+        // a real, permanent, empty "conversation" row in the developer's own
+        // chat sidebar (this is exactly how the app can accumulate orphaned
+        // empty chats named after test job names like "job"/"stock report").
+        if !cfg!(test)
+            && let Ok(memory) = crate::memory::MemoryStore::open_default()
+        {
             let _ = memory.ensure_named_chat_session(
                 &super::scheduler::chat_id_for_job(&job.id),
                 &job.name,
@@ -151,6 +161,23 @@ impl CronStore {
         let removed = jobs.len() != before;
         if removed {
             self.write(&jobs)?;
+
+            // Best-effort, mirroring `add`'s eager conversation creation: if
+            // this job's pre-named conversation never got a real run written
+            // to it (removed right after creation, or as part of an
+            // edit-as-remove-then-add — there is no in-place update here),
+            // clean up the empty placeholder instead of leaving an orphaned,
+            // contentless conversation in the sidebar forever. A job that
+            // did run at least once keeps its conversation and history.
+            //
+            // Skipped under `cfg!(test)` for the same reason `add` skips its
+            // half of this — see the comment there.
+            if !cfg!(test)
+                && let Ok(memory) = crate::memory::MemoryStore::open_default()
+            {
+                let _ = memory
+                    .delete_chat_session_if_empty(&super::scheduler::chat_id_for_job(id));
+            }
         }
         Ok(removed)
     }

@@ -209,30 +209,16 @@ pub async fn run_code_agent_with_options(
                     Ok(ApprovalOutcome::Denied)
                 }
             }
+            AgentApproval::EnterPlanMode { reason } => {
+                print_approval_card("Enter Plan Mode?", &[("Reason", reason)]);
+                plan_mode_option_picker("Yes, switch to plan mode", "No, proceed directly")
+            }
             AgentApproval::ExitPlanMode { plan } => {
                 print_approval_card("Review Plan", &[("Plan", plan)]);
-                print!(
-                    "  Approve this plan and allow edits? [y/N] (or type feedback to keep planning): "
-                );
-                let _ = std::io::Write::flush(&mut std::io::stdout());
-                let mut answer = String::new();
-                match std::io::stdin().read_line(&mut answer) {
-                    Ok(_) => {
-                        let trimmed = answer.trim();
-                        if trimmed.eq_ignore_ascii_case("y") || trimmed.eq_ignore_ascii_case("yes")
-                        {
-                            Ok(ApprovalOutcome::Approved)
-                        } else if trimmed.is_empty()
-                            || trimmed.eq_ignore_ascii_case("n")
-                            || trimmed.eq_ignore_ascii_case("no")
-                        {
-                            Ok(ApprovalOutcome::Denied)
-                        } else {
-                            Ok(ApprovalOutcome::Intercepted(trimmed.to_owned()))
-                        }
-                    }
-                    Err(error) => Err(error.to_string()),
-                }
+                plan_mode_option_picker(
+                    "Yes, approve and start implementing",
+                    "No, keep planning",
+                )
             }
             AgentApproval::AskUser { question, options } => {
                 if options.is_empty() {
@@ -1836,6 +1822,22 @@ async fn wait_for_escape_interrupt(approval_active: Arc<AtomicBool>) {
 /// Interactive picker for `ask_user` options: ↑/↓ + Enter to choose, digits for a quick
 /// jump, any other character drops into free-text mode, Esc declines. Falls back to a
 /// plain numbered prompt when raw mode isn't available (e.g. piped/non-interactive stdin).
+/// Arrow-key Yes/No picker for the plan-mode approval cards (entering and
+/// exiting), built on top of [`run_option_picker`] so plan mode gets the same
+/// picker UX as every other approval card (`WriteFile`, `ApplyPatch`,
+/// `AskUser` with options, …) instead of a plain `y/N` text prompt. Selecting
+/// `yes_label`/`no_label` maps back to `Approved`/`Denied`; typing free text
+/// or pressing Esc still falls through to `Intercepted`/`Denied` untouched,
+/// since `run_option_picker` already supports those directly.
+fn plan_mode_option_picker(yes_label: &str, no_label: &str) -> Result<ApprovalOutcome, String> {
+    let options = vec![yes_label.to_string(), no_label.to_string()];
+    match run_option_picker(&options)? {
+        ApprovalOutcome::Intercepted(text) if text == yes_label => Ok(ApprovalOutcome::Approved),
+        ApprovalOutcome::Intercepted(text) if text == no_label => Ok(ApprovalOutcome::Denied),
+        other => Ok(other),
+    }
+}
+
 fn run_option_picker(options: &[String]) -> Result<ApprovalOutcome, String> {
     use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};

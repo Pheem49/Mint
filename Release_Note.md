@@ -107,3 +107,176 @@ capability in Hermes Agent.
   **Browse...** button next to the path field that opens a native folder picker
   (reusing the existing `select_workspace_directory` Tauri command) — omitted on
   Web, since browsers cannot expose a real filesystem path from a folder picker.
+
+---
+
+## 🛡️ Agent-Initiated Plan Mode
+
+Plan mode used to be something only the user could switch on. The agent can now
+propose switching into it itself, mid-task — subject to the same kind of
+approval gate as any other risky action.
+
+- **New `enter_plan_mode` action** (`crates/mint-core/src/prompts/agent.rs`,
+  `prompts/tool_catalog.rs`) — offered to the model only while plan mode is
+  off, symmetric to the existing `exit_plan_mode` (offered only while it's on),
+  so the two can never both appear at once. The system prompt tells the agent
+  to call it before its first mutating action on anything that looks like a
+  multi-file refactor, a migration, deletions, or another hard-to-reverse
+  change.
+- **New `AgentApproval::EnterPlanMode`** (`orchestration.rs`) gates the switch
+  behind the same approval flow as every other risky action — declining or
+  leaving feedback keeps plan mode off and the agent proceeds directly.
+  Unattended contexts (cron jobs) auto-approve it like everything else there.
+- **CLI approval card matches every other picker-style approval** (`agent.rs`):
+  both `EnterPlanMode` and `ExitPlanMode` now render through the same
+  arrow-key `run_option_picker` used for `AskUser`/file-write approvals
+  (↑/↓ + Enter, type to answer freely, Esc to decline) instead of the old
+  plain `[y/N]` text prompt.
+- **Status bar reflects plan mode**: the interactive composer's bottom-line
+  label switches from `[Agent]` to `[Plan]` whenever `session.plan_mode` is on
+  (`interactive/input_box.rs`).
+
+---
+
+## ⏰🌏 Scheduled Tasks — Fixes & Timezone Support
+
+Two real bugs found and fixed in the cron system shipped above, plus proper
+timezone handling and a friendlier way to create a job.
+
+- **Fixed: orphaned empty conversations in the chat sidebar.** `CronStore::add`
+  pre-creates the job's conversation up front (so it's titled in the sidebar
+  immediately) via `MemoryStore::open_default()` — which, unlike
+  `CronStore`'s own store, has no test-scoped path override. Every
+  `cargo test` run was silently leaving real, permanent, empty conversation
+  rows in the developer's *actual* chat database. Fixed with a `cfg!(test)`
+  guard on both sides (`cron/store.rs`), matching the existing pattern already
+  used in `memory.rs`.
+- **Fixed: deleting/replacing a task could still leave an empty conversation
+  behind.** New `MemoryStore::delete_chat_session_if_empty` (`memory.rs`) is
+  now called from `CronStore::remove` — cleans up the placeholder only if the
+  job never actually ran (zero interactions), leaving real report history
+  untouched for jobs that did run.
+- **Timezone-aware scheduling, backend and frontend:**
+  - New `mint_core::cron::localize_schedule()` (`cron/schedule.rs`, built on
+    `chrono-tz`) converts a wall-clock time in an explicit IANA timezone into
+    the UTC cron expression the scheduler actually evaluates against —
+    correctly handling daily/weekly/monthly/one-time shapes and DST (verified
+    against real `America/New_York` EST/EDT transitions in tests).
+  - `mint cron add --name/--schedule/--task --timezone <IANA zone>` and
+    `/cron add <name> | <schedule> | <task> | [timezone]` (a new optional 4th
+    field) now do this conversion automatically instead of requiring the
+    schedule to already be written in UTC.
+  - The Desktop/Web "New Scheduled Task" form (`ScheduledTasksView.tsx`) does
+    the same conversion client-side via `luxon`, plus a new **Timezone**
+    dropdown (defaults to the device's zone, not locked to it) — previously
+    the time picker silently assumed UTC, so picking "08:00" could fire at a
+    different hour than intended depending on the browser's real timezone.
+- **New interactive wizard**: running `mint cron add` or `/cron add` with no
+  arguments now walks through name → repeat type (daily/weekly/monthly/
+  one-time/custom) → time → weekday/day-of-month/date → timezone
+  (auto-detected via `iana-time-zone`, editable) → task → workspace, reusing
+  the onboarding flow's own `prompt_choice`/`prompt_input` helpers
+  (`cron_wizard.rs`). The flag-based and pipe-delimited forms still work
+  unchanged for scripting.
+- **`/cron add` is now its own entry** in the CLI's slash-command suggestion
+  list, not just documented under the parent `/cron` entry.
+
+---
+
+## 🔧 `mint setup` — Full Tool Coverage
+
+`mint setup`'s tool-enable wizard had drifted out of sync with the agent's
+actual tool catalog as new tools were added over time — 21 real tools had no
+way to be toggled off through it at all. `crates/mint-cli/src/setup.rs` now
+lists all 49 tools from `base_allowed_actions()`, in the same order, verified
+by direct comparison: `image_search`, `weather`, `stock`, `calculation`,
+`mcp_list_tools`, the full video/subtitle/audio editing set (`video_trim`,
+`video_remove_silence`, `video_resize`, `video_merge`, `video_export`,
+`video_extract_audio`, `speech_transcribe`, `subtitle_generate`,
+`subtitle_translate`, `subtitle_burn`, `timeline_reorder`,
+`effect_zoom_on_speaker`, `audio_duck_music`, `make_shorts`), and
+`generate_image`/`generate_video`.
+
+---
+
+## 🔒 Messaging Bridges — Owner Allowlist (Security Fix)
+
+Found and fixed a real gap: none of Telegram, Discord, Slack, LINE, or
+WhatsApp verified *who* was messaging the bot. Any stranger who could reach
+one — DM a public Telegram bot, share a Discord server or Slack workspace
+with it, message a LINE/WhatsApp account — could trigger `answer_channel`'s
+agent loop, which auto-approves every action (`write_file`, `apply_patch`,
+`run_shell`, …) since there's no human present on a bridge to click approve.
+
+- **New `authorize_sender()`** (`channels.rs`): the first sender any bridge
+  ever hears from is claimed as its owner (persisted to
+  `config.extra["<platform>OwnerChatId"/"OwnerUserId"/"OwnerPhone"]`);
+  everyone else is silently ignored from then on. Zero setup required. Wired
+  into all five loops (Telegram `from.id`, Discord `author.id`, Slack
+  `event.user`, LINE `source.userId`, WhatsApp `message.from`).
+- Decision logic split into a pure, directly-testable `sender_authorization()`
+  core so tests never touch the real on-disk config (the same class of bug
+  fixed in cron's tests above).
+- `README.md`'s Safety And Privacy section documents the behavior and how to
+  reset an owner (`mint config set telegramOwnerChatId ""`).
+
+---
+
+## 📣 README Repositioning — Reach Is The Headline
+
+Messaging-bridge reach was buried as feature #6 of 9; it's Mint's most
+distinctive capability (a local agent reachable from a chat app, not just a
+terminal or desktop window), so `README.md` now leads with it: the top
+tagline, intro paragraph, feature-list ordering (now #1), and Highlights list
+all foreground it, done only after the owner-allowlist fix above closed the
+security gap that would have made a louder headline risky.
+
+---
+
+## 🎧 Multimodal — OpenAI Audio Input
+
+Audio attachments were Gemini-only; OpenAI's real API supports them too via
+`input_audio` content parts, so `crates/mint-core/src/chat.rs` now builds that
+payload shape for it (`openai_audio_part`, wired into both the single-turn and
+native multi-turn message paths).
+
+Scoped honestly rather than claimed as blanket "provider-agnostic multimodal":
+video stays Gemini-only, since OpenAI/Anthropic have no native video
+ingestion at all in their chat APIs — a genuine provider capability gap, not
+an integration gap. Audio also stays unsupported for `local_openai`,
+`openrouter`, `deepseek`, and `huggingface` — proxies/other services on
+similar wire formats that aren't confirmed to speak the same `input_audio`
+schema as the real OpenAI API.
+
+---
+
+## 🎯 Agent Honesty — Don't Report Success On A Real Failure
+
+The existing "did you verify your changes" gate only checked that the `verify`
+tool had been *called* after the last edit — not whether it actually passed.
+An agent could run `verify`, see real test failures in the output, and still
+call `finish` claiming success, and nothing would catch it. That matters more
+for Mint than for an interactively-watched coding assistant: a task run from
+a scheduled job or a messaging bridge has nobody watching live to notice the
+lie until they check back later.
+
+- **Fixed a real bug along the way**: the in-context "your command failed"
+  nudge that fires right after `run_shell`/`verify` only scanned the *first*
+  `"exit: "` line in the result before stopping — a multi-command `verify`
+  call where an earlier command passed but a later one failed never
+  triggered it. New `shell_result_failed()` (`orchestration.rs`) scans every
+  line instead.
+- **New hard gate at `finish` time**: `last_verify_failed` now tracks whether
+  the most recent `verify` call actually passed, separately from whether it
+  merely ran. `unacknowledged_verify_failure()` rejects `finish` outright if
+  the last verify failed and the agent's `finish.verification` field says
+  nothing about it — forcing the agent to either fix the problem, re-verify
+  successfully, or explicitly explain the failure (e.g. "pre-existing,
+  unrelated to this change") rather than silently claiming success over it.
+- Mirrors the existing `unverified_modification` gate's shape and escape
+  hatch (a non-empty, non-placeholder `verification` field satisfies it) so
+  the two gates behave consistently.
+- **Known limit, stated plainly**: this stops silent success claims, not a
+  sufficiently motivated *false* explanation typed into the verification
+  field — a text-based gate can't fully replace actually re-running the
+  check itself, which is out of scope here.

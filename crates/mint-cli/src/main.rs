@@ -20,6 +20,7 @@ use mint_core::{
 mod actions;
 mod agent;
 mod background;
+mod cron_wizard;
 mod gmail;
 mod hooks;
 mod image;
@@ -435,16 +436,26 @@ enum TaskCommand {
 enum CronCommand {
     /// Create a new scheduled job. `schedule` accepts 5-field unix cron
     /// ("min hour dom month dow", e.g. "0 8 * * *" for every day at 08:00),
-    /// or 6/7-field forms with seconds/year.
+    /// or 6/7-field forms with seconds/year. Omit `--name`/`--schedule`/
+    /// `--task` entirely to walk through an interactive wizard instead.
     Add {
         #[arg(long)]
-        name: String,
+        name: Option<String>,
         #[arg(long)]
-        schedule: String,
+        schedule: Option<String>,
         #[arg(long)]
-        task: String,
+        task: Option<String>,
         #[arg(long)]
         workspace: Option<PathBuf>,
+        /// IANA timezone name (e.g. "Asia/Bangkok") to interpret `schedule`
+        /// in. When set, `schedule` must give a specific minute/hour (and,
+        /// for weekly/monthly/one-time schedules, a specific weekday/day/
+        /// date) — no `*`, ranges, or steps in those fields — since it gets
+        /// converted to the UTC expression the scheduler actually stores and
+        /// evaluates. Omit to keep writing `schedule` in UTC directly, as
+        /// before.
+        #[arg(long)]
+        timezone: Option<String>,
     },
     List,
     Show {
@@ -1479,17 +1490,34 @@ async fn main() -> Result<()> {
                         schedule,
                         task,
                         workspace,
+                        timezone,
                     } => {
-                        let workspace = match workspace {
-                            Some(path) => path,
-                            None => std::env::current_dir()?,
-                        };
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&cron_jobs.add(
-                                name, schedule, task, workspace
-                            )?)?
-                        );
+                        let default_workspace = std::env::current_dir()?;
+                        if name.is_none() && schedule.is_none() && task.is_none() {
+                            let job = cron_wizard::run_add_wizard(&cron_jobs, &default_workspace)?;
+                            println!("\nCreated cron job {} — next run: {}", job.id, job.next_run);
+                        } else {
+                            let name = name.ok_or_else(|| anyhow::anyhow!("--name is required"))?;
+                            let schedule =
+                                schedule.ok_or_else(|| anyhow::anyhow!("--schedule is required"))?;
+                            let task = task.ok_or_else(|| anyhow::anyhow!("--task is required"))?;
+                            let workspace = workspace.unwrap_or(default_workspace);
+                            let schedule = match timezone {
+                                Some(tz) => mint_core::localize_schedule(
+                                    &schedule,
+                                    &tz,
+                                    chrono::Utc::now(),
+                                )
+                                .map_err(|e| anyhow::anyhow!(e))?,
+                                None => schedule,
+                            };
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&cron_jobs.add(
+                                    name, schedule, task, workspace
+                                )?)?
+                            );
+                        }
                     }
                     CronCommand::List => {
                         println!("{}", serde_json::to_string_pretty(&cron_jobs.list()?)?)

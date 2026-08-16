@@ -276,6 +276,40 @@ impl MemoryStore {
         Ok(deleted)
     }
 
+    /// Deletes `chat_id`'s conversation only if it has no interactions yet.
+    ///
+    /// Used when a scheduled task is removed: `CronStore::add` eagerly
+    /// creates its conversation up front (titled, so it appears in the
+    /// sidebar immediately instead of waiting for a first run) via
+    /// `ensure_named_chat_session`, but if the task is deleted — or an "edit"
+    /// is implemented as delete-then-recreate — before it ever actually
+    /// fires, that placeholder conversation has zero interactions and would
+    /// otherwise sit in the sidebar forever with nothing in it. A task that
+    /// *did* run keeps its history: this only clears the empty case.
+    pub fn delete_chat_session_if_empty(&self, chat_id: &str) -> Result<bool, MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        if chat_id == CHAT_CLI_ID {
+            return Ok(false);
+        }
+        let connection = self.connection()?;
+        let transaction = connection.unchecked_transaction()?;
+        let count: i64 = transaction.query_row(
+            "SELECT COUNT(*) FROM interaction_memories WHERE chat_id = ?1",
+            params![chat_id],
+            |row| row.get(0),
+        )?;
+        if count > 0 {
+            return Ok(false);
+        }
+        let deleted = transaction.execute(
+            "DELETE FROM chat_sessions
+             WHERE id = ?1 AND kind = 'conversation'",
+            params![chat_id],
+        )?;
+        transaction.commit()?;
+        Ok(deleted > 0)
+    }
+
     pub fn rename_chat_session(
         &self,
         chat_id: &str,

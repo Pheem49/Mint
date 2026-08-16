@@ -74,7 +74,7 @@ pub use config::{
     MintConfig, PermissionDecision, PermissionRule, ToolCallingMode, config_path,
     initialize_config, load_config, permission_decision_for, save_config, set_config_value,
 };
-pub use cron::{CronError, CronJob, CronJobDraft, CronStore, start_cron_scheduler};
+pub use cron::{CronError, CronJob, CronJobDraft, CronStore, localize_schedule, start_cron_scheduler};
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
 pub use gemini_live::{
     GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session,

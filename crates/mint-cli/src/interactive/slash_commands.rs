@@ -1309,27 +1309,58 @@ pub async fn handle_slash_command(
                     }
                     Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
+                "add" if args.trim().is_empty() => {
+                    match crate::cron_wizard::run_add_wizard(&cron_jobs, &session.current_dir) {
+                        Ok(job) => println!(
+                            "\n{DIM}Created cron job {} — next run: {}{RESET}\n",
+                            job.id,
+                            format_local_time(&job.next_run)
+                        ),
+                        Err(e) => println!("\n{ERROR}Error:{RESET} {e}\n"),
+                    }
+                }
                 "add" => {
-                    let fields: Vec<&str> = args.splitn(3, '|').map(str::trim).collect();
-                    match fields.as_slice() {
-                        [name, schedule, task] if !name.is_empty() && !task.is_empty() => {
-                            match cron_jobs.add(
-                                *name,
-                                *schedule,
-                                *task,
-                                session.current_dir.clone(),
-                            ) {
-                                Ok(job) => println!(
-                                    "{DIM}Created cron job {} — next run: {}{RESET}\n",
-                                    job.id,
-                                    format_local_time(&job.next_run)
-                                ),
-                                Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                    // A trailing 4th `|`-separated segment is an optional IANA
+                    // timezone name for `schedule` (see `mint cron add
+                    // --timezone`) — its presence is judged purely by pipe
+                    // count, so `task` can still contain literal `|`
+                    // characters as long as no timezone is given.
+                    let fields: Vec<&str> = args.splitn(4, '|').map(str::trim).collect();
+                    let (name, schedule, task, timezone) = match fields.as_slice() {
+                        [name, schedule, task] => (*name, *schedule, *task, None),
+                        [name, schedule, task, tz] => (*name, *schedule, *task, Some(*tz)),
+                        _ => {
+                            println!(
+                                "{WARN}/cron add <name> | <schedule> | <task> | [timezone]{RESET}\n{DIM}e.g. /cron add stock report | 0 8 * * * | fetch today's stock prices and summarize{RESET}\n{DIM}e.g. with a local time: /cron add stock report | 0 8 * * * | fetch today's stock prices and summarize | Asia/Bangkok{RESET}\n"
+                            );
+                            return Some(SlashResult::Handled);
+                        }
+                    };
+                    if name.is_empty() || task.is_empty() {
+                        println!(
+                            "{WARN}/cron add <name> | <schedule> | <task> | [timezone]{RESET}\n"
+                        );
+                        return Some(SlashResult::Handled);
+                    }
+                    let schedule = match timezone {
+                        Some(tz) if !tz.is_empty() => {
+                            match mint_core::localize_schedule(schedule, tz, chrono::Utc::now()) {
+                                Ok(utc_schedule) => utc_schedule,
+                                Err(e) => {
+                                    println!("{ERROR}Error:{RESET} {e}\n");
+                                    return Some(SlashResult::Handled);
+                                }
                             }
                         }
-                        _ => println!(
-                            "{WARN}/cron add <name> | <schedule> | <task>{RESET}\n{DIM}e.g. /cron add stock report | 0 8 * * * | fetch today's stock prices and summarize{RESET}\n"
+                        _ => schedule.to_string(),
+                    };
+                    match cron_jobs.add(name, schedule, task, session.current_dir.clone()) {
+                        Ok(job) => println!(
+                            "{DIM}Created cron job {} — next run: {}{RESET}\n",
+                            job.id,
+                            format_local_time(&job.next_run)
                         ),
+                        Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                     }
                 }
                 "remove" => {
@@ -1355,7 +1386,7 @@ pub async fn handle_slash_command(
                     }
                 }
                 _ => println!(
-                    "{WARN}/cron usage: list | add <name> | <schedule> | <task> | remove <id> | enable <id> | disable <id>{RESET}\n{DIM}For run-now, use `mint cron run-now <id>` in a terminal.{RESET}\n"
+                    "{WARN}/cron usage: list | add <name> | <schedule> | <task> | [timezone] | remove <id> | enable <id> | disable <id>{RESET}\n{DIM}For run-now, use `mint cron run-now <id>` in a terminal.{RESET}\n"
                 ),
             }
             Some(SlashResult::Handled)

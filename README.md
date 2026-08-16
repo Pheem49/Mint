@@ -3,7 +3,7 @@
 
   # Mint
 
-  **A native desktop AI assistant with a shared Rust core and an optional terminal interface.**
+  **Your AI agent, reachable from Telegram, Discord, Slack, LINE, or WhatsApp — not just a terminal window.**
 
   [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://v2.tauri.app/)
   [![Rust](https://img.shields.io/badge/Rust-backend-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -11,10 +11,13 @@
   [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 </div>
 
-Mint is a local-first AI assistant built with Tauri v2, Rust, React, and TypeScript.
-The desktop application and native CLI share the same Rust domain layer, so chat,
-memory, knowledge, tools, safety policies, and integrations behave consistently
-across both interfaces.
+Mint is a local-first AI assistant that runs on your own machine and follows you
+wherever you already are: message it from Telegram, Discord, Slack, LINE, or
+WhatsApp like you'd message a person, no desktop window required. It's also a
+native desktop app with a Live2D companion, and a full terminal agent for
+coding tasks — all backed by the same Tauri v2 + Rust + React/TypeScript core,
+so chat, memory, knowledge, tools, and safety policies behave identically no
+matter which door you walk in through.
 
 ## 🆕 Recent Updates (v1.11.0)
 
@@ -29,14 +32,14 @@ across both interfaces.
 
 ## <img src="assets/features.svg" width="24" height="24" valign="middle" /> What Mint Can Do
 
-Mint is a local-first AI assistant running on your machine, capable of handling tasks via either the desktop application or the terminal interface (CLI):
+Mint is a local-first AI assistant running on your machine, capable of handling tasks from a messaging app, the desktop application, or the terminal interface (CLI):
 
 ---
 
-### 1. <img src="assets/chat.svg" width="18" height="18" valign="middle" /> AI Chat & Multi-Providers
-- Connect to **Gemini, OpenAI, Anthropic (Claude), Ollama (Local), Hugging Face**, and LM Studio.
-- Run private local LLMs inside your machine using Ollama or connect to leading cloud APIs.
-- Supports system instructions, temperature adjustments, voice replies, and image analysis (Multimodal).
+### 1. <img src="assets/bridges.svg" width="18" height="18" valign="middle" /> Reach Mint From Anywhere — Messaging Bridges
+- Message your local AI assistant like you'd message a person, from **Telegram, Discord Gateway, Discord RPC, Slack, LINE, and WhatsApp** — no desktop window required.
+- Enabled bridges run automatically in the background alongside the desktop app or `mint api`/`mint web`, so Mint is reachable the moment one of those is running.
+- Every bridge locks itself to a single owner the first time it hears from anyone: whoever messages it first is claimed as the owner, and everyone else is ignored from then on.
 
 ---
 
@@ -47,7 +50,14 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ---
 
-### 3. <img src="assets/code.svg" width="18" height="18" valign="middle" /> Autonomous Code Agent
+### 3. <img src="assets/chat.svg" width="18" height="18" valign="middle" /> AI Chat & Multi-Providers
+- Connect to **Gemini, OpenAI, Anthropic (Claude), Ollama (Local), Hugging Face**, and LM Studio.
+- Run private local LLMs inside your machine using Ollama or connect to leading cloud APIs.
+- Supports system instructions, temperature adjustments, voice replies, and image analysis (Multimodal).
+
+---
+
+### 4. <img src="assets/code.svg" width="18" height="18" valign="middle" /> Autonomous Code Agent
 - Run code agent loops via `/code <task>` or the terminal command `mint code agent "<task>"`.
 - Scan your project workspace, build multi-file implementation plans, fix test suite errors, and write edits automatically.
 - Run local tests, cargo checks, and shell commands.
@@ -56,25 +66,17 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ---
 
-### 4. <img src="assets/memory.svg" width="18" height="18" valign="middle" /> Long-Term Memory & Knowledge Base
+### 5. <img src="assets/memory.svg" width="18" height="18" valign="middle" /> Long-Term Memory & Knowledge Base
 - Persistent conversation memory stored locally in SQLite. Manage user profile memory with `/memory set/get` or CLI commands.
 - Index local directories, text files, and documentation to build your private searchable knowledge base.
 
 ---
 
-### 5. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Tool & MCP Integrations
+### 6. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Tool & MCP Integrations
 - Support **Model Context Protocol (MCP)** to connect tools like Google/Brave Search, Filesystem servers, and GitHub context.
 - Dedicated **Image Search** tool (Google Custom Search Image / Brave Images) for finding and browsing pictures on request, rendered as an image-grid card on Desktop and Web.
 - **Auto GitHub Link Resolver:** Automatically detects GitHub URLs in chat messages (CLI, Web, and Desktop) and Code Agent tasks. It fetches and injects the repository's metadata, directory structure, and README as prompt context, serving as an instant fallback when the GitHub MCP server is not active.
 - Local plugins for Spotify playback control, Google Calendar, Gmail drafts, and Notion workspace reading.
-
----
-
-### 6. <img src="assets/bridges.svg" width="18" height="18" valign="middle" /> Messaging Bridges
-- Bridge your local AI assistant to messaging services: **Telegram, Discord Gateway, Discord RPC, Slack, LINE, and WhatsApp**.
-- Host local chatbot webhooks that relay chat traffic into your configured LLM.
-> [!TIP]
-> **Headless Background Execution:** Enabled bridges automatically run in the background when you launch either the desktop application OR the local API/Web server (`mint api` / `mint web`). This allows you to chat with Mint from anywhere without needing the desktop GUI window open.
 
 ---
 
@@ -100,6 +102,9 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ## Highlights
 
+- Reachable from **Telegram, Discord Gateway, Discord RPC, Slack Socket Mode,
+  LINE, and WhatsApp Cloud API** — each bridge locked to a single owner on
+  first contact, no desktop window needed to keep chatting with it.
 - Multi-provider chat with Gemini, OpenAI, Anthropic, Ollama, Hugging Face, and
   local OpenAI-compatible endpoints.
 - Image generation using DALL-E 3, Stability AI, Ideogram, Replicate, and NanoBanana.
@@ -112,8 +117,6 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
   execution, and verification with explicit approval for risky actions.
 - MCP servers, local plugins, custom workflows, weather, web search, and
   optional external services.
-- Telegram, Discord Gateway, Discord RPC, Slack Socket Mode, LINE, and WhatsApp
-  Cloud API integrations.
 - Signed Tauri update checks with an explicit approval step before installation.
 - Dynamic local Ollama model fetching in the Settings Window to query and display the actual models installed on your machine.
 - Pill-styled clean horizontal system event dividers for provider and model change notifications in the chat panel.
@@ -534,6 +537,11 @@ Mint keeps high-risk behavior behind explicit policy checks:
   routine workspace access.
 - LINE and WhatsApp webhook services listen locally unless you intentionally
   forward them.
+- Every messaging bridge (Telegram, Discord, Slack, LINE, WhatsApp) locks
+  itself to a single owner: the first sender it ever hears from is claimed as
+  that owner, and every other sender is silently ignored from then on. To
+  hand a bridge to a different sender, clear its stored owner id (e.g.
+  `mint config set telegramOwnerChatId ""`) before they message it.
 
 Review the generated command or edit preview before approving an action.
 

@@ -1,9 +1,49 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { DateTime } from 'luxon'
 import { renderScheduledTasksSvgIcon, renderTaskLogoIcon } from '../constants/plugins'
 import '../css/management-views.css'
 import type { CronJob, CronJobDraft } from '../types'
 
 export type { CronJob }
+
+// A curated fallback for engines that don't implement
+// `Intl.supportedValuesOf('timeZone')` (older WebKitGTK on Linux, notably —
+// the desktop build runs inside the OS's native webview, not a bundled
+// Chromium, so this can't be assumed present). Covers one representative
+// zone per UTC offset/region so the picker still works, just with a shorter
+// list, instead of throwing and breaking the whole form.
+const FALLBACK_TIMEZONES = [
+  'UTC', 'Pacific/Midway', 'Pacific/Honolulu', 'America/Anchorage', 'America/Los_Angeles',
+  'America/Denver', 'America/Chicago', 'America/New_York', 'America/Sao_Paulo',
+  'Atlantic/Azores', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
+  'Africa/Cairo', 'Africa/Johannesburg', 'Asia/Dubai', 'Asia/Karachi', 'Asia/Kolkata',
+  'Asia/Dhaka', 'Asia/Bangkok', 'Asia/Jakarta', 'Asia/Shanghai', 'Asia/Singapore',
+  'Asia/Tokyo', 'Asia/Seoul', 'Australia/Sydney', 'Pacific/Auckland'
+]
+
+function listTimezones(): string[] {
+  try {
+    const zones = Intl.supportedValuesOf?.('timeZone')
+    if (zones && zones.length) return zones
+  } catch {
+    // fall through to the static list below
+  }
+  return FALLBACK_TIMEZONES
+}
+
+function deviceTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
+
+// Cron's day-of-week field is 0=Sun..6=Sat; Luxon's `.weekday` is
+// ISO-style 1=Mon..7=Sun. `% 7` maps Luxon's 7 (Sun) back to 0 and leaves
+// 1..6 (Mon..Sat) unchanged, so it's a two-way conversion.
+const cronDowToLuxon = (cronDow: number) => (cronDow === 0 ? 7 : cronDow)
+const luxonWeekdayToCron = (luxonWeekday: number) => luxonWeekday % 7
 
 export interface ScheduledTasksViewProps {
   listCronJobs: () => Promise<CronJob[]>
@@ -44,6 +84,11 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
     const [weekdays, setWeekdays] = useState<number[]>([1])
     const [monthDay, setMonthDay] = useState(1)
     const [onceDate, setOnceDate] = useState('')
+    // Explicit, not tied to whichever device happens to be viewing the form —
+    // defaults to the device's own zone so existing behavior is unchanged
+    // until someone picks a different one.
+    const [taskTimezone, setTaskTimezone] = useState(deviceTimezone)
+    const timezoneOptions = useMemo(listTimezones, [])
 
     useEffect(() => {
       if (repeatMode === 'custom') return
@@ -51,24 +96,66 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
       const H = Number.isFinite(hh) ? hh : 8
       const M = Number.isFinite(mm) ? mm : 0
 
+      // The cron scheduler evaluates the saved expression in UTC (see
+      // `crates/mint-core/src/cron/schedule.rs`), but these pickers collect
+      // a wall-clock time in `taskTimezone` (an explicit IANA zone, not
+      // whichever device happens to be viewing this form). Luxon resolves
+      // that zone's real UTC offset for the actual calendar date involved —
+      // including DST — so every field is built by constructing the picked
+      // time in `taskTimezone` and reading its UTC components back out,
+      // rather than assuming a fixed offset by hand.
+      const nowInZone = DateTime.now().setZone(taskTimezone)
+      if (!nowInZone.isValid) return
+
       if (repeatMode === 'daily') {
-        setNewSchedule(`${M} ${H} * * *`)
+        const utc = nowInZone.set({ hour: H, minute: M, second: 0, millisecond: 0 }).toUTC()
+        setNewSchedule(`${utc.minute} ${utc.hour} * * *`)
       } else if (repeatMode === 'weekly') {
-        setNewSchedule(`${M} ${H} * * ${weekdays.length ? [...weekdays].sort().join(',') : '*'}`)
+        if (!weekdays.length) {
+          const utc = nowInZone.set({ hour: H, minute: M, second: 0, millisecond: 0 }).toUTC()
+          setNewSchedule(`${utc.minute} ${utc.hour} * * *`)
+          return
+        }
+        // A UTC offset can shift the local weekday by at most one calendar
+        // day, so each selected weekday is converted individually (rather
+        // than assuming they all shift the same way) by anchoring to the
+        // next real calendar date — in `taskTimezone` — that actually falls
+        // on it.
+        const converted = weekdays.map((cronDow) => {
+          const targetLuxonDow = cronDowToLuxon(cronDow)
+          const daysToAdd = (targetLuxonDow - nowInZone.weekday + 7) % 7
+          return nowInZone
+            .plus({ days: daysToAdd })
+            .set({ hour: H, minute: M, second: 0, millisecond: 0 })
+            .toUTC()
+        })
+        const utcWeekdays = [...new Set(converted.map((d) => luxonWeekdayToCron(d.weekday)))].sort(
+          (a, b) => a - b
+        )
+        setNewSchedule(`${converted[0].minute} ${converted[0].hour} * * ${utcWeekdays.join(',')}`)
       } else if (repeatMode === 'monthly') {
-        setNewSchedule(`${M} ${H} ${monthDay} * *`)
+        const utc = nowInZone
+          .set({ day: monthDay, hour: H, minute: M, second: 0, millisecond: 0 })
+          .toUTC()
+        if (!utc.isValid) return
+        setNewSchedule(`${utc.minute} ${utc.hour} ${utc.day} * *`)
       } else if (repeatMode === 'once') {
         if (!onceDate) {
           setNewSchedule('')
           return
         }
         const [y, mo, d] = onceDate.split('-').map((v) => parseInt(v, 10))
+        const utc = DateTime.fromObject(
+          { year: y, month: mo, day: d, hour: H, minute: M },
+          { zone: taskTimezone }
+        ).toUTC()
+        if (!utc.isValid) return
         // 7-field form (sec min hour day month dow year) with the year
         // pinned — the schedule has no occurrence after that date, so the
         // scheduler runs it exactly once and then disables it.
-        setNewSchedule(`0 ${M} ${H} ${d} ${mo} * ${y}`)
+        setNewSchedule(`0 ${utc.minute} ${utc.hour} ${utc.day} ${utc.month} * ${utc.year}`)
       }
-    }, [repeatMode, timeOfDay, weekdays, monthDay, onceDate])
+    }, [repeatMode, timeOfDay, weekdays, monthDay, onceDate, taskTimezone])
 
     const toggleWeekday = (day: number) => {
       setWeekdays((current) =>
@@ -292,11 +379,11 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
 
                 <div style={{ fontSize: '0.85rem', color: 'var(--text-muted, #94a3b8)', marginTop: '14px', display: 'grid', gap: '6px' }}>
                   <div>
-                    Schedule: <code>{detailJob.schedule}</code>
+                    Schedule (UTC): <code>{detailJob.schedule}</code>
                   </div>
-                  <div>Next run: {formatTimestamp(detailJob.nextRun)}</div>
+                  <div>Next run (local time): {formatTimestamp(detailJob.nextRun)}</div>
                   <div>
-                    Last run: {formatTimestamp(detailJob.lastRunAt)}
+                    Last run (local time): {formatTimestamp(detailJob.lastRunAt)}
                     {detailJob.lastStatus && (
                       <span
                         className={`management-badge ${detailJob.lastStatus === 'success' ? 'active' : 'inactive'}`}
@@ -369,87 +456,99 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
                   </div>
 
                   <div className="management-form-group">
-                    <label className="management-label">Repeat</label>
-                    <div className="management-filter-pills" style={{ flexWrap: 'wrap' }}>
-                      {(['daily', 'weekly', 'monthly', 'once', 'custom'] as const).map((mode) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          className={`management-pill-btn ${repeatMode === mode ? 'active' : ''}`}
-                          onClick={() => setRepeatMode(mode)}
+                    <label className="management-label">When to run</label>
+                    <div className="schedule-inline-row">
+                      <select
+                        className="management-input-field schedule-repeat-select"
+                        value={repeatMode}
+                        onChange={(e) => setRepeatMode(e.target.value as typeof repeatMode)}
+                      >
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="once">One-time</option>
+                        <option value="custom">Custom (cron)</option>
+                      </select>
+
+                      {repeatMode === 'weekly' && (
+                        <>
+                          <span className="schedule-inline-word">on</span>
+                          <div className="schedule-weekday-circles">
+                            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, idx) => (
+                              <button
+                                key={day}
+                                type="button"
+                                className={`management-pill-btn-circle ${weekdays.includes(idx) ? 'active' : ''}`}
+                                onClick={() => toggleWeekday(idx)}
+                                title={day}
+                              >
+                                {day[0]}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+
+                      {repeatMode === 'monthly' && (
+                        <>
+                          <span className="schedule-inline-word">on day</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={31}
+                            className="management-input-field schedule-day-input"
+                            value={monthDay}
+                            onChange={(e) =>
+                              setMonthDay(Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1)))
+                            }
+                            required
+                          />
+                        </>
+                      )}
+
+                      {repeatMode === 'once' && (
+                        <input
+                          type="date"
+                          className="management-input-field schedule-day-input"
+                          value={onceDate}
+                          onChange={(e) => setOnceDate(e.target.value)}
+                          required
+                        />
+                      )}
+                    </div>
+
+                    {repeatMode !== 'custom' && (
+                      <div className="schedule-inline-row" style={{ marginTop: '10px' }}>
+                        <span className="schedule-inline-word">around</span>
+                        <input
+                          type="time"
+                          className="management-input-field schedule-time-input"
+                          value={timeOfDay}
+                          onChange={(e) => setTimeOfDay(e.target.value)}
+                          required
+                        />
+                        <select
+                          className="management-input-field schedule-timezone-select"
+                          value={taskTimezone}
+                          onChange={(e) => setTaskTimezone(e.target.value)}
                         >
-                          {mode === 'once' ? 'One-time' : mode}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {repeatMode !== 'custom' && (
-                    <div className="management-form-group">
-                      <label className="management-label">Time</label>
-                      <input
-                        type="time"
-                        className="management-input-field"
-                        value={timeOfDay}
-                        onChange={(e) => setTimeOfDay(e.target.value)}
-                        required
-                      />
-                    </div>
-                  )}
-
-                  {repeatMode === 'weekly' && (
-                    <div className="management-form-group">
-                      <label className="management-label">On these days</label>
-                      <div className="management-filter-pills" style={{ flexWrap: 'wrap' }}>
-                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((label, idx) => (
-                          <button
-                            key={label}
-                            type="button"
-                            className={`management-pill-btn ${weekdays.includes(idx) ? 'active' : ''}`}
-                            onClick={() => toggleWeekday(idx)}
-                          >
-                            {label}
-                          </button>
-                        ))}
+                          {timezoneOptions.map((tz) => (
+                            <option key={tz} value={tz}>
+                              {tz}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                    </div>
-                  )}
-
-                  {repeatMode === 'monthly' && (
-                    <div className="management-form-group">
-                      <label className="management-label">Day of month</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={31}
-                        className="management-input-field"
-                        value={monthDay}
-                        onChange={(e) => setMonthDay(Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 1)))}
-                        required
-                      />
-                    </div>
-                  )}
-
-                  {repeatMode === 'once' && (
-                    <div className="management-form-group">
-                      <label className="management-label">Date</label>
-                      <input
-                        type="date"
-                        className="management-input-field"
-                        value={onceDate}
-                        onChange={(e) => setOnceDate(e.target.value)}
-                        required
-                      />
-                    </div>
-                  )}
+                    )}
+                  </div>
 
                   {repeatMode === 'custom' && (
                     <div className="management-form-group">
-                      <label className="management-label">Schedule (cron expression)</label>
+                      <label className="management-label">Schedule (cron expression, UTC)</label>
                       <input
                         type="text"
                         className="management-input-field"
-                        placeholder="0 8 * * *  (every day at 08:00)"
+                        placeholder="0 8 * * *  (every day at 08:00 UTC)"
                         value={newSchedule}
                         onChange={(e) => setNewSchedule(e.target.value)}
                         required
@@ -459,7 +558,7 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
 
                   {repeatMode !== 'custom' && (
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)' }}>
-                      Cron: <code>{newSchedule || '—'}</code>
+                      Cron (UTC): <code>{newSchedule || '—'}</code>
                     </div>
                   )}
 
