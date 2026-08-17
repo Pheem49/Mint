@@ -44,7 +44,6 @@ pub const BLUE: &str = "\x1b[38;2;78;201;216m";
 pub const DIM: &str = "\x1b[90m";
 pub const ERROR: &str = "\x1b[31m";
 pub const WARN: &str = "\x1b[33m";
-pub const COMPOSER_BG: &str = "\x1b[48;2;35;39;45m";
 
 pub(crate) async fn run_code_agent_with_saved_image(
     task: &str,
@@ -53,22 +52,33 @@ pub(crate) async fn run_code_agent_with_saved_image(
     image_data_uri: Option<String>,
     video_data_uri: Option<String>,
     options: agent::AgentOptions,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let sent_image = image_data_uri.clone();
     let sent_video = video_data_uri.clone();
-    agent::run_code_agent_with_options(
+    // Follow-up messages the user typed into the queueing box while this
+    // turn was still running (see `agent::run_code_agent_with_options`)
+    // land here; the caller is responsible for dispatching them. On error
+    // the queue is dropped along with the interrupted turn.
+    let queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let result = agent::run_code_agent_with_options(
         task,
         current_dir,
         config,
         image_data_uri,
         video_data_uri,
         options,
+        std::sync::Arc::clone(&queue),
     )
-    .await?;
+    .await;
+    result?;
     // Save any attached images and videos that were sent with the task
     image::save_sent_image_after_send(sent_image.as_deref(), task);
     image::save_sent_image_after_send(sent_video.as_deref(), task);
-    Ok(())
+    let queued = queue
+        .lock()
+        .map(|mut q| std::mem::take(&mut *q))
+        .unwrap_or_default();
+    Ok(queued)
 }
 
 fn configured(config: &mint_core::MintConfig, keys: &[&str]) -> bool {
@@ -325,9 +335,17 @@ enum McpCommand {
     Add {
         name: String,
         command: String,
-        #[arg(long, num_args = 0.., allow_hyphen_values = true)]
+        /// Repeatable: one value per `--args` occurrence (e.g. `--args -y --args --header`).
+        /// `num_args = 1` (not `0..`) is deliberate — with `allow_hyphen_values` and an
+        /// unbounded arity, clap can't tell a fresh `--args` occurrence apart from a
+        /// hyphen-prefixed value being appended to the previous one, so a value like
+        /// `--header` would swallow every following `--args`/value as literal text
+        /// instead of starting a new occurrence. Pinning arity to exactly 1 removes
+        /// that ambiguity: each occurrence is unambiguously one value, hyphen-prefixed
+        /// or not, and repeated occurrences still append into the Vec as usual.
+        #[arg(long, num_args = 1, allow_hyphen_values = true)]
         args: Vec<String>,
-        #[arg(long, num_args = 0..)]
+        #[arg(long, num_args = 1, allow_hyphen_values = true)]
         env: Vec<String>,
     },
     List,
@@ -1623,7 +1641,9 @@ async fn main() -> Result<()> {
                             agent::AgentOptions {
                                 fast_mode: false,
                                 plan_mode: plan,
+                                queueing: false,
                             },
+                            std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                         )
                         .await?;
                     }

@@ -493,6 +493,10 @@ struct AgentInput {
     #[serde(default)]
     height: Option<i32>,
     #[serde(default)]
+    frame_count: Option<u32>,
+    #[serde(default)]
+    columns: Option<u32>,
+    #[serde(default)]
     threshold_db: Option<f64>,
     #[serde(default)]
     min_silence_secs: Option<f64>,
@@ -1401,11 +1405,25 @@ where
                         }
                     }
 
-                    let mut final_result = if decision.action == "browser_screenshot"
-                        && result.starts_with("data:image/")
-                    {
+                    let mut final_result = if result.starts_with("data:image/")
+                        && matches!(
+                            decision.action.as_str(),
+                            "browser_screenshot"
+                                | "video_filmstrip"
+                                | "video_waveform"
+                                | "view_image"
+                        ) {
                         step_images.insert(call_id.clone(), result.clone());
-                        "[Screenshot captured — see attached image]".to_string()
+                        match decision.action.as_str() {
+                            "video_filmstrip" => "[Filmstrip generated — see attached image: \
+                                sampled frames across the video timeline]"
+                                .to_string(),
+                            "video_waveform" => "[Waveform generated — see attached image: \
+                                audio amplitude over time]"
+                                .to_string(),
+                            "view_image" => "[Image loaded — see attached image]".to_string(),
+                            _ => "[Screenshot captured — see attached image]".to_string(),
+                        }
                     } else {
                         truncate(&result)
                     };
@@ -2510,6 +2528,57 @@ async fn execute_tool(
                 .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
             Ok(format!("Audio extracted to {}", out.output_path))
         }
+        "video_filmstrip" | "video.filmstrip" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::FilmstripRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                frame_count: input.frame_count.unwrap_or(12),
+                columns: input.columns.unwrap_or(4),
+                thumb_width: input
+                    .width
+                    .filter(|w| *w > 0)
+                    .map(|w| w as u32)
+                    .unwrap_or(320),
+            };
+            let res = crate::video_edit::video_filmstrip(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            let bytes = std::fs::read(&res.output_path).map_err(|e| {
+                OrchestrationError::Agent(format!("failed to read generated filmstrip: {e}"))
+            })?;
+            Ok(format!(
+                "data:image/png;base64,{}",
+                BASE64_STANDARD.encode(bytes)
+            ))
+        }
+        "video_waveform" | "video.waveform" => {
+            let input_path = required(&input.input, "input")?;
+            let output_path = required(&input.output, "output")?;
+            let req = crate::video_edit::WaveformRequest {
+                input: input_path.to_string(),
+                output: output_path.to_string(),
+                width: input
+                    .width
+                    .filter(|w| *w > 0)
+                    .map(|w| w as u32)
+                    .unwrap_or(1280),
+                height: input
+                    .height
+                    .filter(|h| *h > 0)
+                    .map(|h| h as u32)
+                    .unwrap_or(240),
+            };
+            let res = crate::video_edit::video_waveform(&req)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            let bytes = std::fs::read(&res.output_path).map_err(|e| {
+                OrchestrationError::Agent(format!("failed to read generated waveform: {e}"))
+            })?;
+            Ok(format!(
+                "data:image/png;base64,{}",
+                BASE64_STANDARD.encode(bytes)
+            ))
+        }
         "speech_transcribe" | "subtitle_generate" | "subtitle.generate" => {
             let input_path = required(&input.input, "input")?;
             let req = crate::speech::TranscribeRequest {
@@ -2901,13 +2970,10 @@ fn view_image(path: &Path, config: &MintConfig) -> Result<String, OrchestrationE
     }
     let bytes = std::fs::read(&path)
         .map_err(|e| OrchestrationError::Agent(format!("cannot read image: {e}")))?;
-    serde_json::to_string_pretty(&serde_json::json!({
-        "path": path,
-        "bytes": bytes.len(),
-        "mime": mime,
-        "dataUri": format!("data:{mime};base64,{}", BASE64_STANDARD.encode(bytes)),
-    }))
-    .map_err(|e| OrchestrationError::Agent(e.to_string()))
+    Ok(format!(
+        "data:{mime};base64,{}",
+        BASE64_STANDARD.encode(bytes)
+    ))
 }
 
 /// Renders a slice of `native_messages` back into readable text for the

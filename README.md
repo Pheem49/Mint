@@ -149,6 +149,7 @@ sudo apt-get install -y \
   build-essential curl file pkg-config wget \
   libdbus-1-dev libwebkit2gtk-4.1-dev \
   libayatana-appindicator3-dev librsvg2-dev \
+  libasound2-dev \
   poppler-utils unzip patchelf
 ```
 
@@ -158,6 +159,7 @@ sudo dnf groupinstall -y "Development Tools"
 sudo dnf install -y \
   webkit2gtk4.1-devel openssl-devel curl wget glibc-devel \
   dbus-devel libayatana-appindicator-devel librsvg2-devel \
+  alsa-lib-devel \
   poppler-utils unzip patchelf
 ```
 
@@ -166,8 +168,12 @@ sudo dnf install -y \
 sudo pacman -Syu --needed \
   base-devel webkit2gtk-4.1 openssl curl wget \
   dbus libayatana-appindicator librsvg \
+  alsa-lib \
   poppler unzip patchelf
 ```
+
+> [!NOTE]
+> ALSA development headers (`libasound2-dev`/`alsa-lib-devel`/`alsa-lib`) are required to build `cpal`, used for native microphone capture in the desktop app's voice input feature.
 
 > [!TIP]
 > **Other Platforms:** If you are developing on macOS or Windows, follow the official [Tauri Prerequisites Guide](https://v2.tauri.app/start/prerequisites/) to set up your build environment.

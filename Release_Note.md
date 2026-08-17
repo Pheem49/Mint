@@ -280,3 +280,129 @@ lie until they check back later.
   sufficiently motivated *false* explanation typed into the verification
   field — a text-based gate can't fully replace actually re-running the
   check itself, which is out of scope here.
+
+---
+
+## 🎙️ Native Voice Input — Desktop Mic Replaces Browser Speech Recognition
+
+The desktop app's push-to-talk mic button ran on the browser's
+`window.SpeechRecognition` API — Chrome/Edge-only, and effectively broken
+inside Tauri's WebKitGTK webview on Linux. It's now a native Rust recorder
+that works regardless of webview engine.
+
+- **New `crates/mint-core/src/mic_transcribe.rs`**: `cpal`-based mic capture
+  running on a dedicated OS thread (`cpal::Stream` isn't `Send` on every
+  backend, notably ALSA, so it can't live on a tokio task) with a
+  `start_recording()`/`stop_recording()` handle pair; recording is encoded to
+  an in-memory WAV via `hound` at the device's native sample rate — no forced
+  16kHz resampling, since a WAV header self-describes its own rate.
+- **Reuses whichever provider is already configured for chat** — Gemini or
+  OpenAI's existing multimodal audio support in `chat.rs`, not a separate
+  Whisper API key. If the configured provider doesn't accept audio
+  (Anthropic, Ollama, HuggingFace, local/custom endpoints), the mic button
+  shows a specific "switch provider" error instead of silently falling back
+  or faking a transcript. Deliberately calls `send_chat`, not
+  `send_chat_with_fallback`, so an unsupported-attachment error can't be
+  silently retried on a different provider.
+- **Not the same as the existing Whisper-based transcription** —
+  `crates/mint-core/src/speech.rs`'s OpenAI Whisper API → local `whisper` CLI
+  → placeholder fallback chain (used for subtitle generation) is untouched
+  and still exists for that separate use case.
+- **New Tauri commands** (`start_mic_recording`, `stop_mic_recording_and_transcribe`)
+  and a new frontend hook, `useNativeVoiceInput.ts`, replacing
+  `useSpeechToText` in the desktop build's `ChatPanel.tsx` only — the `mint
+  web` browser build keeps the old browser-based mic button unchanged, since
+  its server can be reached from a different device than the browser
+  (native recording would capture the wrong machine's mic).
+- **New Linux build prerequisite**: ALSA development headers
+  (`libasound2-dev` / `alsa-lib-devel` / `alsa-lib`) to build `cpal`,
+  documented in the README's Linux Dependencies section.
+- **Verified end-to-end** with real captured speech through the actual
+  record → encode → transcribe pipeline (not just a compile check) — a
+  spoken test phrase came back transcribed correctly via Gemini's audio
+  input.
+
+---
+
+## 🎞️ Video Filmstrip & Waveform — Cheap Visual Context Instead of Frame-Dumping
+
+Inspired by the open-source `browser-use/video-use` project's approach:
+give the agent cheap visual context on a video instead of shipping the
+whole file. Previously, `video_data_uri` sent a video's entire raw bytes as
+base64 straight into Gemini's `inlineData` (the only provider that accepts
+video at all) with no size limiting whatsoever.
+
+- **Two new agent actions** in `crates/mint-core/src/video_edit.rs`:
+  `video_filmstrip` (a grid image of frames sampled evenly across the
+  timeline, composited with the `image` crate — no new dependency) and
+  `video_waveform` (an audio amplitude image via ffmpeg's built-in
+  `showwavespic` filter) — a couple of small PNGs instead of the whole file,
+  and it works on any vision-capable provider, not just Gemini.
+- **Found and fixed a real vision-attachment gap while building this**: an
+  image only ever reached the model as something it could actually *see* on
+  a task's very first turn (attached from the frontend before the loop
+  starts). A `step_images` mechanism already existed to attach a **mid-task**
+  tool result as real vision on the next turn, but only `browser_screenshot`
+  used it — the existing `view_image` tool returned a JSON-wrapped data URI
+  that failed the attach check, so its image was dumped as unreadable base64
+  text instead of actually being seen. Generalized the check in
+  `orchestration.rs` to cover `browser_screenshot | video_filmstrip |
+  video_waveform | view_image`, and simplified `view_image` to return the
+  bare data URI so it benefits too.
+- Both new actions registered in `prompts/agent.rs`'s allowed-actions list
+  (including plan mode's read-only allowlist, alongside `view_image` and
+  `browser_screenshot` — generating an inspection image doesn't modify
+  project files) and `prompts/tool_catalog.rs`'s native tool-calling schemas.
+- **Verified end-to-end** against a real synthetic test video: the agent
+  correctly read a moving on-screen counter from the generated filmstrip and
+  correctly located a silent audio gap from the generated waveform — genuine
+  visual reasoning grounded in the actual pixels, not placeholder text.
+
+---
+
+## 🔌 Companion Service Shortcuts — `/n8n` and `/notebook`
+
+Two self-hosted open-source projects — [n8n](https://n8n.io) (workflow
+automation) and [SurfSense](https://github.com/MODSetter/SurfSense) (a
+self-hosted NotebookLM alternative) — can now be driven straight from Mint's
+agent, each wired in as its own MCP server. Neither ships with Mint; both
+are separate projects you clone and run yourself, connected the same way any
+third-party MCP server is.
+
+- **New slash commands `/n8n [task]` and `/notebook [task]`**
+  (`crates/mint-cli/src/interactive/slash_commands.rs`): with no task, each
+  checks whether its service is actually reachable (a 300ms TCP probe via a
+  new `is_reachable()` helper) and opens it in the browser
+  (`crate::actions::open_system_handler`); with a task, it forwards to the
+  agent loop tagged `[n8n]`/`[notebook]` — the same `ForwardToAgent` pattern
+  `/code` already uses — so the model reaches for that service's MCP tools
+  specifically.
+- **Guarded against the obvious silent-failure case**: both commands check
+  `mint mcp list` for a server registered under the exact name `n8n` /
+  `surfsense` before forwarding a task, so a task never gets silently sent
+  to an agent with no matching tools to call.
+- **New inline status panel instead of walls of warning text**
+  (`render_companion_status_panel`): reuses the same "flash an inline
+  `ratatui` `Terminal`, draw once, `clear()` to finalize into scrollback"
+  pattern `picker.rs` already uses for `/mcp` and `/models`, just without
+  the interactive redraw loop since there's nothing to select — a colored
+  `●`/`○` dot per service plus its MCP-connection status and a setup-doc
+  pointer, shown whenever either command can't proceed.
+- **New setup docs** (`docs/N8N_INTEGRATION.md`,
+  `docs/SURFSENSE_INTEGRATION.md`): full clone-and-run steps for each
+  project, how to register it with `mint mcp add`, and — for n8n
+  specifically — a correction that its MCP support moved from a per-workflow
+  "MCP Server Trigger" node (older versions) to a single instance-wide
+  `/mcp-server/http` endpoint authenticated by a dedicated MCP API key
+  (distinct from n8n's general Public API key, which shares the same JWT
+  shape and is easy to grab by mistake), found by inspecting a running n8n
+  v2.34.6 container directly since public docs hadn't caught up yet.
+- **Fixed a real `mint mcp add --args` parsing bug found while wiring this
+  up** (`crates/mint-cli/src/main.rs`): `args`/`env` were declared with
+  `num_args = 0..` (unbounded) plus `allow_hyphen_values`, which made clap
+  unable to distinguish a fresh `--args` occurrence from a hyphen-prefixed
+  value continuing the previous one — passing a value like `--header` (needed
+  to bridge n8n's MCP endpoint through `mcp-remote`) silently swallowed every
+  following `--args`/value as literal text instead of starting a new
+  occurrence. Pinned both to `num_args = 1` (one value per occurrence,
+  still repeatable) to remove the ambiguity entirely.

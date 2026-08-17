@@ -608,6 +608,30 @@ fn all_tools() -> Vec<ToolSpec> {
             ),
         ),
         tool(
+            "video_filmstrip",
+            "Generate a grid image of frames sampled evenly across a video's timeline, so you can see what happens without loading the whole video. Use this before deciding where to trim/cut.",
+            schema(
+                json!({
+                    "input": { "type": "string" },
+                    "output": { "type": "string", "description": "Where to save the filmstrip PNG, e.g. \"filmstrip.png\"." },
+                    "frameCount": { "type": "integer", "description": "Number of frames to sample. Default 12." },
+                    "columns": { "type": "integer", "description": "Grid columns. Default 4." }
+                }),
+                &["input", "output"],
+            ),
+        ),
+        tool(
+            "video_waveform",
+            "Generate an image of the audio waveform (amplitude over time) for a video or audio file, to spot silence/loud sections visually.",
+            schema(
+                json!({
+                    "input": { "type": "string" },
+                    "output": { "type": "string", "description": "Where to save the waveform PNG, e.g. \"waveform.png\"." }
+                }),
+                &["input", "output"],
+            ),
+        ),
+        tool(
             "speech_transcribe",
             "Transcribe speech from an audio/video file.",
             schema(

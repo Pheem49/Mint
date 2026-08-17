@@ -19,6 +19,7 @@ pub mod knowledge;
 pub mod linked_folders;
 pub mod mcp;
 pub mod memory;
+pub mod mic_transcribe;
 pub mod oauth;
 pub mod orchestration;
 pub mod pictures;
@@ -105,6 +106,9 @@ pub use mcp::{
 pub use memory::{
     CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, InteractionMemory, LearnedSkill,
     MemoryError, MemoryStore, WorkspaceSession, memory_path,
+};
+pub use mic_transcribe::{
+    MicRecordingHandle, MicTranscribeError, start_recording, stop_recording, transcribe_recording,
 };
 pub use orchestration::{
     AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, OrchestrationError,

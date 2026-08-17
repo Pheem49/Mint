@@ -716,6 +716,196 @@ pub fn timeline_reorder(req: &ReorderClipsRequest) -> Result<VideoEditResult, Vi
     })
 }
 
+// ── Filmstrip & Waveform ────────────────────────────────────────────────────
+
+/// Request body for `video_filmstrip`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilmstripRequest {
+    pub input: String,
+    pub output: String,
+    #[serde(default = "default_filmstrip_frames")]
+    pub frame_count: u32,
+    #[serde(default = "default_filmstrip_columns")]
+    pub columns: u32,
+    #[serde(default = "default_filmstrip_thumb_width")]
+    pub thumb_width: u32,
+}
+
+fn default_filmstrip_frames() -> u32 {
+    12
+}
+fn default_filmstrip_columns() -> u32 {
+    4
+}
+fn default_filmstrip_thumb_width() -> u32 {
+    320
+}
+
+/// Result of `video_filmstrip` — a grid image of sampled frames plus the
+/// timestamp each grid cell corresponds to (evenly spaced, left-to-right,
+/// top-to-bottom).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilmstripResult {
+    pub output_path: String,
+    pub frame_count: u32,
+    pub columns: u32,
+    pub timestamps: Vec<f64>,
+    pub size_bytes: Option<u64>,
+}
+
+/// Generates a grid image of frames sampled evenly across a video's
+/// timeline — lets the agent get visual context on a video cheaply (one
+/// small PNG) instead of shipping the whole file as `video_data_uri`.
+pub fn video_filmstrip(req: &FilmstripRequest) -> Result<FilmstripResult, VideoEditError> {
+    check_ffmpeg()?;
+    let info = video_load(&req.input)?;
+    if info.duration <= 0.0 {
+        return Err(VideoEditError::InvalidParams(
+            "video has zero duration".into(),
+        ));
+    }
+
+    let frame_count = req.frame_count.max(1);
+    let columns = req.columns.max(1);
+
+    // Inset ~2% from both ends so the first/last sampled frame isn't a
+    // black/EOF frame.
+    let inset = (info.duration * 0.02).min(1.0);
+    let usable = (info.duration - 2.0 * inset).max(0.0);
+    let timestamps: Vec<f64> = (0..frame_count)
+        .map(|i| {
+            if frame_count == 1 {
+                info.duration / 2.0
+            } else {
+                inset + usable * (i as f64) / ((frame_count - 1) as f64)
+            }
+        })
+        .collect();
+
+    let temp_dir = std::env::temp_dir().join("mint_filmstrip");
+    let _ = std::fs::create_dir_all(&temp_dir);
+
+    let mut frames: Vec<image::DynamicImage> = Vec::new();
+    let extract_result = (|| -> Result<(), VideoEditError> {
+        for (idx, ts) in timestamps.iter().enumerate() {
+            let frame_path = temp_dir.join(format!("frame_{idx:04}.png"));
+            let frame_str = frame_path
+                .to_str()
+                .ok_or_else(|| VideoEditError::InvalidParams("invalid temp path".into()))?;
+            let ts_str = ts.to_string();
+            run_ffmpeg(&[
+                "-y",
+                "-ss",
+                &ts_str,
+                "-i",
+                &req.input,
+                "-frames:v",
+                "1",
+                frame_str,
+            ])?;
+
+            let bytes = std::fs::read(&frame_path)?;
+            let img = image::load_from_memory(&bytes).map_err(|e| {
+                VideoEditError::Process(format!("failed to decode frame {idx}: {e}"))
+            })?;
+            frames.push(img.thumbnail(req.thumb_width, req.thumb_width));
+        }
+        Ok(())
+    })();
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    extract_result?;
+
+    let cell_w = frames
+        .iter()
+        .map(|f| f.width())
+        .max()
+        .unwrap_or(req.thumb_width);
+    let cell_h = frames
+        .iter()
+        .map(|f| f.height())
+        .max()
+        .unwrap_or(req.thumb_width);
+    let rows = frame_count.div_ceil(columns);
+    let mut canvas = image::RgbImage::new(cell_w * columns, cell_h.max(1) * rows.max(1));
+    for (idx, frame) in frames.iter().enumerate() {
+        let col = (idx as u32) % columns;
+        let row = (idx as u32) / columns;
+        image::imageops::overlay(
+            &mut canvas,
+            &frame.to_rgb8(),
+            (col * cell_w) as i64,
+            (row * cell_h) as i64,
+        );
+    }
+
+    let mut encoded = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(canvas)
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .map_err(|e| VideoEditError::Process(format!("failed to encode filmstrip: {e}")))?;
+    let bytes = encoded.into_inner();
+    std::fs::write(&req.output, &bytes)?;
+
+    Ok(FilmstripResult {
+        output_path: req.output.clone(),
+        frame_count,
+        columns,
+        timestamps,
+        size_bytes: Some(bytes.len() as u64),
+    })
+}
+
+/// Request body for `video_waveform`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaveformRequest {
+    pub input: String,
+    pub output: String,
+    #[serde(default = "default_waveform_width")]
+    pub width: u32,
+    #[serde(default = "default_waveform_height")]
+    pub height: u32,
+}
+
+fn default_waveform_width() -> u32 {
+    1280
+}
+fn default_waveform_height() -> u32 {
+    240
+}
+
+/// Result of `video_waveform`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WaveformResult {
+    pub output_path: String,
+    pub size_bytes: Option<u64>,
+}
+
+/// Generates an image of the audio waveform (amplitude over time) for a
+/// video or audio file, via ffmpeg's built-in `showwavespic` filter — lets
+/// the agent spot silence/loud sections visually without listening to or
+/// transcribing the whole track.
+pub fn video_waveform(req: &WaveformRequest) -> Result<WaveformResult, VideoEditError> {
+    check_ffmpeg()?;
+    let filter = format!("showwavespic=s={}x{}:colors=white", req.width, req.height);
+    run_ffmpeg(&[
+        "-y",
+        "-i",
+        &req.input,
+        "-filter_complex",
+        &filter,
+        "-frames:v",
+        "1",
+        &req.output,
+    ])?;
+    Ok(WaveformResult {
+        output_path: req.output.clone(),
+        size_bytes: file_size(&req.output),
+    })
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -35,6 +35,15 @@ const BG_DEL: &str = "\x1b[48;2;61;23;23m\x1b[38;2;255;121;121m";
 pub struct AgentOptions {
     pub fast_mode: bool,
     pub plan_mode: bool,
+    /// Keeps a lightweight, typeable input box pinned under the live status
+    /// region for the duration of this turn. Enter queues the typed text
+    /// (into the `Arc<Mutex<Vec<String>>>` passed to
+    /// `run_code_agent_with_options`) rather than sending it immediately —
+    /// the caller drains that queue once this turn returns and dispatches
+    /// each entry as its own follow-up turn. Only meaningful on an
+    /// interactive TTY; one-shot/non-interactive callers should leave this
+    /// `false`.
+    pub queueing: bool,
 }
 
 pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Result<AgentResult> {
@@ -55,6 +64,7 @@ pub async fn run_code_agent_with_image(
         image_data_uri,
         video_data_uri,
         AgentOptions::default(),
+        Arc::new(Mutex::new(Vec::new())),
     )
     .await
 }
@@ -66,12 +76,25 @@ pub async fn run_code_agent_with_options(
     image_data_uri: Option<String>,
     video_data_uri: Option<String>,
     options: AgentOptions,
+    queued_out: Arc<Mutex<Vec<String>>>,
 ) -> Result<AgentResult> {
     let started_at = Instant::now();
     let thinking_verb = random_thinking_verb();
     let approval_active = Arc::new(AtomicBool::new(false));
     let agent_done = Arc::new(AtomicBool::new(false));
     let live_status = Arc::new(Mutex::new(LiveStatus::default()));
+    {
+        use crossterm::tty::IsTty;
+        if options.queueing && !options.fast_mode && io::stdout().is_tty()
+            && let Ok(mut status) = live_status.lock()
+        {
+            status.queue_enabled = true;
+            status.accepting_input = true;
+            status.model_label = crate::active_model(&config.ai_provider, config).to_string();
+            status.path_label = crate::interactive::format_path_with_tilde(root);
+            status.plan_mode = options.plan_mode;
+        }
+    }
     let approve_approval_active = Arc::clone(&approval_active);
     let approve_live_status = Arc::clone(&live_status);
     // Seeded from disk, then grown in-memory as the user picks "Always allow"
@@ -81,6 +104,14 @@ pub async fn run_code_agent_with_options(
 
     let approve_cb = |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
         approve_approval_active.store(true, Ordering::Relaxed);
+        // Synchronous, not polled: `wait_for_escape_interrupt` holds raw
+        // mode continuously while the queueing box is live (see its docs),
+        // and only reacts to `approval_active` on its next ~15ms tick. Every
+        // print below needs cooked mode's `\n` → `\r\n` translation *before*
+        // it happens, not up to a tick later, so this closure — which knows
+        // exactly when it's about to print — drops raw mode itself instead
+        // of waiting to be noticed.
+        let _ = crossterm::terminal::disable_raw_mode();
         if let Ok(mut status) = approve_live_status.lock() {
             clear_live_status(&mut status);
         }
@@ -506,9 +537,21 @@ pub async fn run_code_agent_with_options(
             && let Ok(mut status) = chunk_live_status.lock()
         {
             status.thinking = None;
+            // Stop accepting keystrokes for the queueing box before it's torn
+            // down below — otherwise a keypress landing between this
+            // `clear_live_status` and the final answer's plain `println!`
+            // would resurrect the box (via `render_live_status`'s lazy
+            // `InlineTui::ensure`) at whatever the cursor's current position
+            // happens to be, underneath the answer that just printed.
+            status.accepting_input = false;
             commit_activity_snapshot(&mut status);
             clear_live_status(&mut status);
         }
+        // Same reasoning as `approve_cb`: drop raw mode synchronously,
+        // right here, rather than leaving `wait_for_escape_interrupt` to
+        // notice `accepting_input` went false on its next tick — the prints
+        // below need cooked mode's `\n` → `\r\n` translation immediately.
+        let _ = crossterm::terminal::disable_raw_mode();
         let formatted_summary = format_markdown_bold(&sanitize_latex(&summary));
         print!("\n  {MINT}Mint:{RESET} ");
         render_live_summary(&formatted_summary);
@@ -581,7 +624,7 @@ pub async fn run_code_agent_with_options(
     } else {
         tokio::select! {
             res = agent_loop => res,
-            _ = wait_for_escape_interrupt(Arc::clone(&approval_active)) => {
+            _ = wait_for_escape_interrupt(Arc::clone(&approval_active), Arc::clone(&live_status)) => {
                 Err(OrchestrationError::Agent("interrupted by Esc".into()))
             }
         }
@@ -591,6 +634,10 @@ pub async fn run_code_agent_with_options(
         && let Ok(mut status) = live_status.lock()
     {
         status.thinking = None;
+        status.accepting_input = false;
+        if let Ok(mut out) = queued_out.lock() {
+            *out = status.queued.clone();
+        }
         if res.is_err() {
             commit_activity_snapshot(&mut status);
         }
@@ -601,26 +648,36 @@ pub async fn run_code_agent_with_options(
     if should_show_verification(&res.verification) {
         println!("  Verification: {}", res.verification);
     }
-    let badge = if let Some(fb_provider) = &res.fallback {
+    let badge_plain = if let Some(fb_provider) = &res.fallback {
         format!(
-            "{DIM}{} • {} → fallback: {} • {}{RESET}",
+            "{} • {} → fallback: {} • {}",
             config.ai_provider,
             crate::active_model(&config.ai_provider, config),
             fb_provider,
             res.model
         )
     } else {
-        format!("{DIM}{} • {}{RESET}", res.provider, res.model)
+        format!("{} • {}", res.provider, res.model)
     };
-    println!("  {badge}");
-    println!(
-        "  {DIM}─ Worked for {}{RESET}",
-        format_elapsed(started_at.elapsed())
-    );
 
+    // "─ Worked for {elapsed} • {provider} • {model}" as one *labeled*
+    // divider — filled out with more "─" to the same width the box's own
+    // two divider lines use — rather than the provider/model badge and the
+    // elapsed-time label as two separate short lines followed by a third,
+    // unlabeled full-width divider directly under them. The three used to
+    // look like unrelated elements stacked on top of each other; folding
+    // both labels into one rule reads as a single line doing all three
+    // jobs, matching the box below it.
     let (tw, _) = markdown::terminal_size_or_default();
     let width = tw as usize;
-    println!("  {DIM}{}{RESET}", "─".repeat(width.saturating_sub(2)));
+    let label = format!(
+        "─ Worked for {} • {badge_plain}",
+        format_elapsed(started_at.elapsed())
+    );
+    let fill_len = width
+        .saturating_sub(2)
+        .saturating_sub(label.chars().count() + 1);
+    println!("  {DIM}{label} {}{RESET}", "─".repeat(fill_len));
 
     Ok(res)
 }
@@ -933,6 +990,21 @@ struct LiveStatus {
     /// Sources collected from web_search ToolEnd results (title, url)
     web_sources: Vec<(String, String)>,
     inline_tui: InlineTui,
+    /// Whether this turn keeps a typeable follow-up box pinned under the
+    /// live status region (see [`AgentOptions::queueing`]).
+    queue_enabled: bool,
+    /// Flips to `false` once the turn is wrapping up (final chunk printing,
+    /// or the turn ending), so a stray keystroke can't resurrect the box
+    /// after [`clear_live_status`] has already torn it down.
+    accepting_input: bool,
+    /// In-progress text typed into the follow-up box, not yet submitted.
+    draft: Vec<char>,
+    /// Follow-up messages submitted (Enter) while this turn was still
+    /// running. Copied out to the caller's `queued_out` once the turn ends.
+    queued: Vec<String>,
+    model_label: String,
+    path_label: String,
+    plan_mode: bool,
 }
 
 /// A `ratatui` inline-viewport terminal for the live status region — the
@@ -1227,6 +1299,60 @@ fn apply_wave_effect(text: &str, tick: usize) -> String {
     animated_label
 }
 
+/// Builds the queueing follow-up box `render_live_status` pins under the
+/// live region while an agent turn is running — a thin divider line plus a
+/// plain (no filled background) input row, styled after Claude Code's own
+/// mid-turn box rather than `compose_input_box`'s solid composer bar (see
+/// the call site's comment for why). Shares `compose_input_box`'s exact
+/// leading-margin-plus-prefix layout (one leading space, then `"› "`/`"  "`)
+/// so it can reuse `wrap_input_into_rows`/`cursor_visual_column` unchanged —
+/// those hardcode that layout's column offsets.
+///
+/// Returns the lines plus the cursor's (x, y) relative to line 0, same
+/// contract as `compose_input_box`.
+fn compose_queue_box(
+    input_chars: &[char],
+    cursor_pos: usize,
+    model: &str,
+    path_str: &str,
+    plan_mode: bool,
+) -> (Vec<String>, u16, u16) {
+    let (term_width, _) = markdown::terminal_size_or_default();
+    let width = term_width as usize;
+    let content_max_len = crate::interactive::input_content_width();
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("{DIM}{}{RESET}", "─".repeat(width.saturating_sub(2))));
+
+    let cursor_row_idx;
+    if input_chars.is_empty() {
+        cursor_row_idx = 0;
+        lines.push(format!(" \x1b[1m{MINT}› {RESET}{DIM}Ask anything...{RESET}"));
+    } else {
+        let (rows, c_row, _) =
+            crate::interactive::wrap_input_into_rows(input_chars, content_max_len, cursor_pos);
+        cursor_row_idx = c_row;
+        for (i, row) in rows.iter().enumerate() {
+            let row_prefix = if i == 0 { "› " } else { "  " };
+            let display_row = crate::interactive::format_placeholders(row);
+            lines.push(format!(" \x1b[1m{MINT}{row_prefix}{RESET}{display_row}"));
+        }
+    }
+
+    lines.push(format!("{DIM}{}{RESET}", "─".repeat(width.saturating_sub(2))));
+
+    let mode_label = if plan_mode { "[Plan]" } else { "[Agent]" };
+    lines.push(format!(
+        " {DIM}{mode_label}{RESET} {MINT}{model}{RESET}    {DIM}path: {path_str}{RESET}"
+    ));
+
+    let cursor_y = 1 + cursor_row_idx as u16;
+    let cursor_x = (crate::interactive::cursor_visual_column(input_chars, cursor_pos, content_max_len)
+        as u16)
+        .saturating_sub(1);
+    (lines, cursor_x, cursor_y)
+}
+
 fn render_live_status(status: &mut LiveStatus) {
     let mut lines = Vec::new();
     let explored_start = status.committed_explored.min(status.explored.len());
@@ -1275,14 +1401,54 @@ fn render_live_status(status: &mut LiveStatus) {
 
         lines.push(format!("  {MINT}{frame}{RESET} {waved_thinking}"));
     }
-    if lines.is_empty() {
+    // The queueing follow-up box (see `AgentOptions::queueing`) is appended
+    // after everything above, so it's always the bottom-most thing in the
+    // live region. Deliberately a *different* style from
+    // `compose_input_box` (the solid composer-background bar the primary
+    // prompt uses between turns): a thin divider line instead, closer to
+    // Claude Code's own mid-turn box — the solid bar reads as the main UI,
+    // which fights for attention against the tool/activity log scrolling
+    // above it, while a thin line reads as a temporary overlay.
+    //
+    // Rendered as its own `Paragraph`, in its own `Rect` below the status
+    // lines, deliberately *without* `.wrap(...)` — matching how
+    // `read_line_interactive`'s own box is drawn. Combining tightly-padded
+    // box content with `Wrap` in the same `Paragraph` as the status lines
+    // above it turned out to insert a phantom near-empty row after several
+    // of them — visible as the box's cursor landing a row above its actual
+    // text. Status lines (which can genuinely be longer than the terminal,
+    // e.g. a long command or file path) still need `.wrap(...)`, so the fix
+    // is two `Paragraph`s in two `Rect`s rather than dropping wrap
+    // everywhere.
+    let mut box_lines: Vec<String> = Vec::new();
+    let mut box_cursor: Option<(u16, u16)> = None;
+    if status.queue_enabled && status.accepting_input {
+        let cursor_pos = status.draft.len();
+        let (composed, cursor_x, cursor_y) = compose_queue_box(
+            &status.draft,
+            cursor_pos,
+            &status.model_label,
+            &status.path_label,
+            status.plan_mode,
+        );
+        box_cursor = Some((cursor_x, cursor_y));
+        box_lines = composed;
+        for queued in &status.queued {
+            let preview: String = queued.chars().take(80).collect();
+            let ellipsis = if queued.chars().count() > preview.chars().count() {
+                "…"
+            } else {
+                ""
+            };
+            box_lines.push(format!("  {DIM}Queued · {preview}{ellipsis}{RESET}"));
+        }
+    }
+
+    if lines.is_empty() && box_lines.is_empty() {
         status.inline_tui.teardown();
         return;
     }
 
-    let Ok(text) = lines.join("\n").into_text() else {
-        return;
-    };
     let Ok(terminal) = status.inline_tui.ensure() else {
         return;
     };
@@ -1292,10 +1458,36 @@ fn render_live_status(status: &mut LiveStatus) {
     let _ = with_raw_mode_for_cursor_query(|| {
         terminal.draw(|frame| {
             let area = frame.area();
-            frame.render_widget(
-                ratatui::widgets::Paragraph::new(text).wrap(ratatui::widgets::Wrap { trim: false }),
-                area,
-            );
+            let status_height = (lines.len() as u16).min(area.height);
+            let status_area = ratatui::layout::Rect {
+                height: status_height,
+                ..area
+            };
+            let box_area = ratatui::layout::Rect {
+                y: area.y + status_height,
+                height: area.height.saturating_sub(status_height),
+                ..area
+            };
+            if !lines.is_empty()
+                && let Ok(status_text) = lines.join("\n").into_text()
+            {
+                frame.render_widget(
+                    ratatui::widgets::Paragraph::new(status_text)
+                        .wrap(ratatui::widgets::Wrap { trim: false }),
+                    status_area,
+                );
+            }
+            if !box_lines.is_empty()
+                && let Ok(box_text) = box_lines.join("\n").into_text()
+            {
+                frame.render_widget(ratatui::widgets::Paragraph::new(box_text), box_area);
+            }
+            if let Some((cursor_x, cursor_y)) = box_cursor {
+                frame.set_cursor_position(ratatui::layout::Position::new(
+                    box_area.x + cursor_x,
+                    box_area.y + cursor_y,
+                ));
+            }
         })
     });
 }
@@ -1363,6 +1555,10 @@ fn print_timeline_note(status: &mut LiveStatus, thought: &str) {
 /// (e.g. committing before anything has rendered yet this turn).
 fn insert_permanent_lines(status: &mut LiveStatus, lines: &[String]) {
     let Some(terminal) = status.inline_tui.terminal.as_mut() else {
+        // Defensive, same reasoning as `approve_cb`/`on_chunk`: this is a
+        // plain `println!`, so it needs cooked mode regardless of whether
+        // `wait_for_escape_interrupt` has noticed yet.
+        let _ = crossterm::terminal::disable_raw_mode();
         for line in lines {
             println!("{line}");
         }
@@ -1791,31 +1987,176 @@ fn grouped_explored_actions(actions: &[ExploredAction]) -> Vec<String> {
         .collect()
 }
 
-async fn wait_for_escape_interrupt(approval_active: Arc<AtomicBool>) {
-    use crossterm::event::{self, Event, KeyCode};
-    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+/// Holds raw mode on for [`wait_for_escape_interrupt`]'s continuous-hold
+/// window (see that function's docs). A plain `bool` local isn't enough:
+/// `tokio::select!` can *drop* that whole async fn mid-poll — the instant
+/// its sibling branch (`agent_loop`) resolves first — which runs none of
+/// its ordinary code, only `Drop` impls of locals still alive at that
+/// point. Without an RAII guard, that's a terminal stuck in raw mode: every
+/// plain `println!` after the `select!` (the verification line, the badge,
+/// eventually the next prompt) would print without `\n` → `\r\n`
+/// translation until something else happened to re-enable cooked mode.
+struct RawModeGuard(bool);
+
+impl RawModeGuard {
+    fn set(&mut self, want_raw: bool) {
+        if want_raw == self.0 {
+            return;
+        }
+        if want_raw {
+            let _ = crossterm::terminal::enable_raw_mode();
+        } else {
+            let _ = crossterm::terminal::disable_raw_mode();
+        }
+        self.0 = want_raw;
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            let _ = crossterm::terminal::disable_raw_mode();
+        }
+    }
+}
+
+/// Watches stdin for the rest of the turn: Esc still interrupts (its
+/// original job), and — when `LiveStatus::queue_enabled` — every other
+/// keypress edits the follow-up draft shown in the box `render_live_status`
+/// pins under the live region. Enter queues the draft (see
+/// `LiveStatus::queued`) rather than sending it; the caller dispatches
+/// queued entries once this turn returns.
+///
+/// While the queueing box is live and accepting input, this holds raw mode
+/// *continuously* via [`RawModeGuard`] instead of toggling it every tick —
+/// an earlier version enabled raw mode only for the brief poll/read each
+/// tick and disabled it again before sleeping, on the theory that a longer
+/// sleep interval or a queue-draining read loop would keep the cooked-mode
+/// gap small enough not to matter. Measured against real typing (including
+/// tmux-delivered bursts, which land in a single pty write almost
+/// instantly), that measurement was wrong: since the cooked window was the
+/// *sleep* and the raw window was a near-instant poll, a keystroke was
+/// always far more likely to land during cooked mode than raw, regardless
+/// of how short the tick was made — every character got locally echoed by
+/// the tty driver on top of whatever `render_live_status` had drawn (e.g.
+/// "ก่ำ" appearing once as raw echoed text with the terminal's own cursor,
+/// once correctly inside the box). Holding raw mode continuously inverts
+/// that ratio: cooked mode now only happens for the brief, event-driven
+/// windows where something is actually about to print — `approve_cb`,
+/// `on_chunk`, and `insert_permanent_lines`'s fallback branch each disable
+/// raw mode themselves, synchronously, the instant they're about to print,
+/// rather than waiting for this function to notice on its next tick.
+async fn wait_for_escape_interrupt(
+    approval_active: Arc<AtomicBool>,
+    live_status: Arc<Mutex<LiveStatus>>,
+) {
+    use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+
+    // Fixed for the whole turn (set once when it starts), so it's safe to
+    // snapshot instead of re-locking every tick.
+    let queueing = live_status
+        .lock()
+        .map(|status| status.queue_enabled)
+        .unwrap_or(false);
+
+    let mut raw_mode = RawModeGuard(false);
 
     loop {
-        if approval_active.load(Ordering::Relaxed) || CURSOR_QUERY_ACTIVE.load(Ordering::Relaxed)
-        {
+        let blocked = approval_active.load(Ordering::Relaxed) || CURSOR_QUERY_ACTIVE.load(Ordering::Relaxed);
+        let accepting = !blocked
+            && queueing
+            && live_status
+                .lock()
+                .map(|status| status.accepting_input)
+                .unwrap_or(false);
+
+        raw_mode.set(accepting);
+
+        if blocked {
             tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         }
 
-        let _ = enable_raw_mode();
-        let escaped = matches!(event::poll(Duration::from_millis(0)), Ok(true))
-            && matches!(
-                event::read(),
-                Ok(Event::Key(key_event))
-                    if key_event.kind == event::KeyEventKind::Press
-                        && key_event.code == KeyCode::Esc
-            );
-        let _ = disable_raw_mode();
-
-        if escaped {
-            break;
+        if !accepting {
+            // Esc-only path: the queueing box isn't live for this turn (or
+            // isn't accepting input right now), so there's nothing to type
+            // into — fall back to a brief per-tick raw-mode window just for
+            // the Esc read, same as before the box existed.
+            let _ = crossterm::terminal::enable_raw_mode();
+            let escaped = matches!(event::poll(Duration::from_millis(0)), Ok(true))
+                && matches!(
+                    event::read(),
+                    Ok(Event::Key(key_event))
+                        if key_event.kind == event::KeyEventKind::Press
+                            && key_event.code == KeyCode::Esc
+                );
+            let _ = crossterm::terminal::disable_raw_mode();
+            if escaped {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            continue;
         }
-        tokio::time::sleep(Duration::from_millis(80)).await;
+
+        // `accepting`: `raw_mode` above already holds raw mode, so this can
+        // poll/read without any toggling of its own. Drains everything
+        // already queued (not just one event) so a fast burst can't leave
+        // a backlog for a stray tick boundary to mishandle.
+        let mut key_events = Vec::new();
+        while matches!(event::poll(Duration::from_millis(0)), Ok(true)) {
+            match event::read() {
+                Ok(Event::Key(key_event)) if key_event.kind == event::KeyEventKind::Press => {
+                    key_events.push(key_event);
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+
+        if !key_events.is_empty() {
+            let mut escaped = false;
+            let mut changed = false;
+            if let Ok(mut status) = live_status.lock() {
+                for key_event in key_events {
+                    if key_event.code == KeyCode::Esc {
+                        escaped = true;
+                        break;
+                    }
+                    match key_event.code {
+                        KeyCode::Char(c)
+                            if !key_event
+                                .modifiers
+                                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                        {
+                            if status.draft.len() < 4000 {
+                                status.draft.push(c);
+                            }
+                            changed = true;
+                        }
+                        KeyCode::Backspace => {
+                            status.draft.pop();
+                            changed = true;
+                        }
+                        KeyCode::Enter => {
+                            if !status.draft.is_empty() {
+                                let text: String = status.draft.drain(..).collect();
+                                status.queued.push(text);
+                            }
+                            changed = true;
+                        }
+                        _ => {}
+                    }
+                }
+                if changed {
+                    render_live_status(&mut status);
+                }
+            }
+            if escaped {
+                break;
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(15)).await;
     }
 }
 

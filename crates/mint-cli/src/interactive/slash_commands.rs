@@ -1,5 +1,109 @@
 use super::*;
 
+fn is_reachable(host: &str, port: u16) -> bool {
+    use std::net::{TcpStream, ToSocketAddrs};
+    use std::time::Duration;
+    (host, port)
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.next())
+        .is_some_and(|addr| TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok())
+}
+
+struct CompanionService {
+    name: &'static str,
+    host: &'static str,
+    port: u16,
+    mcp_key: &'static str,
+    setup_doc: &'static str,
+}
+
+const COMPANION_SERVICES: &[CompanionService] = &[
+    CompanionService {
+        name: "n8n",
+        host: "127.0.0.1",
+        port: 5678,
+        mcp_key: "n8n",
+        setup_doc: "docs/N8N_INTEGRATION.md",
+    },
+    CompanionService {
+        name: "SurfSense",
+        host: "127.0.0.1",
+        port: 3929,
+        mcp_key: "surfsense",
+        setup_doc: "docs/SURFSENSE_INTEGRATION.md",
+    },
+];
+
+/// Flash a small inline status panel for the companion services (n8n, Mint
+/// Notebook, ...) instead of printing a wall of warning text — reuses the
+/// same "inline ratatui `Terminal`, draw once, `clear()` to finalize into
+/// scrollback" pattern `picker.rs` uses for `/mcp` and `/models`, just
+/// without the interactive redraw loop since there's nothing to select here.
+fn render_companion_status_panel() {
+    use ansi_to_tui::IntoText;
+    use crossterm::tty::IsTty;
+
+    let mcp_servers = crate::mcp::list().unwrap_or_default();
+    let name_width = COMPANION_SERVICES
+        .iter()
+        .map(|s| s.name.len())
+        .max()
+        .unwrap_or(0);
+
+    let mut lines = vec![format!("{BLUE}Companion Services{RESET}")];
+    for service in COMPANION_SERVICES {
+        let up = is_reachable(service.host, service.port);
+        let (dot, color, status_label) = if up {
+            ("●", MINT, "running")
+        } else {
+            ("○", DIM, "not running")
+        };
+        let mcp_connected = mcp_servers.contains_key(service.mcp_key);
+        let mcp_label = if mcp_connected {
+            format!("{MINT}MCP: connected{RESET}")
+        } else {
+            format!("{DIM}MCP: not configured{RESET}")
+        };
+        lines.push(format!(
+            "  {color}{dot}{RESET} {:<name_width$}  {color}{status_label:<11}{RESET} {mcp_label}",
+            service.name
+        ));
+        if !up || !mcp_connected {
+            lines.push(format!("      {DIM}setup: {}{RESET}", service.setup_doc));
+        }
+    }
+    let text = lines.join("\n");
+
+    if !io::stdout().is_tty() {
+        println!("{text}\n");
+        return;
+    }
+
+    let height = (lines.len() as u16).saturating_add(1);
+    let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
+    let terminal = agent::with_raw_mode_for_cursor_query(move || {
+        ratatui::Terminal::with_options(
+            backend,
+            ratatui::TerminalOptions {
+                viewport: ratatui::Viewport::Inline(height),
+            },
+        )
+    });
+    let Ok(mut terminal) = terminal else {
+        println!("{text}\n");
+        return;
+    };
+    if let Ok(rendered) = text.into_text() {
+        let _ = terminal.draw(|frame| {
+            let area = frame.area();
+            frame.render_widget(ratatui::widgets::Paragraph::new(rendered), area);
+        });
+    }
+    let _ = terminal.clear();
+    println!();
+}
+
 fn parse_path_and_prompt(rest: &str) -> (String, String) {
     let rest = rest.trim();
     if rest.is_empty() {
@@ -113,6 +217,14 @@ pub async fn handle_slash_command(
                 ("/stats", "Show session statistics"),
                 ("/exit", "Exit Mint"),
                 ("/code <task>", "Run in code-agent mode"),
+                (
+                    "/n8n [task]",
+                    "Open n8n in your browser, or trigger a workflow via the n8n MCP server",
+                ),
+                (
+                    "/notebook [task]",
+                    "Open SurfSense in your browser, or run a task via the surfsense MCP server",
+                ),
                 (
                     "/multi-agent [on|off]",
                     "Show or toggle Multi-Agent Collaboration system",
@@ -1991,6 +2103,70 @@ pub async fn handle_slash_command(
                 Some(SlashResult::Handled)
             } else {
                 Some(SlashResult::ForwardToAgent(format!("[code] {rest}")))
+            }
+        }
+
+        "/n8n" => {
+            const N8N_URL: &str = "http://localhost:5678";
+            let n8n_connected = crate::mcp::list()
+                .map(|servers| servers.contains_key("n8n"))
+                .unwrap_or(false);
+            if rest.is_empty() {
+                if !is_reachable("127.0.0.1", 5678) {
+                    render_companion_status_panel();
+                    return Some(SlashResult::Handled);
+                }
+                println!("{MINT}Opening n8n...{RESET}");
+                println!("{DIM}{N8N_URL}{RESET}");
+                if let Err(e) = crate::actions::open_system_handler(N8N_URL) {
+                    println!("{ERROR}Couldn't open a browser automatically:{RESET} {e}");
+                }
+                if !n8n_connected {
+                    println!(
+                        "{DIM}Tip: 'n8n' isn't wired up as an MCP server yet, so /n8n <task> won't work until you enable MCP in n8n's Settings and connect it (full steps: docs/N8N_INTEGRATION.md){RESET}"
+                    );
+                }
+                println!();
+                Some(SlashResult::Handled)
+            } else if !n8n_connected {
+                render_companion_status_panel();
+                Some(SlashResult::Handled)
+            } else {
+                Some(SlashResult::ForwardToAgent(format!(
+                    "[n8n] Use the n8n MCP server's tools to accomplish this: {rest}"
+                )))
+            }
+        }
+
+        "/notebook" => {
+            const SURFSENSE_URL: &str = "http://localhost:3929";
+            let surfsense_connected = crate::mcp::list()
+                .map(|servers| servers.contains_key("surfsense"))
+                .unwrap_or(false);
+            if rest.is_empty() {
+                if !is_reachable("127.0.0.1", 3929) {
+                    render_companion_status_panel();
+                    return Some(SlashResult::Handled);
+                }
+                println!("{MINT}Opening SurfSense...{RESET}");
+                println!("{DIM}{SURFSENSE_URL}{RESET}");
+                if let Err(e) = crate::actions::open_system_handler(SURFSENSE_URL) {
+                    println!("{ERROR}Couldn't open a browser automatically:{RESET} {e}");
+                }
+                if !surfsense_connected {
+                    println!(
+                        "{DIM}Tip: 'surfsense' isn't wired up as an MCP server yet, so /notebook <task> won't work until you run: mint mcp add surfsense uv --args --directory --args <path to your SurfSense clone>/surfsense_mcp --args run --args mcp_server --env SURFSENSE_API_KEY=<your key> (full steps: docs/SURFSENSE_INTEGRATION.md){RESET}"
+                    );
+                }
+                println!();
+                Some(SlashResult::Handled)
+            } else if !surfsense_connected {
+                render_companion_status_panel();
+                Some(SlashResult::Handled)
+            } else {
+                Some(SlashResult::ForwardToAgent(format!(
+                    "[notebook] Use the surfsense MCP server's tools to accomplish this: {rest}"
+                )))
             }
         }
 

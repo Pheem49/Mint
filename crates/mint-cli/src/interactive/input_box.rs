@@ -38,6 +38,14 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ("/learn", "Import persistent skill/instruction"),
     ("/mcp", "List configured MCP servers"),
     ("/memory", "Manage long-term memory store"),
+    (
+        "/n8n",
+        "Open n8n, or trigger a workflow via the n8n MCP server",
+    ),
+    (
+        "/notebook",
+        "Open SurfSense, or run a task via the surfsense MCP server",
+    ),
     ("/models", "List AI providers or switch active provider"),
     ("/multi-agent", "Toggle Multi-Agent Collaboration system"),
     ("/paste", "Attach image from clipboard"),
@@ -65,7 +73,7 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
 /// Width, in raw characters, available for input text within the box —
 /// shared by every function that needs to reason about row layout, so the
 /// terminal-width query and margin/prefix math stay in one place.
-fn input_content_width() -> usize {
+pub(crate) fn input_content_width() -> usize {
     let (term_width, _) = crate::markdown::terminal_size_or_default();
     let width = term_width as usize;
     let prefix_len = "› ".chars().count();
@@ -76,7 +84,7 @@ fn input_content_width() -> usize {
 /// existing horizontal-scroll convention) and at any explicit `\n` the user
 /// inserted (Alt+Enter) — and reports which row/column the cursor falls in.
 /// A `\n` itself is consumed by the break and never appears in a row's text.
-fn wrap_input_into_rows(
+pub(crate) fn wrap_input_into_rows(
     input_chars: &[char],
     row_width: usize,
     cursor_pos: usize,
@@ -132,7 +140,11 @@ fn wrap_input_into_rows(
 /// Visual (1-indexed) terminal column for the cursor within its current row —
 /// column 4 is the first content character (columns 1-3 are the leading
 /// margin space plus the 2-visual-width `"› "`/`"  "` prefix).
-fn cursor_visual_column(input_chars: &[char], cursor_pos: usize, content_width: usize) -> usize {
+pub(crate) fn cursor_visual_column(
+    input_chars: &[char],
+    cursor_pos: usize,
+    content_width: usize,
+) -> usize {
     let (_, _, col) = wrap_input_into_rows(input_chars, content_width, cursor_pos);
     let cursor_pos = cursor_pos.min(input_chars.len());
     let row_start = cursor_pos - col;
@@ -153,7 +165,20 @@ fn cursor_visual_column(input_chars: &[char], cursor_pos: usize, content_width: 
 /// position from "how many lines did I just print" — `ratatui`'s
 /// `Frame::set_cursor_position` takes an (x, y) directly, so this can just
 /// hand that over instead of recomputing it via up/down ANSI motion.
-fn compose_input_box(
+/// `pub(crate)`, not private: also reused by `agent::compose_queue_box` /
+/// `agent::render_live_status`, which share this function's leading-space-
+/// plus-prefix row layout (see `cursor_visual_column`'s doc) even though
+/// they draw their own thin-divider box rather than calling this directly —
+/// keeping both boxes on one style (see below) means whichever one is on
+/// screen doesn't visually jump when the other replaces it.
+///
+/// Styled as a thin divider line plus plain (no filled background) text
+/// rows — deliberately not a solid composer-background bar, to match the
+/// queueing box `agent::render_live_status` pins under the live region
+/// mid-turn (`agent::compose_queue_box`): the two boxes trade places at the
+/// start/end of every turn, so keeping them visually identical avoids the
+/// box appearing to "flip styles" right when a turn starts or ends.
+pub(crate) fn compose_input_box(
     input_chars: &[char],
     cursor_pos: usize,
     placeholder: &str,
@@ -168,22 +193,18 @@ fn compose_input_box(
     let width = term_width as usize;
     let prefix = "› ";
     let cont_prefix = "  ";
-    let input_width = width.saturating_sub(2);
     let content_max_len = input_content_width();
-    let blank_line = " ".repeat(input_width);
 
     let mut lines: Vec<String> = Vec::new();
-    lines.push(format!(" {COMPOSER_BG}{blank_line}{RESET}"));
+    lines.push(format!("{DIM}{}{RESET}", "─".repeat(width.saturating_sub(2))));
 
     let (cursor_row_idx, cursor_col);
     if input_chars.is_empty() {
         cursor_row_idx = 0;
         cursor_col = 0;
-        let pad_len = content_max_len.saturating_sub(placeholder.chars().count());
-        let padding = " ".repeat(pad_len);
         lines.push(format!(
-            " {COMPOSER_BG}{MINT}{prefix}{RESET}{COMPOSER_BG}{DIM}{}\x1b[39m{}{RESET}",
-            placeholder, padding
+            " \x1b[1m{MINT}{prefix}{RESET}{DIM}{}{RESET}",
+            placeholder
         ));
     } else {
         let (rows, c_row, c_col) = wrap_input_into_rows(input_chars, content_max_len, cursor_pos);
@@ -192,18 +213,12 @@ fn compose_input_box(
         for (i, row) in rows.iter().enumerate() {
             let row_prefix = if i == 0 { prefix } else { cont_prefix };
             let display_row = format_placeholders(row);
-            let visible_len = string_visual_width(row);
-            let pad_len = content_max_len.saturating_sub(visible_len);
-            let padding = " ".repeat(pad_len);
-            lines.push(format!(
-                " {COMPOSER_BG}{MINT}{}{RESET}{COMPOSER_BG}{}{}{RESET}",
-                row_prefix, display_row, padding
-            ));
+            lines.push(format!(" \x1b[1m{MINT}{}{RESET}{}", row_prefix, display_row));
         }
     }
     let _ = cursor_col; // visual column is derived below via `cursor_visual_column`
 
-    lines.push(format!(" {COMPOSER_BG}{blank_line}{RESET}"));
+    lines.push(format!("{DIM}{}{RESET}", "─".repeat(width.saturating_sub(2))));
 
     // Plan mode is read-only until the user approves a plan, so the status
     // bar swaps [Agent] for [Plan] to keep that state visible at a glance.

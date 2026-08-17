@@ -492,6 +492,28 @@ export async function stopGeminiLiveSession(sessionId: string): Promise<void> {
   await invoke('stop_gemini_live_session', { sessionId })
 }
 
+/** Starts native push-to-talk mic recording (Rust-side, via cpal) — desktop only. */
+export async function startMicRecording(): Promise<void> {
+  if (!isTauriRuntime()) {
+    throw new Error('Native voice input is only available in the desktop app.')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('start_mic_recording')
+}
+
+/**
+ * Stops the in-progress recording and transcribes it using whichever provider is
+ * configured for chat. Rejects with a clear message if that provider doesn't
+ * support audio input.
+ */
+export async function stopMicRecordingAndTranscribe(): Promise<string> {
+  if (!isTauriRuntime()) {
+    throw new Error('Native voice input is only available in the desktop app.')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string>('stop_mic_recording_and_transcribe')
+}
+
 function withImagePlaceholder(message: string, imageDataUri?: string | null, videoDataUri?: string | null) {
   let finalMessage = message
   if (imageDataUri && !finalMessage.includes('[Image #1]')) {

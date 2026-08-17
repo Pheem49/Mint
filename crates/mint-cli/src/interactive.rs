@@ -1,6 +1,6 @@
 use crate::background::{BackgroundJobs, JobStatus};
 use crate::onboard;
-use crate::{BLUE, COMPOSER_BG, DIM, ERROR, MINT, RESET, WARN};
+use crate::{BLUE, DIM, ERROR, MINT, RESET, WARN};
 use crate::{agent, image};
 use anyhow::Result;
 use mint_core::{CHAT_CLI_ID, MemoryStore, MintConfig};
@@ -225,6 +225,13 @@ pub async fn run_interactive_chat() -> Result<()> {
         None
     };
 
+    // Follow-up messages typed while an agent turn is still running (into the
+    // queueing box `agent::run_code_agent_with_options` keeps on screen) come
+    // back out via `run_code_agent_with_saved_image`'s return value. They're
+    // queued here and drained before prompting for new input, so a message
+    // typed mid-turn is dispatched automatically instead of being lost.
+    let mut pending_inputs: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+
     loop {
         if let Some(handle) = update_handle.take() {
             if handle.is_finished() {
@@ -242,7 +249,10 @@ pub async fn run_interactive_chat() -> Result<()> {
         let path_str = format_path_with_tilde(&session.current_dir);
         let model_str = active_model(&session.config.ai_provider, &session.config).to_owned();
 
-        if let Some(input) = read_line_interactive(
+        let query_str = if let Some(queued) = pending_inputs.pop_front() {
+            println!("  {BLUE}You ›{RESET} {}", queued);
+            queued
+        } else if let Some(input) = read_line_interactive(
             &session.config.ai_provider,
             &model_str,
             &path_str,
@@ -259,99 +269,69 @@ pub async fn run_interactive_chat() -> Result<()> {
                     session.pending_image = Some(uri);
                 }
             }
-            let query_str = input.text.trim().to_owned();
-            if query_str.is_empty() {
+            let text = input.text.trim().to_owned();
+            if text.is_empty() {
                 continue;
             }
+            text
+        } else {
+            print_exit_message(&session);
+            break;
+        };
 
-            if session.history.last().map(|s| s.as_str()) != Some(query_str.as_str()) {
-                session.history.push(query_str.clone());
-            }
+        if session.history.last().map(|s| s.as_str()) != Some(query_str.as_str()) {
+            session.history.push(query_str.clone());
+        }
 
-            if query_str.starts_with('$') {
-                let (skill_word, task_part) = query_str
-                    .split_once(char::is_whitespace)
-                    .map(|(s, t)| (s, t.trim()))
-                    .unwrap_or((&query_str, ""));
+        if query_str.starts_with('$') {
+            let (skill_word, task_part) = query_str
+                .split_once(char::is_whitespace)
+                .map(|(s, t)| (s, t.trim()))
+                .unwrap_or((&query_str, ""));
 
-                let skill_name = skill_word.trim_start_matches('$').to_lowercase();
-                let skills = load_all_available_skills(&session.current_dir);
-                let skill_opt = skills.iter().find(|s| s.name.to_lowercase() == skill_name);
+            let skill_name = skill_word.trim_start_matches('$').to_lowercase();
+            let skills = load_all_available_skills(&session.current_dir);
+            let skill_opt = skills.iter().find(|s| s.name.to_lowercase() == skill_name);
 
-                if let Some(skill) = skill_opt {
-                    println!("\n{BLUE}Skill: {}{RESET}", skill.name);
-                    if let Some(ref desc) = skill.description {
-                        println!("{DIM}{}{RESET}", desc);
-                    }
-                    println!("{DIM}────────────────────────────────────────────{RESET}");
-                    println!("{}", skill.content);
-                    println!("{DIM}────────────────────────────────────────────{RESET}\n");
+            if let Some(skill) = skill_opt {
+                println!("\n{BLUE}Skill: {}{RESET}", skill.name);
+                if let Some(ref desc) = skill.description {
+                    println!("{DIM}{}{RESET}", desc);
+                }
+                println!("{DIM}────────────────────────────────────────────{RESET}");
+                println!("{}", skill.content);
+                println!("{DIM}────────────────────────────────────────────{RESET}\n");
 
-                    if confirm("ต้องการ activate skill นี้ไหม? [y/N] ")? {
-                        let final_task = if task_part.is_empty() {
-                            print!("พิมพ์ Task ที่ต้องการให้ทำงานด้วย Skill นี้: ");
-                            let _ = io::stdout().flush();
-                            let mut input = String::new();
-                            io::stdin().read_line(&mut input)?;
-                            let input = input.trim().to_owned();
-                            if input.is_empty() {
-                                println!("{WARN}Cancelled: Task cannot be empty.{RESET}\n");
-                                continue;
-                            }
-                            input
-                        } else {
-                            task_part.to_owned()
-                        };
-
-                        let task_with_skill = format!(
-                            "=== ACTIVATED SKILL: {} ===\n\
-                             {}\n\
-                             ===========================\n\n\
-                             Task: {}",
-                            skill.name, skill.content, final_task
-                        );
-
-                        println!();
-                        println!("{MINT}●{RESET} \x1b[1mSkill({}){RESET}", skill.name);
-                        println!("  {DIM}└ Successfully loaded skill{RESET}");
-                        println!();
-                        if let Err(error) = crate::run_code_agent_with_saved_image(
-                            &task_with_skill,
-                            &session.current_dir,
-                            &session.config,
-                            session.pending_image.take(),
-                            None,
-                            agent::AgentOptions {
-                                fast_mode: session.fast_mode,
-                                plan_mode: session.plan_mode,
-                            },
-                        )
-                        .await
-                        {
-                            println!("{ERROR}Error:{RESET} {error}\n");
+                if confirm("ต้องการ activate skill นี้ไหม? [y/N] ")? {
+                    let final_task = if task_part.is_empty() {
+                        print!("พิมพ์ Task ที่ต้องการให้ทำงานด้วย Skill นี้: ");
+                        let _ = io::stdout().flush();
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
+                        let input = input.trim().to_owned();
+                        if input.is_empty() {
+                            println!("{WARN}Cancelled: Task cannot be empty.{RESET}\n");
+                            continue;
                         }
+                        input
                     } else {
-                        println!("{DIM}Cancelled.{RESET}\n");
-                    }
-                } else {
-                    println!("{ERROR}Skill '{}' not found.{RESET}\n", skill_name);
-                }
-                continue;
-            }
+                        task_part.to_owned()
+                    };
 
-            // Run slash-command router
-            match handle_slash_command(&mut session, &query_str).await {
-                Some(SlashResult::Handled) => continue,
-                Some(SlashResult::Exit) => {
-                    print_exit_message(&session);
-                    break;
-                }
+                    let task_with_skill = format!(
+                        "=== ACTIVATED SKILL: {} ===\n\
+                         {}\n\
+                         ===========================\n\n\
+                         Task: {}",
+                        skill.name, skill.content, final_task
+                    );
 
-                Some(SlashResult::ForwardToAgent(task)) => {
-                    // Force code agent for /code forwarded tasks
                     println!();
-                    if let Err(error) = crate::run_code_agent_with_saved_image(
-                        &task,
+                    println!("{MINT}●{RESET} \x1b[1mSkill({}){RESET}", skill.name);
+                    println!("  {DIM}└ Successfully loaded skill{RESET}");
+                    println!();
+                    match crate::run_code_agent_with_saved_image(
+                        &task_with_skill,
                         &session.current_dir,
                         &session.config,
                         session.pending_image.take(),
@@ -359,39 +339,76 @@ pub async fn run_interactive_chat() -> Result<()> {
                         agent::AgentOptions {
                             fast_mode: session.fast_mode,
                             plan_mode: session.plan_mode,
+                            queueing: true,
                         },
                     )
                     .await
                     {
-                        println!("{ERROR}Error:{RESET} {error}\n");
+                        Ok(queued) => pending_inputs.extend(queued),
+                        Err(error) => println!("{ERROR}Error:{RESET} {error}\n"),
                     }
-                    continue;
+                } else {
+                    println!("{DIM}Cancelled.{RESET}\n");
                 }
-                None => {} // Not a slash command, fall through
+            } else {
+                println!("{ERROR}Skill '{}' not found.{RESET}\n", skill_name);
+            }
+            continue;
+        }
+
+        // Run slash-command router
+        match handle_slash_command(&mut session, &query_str).await {
+            Some(SlashResult::Handled) => continue,
+            Some(SlashResult::Exit) => {
+                print_exit_message(&session);
+                break;
             }
 
-            // Regular agent loop (handles both chat and coding).
-            // Note: /code is fully handled by handle_slash_command above
-            // (its "/code" arm always returns Some(...)), so no separate
-            // "/code " fallback is needed here.
-            if let Err(error) = crate::run_code_agent_with_saved_image(
-                &query_str,
-                &session.current_dir,
-                &session.config,
-                session.pending_image.take(),
-                None,
-                agent::AgentOptions {
-                    fast_mode: session.fast_mode,
-                    plan_mode: session.plan_mode,
-                },
-            )
-            .await
-            {
-                println!("{ERROR}Error:{RESET} {error}\n");
+            Some(SlashResult::ForwardToAgent(task)) => {
+                // Force code agent for /code forwarded tasks
+                println!();
+                match crate::run_code_agent_with_saved_image(
+                    &task,
+                    &session.current_dir,
+                    &session.config,
+                    session.pending_image.take(),
+                    None,
+                    agent::AgentOptions {
+                        fast_mode: session.fast_mode,
+                        plan_mode: session.plan_mode,
+                        queueing: true,
+                    },
+                )
+                .await
+                {
+                    Ok(queued) => pending_inputs.extend(queued),
+                    Err(error) => println!("{ERROR}Error:{RESET} {error}\n"),
+                }
+                continue;
             }
-        } else {
-            print_exit_message(&session);
-            break;
+            None => {} // Not a slash command, fall through
+        }
+
+        // Regular agent loop (handles both chat and coding).
+        // Note: /code is fully handled by handle_slash_command above
+        // (its "/code" arm always returns Some(...)), so no separate
+        // "/code " fallback is needed here.
+        match crate::run_code_agent_with_saved_image(
+            &query_str,
+            &session.current_dir,
+            &session.config,
+            session.pending_image.take(),
+            None,
+            agent::AgentOptions {
+                fast_mode: session.fast_mode,
+                plan_mode: session.plan_mode,
+                queueing: true,
+            },
+        )
+        .await
+        {
+            Ok(queued) => pending_inputs.extend(queued),
+            Err(error) => println!("{ERROR}Error:{RESET} {error}\n"),
         }
     }
 

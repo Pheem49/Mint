@@ -25,7 +25,7 @@ import ChatMessageItem from '../../shared/components/ChatMessageItem'
 import { AgentActivityDrawer } from '../../shared/components/AgentActivityDrawer'
 import type { DiffHunk, FileChange } from '../../shared/types'
 import { numericSetting, shouldShowSessionDivider, formatSessionDividerLabel } from '../../shared/utils/ui'
-import { useSpeechToText } from '../../shared/utils/speech'
+import { useNativeVoiceInput } from '../../shared/utils/useNativeVoiceInput'
 import { useGeminiLiveVoice } from '../../shared/utils/useGeminiLiveVoice'
 import GeminiLiveOverlay from '../../shared/components/GeminiLiveOverlay'
 import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../../shared/utils/documentTypes'
@@ -41,6 +41,8 @@ import {
   startGeminiLiveSession,
   sendGeminiLiveAudioChunk,
   stopGeminiLiveSession,
+  startMicRecording,
+  stopMicRecordingAndTranscribe,
 } from '../tauri'
 
 
@@ -287,8 +289,9 @@ export default function ChatPanel({
   }
 
 
-  // The mic button always drives the browser STT flow; Gemini Live is a separate "Live"
-  // button + overlay (see below), not a swap-in replacement for the same button.
+  // The mic button always drives native push-to-talk transcription; Gemini Live is a
+  // separate "Live" button + overlay (see below), not a swap-in replacement for the
+  // same button.
   const {
     isRecording,
     voiceMode,
@@ -302,13 +305,10 @@ export default function ChatPanel({
     stopRecognition,
     scheduleVoiceListen,
     clearRestartTimer
-  } = useSpeechToText({
-    language: settingsConfig?.language,
-    message,
-    sending,
-    isSpeaking: Boolean(speakingText),
+  } = useNativeVoiceInput({
     onSendVoiceMessage,
-    onSetMessage: (val) => onSetMessage(val)
+    startRecording: startMicRecording,
+    stopRecordingAndTranscribe: stopMicRecordingAndTranscribe
   })
 
   const geminiLiveEnabled = settingsConfig?.voiceMode === 'geminiLive'
@@ -621,15 +621,14 @@ export default function ChatPanel({
   }
 
   const toggleRecording = () => {
-    if (voiceMode) {
-      setVoiceMode(false)
+    if (isRecording) {
       stopRecognition()
       cancelSpeech()
       return
     }
 
-    setVoiceMode(true)
-    startRecognition(true)
+    cancelSpeech()
+    startRecognition()
   }
   const resizeInput = (element: HTMLTextAreaElement) => {
     element.style.height = 'auto'
