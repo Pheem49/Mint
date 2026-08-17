@@ -231,6 +231,12 @@ pub async fn run_interactive_chat() -> Result<()> {
     // queued here and drained before prompting for new input, so a message
     // typed mid-turn is dispatched automatically instead of being lost.
     let mut pending_inputs: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    // The box's in-progress, not-yet-submitted text at the moment the previous
+    // turn ended (see `run_code_agent_with_saved_image`'s `draft_out`) —
+    // reappears as the next `read_line_interactive` call's starting text
+    // instead of being discarded. `None` once consumed until a new turn
+    // leaves something unsent behind again.
+    let mut pending_draft: Option<String> = None;
 
     loop {
         if let Some(handle) = update_handle.take() {
@@ -260,6 +266,7 @@ pub async fn run_interactive_chat() -> Result<()> {
             &session.history,
             &session.jobs,
             session.plan_mode,
+            pending_draft.take().unwrap_or_default().as_str(),
         )? {
             if let Some(uri) = input.pasted_image {
                 if let Some(ref mut current) = session.pending_image {
@@ -344,7 +351,10 @@ pub async fn run_interactive_chat() -> Result<()> {
                     )
                     .await
                     {
-                        Ok(queued) => pending_inputs.extend(queued),
+                        Ok((queued, draft)) => {
+                            pending_inputs.extend(queued);
+                            pending_draft = draft;
+                        }
                         Err(error) => println!("{ERROR}Error:{RESET} {error}\n"),
                     }
                 } else {
@@ -381,7 +391,10 @@ pub async fn run_interactive_chat() -> Result<()> {
                 )
                 .await
                 {
-                    Ok(queued) => pending_inputs.extend(queued),
+                    Ok((queued, draft)) => {
+                        pending_inputs.extend(queued);
+                        pending_draft = draft;
+                    }
                     Err(error) => println!("{ERROR}Error:{RESET} {error}\n"),
                 }
                 continue;
@@ -407,7 +420,10 @@ pub async fn run_interactive_chat() -> Result<()> {
         )
         .await
         {
-            Ok(queued) => pending_inputs.extend(queued),
+            Ok((queued, draft)) => {
+                pending_inputs.extend(queued);
+                pending_draft = draft;
+            }
             Err(error) => println!("{ERROR}Error:{RESET} {error}\n"),
         }
     }

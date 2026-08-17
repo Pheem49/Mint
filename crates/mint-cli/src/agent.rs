@@ -65,6 +65,7 @@ pub async fn run_code_agent_with_image(
         video_data_uri,
         AgentOptions::default(),
         Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(None)),
     )
     .await
 }
@@ -77,6 +78,7 @@ pub async fn run_code_agent_with_options(
     video_data_uri: Option<String>,
     options: AgentOptions,
     queued_out: Arc<Mutex<Vec<String>>>,
+    draft_out: Arc<Mutex<Option<String>>>,
 ) -> Result<AgentResult> {
     let started_at = Instant::now();
     let thinking_verb = random_thinking_verb();
@@ -637,6 +639,13 @@ pub async fn run_code_agent_with_options(
         status.accepting_input = false;
         if let Ok(mut out) = queued_out.lock() {
             *out = status.queued.clone();
+        }
+        if let Ok(mut out) = draft_out.lock() {
+            *out = if status.draft.is_empty() {
+                None
+            } else {
+                Some(status.draft.iter().collect())
+            };
         }
         if res.is_err() {
             commit_activity_snapshot(&mut status);
@@ -1458,7 +1467,46 @@ fn render_live_status(status: &mut LiveStatus) {
     let _ = with_raw_mode_for_cursor_query(|| {
         terminal.draw(|frame| {
             let area = frame.area();
-            let status_height = (lines.len() as u16).min(area.height);
+            // The box (the "Ask anything..." input) claims its own rows
+            // first, since it's a fixed handful of lines that must always
+            // stay visible; the status/activity log — which can grow
+            // unboundedly (e.g. several tool calls each with output
+            // previews) — gets whatever's left over and clips/wraps instead.
+            // Giving the log first claim (as this used to) let a long log
+            // push the box's height down to zero, making it disappear
+            // entirely whenever multiple commands ran at once.
+            let box_height = (box_lines.len() as u16).min(area.height);
+            let available_for_status = area.height.saturating_sub(box_height);
+
+            let mut status_line_count: u16 = 0;
+            let mut status_paragraph = None;
+            if !lines.is_empty()
+                && let Ok(status_text) = lines.join("\n").into_text()
+            {
+                // `lines.len()` counts logical entries, not the terminal rows
+                // they occupy once wrapped — a single long shell command or
+                // output preview line can expand to many rows. Measuring each
+                // parsed `Line`'s display width (post-ANSI-stripping, via
+                // `into_text()` above) against the real terminal width and
+                // rounding up approximates the same wrapping `Wrap{trim:
+                // false}` performs at render time, so the reserved height
+                // stays in sync with what's actually drawn instead of
+                // under-reserving and clipping trailing lines (e.g. the
+                // "Deliberating" spinner, always last in `lines`) off the
+                // bottom of the frame. (`Paragraph::line_count` would do this
+                // exactly, but it's gated behind an unstable ratatui feature.)
+                let wrap_width = area.width.max(1);
+                status_line_count = status_text
+                    .lines
+                    .iter()
+                    .map(|line| (line.width().max(1) as u16).div_ceil(wrap_width))
+                    .sum();
+                status_paragraph = Some(
+                    ratatui::widgets::Paragraph::new(status_text)
+                        .wrap(ratatui::widgets::Wrap { trim: false }),
+                );
+            }
+            let status_height = status_line_count.min(available_for_status);
             let status_area = ratatui::layout::Rect {
                 height: status_height,
                 ..area
@@ -1468,14 +1516,8 @@ fn render_live_status(status: &mut LiveStatus) {
                 height: area.height.saturating_sub(status_height),
                 ..area
             };
-            if !lines.is_empty()
-                && let Ok(status_text) = lines.join("\n").into_text()
-            {
-                frame.render_widget(
-                    ratatui::widgets::Paragraph::new(status_text)
-                        .wrap(ratatui::widgets::Wrap { trim: false }),
-                    status_area,
-                );
+            if let Some(paragraph) = status_paragraph {
+                frame.render_widget(paragraph, status_area);
             }
             if !box_lines.is_empty()
                 && let Ok(box_text) = box_lines.join("\n").into_text()
@@ -1586,7 +1628,16 @@ fn insert_permanent_lines(status: &mut LiveStatus, lines: &[String]) {
     };
     let _ = terminal.insert_before(height, |buf| {
         use ratatui::widgets::Widget as _;
-        ratatui::widgets::Paragraph::new(text).render(buf.area, buf);
+        // `height` above is computed assuming lines longer than the
+        // terminal width wrap onto extra rows; without `.wrap(...)` here
+        // the `Paragraph` instead clips each source line to a single row,
+        // so a long committed line (e.g. a full shell command) reserved
+        // more rows than it painted — leaving stray blank rows behind in
+        // the scrollback. Wrapping keeps what's actually drawn in sync
+        // with what was reserved.
+        ratatui::widgets::Paragraph::new(text)
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .render(buf.area, buf);
     });
 }
 

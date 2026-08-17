@@ -52,7 +52,7 @@ pub(crate) async fn run_code_agent_with_saved_image(
     image_data_uri: Option<String>,
     video_data_uri: Option<String>,
     options: agent::AgentOptions,
-) -> Result<Vec<String>> {
+) -> Result<(Vec<String>, Option<String>)> {
     let sent_image = image_data_uri.clone();
     let sent_video = video_data_uri.clone();
     // Follow-up messages the user typed into the queueing box while this
@@ -60,6 +60,11 @@ pub(crate) async fn run_code_agent_with_saved_image(
     // land here; the caller is responsible for dispatching them. On error
     // the queue is dropped along with the interrupted turn.
     let queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    // The box's leftover, not-yet-submitted text (typed but no Enter yet) at
+    // the moment the turn ended — same idea as `queue` above, but for the one
+    // partial entry that was never confirmed, so the caller can hand it back
+    // as the next prompt's starting text instead of dropping it silently.
+    let draft = std::sync::Arc::new(std::sync::Mutex::new(None));
     let result = agent::run_code_agent_with_options(
         task,
         current_dir,
@@ -68,6 +73,7 @@ pub(crate) async fn run_code_agent_with_saved_image(
         video_data_uri,
         options,
         std::sync::Arc::clone(&queue),
+        std::sync::Arc::clone(&draft),
     )
     .await;
     result?;
@@ -78,7 +84,8 @@ pub(crate) async fn run_code_agent_with_saved_image(
         .lock()
         .map(|mut q| std::mem::take(&mut *q))
         .unwrap_or_default();
-    Ok(queued)
+    let draft = draft.lock().map(|mut d| d.take()).unwrap_or_default();
+    Ok((queued, draft))
 }
 
 fn configured(config: &mint_core::MintConfig, keys: &[&str]) -> bool {
@@ -1644,6 +1651,7 @@ async fn main() -> Result<()> {
                                 queueing: false,
                             },
                             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                            std::sync::Arc::new(std::sync::Mutex::new(None)),
                         )
                         .await?;
                     }

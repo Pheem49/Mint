@@ -369,6 +369,7 @@ pub fn read_line_interactive(
     history: &[String],
     jobs: &BackgroundJobs,
     plan_mode: bool,
+    initial_text: &str,
 ) -> Result<Option<InteractiveInput>> {
     use crossterm::event::{self, Event, KeyCode};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -387,8 +388,11 @@ pub fn read_line_interactive(
         }));
     }
 
-    let mut input_chars: Vec<char> = Vec::new();
-    let mut cursor_pos = 0;
+    // Seeded from `initial_text` so a draft the user was still typing when the
+    // previous agent turn ended (see `run_code_agent_with_saved_image`'s
+    // `draft_out`) reappears here instead of being silently dropped.
+    let mut input_chars: Vec<char> = initial_text.chars().collect();
+    let mut cursor_pos = input_chars.len();
     let placeholder = "Ask anything...";
     let mut ctrl_d_pressed = false;
     let mut pasted_image: Option<String> = None;

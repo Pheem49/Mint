@@ -2222,7 +2222,7 @@ async fn execute_tool(
         }
         "read_diagnostics" => {
             let path = workspace_path(root, &input.path)?;
-            read_diagnostics(&path, config)
+            read_diagnostics(&path, config).await
         }
         "view_image" => {
             let path = workspace_path(root, required(&input.path, "path")?)?;
@@ -2350,7 +2350,7 @@ async fn execute_tool(
                         started.pid.map_or_else(|| "unknown".to_string(), |p| p.to_string()),
                     ))
                 }
-                ApprovalOutcome::Approved => run_shell(root, config, command),
+                ApprovalOutcome::Approved => run_shell(root, config, command).await,
                 ApprovalOutcome::Denied => Ok(format!("User denied shell command: {}", command)),
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
             }
@@ -2371,7 +2371,7 @@ async fn execute_tool(
             }
             let mut output = Vec::new();
             for command in &input.commands {
-                output.push(run_shell(root, config, command)?);
+                output.push(run_shell(root, config, command).await?);
             }
             Ok(output.join("\n\n"))
         }
@@ -2917,7 +2917,7 @@ fn package_test_scripts(root: &Path) -> BTreeMap<String, String> {
         .collect()
 }
 
-fn read_diagnostics(root: &Path, config: &MintConfig) -> Result<String, OrchestrationError> {
+async fn read_diagnostics(root: &Path, config: &MintConfig) -> Result<String, OrchestrationError> {
     let command = if root.join("Cargo.toml").exists() {
         Some("cargo check")
     } else {
@@ -2933,7 +2933,7 @@ fn read_diagnostics(root: &Path, config: &MintConfig) -> Result<String, Orchestr
         }
     };
     match command {
-        Some(command) => run_shell(root, config, command),
+        Some(command) => run_shell(root, config, command).await,
         None => Ok("No diagnostics command detected.".into()),
     }
 }
@@ -3092,13 +3092,34 @@ async fn compact_native_messages(
     Ok(Some(compacted))
 }
 
-fn run_shell(
+// `async` and dispatched onto tokio's blocking-thread-pool via
+// `spawn_blocking` (not called synchronously in place) because
+// `run_shell_command` is a plain blocking `std::process::Command` call —
+// possibly for as long as the command itself runs (`du -xhd1 /`, a build,
+// a sleep, ...). `execute_tool`'s caller races this whole future against
+// `wait_for_escape_interrupt` inside one `tokio::select!` in `mint-cli`,
+// which only *interleaves* futures on the current task rather than giving
+// each its own OS thread — a blocking call left in place here would never
+// yield control back to the executor, so the Esc-watcher (and, in the CLI,
+// keystrokes typed into the mid-turn input box) would starve for the
+// command's entire duration, not just get delayed. `spawn_blocking` moves
+// the actual blocking work to a dedicated thread so this task's `.await`
+// point here is a real yield.
+async fn run_shell(
     root: &Path,
     config: &MintConfig,
     command: &str,
 ) -> Result<String, OrchestrationError> {
-    let output = run_shell_command(command, root, true, config)
-        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+    let root = root.to_path_buf();
+    let config = config.clone();
+    let command = command.to_owned();
+    let output = {
+        let command = command.clone();
+        tokio::task::spawn_blocking(move || run_shell_command(&command, &root, true, &config))
+            .await
+            .map_err(|e| OrchestrationError::Agent(format!("shell command task panicked: {e}")))?
+            .map_err(|e| OrchestrationError::Agent(e.to_string()))?
+    };
     let status_str = output
         .status
         .map_or_else(|| "unknown".into(), |status| status.to_string());
