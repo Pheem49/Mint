@@ -37,9 +37,10 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 ---
 
 ### 1. <img src="assets/bridges.svg" width="18" height="18" valign="middle" /> Reach Mint From Anywhere — Messaging Bridges
-- Message your local AI assistant like you'd message a person, from **Telegram, Discord Gateway, Discord RPC, Slack, LINE, and WhatsApp** — no desktop window required.
-- Enabled bridges run automatically in the background alongside the desktop app or `mint api`/`mint web`, so Mint is reachable the moment one of those is running.
+- Message your local AI assistant like you'd message a person, from **Telegram, Discord Gateway, Discord RPC, Slack, LINE, WhatsApp, Signal, and Email (via Gmail)** — no desktop window required.
+- Enabled bridges run automatically in the background alongside the desktop app, `mint api`/`mint web`, or — for running 24/7 on a VPS with no session attached at all — `mint gateway start`. See [Running Mint 24/7 on a VPS](#running-mint-247-on-a-vps-headless-gateway) below.
 - Every bridge locks itself to a single owner the first time it hears from anyone: whoever messages it first is claimed as the owner, and everyone else is ignored from then on.
+- All bridges share one continuous memory/conversation with the terminal CLI — pick up a conversation on Telegram that you started in the terminal, and vice versa.
 
 ---
 
@@ -103,8 +104,13 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 ## Highlights
 
 - Reachable from **Telegram, Discord Gateway, Discord RPC, Slack Socket Mode,
-  LINE, and WhatsApp Cloud API** — each bridge locked to a single owner on
-  first contact, no desktop window needed to keep chatting with it.
+  LINE, WhatsApp Cloud API, Signal, and Email (Gmail)** — each bridge locked
+  to a single owner on first contact, no desktop window needed to keep
+  chatting with it.
+- Runs unattended 24/7 on a VPS via `mint gateway start`/`mint gateway
+  install` — a real headless mode with no TUI, a systemd unit that survives
+  reboots, and a `GET /api/gateway/health` endpoint to check bridge status
+  remotely.
 - Multi-provider chat with Gemini, OpenAI, Anthropic, Ollama, Hugging Face, and
   local OpenAI-compatible endpoints.
 - Image generation using DALL-E 3, Stability AI, Ideogram, Replicate, and NanoBanana.
@@ -384,6 +390,9 @@ mint chat "<message>"
 | `mint plugins` | Centralized interactive management for built-in ecosystem plugins & skills |
 | `mint web` | Launch the web UI and local API server |
 | `mint api` | Start only the local API server |
+| `mint gateway start` | Run headless: bridges + cron, no TUI — for VPS/systemd use |
+| `mint gateway start --api-port <N>` | Same, plus the local API/WebUI on port `<N>` |
+| `mint gateway install [--system] [--now] [--memory-max <size>]` | Register `mint gateway start` as a systemd unit |
 | `mint auto` | Launch the GUI browser automation isolated port |
 | `mint status` | Show runtime status |
 | `mint config init` | Create the local configuration file |
@@ -489,6 +498,110 @@ mint mcp call filesystem list_directory \
 | `/code <task>` | Start a code-agent task |
 | `/exit` or `/quit` | Leave interactive mode |
 
+## Running Mint 24/7 on a VPS (Headless Gateway)
+
+By default, messaging bridges and cron only run while something's actually
+attached — the interactive terminal, the desktop app, or `mint web`/`mint
+api`. **Gateway mode** is a real headless mode built for unattended
+deployment: no TUI, no desktop window, just the bridges and the cron
+scheduler running in the background, installable as a systemd service that
+survives reboots.
+
+### How it works
+
+- `mint gateway start` calls the exact same `start_channels()`/
+  `start_cron_scheduler()` the interactive app uses — it just never launches
+  the terminal UI, so it needs no TTY and can run under systemd with no
+  login session attached.
+- Every bridge loop auto-restarts on error *or* panic (5s backoff), so a bad
+  payload from one platform can't silently and permanently kill that bridge.
+- All bridges (Telegram, Discord, Slack, LINE, WhatsApp, Signal, Email) share
+  one continuous memory thread with the terminal CLI, not a siloed one per
+  platform.
+- `GET /api/gateway/health` reports each bridge's enabled state, last
+  success, last error, and consecutive-failure count as JSON — check it
+  remotely instead of SSHing in to read `journalctl`.
+
+### Quick start on a fresh VPS
+
+```bash
+# 1. Install Mint (Linux, needs Node/npm + Rust — the installer offers to set both up)
+curl -fsSL https://raw.githubusercontent.com/Pheem49/Mint/main/install.sh | bash
+
+# 2. Configure a provider + the bridge(s) you want (Telegram, Signal, Email, ...)
+mint onboard
+
+# 3. Test in the foreground first — fix any config errors here before installing as a service
+mint gateway start
+# Ctrl+C once you see your bridge(s) come up "Active" and a test message gets a reply
+
+# 4. Install as a systemd service and start it now
+mint gateway install --now --api-port 3000 --memory-max 512M
+
+# 5. Per-user units (the default) only run while you're logged in —
+#    this keeps it running after you log out / reboot with no session at all
+sudo loginctl enable-linger "$(whoami)"
+```
+
+### Gateway commands
+
+| Command | Purpose |
+| --- | --- |
+| `mint gateway start` | Run bridges + cron in the foreground, headless (no TUI) |
+| `mint gateway start --api-port <N>` | Same, plus the local API/WebUI on port `<N>` |
+| `mint gateway install` | Write + enable a per-user systemd unit (`~/.config/systemd/user/`, no root) |
+| `mint gateway install --system` | Same, but system-wide (`/etc/systemd/system/`, needs `sudo`) |
+| `mint gateway install --now` | Also start the service immediately after installing it |
+| `mint gateway install --memory-max <size>` | Cap the service's memory (systemd size syntax, e.g. `512M`, `1G`) — unset by default |
+
+Once installed:
+
+```bash
+systemctl --user status mint.service      # or `systemctl status mint` with --system
+journalctl --user -u mint.service -f      # follow logs
+```
+
+### Checking on it remotely
+
+Don't expose the API/WebUI port to the public internet — reach it over an
+SSH tunnel or [Tailscale](https://tailscale.com/) instead:
+
+```bash
+ssh -L 3000:localhost:3000 you@your-vps
+curl http://localhost:3000/api/gateway/health
+```
+
+For an extra layer beyond the tunnel itself, set a shared secret so every API
+request needs it:
+
+```bash
+mint config set apiAuthToken "$(openssl rand -hex 32)"
+```
+
+Once set, every request (except the browser's CORS preflight) needs
+`Authorization: Bearer <token>` or gets `401 Unauthorized`. Leave it unset to
+keep the previous open-on-localhost behavior (desktop app / `mint web` don't
+need to change anything).
+
+### New bridges built for this: Signal and Email
+
+- **Signal** has no official bot API, so Mint talks to a self-hosted
+  [`signal-cli-rest-api`](https://github.com/bbernhard/signal-cli-rest-api)
+  instance instead (you link the number yourself first). Config:
+  `enableSignalBridge`, `signalApiUrl`, `signalNumber`.
+- **Email** reuses the same Gmail OAuth connection as the `gmail` plugin —
+  set `gmailClientId`/`gmailClientSecret`, run `mint gmail auth` once to get
+  a refresh token, then enable it. Both are offered directly in `mint
+  onboard` under "Messaging Bridges".
+
+> [!NOTE]
+> LINE and WhatsApp are webhook-based (the provider pushes to you), which
+> means they need a real public HTTPS URL — a reverse proxy (Caddy/nginx) +
+> TLS cert in front of the VPS. Telegram, Discord, Slack, Signal, and Email
+> all connect *outbound* instead, so they need nothing public at all. See
+> [`docs/WEBHOOK_FORWARDING.md`](docs/WEBHOOK_FORWARDING.md) before exposing
+> a webhook listener.
+
 ## Configuration
 
 Mint stores its local configuration in the platform config directory:
@@ -543,11 +656,18 @@ Mint keeps high-risk behavior behind explicit policy checks:
   routine workspace access.
 - LINE and WhatsApp webhook services listen locally unless you intentionally
   forward them.
-- Every messaging bridge (Telegram, Discord, Slack, LINE, WhatsApp) locks
-  itself to a single owner: the first sender it ever hears from is claimed as
-  that owner, and every other sender is silently ignored from then on. To
-  hand a bridge to a different sender, clear its stored owner id (e.g.
-  `mint config set telegramOwnerChatId ""`) before they message it.
+- Every messaging bridge (Telegram, Discord, Slack, LINE, WhatsApp, Signal,
+  Email) locks itself to a single owner: the first sender it ever hears from
+  is claimed as that owner, and every other sender is silently ignored from
+  then on. To hand a bridge to a different sender, clear its stored owner id
+  (e.g. `mint config set telegramOwnerChatId ""`) before they message it.
+- The local API server (`mint api`, `mint web`, `mint gateway start
+  --api-port`) is open by default, matching the assumption that it's only
+  reached from localhost or your own desktop/web frontend. If you expose the
+  port on a VPS, set `apiAuthToken` (`mint config set apiAuthToken
+  "<secret>"`) to require every request to carry `Authorization: Bearer
+  <token>` — and still prefer an SSH tunnel or Tailscale over opening the
+  port publicly regardless. See [Running Mint 24/7 on a VPS](#running-mint-247-on-a-vps-headless-gateway).
 
 Review the generated command or edit preview before approving an action.
 

@@ -675,7 +675,7 @@ async fn notion_append(key: &str, input: &Value) -> Result<String, PluginError> 
     Ok("Appended block to Notion page.".into())
 }
 
-async fn google_access_token(
+pub(crate) async fn google_access_token(
     client_id: &str,
     secret: &str,
     refresh: &str,
@@ -726,7 +726,7 @@ fn config_optional<'a>(config: &'a MintConfig, key: &str) -> Option<&'a str> {
         .filter(|value| !value.trim().is_empty())
 }
 
-fn sanitize_header(value: &str) -> String {
+pub(crate) fn sanitize_header(value: &str) -> String {
     value.replace(['\r', '\n'], " ").trim().to_owned()
 }
 

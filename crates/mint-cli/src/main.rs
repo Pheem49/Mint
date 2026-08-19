@@ -21,6 +21,7 @@ mod actions;
 mod agent;
 mod background;
 mod cron_wizard;
+mod gateway;
 mod gmail;
 mod hooks;
 mod image;
@@ -209,6 +210,14 @@ enum Command {
         #[arg(long, default_value_t = 3000)]
         port: u16,
     },
+    /// Run Mint headless: chat bridges (Telegram, Discord, Slack, LINE,
+    /// WhatsApp) and the cron scheduler, with no interactive TUI. Meant for
+    /// unattended deployment (e.g. a VPS under systemd), not a terminal
+    /// session.
+    Gateway {
+        #[command(subcommand)]
+        command: GatewayCommand,
+    },
     /// Manage configured MCP stdio servers.
     Mcp {
         #[command(subcommand)]
@@ -320,6 +329,39 @@ enum Command {
     Video {
         #[command(subcommand)]
         command: VideoCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum GatewayCommand {
+    /// Start the gateway: chat bridges + cron scheduler, blocking until
+    /// terminated (Ctrl+C or, under systemd, SIGTERM).
+    Start {
+        /// Also serve the local REST API + WebUI on this port (reachable
+        /// remotely over an SSH tunnel or Tailscale). Omit to run bridges
+        /// and cron only.
+        #[arg(long)]
+        api_port: Option<u16>,
+    },
+    /// Register `mint gateway start` as a systemd unit so it survives
+    /// reboots and keeps running without a login session (Linux only).
+    Install {
+        /// Passed through to the installed unit's `mint gateway start` command.
+        #[arg(long)]
+        api_port: Option<u16>,
+        /// Write a system-wide unit under /etc/systemd/system (needs root)
+        /// instead of a per-user one under ~/.config/systemd/user.
+        #[arg(long)]
+        system: bool,
+        /// Enable and start the service immediately after installing it.
+        #[arg(long)]
+        now: bool,
+        /// Hard memory cap for the service (systemd size syntax, e.g. "512M",
+        /// "1G", "75%"). Omit to leave it unbounded — Mint's video/image
+        /// tooling can legitimately need real memory for a single task, and a
+        /// guessed default risks an OOM-kill mid-task for no real benefit.
+        #[arg(long)]
+        memory_max: Option<String>,
     },
 }
 
@@ -837,6 +879,28 @@ pub(crate) fn print_mcp_servers(
 /// normal, non-panicking exit path; (2) there was no record of a crash
 /// anywhere — a user hitting a panic had no way to report *what* happened
 /// beyond whatever scrolled off their terminal.
+/// Blocks until the process should stop: Ctrl+C everywhere, plus SIGTERM on
+/// Unix so `systemctl stop`/`docker stop` (which send SIGTERM, not SIGINT)
+/// shut the gateway down cleanly instead of requiring a SIGKILL.
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let Ok(mut sigterm) = signal(SignalKind::terminate()) else {
+            let _ = tokio::signal::ctrl_c().await;
+            return;
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = sigterm.recv() => {},
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
 fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -1079,6 +1143,8 @@ async fn main() -> Result<()> {
                     ("enableSlackBridge", "Slack Bot Bridge"),
                     ("enableLineBridge", "LINE Bot Bridge"),
                     ("enableWhatsappBridge", "WhatsApp Cloud Bridge"),
+                    ("enableSignalBridge", "Signal Bridge"),
+                    ("enableEmailBridge", "Email Bridge"),
                 ];
 
                 for &(key, name) in &bridges {
@@ -1094,10 +1160,84 @@ async fn main() -> Result<()> {
                     }
                 }
 
+                // `start_api_server` below already starts channels/cron itself
+                // (see its own doc comment) — no separate call needed here.
+
                 println!("\n{DIM}(API Requests & Error logs will be displayed below){RESET}\n");
                 println!("{DIM}Press Ctrl+C to stop{RESET}\n");
                 mint_core::start_api_server(port).await?;
             }
+            Command::Gateway { command } => match command {
+                GatewayCommand::Start { api_port } => {
+                    let config = load_config()?;
+                    print_welcome_banner(&config);
+
+                    println!("\n{MINT}✔ Mint Gateway is running (headless){RESET}\n");
+                    println!("Messaging Bridges Status:");
+
+                    let bridges = [
+                        ("enableTelegramBridge", "Telegram Bot Bridge"),
+                        ("enableDiscordBridge", "Discord Bot Bridge"),
+                        ("enableSlackBridge", "Slack Bot Bridge"),
+                        ("enableLineBridge", "LINE Bot Bridge"),
+                        ("enableWhatsappBridge", "WhatsApp Cloud Bridge"),
+                        ("enableSignalBridge", "Signal Bridge"),
+                        ("enableEmailBridge", "Email Bridge"),
+                    ];
+                    let mut any_bridge_enabled = false;
+                    for &(key, name) in &bridges {
+                        let enabled = config
+                            .extra
+                            .get(key)
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        any_bridge_enabled |= enabled;
+                        if enabled {
+                            println!("  {MINT}● {name:<23} [Active]{RESET}");
+                        } else {
+                            println!("  {DIM}○ {name:<23} [Inactive]{RESET}");
+                        }
+                    }
+                    if !any_bridge_enabled {
+                        println!(
+                            "\n{WARN}No chat bridge is enabled — the gateway will only run \
+                             cron jobs. Enable one first, e.g. \
+                             `mint config set enableTelegramBridge true`.{RESET}"
+                        );
+                    }
+
+                    if let Some(port) = api_port {
+                        // `start_api_server` starts channels/cron itself — calling
+                        // them again here would spawn every bridge loop twice
+                        // (duplicate Telegram polling, duplicate Discord gateway
+                        // connections, duplicate replies to the owner).
+                        println!(
+                            "\n    {BLUE}API Server URL:{RESET} {MINT}http://localhost:{port}{RESET}"
+                        );
+                        tokio::spawn(async move {
+                            if let Err(error) = mint_core::start_api_server(port).await {
+                                eprintln!("{ERROR}API server exited: {error}{RESET}");
+                            }
+                        });
+                    } else {
+                        mint_core::channels::start_channels();
+                        mint_core::start_cron_scheduler();
+                    }
+
+                    println!("\n{DIM}(Bridge & cron activity will be logged below){RESET}");
+                    println!("{DIM}Press Ctrl+C to stop{RESET}\n");
+                    wait_for_shutdown_signal().await;
+                    println!("\n👋 Shutting down Mint Gateway...");
+                }
+                GatewayCommand::Install {
+                    api_port,
+                    system,
+                    now,
+                    memory_max,
+                } => {
+                    gateway::install(api_port, system, now, memory_max)?;
+                }
+            },
             Command::Mcp { command } => match command {
                 McpCommand::Add {
                     name,

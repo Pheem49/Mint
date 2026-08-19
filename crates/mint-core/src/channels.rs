@@ -1,8 +1,11 @@
 use std::time::Duration;
 
 use crate::{ChatRequest, MintConfig, load_config, orchestrate_chat, set_config_value};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use futures_util::{SinkExt, StreamExt};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD},
+};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use serde_json::{Value, json};
 use sha2::Sha256;
@@ -12,36 +15,76 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 pub fn start_channels() {
     if tokio::runtime::Handle::try_current().is_ok() {
-        tokio::spawn(restarting_loop(telegram_loop));
-        tokio::spawn(restarting_loop(discord_loop));
-        tokio::spawn(restarting_loop(slack_loop));
-        tokio::spawn(restarting_loop(line_webhook_loop));
-        tokio::spawn(restarting_loop(whatsapp_webhook_loop));
+        tokio::spawn(restarting_loop("telegram", telegram_loop));
+        tokio::spawn(restarting_loop("discord", discord_loop));
+        tokio::spawn(restarting_loop("slack", slack_loop));
+        tokio::spawn(restarting_loop("line", line_webhook_loop));
+        tokio::spawn(restarting_loop("whatsapp", whatsapp_webhook_loop));
+        tokio::spawn(restarting_loop("signal", signal_loop));
+        tokio::spawn(restarting_loop("email", email_loop));
     } else {
         std::thread::spawn(|| {
             if let Ok(rt) = tokio::runtime::Runtime::new() {
                 rt.block_on(async {
-                    let h1 = tokio::spawn(restarting_loop(telegram_loop));
-                    let h2 = tokio::spawn(restarting_loop(discord_loop));
-                    let h3 = tokio::spawn(restarting_loop(slack_loop));
-                    let h4 = tokio::spawn(restarting_loop(line_webhook_loop));
-                    let h5 = tokio::spawn(restarting_loop(whatsapp_webhook_loop));
-                    let _ = tokio::join!(h1, h2, h3, h4, h5);
+                    let h1 = tokio::spawn(restarting_loop("telegram", telegram_loop));
+                    let h2 = tokio::spawn(restarting_loop("discord", discord_loop));
+                    let h3 = tokio::spawn(restarting_loop("slack", slack_loop));
+                    let h4 = tokio::spawn(restarting_loop("line", line_webhook_loop));
+                    let h5 = tokio::spawn(restarting_loop("whatsapp", whatsapp_webhook_loop));
+                    let h6 = tokio::spawn(restarting_loop("signal", signal_loop));
+                    let h7 = tokio::spawn(restarting_loop("email", email_loop));
+                    let _ = tokio::join!(h1, h2, h3, h4, h5, h6, h7);
                 });
             }
         });
     }
 }
 
-async fn restarting_loop<F, Fut>(mut run: F)
+/// Keeps `run` alive forever, retrying after a 5s backoff on either an `Err`
+/// return *or* a panic. Without `catch_unwind` here, a panic inside one bridge
+/// loop (bad payload shape, an unexpected `None`, ...) would unwind straight
+/// out of the `tokio::spawn`ed task in `start_channels` and never be seen
+/// again: the task just vanishes, `systemctl status` still shows the process
+/// `active` since nothing else crashed, and that one bridge silently stops
+/// responding forever with no restart and no error surfaced anywhere. Each
+/// call to `run()` is independent (no shared mutable state carried across
+/// iterations), so resuming after a caught panic is safe — there's nothing
+/// left in a torn-down state to worry about.
+async fn restarting_loop<F, Fut>(name: &'static str, mut run: F)
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
+    crate::bridge_health::record_started(name);
     loop {
-        if run().await.is_err() {
+        let outcome = std::panic::AssertUnwindSafe(run()).catch_unwind().await;
+        let retry = match outcome {
+            Ok(Ok(())) => false,
+            Ok(Err(error)) => {
+                eprintln!("[mint] {name} bridge loop error, retrying in 5s: {error}");
+                crate::bridge_health::record_error(name, &error);
+                true
+            }
+            Err(payload) => {
+                let message = panic_payload_message(&payload);
+                eprintln!("[mint] {name} bridge loop panicked, retrying in 5s: {message}");
+                crate::bridge_health::record_error(name, &message);
+                true
+            }
+        };
+        if retry {
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
+    }
+}
+
+fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic payload".to_string()
     }
 }
 
@@ -62,6 +105,7 @@ async fn telegram_loop() -> Result<(), String> {
             .json()
             .await
             .map_err(request_error)?;
+        crate::bridge_health::record_success("telegram");
         for update in value["result"].as_array().cloned().unwrap_or_default() {
             offset = update["update_id"].as_i64().unwrap_or(offset) + 1;
             let (Some(chat_id), Some(text)) = (
@@ -77,22 +121,27 @@ async fn telegram_loop() -> Result<(), String> {
             if !authorize_sender("telegramOwnerChatId", &sender_id) {
                 continue;
             }
-            let formatted_chat_id = format!("telegram:{chat_id}");
-            if let Ok(config) = load_config() {
-                if config.bridge_ack_enabled() {
-                    let _ = client
-                        .post(format!(
-                            "https://api.telegram.org/bot{token}/sendChatAction"
-                        ))
-                        .json(&json!({ "chat_id": chat_id, "action": "typing" }))
-                        .send()
-                        .await;
-                }
+            // Every bridge shares `CHAT_CLI_ID` (rather than a per-platform id) so the
+            // owner's memory/history is one continuous conversation regardless of
+            // which front-end (terminal, Telegram, Discord, ...) they're using —
+            // authorize_sender above already limits each bridge to a single owner,
+            // so there's no cross-user mixing risk to guard against here.
+            let shared_chat_id = crate::CHAT_CLI_ID.to_string();
+            if let Ok(config) = load_config()
+                && config.bridge_ack_enabled()
+            {
+                let _ = client
+                    .post(format!(
+                        "https://api.telegram.org/bot{token}/sendChatAction"
+                    ))
+                    .json(&json!({ "chat_id": chat_id, "action": "typing" }))
+                    .send()
+                    .await;
             }
             let answer = answer_channel(
                 text,
                 "Reply concisely for a Telegram chat.",
-                Some(formatted_chat_id),
+                Some(shared_chat_id),
             )
             .await;
             let _ = client
@@ -123,6 +172,7 @@ async fn discord_loop() -> Result<(), String> {
             "properties": { "os": std::env::consts::OS, "browser": "mint", "device": "mint" }
         }
     }).to_string().into())).await.map_err(|error| error.to_string())?;
+    crate::bridge_health::record_success("discord");
     let mut heartbeat = tokio::time::interval(Duration::from_millis(interval));
     let mut sequence = Value::Null;
     let mut bot_id = String::new();
@@ -131,6 +181,7 @@ async fn discord_loop() -> Result<(), String> {
             _ = heartbeat.tick() => {
                 writer.send(Message::Text(json!({ "op": 1, "d": sequence }).to_string().into()))
                     .await.map_err(|error| error.to_string())?;
+                crate::bridge_health::record_success("discord");
             }
             item = reader.next() => {
                 let value = parse_ws(item)?;
@@ -151,14 +202,14 @@ async fn discord_loop() -> Result<(), String> {
                     if !direct_message && !mentioned { continue }
                     let sender_id = value["d"]["author"]["id"].as_str().unwrap_or_default();
                     if !authorize_sender("discordOwnerUserId", sender_id) { continue }
-                    if let Ok(config) = load_config() {
-                        if config.bridge_ack_enabled() {
-                            let _ = crate::HTTP_CLIENT.clone().post(format!("https://discord.com/api/v10/channels/{channel}/typing"))
-                                .header("Authorization", format!("Bot {token}")).send().await;
-                        }
+                    if let Ok(config) = load_config()
+                        && config.bridge_ack_enabled()
+                    {
+                        let _ = crate::HTTP_CLIENT.clone().post(format!("https://discord.com/api/v10/channels/{channel}/typing"))
+                            .header("Authorization", format!("Bot {token}")).send().await;
                     }
-                    let formatted_chat_id = format!("discord:{channel}");
-                    let reply = answer_channel(text, "Reply concisely for a Discord chat.", Some(formatted_chat_id)).await;
+                    let shared_chat_id = crate::CHAT_CLI_ID.to_string();
+                    let reply = answer_channel(text, "Reply concisely for a Discord chat.", Some(shared_chat_id)).await;
                     let _ = crate::HTTP_CLIENT.clone().post(format!("https://discord.com/api/v10/channels/{channel}/messages"))
                         .header("Authorization", format!("Bot {token}")).json(&json!({ "content": reply })).send().await;
                 }
@@ -192,6 +243,7 @@ async fn slack_loop() -> Result<(), String> {
     let (mut writer, mut reader) = socket.split();
     while let Some(item) = reader.next().await {
         let value = parse_ws(Some(item))?;
+        crate::bridge_health::record_success("slack");
         if let Some(envelope) = value["envelope_id"].as_str() {
             writer
                 .send(Message::Text(
@@ -214,11 +266,11 @@ async fn slack_loop() -> Result<(), String> {
         if !authorize_sender("slackOwnerUserId", sender_id) {
             continue;
         }
-        let formatted_chat_id = format!("slack:{channel}");
+        let shared_chat_id = crate::CHAT_CLI_ID.to_string();
         let reply = answer_channel(
             text,
             "Reply concisely for a Slack chat.",
-            Some(formatted_chat_id),
+            Some(shared_chat_id),
         )
         .await;
         let _ = crate::HTTP_CLIENT
@@ -275,6 +327,7 @@ async fn line_webhook_loop() -> Result<(), String> {
                 let _ = respond_plain(&mut socket, "400 Bad Request").await;
                 return;
             };
+            crate::bridge_health::record_success("line");
             // Ack the webhook right away — LINE expects a fast response, and the reply
             // token below is short-lived regardless, so nothing is gained by waiting.
             let _ = respond_plain(&mut socket, "200 OK").await;
@@ -294,11 +347,11 @@ async fn line_webhook_loop() -> Result<(), String> {
                 if !authorize_sender("lineOwnerUserId", user_id) {
                     continue;
                 }
-                let formatted_chat_id = format!("line:{user_id}");
+                let shared_chat_id = crate::CHAT_CLI_ID.to_string();
                 let reply = answer_channel(
                     text,
                     "Reply concisely for a LINE chat.",
-                    Some(formatted_chat_id),
+                    Some(shared_chat_id),
                 )
                 .await;
                 let _ = client
@@ -351,6 +404,7 @@ async fn whatsapp_webhook_loop() -> Result<(), String> {
                 let token = query_param(&request.path, "hub.verify_token").unwrap_or_default();
                 let challenge = query_param(&request.path, "hub.challenge").unwrap_or_default();
                 if mode == "subscribe" && !verify_token.is_empty() && token == verify_token {
+                    crate::bridge_health::record_success("whatsapp");
                     let _ = respond_text(&mut socket, "200 OK", &challenge).await;
                 } else {
                     let _ = respond_plain(&mut socket, "403 Forbidden").await;
@@ -374,6 +428,7 @@ async fn whatsapp_webhook_loop() -> Result<(), String> {
                 let _ = respond_plain(&mut socket, "400 Bad Request").await;
                 return;
             };
+            crate::bridge_health::record_success("whatsapp");
             let _ = respond_plain(&mut socket, "200 OK").await;
 
             let client = crate::HTTP_CLIENT.clone();
@@ -398,11 +453,11 @@ async fn whatsapp_webhook_loop() -> Result<(), String> {
                     if !authorize_sender("whatsappOwnerPhone", from) {
                         continue;
                     }
-                    let formatted_chat_id = format!("whatsapp:{from}");
+                    let shared_chat_id = crate::CHAT_CLI_ID.to_string();
                     let reply = answer_channel(
                         text,
                         "Reply concisely for a WhatsApp chat.",
-                        Some(formatted_chat_id),
+                        Some(shared_chat_id),
                     )
                     .await;
                     let _ = client
@@ -421,6 +476,194 @@ async fn whatsapp_webhook_loop() -> Result<(), String> {
             }
         });
     }
+}
+
+/// Signal has no official bot API, so this talks to a self-hosted
+/// `signal-cli-rest-api` (https://github.com/bbernhard/signal-cli-rest-api)
+/// instance instead — same "bring your own infra" shape as the LINE/WhatsApp
+/// webhook loops above, except here Mint is the client polling a local REST
+/// API rather than a server receiving a public webhook. Linking the number
+/// with `signal-cli`/`signal-cli-rest-api` itself is the user's setup step;
+/// this loop only talks to it once it's already running and registered.
+async fn signal_loop() -> Result<(), String> {
+    let client = crate::HTTP_CLIENT.clone();
+    loop {
+        let Some(base_url) = enabled_value("enableSignalBridge", "signalApiUrl") else {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            continue;
+        };
+        let Some(number) = config_value("signalNumber") else {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            continue;
+        };
+        let base_url = base_url.trim_end_matches('/');
+        let messages: Vec<Value> = client
+            .get(format!("{base_url}/v1/receive/{number}"))
+            .send()
+            .await
+            .map_err(request_error)?
+            .json()
+            .await
+            .map_err(request_error)?;
+        crate::bridge_health::record_success("signal");
+        for item in messages {
+            let envelope = &item["envelope"];
+            let source = envelope["sourceNumber"]
+                .as_str()
+                .or_else(|| envelope["source"].as_str());
+            let text = envelope["dataMessage"]["message"].as_str();
+            let (Some(source), Some(text)) = (source, text) else {
+                continue;
+            };
+            if text.trim().is_empty() {
+                continue;
+            }
+            if !authorize_sender("signalOwnerNumber", source) {
+                continue;
+            }
+            let shared_chat_id = crate::CHAT_CLI_ID.to_string();
+            let reply = answer_channel(text, "Reply concisely for a Signal chat.", Some(shared_chat_id))
+                .await;
+            let _ = client
+                .post(format!("{base_url}/v2/send"))
+                .json(&json!({ "message": reply, "number": number, "recipients": [source] }))
+                .send()
+                .await;
+        }
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    }
+}
+
+/// Rides on the same Gmail OAuth connection the `gmail` native plugin uses
+/// (`gmailClientId`/`gmailClientSecret`/`gmailRefreshToken` — connect once via
+/// `mint gmail`, both features share it) rather than asking for separate IMAP/
+/// SMTP credentials. Unlike the `gmail` plugin's `draft`-only action (deliberately
+/// non-sending, since that tool can be invoked mid-task with an arbitrary
+/// recipient), this loop sends real replies straight back to the sender — safe
+/// here because `authorize_sender` limits that sender to a single verified
+/// owner address, same guarantee every other bridge relies on.
+///
+/// Uses each message's `snippet` (Gmail's short plain-text preview) rather than
+/// parsing full MIME bodies, matching the same trade-off the `gmail` plugin's
+/// `read` action already makes — enough for a short chat-style exchange, not a
+/// full email client.
+async fn email_loop() -> Result<(), String> {
+    let client = crate::HTTP_CLIENT.clone();
+    loop {
+        let Some(refresh_token) = enabled_value("enableEmailBridge", "gmailRefreshToken") else {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            continue;
+        };
+        let (Some(client_id), Some(client_secret)) =
+            (config_value("gmailClientId"), config_value("gmailClientSecret"))
+        else {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            continue;
+        };
+        let Ok(token) =
+            crate::plugins::google_access_token(&client_id, &client_secret, &refresh_token).await
+        else {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            continue;
+        };
+
+        let list: Value = client
+            .get("https://gmail.googleapis.com/gmail/v1/users/me/messages")
+            .bearer_auth(&token)
+            .query(&[("q", "is:unread in:inbox"), ("maxResults", "10")])
+            .send()
+            .await
+            .map_err(request_error)?
+            .json()
+            .await
+            .map_err(request_error)?;
+        crate::bridge_health::record_success("email");
+
+        for item in list["messages"].as_array().cloned().unwrap_or_default() {
+            let Some(id) = item["id"].as_str() else {
+                continue;
+            };
+            let Ok(response) = client
+                .get(format!(
+                    "https://gmail.googleapis.com/gmail/v1/users/me/messages/{id}"
+                ))
+                .bearer_auth(&token)
+                .query(&[("format", "full")])
+                .send()
+                .await
+            else {
+                continue;
+            };
+            let Ok(detail) = response.json::<Value>().await else {
+                continue;
+            };
+
+            let headers = detail["payload"]["headers"].as_array().cloned().unwrap_or_default();
+            let header = |name: &str| -> Option<&str> {
+                headers
+                    .iter()
+                    .find(|h| h["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name)))
+                    .and_then(|h| h["value"].as_str())
+            };
+            let sender_email = header("From")
+                .map(extract_email_address)
+                .unwrap_or_default();
+            let subject = header("Subject").unwrap_or("(no subject)").to_string();
+            let text = detail["snippet"].as_str().unwrap_or_default();
+
+            // Mark it read regardless of outcome from here on, so an
+            // unauthorized/empty/malformed message doesn't get re-fetched
+            // and re-evaluated on every poll.
+            let _ = client
+                .post(format!(
+                    "https://gmail.googleapis.com/gmail/v1/users/me/messages/{id}/modify"
+                ))
+                .bearer_auth(&token)
+                .json(&json!({ "removeLabelIds": ["UNREAD"] }))
+                .send()
+                .await;
+
+            if sender_email.is_empty() || text.trim().is_empty() {
+                continue;
+            }
+            if !authorize_sender("emailOwnerAddress", &sender_email) {
+                continue;
+            }
+
+            let shared_chat_id = crate::CHAT_CLI_ID.to_string();
+            let reply = answer_channel(text, "Reply concisely for an email.", Some(shared_chat_id))
+                .await;
+            let reply_subject = if subject.trim().to_lowercase().starts_with("re:") {
+                subject.trim().to_string()
+            } else {
+                format!("Re: {}", subject.trim())
+            };
+            let raw = URL_SAFE_NO_PAD.encode(format!(
+                "To: {}\r\nSubject: {}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=\"UTF-8\"\r\n\r\n{}",
+                crate::plugins::sanitize_header(&sender_email),
+                crate::plugins::sanitize_header(&reply_subject),
+                reply
+            ));
+            let _ = client
+                .post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send")
+                .bearer_auth(&token)
+                .json(&json!({ "raw": raw }))
+                .send()
+                .await;
+        }
+        tokio::time::sleep(Duration::from_secs(30)).await;
+    }
+}
+
+/// Pulls the bare address out of a `"Display Name <addr@example.com>"` header,
+/// or returns the header unchanged if it's already a bare address.
+fn extract_email_address(header: &str) -> String {
+    if let Some(start) = header.find('<')
+        && let Some(end) = header[start..].find('>')
+    {
+        return header[start + 1..start + end].trim().to_lowercase();
+    }
+    header.trim().to_lowercase()
 }
 
 pub fn is_action_intent(text: &str) -> bool {
@@ -470,31 +713,30 @@ pub async fn answer_channel(
 
     if is_action_intent(text)
         && let Some(ref root_path) = workspace
+        && root_path.exists()
     {
-        if root_path.exists() {
-            let agent_result = crate::orchestrate_agent_loop(
-                &config,
-                text,
-                root_path,
-                None,
-                None,
-                None,
-                chat_id.as_deref(),
-                None,
-                None,
-                true,
-                false,
-                |_approval| Ok(crate::ApprovalOutcome::Approved),
-                |_progress| {},
-                |_chunk| {},
-            )
-            .await;
+        let agent_result = crate::orchestrate_agent_loop(
+            &config,
+            text,
+            root_path,
+            None,
+            None,
+            None,
+            chat_id.as_deref(),
+            None,
+            None,
+            true,
+            false,
+            |_approval| Ok(crate::ApprovalOutcome::Approved),
+            |_progress| {},
+            |_chunk| {},
+        )
+        .await;
 
-            if let Ok(res) = agent_result {
-                if !res.summary.trim().is_empty() {
-                    return res.summary;
-                }
-            }
+        if let Ok(res) = agent_result
+            && !res.summary.trim().is_empty()
+        {
+            return res.summary;
         }
     }
 
@@ -782,5 +1024,37 @@ mod tests {
         // sender id (a field the platform didn't send) must never fall
         // through to "no owner stored yet, claim it".
         assert!(!authorize_sender("telegramOwnerChatId", ""));
+    }
+
+    #[tokio::test]
+    async fn restarting_loop_retries_after_a_panic_instead_of_dying_silently() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_run = Arc::clone(&calls);
+        let run = move || {
+            let calls = Arc::clone(&calls_for_run);
+            async move {
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    panic!("simulated bridge loop panic");
+                }
+                Err::<(), String>("stop after second call".into())
+            }
+        };
+
+        // `restarting_loop` never returns on its own, so this timeout always
+        // fully elapses — it just bounds the wait. 6s covers the one 5s
+        // backoff needed to observe a second call after the panic.
+        let _ = tokio::time::timeout(
+            Duration::from_secs(6),
+            restarting_loop("test-panic-recovery-bridge", run),
+        )
+        .await;
+
+        assert!(
+            calls.load(Ordering::SeqCst) >= 2,
+            "restarting_loop should have called run() again after it panicked"
+        );
     }
 }

@@ -4,6 +4,7 @@ pub mod agent_loop;
 pub mod auth;
 pub mod auto_shorts;
 pub mod bg_shell;
+pub mod bridge_health;
 pub mod browser;
 pub mod calculation;
 pub mod chat;

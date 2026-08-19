@@ -272,6 +272,26 @@ pub async fn run() -> Result<()> {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
         },
+        OnboardService {
+            category: "Messaging Bridges",
+            name: "Signal Bridge",
+            key: "signal",
+            enabled: config
+                .extra
+                .get("enableSignalBridge")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        },
+        OnboardService {
+            category: "Messaging Bridges",
+            name: "Email Bridge (Gmail)",
+            key: "email",
+            enabled: config
+                .extra
+                .get("enableEmailBridge")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        },
         // ── Image Generation ─────────────────────────────────────────────────
         OnboardService {
             category: "Image Generation",
@@ -860,6 +880,101 @@ pub async fn run() -> Result<()> {
     } else {
         config.extra.insert(
             "enableWhatsappBridge".to_string(),
+            serde_json::Value::Bool(false),
+        );
+    }
+
+    // Signal Bridge (via a self-hosted signal-cli-rest-api instance — Signal
+    // has no official bot API, so unlike the other bridges here Mint is the
+    // one polling a REST endpoint rather than receiving a webhook/socket push)
+    if is_selected("signal", &services) {
+        println!("\n\x1b[36m--- Signal Bridge ---\x1b[0m");
+        println!(
+            "Needs a self-hosted signal-cli-rest-api instance with a number already \
+             linked/registered: https://github.com/bbernhard/signal-cli-rest-api"
+        );
+        let current_url = config
+            .extra
+            .get("signalApiUrl")
+            .and_then(|v| v.as_str())
+            .unwrap_or("http://localhost:8080");
+        let current_number = config
+            .extra
+            .get("signalNumber")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let api_url = prompt_input("signal-cli-rest-api URL", Some(current_url))?;
+        let number = prompt_input(
+            "Signal Number (E.164, e.g. +15551234567)",
+            Some(current_number),
+        )?;
+        config.extra.insert(
+            "signalApiUrl".to_string(),
+            serde_json::Value::String(api_url),
+        );
+        config.extra.insert(
+            "signalNumber".to_string(),
+            serde_json::Value::String(number),
+        );
+        config.extra.insert(
+            "enableSignalBridge".to_string(),
+            serde_json::Value::Bool(true),
+        );
+    } else {
+        config.extra.insert(
+            "enableSignalBridge".to_string(),
+            serde_json::Value::Bool(false),
+        );
+    }
+
+    // Email Bridge (rides the same Gmail OAuth connection as the `gmail`
+    // plugin — see `mint gmail auth` — rather than asking for separate
+    // IMAP/SMTP credentials)
+    if is_selected("email", &services) {
+        println!("\n\x1b[36m--- Email Bridge (via Gmail) ---\x1b[0m");
+        println!(
+            "Reuses the same Gmail OAuth connection as the `gmail` plugin. Needs a \
+             Google Cloud OAuth client (Client ID/Secret) — see \
+             https://console.cloud.google.com/apis/credentials."
+        );
+        let current_id = config
+            .extra
+            .get("gmailClientId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let current_secret = config
+            .extra
+            .get("gmailClientSecret")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let client_id = prompt_input("Gmail OAuth Client ID", Some(current_id))?;
+        let client_secret = prompt_sensitive("Gmail OAuth Client Secret", current_secret)?;
+        config.extra.insert(
+            "gmailClientId".to_string(),
+            serde_json::Value::String(client_id),
+        );
+        config.extra.insert(
+            "gmailClientSecret".to_string(),
+            serde_json::Value::String(client_secret),
+        );
+        let has_refresh_token = config
+            .extra
+            .get("gmailRefreshToken")
+            .and_then(|v| v.as_str())
+            .is_some_and(|value| !value.trim().is_empty());
+        if !has_refresh_token {
+            println!(
+                "\x1b[33mNo Gmail refresh token yet — after saving, run `mint gmail auth` \
+                 to finish connecting (opens a browser for Google's consent screen).\x1b[0m"
+            );
+        }
+        config.extra.insert(
+            "enableEmailBridge".to_string(),
+            serde_json::Value::Bool(true),
+        );
+    } else {
+        config.extra.insert(
+            "enableEmailBridge".to_string(),
             serde_json::Value::Bool(false),
         );
     }

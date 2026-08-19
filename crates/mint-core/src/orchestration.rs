@@ -31,6 +31,15 @@ use crate::{
 };
 
 const CONTEXT_LIMIT: usize = 6;
+/// Per-message cap (in `chars`, not bytes — Thai text is multi-byte UTF-8)
+/// applied to each recalled `user_text`/`ai_text` when building the "recent
+/// conversation context" injected into a new task's opening system prompt.
+/// Without this, a single unusually long past answer (a multi-KB agent
+/// summary, a big code dump) gets replayed *in full* into every subsequent
+/// unrelated turn for as long as it stays within the last `CONTEXT_LIMIT`
+/// interactions — this exists purely to nudge the model with recent
+/// continuity, not to re-litigate a whole previous answer.
+const MAX_CONTEXT_MESSAGE_CHARS: usize = 400;
 
 #[derive(Debug, Error)]
 pub enum OrchestrationError {
@@ -220,6 +229,18 @@ where
     Ok((response, fallback))
 }
 
+/// Truncates `text` to at most `max_chars` characters (not bytes, so this
+/// never splits a multi-byte UTF-8 character) for injection into a "recent
+/// context" summary. Cheap no-op for the common case of a short message.
+fn truncate_for_context(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_owned();
+    }
+    let mut truncated: String = text.chars().take(max_chars).collect();
+    truncated.push_str("... [truncated]");
+    truncated
+}
+
 fn enrich_request(
     config: &MintConfig,
     memory: &MemoryStore,
@@ -230,7 +251,13 @@ fn enrich_request(
     interactions.reverse();
     let transcript = interactions
         .into_iter()
-        .map(|item| format!("User: {}\nAssistant: {}", item.user_text, item.ai_text))
+        .map(|item| {
+            format!(
+                "User: {}\nAssistant: {}",
+                truncate_for_context(&item.user_text, MAX_CONTEXT_MESSAGE_CHARS),
+                truncate_for_context(&item.ai_text, MAX_CONTEXT_MESSAGE_CHARS)
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n\n");
     let mut enriched = request.clone();
@@ -293,11 +320,17 @@ fn request_chat_id(request: &ChatRequest) -> &str {
 
 use crate::prompts::agent::build_system_prompt;
 
-const MAX_STEPS: usize = 32;
+/// Hard ceiling on tool-call round-trips per task. Each step resends the
+/// whole accumulated conversation, so total tokens for one task scale
+/// roughly with step count — lowered from 32 to cap runaway/looping tasks
+/// earlier without cutting off most real multi-file work.
+const MAX_STEPS: usize = 24;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
 /// Compact `native_messages` once reported token usage crosses this fraction
-/// of the active model's context window.
-const COMPACTION_TRIGGER_RATIO: f64 = 0.8;
+/// of the active model's context window. Lowered from 0.8 so long tasks
+/// start shedding old tool output earlier — every step after the trigger
+/// resends less, which is where the real per-task token cost comes from.
+const COMPACTION_TRIGGER_RATIO: f64 = 0.6;
 /// Number of most-recent Assistant/Tool step-pairs kept verbatim (uncompacted)
 /// in `native_messages`.
 const COMPACTION_KEEP_RECENT_STEPS: usize = 3;
@@ -2103,17 +2136,12 @@ async fn execute_tool(
                         {
                             results.push(format!(
                                 "[{}] You: {}\nMint: {}",
+                                // `created_at` is a SQLite DATETIME string
+                                // (always ASCII digits/dashes/colons), so a
+                                // byte-index slice here is safe.
                                 &item.created_at[..16.min(item.created_at.len())],
-                                if item.user_text.len() > 200 {
-                                    format!("{}…", &item.user_text[..200])
-                                } else {
-                                    item.user_text.clone()
-                                },
-                                if item.ai_text.len() > 200 {
-                                    format!("{}…", &item.ai_text[..200])
-                                } else {
-                                    item.ai_text.clone()
-                                },
+                                truncate_for_context(&item.user_text, 200),
+                                truncate_for_context(&item.ai_text, 200),
                             ));
                             if results.len() >= 5 {
                                 break;
@@ -2130,11 +2158,7 @@ async fn execute_tool(
                             results.push(format!(
                                 "[Skill: {}]\n{}",
                                 skill.name,
-                                if skill.content.len() > 300 {
-                                    format!("{}…", &skill.content[..300])
-                                } else {
-                                    skill.content.clone()
-                                }
+                                truncate_for_context(&skill.content, 300)
                             ));
                         }
                     }
@@ -3235,11 +3259,17 @@ pub(crate) fn append_memory_context(system_prompt: &mut String, chat_id: &str) {
         );
     }
 
-    if let Ok(mut interactions) = memory.recent_interactions_for_chat(chat_id, 6) {
+    if let Ok(mut interactions) = memory.recent_interactions_for_chat(chat_id, CONTEXT_LIMIT) {
         interactions.reverse();
         let transcript = interactions
             .into_iter()
-            .map(|item| format!("User: {}\nAssistant: {}", item.user_text, item.ai_text))
+            .map(|item| {
+                format!(
+                    "User: {}\nAssistant: {}",
+                    truncate_for_context(&item.user_text, MAX_CONTEXT_MESSAGE_CHARS),
+                    truncate_for_context(&item.ai_text, MAX_CONTEXT_MESSAGE_CHARS)
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n\n");
         if !transcript.is_empty() {
@@ -3895,6 +3925,29 @@ Example response:
 mod tests {
     use super::*;
     use crate::config::AgentConfig;
+
+    #[test]
+    fn truncate_for_context_leaves_short_text_untouched() {
+        assert_eq!(truncate_for_context("hello", 400), "hello");
+    }
+
+    #[test]
+    fn truncate_for_context_truncates_long_text_with_a_marker() {
+        let long = "a".repeat(500);
+        let result = truncate_for_context(&long, 400);
+        assert_eq!(result.chars().count(), 400 + "... [truncated]".chars().count());
+        assert!(result.starts_with(&"a".repeat(400)));
+        assert!(result.ends_with("... [truncated]"));
+    }
+
+    #[test]
+    fn truncate_for_context_never_splits_a_multibyte_char() {
+        // Thai text is multi-byte UTF-8; a byte-index slice here would panic
+        // or produce invalid UTF-8 if it landed mid-character.
+        let thai = "สวัสดี".repeat(200);
+        let result = truncate_for_context(&thai, 5);
+        assert_eq!(result.chars().count(), 5 + "... [truncated]".chars().count());
+    }
 
     #[test]
     fn slugify_lowercases_and_collapses_separators() {

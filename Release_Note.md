@@ -406,3 +406,43 @@ third-party MCP server is.
   following `--args`/value as literal text instead of starting a new
   occurrence. Pinned both to `num_args = 1` (one value per occurrence,
   still repeatable) to remove the ambiguity entirely.
+
+---
+
+## 🖥️ Headless Gateway Mode — Run Mint 24/7 on a VPS
+
+- **`mint gateway start [--api-port <N>]`**: headless mode — bridges + cron,
+  no TUI, no TTY required. Clean shutdown on Ctrl+C and SIGTERM.
+- **`mint gateway install [--system] [--now] [--memory-max <size>]`**:
+  registers a systemd unit (per-user by default, `--system` for root-level).
+  Hardened out of the box (`TasksMax`, crash-loop limits, `NoNewPrivileges`);
+  `--memory-max` is opt-in, not a guessed default.
+
+## 📡✉️ Signal & Email Bridges, Unified Cross-Channel Memory
+
+- **Signal**: talks to a self-hosted `signal-cli-rest-api` instance (no
+  official bot API exists). **Email**: reuses the existing Gmail OAuth
+  connection (`mint gmail auth`) instead of separate IMAP/SMTP setup. Both
+  configurable via `mint onboard`.
+- **All seven bridges now share one memory thread** with the terminal CLI
+  instead of one per platform — pick up a Telegram conversation from the
+  terminal and vice versa.
+
+## 🩺 Bridge Reliability — Panic Isolation & Health Monitoring
+
+- A panic inside any bridge loop used to kill it silently and permanently.
+  `restarting_loop` now catches panics too, not just errors, and retries
+  with backoff like normal.
+- **New `GET /api/gateway/health`**: each bridge's enabled state, last
+  success/error, and failure count as JSON — check status remotely without
+  SSHing in.
+
+## 🔐 Opt-in API Authentication + a Real Bug Fixed Along the Way
+
+- **`apiAuthToken`** config value gates the whole local API server: set it
+  and every request needs `Authorization: Bearer <token>` or gets `401`.
+  Unset by default — no change for existing desktop/`mint web` users.
+- **Bonus fix**: `mint api` and `mint gateway start --api-port` were both
+  starting every bridge *twice* (duplicate Telegram polling, duplicate
+  Discord sessions) — `start_api_server` already starts them internally.
+  Found while wiring up the auth check above; now fixed.

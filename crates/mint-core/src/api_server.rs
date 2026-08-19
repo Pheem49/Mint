@@ -115,6 +115,12 @@ pub(crate) fn log_api_err(context: &str, error: &dyn std::fmt::Display) {
     );
 }
 
+/// Binds the local HTTP API on `port` and blocks forever serving requests.
+/// Also starts the messaging bridges and cron scheduler as a side effect —
+/// callers (`mint api`, `mint gateway start --api-port`, ...) must not call
+/// `channels::start_channels`/`start_cron_scheduler` again themselves, or
+/// every bridge loop ends up spawned twice (duplicate Telegram polling,
+/// duplicate Discord gateway connections, duplicate replies to the owner).
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
@@ -218,6 +224,16 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
             let (route, query) = path.split_once('?').unwrap_or((path, ""));
 
+            if !api_auth_ok(&request_str) {
+                send_json_response(
+                    socket,
+                    "401 Unauthorized",
+                    "{\"message\":\"Missing or invalid API token. Send it as `Authorization: Bearer <apiAuthToken>`.\"}",
+                )
+                .await;
+                return;
+            }
+
             let auth_label = match authorized_user_id(&request_str) {
                 Some(user_id) => format!("auth:{}", &user_id[..user_id.len().min(8)]),
                 None => "auth:anonymous".to_string(),
@@ -258,6 +274,49 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                         "localIp": get_local_ip()
                     });
                     send_json_response(socket, "200 OK", &status_json.to_string()).await;
+                }
+                ("GET", "/api/gateway/health") => {
+                    // Unauthenticated like `/api/status` above — this is operational
+                    // status (which bridges are alive), not user data, and it's the
+                    // whole point of the endpoint: check it remotely (over an SSH
+                    // tunnel/Tailscale) without needing a login round-trip first.
+                    let config = load_config().unwrap_or_default();
+                    let bridges = [
+                        ("enableTelegramBridge", "telegram"),
+                        ("enableDiscordBridge", "discord"),
+                        ("enableSlackBridge", "slack"),
+                        ("enableLineBridge", "line"),
+                        ("enableWhatsappBridge", "whatsapp"),
+                        ("enableSignalBridge", "signal"),
+                        ("enableEmailBridge", "email"),
+                    ];
+                    let snapshot = crate::bridge_health::snapshot();
+                    let items: Vec<Value> = bridges
+                        .iter()
+                        .map(|&(enabled_key, name)| {
+                            let enabled = config
+                                .extra
+                                .get(enabled_key)
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false);
+                            let health = snapshot.iter().find(|entry| entry.name == name);
+                            json!({
+                                "name": name,
+                                "enabled": enabled,
+                                "startedAt": health.and_then(|h| h.started_at),
+                                "lastSuccessAt": health.and_then(|h| h.last_success_at),
+                                "lastErrorAt": health.and_then(|h| h.last_error_at),
+                                "lastError": health.and_then(|h| h.last_error.clone()),
+                                "consecutiveFailures": health.map(|h| h.consecutive_failures).unwrap_or(0),
+                            })
+                        })
+                        .collect();
+                    send_json_response(
+                        socket,
+                        "200 OK",
+                        &json!({ "bridges": items }).to_string(),
+                    )
+                    .await;
                 }
                 ("POST", "/api/auth/register") => {
                     #[derive(Deserialize)]
@@ -2988,6 +3047,34 @@ fn get_header(request_str: &str, header_name: &str) -> Option<String> {
             None
         }
     })
+}
+
+/// Opt-in shared-secret gate for the *whole* API server (every route except
+/// the CORS preflight handled earlier, which returns before this runs).
+/// Unset by default (no `apiAuthToken` in config), so existing local-only
+/// setups — the desktop app, `mint web` — keep working exactly as before.
+/// An operator who exposes this port beyond localhost (e.g. a VPS reachable
+/// over an SSH tunnel/Tailscale) can set `apiAuthToken` via
+/// `mint config set apiAuthToken <token>` to require every request to carry
+/// it as `Authorization: Bearer <token>` — a second layer on top of the
+/// tunnel itself, since only 3 of this server's ~60 routes otherwise check
+/// `authorized_user_id` (that login system is per-user profile data, not a
+/// general access-control boundary for the rest of the API).
+fn api_auth_ok(request_str: &str) -> bool {
+    let Some(expected_token) = load_config().ok().and_then(|config| {
+        config
+            .extra
+            .get("apiAuthToken")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    }) else {
+        return true;
+    };
+    get_header(request_str, "Authorization")
+        .and_then(|header| header.strip_prefix("Bearer ").map(|token| token.trim().to_owned()))
+        .is_some_and(|provided_token| provided_token == expected_token)
 }
 
 /// Resolves the logged-in user id (web mode) from the `Authorization: Bearer
