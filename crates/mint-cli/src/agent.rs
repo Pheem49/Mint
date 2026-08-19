@@ -84,6 +84,12 @@ pub async fn run_code_agent_with_options(
     let thinking_verb = random_thinking_verb();
     let approval_active = Arc::new(AtomicBool::new(false));
     let agent_done = Arc::new(AtomicBool::new(false));
+    // True between a tool starting and finishing — tells the periodic timer
+    // below not to overwrite the live status with "Thinking (Xs)…" text
+    // while a tool (e.g. a shell command) is actually the thing in flight,
+    // without stopping it from still re-rendering (so the bullets keep
+    // pulsing) while that's happening.
+    let tool_running = Arc::new(AtomicBool::new(false));
     let live_status = Arc::new(Mutex::new(LiveStatus::default()));
     {
         use crossterm::tty::IsTty;
@@ -280,6 +286,7 @@ pub async fn run_code_agent_with_options(
     let timer_live_status = Arc::clone(&live_status);
     let timer_agent_done = Arc::clone(&agent_done);
     let timer_approval_active = Arc::clone(&approval_active);
+    let timer_tool_running = Arc::clone(&tool_running);
     let timer_started_at = started_at;
     if !options.fast_mode {
         tokio::spawn(async move {
@@ -290,10 +297,12 @@ pub async fn run_code_agent_with_options(
                 if !timer_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = timer_live_status.lock()
                 {
-                    status.thinking = Some(format!(
-                        "{thinking_verb} ({} • Esc to interrupt)",
-                        format_elapsed(timer_started_at.elapsed())
-                    ));
+                    if !timer_tool_running.load(Ordering::Relaxed) {
+                        status.thinking = Some(format!(
+                            "{thinking_verb} ({} • Esc to interrupt)",
+                            format_elapsed(timer_started_at.elapsed())
+                        ));
+                    }
                     render_live_status(&mut status);
                 }
                 tokio::time::sleep(Duration::from_millis(150)).await;
@@ -302,6 +311,7 @@ pub async fn run_code_agent_with_options(
     }
     let progress_live_status = Arc::clone(&live_status);
     let progress_approval_active = Arc::clone(&approval_active);
+    let progress_tool_running = Arc::clone(&tool_running);
     let progress_cb = |progress: AgentProgress| match progress {
         AgentProgress::Thinking {
             elapsed_secs,
@@ -342,6 +352,7 @@ pub async fn run_code_agent_with_options(
             }
         }
         AgentProgress::ToolStart { action, input } => {
+            progress_tool_running.store(true, Ordering::Relaxed);
             if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
                 if (action == "create_plan" || action == "update_plan")
                     && let Some(steps) = extract_plan_steps(&input)
@@ -473,6 +484,7 @@ pub async fn run_code_agent_with_options(
             input,
             result,
         } => {
+            progress_tool_running.store(false, Ordering::Relaxed);
             if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
                 if action == "create_plan" || action == "update_plan" {
                     if let Some(steps) = extract_plan_steps(&input)
@@ -1368,15 +1380,19 @@ fn render_live_status(status: &mut LiveStatus) {
     let activities_start = status.committed_activities.min(status.activities.len());
     let tasks_start = status.committed_tasks.min(status.tasks.len());
 
-    let is_thinking = status.thinking.is_some();
     let tick = status.spinner_tick;
+    // Advances every render call (not just while `status.thinking` is set) so
+    // the plan/activity bullets below keep pulsing through a running tool —
+    // a shell command in flight is still "live", even though the "Thinking
+    // (Xs)…" text specifically only makes sense while waiting on the model.
+    status.spinner_tick += 1;
 
-    lines.extend(plan_lines(&status.plan_steps, is_thinking, tick));
+    lines.extend(plan_lines(&status.plan_steps, true, tick));
     lines.extend(activity_block_lines(
         &status.tasks[tasks_start..],
         &status.activities[activities_start..],
         &status.explored[explored_start..],
-        is_thinking,
+        true,
         tick,
     ));
     if let Some(thinking) = &status.thinking {
@@ -1394,8 +1410,6 @@ fn render_live_status(status: &mut LiveStatus) {
 
         let dots_frames = &["", ".", "..", "..."];
         let dots = dots_frames[(status.spinner_tick / 2) % dots_frames.len()];
-
-        status.spinner_tick += 1;
 
         // The verb is whatever precedes the trailing "(elapsed • Esc to interrupt)"
         // segment — find that split point rather than matching a literal word, since
@@ -1574,7 +1588,7 @@ fn print_timeline_note(status: &mut LiveStatus, thought: &str) {
         .subsequent_indent("    ")
         .break_words(true);
     let wrapped = textwrap::fill(thought, &options);
-    insert_permanent_lines(status, &[format!("{DIM}{wrapped}{RESET}")]);
+    insert_permanent_lines(status, &[wrapped]);
 }
 
 /// Inserts already ANSI-formatted `lines` as permanent content above the
@@ -1657,8 +1671,14 @@ fn clear_live_status(status: &mut LiveStatus) {
     status.inline_tui.teardown();
 }
 
-fn bullet_char(is_thinking: bool, tick: usize) -> &'static str {
-    if is_thinking {
+/// `animate` distinguishes a still-live status region (pulse the bullet every
+/// tick — true for the whole turn, not just while waiting on the model, so a
+/// running shell command pulses too) from a snapshot already being committed
+/// to permanent scrollback (`commit_activity_snapshot` passes `false` for a
+/// single frozen `●`, since re-animating text that's already been printed
+/// makes no sense).
+fn bullet_char(animate: bool, tick: usize) -> &'static str {
+    if animate {
         if (tick / 4).is_multiple_of(2) {
             "●"
         } else {
@@ -1669,8 +1689,8 @@ fn bullet_char(is_thinking: bool, tick: usize) -> &'static str {
     }
 }
 
-fn get_bullet(name: &str, is_thinking: bool, tick: usize) -> String {
-    let char_str = bullet_char(is_thinking, tick);
+fn get_bullet(name: &str, animate: bool, tick: usize) -> String {
+    let char_str = bullet_char(animate, tick);
     match name {
         "plan" => format!("{BLUE}{char_str}{RESET} plan"),
         _ => char_str.to_string(),
@@ -1763,13 +1783,13 @@ fn activity_block_lines(
     tasks: &[TaskEntry],
     activities: &[String],
     explored: &[ExploredAction],
-    is_thinking: bool,
+    animate: bool,
     tick: usize,
 ) -> Vec<String> {
     if tasks.is_empty() && activities.is_empty() && explored.is_empty() {
         return Vec::new();
     }
-    let char_str = bullet_char(is_thinking, tick);
+    let char_str = bullet_char(animate, tick);
     let header_text =
         activity_summary_line(tasks, activities, explored).unwrap_or_else(|| "activity".into());
     let mut lines = vec![format!("  {BLUE}{char_str}{RESET} {header_text}")];
@@ -1966,11 +1986,11 @@ fn extract_plan_steps(input: &serde_json::Value) -> Option<Vec<String>> {
     Some(steps)
 }
 
-fn plan_lines(steps: &[String], is_thinking: bool, tick: usize) -> Vec<String> {
+fn plan_lines(steps: &[String], animate: bool, tick: usize) -> Vec<String> {
     if steps.is_empty() {
         return Vec::new();
     }
-    let mut lines = vec![format!("  {}", get_bullet("plan", is_thinking, tick))];
+    let mut lines = vec![format!("  {}", get_bullet("plan", animate, tick))];
     for (index, step) in steps.iter().enumerate() {
         let prefix = if index == steps.len() - 1 {
             "    └"
