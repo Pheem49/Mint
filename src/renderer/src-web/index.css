@@ -14,8 +14,8 @@
 @import './css/settings/shortcuts.css';
 @import './css/spotlight.css';
 @import './css/widget.css';
-@import './css/image-studio.css';
-@import './css/veo-studio.css';
+@import '../shared/css/image-studio.css';
+@import '../shared/css/veo-studio.css';
 
 * {
   box-sizing: border-box;

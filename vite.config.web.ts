@@ -72,7 +72,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src/renderer/src-web'),
-      '@shared': resolve(__dirname, 'src')
+      '@shared': resolve(__dirname, 'src/renderer/shared')
     }
   }
 })
