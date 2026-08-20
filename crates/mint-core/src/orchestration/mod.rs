@@ -320,6 +320,18 @@ fn request_chat_id(request: &ChatRequest) -> &str {
 
 use crate::prompts::agent::build_system_prompt;
 
+mod context_render;
+mod decision_parsing;
+mod memory_skill;
+mod tools;
+mod verification;
+mod workspace_helpers;
+use context_render::*;
+use decision_parsing::*;
+pub(crate) use memory_skill::*;
+use verification::*;
+use workspace_helpers::*;
+
 /// Hard ceiling on tool-call round-trips per task. Each step resends the
 /// whole accumulated conversation, so total tokens for one task scale
 /// roughly with step count — lowered from 32 to cap runaway/looping tasks
@@ -1808,6 +1820,7 @@ async fn run_parallel_subagent_batch(
 // `tool_catalog`/`allow_subagent_dispatch` enforces. A `&mut dyn FnMut(...)`
 // trait object is a single fixed type regardless of recursion depth, so it
 // doesn't hit that.
+
 async fn execute_tool(
     root: &Path,
     config: &MintConfig,
@@ -1817,978 +1830,165 @@ async fn execute_tool(
 ) -> Result<String, OrchestrationError> {
     let input = &decision.input;
     match decision.action.as_str() {
-        "list_files" => {
-            let path = agent_read_path(root, &input.path, config)?;
-            let entries = list_directory_entries(&path, input.limit.unwrap_or(100), config)?;
-            Ok(serde_json::to_string_pretty(&entries)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
-        }
-        "read_file" => {
-            let path = workspace_path(root, required(&input.path, "path")?)?;
-            Ok(read_code_file(
-                &path,
-                input.start_line.unwrap_or(1),
-                input.end_line.unwrap_or(240),
+        "list_files" | "read_file" | "note_write" | "apply_patch" | "write_file" => {
+            tools::files::execute(
+                decision.action.as_str(),
+                input,
+                root,
                 config,
+                chat_id,
+                approve_cb,
             )
-            .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+            .await
         }
-        "search_code" => {
-            let path = workspace_path(root, &input.path)?;
-            Ok(serde_json::to_string_pretty(
-                &search_code(
-                    &path,
-                    required(&input.query, "query")?,
-                    input.limit.unwrap_or(20),
-                    config,
-                )
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
+        "search_code" | "symbols" | "semantic_index" | "semantic_search" => {
+            tools::code_search::execute(
+                decision.action.as_str(),
+                input,
+                root,
+                config,
+                chat_id,
+                approve_cb,
             )
-            .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+            .await
         }
-        "symbols" => {
-            let path = workspace_path(root, &input.path)?;
-            Ok(serde_json::to_string_pretty(
-                &build_symbol_index(&path, input.limit.unwrap_or(100), config)
-                    .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
+        "knowledge_search" | "web_search" | "image_search" => {
+            tools::web::execute(
+                decision.action.as_str(),
+                input,
+                root,
+                config,
+                chat_id,
+                approve_cb,
             )
-            .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+            .await
         }
-        "semantic_index" => {
-            let path = workspace_path(root, &input.path)?;
-            Ok(serde_json::to_string_pretty(
-                &index_semantic_code(&path, config)
-                    .await
-                    .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
+        "weather" | "stock" | "calculation" | "memory_recall" => {
+            tools::misc::execute(
+                decision.action.as_str(),
+                input,
+                root,
+                config,
+                chat_id,
+                approve_cb,
             )
-            .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+            .await
         }
-        "semantic_search" => {
-            let path = workspace_path(root, &input.path)?;
-            Ok(serde_json::to_string_pretty(
-                &search_semantic_code(
-                    &path,
-                    required(&input.query, "query")?,
-                    input.limit.unwrap_or(5),
-                    config,
-                )
-                .await
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
+        "browser_open"
+        | "browser_click"
+        | "browser_type"
+        | "browser_read"
+        | "browser_mouse_move"
+        | "browser_mouse_click"
+        | "browser_key_press"
+        | "browser_screenshot" => {
+            tools::browser::execute(
+                decision.action.as_str(),
+                input,
+                root,
+                config,
+                chat_id,
+                approve_cb,
             )
-            .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+            .await
         }
-        "knowledge_search" => Ok(serde_json::to_string_pretty(
-            &KnowledgeStore::open_default()
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?
-                .search(required(&input.query, "query")?, input.limit.unwrap_or(5))
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
-        )
-        .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
-        "web_search" => {
-            let query = required(&input.query, "query")?;
-            let limit = input.limit.unwrap_or(5);
-            match crate::web_search::search(query, limit, config).await {
-                Ok((hits, provider)) => {
-                    if hits.is_empty() {
-                        Ok("No web search results found.".to_owned())
-                    } else {
-                        let formatted: String = hits
-                            .iter()
-                            .enumerate()
-                            .map(|(i, h)| {
-                                let image_line = h
-                                    .image_url
-                                    .as_deref()
-                                    .map(|img| format!("   Image: {img}\n"))
-                                    .unwrap_or_default();
-                                format!(
-                                    "{}. {}\n   URL: {}\n{}{}\n",
-                                    i + 1,
-                                    h.title,
-                                    h.url,
-                                    image_line,
-                                    h.snippet
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        Ok(format!(
-                            "{formatted}\n\nNote: Web search succeeded using {provider} Search. In your finish summary, you MUST:\n1. Answer the user's question using the information above.\n2. Mention that you found this information via {provider} Search (e.g. \"I found this information using {provider} Search.\").\n3. INLINE IMAGES: For each result that includes an 'Image:' URL, embed it in your summary using standard markdown image syntax:\n   ![result title](image_url)\n   Place the image tag on its OWN LINE, immediately AFTER the bullet point or paragraph that references that result.\n   Only embed images when they add visual value — e.g. food, restaurants, travel, products, people, art, profiles.\n   Do NOT embed images for code snippets, math, API docs, or pure text answers.\nDo NOT list source URLs manually — the UI will display them automatically."
-                        ))
-                    }
-                }
-                Err(e) => Ok(format!(
-                    "Web search error: {e}. Web search is currently unavailable. \
-                     Do not try to search again. You MUST now proceed by calling the 'finish' action. \
-                     In your finish summary, explain to the user in Thai that the web search failed (mentioning the search error: {e}), \
-                     and then answer their query using your own pre-existing knowledge/database."
-                )),
-            }
+        "git_status" | "git_diff" | "git_log" | "git_branch" => {
+            tools::git::execute(
+                decision.action.as_str(),
+                input,
+                root,
+                config,
+                chat_id,
+                approve_cb,
+            )
+            .await
         }
-        "image_search" => {
-            let query = required(&input.query, "query")?;
-            let limit = input.limit.unwrap_or(6);
-            match crate::image_search::image_search(query, limit, config).await {
-                Ok(report) => Ok(format!(
-                    "{}\n\nNote: Image search succeeded. In your finish summary, you MUST include the exact ```image_search_json ... ``` code block from above in your response so the user sees the image results UI.",
-                    report.data
-                )),
-                Err(e) => Ok(format!("Image search failed for '{query}': {e}")),
-            }
+        "create_plan" | "update_plan" | "request_user_approval" | "ask_user" => {
+            tools::planning::execute(
+                decision.action.as_str(),
+                input,
+                root,
+                config,
+                chat_id,
+                approve_cb,
+            )
+            .await
         }
-        "weather" => {
-            let city = if !input.city.trim().is_empty() {
-                input.city.trim()
-            } else if !input.query.trim().is_empty() {
-                input.query.trim()
-            } else if !input.path.trim().is_empty() {
-                input.path.trim()
-            } else {
-                "Thailand"
-            };
-            match crate::weather::weather(city).await {
-                Ok(report) => Ok(format!(
-                    "{}\n\nNote: Weather lookup succeeded. In your finish summary, you MUST include the exact ```weather_json ... ``` code block from above in your response so the user sees the weather card UI.",
-                    report.data
-                )),
-                Err(e) => Ok(format!("Weather lookup failed for {city}: {e}")),
-            }
+        "detect_project" | "list_tests" | "read_diagnostics" | "view_image" => {
+            tools::project::execute(
+                decision.action.as_str(),
+                input,
+                root,
+                config,
+                chat_id,
+                approve_cb,
+            )
+            .await
         }
-        "stock" => {
-            let symbol = if !input.query.trim().is_empty() {
-                input.query.trim()
-            } else if !input.name.trim().is_empty() {
-                input.name.trim()
-            } else if !input.path.trim().is_empty() {
-                input.path.trim()
-            } else {
-                "AAPL"
-            };
-            match crate::stock::stock(symbol).await {
-                Ok(report) => Ok(format!(
-                    "{}\n\nNote: Stock lookup succeeded. In your finish summary, you MUST include the exact ```stock_json ... ``` code block from above in your response so the user sees the stock card UI.",
-                    report.data
-                )),
-                Err(e) => Ok(format!("Stock lookup failed for {symbol}: {e}")),
-            }
+        "run_plugin" | "dispatch_subagent" | "mcp_tool" | "mcp_list_tools" => {
+            tools::plugins_mcp::execute(
+                decision.action.as_str(),
+                input,
+                root,
+                config,
+                chat_id,
+                approve_cb,
+            )
+            .await
         }
-        "calculation" => {
-            let expr = if !input.expression.trim().is_empty() {
-                input.expression.trim()
-            } else if !input.query.trim().is_empty() {
-                input.query.trim()
-            } else if !input.command.trim().is_empty() {
-                input.command.trim()
-            } else {
-                "0"
-            };
-            match crate::calculation::calculate(expr) {
-                Ok(report) => Ok(format!(
-                    "{}\n\nNote: Calculation succeeded. In your finish summary, you MUST include the exact ```calculation_json ... ``` code block from above in your response so the user sees the calculation card UI.",
-                    report.data
-                )),
-                Err(e) => Ok(format!("Calculation failed for {expr}: {e}")),
-            }
+        "run_shell" | "shell_output" | "kill_shell" | "verify" => {
+            tools::shell::execute(
+                decision.action.as_str(),
+                input,
+                root,
+                config,
+                chat_id,
+                approve_cb,
+            )
+            .await
         }
-        "browser_open" => {
-            let url = if !input.url.is_empty() {
-                &input.url
-            } else if !input.path.is_empty() {
-                &input.path
-            } else {
-                return Err(OrchestrationError::Agent(
-                    "browser_open requires 'url'".into(),
-                ));
-            };
-            if crate::is_browser_running(config).await {
-                let result = crate::browser::navigate(config, url)
-                    .await
-                    .map_err(OrchestrationError::Agent)?;
-                Ok(result)
-            } else {
-                let opened = if cfg!(target_os = "macos") {
-                    std::process::Command::new("open").arg(url).spawn().is_ok()
-                } else if cfg!(target_os = "windows") {
-                    std::process::Command::new("cmd")
-                        .args(["/C", "start", url])
-                        .spawn()
-                        .is_ok()
-                } else {
-                    std::process::Command::new("xdg-open")
-                        .arg(url)
-                        .spawn()
-                        .is_ok()
-                };
-                if opened {
-                    Ok(format!(
-                        "Mint Auto is not active. Opened {url} in your default browser instead."
-                    ))
-                } else {
-                    Err(OrchestrationError::Agent(
-                        "Failed to open URL in default browser.".into(),
-                    ))
-                }
-            }
-        }
-        "browser_click" => {
-            let selector = if !input.selector.is_empty() {
-                &input.selector
-            } else if !input.path.is_empty() {
-                &input.path
-            } else {
-                return Err(OrchestrationError::Agent(
-                    "browser_click requires 'selector'".into(),
-                ));
-            };
-            let result = crate::browser::click(config, selector)
-                .await
-                .map_err(OrchestrationError::Agent)?;
-            Ok(result)
-        }
-        "browser_type" => {
-            let selector = if !input.selector.is_empty() {
-                &input.selector
-            } else if !input.path.is_empty() {
-                &input.path
-            } else {
-                return Err(OrchestrationError::Agent(
-                    "browser_type requires 'selector'".into(),
-                ));
-            };
-            let text = if !input.text.is_empty() {
-                &input.text
-            } else if !input.query.is_empty() {
-                &input.query
-            } else {
-                return Err(OrchestrationError::Agent(
-                    "browser_type requires 'text'".into(),
-                ));
-            };
-            let result = crate::browser::type_text(config, selector, text)
-                .await
-                .map_err(OrchestrationError::Agent)?;
-            Ok(result)
-        }
-        "browser_read" => {
-            let result = crate::browser::read_page_text(config)
-                .await
-                .map_err(OrchestrationError::Agent)?;
-            Ok(result)
-        }
-        "browser_mouse_move" => {
-            let x = input.x.ok_or_else(|| {
-                OrchestrationError::Agent("browser_mouse_move requires 'x'".into())
-            })?;
-            let y = input.y.ok_or_else(|| {
-                OrchestrationError::Agent("browser_mouse_move requires 'y'".into())
-            })?;
-            let result = crate::browser::mouse_move(config, x, y)
-                .await
-                .map_err(OrchestrationError::Agent)?;
-            Ok(result)
-        }
-        "browser_mouse_click" => {
-            let x = input.x.ok_or_else(|| {
-                OrchestrationError::Agent("browser_mouse_click requires 'x'".into())
-            })?;
-            let y = input.y.ok_or_else(|| {
-                OrchestrationError::Agent("browser_mouse_click requires 'y'".into())
-            })?;
-            let button = if input.button.is_empty() {
-                "left"
-            } else {
-                &input.button
-            };
-            let result = crate::browser::mouse_click(config, x, y, button)
-                .await
-                .map_err(OrchestrationError::Agent)?;
-            Ok(result)
-        }
-        "browser_key_press" => {
-            let key = if !input.key.is_empty() {
-                &input.key
-            } else {
-                return Err(OrchestrationError::Agent(
-                    "browser_key_press requires 'key'".into(),
-                ));
-            };
-            let result = crate::browser::key_press(config, key)
-                .await
-                .map_err(OrchestrationError::Agent)?;
-            Ok(result)
-        }
-        "browser_screenshot" => {
-            let data = crate::browser::screenshot(config)
-                .await
-                .map_err(OrchestrationError::Agent)?;
-            Ok(format!("data:image/png;base64,{data}"))
-        }
-        "memory_recall" => {
-            let query = required(&input.query, "query")?;
-            let query_lower = query.to_ascii_lowercase();
-            let mut results = Vec::new();
-
-            if let Ok(memory) = MemoryStore::open_default() {
-                if let Ok(interactions) = memory.recent_interactions_for_chat(chat_id, 50) {
-                    for item in interactions.iter().rev() {
-                        if item.user_text.to_ascii_lowercase().contains(&query_lower)
-                            || item.ai_text.to_ascii_lowercase().contains(&query_lower)
-                        {
-                            results.push(format!(
-                                "[{}] You: {}\nMint: {}",
-                                // `created_at` is a SQLite DATETIME string
-                                // (always ASCII digits/dashes/colons), so a
-                                // byte-index slice here is safe.
-                                &item.created_at[..16.min(item.created_at.len())],
-                                truncate_for_context(&item.user_text, 200),
-                                truncate_for_context(&item.ai_text, 200),
-                            ));
-                            if results.len() >= 5 {
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if let Ok(skills) = memory.learned_skills(20) {
-                    for skill in &skills {
-                        if skill.content.to_ascii_lowercase().contains(&query_lower)
-                            || skill.name.to_ascii_lowercase().contains(&query_lower)
-                        {
-                            results.push(format!(
-                                "[Skill: {}]\n{}",
-                                skill.name,
-                                truncate_for_context(&skill.content, 300)
-                            ));
-                        }
-                    }
-                }
-            }
-
-            if results.is_empty() {
-                Ok(format!("No memory found matching: {query}"))
-            } else {
-                Ok(results.join("\n\n"))
-            }
-        }
-        "git_status" => run_git(root, &["status", "--short", "--branch"]),
-        "git_diff" => {
-            if input.path.trim().is_empty() {
-                run_git(root, &["diff", "--"])
-            } else {
-                let path = workspace_path(root, &input.path)?;
-                let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy();
-                run_git(root, &["diff", "--", relative.as_ref()])
-            }
-        }
-        "git_log" => {
-            let limit = input.limit.unwrap_or(5).clamp(1, 50).to_string();
-            run_git(root, &["log", "-n", &limit, "--oneline", "--decorate"])
-        }
-        "git_branch" => run_git(root, &["branch", "--show-current"]),
-        "create_plan" => Ok(serde_json::to_string_pretty(&serde_json::json!({
-            "objective": input.summary,
-            "steps": input.steps,
-        }))
-        .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
-        "update_plan" => Ok(serde_json::to_string_pretty(&serde_json::json!({
-            "steps": input.steps,
-            "status": input.status,
-        }))
-        .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
-        "request_user_approval" => {
-            let title = if input.title.trim().is_empty() {
-                "User approval"
-            } else {
-                input.title.trim()
-            };
-            let prompt = required(&input.summary, "summary")?;
-            let approved = approve_cb(&AgentApproval::UserApproval {
-                title: title.to_owned(),
-                prompt: prompt.to_owned(),
-            })
-            .map_err(OrchestrationError::Agent)?;
-            match approved {
-                ApprovalOutcome::Approved => Ok(format!("User approved: {title}")),
-                ApprovalOutcome::Denied => Ok(format!("User denied: {title}")),
-                ApprovalOutcome::Intercepted(obs) => Ok(obs),
-            }
-        }
-        "ask_user" => {
-            let question = required(&input.query, "query")?;
-            let options: Vec<String> = input
-                .options
-                .iter()
-                .map(|o| o.trim().to_owned())
-                .filter(|o| !o.is_empty())
-                .take(3)
-                .collect();
-            let approved = approve_cb(&AgentApproval::AskUser {
-                question: question.to_owned(),
-                options,
-            })
-            .map_err(OrchestrationError::Agent)?;
-            match approved {
-                ApprovalOutcome::Approved => Ok("User approved the prompt.".into()),
-                ApprovalOutcome::Denied => Ok("User declined to answer.".into()),
-                ApprovalOutcome::Intercepted(answer) => Ok(format!("User answered: {answer}")),
-            }
-        }
-        "detect_project" => {
-            let path = workspace_path(root, &input.path)?;
-            Ok(serde_json::to_string_pretty(&detect_project(&path))
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
-        }
-        "list_tests" => {
-            let path = workspace_path(root, &input.path)?;
-            Ok(serde_json::to_string_pretty(&list_tests(&path, config)?)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
-        }
-        "read_diagnostics" => {
-            let path = workspace_path(root, &input.path)?;
-            read_diagnostics(&path, config).await
-        }
-        "view_image" => {
-            let path = workspace_path(root, required(&input.path, "path")?)?;
-            view_image(&path, config)
-        }
-        "note_write" => {
-            let file_name = if !input.note_path.is_empty() {
-                input.note_path.as_str()
-            } else {
-                required(&input.path, "path")?
-            };
-            if file_name.contains("..") || file_name.contains('/') {
-                return Err(OrchestrationError::Agent(
-                    "note_write path must be a simple filename".into(),
-                ));
-            }
-            let notes_dir = dirs::config_dir()
-                .ok_or_else(|| {
-                    OrchestrationError::Agent("cannot determine config directory".into())
-                })?
-                .join("mint")
-                .join("notes");
-            let note_path = notes_dir.join(file_name);
-
-            let approved = approve_cb(&AgentApproval::NoteWrite {
-                path: file_name.to_owned(),
-                content: input.file_content.clone(),
-            })
-            .map_err(OrchestrationError::Agent)?;
-
-            match approved {
-                ApprovalOutcome::Approved => {
-                    std::fs::create_dir_all(&notes_dir).map_err(|e| {
-                        OrchestrationError::Agent(format!("cannot create notes directory: {}", e))
-                    })?;
-                    std::fs::write(&note_path, &input.file_content).map_err(|e| {
-                        OrchestrationError::Agent(format!("cannot write note: {}", e))
-                    })?;
-                    Ok(format!("Note saved to {}", note_path.display()))
-                }
-                ApprovalOutcome::Denied => Ok(format!("User denied note write: {}", file_name)),
-                ApprovalOutcome::Intercepted(obs) => Ok(obs),
-            }
-        }
-        "run_plugin" => {
-            let name = required(&input.name, "name")?;
-            let instruction = required(&input.instruction, "instruction")?;
-            let approved = approve_cb(&AgentApproval::RunPlugin {
-                name: name.to_owned(),
-                instruction: instruction.to_owned(),
-            })
-            .map_err(OrchestrationError::Agent)?;
-
-            match approved {
-                ApprovalOutcome::Approved => Ok(execute_native_plugin(config, name, instruction)
-                    .await
-                    .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
-                ApprovalOutcome::Denied => Ok(format!("User denied plugin execution: {}", name)),
-                ApprovalOutcome::Intercepted(obs) => Ok(obs),
-            }
-        }
-        "dispatch_subagent" => {
-            let name = required(&input.name, "name")?;
-            let task = required(&input.instruction, "instruction")?;
-            dispatch_one_subagent(root, config, chat_id, name, task, approve_cb).await
-        }
-        "mcp_tool" => {
-            let server = required(&input.server, "server")?;
-            let tool = required(&input.tool, "tool")?;
-            let approved = approve_cb(&AgentApproval::McpTool {
-                server: server.to_owned(),
-                tool: tool.to_owned(),
-                arguments: input.arguments.clone(),
-            })
-            .map_err(OrchestrationError::Agent)?;
-
-            match approved {
-                ApprovalOutcome::Approved => Ok(serde_json::to_string_pretty(
-                    &crate::mcp::call_mcp_tool(config, server, tool, input.arguments.clone())
-                        .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
-                )
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
-                ApprovalOutcome::Denied => {
-                    Ok(format!("User denied MCP tool call: {} {}", server, tool))
-                }
-                ApprovalOutcome::Intercepted(obs) => Ok(obs),
-            }
-        }
-        "mcp_list_tools" => {
-            let server = required(&input.server, "server")?;
-            let approved = approve_cb(&AgentApproval::McpTool {
-                server: server.to_owned(),
-                tool: "list_tools".to_owned(),
-                arguments: serde_json::json!({}),
-            })
-            .map_err(OrchestrationError::Agent)?;
-
-            match approved {
-                ApprovalOutcome::Approved => Ok(serde_json::to_string_pretty(
-                    &crate::mcp::list_server_tools(config, server)
-                        .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
-                )
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
-                ApprovalOutcome::Denied => Ok(format!("User denied MCP list tools: {}", server)),
-                ApprovalOutcome::Intercepted(obs) => Ok(obs),
-            }
-        }
-        "run_shell" => {
-            let command = required(&input.command, "command")?;
-            let mode = classify_shell_command(command).mode.as_str().to_owned();
-            let approved = approve_cb(&AgentApproval::RunShell {
-                command: command.to_owned(),
-                mode,
-                background: input.background,
-            })
-            .map_err(OrchestrationError::Agent)?;
-
-            match approved {
-                ApprovalOutcome::Approved if input.background => {
-                    let started = crate::bg_shell::start_background(root, config, command)
-                        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-                    Ok(format!(
-                        "job_id: {}\npid: {}\nstatus: running\nUse the 'shell_output' tool with this job_id to check on it, and 'kill_shell' to stop it.",
-                        started.id,
-                        started.pid.map_or_else(|| "unknown".to_string(), |p| p.to_string()),
-                    ))
-                }
-                ApprovalOutcome::Approved => run_shell(root, config, command).await,
-                ApprovalOutcome::Denied => Ok(format!("User denied shell command: {}", command)),
-                ApprovalOutcome::Intercepted(obs) => Ok(obs),
-            }
-        }
-        "shell_output" => {
-            let job_id = required(&input.job_id, "job_id")?;
-            crate::bg_shell::poll_output(job_id).map_err(|e| OrchestrationError::Agent(e.to_string()))
-        }
-        "kill_shell" => {
-            let job_id = required(&input.job_id, "job_id")?;
-            crate::bg_shell::kill_job(job_id).map_err(|e| OrchestrationError::Agent(e.to_string()))
-        }
-        "verify" => {
-            if input.commands.is_empty() {
-                return Err(OrchestrationError::Agent(
-                    "verify requires at least one command".into(),
-                ));
-            }
-            let mut output = Vec::new();
-            for command in &input.commands {
-                output.push(run_shell(root, config, command).await?);
-            }
-            Ok(output.join("\n\n"))
-        }
-        "apply_patch" => {
-            let patch = input.patch.as_ref().ok_or_else(|| {
-                OrchestrationError::Agent("apply_patch requires patch input".into())
-            })?;
-            if patch.hunks.is_empty() {
-                return Err(OrchestrationError::Agent(
-                    "apply_patch requires at least one hunk".into(),
-                ));
-            }
-            let edit = build_code_patch(root, patch.path.clone(), &patch.hunks, config)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            let proposal = propose_code_edits(root, std::slice::from_ref(&edit), config)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            let diff = proposal
-                .edits
-                .iter()
-                .map(|e| e.diff.clone())
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            let approved = approve_cb(&AgentApproval::ApplyPatch {
-                path: patch.path.to_string_lossy().into_owned(),
-                hunks: patch.hunks.clone(),
-                diff,
-            })
-            .map_err(OrchestrationError::Agent)?;
-
-            match approved {
-                ApprovalOutcome::Approved => {
-                    let applied = apply_code_edits(root, &[edit], &proposal.approval_token, config)
-                        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-                    Ok(serde_json::to_string_pretty(&applied)
-                        .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
-                }
-                ApprovalOutcome::Denied => {
-                    Ok(format!("User denied file edit: {}", edit.path.display()))
-                }
-                ApprovalOutcome::Intercepted(obs) => Ok(obs),
-            }
-        }
-        "write_file" => {
-            let path_str = required(&input.path, "path")?;
-            validate_new_workspace_file(root, config, Path::new(path_str))?;
-            let edit = CodeEdit {
-                path: PathBuf::from(path_str),
-                content: input.file_content.clone(),
-            };
-            let proposal = propose_code_edits(root, std::slice::from_ref(&edit), config)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            let diff = proposal
-                .edits
-                .iter()
-                .map(|e| e.diff.clone())
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            let approved = approve_cb(&AgentApproval::WriteFile {
-                path: path_str.to_owned(),
-                content: input.file_content.clone(),
-                diff,
-            })
-            .map_err(OrchestrationError::Agent)?;
-
-            match approved {
-                ApprovalOutcome::Approved => {
-                    let applied = apply_code_edits(root, &[edit], &proposal.approval_token, config)
-                        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-                    Ok(serde_json::to_string_pretty(&applied)
-                        .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
-                }
-                ApprovalOutcome::Denied => Ok(format!("User denied file edit: {}", path_str)),
-                ApprovalOutcome::Intercepted(obs) => Ok(obs),
-            }
-        }
-        "video_trim" | "video.trim" => {
-            let input_path = required(&input.input, "input")?;
-            let output_path = required(&input.output, "output")?;
-            let req = crate::video_edit::TrimRequest {
-                input: input_path.to_string(),
-                output: output_path.to_string(),
-                start: input.start.unwrap_or(0.0),
-                end: input.end.unwrap_or(0.0),
-            };
-            let res = crate::video_edit::video_trim(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string(&res).unwrap_or_default())
-        }
-        "video_remove_silence" | "video.remove_silence" => {
-            let input_path = required(&input.input, "input")?;
-            let output_path = required(&input.output, "output")?;
-            let req = crate::video_edit::RemoveSilenceRequest {
-                input: input_path.to_string(),
-                output: output_path.to_string(),
-                threshold_db: input.threshold_db.unwrap_or(-30.0),
-                min_silence_secs: input.min_silence_secs.unwrap_or(0.5),
-            };
-            let res = crate::video_edit::video_remove_silence(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string(&res).unwrap_or_default())
-        }
-        "video_resize" => {
-            let input_path = required(&input.input, "input")?;
-            let output_path = required(&input.output, "output")?;
-            let req = crate::video_edit::ResizeRequest {
-                input: input_path.to_string(),
-                output: output_path.to_string(),
-                width: input.width.unwrap_or(1920),
-                height: input.height.unwrap_or(1080),
-            };
-            let res = crate::video_edit::video_resize(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string(&res).unwrap_or_default())
-        }
-        "video_merge" => {
-            let output_path = required(&input.output, "output")?;
-            let req = crate::video_edit::MergeRequest {
-                inputs: if input.inputs.is_empty() {
-                    input.commands.clone()
-                } else {
-                    input.inputs.clone()
-                },
-                output: output_path.to_string(),
-            };
-            let res = crate::video_edit::video_merge(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string(&res).unwrap_or_default())
-        }
-        "video_export" | "video.export" => {
-            let input_path = required(&input.input, "input")?;
-            let output_path = required(&input.output, "output")?;
-            let req = crate::video_edit::ExportRequest {
-                input: input_path.to_string(),
-                output: output_path.to_string(),
-                resolution: input.preset.clone(),
-                fps: None,
-                codec: None,
-                crf: None,
-            };
-            let res = crate::video_edit::video_export(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string(&res).unwrap_or_default())
-        }
-        "video_extract_audio" => {
-            let input_path = required(&input.input, "input")?;
-            let output_path = required(&input.output, "output")?;
-            let req = crate::video_edit::ExtractAudioRequest {
-                input: input_path.to_string(),
-                output: output_path.to_string(),
-            };
-            let out = crate::video_edit::video_extract_audio(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(format!("Audio extracted to {}", out.output_path))
-        }
-        "video_filmstrip" | "video.filmstrip" => {
-            let input_path = required(&input.input, "input")?;
-            let output_path = required(&input.output, "output")?;
-            let req = crate::video_edit::FilmstripRequest {
-                input: input_path.to_string(),
-                output: output_path.to_string(),
-                frame_count: input.frame_count.unwrap_or(12),
-                columns: input.columns.unwrap_or(4),
-                thumb_width: input
-                    .width
-                    .filter(|w| *w > 0)
-                    .map(|w| w as u32)
-                    .unwrap_or(320),
-            };
-            let res = crate::video_edit::video_filmstrip(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            let bytes = std::fs::read(&res.output_path).map_err(|e| {
-                OrchestrationError::Agent(format!("failed to read generated filmstrip: {e}"))
-            })?;
-            Ok(format!(
-                "data:image/png;base64,{}",
-                BASE64_STANDARD.encode(bytes)
-            ))
-        }
-        "video_waveform" | "video.waveform" => {
-            let input_path = required(&input.input, "input")?;
-            let output_path = required(&input.output, "output")?;
-            let req = crate::video_edit::WaveformRequest {
-                input: input_path.to_string(),
-                output: output_path.to_string(),
-                width: input
-                    .width
-                    .filter(|w| *w > 0)
-                    .map(|w| w as u32)
-                    .unwrap_or(1280),
-                height: input
-                    .height
-                    .filter(|h| *h > 0)
-                    .map(|h| h as u32)
-                    .unwrap_or(240),
-            };
-            let res = crate::video_edit::video_waveform(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            let bytes = std::fs::read(&res.output_path).map_err(|e| {
-                OrchestrationError::Agent(format!("failed to read generated waveform: {e}"))
-            })?;
-            Ok(format!(
-                "data:image/png;base64,{}",
-                BASE64_STANDARD.encode(bytes)
-            ))
-        }
-        "speech_transcribe" | "subtitle_generate" | "subtitle.generate" => {
-            let input_path = required(&input.input, "input")?;
-            let req = crate::speech::TranscribeRequest {
-                input: input_path.to_string(),
-                language: input.language.clone(),
-                prompt: None,
-            };
-            let res = crate::speech::transcribe(config, &req)
-                .await
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string(&res).unwrap_or_default())
-        }
-        "subtitle_translate" | "subtitle.translate" => {
-            let srt = input.srt_content.as_deref().unwrap_or_default();
-            let target = input.target_language.as_deref().unwrap_or("th");
-            let req = crate::subtitle::TranslateSubtitleRequest {
-                srt_content: srt.to_string(),
-                target_language: target.to_string(),
-            };
-            let translated = crate::subtitle::translate_subtitles(config, &req)
-                .await
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(translated)
-        }
-        "subtitle_burn" => {
-            let input_video = required(&input.input, "input")?;
-            let output_video = required(&input.output, "output")?;
-            let srt_input = input.srt_content.as_deref().unwrap_or_default();
-            let req = crate::subtitle::BurnSubtitleRequest {
-                input_video: input_video.to_string(),
-                srt_input: srt_input.to_string(),
-                output_video: output_video.to_string(),
-                style: None,
-                preset: input.preset.clone(),
-            };
-            let res = crate::subtitle::burn_subtitles(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string(&res).unwrap_or_default())
-        }
-        "timeline_reorder" | "timeline.reorder" => {
-            let output_path = required(&input.output, "output")?;
-            let req = crate::video_edit::ReorderClipsRequest {
-                inputs: input.inputs.clone(),
-                order: input.order.clone(),
-                output: output_path.to_string(),
-            };
-            let res = crate::video_edit::timeline_reorder(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string(&res).unwrap_or_default())
-        }
-        "effect_zoom_on_speaker" | "effect.zoom_on_speaker" => {
-            let input_path = required(&input.input, "input")?;
-            let output_path = required(&input.output, "output")?;
-            let req = crate::video_edit::ZoomSpeakerRequest {
-                input: input_path.to_string(),
-                output: output_path.to_string(),
-                zoom_factor: input.zoom_factor.unwrap_or(1.25),
-            };
-            let res = crate::video_edit::effect_zoom_on_speaker(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string(&res).unwrap_or_default())
-        }
-        "audio_duck_music" | "audio.duck_music" => {
-            let video_in = input.video_input.as_deref().unwrap_or(&input.input);
-            let music_in = input.music_input.as_deref().unwrap_or("");
-            let output_path = required(&input.output, "output")?;
-            let req = crate::video_edit::DuckMusicRequest {
-                video_input: video_in.to_string(),
-                music_input: music_in.to_string(),
-                output: output_path.to_string(),
-                music_volume: input.music_volume.unwrap_or(0.2),
-            };
-            let res = crate::video_edit::audio_duck_music(&req)
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string(&res).unwrap_or_default())
-        }
-        "make_shorts" | "video.make_shorts" => {
-            let input_path = required(&input.input, "input")?;
-            let req = crate::auto_shorts::MakeShortsRequest {
-                input: input_path.to_string(),
-                output_dir: if input.output.is_empty() {
-                    None
-                } else {
-                    Some(input.output.clone())
-                },
-                max_clips: input.max_clips.unwrap_or(3),
-                target_duration: input.target_duration.unwrap_or(60.0),
-                burn_subtitles: true,
-                width: input.width.unwrap_or(1080),
-                height: input.height.unwrap_or(1920),
-            };
-            let res = crate::auto_shorts::make_shorts(config, &req)
-                .await
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            Ok(serde_json::to_string(&res).unwrap_or_default())
-        }
-        "generate_image" | "image_studio.generate" | "image_generate" => {
-            let prompt_text = if !input.prompt.trim().is_empty() {
-                input.prompt.trim()
-            } else if !input.query.trim().is_empty() {
-                input.query.trim()
-            } else {
-                required(&input.text, "prompt")?
-            };
-            let req = crate::image_gen::ImageGenRequest {
-                prompt: prompt_text.to_string(),
-                aspect_ratio: if input.aspect_ratio.is_empty() {
-                    Some("1:1".to_string())
-                } else {
-                    Some(input.aspect_ratio.clone())
-                },
-                provider: if input.provider.is_empty() {
-                    None
-                } else {
-                    Some(input.provider.clone())
-                },
-                num_images: Some(1),
-                ..Default::default()
-            };
-            let res = crate::image_gen::generate_images(config, &req)
-                .await
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            let data_uris: Vec<String> = res.images.iter().map(|i| i.data_uri.clone()).collect();
-            if let Ok(saved) = crate::pictures::save_chat_images(
-                data_uris,
-                Some(res.provider.clone()),
-                Some(prompt_text.to_string()),
-            ) {
-                if let Some(first_saved) = saved.first() {
-                    let img_url = format!("/api/pictures/{}", first_saved.filename);
-                    let saved_path = first_saved.path.display();
-                    let img_md = format!(
-                        "![Generated Image]({})\n\n✓ Image generated successfully with model `{}` ({})\nSaved to: {}\n\nNote: In your final response or finish summary, you MUST copy the exact image markdown (`![Generated Image]({})`), model feedback (`✓ Image generated successfully...`), and saved path line (`Saved to: {}`) so the user can see them in their chat bubble.",
-                        img_url, res.model, res.provider, saved_path, img_url, saved_path
-                    );
-                    return Ok(img_md);
-                }
-            }
-            if let Some(first) = res.images.first() {
-                let img_md = format!(
-                    "![Generated Image]({})\n\n✓ Image generated successfully with model `{}` ({})",
-                    first.data_uri, res.model, res.provider
-                );
-                Ok(img_md)
-            } else {
-                Ok("No image returned from provider".to_string())
-            }
-        }
-        "generate_video" | "veo.generate" | "video_generate" => {
-            let prompt_text = if !input.prompt.trim().is_empty() {
-                input.prompt.trim()
-            } else if !input.query.trim().is_empty() {
-                input.query.trim()
-            } else {
-                required(&input.text, "prompt")?
-            };
-            let req = crate::video_gen::VideoGenRequest {
-                prompt: prompt_text.to_string(),
-                negative_prompt: None,
-                aspect_ratio: if input.aspect_ratio.is_empty() {
-                    "16:9".to_string()
-                } else {
-                    input.aspect_ratio.clone()
-                },
-                duration: input.duration.unwrap_or(5.0) as u32,
-                model: None,
-                provider: if input.provider.is_empty() {
-                    "veo".to_string()
-                } else {
-                    input.provider.clone()
-                },
-            };
-            let res = crate::video_gen::generate_video(config, &req)
-                .await
-                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-            if let Some(first) = res.videos.first() {
-                let vid_md = format!(
-                    "<video controls src=\"{}\" width=\"100%\" style=\"max-height:400px; border-radius:8px;\"></video>\n\n✓ Video generated successfully with Veo `{}` ({})",
-                    first.path.to_string_lossy(),
-                    res.model,
-                    res.provider
-                );
-                Ok(vid_md)
-            } else {
-                Ok("No video returned from provider".to_string())
-            }
+        "video_trim"
+        | "video.trim"
+        | "video_remove_silence"
+        | "video.remove_silence"
+        | "video_resize"
+        | "video_merge"
+        | "video_export"
+        | "video.export"
+        | "video_extract_audio"
+        | "video_filmstrip"
+        | "video.filmstrip"
+        | "video_waveform"
+        | "video.waveform"
+        | "speech_transcribe"
+        | "subtitle_generate"
+        | "subtitle.generate"
+        | "subtitle_translate"
+        | "subtitle.translate"
+        | "subtitle_burn"
+        | "timeline_reorder"
+        | "timeline.reorder"
+        | "effect_zoom_on_speaker"
+        | "effect.zoom_on_speaker"
+        | "audio_duck_music"
+        | "audio.duck_music"
+        | "make_shorts"
+        | "video.make_shorts"
+        | "generate_image"
+        | "image_studio.generate"
+        | "image_generate"
+        | "generate_video"
+        | "veo.generate"
+        | "video_generate" => {
+            tools::media::execute(
+                decision.action.as_str(),
+                input,
+                root,
+                config,
+                chat_id,
+                approve_cb,
+            )
+            .await
         }
         other => Err(OrchestrationError::Agent(format!(
             "unsupported code-agent action '{}'",
@@ -2820,1107 +2020,6 @@ where
     execute_tool(root, config, &decision, chat_id, approve_cb).await
 }
 
-fn validate_new_workspace_file(
-    root: &Path,
-    config: &MintConfig,
-    path: &Path,
-) -> Result<(), OrchestrationError> {
-    let root = assert_path_capability(root, Capability::Write, config)
-        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-    let target = assert_path_capability(&root.join(path), Capability::Write, config)
-        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-    if !target.starts_with(&root) {
-        return Err(OrchestrationError::Agent(format!(
-            "write_file path escapes workspace root: {}",
-            target.display()
-        )));
-    }
-    if target.exists() {
-        return Err(OrchestrationError::Agent(format!(
-            "write_file can only create new files. Use apply_patch for existing file: {}",
-            target.display()
-        )));
-    }
-    Ok(())
-}
-
-fn run_git(root: &Path, args: &[&str]) -> Result<String, OrchestrationError> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .map_err(|e| OrchestrationError::Agent(format!("unable to run git: {e}")))?;
-    Ok(format!(
-        "exit: {}\nstdout:\n{}\nstderr:\n{}",
-        output.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    ))
-}
-
-fn detect_project(root: &Path) -> Value {
-    let mut languages = Vec::new();
-    let mut managers = Vec::new();
-    let mut diagnostics = Vec::new();
-    if root.join("Cargo.toml").exists() {
-        languages.push("rust");
-        managers.push("cargo");
-        diagnostics.push("cargo check");
-    }
-    if root.join("package.json").exists() {
-        languages.push("javascript/typescript");
-        managers.push(if root.join("pnpm-lock.yaml").exists() {
-            "pnpm"
-        } else if root.join("yarn.lock").exists() {
-            "yarn"
-        } else {
-            "npm"
-        });
-        diagnostics.push("npm run build or npm run typecheck");
-    }
-    if root.join("pyproject.toml").exists() || root.join("requirements.txt").exists() {
-        languages.push("python");
-        managers.push("pip/uv");
-        diagnostics.push("pytest or python -m compileall");
-    }
-    serde_json::json!({
-        "root": root,
-        "languages": languages,
-        "packageManagers": managers,
-        "diagnostics": diagnostics,
-    })
-}
-
-fn list_tests(root: &Path, config: &MintConfig) -> Result<Value, OrchestrationError> {
-    let files = list_code_files(root, usize::MAX, config)
-        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-    let test_files = files
-        .into_iter()
-        .filter(|file| {
-            let path = file.path.to_string_lossy();
-            path.contains("/tests/")
-                || path.ends_with("_test.rs")
-                || path.ends_with(".test.ts")
-                || path.ends_with(".test.tsx")
-                || path.ends_with(".spec.ts")
-                || path.ends_with(".spec.tsx")
-                || path.ends_with("_test.py")
-        })
-        .map(|file| file.path)
-        .collect::<Vec<_>>();
-    let package_scripts = package_test_scripts(root);
-    Ok(serde_json::json!({
-        "testFiles": test_files,
-        "packageScripts": package_scripts,
-        "cargo": root.join("Cargo.toml").exists(),
-    }))
-}
-
-fn package_test_scripts(root: &Path) -> BTreeMap<String, String> {
-    let path = root.join("package.json");
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return BTreeMap::new();
-    };
-    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
-        return BTreeMap::new();
-    };
-    value
-        .get("scripts")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flatten()
-        .filter(|(name, _)| {
-            let lower = name.to_ascii_lowercase();
-            lower.contains("test")
-                || lower.contains("check")
-                || lower.contains("lint")
-                || lower.contains("build")
-                || lower.contains("type")
-        })
-        .filter_map(|(name, command)| Some((name.clone(), command.as_str()?.to_owned())))
-        .collect()
-}
-
-async fn read_diagnostics(root: &Path, config: &MintConfig) -> Result<String, OrchestrationError> {
-    let command = if root.join("Cargo.toml").exists() {
-        Some("cargo check")
-    } else {
-        let scripts = package_test_scripts(root);
-        if scripts.contains_key("typecheck") {
-            Some("npm run -s typecheck")
-        } else if scripts.contains_key("check") {
-            Some("npm run -s check")
-        } else if scripts.contains_key("build") {
-            Some("npm run -s build")
-        } else {
-            None
-        }
-    };
-    match command {
-        Some(command) => run_shell(root, config, command).await,
-        None => Ok("No diagnostics command detected.".into()),
-    }
-}
-
-fn view_image(path: &Path, config: &MintConfig) -> Result<String, OrchestrationError> {
-    let path = assert_path_capability(path, Capability::Read, config)
-        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-    let extension = path
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let mime = match extension.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        _ => {
-            return Err(OrchestrationError::Agent(format!(
-                "unsupported image type: {}",
-                path.display()
-            )));
-        }
-    };
-    let metadata = std::fs::metadata(&path)
-        .map_err(|e| OrchestrationError::Agent(format!("cannot stat image: {e}")))?;
-    if metadata.len() > 2_000_000 {
-        return Ok(format!(
-            "Image exists but is too large to inline ({} bytes): {}",
-            metadata.len(),
-            path.display()
-        ));
-    }
-    let bytes = std::fs::read(&path)
-        .map_err(|e| OrchestrationError::Agent(format!("cannot read image: {e}")))?;
-    Ok(format!(
-        "data:{mime};base64,{}",
-        BASE64_STANDARD.encode(bytes)
-    ))
-}
-
-/// Renders a slice of `native_messages` back into readable text for the
-/// compaction summarizer prompt. Self-contained to `ChatMessage`/`ContentBlock`
-/// rather than reusing the parallel `trajectory: Vec<String>` log, since that
-/// log gets one entry per *tool call* while `native_messages` gets one
-/// Assistant/Tool pair per *step* (a step can batch multiple tool calls) —
-/// keeping the two aligned would need extra bookkeeping for no real benefit.
-fn render_messages_as_text(messages: &[ChatMessage]) -> String {
-    messages
-        .iter()
-        .map(|message| {
-            let rendered = message
-                .content
-                .iter()
-                .map(|block| match block {
-                    ContentBlock::Text { text } => text.clone(),
-                    ContentBlock::ToolUse { name, input, .. } => {
-                        format!("Called {name} with {input}")
-                    }
-                    ContentBlock::ToolResult { content, .. } => format!("Result: {content}"),
-                    ContentBlock::Image { .. } => "[image]".to_string(),
-                    ContentBlock::Audio { .. } => "[audio]".to_string(),
-                    ContentBlock::Video { .. } => "[video]".to_string(),
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("{:?}: {rendered}", message.role)
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-/// Compacts the older portion of `native_messages` into a single synthetic
-/// step-pair summary once the conversation is approaching the model's context
-/// window, keeping the last `COMPACTION_KEEP_RECENT_STEPS` step-pairs verbatim.
-///
-/// `messages[0]` is always the initial task/observation message, and every
-/// message after it is a strict repeating `[Assistant, Tool]` pair — one pair
-/// per outer agent-loop step, even when that step batched multiple tool calls
-/// (see the loop body). Cutting only on pair boundaries means the result
-/// always preserves valid role alternation for every provider, with no
-/// special-casing needed elsewhere.
-///
-/// `Ok(None)` means there was nothing worth compacting yet (too little history)
-/// — not a failure, just a no-op. `Err` means compaction was attempted but the
-/// summarization call itself failed; compaction is a best-effort optimization,
-/// so callers should fall back to the uncompacted messages rather than failing
-/// the agent run, but may want to surface the failure differently than a
-/// routine no-op.
-async fn compact_native_messages(
-    config: &MintConfig,
-    messages: &[ChatMessage],
-) -> Result<Option<Vec<ChatMessage>>, ChatError> {
-    let step_pairs = messages.len().saturating_sub(1) / 2;
-    if step_pairs <= COMPACTION_KEEP_RECENT_STEPS || messages.is_empty() {
-        return Ok(None);
-    }
-    let compact_pairs = step_pairs - COMPACTION_KEEP_RECENT_STEPS;
-    let compact_message_count = compact_pairs * 2;
-    let compacted_range = &messages[1..1 + compact_message_count];
-
-    let transcript = render_messages_as_text(compacted_range);
-    let summary_prompt = format!(
-        "Summarize the following part of an autonomous coding agent's work log concisely but \
-         completely. Preserve: exact file paths touched and their resulting state, exact \
-         commands run and whether they succeeded, key findings from searches/reads, and any \
-         decisions or open threads still relevant to finishing the task. Omit verbose \
-         stdout/stderr detail that isn't load-bearing. Write it as dense prose, not a copy of \
-         the log.\n\n{transcript}"
-    );
-
-    let (summary_response, _) = send_chat_with_fallback(
-        config,
-        &ChatRequest {
-            message: summary_prompt,
-            system_instruction: "You compress agent work logs into dense, factual summaries."
-                .into(),
-            chat_id: None,
-            image_data_uri: None,
-            audio_data_uri: None,
-            video_data_uri: None,
-            document_attachment: None,
-            workspace_path: None,
-            agent_id: None,
-            plan_mode: false,
-            messages: None,
-            tools: None,
-        },
-    )
-    .await?;
-
-    let mut compacted = Vec::with_capacity(messages.len() - compact_message_count + 3);
-    compacted.push(messages[0].clone());
-    compacted.push(ChatMessage {
-        role: ChatRole::Assistant,
-        content: vec![ContentBlock::ToolUse {
-            id: "compacted_summary".into(),
-            name: "conversation_summary".into(),
-            input: serde_json::json!({}),
-            thought_signature: None,
-        }],
-    });
-    compacted.push(ChatMessage {
-        role: ChatRole::Tool,
-        content: vec![ContentBlock::ToolResult {
-            tool_use_id: "compacted_summary".into(),
-            content: format!(
-                "[Summary of steps 1-{compact_pairs}, compacted to save context]\n{}",
-                summary_response.text.trim()
-            ),
-            is_error: false,
-        }],
-    });
-    compacted.extend_from_slice(&messages[1 + compact_message_count..]);
-    Ok(Some(compacted))
-}
-
-// `async` and dispatched onto tokio's blocking-thread-pool via
-// `spawn_blocking` (not called synchronously in place) because
-// `run_shell_command` is a plain blocking `std::process::Command` call —
-// possibly for as long as the command itself runs (`du -xhd1 /`, a build,
-// a sleep, ...). `execute_tool`'s caller races this whole future against
-// `wait_for_escape_interrupt` inside one `tokio::select!` in `mint-cli`,
-// which only *interleaves* futures on the current task rather than giving
-// each its own OS thread — a blocking call left in place here would never
-// yield control back to the executor, so the Esc-watcher (and, in the CLI,
-// keystrokes typed into the mid-turn input box) would starve for the
-// command's entire duration, not just get delayed. `spawn_blocking` moves
-// the actual blocking work to a dedicated thread so this task's `.await`
-// point here is a real yield.
-async fn run_shell(
-    root: &Path,
-    config: &MintConfig,
-    command: &str,
-) -> Result<String, OrchestrationError> {
-    let root = root.to_path_buf();
-    let config = config.clone();
-    let command = command.to_owned();
-    let output = {
-        let command = command.clone();
-        tokio::task::spawn_blocking(move || run_shell_command(&command, &root, true, &config))
-            .await
-            .map_err(|e| OrchestrationError::Agent(format!("shell command task panicked: {e}")))?
-            .map_err(|e| OrchestrationError::Agent(e.to_string()))?
-    };
-    let status_str = output
-        .status
-        .map_or_else(|| "unknown".into(), |status| status.to_string());
-
-    let mut hint = "";
-    let cmd_lower = command.to_lowercase();
-    if output.success
-        && (cmd_lower.contains("open")
-            || cmd_lower.contains("launch")
-            || cmd_lower.contains("chrome")
-            || cmd_lower.contains("firefox"))
-    {
-        hint = "\nNote: Opening URLs, files, folders, or launching applications are background processes. Even if there are warnings or stdout/stderr outputs, since the command exited successfully with status 0, the operation has succeeded and you should now use the 'finish' action to inform the user.";
-    }
-
-    let warning_line = output
-        .sandbox_warning
-        .as_deref()
-        .map(|warning| format!("\n[Warning] {warning}"))
-        .unwrap_or_default();
-
-    Ok(format!(
-        "exit: {}\nmode: {}\nsandboxed: {}{}\nstdout:\n{}\nstderr:\n{}{}",
-        status_str, output.mode, output.sandboxed, warning_line, output.stdout, output.stderr, hint
-    ))
-}
-
-/// Cheap pre-filter run before the (costlier) auto-skill-writing reflection call:
-/// only tasks that took several steps and did real work (edited files, ran shell
-/// commands, drove the browser, or delegated to a subagent) are worth asking the
-/// LLM to judge for skill-worthiness. Keeps trivial one-shot chats from spawning an
-/// extra reflection call every time `auto_skill_writing` is enabled.
-fn looks_skill_worthy(step: usize, action_counts: &BTreeMap<String, usize>) -> bool {
-    const SUBSTANTIVE_ACTIONS: &[&str] = &[
-        "apply_patch",
-        "write_file",
-        "run_shell",
-        "browser_open",
-        "browser_click",
-        "browser_type",
-        "dispatch_subagent",
-    ];
-    step >= 3
-        && action_counts
-            .keys()
-            .any(|key| SUBSTANTIVE_ACTIONS.iter().any(|action| key.starts_with(action)))
-}
-
-fn action_fingerprint(decision: &AgentDecision) -> String {
-    let input = &decision.input;
-    match decision.action.as_str() {
-        "list_files" | "read_file" | "symbols" => {
-            format!("{}:{}", decision.action, input.path.trim())
-        }
-        "search_code" | "semantic_search" | "web_search" | "knowledge_search" | "memory_recall" => {
-            format!(
-                "{}:{}:{}",
-                decision.action,
-                input.path.trim(),
-                input.query.trim()
-            )
-        }
-        "git_status" | "git_branch" | "detect_project" | "list_tests" | "read_diagnostics" => {
-            format!("{}:{}", decision.action, input.path.trim())
-        }
-        "git_diff" => format!("git_diff:{}", input.path.trim()),
-        "git_log" => format!("git_log:{}", input.limit.unwrap_or(5)),
-        "create_plan" | "update_plan" => format!("{}:{}", decision.action, input.steps.join("\n")),
-        "request_user_approval" => format!("request_user_approval:{}", input.summary.trim()),
-        "ask_user" => format!("ask_user:{}", input.query.trim()),
-        "view_image" => format!("view_image:{}", input.path.trim()),
-        "run_shell" => format!("run_shell:{}", input.command.trim()),
-        "verify" => format!("verify:{}", input.commands.join("\n")),
-        "apply_patch" => input
-            .patch
-            .as_ref()
-            .map(|patch| format!("apply_patch:{}", patch.path.display()))
-            .unwrap_or_else(|| "apply_patch:<missing>".to_owned()),
-        "write_file" => format!("write_file:{}", input.path.trim()),
-        other => other.to_owned(),
-    }
-}
-
-/// Appends saved cross-session memory — the user's profile/preferences (Settings
-/// → Memory) and this chat's recent interaction history — onto `system_prompt`.
-/// Shared by the typed-chat agent loop and the Gemini Live bridge so a Live
-/// session starts with the same "who is this user, what have we already
-/// discussed" context instead of starting blank every call.
-pub(crate) fn append_memory_context(system_prompt: &mut String, chat_id: &str) {
-    let Ok(memory) = MemoryStore::open_default() else {
-        return;
-    };
-
-    let mut profile_instructions = String::new();
-    if let Ok(Some(name)) = memory.get_profile("name")
-        && !name.trim().is_empty()
-    {
-        profile_instructions.push_str(&format!("User Name: {}\n", name.trim()));
-    }
-    if let Ok(Some(preferences)) = memory.get_profile("preferences")
-        && !preferences.trim().is_empty()
-    {
-        profile_instructions.push_str(&format!(
-            "User Preferences & Profile:\n{}\n",
-            preferences.trim()
-        ));
-    }
-    if !profile_instructions.is_empty() {
-        *system_prompt = format!(
-            "{}\n\nUser Profile Information:\n{}",
-            system_prompt.trim(),
-            profile_instructions.trim()
-        );
-    }
-
-    if let Ok(mut interactions) = memory.recent_interactions_for_chat(chat_id, CONTEXT_LIMIT) {
-        interactions.reverse();
-        let transcript = interactions
-            .into_iter()
-            .map(|item| {
-                format!(
-                    "User: {}\nAssistant: {}",
-                    truncate_for_context(&item.user_text, MAX_CONTEXT_MESSAGE_CHARS),
-                    truncate_for_context(&item.ai_text, MAX_CONTEXT_MESSAGE_CHARS)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        if !transcript.is_empty() {
-            *system_prompt = format!(
-                "{}\n\nRecent conversation context:\n{}",
-                system_prompt.trim(),
-                transcript
-            );
-        }
-    }
-}
-
-fn initial_observation(task: &str, root: &Path, skills: &str) -> String {
-    let now = chrono::Local::now()
-        .format("%Y-%m-%d %H:%M:%S %Z")
-        .to_string();
-    let mut observation = format!(
-        "Current Time: {now}\nTask: {task}\nWorkspace: {}\nLearned skills:\n{}\n",
-        root.display(),
-        if skills.trim().is_empty() {
-            "(none)"
-        } else {
-            skills
-        }
-    );
-    if let Ok(memory) = MemoryStore::open_default() {
-        if let Ok(Some(name)) = memory.get_profile("name") {
-            observation.push_str(&format!("User Name: {name}\n"));
-        }
-        if let Ok(Some(session)) = memory.workspace_session(&root.to_string_lossy()) {
-            observation.push_str(&format!(
-                "Previous workspace session ({}):\nSummary: {}\nVerification: {}\n",
-                session.updated_at,
-                session.summary,
-                if session.verification.trim().is_empty() {
-                    "(none)"
-                } else {
-                    &session.verification
-                }
-            ));
-        }
-    }
-    observation.push_str(&workspace_context(root));
-    observation.push_str("Choose the first action. Finish immediately for casual conversation.");
-    observation
-}
-
-fn workspace_context(root: &Path) -> String {
-    let mut context = String::from("Automatic workspace context:\n");
-    context.push_str(&format!(
-        "Git status:\n{}\n",
-        command_output(root, "git", &["status", "--short"])
-    ));
-    context.push_str(&format!(
-        "Diff summary:\n{}\n",
-        command_output(root, "git", &["diff", "--stat"])
-    ));
-    context.push_str(&format!("Package scripts:\n{}\n", package_scripts(root)));
-    context
-}
-
-fn command_output(root: &Path, program: &str, args: &[&str]) -> String {
-    use std::process::Command;
-    match Command::new(program).args(args).current_dir(root).output() {
-        Ok(output) if output.status.success() => {
-            let value = String::from_utf8_lossy(&output.stdout);
-            if value.trim().is_empty() {
-                "(none)".into()
-            } else {
-                truncate(&value).trim().into()
-            }
-        }
-        _ => "(unavailable)".into(),
-    }
-}
-
-fn package_scripts(root: &Path) -> String {
-    let Ok(raw) = std::fs::read_to_string(root.join("package.json")) else {
-        return "(none)".into();
-    };
-    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
-        return "(invalid package.json)".into();
-    };
-    let Some(scripts) = value.get("scripts").and_then(Value::as_object) else {
-        return "(none)".into();
-    };
-    scripts
-        .iter()
-        .map(|(name, command)| format!("{name}: {}", command.as_str().unwrap_or_default()))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn parse_decision(raw: &str) -> Result<AgentDecision, OrchestrationError> {
-    if let Ok(decision) = parse_agent_json(raw) {
-        return Ok(decision);
-    }
-    parse_shorthand_finish(raw).map_err(|e| OrchestrationError::Agent(e.to_string()))
-}
-
-fn parse_agent_json<T: serde::de::DeserializeOwned>(raw: &str) -> Result<T, OrchestrationError> {
-    serde_json::from_str(raw).or_else(|_| {
-        let start = raw
-            .find('{')
-            .ok_or_else(|| OrchestrationError::Agent("missing JSON object".into()))?;
-        let end = raw
-            .rfind('}')
-            .ok_or_else(|| OrchestrationError::Agent("missing JSON object".into()))?;
-        serde_json::from_str(&raw[start..=end])
-            .map_err(|error| OrchestrationError::Agent(error.to_string()))
-    })
-}
-
-fn parse_shorthand_finish(raw: &str) -> Result<AgentDecision, serde_json::Error> {
-    let value: Value = serde_json::from_str(raw)?;
-    let finish = value.get("finish").cloned().unwrap_or(Value::Null);
-    let input = match finish {
-        Value::Object(_) => serde_json::from_value(finish)?,
-        Value::String(s) => AgentInput {
-            summary: s,
-            ..AgentInput::default()
-        },
-        _ => AgentInput::default(),
-    };
-    Ok(AgentDecision {
-        thought: value
-            .get("thought")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .into(),
-        action: "finish".into(),
-        input,
-    })
-}
-
-fn parse_decision_or_finish(raw: &str) -> Result<AgentDecision, OrchestrationError> {
-    match parse_decision(raw) {
-        Ok(decision) => Ok(decision),
-        Err(_) if !raw.trim().is_empty() && !raw.contains("\"action\"") => Ok(AgentDecision {
-            thought: String::new(),
-            action: "finish".into(),
-            input: AgentInput {
-                summary: raw.trim().into(),
-                ..AgentInput::default()
-            },
-        }),
-        Err(error) => Err(error),
-    }
-}
-
-fn list_directory_entries(
-    path: &Path,
-    limit: usize,
-    config: &MintConfig,
-) -> Result<Vec<AgentDirectoryEntry>, OrchestrationError> {
-    let path = assert_path_capability(path, Capability::Read, config)
-        .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
-    if !path.is_dir() {
-        return Err(OrchestrationError::Agent(format!(
-            "path is not a directory: {}",
-            path.display()
-        )));
-    }
-
-    let mut entries = Vec::new();
-    let read_dir = std::fs::read_dir(&path).map_err(|e| {
-        OrchestrationError::Agent(format!(
-            "unable to read directory {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
-    for entry in read_dir.take(limit.max(1)) {
-        let entry = entry.map_err(|e| {
-            OrchestrationError::Agent(format!("unable to read directory entry: {e}"))
-        })?;
-        let entry_path = entry.path();
-        let file_type = entry.file_type().map_err(|e| {
-            OrchestrationError::Agent(format!(
-                "unable to read file type for {}: {}",
-                entry_path.display(),
-                e
-            ))
-        })?;
-        let size = if file_type.is_file() {
-            entry.metadata().ok().map(|metadata| metadata.len())
-        } else {
-            None
-        };
-        entries.push(AgentDirectoryEntry {
-            name: entry.file_name().to_string_lossy().into_owned(),
-            path: entry_path,
-            kind: if file_type.is_dir() {
-                "directory"
-            } else if file_type.is_file() {
-                "file"
-            } else if file_type.is_symlink() {
-                "symlink"
-            } else {
-                "other"
-            },
-            size,
-        });
-    }
-    entries.sort_by(|a, b| {
-        a.kind
-            .cmp(b.kind)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-    Ok(entries)
-}
-
-fn agent_read_path(
-    root: &Path,
-    value: &str,
-    config: &MintConfig,
-) -> Result<PathBuf, OrchestrationError> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed == "." {
-        return workspace_path(root, ".");
-    }
-    if let Ok(path) = workspace_path(root, trimmed) {
-        return Ok(path);
-    }
-
-    let requested = Path::new(trimmed);
-    let mut candidates = Vec::new();
-    if let Some(home) = dirs::home_dir() {
-        if trimmed == "~" {
-            candidates.push(home.clone());
-        } else if let Some(rest) = trimmed.strip_prefix("~/") {
-            candidates.push(home.join(rest));
-        } else if requested.components().count() == 1 {
-            candidates.push(home.join(trimmed));
-        }
-    }
-    if requested.is_absolute() {
-        candidates.push(requested.to_path_buf());
-    }
-
-    for candidate in candidates {
-        let Ok(path) = candidate.canonicalize() else {
-            continue;
-        };
-        if assert_path_capability(&path, Capability::Read, config).is_ok() {
-            return Ok(path);
-        }
-    }
-
-    Err(OrchestrationError::Agent(format!(
-        "unable to resolve readable path: {trimmed}"
-    )))
-}
-
-/// When a `finish` attempt is rejected (empty summary, missing verification, ...),
-/// native tool-calling mode's `messages` history must record both the model's
-/// attempted finish and the rejection, or the next request would just resend the
-/// same history with no signal anything was wrong: the JSON-prompt path gets the
-/// rejection via `observation` (rebuilt from `trajectory` at each call site above),
-/// but native mode stops reading `observation` once `native_messages` is non-empty
-/// (see the `native_messages.is_empty()` guard near the top of the step loop).
-/// No-op outside native mode, where `observation` alone is sufficient.
-fn reject_native_finish(
-    tool_mode: ToolCallingMode,
-    native_messages: &mut Vec<ChatMessage>,
-    response_text: &str,
-    rejection: &str,
-) {
-    if tool_mode != ToolCallingMode::Native {
-        return;
-    }
-    if !response_text.trim().is_empty() {
-        native_messages.push(ChatMessage {
-            role: ChatRole::Assistant,
-            content: vec![ContentBlock::Text {
-                text: response_text.trim().to_string(),
-            }],
-        });
-    }
-    native_messages.push(ChatMessage {
-        role: ChatRole::User,
-        content: vec![ContentBlock::Text {
-            text: rejection.to_string(),
-        }],
-    });
-}
-
-/// Maximum number of `dispatch_subagent` calls run concurrently when a single
-/// model turn requests several of them at once (see `orchestrate_agent_loop`'s
-/// parallel-dispatch branch). Kept low: each subagent makes its own AI-provider
-/// API calls, so a higher cap risks tripping the configured provider's rate
-/// limit, and most tasks don't naturally decompose into more than a couple of
-/// truly independent pieces anyway.
-const PARALLEL_SUBAGENT_LIMIT: usize = 2;
-
-/// Whether this step's decisions should run as a concurrency-limited batch of
-/// subagent dispatches instead of the normal one-at-a-time loop: 2 or more
-/// decisions, every one of them a `dispatch_subagent` call with nothing else
-/// mixed in. A lone subagent call, or one mixed with other actions, stays on
-/// the sequential path — keeps ordering between subagent results and other
-/// tool results simple, and avoids parallelizing tools that were never
-/// verified to be safe to run concurrently.
-fn decisions_are_parallel_subagent_batch(decisions: &[(String, AgentDecision)]) -> bool {
-    decisions.len() >= 2
-        && decisions
-            .iter()
-            .all(|(_, d)| d.action == "dispatch_subagent")
-}
-
-/// Whether `finish` should be rejected because the run modified a file
-/// (`apply_patch`/`write_file`) without a subsequent `verify` call and without
-/// an explicit written reason in the `finish` action's `verification` field.
-fn unverified_modification(
-    last_modify_step: Option<usize>,
-    last_verify_step: Option<usize>,
-    verification_field: &str,
-) -> bool {
-    let Some(modify_step) = last_modify_step else {
-        return false;
-    };
-    let verified_since = last_verify_step.is_some_and(|verify_step| verify_step >= modify_step);
-    !verified_since && meaningful_verification(verification_field).is_empty()
-}
-
-/// Whether any `run_shell`/`verify` command in `result` — which may join
-/// several `"exit: N\n..."` blocks, one per command in a multi-command
-/// `verify` call — reported a non-zero, known exit code. Scans every
-/// `"exit: "` line rather than just the first, so a `verify` call where an
-/// earlier command passed but a later one failed still counts as a failure.
-fn shell_result_failed(result: &str) -> bool {
-    result.lines().any(|line| {
-        line.strip_prefix("exit: ")
-            .is_some_and(|code| !matches!(code.trim(), "0" | "unknown"))
-    })
-}
-
-/// Whether `finish` should be rejected because the most recent `verify` call
-/// reported a failure and the agent said nothing about it in the `finish`
-/// action's `verification` field. Unlike `unverified_modification` (which
-/// only checks that `verify` was *called*), this catches the agent claiming
-/// success while ignoring a real failure that's sitting right there in
-/// `verify`'s own last result — the specific "reports success when it
-/// wasn't" failure mode that matters more here than in an
-/// interactively-supervised session, since a scheduled or messaging-bridge
-/// run has nobody watching live to catch it.
-fn unacknowledged_verify_failure(last_verify_failed: Option<bool>, verification_field: &str) -> bool {
-    last_verify_failed == Some(true) && meaningful_verification(verification_field).is_empty()
-}
-
-fn meaningful_verification(value: &str) -> &str {
-    let value = value.trim();
-    if matches!(
-        value.to_ascii_lowercase().as_str(),
-        "" | "not run"
-            | "not run."
-            | "no checks run"
-            | "no checks run."
-            | "not_required"
-            | "not required"
-            | "none"
-            | "n/a"
-    ) {
-        ""
-    } else {
-        value
-    }
-}
-
-fn workspace_path(root: &Path, value: &str) -> Result<PathBuf, OrchestrationError> {
-    let path = root.join(if value.trim().is_empty() { "." } else { value });
-    let path = path.canonicalize().map_err(|e| {
-        OrchestrationError::Agent(format!(
-            "unable to resolve workspace path {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
-    if !path.starts_with(root) {
-        return Err(OrchestrationError::Agent(format!(
-            "path is outside workspace: {}",
-            path.display()
-        )));
-    }
-    Ok(path)
-}
-
-fn required<'a>(value: &'a str, name: &str) -> Result<&'a str, OrchestrationError> {
-    if value.trim().is_empty() {
-        return Err(OrchestrationError::Agent(format!("{} is required", name)));
-    }
-    Ok(value)
-}
-
-fn truncate(value: &str) -> String {
-    if value.len() <= MAX_OBSERVATION_BYTES {
-        value.into()
-    } else {
-        let mut end = MAX_OBSERVATION_BYTES;
-        while !value.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}\n...<truncated>", &value[..end])
-    }
-}
-
-pub fn spawn_auto_memory_update(config: MintConfig, user_text: String, ai_text: String) {
-    tokio::spawn(async move {
-        if let Err(e) = auto_extract_and_update_memory(&config, &user_text, &ai_text).await {
-            eprintln!("Auto memory update failed: {:?}", e);
-        }
-    });
-}
-
-/// Fire-and-forget: after a task finishes and passes [`looks_skill_worthy`], ask the
-/// model (in a second, separate call) whether the task was a genuinely reusable
-/// problem worth turning into a skill, and if so write
-/// `<root>/.agents/skills/<slug>/SKILL.md`. Mirrors [`spawn_auto_memory_update`] —
-/// never blocks or fails the already-returned [`AgentResult`].
-pub fn spawn_auto_skill_write(
-    config: MintConfig,
-    task: String,
-    summary: String,
-    root: PathBuf,
-    existing_skills: String,
-) {
-    tokio::spawn(async move {
-        if let Err(e) = auto_write_skill(&config, &task, &summary, &root, &existing_skills).await
-        {
-            eprintln!("Auto skill write failed: {:?}", e);
-        }
-    });
-}
-
-async fn auto_write_skill(
-    config: &MintConfig,
-    task: &str,
-    summary: &str,
-    root: &Path,
-    existing_skills: &str,
-) -> Result<(), OrchestrationError> {
-    let system_instruction = r#"You are a background agent that decides whether a just-completed
-coding/agent task is worth turning into a reusable skill for future sessions.
-
-A task is skill-worthy only if it was non-trivial (took real investigation or multiple
-steps to solve) AND the solution generalizes beyond this one-off instance (a pattern,
-workaround, command sequence, or gotcha that will plausibly recur). Do NOT save trivial
-tasks, one-off questions, or anything already covered by an existing skill listed below
-(reuse that skill's slug to update it instead of creating a near-duplicate).
-
-You must return strictly valid JSON with no other text, markers, or markdown, and do NOT
-wrap it in ```json fences. Two shapes are allowed:
-
-Not worth saving:
-{"should_save": false}
-
-Worth saving:
-{
-  "should_save": true,
-  "slug": "kebab-case-name",
-  "description": "one-line summary of when this skill applies",
-  "content": "full SKILL.md body as markdown, starting with YAML frontmatter:\n---\ndescription: one-line summary\n---\nthen step-by-step reusable instructions"
-}"#
-        .to_string();
-
-    let message = format!(
-        "Existing skills already known (avoid duplicating these; reuse a slug below to update it instead):\n{}\n\nTask:\n{}\n\nOutcome:\n{}",
-        existing_skills, task, summary
-    );
-
-    let request = ChatRequest {
-        message,
-        system_instruction,
-        chat_id: None,
-        image_data_uri: None,
-        audio_data_uri: None,
-        video_data_uri: None,
-        document_attachment: None,
-        workspace_path: None,
-        agent_id: None,
-        plan_mode: false,
-        messages: None,
-        tools: None,
-    };
-
-    let response = send_chat(config, &request).await?;
-    let text_reply = response.text.trim();
-
-    let clean_json = if text_reply.starts_with("```") {
-        let lines: Vec<&str> = text_reply.lines().collect();
-        let mut filtered = Vec::new();
-        for line in lines {
-            let trimmed = line.trim();
-            if !trimmed.starts_with("```") {
-                filtered.push(trimmed);
-            }
-        }
-        filtered.join("\n")
-    } else {
-        text_reply.to_string()
-    };
-
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&clean_json) else {
-        return Ok(());
-    };
-    let Some(obj) = value.as_object() else {
-        return Ok(());
-    };
-    if !obj
-        .get("should_save")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
-        return Ok(());
-    }
-    let (Some(slug), Some(content)) = (
-        obj.get("slug").and_then(|v| v.as_str()),
-        obj.get("content").and_then(|v| v.as_str()),
-    ) else {
-        return Ok(());
-    };
-
-    let slug = slugify(slug);
-    if slug.is_empty() {
-        return Ok(());
-    }
-
-    let skill_dir = root.join(".agents").join("skills").join(&slug);
-    std::fs::create_dir_all(&skill_dir)
-        .map_err(|e| OrchestrationError::Agent(format!("unable to create {skill_dir:?}: {e}")))?;
-    std::fs::write(skill_dir.join("SKILL.md"), content)
-        .map_err(|e| OrchestrationError::Agent(format!("unable to write SKILL.md: {e}")))?;
-
-    Ok(())
-}
-
-/// Lowercases, replaces runs of non-alphanumeric characters with a single `-`, and
-/// trims leading/trailing `-` — turns an arbitrary model-provided name into a safe
-/// directory name under `.agents/skills/`.
-fn slugify(value: &str) -> String {
-    let mut slug = String::with_capacity(value.len());
-    let mut last_was_dash = false;
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() {
-            slug.push(ch.to_ascii_lowercase());
-            last_was_dash = false;
-        } else if !last_was_dash && !slug.is_empty() {
-            slug.push('-');
-            last_was_dash = true;
-        }
-    }
-    if slug.ends_with('-') {
-        slug.pop();
-    }
-    slug
-}
-
-pub async fn auto_extract_and_update_memory(
-    config: &MintConfig,
-    user_text: &str,
-    ai_text: &str,
-) -> Result<(), OrchestrationError> {
-    let memory = MemoryStore::open_default()?;
-
-    // Retrieve current profile values
-    let current_name = memory
-        .get_profile("name")
-        .unwrap_or(None)
-        .unwrap_or_default();
-    let current_pref = memory
-        .get_profile("preferences")
-        .unwrap_or(None)
-        .unwrap_or_default();
-
-    // System instruction for memory extraction
-    let system_instruction = r#"You are a background agent responsible for updating a user's profile memory.
-Analyze the latest conversation turn below.
-Determine if the user shared their name, nickname, or any preferences, hobbies, or instructions on how they want the assistant to behave (e.g. language, formatting preference, details).
-Update the existing Profile Name and Profile Preferences accordingly.
-Keep existing preferences, add new ones, and resolve conflicts. Do not add metadata (like "preferred name") unless it is a generic preference. Keep formatting simple (e.g. list style or bullet points).
-You must return the updated profile strictly as a valid JSON object with keys:
-- "name": (string) updated name or same if not changed.
-- "preferences": (string) updated preferences list or same if not changed.
-
-Format the response strictly as valid JSON, with no other text, markers, or markdown.
-Do NOT wrap the JSON in ```json ... ``` code blocks. Just output the raw JSON object.
-
-Example response:
-{
-  "name": "Pheem",
-  "preferences": "Always explain code step-by-step. Prefers TypeScript. Default language is Thai."
-}"#.to_string();
-
-    let message = format!(
-        "Current Name: {}\nCurrent Preferences:\n{}\n\nLatest Turn:\nUser: {}\nAssistant: {}",
-        current_name, current_pref, user_text, ai_text
-    );
-
-    let request = ChatRequest {
-        message,
-        system_instruction,
-        chat_id: None,
-        image_data_uri: None,
-        audio_data_uri: None,
-        video_data_uri: None,
-        document_attachment: None,
-        workspace_path: None,
-        agent_id: None,
-        plan_mode: false,
-        messages: None,
-        tools: None,
-    };
-
-    // Send the chat request to LLM
-    let response = send_chat(config, &request).await?;
-    let text_reply = response.text.trim();
-
-    // Attempt to parse the JSON response
-    let clean_json = if text_reply.starts_with("```") {
-        let lines: Vec<&str> = text_reply.lines().collect();
-        let mut filtered = Vec::new();
-        for line in lines {
-            let trimmed = line.trim();
-            if !trimmed.starts_with("```") {
-                filtered.push(trimmed);
-            }
-        }
-        filtered.join("\n")
-    } else {
-        text_reply.to_string()
-    };
-
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&clean_json)
-        && let Some(obj) = value.as_object()
-    {
-        if let Some(new_name) = obj.get("name").and_then(|v| v.as_str()) {
-            let trimmed_name = new_name.trim();
-            if !trimmed_name.is_empty() && trimmed_name != current_name {
-                memory.set_profile("name", trimmed_name)?;
-            }
-        }
-        if let Some(new_pref) = obj.get("preferences").and_then(|v| v.as_str()) {
-            let trimmed_pref = new_pref.trim();
-            if !trimmed_pref.is_empty() && trimmed_pref != current_pref {
-                memory.set_profile("preferences", trimmed_pref)?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3935,7 +2034,10 @@ mod tests {
     fn truncate_for_context_truncates_long_text_with_a_marker() {
         let long = "a".repeat(500);
         let result = truncate_for_context(&long, 400);
-        assert_eq!(result.chars().count(), 400 + "... [truncated]".chars().count());
+        assert_eq!(
+            result.chars().count(),
+            400 + "... [truncated]".chars().count()
+        );
         assert!(result.starts_with(&"a".repeat(400)));
         assert!(result.ends_with("... [truncated]"));
     }
@@ -3946,13 +2048,22 @@ mod tests {
         // or produce invalid UTF-8 if it landed mid-character.
         let thai = "สวัสดี".repeat(200);
         let result = truncate_for_context(&thai, 5);
-        assert_eq!(result.chars().count(), 5 + "... [truncated]".chars().count());
+        assert_eq!(
+            result.chars().count(),
+            5 + "... [truncated]".chars().count()
+        );
     }
 
     #[test]
     fn slugify_lowercases_and_collapses_separators() {
-        assert_eq!(slugify("Retry Flaky Playwright Tests!!"), "retry-flaky-playwright-tests");
-        assert_eq!(slugify("  leading/trailing --dashes--  "), "leading-trailing-dashes");
+        assert_eq!(
+            slugify("Retry Flaky Playwright Tests!!"),
+            "retry-flaky-playwright-tests"
+        );
+        assert_eq!(
+            slugify("  leading/trailing --dashes--  "),
+            "leading-trailing-dashes"
+        );
         assert_eq!(slugify("already-a-slug"), "already-a-slug");
         assert_eq!(slugify("***"), "");
     }
@@ -3977,10 +2088,16 @@ mod tests {
 
     #[test]
     fn shell_result_failed_reads_the_exit_line() {
-        assert!(!shell_result_failed("exit: 0\nmode: normal\nsandboxed: true\nstdout:\nok\nstderr:\n"));
-        assert!(shell_result_failed("exit: 1\nmode: normal\nsandboxed: true\nstdout:\nfail\nstderr:\n"));
+        assert!(!shell_result_failed(
+            "exit: 0\nmode: normal\nsandboxed: true\nstdout:\nok\nstderr:\n"
+        ));
+        assert!(shell_result_failed(
+            "exit: 1\nmode: normal\nsandboxed: true\nstdout:\nfail\nstderr:\n"
+        ));
         // A killed/unknown-status process isn't treated as a confirmed failure.
-        assert!(!shell_result_failed("exit: unknown\nmode: normal\nsandboxed: true\nstdout:\nstderr:\n"));
+        assert!(!shell_result_failed(
+            "exit: unknown\nmode: normal\nsandboxed: true\nstdout:\nstderr:\n"
+        ));
     }
 
     #[test]
@@ -4004,7 +2121,11 @@ mod tests {
         // Edited, verified after — satisfied regardless of what verify found.
         assert!(!unverified_modification(Some(2), Some(3), ""));
         // Edited, never verified, but explicitly explained why no check applies.
-        assert!(!unverified_modification(Some(2), None, "Docs-only change, no test suite."));
+        assert!(!unverified_modification(
+            Some(2),
+            None,
+            "Docs-only change, no test suite."
+        ));
     }
 
     #[test]
