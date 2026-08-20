@@ -5,7 +5,7 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
@@ -138,6 +138,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
         };
 
         tokio::spawn(async move {
+            // Isolates a panic anywhere in this connection's handling (a malformed
+            // request, an unexpected `None` on some edge-case input, ...) so it
+            // only drops this one connection instead of leaving it hung with no
+            // response and no trace in the logs — same reasoning as
+            // `channels::restarting_loop`, which does this for the bridge loops.
+            let outcome = std::panic::AssertUnwindSafe(async move {
             let mut request_bytes = Vec::with_capacity(8192);
             let mut chunk = [0_u8; 8192];
             let mut expected_len: Option<usize> = None;
@@ -311,12 +317,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                             })
                         })
                         .collect();
-                    send_json_response(
-                        socket,
-                        "200 OK",
-                        &json!({ "bridges": items }).to_string(),
-                    )
-                    .await;
+                    send_json_response(socket, "200 OK", &json!({ "bridges": items }).to_string())
+                        .await;
                 }
                 ("POST", "/api/auth/register") => {
                     #[derive(Deserialize)]
@@ -772,8 +774,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                     let err_msg =
                                         json!({ "error": format!("reauth task failed: {err}") })
                                             .to_string();
-                                    send_json_response(socket, "500 Internal Server Error", &err_msg)
-                                        .await;
+                                    send_json_response(
+                                        socket,
+                                        "500 Internal Server Error",
+                                        &err_msg,
+                                    )
+                                    .await;
                                 }
                             }
                         }
@@ -798,41 +804,39 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
-                ("POST", "/api/cron") => {
-                    match serde_json::from_str::<crate::CronJobDraft>(body) {
-                        Ok(draft) => match crate::CronStore::open_default() {
-                            Ok(store) => {
-                                match store.add(draft.name, draft.schedule, draft.task, draft.workspace)
-                                {
-                                    Ok(job) => {
-                                        send_json_response(
-                                            socket,
-                                            "200 OK",
-                                            &serde_json::to_string(&job).unwrap_or_default(),
-                                        )
-                                        .await;
-                                    }
-                                    Err(err) => {
-                                        let err_msg = json!({ "error": err.to_string() }).to_string();
-                                        send_json_response(socket, "400 Bad Request", &err_msg).await;
-                                    }
+                ("POST", "/api/cron") => match serde_json::from_str::<crate::CronJobDraft>(body) {
+                    Ok(draft) => match crate::CronStore::open_default() {
+                        Ok(store) => {
+                            match store.add(draft.name, draft.schedule, draft.task, draft.workspace)
+                            {
+                                Ok(job) => {
+                                    send_json_response(
+                                        socket,
+                                        "200 OK",
+                                        &serde_json::to_string(&job).unwrap_or_default(),
+                                    )
+                                    .await;
+                                }
+                                Err(err) => {
+                                    let err_msg = json!({ "error": err.to_string() }).to_string();
+                                    send_json_response(socket, "400 Bad Request", &err_msg).await;
                                 }
                             }
-                            Err(err) => {
-                                let err_msg = json!({ "error": err.to_string() }).to_string();
-                                send_json_response(socket, "400 Bad Request", &err_msg).await;
-                            }
-                        },
-                        Err(_) => {
-                            send_json_response(
-                                socket,
-                                "400 Bad Request",
-                                "{\"error\":\"Invalid request body.\"}",
-                            )
-                            .await;
                         }
+                        Err(err) => {
+                            let err_msg = json!({ "error": err.to_string() }).to_string();
+                            send_json_response(socket, "400 Bad Request", &err_msg).await;
+                        }
+                    },
+                    Err(_) => {
+                        send_json_response(
+                            socket,
+                            "400 Bad Request",
+                            "{\"error\":\"Invalid request body.\"}",
+                        )
+                        .await;
                     }
-                }
+                },
                 ("DELETE", route) if route.starts_with("/api/cron/") => {
                     let id = percent_decode(route.trim_start_matches("/api/cron/"));
                     match crate::CronStore::open_default().and_then(|store| store.remove(&id)) {
@@ -939,12 +943,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                                 draft.description,
                             ) {
                                 Ok(()) => {
-                                    send_json_response(
-                                        socket,
-                                        "200 OK",
-                                        "{\"status\":\"ok\"}",
-                                    )
-                                    .await;
+                                    send_json_response(socket, "200 OK", "{\"status\":\"ok\"}")
+                                        .await;
                                 }
                                 Err(err) => {
                                     let err_msg = json!({ "error": err.to_string() }).to_string();
@@ -2799,6 +2799,13 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     send_json_response(socket, "404 Not Found", "{\"error\":\"Not Found\"}").await;
                 }
             }
+            })
+            .catch_unwind()
+            .await;
+            if let Err(payload) = outcome {
+                let message = crate::channels::panic_payload_message(&payload);
+                eprintln!("[mint] api_server connection handler panicked: {message}");
+            }
         });
     }
 }
@@ -3072,8 +3079,20 @@ fn api_auth_ok(request_str: &str) -> bool {
     }) else {
         return true;
     };
+    token_matches(request_str, &expected_token)
+}
+
+/// Checks the request's `Authorization: Bearer <token>` header against the
+/// expected token. Split out from `api_auth_ok` so this comparison — the
+/// actual security check — is testable without touching the real on-disk
+/// config that `api_auth_ok` reads `expected_token` from.
+fn token_matches(request_str: &str, expected_token: &str) -> bool {
     get_header(request_str, "Authorization")
-        .and_then(|header| header.strip_prefix("Bearer ").map(|token| token.trim().to_owned()))
+        .and_then(|header| {
+            header
+                .strip_prefix("Bearer ")
+                .map(|token| token.trim().to_owned())
+        })
         .is_some_and(|provided_token| provided_token == expected_token)
 }
 
@@ -3205,4 +3224,159 @@ async fn send_binary_response(
     let _ = socket.write_all(response.as_bytes()).await;
     let _ = socket.write_all(body).await;
     let _ = socket.flush().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- get_header --------------------------------------------------
+
+    #[test]
+    fn get_header_finds_header_case_insensitively() {
+        let req =
+            "GET /api/status HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer abc123\r\n\r\n";
+        assert_eq!(
+            get_header(req, "authorization").as_deref(),
+            Some("Bearer abc123")
+        );
+        assert_eq!(
+            get_header(req, "AUTHORIZATION").as_deref(),
+            Some("Bearer abc123")
+        );
+    }
+
+    #[test]
+    fn get_header_trims_leading_whitespace() {
+        let req = "GET / HTTP/1.1\r\nX-Test:    spaced-value  \r\n\r\n";
+        assert_eq!(get_header(req, "X-Test").as_deref(), Some("spaced-value"));
+    }
+
+    #[test]
+    fn get_header_missing_returns_none() {
+        let req = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(get_header(req, "Authorization"), None);
+    }
+
+    #[test]
+    fn get_header_does_not_match_suffix_header_names() {
+        // "Authorization-Extra" must not be picked up when asking for "Authorization".
+        let req = "GET / HTTP/1.1\r\nAuthorization-Extra: nope\r\n\r\n";
+        assert_eq!(get_header(req, "Authorization"), None);
+    }
+
+    #[test]
+    fn get_header_ignores_body_content() {
+        // A header-looking line in the body (after \r\n\r\n) must not be read.
+        let req = "POST / HTTP/1.1\r\nHost: localhost\r\n\r\nAuthorization: Bearer body-smuggled";
+        assert_eq!(get_header(req, "Authorization"), None);
+    }
+
+    // -- token_matches (the actual gateway auth-gate comparison) ------
+
+    #[test]
+    fn token_matches_accepts_correct_bearer_token() {
+        let req = "GET / HTTP/1.1\r\nAuthorization: Bearer secret-token\r\n\r\n";
+        assert!(token_matches(req, "secret-token"));
+    }
+
+    #[test]
+    fn token_matches_rejects_wrong_token() {
+        let req = "GET / HTTP/1.1\r\nAuthorization: Bearer wrong-token\r\n\r\n";
+        assert!(!token_matches(req, "secret-token"));
+    }
+
+    #[test]
+    fn token_matches_rejects_missing_header() {
+        let req = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert!(!token_matches(req, "secret-token"));
+    }
+
+    #[test]
+    fn token_matches_rejects_header_without_bearer_prefix() {
+        let req = "GET / HTTP/1.1\r\nAuthorization: secret-token\r\n\r\n";
+        assert!(!token_matches(req, "secret-token"));
+    }
+
+    #[test]
+    fn token_matches_trims_surrounding_whitespace_on_token() {
+        let req = "GET / HTTP/1.1\r\nAuthorization: Bearer   secret-token  \r\n\r\n";
+        assert!(token_matches(req, "secret-token"));
+    }
+
+    #[test]
+    fn token_matches_rejects_empty_expected_token() {
+        // Callers should never reach here with an empty expected_token (api_auth_ok
+        // filters those out before calling), but the comparison itself must not
+        // treat "no token provided" as matching "no token expected".
+        let req = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert!(!token_matches(req, ""));
+    }
+
+    // -- query_param / percent_decode ---------------------------------
+
+    #[test]
+    fn percent_decode_handles_percent_and_plus_encoding() {
+        assert_eq!(percent_decode("hello%20world"), "hello world");
+        assert_eq!(percent_decode("a+b"), "a b");
+        assert_eq!(percent_decode("100%25"), "100%");
+    }
+
+    #[test]
+    fn percent_decode_leaves_invalid_escapes_intact() {
+        assert_eq!(percent_decode("50%"), "50%");
+        assert_eq!(percent_decode("50%zz"), "50%zz");
+    }
+
+    #[test]
+    fn query_param_extracts_decoded_value() {
+        let query = "path=%2Fhome%2Fuser&limit=10";
+        assert_eq!(query_param(query, "path").as_deref(), Some("/home/user"));
+        assert_eq!(query_param(query, "limit").as_deref(), Some("10"));
+        assert_eq!(query_param(query, "missing"), None);
+    }
+
+    #[test]
+    fn encode_query_percent_encodes_reserved_characters() {
+        assert_eq!(encode_query("a b"), "a+b");
+        assert_eq!(encode_query("100%"), "100%25");
+        assert_eq!(encode_query("safe-Value_1.0~"), "safe-Value_1.0~");
+    }
+
+    #[test]
+    fn encode_query_round_trips_through_percent_decode() {
+        let original = "hello world/ünïcode? 100%";
+        assert_eq!(percent_decode(&encode_query(original)), original);
+    }
+
+    // -- websocket_accept_header ---------------------------------------
+
+    #[test]
+    fn websocket_accept_header_matches_rfc6455_example() {
+        // Worked example straight from RFC 6455 section 1.3.
+        assert_eq!(
+            websocket_accept_header("dGhlIHNhbXBsZSBub25jZQ=="),
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+    }
+
+    // -- misc small helpers ---------------------------------------------
+
+    #[test]
+    fn success_json_shape() {
+        let value = success_json("done");
+        assert_eq!(value["success"], true);
+        assert_eq!(value["message"], "done");
+    }
+
+    #[test]
+    fn unix_timestamp_is_recent_and_monotonic_enough() {
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let ts = unix_timestamp();
+        assert!(ts >= before);
+        assert!(ts < before + 5);
+    }
 }

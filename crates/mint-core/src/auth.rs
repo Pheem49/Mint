@@ -74,14 +74,7 @@ pub fn save_avatar_file(bytes: &[u8], extension: &str) -> Result<String, AuthErr
     Ok(format!("/api/avatar?key={file_name}"))
 }
 
-fn open_user_db() -> Result<Connection, AuthError> {
-    let path = user_db_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).ok();
-    }
-    let conn = Connection::open(path)?;
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS user (
+const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS user (
             id TEXT PRIMARY KEY,
             name TEXT,
             email TEXT UNIQUE,
@@ -113,12 +106,37 @@ fn open_user_db() -> Result<Connection, AuthError> {
             token TEXT NOT NULL,
             expires INTEGER NOT NULL,
             PRIMARY KEY (identifier, token)
-        );",
-    )?;
+        );";
+
+fn init_schema(conn: &Connection) -> Result<(), AuthError> {
+    conn.execute_batch(SCHEMA_SQL)?;
+    Ok(())
+}
+
+fn open_user_db() -> Result<Connection, AuthError> {
+    let path = user_db_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let conn = Connection::open(path)?;
+    init_schema(&conn)?;
     Ok(conn)
 }
 
 pub fn register_user(
+    name: Option<String>,
+    email: &str,
+    password: &str,
+) -> Result<AuthUser, AuthError> {
+    register_user_with_conn(&open_user_db()?, name, email, password)
+}
+
+/// Core registration logic, decoupled from the real on-disk database so it
+/// can run against an isolated connection (e.g. a temp-file SQLite db) in
+/// tests. `register_user` is the production entry point; call this directly
+/// only from tests.
+fn register_user_with_conn(
+    conn: &Connection,
     name: Option<String>,
     email: &str,
     password: &str,
@@ -130,8 +148,6 @@ pub fn register_user(
     if password.len() < 8 {
         return Err(AuthError::PasswordTooShort);
     }
-
-    let conn = open_user_db()?;
 
     let existing: Option<String> = conn
         .query_row(
@@ -164,12 +180,19 @@ pub fn register_user(
 }
 
 pub fn login_user(email: &str, password: &str) -> Result<AuthUser, AuthError> {
+    login_user_with_conn(&open_user_db()?, email, password)
+}
+
+fn login_user_with_conn(
+    conn: &Connection,
+    email: &str,
+    password: &str,
+) -> Result<AuthUser, AuthError> {
     let email = email.trim();
     if email.is_empty() || password.is_empty() {
         return Err(AuthError::MissingCredentials);
     }
 
-    let conn = open_user_db()?;
     let row: Option<(
         String,
         Option<String>,
@@ -211,7 +234,10 @@ pub fn login_user(email: &str, password: &str) -> Result<AuthUser, AuthError> {
 }
 
 pub fn get_user(id: &str) -> Result<Option<AuthUser>, AuthError> {
-    let conn = open_user_db()?;
+    get_user_with_conn(&open_user_db()?, id)
+}
+
+fn get_user_with_conn(conn: &Connection, id: &str) -> Result<Option<AuthUser>, AuthError> {
     let user = conn
         .query_row(
             "SELECT id, name, email, image FROM user WHERE id = ?1",
@@ -234,7 +260,15 @@ pub fn update_profile(
     name: Option<String>,
     image: Option<String>,
 ) -> Result<AuthUser, AuthError> {
-    let conn = open_user_db()?;
+    update_profile_with_conn(&open_user_db()?, id, name, image)
+}
+
+fn update_profile_with_conn(
+    conn: &Connection,
+    id: &str,
+    name: Option<String>,
+    image: Option<String>,
+) -> Result<AuthUser, AuthError> {
     if let Some(name) = &name {
         conn.execute("UPDATE user SET name = ?1 WHERE id = ?2", params![name, id])?;
     }
@@ -244,7 +278,7 @@ pub fn update_profile(
             params![image, id],
         )?;
     }
-    get_user(id)?.ok_or(AuthError::InvalidCredentials)
+    get_user_with_conn(conn, id)?.ok_or(AuthError::InvalidCredentials)
 }
 
 // --- Session tokens (used by the web-mode API server; the desktop app uses
@@ -257,20 +291,28 @@ pub fn update_profile(
 const SESSION_LIFETIME_DAYS: i64 = 30;
 
 pub fn create_session(user_id: &str) -> String {
+    let Ok(conn) = open_user_db() else {
+        return Uuid::new_v4().to_string();
+    };
+    create_session_with_conn(&conn, user_id)
+}
+
+fn create_session_with_conn(conn: &Connection, user_id: &str) -> String {
     let token = Uuid::new_v4().to_string();
-    if let Ok(conn) = open_user_db() {
-        let expires =
-            (chrono::Utc::now() + chrono::Duration::days(SESSION_LIFETIME_DAYS)).timestamp_millis();
-        let _ = conn.execute(
-            "INSERT INTO session (sessionToken, userId, expires) VALUES (?1, ?2, ?3)",
-            params![token, user_id, expires],
-        );
-    }
+    let expires =
+        (chrono::Utc::now() + chrono::Duration::days(SESSION_LIFETIME_DAYS)).timestamp_millis();
+    let _ = conn.execute(
+        "INSERT INTO session (sessionToken, userId, expires) VALUES (?1, ?2, ?3)",
+        params![token, user_id, expires],
+    );
     token
 }
 
 pub fn session_user_id(token: &str) -> Option<String> {
-    let conn = open_user_db().ok()?;
+    session_user_id_with_conn(&open_user_db().ok()?, token)
+}
+
+fn session_user_id_with_conn(conn: &Connection, token: &str) -> Option<String> {
     let now = chrono::Utc::now().timestamp_millis();
     conn.query_row(
         "SELECT userId FROM session WHERE sessionToken = ?1 AND expires > ?2",
@@ -284,9 +326,220 @@ pub fn session_user_id(token: &str) -> Option<String> {
 
 pub fn destroy_session(token: &str) {
     if let Ok(conn) = open_user_db() {
-        let _ = conn.execute(
-            "DELETE FROM session WHERE sessionToken = ?1",
-            params![token],
+        destroy_session_with_conn(&conn, token);
+    }
+}
+
+fn destroy_session_with_conn(conn: &Connection, token: &str) {
+    let _ = conn.execute(
+        "DELETE FROM session WHERE sessionToken = ?1",
+        params![token],
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// A real (temp-file, not in-memory) SQLite connection with the schema
+    /// applied — mirrors `open_user_db()` but points at a throwaway file
+    /// instead of the real `~/.config/mint/mint-user.sqlite`, so these tests
+    /// can never touch a real user's account data. Each test gets a unique
+    /// path (pid + nanos) so `cargo test`'s parallel test threads don't
+    /// collide, matching the pattern used in tests/memory_persistence.rs.
+    fn test_conn(name: &str) -> Connection {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mint-core-auth-test-{name}-{}-{nanos}.sqlite",
+            std::process::id(),
+        ));
+        let _ = std::fs::remove_file(&path);
+        let conn = Connection::open(&path).expect("open temp sqlite db");
+        init_schema(&conn).expect("init schema");
+        conn
+    }
+
+    // -- register_user ---------------------------------------------------
+
+    #[test]
+    fn register_user_succeeds_and_hashes_password() {
+        let conn = test_conn("register-ok");
+        let user = register_user_with_conn(
+            &conn,
+            Some("Pheem".to_string()),
+            "pheem@example.com",
+            "hunter22",
+        )
+        .expect("registration should succeed");
+
+        assert_eq!(user.email.as_deref(), Some("pheem@example.com"));
+        assert_eq!(user.name.as_deref(), Some("Pheem"));
+
+        let stored_hash: String = conn
+            .query_row(
+                "SELECT passwordHash FROM user WHERE id = ?1",
+                params![user.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(
+            stored_hash, "hunter22",
+            "password must not be stored in plaintext"
         );
+        assert!(bcrypt::verify("hunter22", &stored_hash).unwrap());
+    }
+
+    #[test]
+    fn register_user_defaults_name_from_email_when_blank() {
+        let conn = test_conn("register-default-name");
+        let user = register_user_with_conn(&conn, None, "nickname@example.com", "hunter22")
+            .expect("registration should succeed");
+        assert_eq!(user.name.as_deref(), Some("nickname"));
+    }
+
+    #[test]
+    fn register_user_rejects_duplicate_email() {
+        let conn = test_conn("register-dup");
+        register_user_with_conn(&conn, None, "dup@example.com", "hunter22").unwrap();
+        let result = register_user_with_conn(&conn, None, "dup@example.com", "different1");
+        assert!(matches!(result, Err(AuthError::EmailTaken)));
+    }
+
+    #[test]
+    fn register_user_rejects_short_password() {
+        let conn = test_conn("register-short-pw");
+        let result = register_user_with_conn(&conn, None, "short@example.com", "abc123");
+        assert!(matches!(result, Err(AuthError::PasswordTooShort)));
+    }
+
+    #[test]
+    fn register_user_rejects_empty_email_or_password() {
+        let conn = test_conn("register-empty");
+        assert!(matches!(
+            register_user_with_conn(&conn, None, "", "hunter22"),
+            Err(AuthError::MissingCredentials)
+        ));
+        assert!(matches!(
+            register_user_with_conn(&conn, None, "someone@example.com", ""),
+            Err(AuthError::MissingCredentials)
+        ));
+    }
+
+    // -- login_user -------------------------------------------------------
+
+    #[test]
+    fn login_user_succeeds_with_correct_password() {
+        let conn = test_conn("login-ok");
+        register_user_with_conn(&conn, None, "login@example.com", "correct-horse").unwrap();
+        let user = login_user_with_conn(&conn, "login@example.com", "correct-horse")
+            .expect("login should succeed");
+        assert_eq!(user.email.as_deref(), Some("login@example.com"));
+    }
+
+    #[test]
+    fn login_user_rejects_wrong_password() {
+        let conn = test_conn("login-wrong-pw");
+        register_user_with_conn(&conn, None, "login2@example.com", "correct-horse").unwrap();
+        let result = login_user_with_conn(&conn, "login2@example.com", "wrong-password");
+        assert!(matches!(result, Err(AuthError::InvalidCredentials)));
+    }
+
+    #[test]
+    fn login_user_rejects_unknown_email() {
+        let conn = test_conn("login-unknown");
+        let result = login_user_with_conn(&conn, "ghost@example.com", "whatever1");
+        assert!(matches!(result, Err(AuthError::InvalidCredentials)));
+    }
+
+    #[test]
+    fn login_user_rejects_empty_credentials() {
+        let conn = test_conn("login-empty");
+        assert!(matches!(
+            login_user_with_conn(&conn, "", "whatever1"),
+            Err(AuthError::MissingCredentials)
+        ));
+    }
+
+    // -- get_user / update_profile ----------------------------------------
+
+    #[test]
+    fn get_user_round_trips_registered_user() {
+        let conn = test_conn("get-user");
+        let created =
+            register_user_with_conn(&conn, Some("Name".into()), "getme@example.com", "hunter22")
+                .unwrap();
+        let fetched = get_user_with_conn(&conn, &created.id).unwrap();
+        assert_eq!(
+            fetched.map(|u| u.email),
+            Some(Some("getme@example.com".to_string()))
+        );
+    }
+
+    #[test]
+    fn get_user_returns_none_for_unknown_id() {
+        let conn = test_conn("get-user-missing");
+        assert!(get_user_with_conn(&conn, "no-such-id").unwrap().is_none());
+    }
+
+    #[test]
+    fn update_profile_changes_name_and_image() {
+        let conn = test_conn("update-profile");
+        let created =
+            register_user_with_conn(&conn, None, "update@example.com", "hunter22").unwrap();
+        let updated = update_profile_with_conn(
+            &conn,
+            &created.id,
+            Some("New Name".to_string()),
+            Some("/api/avatar?key=x.png".to_string()),
+        )
+        .unwrap();
+        assert_eq!(updated.name.as_deref(), Some("New Name"));
+        assert_eq!(updated.image.as_deref(), Some("/api/avatar?key=x.png"));
+    }
+
+    // -- sessions -----------------------------------------------------------
+
+    #[test]
+    fn session_create_then_resolve_returns_user_id() {
+        let conn = test_conn("session-resolve");
+        let user = register_user_with_conn(&conn, None, "session@example.com", "hunter22").unwrap();
+        let token = create_session_with_conn(&conn, &user.id);
+        assert_eq!(
+            session_user_id_with_conn(&conn, &token).as_deref(),
+            Some(user.id.as_str())
+        );
+    }
+
+    #[test]
+    fn session_unknown_token_resolves_to_none() {
+        let conn = test_conn("session-unknown");
+        assert_eq!(session_user_id_with_conn(&conn, "no-such-token"), None);
+    }
+
+    #[test]
+    fn session_destroy_makes_it_unresolvable() {
+        let conn = test_conn("session-destroy");
+        let user = register_user_with_conn(&conn, None, "destroy@example.com", "hunter22").unwrap();
+        let token = create_session_with_conn(&conn, &user.id);
+        destroy_session_with_conn(&conn, &token);
+        assert_eq!(session_user_id_with_conn(&conn, &token), None);
+    }
+
+    #[test]
+    fn session_expired_resolves_to_none() {
+        let conn = test_conn("session-expired");
+        let user = register_user_with_conn(&conn, None, "expired@example.com", "hunter22").unwrap();
+        let expired_token = Uuid::new_v4().to_string();
+        let already_expired = (chrono::Utc::now() - chrono::Duration::days(1)).timestamp_millis();
+        conn.execute(
+            "INSERT INTO session (sessionToken, userId, expires) VALUES (?1, ?2, ?3)",
+            params![expired_token, user.id, already_expired],
+        )
+        .unwrap();
+        assert_eq!(session_user_id_with_conn(&conn, &expired_token), None);
     }
 }

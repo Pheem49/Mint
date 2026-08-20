@@ -30,7 +30,12 @@ fn calls_stdio_mcp_tool() {
                 "command": "sh",
                 "args": [
                     "-c",
-                    "read init; read ready; read call; printf '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"ok\":true}}\\n'"
+                    // The client blocks on the `initialize` response before sending
+                    // `notifications/initialized` or the tool call (see McpSession::start),
+                    // so this must answer id 1 as soon as it's read rather than draining
+                    // all three lines before replying once — otherwise it deadlocks
+                    // waiting for input the client will never send.
+                    "read init; printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\\n'; read ready; read call; printf '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"ok\":true}}\\n'"
                 ]
             }
         }),

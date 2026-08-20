@@ -232,21 +232,37 @@ pub fn start_background(
     {
         let job = Arc::clone(&job);
         std::thread::spawn(move || {
-            // Always wait, even if `kill_job` already marked this Killed —
-            // otherwise the child becomes a zombie.
-            let exit_status = child.wait();
-            let mut status = job.status.lock().unwrap();
-            let was_running = matches!(*status, JobStatus::Running);
-            if was_running {
-                *status = match exit_status {
-                    Ok(code) => JobStatus::Exited(code.code().unwrap_or(-1)),
-                    Err(e) => JobStatus::Failed(e.to_string()),
-                };
-            }
-            let final_status = status.clone();
-            drop(status);
-            if was_running {
-                push_finished_notice(&job, &final_status);
+            let job_for_wait = Arc::clone(&job);
+            // Isolated so a panic here (an unexpectedly poisoned lock, ...) marks
+            // the job Failed instead of leaving it stuck showing `Running`
+            // forever in `/shells` with no explanation and — since `child` is
+            // never `wait()`-ed on if the panic happens before that call — a
+            // zombie process left behind.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                // Always wait, even if `kill_job` already marked this Killed —
+                // otherwise the child becomes a zombie.
+                let exit_status = child.wait();
+                let mut status = job_for_wait.status.lock().unwrap();
+                let was_running = matches!(*status, JobStatus::Running);
+                if was_running {
+                    *status = match exit_status {
+                        Ok(code) => JobStatus::Exited(code.code().unwrap_or(-1)),
+                        Err(e) => JobStatus::Failed(e.to_string()),
+                    };
+                }
+                let final_status = status.clone();
+                drop(status);
+                if was_running {
+                    push_finished_notice(&job_for_wait, &final_status);
+                }
+            }));
+            if let Err(payload) = result {
+                let message = crate::channels::panic_payload_message(&payload);
+                eprintln!("[mint] bg_shell job reaper thread panicked: {message}");
+                let mut status = job.status.lock().unwrap();
+                if matches!(*status, JobStatus::Running) {
+                    *status = JobStatus::Failed(format!("reaper thread panicked: {message}"));
+                }
             }
         });
     }
@@ -256,7 +272,10 @@ pub fn start_background(
         pid: job.pid,
         cwd,
     };
-    BG_SHELL_JOBS.lock().unwrap().insert(started.id.clone(), job);
+    BG_SHELL_JOBS
+        .lock()
+        .unwrap()
+        .insert(started.id.clone(), job);
     Ok(started)
 }
 
@@ -292,32 +311,48 @@ pub fn promote_timed_out(
     {
         let job = Arc::clone(&job);
         std::thread::spawn(move || {
-            let stdout = stdout_handle.join().unwrap_or_default();
-            let stderr = stderr_handle.join().unwrap_or_default();
-            job.stdout
-                .lock()
-                .unwrap()
-                .push(&String::from_utf8_lossy(&stdout));
-            job.stderr
-                .lock()
-                .unwrap()
-                .push(&String::from_utf8_lossy(&stderr));
+            let job_for_wait = Arc::clone(&job);
+            // See the matching comment in `start_background`: isolated so a
+            // panic here marks the job Failed instead of leaving it stuck as
+            // `Running` forever with a zombie child left un-`wait()`-ed.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                let stdout = stdout_handle.join().unwrap_or_default();
+                let stderr = stderr_handle.join().unwrap_or_default();
+                job_for_wait
+                    .stdout
+                    .lock()
+                    .unwrap()
+                    .push(&String::from_utf8_lossy(&stdout));
+                job_for_wait
+                    .stderr
+                    .lock()
+                    .unwrap()
+                    .push(&String::from_utf8_lossy(&stderr));
 
-            // Always wait, even if `kill_job` already marked this Killed —
-            // otherwise the child becomes a zombie.
-            let exit_status = child.wait();
-            let mut status = job.status.lock().unwrap();
-            let was_running = matches!(*status, JobStatus::Running);
-            if was_running {
-                *status = match exit_status {
-                    Ok(code) => JobStatus::Exited(code.code().unwrap_or(-1)),
-                    Err(e) => JobStatus::Failed(e.to_string()),
-                };
-            }
-            let final_status = status.clone();
-            drop(status);
-            if was_running {
-                push_finished_notice(&job, &final_status);
+                // Always wait, even if `kill_job` already marked this Killed —
+                // otherwise the child becomes a zombie.
+                let exit_status = child.wait();
+                let mut status = job_for_wait.status.lock().unwrap();
+                let was_running = matches!(*status, JobStatus::Running);
+                if was_running {
+                    *status = match exit_status {
+                        Ok(code) => JobStatus::Exited(code.code().unwrap_or(-1)),
+                        Err(e) => JobStatus::Failed(e.to_string()),
+                    };
+                }
+                let final_status = status.clone();
+                drop(status);
+                if was_running {
+                    push_finished_notice(&job_for_wait, &final_status);
+                }
+            }));
+            if let Err(payload) = result {
+                let message = crate::channels::panic_payload_message(&payload);
+                eprintln!("[mint] bg_shell job reaper thread panicked: {message}");
+                let mut status = job.status.lock().unwrap();
+                if matches!(*status, JobStatus::Running) {
+                    *status = JobStatus::Failed(format!("reaper thread panicked: {message}"));
+                }
             }
         });
     }
@@ -327,7 +362,10 @@ pub fn promote_timed_out(
         pid: job.pid,
         cwd,
     };
-    BG_SHELL_JOBS.lock().unwrap().insert(started.id.clone(), job);
+    BG_SHELL_JOBS
+        .lock()
+        .unwrap()
+        .insert(started.id.clone(), job);
     started
 }
 
@@ -481,10 +519,7 @@ pub fn kill_job(job_id: &str) -> Result<String, ShellError> {
         }
     }
 
-    Ok(format!(
-        "job_id: {} kill signal sent (pid {pid})",
-        job.id
-    ))
+    Ok(format!("job_id: {} kill signal sent (pid {pid})", job.id))
 }
 
 #[cfg(test)]
@@ -517,8 +552,7 @@ mod tests {
     #[test]
     fn background_job_reports_running_then_exit() {
         let config = local_config();
-        let started =
-            start_background(Path::new("."), &config, "sleep 0.1 && echo hello").unwrap();
+        let started = start_background(Path::new("."), &config, "sleep 0.1 && echo hello").unwrap();
         assert!(started.pid.is_some());
 
         let after = poll_until(&started.id, Duration::from_secs(10), |out| {

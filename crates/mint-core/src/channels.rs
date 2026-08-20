@@ -78,7 +78,7 @@ where
     }
 }
 
-fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+pub(crate) fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
         (*message).to_string()
     } else if let Some(message) = payload.downcast_ref::<String>() {
@@ -522,8 +522,12 @@ async fn signal_loop() -> Result<(), String> {
                 continue;
             }
             let shared_chat_id = crate::CHAT_CLI_ID.to_string();
-            let reply = answer_channel(text, "Reply concisely for a Signal chat.", Some(shared_chat_id))
-                .await;
+            let reply = answer_channel(
+                text,
+                "Reply concisely for a Signal chat.",
+                Some(shared_chat_id),
+            )
+            .await;
             let _ = client
                 .post(format!("{base_url}/v2/send"))
                 .json(&json!({ "message": reply, "number": number, "recipients": [source] }))
@@ -554,9 +558,10 @@ async fn email_loop() -> Result<(), String> {
             tokio::time::sleep(Duration::from_secs(30)).await;
             continue;
         };
-        let (Some(client_id), Some(client_secret)) =
-            (config_value("gmailClientId"), config_value("gmailClientSecret"))
-        else {
+        let (Some(client_id), Some(client_secret)) = (
+            config_value("gmailClientId"),
+            config_value("gmailClientSecret"),
+        ) else {
             tokio::time::sleep(Duration::from_secs(30)).await;
             continue;
         };
@@ -598,11 +603,18 @@ async fn email_loop() -> Result<(), String> {
                 continue;
             };
 
-            let headers = detail["payload"]["headers"].as_array().cloned().unwrap_or_default();
+            let headers = detail["payload"]["headers"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
             let header = |name: &str| -> Option<&str> {
                 headers
                     .iter()
-                    .find(|h| h["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(name)))
+                    .find(|h| {
+                        h["name"]
+                            .as_str()
+                            .is_some_and(|n| n.eq_ignore_ascii_case(name))
+                    })
                     .and_then(|h| h["value"].as_str())
             };
             let sender_email = header("From")
@@ -631,8 +643,8 @@ async fn email_loop() -> Result<(), String> {
             }
 
             let shared_chat_id = crate::CHAT_CLI_ID.to_string();
-            let reply = answer_channel(text, "Reply concisely for an email.", Some(shared_chat_id))
-                .await;
+            let reply =
+                answer_channel(text, "Reply concisely for an email.", Some(shared_chat_id)).await;
             let reply_subject = if subject.trim().to_lowercase().starts_with("re:") {
                 subject.trim().to_string()
             } else {
@@ -999,7 +1011,10 @@ mod tests {
 
     #[test]
     fn no_stored_owner_claims_the_sender() {
-        assert_eq!(sender_authorization(None, "user-1"), SenderAuthorization::Claim);
+        assert_eq!(
+            sender_authorization(None, "user-1"),
+            SenderAuthorization::Claim
+        );
     }
 
     #[test]

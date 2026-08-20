@@ -498,29 +498,41 @@ impl McpSession {
         let reader_pending = Arc::clone(&pending);
         let reader_notifications = Arc::clone(&notifications);
         std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Some(url) = find_url(&line) {
-                    println!(
-                        "\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n",
-                        url
-                    );
-                    OAUTH_DETECTED.store(true, Ordering::Relaxed);
-                    let _ = open_url_in_browser(&url);
-                }
-                let Ok(value) = serde_json::from_str::<Value>(&line) else {
-                    continue;
-                };
-                match classify_mcp_line(&value) {
-                    McpLine::Response(id, response) => {
-                        if let Some(sender) = reader_pending.lock().unwrap().remove(&id) {
-                            let _ = sender.send(response);
+            // Isolates a panic in the read loop (e.g. a poisoned `pending`/
+            // `notifications` lock from some other unrelated failure) so it's
+            // logged with context instead of just the default panic hook's
+            // generic message — otherwise every request still waiting on this
+            // session silently sits out its full timeout with no clue why the
+            // server stopped answering.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                    if let Some(url) = find_url(&line) {
+                        println!(
+                            "\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n",
+                            url
+                        );
+                        OAUTH_DETECTED.store(true, Ordering::Relaxed);
+                        let _ = open_url_in_browser(&url);
+                    }
+                    let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                        continue;
+                    };
+                    match classify_mcp_line(&value) {
+                        McpLine::Response(id, response) => {
+                            if let Some(sender) = reader_pending.lock().unwrap().remove(&id) {
+                                let _ = sender.send(response);
+                            }
                         }
+                        McpLine::Notification(notification) => {
+                            reader_notifications.lock().unwrap().push_back(notification);
+                        }
+                        McpLine::Other => {}
                     }
-                    McpLine::Notification(notification) => {
-                        reader_notifications.lock().unwrap().push_back(notification);
-                    }
-                    McpLine::Other => {}
                 }
+            }));
+            if let Err(payload) = result {
+                let message = crate::channels::panic_payload_message(&payload);
+                eprintln!("[mint] MCP stdout reader thread panicked: {message}");
             }
         });
 
