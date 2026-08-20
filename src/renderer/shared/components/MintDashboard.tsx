@@ -922,24 +922,30 @@ export default function MintDashboard() {
       }
     }
 
-    if (!file && isDesktopApp) {
-      // Fallback for Tauri desktop app where WebKitGTK/WebView clipboard paste events do not provide file handles
-      const now = Date.now()
-      if (now - lastNativePasteTimeRef.current > 100) {
-        lastNativePasteTimeRef.current = now
-        readClipboardImage().then((dataUri) => {
-          if (dataUri) {
-            const name = 'Pasted image'
-            createTrimmedImagePreview(dataUri)
-              .catch(() => dataUri)
-              .then((previewDataUri) => {
-                setImageAttachments((current) => [...current, { dataUri, previewDataUri, name }])
-              })
-          }
-        }).catch((err) => {
-          console.warn('Failed to read clipboard image via Tauri API:', err)
-        })
+    if (!file) {
+      if (isDesktopApp) {
+        // Fallback for Tauri desktop app where WebKitGTK/WebView clipboard paste events do not provide file handles
+        const now = Date.now()
+        if (now - lastNativePasteTimeRef.current > 100) {
+          lastNativePasteTimeRef.current = now
+          readClipboardImage().then((dataUri) => {
+            if (dataUri) {
+              const name = 'Pasted image'
+              createTrimmedImagePreview(dataUri)
+                .catch(() => dataUri)
+                .then((previewDataUri) => {
+                  setImageAttachments((current) => [...current, { dataUri, previewDataUri, name }])
+                })
+            }
+          }).catch((err) => {
+            console.warn('Failed to read clipboard image via Tauri API:', err)
+          })
+        }
       }
+      // No image in the clipboard (e.g. pasting plain text) — nothing more
+      // to do here regardless of platform. Must return before `readImage`
+      // below, which requires a real File and would otherwise be called
+      // with `file` still null on every non-image paste.
       return false
     }
 
