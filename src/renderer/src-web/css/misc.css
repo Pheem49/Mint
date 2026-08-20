@@ -80,23 +80,6 @@
   border-color: rgba(34, 211, 238, 0.34);
 }
 
-/* When rendered inside modal, make settings-container adapt to modal size */
-
-.settings-modal .settings-container {
-  height: auto !important;
-  width: 100% !important;
-  max-height: 92vh !important;
-  overflow: hidden !important;
-  border-radius: 12px !important;
-}
-
-/* Make settings content scroll internally */
-
-.settings-modal .settings-content {
-  max-height: calc(92vh - 160px);
-  overflow-y: auto;
-}
-
 .toggle-model-btn:hover,
 .toggle-model-btn.active,
 .change-expression-btn:hover,

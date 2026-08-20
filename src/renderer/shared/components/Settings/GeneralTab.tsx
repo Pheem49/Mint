@@ -13,6 +13,7 @@ import {
   CustomProviderHeader,
 } from '@/components/SettingsWindow'
 import { setActiveModel } from '../../utils/modelManager'
+import ApiKeyInput from './ApiKeyInput'
 
 interface GeneralTabProps {
   config: typeof DEFAULT_CONFIG
@@ -276,11 +277,10 @@ export default function GeneralTab({
                 )}
                 <div className="setting-row">
                   <label>Gemini API Key</label>
-                  <input 
-                    type="password" 
-                    value={config.apiKey} 
-                    onChange={(e) => updateField('apiKey', e.target.value)} 
-                    placeholder="Enter Gemini API Key..." 
+                  <ApiKeyInput
+                    value={config.apiKey}
+                    onChange={(value) => updateField('apiKey', value)}
+                    placeholder="Enter Gemini API Key..."
                   />
                 </div>
               </div>
@@ -324,11 +324,10 @@ export default function GeneralTab({
                 )}
                 <div className="setting-row">
                   <label>Anthropic API Key</label>
-                  <input 
-                    type="password" 
-                    value={config.anthropicApiKey} 
-                    onChange={(e) => updateField('anthropicApiKey', e.target.value)} 
-                    placeholder="Enter Anthropic API Key..." 
+                  <ApiKeyInput
+                    value={config.anthropicApiKey}
+                    onChange={(value) => updateField('anthropicApiKey', value)}
+                    placeholder="Enter Anthropic API Key..."
                   />
                 </div>
               </div>
@@ -373,11 +372,10 @@ export default function GeneralTab({
                 )}
                 <div className="setting-row">
                   <label>OpenAI API Key</label>
-                  <input 
-                    type="password" 
-                    value={config.openaiApiKey} 
-                    onChange={(e) => updateField('openaiApiKey', e.target.value)} 
-                    placeholder="Enter OpenAI API Key..." 
+                  <ApiKeyInput
+                    value={config.openaiApiKey}
+                    onChange={(value) => updateField('openaiApiKey', value)}
+                    placeholder="Enter OpenAI API Key..."
                   />
                 </div>
               </div>
@@ -424,10 +422,9 @@ export default function GeneralTab({
                 )}
                 <div className="setting-row">
                   <label>OpenRouter API Key</label>
-                  <input
-                    type="password"
+                  <ApiKeyInput
                     value={config.openrouterApiKey}
-                    onChange={(e) => updateField('openrouterApiKey', e.target.value)}
+                    onChange={(value) => updateField('openrouterApiKey', value)}
                     placeholder="Enter OpenRouter API Key..."
                   />
                 </div>
@@ -472,10 +469,9 @@ export default function GeneralTab({
                 )}
                 <div className="setting-row">
                   <label>DeepSeek API Key</label>
-                  <input
-                    type="password"
+                  <ApiKeyInput
                     value={config.deepseekApiKey}
-                    onChange={(e) => updateField('deepseekApiKey', e.target.value)}
+                    onChange={(value) => updateField('deepseekApiKey', value)}
                     placeholder="Enter DeepSeek API Key..."
                   />
                 </div>
@@ -522,11 +518,10 @@ export default function GeneralTab({
                 )}
                 <div className="setting-row">
                   <label>Hugging Face API Key</label>
-                  <input 
-                    type="password" 
-                    value={config.hfApiKey} 
-                    onChange={(e) => updateField('hfApiKey', e.target.value)} 
-                    placeholder="Enter Hugging Face API Key..." 
+                  <ApiKeyInput
+                    value={config.hfApiKey}
+                    onChange={(value) => updateField('hfApiKey', value)}
+                    placeholder="Enter Hugging Face API Key..."
                   />
                 </div>
               </div>
@@ -661,10 +656,9 @@ export default function GeneralTab({
             <div className="provider-card-body">
               <div className="setting-row">
                 <label>Brave Search API Key</label>
-                <input
-                  type="password"
+                <ApiKeyInput
                   value={config.braveSearchApiKey}
-                  onChange={(e) => updateField('braveSearchApiKey', e.target.value)}
+                  onChange={(value) => updateField('braveSearchApiKey', value)}
                   placeholder="Enter Brave Search API Key..."
                 />
               </div>
@@ -692,10 +686,9 @@ export default function GeneralTab({
             <div className="provider-card-body">
               <div className="setting-row">
                 <label>Google Search API Key</label>
-                <input
-                  type="password"
+                <ApiKeyInput
                   value={config.googleSearchApiKey}
-                  onChange={(e) => updateField('googleSearchApiKey', e.target.value)}
+                  onChange={(value) => updateField('googleSearchApiKey', value)}
                   placeholder="Enter Google Search API Key..."
                 />
               </div>
@@ -821,10 +814,9 @@ export default function GeneralTab({
             <div className="provider-card-body">
               <div className="setting-row">
                 <label>Stability AI API Key</label>
-                <input
-                  type="password"
+                <ApiKeyInput
                   value={config.stabilityApiKey}
-                  onChange={(e) => updateField('stabilityApiKey', e.target.value)}
+                  onChange={(value) => updateField('stabilityApiKey', value)}
                   placeholder="Enter Stability AI API Key..."
                 />
               </div>
@@ -853,10 +845,9 @@ export default function GeneralTab({
             <div className="provider-card-body">
               <div className="setting-row">
                 <label>Ideogram API Key</label>
-                <input
-                  type="password"
+                <ApiKeyInput
                   value={config.ideogramApiKey}
-                  onChange={(e) => updateField('ideogramApiKey', e.target.value)}
+                  onChange={(value) => updateField('ideogramApiKey', value)}
                   placeholder="Enter Ideogram API Key..."
                 />
               </div>
@@ -887,10 +878,9 @@ export default function GeneralTab({
             <div className="provider-card-body">
               <div className="setting-row">
                 <label>Replicate API Key</label>
-                <input
-                  type="password"
+                <ApiKeyInput
                   value={config.replicateApiKey}
-                  onChange={(e) => updateField('replicateApiKey', e.target.value)}
+                  onChange={(value) => updateField('replicateApiKey', value)}
                   placeholder="Enter Replicate API Key..."
                 />
               </div>
@@ -917,10 +907,9 @@ export default function GeneralTab({
             <div className="provider-card-body">
               <div className="setting-row">
                 <label>Black Forest Labs API Key</label>
-                <input
-                  type="password"
+                <ApiKeyInput
                   value={config.bflApiKey}
-                  onChange={(e) => updateField('bflApiKey', e.target.value)}
+                  onChange={(value) => updateField('bflApiKey', value)}
                   placeholder="Enter BFL API Key..."
                 />
               </div>
@@ -1085,10 +1074,9 @@ export default function GeneralTab({
 
                     <div className="setting-row">
                       <label>API Key</label>
-                      <input
-                        type="password"
+                      <ApiKeyInput
                         value={cp.apiKey}
-                        onChange={(e) => updateCp({ apiKey: e.target.value })}
+                        onChange={(value) => updateCp({ apiKey: value })}
                         placeholder="Optional. Leave empty if you manage auth via headers."
                       />
                     </div>

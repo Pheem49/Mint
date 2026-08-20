@@ -93,7 +93,7 @@ button {
 .settings-container {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    height: 100vh;
+    height: 100%;
     overflow: hidden;
     background: var(--panel-bg);
     border: 1px solid var(--border);

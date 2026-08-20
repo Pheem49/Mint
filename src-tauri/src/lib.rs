@@ -1615,7 +1615,7 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
                 let _ = app.get_webview_window("main").map(|window| window.show());
             }
             "settings" => {
-                let _ = open_desktop_window(app, "settings");
+                emit_to_main(app, "open-settings", ());
             }
             "spotlight" => {
                 let _ = open_desktop_window(app, "spotlight");

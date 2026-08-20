@@ -11,6 +11,7 @@ import {
   CustomProviderConfig,
 } from '@/components/SettingsWindow'
 import { listSubagents, saveSubagent, deleteSubagent, SubagentDefinition, SubagentDraft } from '@/tauri'
+import ApiKeyInput from './ApiKeyInput'
 
 export interface Agent {
   id: string
@@ -303,11 +304,10 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
 
             <div className="setting-row">
               <label>Custom API Key (Optional)</label>
-              <input 
-                type="password" 
-                value={apiKey} 
-                onChange={(e) => setApiKey(e.target.value)} 
-                placeholder="Leave blank to use global provider API key" 
+              <ApiKeyInput
+                value={apiKey}
+                onChange={(value) => setApiKey(value)}
+                placeholder="Leave blank to use global provider API key"
               />
             </div>
 

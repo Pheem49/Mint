@@ -1423,9 +1423,7 @@ export function installTauriAdapters() {
       return invoke('update_config', { config })
     },
     closeSettings: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      return invoke('close_desktop_window', { label: getCurrentWindow().label })
+      window.location.hash = '#/'
     },
     quitApp: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
@@ -1575,8 +1573,7 @@ export function installTauriAdapters() {
     listSavedPictures,
     deleteSavedPicture,
     openSettings: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('open_window', { kind: 'settings' })
+      window.location.hash = '#/settings'
     },
     openWorkflows: async () => {
       const { invoke } = await import('@tauri-apps/api/core')

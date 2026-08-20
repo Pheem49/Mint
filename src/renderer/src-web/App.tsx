@@ -42,7 +42,9 @@ export default function App() {
           onClick={() => window.settingsApi?.closeSettings?.()}
         >
           <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
-            <SettingsWindow />
+            <Suspense fallback={null}>
+              <SettingsWindow />
+            </Suspense>
           </div>
         </div>
       </>

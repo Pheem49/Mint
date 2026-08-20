@@ -267,9 +267,13 @@ impl MemoryStore {
             "DELETE FROM interaction_memories WHERE chat_id = ?1",
             params![chat_id],
         )?;
+        // No `kind` filter here: the `chat_id == CHAT_CLI_ID` guard above is
+        // what protects the one session that must never be deleted this way.
+        // Restricting to `kind = 'conversation'` used to also block deleting
+        // any other kind (e.g. a stale row left behind by a since-removed
+        // feature) even though nothing else needs that protection.
         let deleted = transaction.execute(
-            "DELETE FROM chat_sessions
-             WHERE id = ?1 AND kind = 'conversation'",
+            "DELETE FROM chat_sessions WHERE id = ?1",
             params![chat_id],
         )?;
         transaction.commit()?;

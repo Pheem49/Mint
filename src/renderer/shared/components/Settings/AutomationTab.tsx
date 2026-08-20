@@ -1,5 +1,6 @@
 import React from 'react'
 import { DEFAULT_CONFIG } from '@/components/SettingsWindow'
+import ApiKeyInput from './ApiKeyInput'
 
 interface AutomationTabProps {
   config: typeof DEFAULT_CONFIG
@@ -240,12 +241,11 @@ export default function AutomationTab({
               </label>
             </div>
             <div className="bridge-inputs">
-              <input
-                type="password"
+              <ApiKeyInput
                 className="bridge-input"
                 placeholder="Telegram Bot Token (from @BotFather)"
                 value={config.telegramBotToken}
-                onChange={(e) => updateField('telegramBotToken', e.target.value)}
+                onChange={(value) => updateField('telegramBotToken', value)}
               />
             </div>
           </div>
@@ -279,12 +279,11 @@ export default function AutomationTab({
               </label>
             </div>
             <div className="bridge-inputs">
-              <input
-                type="password"
+              <ApiKeyInput
                 className="bridge-input"
                 placeholder="Discord Bot Token"
                 value={config.discordBotToken}
-                onChange={(e) => updateField('discordBotToken', e.target.value)}
+                onChange={(value) => updateField('discordBotToken', value)}
               />
               <input
                 type="text"
@@ -325,19 +324,17 @@ export default function AutomationTab({
               </label>
             </div>
             <div className="bridge-inputs">
-              <input
-                type="password"
+              <ApiKeyInput
                 className="bridge-input"
                 placeholder="Slack Bot Token (xoxb-...)"
                 value={config.slackBotToken}
-                onChange={(e) => updateField('slackBotToken', e.target.value)}
+                onChange={(value) => updateField('slackBotToken', value)}
               />
-              <input
-                type="password"
+              <ApiKeyInput
                 className="bridge-input"
                 placeholder="Slack App Token (xapp-...)"
                 value={config.slackAppToken}
-                onChange={(e) => updateField('slackAppToken', e.target.value)}
+                onChange={(value) => updateField('slackAppToken', value)}
               />
             </div>
           </div>
@@ -371,19 +368,17 @@ export default function AutomationTab({
               </label>
             </div>
             <div className="bridge-inputs">
-              <input
-                type="password"
+              <ApiKeyInput
                 className="bridge-input"
                 placeholder="LINE Channel Access Token"
                 value={config.lineChannelAccessToken}
-                onChange={(e) => updateField('lineChannelAccessToken', e.target.value)}
+                onChange={(value) => updateField('lineChannelAccessToken', value)}
               />
-              <input
-                type="password"
+              <ApiKeyInput
                 className="bridge-input"
                 placeholder="LINE Channel Secret"
                 value={config.lineChannelSecret}
-                onChange={(e) => updateField('lineChannelSecret', e.target.value)}
+                onChange={(value) => updateField('lineChannelSecret', value)}
               />
               <div className="bridge-input-row">
                 <input
@@ -434,12 +429,11 @@ export default function AutomationTab({
               </label>
             </div>
             <div className="bridge-inputs">
-              <input
-                type="password"
+              <ApiKeyInput
                 className="bridge-input"
                 placeholder="WhatsApp Cloud Access Token"
                 value={config.whatsappCloudAccessToken}
-                onChange={(e) => updateField('whatsappCloudAccessToken', e.target.value)}
+                onChange={(value) => updateField('whatsappCloudAccessToken', value)}
               />
               <input
                 type="text"
@@ -448,19 +442,17 @@ export default function AutomationTab({
                 value={config.whatsappPhoneNumberId}
                 onChange={(e) => updateField('whatsappPhoneNumberId', e.target.value)}
               />
-              <input
-                type="password"
+              <ApiKeyInput
                 className="bridge-input"
                 placeholder="WhatsApp Verify Token"
                 value={config.whatsappVerifyToken}
-                onChange={(e) => updateField('whatsappVerifyToken', e.target.value)}
+                onChange={(value) => updateField('whatsappVerifyToken', value)}
               />
-              <input
-                type="password"
+              <ApiKeyInput
                 className="bridge-input"
                 placeholder="WhatsApp App Secret (optional HMAC validation)"
                 value={config.whatsappAppSecret}
-                onChange={(e) => updateField('whatsappAppSecret', e.target.value)}
+                onChange={(value) => updateField('whatsappAppSecret', value)}
               />
               <div className="bridge-input-row">
                 <input

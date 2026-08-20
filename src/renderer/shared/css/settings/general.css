@@ -1,5 +1,34 @@
 /* settings/general.css — split from settings.css, rules kept in original order */
 
+.api-key-field {
+    position: relative;
+}
+
+.api-key-field input {
+    padding-right: 34px;
+}
+
+.api-key-toggle {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.api-key-toggle:hover {
+    background: var(--surface-hover);
+    color: var(--text-main);
+}
+
 .setting-actions {
     display: flex;
     gap: 12px;

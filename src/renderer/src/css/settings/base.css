@@ -93,13 +93,36 @@ button {
 .settings-container {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    height: 100vh;
+    height: 100%;
     overflow: hidden;
     background: var(--panel-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     opacity: 1;
+}
+
+/* Settings rendered as an in-app modal over the main window, instead of a
+   separate OS window. */
+.settings-modal-overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    z-index: 80;
+    padding: 24px;
+}
+
+.settings-modal {
+    width: min(1180px, 95vw);
+    height: min(780px, 88vh);
+    overflow: hidden;
+    border-radius: var(--radius-xl);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
 }
 
 @keyframes appEntrance {
