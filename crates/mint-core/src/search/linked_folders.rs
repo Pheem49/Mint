@@ -113,27 +113,24 @@ fn matching_candidates<'a>(
         .values()
         .filter(|folder| {
             haystack.contains(&folder.name.to_lowercase())
-                || folder
-                    .description
-                    .as_deref()
-                    .is_some_and(|description| {
-                        description
-                            .split(|c: char| !c.is_alphanumeric())
-                            .filter(|word| word.len() > 3)
-                            .any(|word| {
-                                // Prefix match (not a full-word match) so simple
-                                // plural/singular differences ("recipe" in the
-                                // chat vs. "recipes" in the description) still
-                                // count — this is a cheap pre-filter, not the
-                                // final judgment call, so false positives here
-                                // are fine (the LLM call after this decides for
-                                // real); false negatives just skip that call.
-                                // Built char-by-char (not byte-sliced) so this
-                                // never panics on multi-byte UTF-8 (e.g. Thai).
-                                let prefix: String = word.to_lowercase().chars().take(5).collect();
-                                haystack.contains(&prefix)
-                            })
-                    })
+                || folder.description.as_deref().is_some_and(|description| {
+                    description
+                        .split(|c: char| !c.is_alphanumeric())
+                        .filter(|word| word.len() > 3)
+                        .any(|word| {
+                            // Prefix match (not a full-word match) so simple
+                            // plural/singular differences ("recipe" in the
+                            // chat vs. "recipes" in the description) still
+                            // count — this is a cheap pre-filter, not the
+                            // final judgment call, so false positives here
+                            // are fine (the LLM call after this decides for
+                            // real); false negatives just skip that call.
+                            // Built char-by-char (not byte-sliced) so this
+                            // never panics on multi-byte UTF-8 (e.g. Thai).
+                            let prefix: String = word.to_lowercase().chars().take(5).collect();
+                            haystack.contains(&prefix)
+                        })
+                })
         })
         .collect()
 }
@@ -301,7 +298,11 @@ mod tests {
         folders.insert("Food".to_string(), folder("Food", None));
         folders.insert("YouTube".to_string(), folder("YouTube", None));
 
-        let hits = matching_candidates(&folders, "I tried a great new restaurant", "That sounds like a Food topic!");
+        let hits = matching_candidates(
+            &folders,
+            "I tried a great new restaurant",
+            "That sounds like a Food topic!",
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].name, "Food");
     }

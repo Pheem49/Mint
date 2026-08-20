@@ -639,7 +639,8 @@ mod tests {
         let job = crate::bg_shell::list_jobs()
             .into_iter()
             .find(|j| {
-                j.command == "sleep 30 # run_with_timeout_promotes_a_command_that_outlives_its_deadline"
+                j.command
+                    == "sleep 30 # run_with_timeout_promotes_a_command_that_outlives_its_deadline"
             })
             .expect("timed-out command should be tracked as a background job, not killed");
         assert!(matches!(job.status, crate::bg_shell::JobStatus::Running));

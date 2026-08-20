@@ -771,4 +771,3 @@ fn ensure_chat_session_row(connection: &Connection, chat_id: &str) -> Result<(),
     )?;
     Ok(())
 }
-

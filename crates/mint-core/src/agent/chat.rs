@@ -1679,7 +1679,11 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
     })
 }
 
-fn openai_chat_payload(model: &str, request: &ChatRequest, stream: bool) -> Result<Value, ChatError> {
+fn openai_chat_payload(
+    model: &str,
+    request: &ChatRequest,
+    stream: bool,
+) -> Result<Value, ChatError> {
     let messages = if let Some(messages) = &request.messages {
         let mut built = Vec::new();
         if !request.system_instruction.is_empty()
@@ -1894,7 +1898,11 @@ fn openai_audio_part(data_uri: &str) -> Result<Value, ChatError> {
 /// fallback rather than rejected outright; the API itself is the final judge
 /// of whether the actual bytes decode.
 fn openai_audio_format(mime_type: &str) -> &'static str {
-    if mime_type.contains("wav") { "wav" } else { "mp3" }
+    if mime_type.contains("wav") {
+        "wav"
+    } else {
+        "mp3"
+    }
 }
 
 /// Splits a `data:<mime>;base64,<data>` URI into `(mime_type, base64_data)`,
@@ -2278,7 +2286,13 @@ mod tests {
             messages: None,
             tools: None,
         };
-        for provider in ["local_openai", "openrouter", "deepseek", "huggingface", "anthropic"] {
+        for provider in [
+            "local_openai",
+            "openrouter",
+            "deepseek",
+            "huggingface",
+            "anthropic",
+        ] {
             let error = require_supported_attachments(provider, &request).unwrap_err();
             assert!(
                 matches!(&error, ChatError::UnsupportedAttachments(p) if p == provider),

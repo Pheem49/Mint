@@ -1,48 +1,65 @@
 #![recursion_limit = "256"]
 
-pub mod agent_loop;
-pub mod auth;
-pub mod auto_shorts;
-pub mod bg_shell;
-pub mod bridge_health;
+// Grouped by theme into subdirectories (agent/media/integrations/search/system)
+// rather than 40 flat sibling files — browser/cron/orchestration/prompts were
+// already organized this way. Each group module just declares its members;
+// the `pub use group::member;` lines below re-export every member at its old
+// flat path (`crate::chat`, `crate::config`, ...) so this reorganization is
+// transparent to every existing `crate::chat::X` / `mint_core::chat::X`
+// reference elsewhere in the workspace — nothing outside this file changed.
+pub mod agent;
 pub mod browser;
-pub mod calculation;
-pub mod chat;
-pub mod code_tools;
-pub mod config;
 pub mod cron;
-pub mod files;
-pub mod gemini_live;
-pub mod hooks;
-pub mod image_gen;
-pub mod image_search;
-pub mod knowledge;
-pub mod linked_folders;
-pub mod mcp;
-pub mod memory;
-pub mod mic_transcribe;
-pub mod oauth;
+pub mod integrations;
+pub mod media;
 pub mod orchestration;
-pub mod pictures;
-pub mod plugins;
 pub mod prompts;
-pub mod safety;
-pub mod semantic;
-pub mod shell;
-pub mod skills;
-pub mod speech;
-pub mod stock;
-pub mod subagents;
-pub mod subtitle;
-pub mod symbols;
-pub mod tasks;
-pub mod timeline;
-pub mod tts;
-pub mod video_edit;
-pub mod video_gen;
-pub mod weather;
-pub mod web_search;
-pub mod workflows;
+pub mod search;
+pub mod system;
+
+pub use agent::agent_loop;
+pub use agent::chat;
+pub use agent::code_tools;
+pub use agent::memory;
+pub use agent::safety;
+pub use agent::skills;
+pub use agent::subagents;
+pub use agent::tasks;
+
+pub use media::auto_shorts;
+pub use media::gemini_live;
+pub use media::image_gen;
+pub use media::image_search;
+pub use media::mic_transcribe;
+pub use media::pictures;
+pub use media::speech;
+pub use media::subtitle;
+pub use media::timeline;
+pub use media::tts;
+pub use media::video_edit;
+pub use media::video_gen;
+
+pub use integrations::bridge_health;
+pub use integrations::hooks;
+pub use integrations::mcp;
+pub use integrations::oauth;
+pub use integrations::plugins;
+pub use integrations::workflows;
+
+pub use search::files;
+pub use search::knowledge;
+pub use search::linked_folders;
+pub use search::semantic;
+pub use search::symbols;
+pub use search::web_search;
+
+pub use system::auth;
+pub use system::bg_shell;
+pub use system::calculation;
+pub use system::config;
+pub use system::shell;
+pub use system::stock;
+pub use system::weather;
 
 pub use agent_loop::{AgentActionFuture, AgentLoopError, parse_agent_json, run_agent_loop};
 pub use auth::{
@@ -76,7 +93,9 @@ pub use config::{
     MintConfig, PermissionDecision, PermissionRule, ToolCallingMode, config_path,
     initialize_config, load_config, permission_decision_for, save_config, set_config_value,
 };
-pub use cron::{CronError, CronJob, CronJobDraft, CronStore, localize_schedule, start_cron_scheduler};
+pub use cron::{
+    CronError, CronJob, CronJobDraft, CronStore, localize_schedule, start_cron_scheduler,
+};
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
 pub use gemini_live::{
     GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session,
@@ -94,8 +113,7 @@ pub use knowledge::{
 };
 pub use linked_folders::{
     LinkedFolder, LinkedFolderDraft, LinkedFolderError, add_linked_folder,
-    configured_linked_folders, list_linked_folders, remove_linked_folder,
-    spawn_linked_folder_note,
+    configured_linked_folders, list_linked_folders, remove_linked_folder, spawn_linked_folder_note,
 };
 pub use mcp::{
     McpError, McpServer, add_mcp_server, call_configured_mcp_tool, call_mcp_tool,
@@ -166,8 +184,8 @@ pub use weather::{WeatherError, WeatherReport, weather};
 pub use workflows::{WorkflowError, load_workflows, save_workflows, workflows_path};
 pub mod api_server;
 pub use api_server::start_api_server;
-pub mod channels;
 pub use channels::start_channels;
+pub use integrations::channels;
 
 pub static HTTP_CLIENT: std::sync::LazyLock<reqwest::Client> =
     std::sync::LazyLock::new(reqwest::Client::new);
@@ -212,7 +230,9 @@ mod linked_folder_notice_tests {
         let _ = take_linked_folder_notices();
 
         push_linked_folder_notice("Saved note to Food (Food/mint-notes/2026-08-09.md)".into());
-        push_linked_folder_notice("Saved note to YouTube (YouTube/mint-notes/2026-08-09.md)".into());
+        push_linked_folder_notice(
+            "Saved note to YouTube (YouTube/mint-notes/2026-08-09.md)".into(),
+        );
 
         let notices = take_linked_folder_notices();
         assert_eq!(notices.len(), 2);

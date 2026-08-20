@@ -50,7 +50,9 @@ fn now_unix() -> u64 {
 }
 
 fn with_entry(name: &'static str, update: impl FnOnce(&mut BridgeHealth)) {
-    let mut registry = REGISTRY.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut registry = REGISTRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let entry = registry
         .entry(name)
         .or_insert_with(|| BridgeHealth::new(name));
@@ -88,7 +90,9 @@ pub fn record_error(name: &'static str, message: &str) {
 /// appear (callers pair this with `config.extra` to show disabled bridges
 /// too, same as `channels`'s own `enableXBridge` flags).
 pub fn snapshot() -> Vec<BridgeHealth> {
-    let registry = REGISTRY.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let registry = REGISTRY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut items: Vec<BridgeHealth> = registry.values().cloned().collect();
     items.sort_by(|a, b| a.name.cmp(b.name));
     items
