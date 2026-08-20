@@ -122,6 +122,7 @@ import LinkedFoldersView from '../../shared/components/LinkedFoldersView'
 import McpServersView from '../../shared/components/McpServersView'
 import PluginsView from '../../shared/components/PluginsView'
 import { isSupportedDocument } from '../../shared/utils/documentTypes'
+import { useCompanionWidget } from '../companionWidget'
 import {
   listLearnedSkills,
   addLearnedSkill,
@@ -242,29 +243,42 @@ export default function MintDashboard() {
   const [pendingApproval, setPendingApproval] = useState<any | null>(null)
   const [sessionAutoApproved, setSessionAutoApproved] = useState(false)
   const sessionAutoApprovedRef = useRef(false)
-  const [modelVisible, setModelVisible] = useState(() => window.localStorage.getItem('mint:model-visible') !== 'false')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
   const [planMode, setPlanMode] = useState(() => window.localStorage.getItem('mint:plan-mode') === 'true')
-  const [scale, setScale] = useState(1.00)
-  const [interactionEnabled, setInteractionEnabled] = useState(() => window.localStorage.getItem('mint:interaction-enabled') !== 'false')
-  const [showInteractionGuide, setShowInteractionGuide] = useState(() => window.localStorage.getItem('mint:interaction-guide-visible') !== 'false')
-  const [isLocked, setIsLocked] = useState(false)
-  const [layoutPreset, setLayoutPreset] = useState<'chat-wide' | 'model-wide'>(() => (window.localStorage.getItem('mint:layout-preset') as 'chat-wide' | 'model-wide') || 'chat-wide')
   const [toastMessage, setToastMessage] = useState('')
-  const [expressionIndex, setExpressionIndex] = useState(0)
-  const [accessoryIndex, setAccessoryIndex] = useState(0)
   const [dashboardDataReady, setDashboardDataReady] = useState(false)
-  const [modelReady, setModelReady] = useState(false)
   const [startupTimedOut, setStartupTimedOut] = useState(false)
   const [settingsConfig, setSettingsConfig] = useState<any>(null)
   const [workspacePath, setWorkspacePath] = useState(() => window.localStorage.getItem(LAST_WORKSPACE_PATH_KEY) || '')
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const lastNativePasteTimeRef = useRef(0)
+  const {
+    modelVisible,
+    scale,
+    interactionEnabled,
+    showInteractionGuide,
+    isLocked,
+    layoutPreset,
+    expressionIndex,
+    accessoryIndex,
+    modelReady,
+    proactiveSuggestion,
+    setScale,
+    setIsLocked,
+    setExpressionIndex,
+    setAccessoryIndex,
+    setModelReady,
+    toggleModel,
+    changeLayoutPreset,
+    updateInteractionEnabled,
+    updateInteractionGuide,
+    dismissProactiveSuggestion,
+    handleProactiveAction,
+  } = useCompanionWidget((message) => setError(message))
   const startupReady = (dashboardDataReady && modelReady) || startupTimedOut
-  const [proactiveSuggestion, setProactiveSuggestion] = useState<any>(null)
 
   const [mcpName, setMcpName] = useState('')
   const [mcpCmd, setMcpCmd] = useState('')
@@ -529,15 +543,11 @@ export default function MintDashboard() {
         setPendingApproval(event.payload)
       }
     })
-    const unlistenProactive = window.api.onProactiveSuggestion?.((suggestion: any) => {
-      setProactiveSuggestion(suggestion)
-    })
     return () => {
       window.removeEventListener('focus', handleWindowFocus)
       unlistenPromise?.then?.((unlisten) => unlisten?.())
       unlistenSpotlight?.then?.((unlisten) => unlisten?.())
       unlistenVision?.then?.((unlisten) => unlisten?.())
-      unlistenProactive?.then?.((unlisten) => unlisten?.())
     }
   }, [])
 
@@ -563,31 +573,10 @@ export default function MintDashboard() {
     setTimeout(() => setToastMessage((current) => current === nextMessage ? '' : current), 3000)
   }
 
-  const changeLayoutPreset = (preset: 'chat-wide' | 'model-wide') => {
-    window.localStorage.setItem('mint:layout-preset', preset)
-    setLayoutPreset(preset)
-  }
-
-  const toggleModel = () => {
-    const next = !modelVisible
-    window.localStorage.setItem('mint:model-visible', String(next))
-    setModelVisible(next)
-  }
-
   const toggleSidebar = () => {
     const next = !sidebarCollapsed
     window.localStorage.setItem('mint:sidebar-collapsed', String(next))
     setSidebarCollapsed(next)
-  }
-
-  const updateInteractionEnabled = (enabled: boolean) => {
-    window.localStorage.setItem('mint:interaction-enabled', String(enabled))
-    setInteractionEnabled(enabled)
-  }
-
-  const updateInteractionGuide = (visible: boolean) => {
-    window.localStorage.setItem('mint:interaction-guide-visible', String(visible))
-    setShowInteractionGuide(visible)
   }
 
   const updateSmartContext = (enabled: boolean) => {
@@ -750,17 +739,6 @@ export default function MintDashboard() {
       setSendingMessage('')
       setSendingImageCount(0)
       setSendingVideoCount(0)
-    }
-  }
-
-  const handleProactiveAction = async (action: any) => {
-    setProactiveSuggestion(null)
-    if (action && action.type !== 'none') {
-      try {
-        await window.api.executeProactiveAction(action)
-      } catch (err) {
-        setError(String(err))
-      }
     }
   }
 
@@ -1305,7 +1283,7 @@ export default function MintDashboard() {
               <div className="proactive-header">
                 <span className="proactive-icon">✨</span>
                 <div className="proactive-message">{proactiveSuggestion.message}</div>
-                <button className="proactive-dismiss-btn" onClick={() => setProactiveSuggestion(null)}>
+                <button className="proactive-dismiss-btn" onClick={dismissProactiveSuggestion}>
                   Dismiss
                 </button>
               </div>
