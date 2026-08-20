@@ -1276,6 +1276,8 @@ export default function MintDashboard() {
           onShowToast={showToast}
           isSearchOpen={isSearchOpen}
           onSetSearchOpen={setIsSearchOpen}
+          showWorkspaceTab
+          hasWorkflowsTab
         />
         <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspace' ? '' : 'model-hidden'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' || view === 'pictures' || view === 'imagine' || view === 'veo') ? { display: 'none' } : undefined}>
           {proactiveSuggestion && (

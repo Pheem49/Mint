@@ -1067,6 +1067,7 @@ export default function MintDashboard() {
           onSetView={changeView}
           isSearchOpen={isSearchOpen}
           onSetSearchOpen={setIsSearchOpen}
+          promoteMediaStudios
         />
         <main className="assistant-workspace model-hidden" style={view !== 'chat' ? { display: 'none' } : undefined}>
           <ChatPanel
