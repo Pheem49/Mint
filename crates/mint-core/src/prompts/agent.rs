@@ -466,6 +466,9 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"run_plugin") {
         rules.push("10. Use run_plugin only when the requested native plugin is explicitly allowed by policy.");
     }
+    if allowed_actions.contains(&"mcp_tool") && allowed_actions.contains(&"video_trim") {
+        rules.push("10a. Video editing has two paths — pick based on complexity. Use the native video_*/timeline_*/subtitle_* tools for simple, single-step operations (trim, resize, merge, extract audio, remove silence, one-off caption burn) — they're faster and need no extra process. Use mcp_tool with the \"fablemint\" server (call mcp_list_tools/fablecut_docs first if unsure of its tools) for anything needing a multi-clip timeline, transitions, keyframes, chroma key, speed ramps, or iterative edits the user wants to watch live in the browser.");
+    }
     if native {
         rules.push("11. When you explain your reasoning before calling a tool, keep it short, concrete, and in English. Give your final answer in Thai when the task is written in Thai.");
     } else {
