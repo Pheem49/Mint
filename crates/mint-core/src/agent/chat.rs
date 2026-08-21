@@ -1715,6 +1715,13 @@ fn openai_chat_payload(
         "model": model,
         "stream": stream,
         "messages": messages,
+        // Left unset, several OpenAI-compatible providers (DeepSeek in
+        // particular) default to a much lower output cap than the model can
+        // actually produce, which silently truncates long structured answers
+        // (a code block followed by a couple of markdown tables is enough to
+        // hit it) — matches the explicit cap already used for Anthropic in
+        // `anthropic_chat_payload`/`stream_anthropic`.
+        "max_tokens": 8192,
     });
     if wants_agent_json(request) {
         payload["response_format"] = json!({ "type": "json_object" });

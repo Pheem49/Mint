@@ -12,6 +12,7 @@ pub(in crate::orchestration) async fn execute(
     config: &MintConfig,
     chat_id: &str,
     approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
 ) -> Result<String, OrchestrationError> {
     match action {
         "run_plugin" => {
@@ -34,7 +35,7 @@ pub(in crate::orchestration) async fn execute(
         "dispatch_subagent" => {
             let name = required(&input.name, "name")?;
             let task = required(&input.instruction, "instruction")?;
-            dispatch_one_subagent(root, config, chat_id, name, task, approve_cb).await
+            dispatch_one_subagent(root, config, chat_id, name, task, approve_cb, progress).await
         }
         "mcp_tool" => {
             let server = required(&input.server, "server")?;

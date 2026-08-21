@@ -343,6 +343,15 @@ pub(super) struct ExploredAction {
     target: String,
 }
 
+impl ExploredAction {
+    /// Flat `"{kind} {target}"` rendering, for contexts (a subagent's own
+    /// nested tool calls) that show one label per call rather than grouping
+    /// same-kind calls together the way [`explored_lines`] does.
+    pub(super) fn as_label(&self) -> String {
+        format!("{} {}", self.kind, self.target)
+    }
+}
+
 pub(super) fn explored_action_label(
     action: &str,
     input: &serde_json::Value,
@@ -521,12 +530,21 @@ pub(super) fn compose_queue_box(
     model: &str,
     path_str: &str,
     plan_mode: bool,
+    thinking_display: Option<&str>,
 ) -> (Vec<String>, u16, u16) {
     let (term_width, _) = markdown::terminal_size_or_default();
     let width = term_width as usize;
     let content_max_len = crate::interactive::input_content_width();
 
     let mut lines: Vec<String> = Vec::new();
+    // Pinned as its own row directly above the box's top divider — part of
+    // this fixed-size box rather than the scrolling activity log above it
+    // (see the caller in `render_live_status`), so it stays put right here
+    // instead of drifting down every time a new activity/tool line gets
+    // added above it.
+    if let Some(display) = thinking_display {
+        lines.push(format!("  {display}"));
+    }
     lines.push(format!(
         "{DIM}{}{RESET}",
         "─".repeat(width.saturating_sub(2))
@@ -559,7 +577,8 @@ pub(super) fn compose_queue_box(
         " {DIM}{mode_label}{RESET} {MINT}{model}{RESET}    {DIM}path: {path_str}{RESET}"
     ));
 
-    let cursor_y = 1 + cursor_row_idx as u16;
+    let top_offset = if thinking_display.is_some() { 2 } else { 1 };
+    let cursor_y = top_offset + cursor_row_idx as u16;
     let cursor_x =
         (crate::interactive::cursor_visual_column(input_chars, cursor_pos, content_max_len) as u16)
             .saturating_sub(1);
@@ -587,7 +606,17 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
         true,
         tick,
     ));
-    if let Some(thinking) = &status.thinking {
+    // Built here (not inline below) so both destinations for it — the old
+    // trailing-line spot in `lines`, and the queue box's own pinned row —
+    // share one animation. When the queue box is about to be drawn, it's
+    // handed to `compose_queue_box` instead of pushed into `lines`: as the
+    // last line of the scrolling activity log, it used to drift down every
+    // time a new activity/tool line landed above it, rather than staying
+    // put right above the box it's actually about (see the box's "queueing
+    // follow-up" comment below). Pinning it as the box's own top row fixes
+    // that — same information, anchored to the thing it describes instead
+    // of to whatever happened to print last.
+    let thinking_display = status.thinking.as_ref().map(|thinking| {
         let frames = &[
             "🌑\u{FE0E}",
             "🌒\u{FE0E}",
@@ -614,7 +643,11 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
 
         let waved_thinking = apply_wave_effect(&custom_thinking, status.spinner_tick);
 
-        lines.push(format!("  {MINT}{frame}{RESET} {waved_thinking}"));
+        format!("{MINT}{frame}{RESET} {waved_thinking}")
+    });
+    let queue_box_will_show = status.queue_enabled && status.accepting_input;
+    if !queue_box_will_show && let Some(display) = &thinking_display {
+        lines.push(format!("  {display}"));
     }
     // The queueing follow-up box (see `AgentOptions::queueing`) is appended
     // after everything above, so it's always the bottom-most thing in the
@@ -637,7 +670,7 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
     // everywhere.
     let mut box_lines: Vec<String> = Vec::new();
     let mut box_cursor: Option<(u16, u16)> = None;
-    if status.queue_enabled && status.accepting_input {
+    if queue_box_will_show {
         let cursor_pos = status.draft.len();
         let (composed, cursor_x, cursor_y) = compose_queue_box(
             &status.draft,
@@ -645,6 +678,7 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
             &status.model_label,
             &status.path_label,
             status.plan_mode,
+            thinking_display.as_deref(),
         );
         box_cursor = Some((cursor_x, cursor_y));
         box_lines = composed;

@@ -130,8 +130,8 @@ pub use mic_transcribe::{
     MicRecordingHandle, MicTranscribeError, start_recording, stop_recording, transcribe_recording,
 };
 pub use orchestration::{
-    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, OrchestrationError,
-    orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
+    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption,
+    OrchestrationError, orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
     orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
 };
 pub use pictures::{

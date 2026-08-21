@@ -33,6 +33,125 @@ pub struct SubagentDefinition {
     /// subagent's system prompt.
     pub system_prompt: String,
     pub source_path: String,
+    /// True for one of [`builtin_subagents`]'s entries rather than a file a
+    /// user wrote — `source_path` is the sentinel `"<builtin>"`, not a real
+    /// path, so `save_subagent`/`delete_subagent` refuse to touch it.
+    #[serde(default)]
+    pub builtin: bool,
+}
+
+/// Subagents available with zero setup — always present in
+/// [`list_subagents`], so `dispatch_subagent` has something to offer the
+/// model even on a fresh install. A user-authored file (global or
+/// workspace) with the same `name` overrides its entry here, exactly like
+/// workspace already overrides global.
+pub fn builtin_subagents() -> Vec<SubagentDefinition> {
+    let read_only_tools = || {
+        Some(
+            [
+                "list_files",
+                "read_file",
+                "search_code",
+                "symbols",
+                "semantic_search",
+                "knowledge_search",
+                "git_status",
+                "git_diff",
+                "git_log",
+                "git_branch",
+                "detect_project",
+                "list_tests",
+                "read_diagnostics",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        )
+    };
+    vec![
+        SubagentDefinition {
+            name: "explorer".to_string(),
+            description: "Fast, read-only code search — locate files, grep symbols, and answer \"where is X\" questions without writing or running anything.".to_string(),
+            tools: read_only_tools(),
+            model: None,
+            provider: None,
+            system_prompt: "You are a focused, read-only research subagent. Investigate the given \
+                question by reading files, searching code, and checking git history, then report a \
+                clear, concise answer. Do not write, edit, or delete files, and do not run shell \
+                commands — if the task turns out to need changes, say so in your summary instead of \
+                attempting them yourself."
+                .to_string(),
+            source_path: "<builtin>".to_string(),
+            builtin: true,
+        },
+        SubagentDefinition {
+            name: "general-purpose".to_string(),
+            description: "Catch-all for any task that doesn't fit a more specialized subagent — research, multi-step edits, and running commands with the full toolset.".to_string(),
+            tools: None,
+            model: None,
+            provider: None,
+            system_prompt: "You are a general-purpose subagent with access to the full toolset. \
+                Investigate and carry out the given task end to end — reading, writing, and \
+                running commands as needed — then report a clear, concise summary of what you \
+                did and found."
+                .to_string(),
+            source_path: "<builtin>".to_string(),
+            builtin: true,
+        },
+        SubagentDefinition {
+            name: "debugger".to_string(),
+            description: "Investigates a bug or failing test — reads code, checks diagnostics, and runs commands to reproduce the failure, then reports the root cause. Does not write or edit files.".to_string(),
+            tools: Some(
+                [
+                    "list_files",
+                    "read_file",
+                    "search_code",
+                    "symbols",
+                    "semantic_search",
+                    "knowledge_search",
+                    "git_status",
+                    "git_diff",
+                    "git_log",
+                    "git_branch",
+                    "detect_project",
+                    "list_tests",
+                    "read_diagnostics",
+                    "run_shell",
+                    "shell_output",
+                    "kill_shell",
+                ]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            ),
+            model: None,
+            provider: None,
+            system_prompt: "You are a focused debugging subagent. Investigate the given bug or \
+                failing test: read the relevant code, check diagnostics, and run commands \
+                (tests, reproduction scripts, log inspection) to pin down the root cause. Report \
+                a clear, concise explanation of what's wrong and where. Do not write, edit, or \
+                delete files — if the task turns out to need a fix, say so in your summary \
+                instead of applying it yourself."
+                .to_string(),
+            source_path: "<builtin>".to_string(),
+            builtin: true,
+        },
+        SubagentDefinition {
+            name: "plan".to_string(),
+            description: "Software-architect subagent for designing an implementation plan — investigates the codebase read-only and returns a step-by-step plan, not code changes.".to_string(),
+            tools: read_only_tools(),
+            model: None,
+            provider: None,
+            system_prompt: "You are a software-architect subagent for designing implementation \
+                plans. Investigate the codebase as needed to understand the current state, then \
+                return a step-by-step plan: the critical files involved, the order of changes, \
+                and any architectural trade-offs. Do not write, edit, or delete files, and do not \
+                run shell commands that change state — you are planning the work, not doing it."
+                .to_string(),
+            source_path: "<builtin>".to_string(),
+            builtin: true,
+        },
+    ]
 }
 
 /// Parses a subagent definition file's contents. Returns `None` if there's no
@@ -93,6 +212,7 @@ pub fn parse_subagent_definition(content: &str, source_path: &str) -> Option<Sub
         provider,
         system_prompt: body,
         source_path: source_path.to_string(),
+        builtin: false,
     })
 }
 
@@ -140,8 +260,12 @@ fn load_subagents_from_dir(dir: &Path, list: &mut Vec<SubagentDefinition>) {
 /// with workspace definitions winning on a name collision (loaded second,
 /// overwriting in the dedup map).
 pub fn list_subagents(workspace_root: Option<&Path>) -> Vec<SubagentDefinition> {
-    let mut definitions = Vec::new();
+    let mut unique: BTreeMap<String, SubagentDefinition> = BTreeMap::new();
+    for definition in builtin_subagents() {
+        unique.insert(definition.name.clone(), definition);
+    }
 
+    let mut definitions = Vec::new();
     if let Some(home) = dirs::home_dir() {
         load_subagents_from_dir(
             &home.join(".config").join("mint").join("mint-agents"),
@@ -151,8 +275,6 @@ pub fn list_subagents(workspace_root: Option<&Path>) -> Vec<SubagentDefinition> 
     if let Some(root) = workspace_root {
         load_subagents_from_dir(&root.join(".agents").join("subagents"), &mut definitions);
     }
-
-    let mut unique: BTreeMap<String, SubagentDefinition> = BTreeMap::new();
     for definition in definitions {
         unique.insert(definition.name.clone(), definition);
     }
@@ -207,6 +329,9 @@ pub fn save_subagent(
     }
     if draft.system_prompt.trim().is_empty() {
         return Err("system prompt is required".into());
+    }
+    if draft.previous_source_path.as_deref() == Some("<builtin>") {
+        return Err("cannot modify a built-in subagent".into());
     }
 
     let dir = if draft.scope == "workspace" {
@@ -264,6 +389,9 @@ pub fn save_subagent(
 /// Deletes a subagent definition file by the `sourcePath` a caller got back
 /// from `list_subagents`/`save_subagent`.
 pub fn delete_subagent(source_path: &str) -> Result<(), String> {
+    if source_path == "<builtin>" {
+        return Err("cannot delete a built-in subagent".into());
+    }
     fs::remove_file(source_path).map_err(|error| error.to_string())
 }
 
@@ -355,13 +483,63 @@ mod tests {
         .unwrap();
         fs::write(subagents_dir.join("not-a-subagent.txt"), "ignored").unwrap();
 
+        // `list_subagents` also always includes the built-in `explorer`
+        // entry now, so this checks for `reviewer` specifically rather than
+        // asserting an exact total count (covered by
+        // `list_subagents_always_includes_builtins_and_lets_files_override_them`
+        // below).
         let found = list_subagents(Some(&root));
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].name, "reviewer");
+        assert!(found.iter().any(|d| d.name == "reviewer"));
 
         let single = find_subagent("reviewer", Some(&root)).unwrap();
         assert_eq!(single.description, "Reviews code.");
         assert!(find_subagent("nonexistent", Some(&root)).is_none());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_subagents_always_includes_builtins_and_lets_files_override_them() {
+        let root = std::env::temp_dir().join("mint-subagents-test-builtin");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+
+        // With no files at all, the builtin `explorer` is still there.
+        let found = list_subagents(Some(&root));
+        let explorer = found.iter().find(|d| d.name == "explorer").unwrap();
+        assert!(explorer.builtin);
+        assert_eq!(explorer.source_path, "<builtin>");
+
+        // A user-authored file with the same name overrides it.
+        let subagents_dir = root.join(".agents").join("subagents");
+        fs::create_dir_all(&subagents_dir).unwrap();
+        fs::write(
+            subagents_dir.join("explorer.md"),
+            "---\nname: explorer\ndescription: Custom override.\n---\nCustom body.",
+        )
+        .unwrap();
+        let overridden = find_subagent("explorer", Some(&root)).unwrap();
+        assert!(!overridden.builtin);
+        assert_eq!(overridden.description, "Custom override.");
+
+        // Deleting/modifying the builtin sentinel path is rejected.
+        assert!(delete_subagent("<builtin>").is_err());
+        assert!(
+            save_subagent(
+                &SubagentDraft {
+                    name: "explorer".to_string(),
+                    description: String::new(),
+                    tools: None,
+                    model: None,
+                    provider: None,
+                    system_prompt: "Body.".to_string(),
+                    scope: "workspace".to_string(),
+                    previous_source_path: Some("<builtin>".to_string()),
+                },
+                Some(&root),
+            )
+            .is_err()
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -438,7 +616,8 @@ mod tests {
 
         assert!(!Path::new(&first.source_path).exists());
         assert!(Path::new(&renamed.source_path).exists());
-        assert_eq!(list_subagents(Some(&root)).len(), 1);
+        // +4 for the always-present builtins (explorer, general-purpose, debugger, plan).
+        assert_eq!(list_subagents(Some(&root)).len(), 5);
 
         let _ = fs::remove_dir_all(&root);
     }

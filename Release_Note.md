@@ -446,3 +446,50 @@ third-party MCP server is.
   starting every bridge *twice* (duplicate Telegram polling, duplicate
   Discord sessions) — `start_api_server` already starts them internally.
   Found while wiring up the auth check above; now fixed.
+
+---
+
+## 💬 `ask_user` — Descriptions, Multi-Select, and a Claude-Code-Style Picker
+
+The agent's `ask_user` tool could already offer up to 3 plain-text options
+plus an always-available free-text fallback. This round brings it closer to
+feature parity with Claude Code's own `AskUserQuestion` tool — richer option
+data, a matching visual style in both the CLI and desktop/web GUI, and
+explicit guidance on when the agent should actually reach for it.
+
+- **Per-option `description`, `multiSelect`, and a short `header` tag**
+  (`crates/mint-core/src/orchestration/mod.rs`): new `AskUserOption { label,
+  description }` struct on `AgentApproval::AskUser`, plus `header:
+  Option<String>` and `multi_select: bool` (wire name `multiSelect`).
+  Decoding uses an untagged `AskUserOptionInput` enum (`Plain(String) |
+  Detailed{label, description}`) so a model that still emits the old bare
+  `["a","b"]` array shape keeps working — no breaking change for in-flight
+  models. `ApprovalOutcome` itself is untouched (still just `Approved |
+  Denied | Intercepted(String)`, shared by every other approval type); a
+  multi-select answer is pre-joined by the CLI/GUI into one canonical string
+  (`"A, B"`, or `"A, B — <free text>"` if the user also typed something)
+  before it ever becomes `Intercepted`.
+- **Native tool schema and legacy prompt both updated**
+  (`prompts/tool_catalog.rs`, `prompts/agent.rs`) to document the new
+  `header`/`multiSelect`/`{label, description}` shape for both the
+  native-tool-calling and prose-JSON code paths.
+- **CLI picker restyled to match Claude Code's own look**
+  (`crates/mint-cli/src/agent/approval_prompts.rs`): a highlighted header
+  chip, the question wrapped in a left-bordered quote block
+  (`textwrap`-powered, sized to the real terminal width), bold option
+  labels with dimmed descriptions underneath, and — new — an explicit,
+  navigable **"Chat about this"** row at the bottom of the list instead of
+  free text only being reachable via a hidden "type any key" gesture. Ships
+  for single-select (`run_option_picker`), multi-select checkboxes
+  (`run_multi_option_picker`, new), and the non-raw-mode numbered fallback
+  alike.
+- **Desktop & Web GUI** (`ApprovalCard.tsx`): numbered, described option
+  buttons; a header chip; multi-select toggle buttons that build the same
+  canonical joined answer the CLI does, submitted alongside (not gated
+  behind) an always-visible free-text box.
+- **New usage guidance on the tool itself**: both prompt paths now tell the
+  model to call `ask_user` *only* when genuinely blocked on a decision that
+  is the user's to make — not resolvable from the request, the code, or a
+  sensible default — and explicitly not to use it for permission-to-proceed
+  or confirmation, which the existing approval/plan-review flow already
+  handles.

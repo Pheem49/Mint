@@ -246,7 +246,7 @@ pub fn build_system_prompt(
         input_formats.push("- request_user_approval: {\"title\":\"short title\",\"summary\":\"what needs approval\"}");
     }
     if allowed_actions.contains(&"ask_user") {
-        input_formats.push("- ask_user: {\"query\":\"short question\",\"options\":[\"choice 1\",\"choice 2\",\"choice 3\"]} (options is optional, max 3 short choices; omit it for a free-text question — the user can always type a custom answer instead of picking a choice)");
+        input_formats.push("- ask_user: {\"query\":\"short question\",\"header\":\"optional short tag\",\"multiSelect\":false,\"options\":[{\"label\":\"choice 1\",\"description\":\"optional detail\"},{\"label\":\"choice 2\"}]} (header, multiSelect, and options are all optional; options is max 3 choices, each with an optional one-line description; set multiSelect true to let the user pick more than one; omit options entirely for a free-text question — the user can always type a custom answer instead of picking a choice. Use this only when you're blocked on a decision that is genuinely the user's to make — one you can't resolve from the request, the code, or a sensible default. Don't use it to ask for permission to proceed or to confirm something you can just go do.)");
     }
     if allowed_actions.contains(&"detect_project") {
         input_formats.push("- detect_project: {\"path\":\".\"}");

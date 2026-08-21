@@ -32,6 +32,7 @@ mod onboard;
 mod plugins_cli;
 mod setup;
 mod skills;
+mod subagent_wizard;
 mod updater;
 
 pub use interactive::{

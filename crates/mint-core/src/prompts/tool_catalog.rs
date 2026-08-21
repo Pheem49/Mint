@@ -351,14 +351,29 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "ask_user",
-            "Ask the user a short question, optionally with up to 3 short pick-a-choice options (the user can still answer freely).",
+            "Ask the user a short question, optionally with up to 3 pick-a-choice options (each with an optional description), optionally allowing multiple selections, and optionally tagged with a short header label. The user can still answer freely. Use this tool only when you're blocked on a decision that is genuinely the user's to make — one you can't resolve from the request, the code, or a sensible default. Don't use it to ask for permission to proceed or to confirm something you can just go do.",
             schema(
                 json!({
                     "query": { "type": "string" },
+                    "header": {
+                        "type": "string",
+                        "description": "Optional short label (a few words) shown as a tag above the question."
+                    },
+                    "multiSelect": {
+                        "type": "boolean",
+                        "description": "Optional. If true, the user may pick more than one option."
+                    },
                     "options": {
                         "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Optional, max 3 short choices."
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": { "type": "string" },
+                                "description": { "type": "string" }
+                            },
+                            "required": ["label"]
+                        },
+                        "description": "Optional, max 3 choices. Each option has a short label and an optional one-line description."
                     }
                 }),
                 &["query"],
@@ -837,12 +852,14 @@ mod tests {
         );
         let config = MintConfig::default();
 
-        // No subagents visible at this root -> tool absent even when allowed.
+        // No user-authored subagents at this root, but the builtins
+        // (explorer, general-purpose, plan) are always present -> offered
+        // even here.
         let empty_root = std::env::temp_dir().join("mint-tool-catalog-no-subagents");
         let _ = std::fs::remove_dir_all(&empty_root);
         std::fs::create_dir_all(&empty_root).unwrap();
         let tools = tool_catalog(&config, false, &empty_root, true);
-        assert!(!tools.iter().any(|t| t.name == "dispatch_subagent"));
+        assert!(tools.iter().any(|t| t.name == "dispatch_subagent"));
 
         // Subagents exist + allowed -> offered.
         let tools = tool_catalog(&config, false, &root, true);

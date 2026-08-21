@@ -64,6 +64,14 @@ const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
     ),
     ("/skill add", "Add or install global skill file or folder"),
     ("/stats", "Show session statistics"),
+    (
+        "/subagent",
+        "List/create/remove subagents the agent can delegate to",
+    ),
+    (
+        "/subagent add",
+        "Create a subagent — walks through a wizard",
+    ),
     ("/veo", "Generate video using Google Veo"),
     (
         "/video-provider",

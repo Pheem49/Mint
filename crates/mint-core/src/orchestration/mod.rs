@@ -347,6 +347,16 @@ const COMPACTION_TRIGGER_RATIO: f64 = 0.6;
 /// in `native_messages`.
 const COMPACTION_KEEP_RECENT_STEPS: usize = 3;
 
+/// A single pick-a-choice option offered by the `ask_user` tool, with an
+/// optional one-line explanation shown under the label in both the CLI
+/// picker and the desktop/web approval card.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AskUserOption {
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentApproval {
     WriteFile {
@@ -384,7 +394,11 @@ pub enum AgentApproval {
     AskUser {
         question: String,
         #[serde(default)]
-        options: Vec<String>,
+        options: Vec<AskUserOption>,
+        #[serde(default)]
+        header: Option<String>,
+        #[serde(default, rename = "multiSelect")]
+        multi_select: bool,
     },
     ExitPlanMode {
         plan: String,
@@ -417,11 +431,21 @@ pub enum AgentProgress {
     ToolStart {
         action: String,
         input: Value,
+        /// Name of the subagent this tool call happened inside, if any —
+        /// `None` for the top-level agent's own calls. Set by
+        /// `dispatch_one_subagent` wrapping the nested loop's `progress` so
+        /// the CLI/GUI can render a subagent's own tool calls nested under
+        /// its `dispatch_subagent` call instead of indistinguishable from
+        /// the parent's.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent: Option<String>,
     },
     ToolEnd {
         action: String,
         input: Value,
         result: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent: Option<String>,
     },
 }
 
@@ -461,7 +485,11 @@ struct AgentInput {
     #[serde(default)]
     query: String,
     #[serde(default)]
-    options: Vec<String>,
+    options: Vec<AskUserOptionInput>,
+    #[serde(default)]
+    header: String,
+    #[serde(default)]
+    multi_select: bool,
     #[serde(default)]
     city: String,
     #[serde(default)]
@@ -578,6 +606,20 @@ struct AgentInput {
     provider: String,
     #[serde(default)]
     duration: Option<f64>,
+}
+
+/// Decode shim for `ask_user`'s `options`: accepts either a bare string
+/// (the legacy shape, and what a model may still emit even after the schema
+/// documents the object shape) or `{label, description}`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+enum AskUserOptionInput {
+    Plain(String),
+    Detailed {
+        label: String,
+        #[serde(default)]
+        description: Option<String>,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -987,18 +1029,33 @@ where
                     // No tool calls means the model answered directly — treat exactly
                     // like the JSON-prompt path's fallback for plain, non-JSON text
                     // (see `parse_decision_or_finish`): finish with that text as the
-                    // summary.
-                    _ => vec![(
-                        format!("call_{step}_finish"),
-                        AgentDecision {
-                            thought: String::new(),
-                            action: "finish".to_string(),
-                            input: AgentInput {
-                                summary: response.text.trim().to_string(),
-                                ..AgentInput::default()
+                    // summary. Unlike the JSON-prompt path, a truncated answer here
+                    // passes through as perfectly valid plain text (there's no JSON
+                    // structure to fail parsing and trigger a repair retry), so a
+                    // response cut off by the provider's own output-token cap would
+                    // otherwise print as if it were a complete answer — see
+                    // `provider_truncated_response`.
+                    _ => {
+                        let mut summary = response.text.trim().to_string();
+                        if provider_truncated_response(response.stop_reason.as_deref()) {
+                            summary.push_str(
+                                "\n\n[System note: this response was cut off by the model \
+                                 provider's own output-length limit, not by Mint — it may be \
+                                 incomplete. Ask to continue or retry to get the rest.]",
+                            );
+                        }
+                        vec![(
+                            format!("call_{step}_finish"),
+                            AgentDecision {
+                                thought: String::new(),
+                                action: "finish".to_string(),
+                                input: AgentInput {
+                                    summary,
+                                    ..AgentInput::default()
+                                },
                             },
-                        },
-                    )],
+                        )]
+                    }
                 }
             } else {
                 let decision = match parse_decision_or_finish(&response.text) {
@@ -1402,6 +1459,7 @@ where
                         progress(AgentProgress::ToolStart {
                             action: decision.action.clone(),
                             input: input_val.clone(),
+                            subagent: None,
                         });
 
                         match crate::hooks::run_pre_tool_hooks(
@@ -1423,6 +1481,7 @@ where
                                     &decision,
                                     chat_id,
                                     &mut approve,
+                                    &mut progress,
                                 )
                                 .await
                                 {
@@ -1459,6 +1518,7 @@ where
                         action: decision.action.clone(),
                         input: serde_json::to_value(&decision.input).unwrap_or(Value::Null),
                         result: result.clone(),
+                        subagent: None,
                     });
 
                     if action_succeeded {
@@ -1635,6 +1695,16 @@ where
 /// allowlist is shared with the system-prompt builder and the native
 /// tool-calling catalog via `crate::prompts::agent::PLAN_MODE_ALLOWED_ACTIONS`
 /// so the three can never drift on which actions are plan-mode-safe.
+/// Whether a `ChatResponse::stop_reason` indicates the provider cut the
+/// response off at its own output-token cap rather than the model choosing
+/// to stop — `"length"` (OpenAI-compatible: openai/deepseek/openrouter/
+/// local_openai), `"max_tokens"` (Anthropic), `"MAX_TOKENS"` (Gemini).
+/// Providers that don't report a stop reason at all (huggingface, ollama)
+/// can't be checked this way and are treated as not truncated.
+fn provider_truncated_response(stop_reason: Option<&str>) -> bool {
+    matches!(stop_reason, Some("length") | Some("max_tokens") | Some("MAX_TOKENS"))
+}
+
 fn plan_mode_allows(action: &str, input: &AgentInput) -> bool {
     if action == "run_shell" {
         return classify_shell_command(&input.command).mode.as_str() == "readOnly";
@@ -1658,6 +1728,7 @@ async fn dispatch_one_subagent(
     name: &str,
     task: &str,
     approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
 ) -> Result<String, OrchestrationError> {
     let Some(definition) = crate::subagents::find_subagent(name, Some(root)) else {
         return Err(OrchestrationError::Agent(format!(
@@ -1700,12 +1771,42 @@ async fn dispatch_one_subagent(
     // can't compute a finite size for a directly self-referential
     // async fn cycle otherwise. `approve_cb` is reborrowed rather than
     // moved so the subagent's mutating actions still go through the
-    // same approval gate as the caller's; `progress`/`chunk` are no-ops
-    // so the subagent's internal steps never reach the parent's UI or
-    // context — only its final summary is returned below.
+    // same approval gate as the caller's; `chunk` stays a no-op so the
+    // subagent's own streamed answer text never lands in the parent's chat
+    // — only its final summary (returned below) does. `progress` is *not*
+    // a no-op: `ToolStart`/`ToolEnd` are re-tagged with this subagent's name
+    // and forwarded to the caller's real `progress`, so the CLI/GUI can
+    // render the subagent's own tool calls nested under its
+    // `dispatch_subagent` call — this only affects what's shown in the UI,
+    // never what reaches the parent model's context (that isolation comes
+    // from `sub_chat_id`/`native_messages` staying local to this call, not
+    // from suppressing progress).
     // `orchestrate_agent_loop` itself returns a boxed `dyn Future`
     // (see its doc comment) specifically so this recursive call can
     // just be awaited directly, with no manual boxing needed here.
+    let subagent_name = definition.name.clone();
+    let mut nested_progress = |event: AgentProgress| {
+        let tagged = match event {
+            AgentProgress::ToolStart { action, input, .. } => AgentProgress::ToolStart {
+                action,
+                input,
+                subagent: Some(subagent_name.clone()),
+            },
+            AgentProgress::ToolEnd {
+                action,
+                input,
+                result,
+                ..
+            } => AgentProgress::ToolEnd {
+                action,
+                input,
+                result,
+                subagent: Some(subagent_name.clone()),
+            },
+            other => other,
+        };
+        progress(tagged);
+    };
     let result = orchestrate_agent_loop(
         &sub_config,
         &sub_task,
@@ -1720,7 +1821,7 @@ async fn dispatch_one_subagent(
         true,
         false,
         &mut *approve_cb,
-        |_| {},
+        &mut nested_progress,
         |_| {},
     )
     .await;
@@ -1761,6 +1862,13 @@ async fn run_parallel_subagent_batch(
     trajectory: &mut Vec<String>,
 ) -> Vec<(String, String, Value, String)> {
     let approve_mutex = std::sync::Mutex::new(approve);
+    // Concurrently-running subagents share one real `progress` sink the same
+    // way they share one real `approve` gate above — each gets a small
+    // Mutex-backed adapter closure so their nested `ToolStart`/`ToolEnd`
+    // events (tagged with their own subagent name in `dispatch_one_subagent`)
+    // still reach the CLI/GUI, interleaved but not corrupted, instead of the
+    // batch staying silent until every item in it finishes.
+    let progress_mutex = std::sync::Mutex::new(progress);
 
     let mut dispatches = Vec::with_capacity(decisions.len());
     for (index, (call_id, decision)) in decisions.iter().enumerate() {
@@ -1772,17 +1880,32 @@ async fn run_parallel_subagent_batch(
         let name = decision.input.name.clone();
         let task_text = decision.input.instruction.clone();
         let approve_mutex = &approve_mutex;
+        let progress_mutex = &progress_mutex;
         dispatches.push(async move {
             let result: Result<String, OrchestrationError> = if name.trim().is_empty() {
                 Err(OrchestrationError::Agent("name is required".into()))
             } else if task_text.trim().is_empty() {
                 Err(OrchestrationError::Agent("instruction is required".into()))
             } else {
-                let mut adapter = |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
-                    let mut guard = approve_mutex.lock().unwrap();
-                    (*guard)(approval)
+                let mut approve_adapter =
+                    |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+                        let mut guard = approve_mutex.lock().unwrap();
+                        (*guard)(approval)
+                    };
+                let mut progress_adapter = |event: AgentProgress| {
+                    let mut guard = progress_mutex.lock().unwrap();
+                    (*guard)(event);
                 };
-                dispatch_one_subagent(root, config, chat_id, &name, &task_text, &mut adapter).await
+                dispatch_one_subagent(
+                    root,
+                    config,
+                    chat_id,
+                    &name,
+                    &task_text,
+                    &mut approve_adapter,
+                    &mut progress_adapter,
+                )
+                .await
             };
             (
                 index, call_id, thought, action, input_val, action_key, result,
@@ -1795,12 +1918,17 @@ async fn run_parallel_subagent_batch(
         .collect::<Vec<_>>()
         .await;
     results.sort_by_key(|(index, ..)| *index);
+    // All `dispatches` futures (the only borrowers of `progress_mutex`) have
+    // finished by now, so this is the sole remaining handle — safe to unwrap
+    // back into a plain `&mut dyn FnMut` for the rest of this function.
+    let progress = progress_mutex.into_inner().unwrap();
 
     let mut step_tool_results = Vec::with_capacity(results.len());
     for (_, call_id, thought, action, input_val, action_key, result) in results {
         progress(AgentProgress::ToolStart {
             action: action.clone(),
             input: input_val.clone(),
+            subagent: None,
         });
         let tool_result = match result {
             Ok(text) => text,
@@ -1810,6 +1938,7 @@ async fn run_parallel_subagent_batch(
             action: action.clone(),
             input: input_val.clone(),
             result: tool_result.clone(),
+            subagent: None,
         });
 
         let action_count = {
@@ -1854,6 +1983,7 @@ async fn execute_tool(
     decision: &AgentDecision,
     chat_id: &str,
     approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
 ) -> Result<String, OrchestrationError> {
     let input = &decision.input;
     match decision.action.as_str() {
@@ -1960,6 +2090,7 @@ async fn execute_tool(
                 config,
                 chat_id,
                 approve_cb,
+                progress,
             )
             .await
         }
@@ -2044,7 +2175,9 @@ where
         action: action.to_string(),
         input: serde_json::from_value(input).unwrap_or_default(),
     };
-    execute_tool(root, config, &decision, chat_id, approve_cb).await
+    // No progress channel from the realtime voice session — tool-call
+    // activity isn't surfaced there the way it is in the CLI/GUI.
+    execute_tool(root, config, &decision, chat_id, approve_cb, &mut |_| {}).await
 }
 
 #[cfg(test)]

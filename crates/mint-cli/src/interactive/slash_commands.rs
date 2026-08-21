@@ -1571,6 +1571,63 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/subagent" => {
+            let (subcmd, args) = rest
+                .split_once(char::is_whitespace)
+                .map(|(c, a)| (c, a.trim()))
+                .unwrap_or((rest, ""));
+            match subcmd {
+                "list" | "" => {
+                    let subagents = mint_core::list_subagents(Some(&session.current_dir));
+                    println!("\n{BLUE}Subagents:{RESET}");
+                    for definition in &subagents {
+                        let source = if definition.builtin {
+                            "built-in".to_string()
+                        } else if definition.source_path.contains(".agents/subagents") {
+                            "workspace".to_string()
+                        } else {
+                            "global".to_string()
+                        };
+                        println!(
+                            "  {} {DIM}({}){RESET} — {}",
+                            definition.name, source, definition.description
+                        );
+                    }
+                    println!();
+                }
+                "add" => {
+                    match crate::subagent_wizard::run_add_wizard(Some(&session.current_dir)) {
+                        Ok(definition) => {
+                            println!("\n{DIM}Created subagent {}.{RESET}\n", definition.name)
+                        }
+                        Err(e) => println!("\n{ERROR}Error:{RESET} {e}\n"),
+                    }
+                }
+                "remove" => {
+                    if args.is_empty() {
+                        println!("{WARN}/subagent remove <name>{RESET}\n");
+                    } else {
+                        match mint_core::find_subagent(args, Some(&session.current_dir)) {
+                            Some(definition) if definition.builtin => println!(
+                                "{WARN}Can't remove the built-in subagent {args}.{RESET}\n"
+                            ),
+                            Some(definition) => {
+                                match mint_core::delete_subagent(&definition.source_path) {
+                                    Ok(()) => println!("{DIM}Removed {args}.{RESET}\n"),
+                                    Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                                }
+                            }
+                            None => println!("{WARN}No subagent named {args}.{RESET}\n"),
+                        }
+                    }
+                }
+                _ => println!(
+                    "{WARN}/subagent usage: list | add | remove <name>{RESET}\n"
+                ),
+            }
+            Some(SlashResult::Handled)
+        }
+
         "/mcp" => {
             let (subcmd, args) = rest
                 .split_once(char::is_whitespace)

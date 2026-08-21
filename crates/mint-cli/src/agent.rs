@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 use ansi_to_tui::IntoText;
 use anyhow::{Result, anyhow};
 use mint_core::{
-    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, CHAT_CLI_ID, MemoryStore,
-    MintConfig, OrchestrationError, PermissionDecision, PermissionRule, orchestrate_agent_loop,
-    permission_decision_for,
+    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption, CHAT_CLI_ID,
+    MemoryStore, MintConfig, OrchestrationError, PermissionDecision, PermissionRule,
+    orchestrate_agent_loop, permission_decision_for,
 };
 use syntect::easy::HighlightLines;
 use syntect::highlighting::ThemeSet;
@@ -37,6 +37,7 @@ const BLUE: &str = "\x1b[38;2;78;201;216m";
 const CYAN: &str = "\x1b[38;2;56;189;248m";
 const DIM: &str = "\x1b[90m";
 const BRIGHT: &str = "\x1b[1;97m";
+const BOLD: &str = "\x1b[1m";
 const BG_ADD: &str = "\x1b[48;2;20;53;32m\x1b[38;2;166;226;46m";
 const BG_DEL: &str = "\x1b[48;2;61;23;23m\x1b[38;2;255;121;121m";
 
@@ -81,6 +82,102 @@ pub async fn run_code_agent_with_image(
         Arc::new(Mutex::new(None)),
     )
     .await
+}
+
+/// Human-readable `(is_activity, label)` for a `ToolStart` whose action
+/// didn't already get a more specific rendering (`explored_action_label`'s
+/// grouped file/search targets, the plan/skill/memory special cases). Shared
+/// between the top-level progress handler and the nested-subagent one so a
+/// subagent's own tool calls get the same descriptive labels the top-level
+/// agent's do, not just a bare `[action] Using tool...` fallback.
+fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String) {
+    match action {
+        "web_search" => {
+            let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            (
+                true,
+                format!("[web_search] Searching the web for \"{}\"...", query),
+            )
+        }
+        "run_shell" => {
+            let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            let background = input
+                .get("background")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            (
+                false,
+                if background {
+                    format!("[run_shell] Starting background command: `{}`...", command)
+                } else {
+                    format!("[run_shell] Running command: `{}`...", command)
+                },
+            )
+        }
+        "shell_output" => {
+            let job_id = input.get("job_id").and_then(|v| v.as_str()).unwrap_or("");
+            (
+                false,
+                format!("[shell_output] Checking background job {}...", job_id),
+            )
+        }
+        "kill_shell" => {
+            let job_id = input.get("job_id").and_then(|v| v.as_str()).unwrap_or("");
+            (
+                false,
+                format!("[kill_shell] Stopping background job {}...", job_id),
+            )
+        }
+        "git_status" | "git_diff" | "git_log" | "git_branch" => {
+            (false, format!("[{}] Reading repository state...", action))
+        }
+        "create_plan" | "update_plan" => {
+            (false, format!("[{}] Updating task plan...", action))
+        }
+        "request_user_approval" => (
+            false,
+            "[request_user_approval] Waiting for approval...".into(),
+        ),
+        "ask_user" => (false, "[ask_user] Waiting for user answer...".into()),
+        "detect_project" => (false, "[detect_project] Detecting project type...".into()),
+        "list_tests" => (false, "[list_tests] Listing tests...".into()),
+        "read_diagnostics" => (false, "[read_diagnostics] Reading diagnostics...".into()),
+        "view_image" => {
+            let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            (false, format!("[view_image] Reading image: {}...", path))
+        }
+        "write_file" => {
+            let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            (false, format!("[write_file] Writing file: {}...", path))
+        }
+        "apply_patch" => {
+            let path = input
+                .get("patch")
+                .and_then(|p| p.get("path"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            (false, format!("[apply_patch] Patching file: {}...", path))
+        }
+        "run_plugin" => {
+            let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            (false, format!("[run_plugin] Running plugin: {}...", name))
+        }
+        "dispatch_subagent" => {
+            let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            (
+                false,
+                format!("[dispatch_subagent] Dispatching to subagent: {}...", name),
+            )
+        }
+        "mcp_tool" => {
+            let tool_name = input.get("tool").and_then(|v| v.as_str()).unwrap_or("");
+            (
+                false,
+                format!("[mcp_tool] Running MCP tool: {}...", tool_name),
+            )
+        }
+        _ => (false, format!("[{}] Using tool...", action)),
+    }
 }
 
 pub async fn run_code_agent_with_options(
@@ -271,9 +368,15 @@ pub async fn run_code_agent_with_options(
                 print_approval_card("Review Plan", &[("Plan", plan)]);
                 plan_mode_option_picker("Yes, approve and start implementing", "No, keep planning")
             }
-            AgentApproval::AskUser { question, options } => {
+            AgentApproval::AskUser {
+                question,
+                options,
+                header,
+                multi_select,
+            } => {
+                let header = header.as_deref().filter(|h| !h.trim().is_empty());
                 if options.is_empty() {
-                    print_approval_card("Agent Question", &[("Question", question)]);
+                    print_ask_user_header(question, header, "Enter to submit · Esc to decline");
                     print!("  Answer (leave empty to decline): ");
                     let _ = io::stdout().flush();
                     let mut answer = String::new();
@@ -288,8 +391,19 @@ pub async fn run_code_agent_with_options(
                         }
                         Err(error) => Err(error.to_string()),
                     }
+                } else if *multi_select {
+                    print_ask_user_header(
+                        question,
+                        header,
+                        "Enter to select · Space to toggle · \u{2191}/\u{2193} to navigate · Esc to cancel",
+                    );
+                    run_multi_option_picker(options)
                 } else {
-                    print_approval_card("Agent Question", &[("Question", question)]);
+                    print_ask_user_header(
+                        question,
+                        header,
+                        "Enter to select · \u{2191}/\u{2193} to navigate · Esc to cancel",
+                    );
                     run_option_picker(options)
                 }
             }
@@ -309,6 +423,14 @@ pub async fn run_code_agent_with_options(
                 if !timer_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = timer_live_status.lock()
                 {
+                    // Re-check after acquiring the lock: `on_chunk` may have
+                    // flipped `agent_done` and started printing the final
+                    // answer while this tick was blocked waiting for the
+                    // same mutex. Bail without touching `status` rather than
+                    // resurrecting the live region underneath that print.
+                    if timer_agent_done.load(Ordering::Relaxed) {
+                        break;
+                    }
                     if !timer_tool_running.load(Ordering::Relaxed) {
                         status.thinking = Some(format!(
                             "{thinking_verb} ({} • Esc to interrupt)",
@@ -363,9 +485,34 @@ pub async fn run_code_agent_with_options(
                 render_live_status(&mut status);
             }
         }
-        AgentProgress::ToolStart { action, input } => {
+        AgentProgress::ToolStart {
+            action,
+            input,
+            subagent,
+        } => {
             progress_tool_running.store(true, Ordering::Relaxed);
             if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
+                if let Some(subagent_name) = subagent {
+                    // A tool call happening *inside* a running subagent's own
+                    // nested loop (tagged by `dispatch_one_subagent`) — render
+                    // it as one indented line under the `[dispatch_subagent]
+                    // Dispatching to subagent: ...` line already pushed when
+                    // the dispatch itself started, rather than merging it into
+                    // `status.explored`/`status.activities` where it'd be
+                    // indistinguishable from the top-level agent's own calls.
+                    let inner = explored_action_label(&action, &input)
+                        .map(|explored| explored.as_label())
+                        .unwrap_or_else(|| generic_tool_label(&action, &input).1);
+                    if let Ok(mut status) = progress_live_status.lock() {
+                        status.thinking = None;
+                        status.tasks.push(TaskEntry {
+                            label: format!("{DIM}{subagent_name}{RESET} \u{2192} {inner}"),
+                            output: Vec::new(),
+                        });
+                        render_live_status(&mut status);
+                    }
+                    return;
+                }
                 if (action == "create_plan" || action == "update_plan")
                     && let Some(steps) = extract_plan_steps(&input)
                 {
@@ -395,90 +542,7 @@ pub async fn run_code_agent_with_options(
                     return;
                 }
 
-                let (is_activity, label) = match action.as_str() {
-                    "web_search" => {
-                        let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                        (
-                            true,
-                            format!("[web_search] Searching the web for \"{}\"...", query),
-                        )
-                    }
-                    "run_shell" => {
-                        let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
-                        let background = input
-                            .get("background")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        (
-                            false,
-                            if background {
-                                format!("[run_shell] Starting background command: `{}`...", command)
-                            } else {
-                                format!("[run_shell] Running command: `{}`...", command)
-                            },
-                        )
-                    }
-                    "shell_output" => {
-                        let job_id = input.get("job_id").and_then(|v| v.as_str()).unwrap_or("");
-                        (
-                            false,
-                            format!("[shell_output] Checking background job {}...", job_id),
-                        )
-                    }
-                    "kill_shell" => {
-                        let job_id = input.get("job_id").and_then(|v| v.as_str()).unwrap_or("");
-                        (
-                            false,
-                            format!("[kill_shell] Stopping background job {}...", job_id),
-                        )
-                    }
-                    "git_status" | "git_diff" | "git_log" | "git_branch" => {
-                        (false, format!("[{}] Reading repository state...", action))
-                    }
-                    "create_plan" | "update_plan" => {
-                        (false, format!("[{}] Updating task plan...", action))
-                    }
-                    "request_user_approval" => (
-                        false,
-                        "[request_user_approval] Waiting for approval...".into(),
-                    ),
-                    "ask_user" => (false, "[ask_user] Waiting for user answer...".into()),
-                    "detect_project" => {
-                        (false, "[detect_project] Detecting project type...".into())
-                    }
-                    "list_tests" => (false, "[list_tests] Listing tests...".into()),
-                    "read_diagnostics" => {
-                        (false, "[read_diagnostics] Reading diagnostics...".into())
-                    }
-                    "view_image" => {
-                        let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("");
-                        (false, format!("[view_image] Reading image: {}...", path))
-                    }
-                    "write_file" => {
-                        let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("");
-                        (false, format!("[write_file] Writing file: {}...", path))
-                    }
-                    "apply_patch" => {
-                        let path = input
-                            .get("patch")
-                            .and_then(|p| p.get("path"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        (false, format!("[apply_patch] Patching file: {}...", path))
-                    }
-                    "run_plugin" => {
-                        let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        (false, format!("[run_plugin] Running plugin: {}...", name))
-                    }
-                    "mcp_tool" => {
-                        let tool_name = input.get("tool").and_then(|v| v.as_str()).unwrap_or("");
-                        (
-                            false,
-                            format!("[mcp_tool] Running MCP tool: {}...", tool_name),
-                        )
-                    }
-                    _ => (false, format!("[{}] Using tool...", action)),
-                };
+                let (is_activity, label) = generic_tool_label(&action, &input);
 
                 if let Ok(mut status) = progress_live_status.lock() {
                     status.thinking = None;
@@ -495,10 +559,36 @@ pub async fn run_code_agent_with_options(
             action,
             input,
             result,
+            subagent,
         } => {
             progress_tool_running.store(false, Ordering::Relaxed);
             if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
-                if action == "create_plan" || action == "update_plan" {
+                if subagent.is_some() {
+                    // Nested call inside a subagent finished — the ToolStart
+                    // line already shown covers it; only the command-output
+                    // preview below (which every caller, nested or not,
+                    // benefits from seeing) still applies.
+                    if command_was_run(&result)
+                        && let Some(commands) = ran_command_labels(&action, &input)
+                        && let Ok(mut status) = progress_live_status.lock()
+                    {
+                        status.thinking = None;
+                        let preview = command_output_preview(&result);
+                        let last_index = commands.len().saturating_sub(1);
+                        let prefix = subagent.as_deref().unwrap_or("");
+                        for (index, cmd) in commands.into_iter().enumerate() {
+                            status.tasks.push(TaskEntry {
+                                label: format!("{DIM}{prefix}{RESET} \u{2192} Finished command: `{}`", cmd),
+                                output: if index == last_index {
+                                    preview.clone()
+                                } else {
+                                    Vec::new()
+                                },
+                            });
+                        }
+                        render_live_status(&mut status);
+                    }
+                } else if action == "create_plan" || action == "update_plan" {
                     if let Some(steps) = extract_plan_steps(&input)
                         && let Ok(mut status) = progress_live_status.lock()
                     {
@@ -558,7 +648,20 @@ pub async fn run_code_agent_with_options(
     };
 
     let chunk_live_status = Arc::clone(&live_status);
+    let chunk_agent_done = Arc::clone(&agent_done);
     let on_chunk = |summary: String| {
+        // Flip this *before* touching anything else — `agent_loop` still has
+        // async work left (memory writes, etc.) after calling `on_chunk`, so
+        // the real "done" store below (after `agent_loop.await`) fires too
+        // late: the periodic status ticker keeps polling every 150ms in the
+        // meantime and, seeing `agent_done` still false, unconditionally
+        // resurrects `status.thinking` and re-renders — reconstructing a
+        // fresh inline TUI viewport mid-print if that lands while the plain
+        // `print!`s below are still spooling out a long answer (e.g. a big
+        // markdown table), corrupting the terminal. Setting it here closes
+        // that window instead of only the (much narrower) one the
+        // `accepting_input` flag below covers.
+        chunk_agent_done.store(true, Ordering::Relaxed);
         if !options.fast_mode
             && let Ok(mut status) = chunk_live_status.lock()
         {

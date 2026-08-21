@@ -692,8 +692,24 @@
 }
 
 .approval-card-title {
+  align-items: center;
   color: var(--text-main);
+  display: flex;
+  flex-wrap: wrap;
   font-weight: 700;
+  gap: 8px;
+}
+
+.approval-header-chip {
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: 999px;
+  color: var(--text-main);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .approval-card-body {
@@ -762,6 +778,17 @@
 .approval-option-btn:hover {
   background: rgba(16, 185, 129, 0.12);
   border-color: rgba(16, 185, 129, 0.4);
+}
+
+.approval-option-btn.selected {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: rgba(16, 185, 129, 0.55);
+}
+
+.approval-option-desc {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  margin-top: 2px;
 }
 
 .approval-option-divider {

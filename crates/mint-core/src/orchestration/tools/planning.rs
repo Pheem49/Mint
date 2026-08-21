@@ -44,16 +44,42 @@ pub(in crate::orchestration) async fn execute(
         }
         "ask_user" => {
             let question = required(&input.query, "query")?;
-            let options: Vec<String> = input
+            let options: Vec<AskUserOption> = input
                 .options
                 .iter()
-                .map(|o| o.trim().to_owned())
-                .filter(|o| !o.is_empty())
+                .filter_map(|o| {
+                    let (label, description) = match o {
+                        AskUserOptionInput::Plain(s) => (s.trim().to_owned(), None),
+                        AskUserOptionInput::Detailed { label, description } => (
+                            label.trim().to_owned(),
+                            description
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|d| !d.is_empty())
+                                .map(str::to_owned),
+                        ),
+                    };
+                    if label.is_empty() {
+                        None
+                    } else {
+                        Some(AskUserOption { label, description })
+                    }
+                })
                 .take(3)
                 .collect();
+            let header = {
+                let h = input.header.trim();
+                if h.is_empty() { None } else { Some(h.to_owned()) }
+            };
+            // Canonical multi-select answer format, matched identically by the
+            // CLI picker (mint-cli/src/agent/approval_prompts.rs) and the
+            // desktop/web ApprovalCard: selected labels joined with ", ",
+            // with any additional free text appended as " — <free text>".
             let approved = approve_cb(&AgentApproval::AskUser {
                 question: question.to_owned(),
                 options,
+                header,
+                multi_select: input.multi_select,
             })
             .map_err(OrchestrationError::Agent)?;
             match approved {

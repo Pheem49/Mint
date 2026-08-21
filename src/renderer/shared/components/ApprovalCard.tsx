@@ -14,24 +14,55 @@ interface Props {
 }
 
 
+interface AskUserOption {
+  label: string
+  description?: string
+}
+
 export function ApprovalCard({ pendingApproval, onApproval }: Props) {
   const [askAnswer, setAskAnswer] = useState('')
+  const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set())
 
   const details = renderApprovalDetails(pendingApproval.approval)
   const writeFile = pendingApproval.approval?.WriteFile
   const applyPatch = pendingApproval.approval?.ApplyPatch
   const diffText = writeFile?.diff || applyPatch?.diff
   const isAskUser = !!pendingApproval.approval?.AskUser
-  const askOptions: string[] = Array.isArray(pendingApproval.approval?.AskUser?.options)
+  const askOptions: AskUserOption[] = Array.isArray(pendingApproval.approval?.AskUser?.options)
     ? pendingApproval.approval.AskUser.options
     : []
+  const isMultiSelect = !!pendingApproval.approval?.AskUser?.multiSelect
+  const askHeader: string | undefined = pendingApproval.approval?.AskUser?.header || undefined
+
+  // Mirrors the canonical join format in
+  // crates/mint-core/src/orchestration/tools/planning.rs and
+  // crates/mint-cli/src/agent/approval_prompts.rs's join_multi_select_answer:
+  // selected labels joined with ", ", with any free text appended as " — <text>".
+  const buildMultiSelectAnswer = () => {
+    const joined = Array.from(selectedOptions).join(', ')
+    const freeText = askAnswer.trim()
+    if (!freeText) return joined
+    return joined ? `${joined} — ${freeText}` : freeText
+  }
+
+  const toggleOption = (label: string) => {
+    setSelectedOptions((prev) => {
+      const next = new Set(prev)
+      if (next.has(label)) next.delete(label)
+      else next.add(label)
+      return next
+    })
+  }
 
   return (
     <div className="message ai-message" style={{ width: '100%' }}>
       <div className="bubble-wrapper" style={{ width: '100%' }}>
         <div className="action-card approval-card" data-tier={details.isDangerous ? 'dangerous' : undefined} style={{ width: '100%' }}>
           <div className="approval-card-content" style={{ width: '100%' }}>
-            <div className="approval-card-title">{details.title}</div>
+            <div className="approval-card-title">
+              {details.title}
+              {askHeader && <span className="approval-header-chip">{'▫ '}{askHeader}</span>}
+            </div>
             <div className="approval-card-body" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{details.body}</div>
             {diffText ? (
               <div className="approval-card-diff-container" style={{ marginTop: '8px', width: '100%' }}>
@@ -50,14 +81,21 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
                         <button
                           key={i}
                           type="button"
-                          className="approval-option-btn"
-                          onClick={() => onApproval(true, false, option)}
+                          className={`approval-option-btn${isMultiSelect && selectedOptions.has(option.label) ? ' selected' : ''}`}
+                          onClick={() =>
+                            isMultiSelect
+                              ? toggleOption(option.label)
+                              : onApproval(true, false, option.label)
+                          }
                         >
-                          {option}
+                          <div>{i + 1}. {option.label}</div>
+                          {option.description && (
+                            <div className="approval-option-desc">{option.description}</div>
+                          )}
                         </button>
                       ))}
                     </div>
-                    <div className="approval-option-divider">Or type your own answer</div>
+                    <div className="approval-option-divider">Chat about this</div>
                   </>
                 )}
                 <textarea
@@ -86,8 +124,10 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
               <button
                 type="button"
                 className="approval-btn approval-btn-approve"
-                disabled={!askAnswer.trim()}
-                onClick={() => onApproval(true, false, askAnswer)}
+                disabled={isMultiSelect ? selectedOptions.size === 0 && !askAnswer.trim() : !askAnswer.trim()}
+                onClick={() =>
+                  onApproval(true, false, isMultiSelect ? buildMultiSelectAnswer() : askAnswer)
+                }
               >
                 Submit Answer
               </button>
