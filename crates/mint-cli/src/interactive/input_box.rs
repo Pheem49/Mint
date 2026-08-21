@@ -349,6 +349,48 @@ pub(crate) fn compose_input_box(
                 }
             }
         }
+    } else if search_query.starts_with('@') {
+        // Parse server name (excluding arguments), mirroring the `$skill` branch above.
+        let server_query = search_query
+            .split_whitespace()
+            .next()
+            .unwrap_or(search_query);
+        let prefix = &server_query[1..].to_lowercase();
+        let servers = mint_core::list_mcp_servers().unwrap_or_default();
+        let matches: Vec<_> = servers
+            .keys()
+            .filter(|name| name.to_lowercase().starts_with(prefix.as_str()))
+            .collect();
+
+        if !matches.is_empty() {
+            let total_pages = matches.len().div_ceil(5);
+            let highlight_idx = tab_index.map(|idx| idx % matches.len());
+            let selected_idx = highlight_idx.unwrap_or(0);
+            let current_page = selected_idx / 5;
+            let s_start_idx = current_page * 5;
+            let s_end_idx = std::cmp::min(s_start_idx + 5, matches.len());
+
+            lines.push(String::new());
+            lines.push(format!(
+                " {BLUE}Suggestions ({}/{}){RESET}",
+                current_page + 1,
+                total_pages
+            ));
+            for i in s_start_idx..s_end_idx {
+                let name = matches[i];
+                if Some(i) == highlight_idx {
+                    lines.push(format!(
+                        "  {BLUE}▶ @{:<20}{RESET} {MINT}[Plugin]{RESET} {DIM}Restrict this turn to this MCP server{RESET}",
+                        name
+                    ));
+                } else {
+                    lines.push(format!(
+                        "    {DIM}@{:<20} [Plugin] Restrict this turn to this MCP server{RESET}",
+                        name
+                    ));
+                }
+            }
+        }
     }
 
     // Row 0 is the leading composer-background blank line, so input rows
@@ -767,6 +809,38 @@ pub fn read_line_interactive(
                                 );
                                 enable_raw_mode()?;
                             }
+                        } else if base.starts_with('@') {
+                            let server_query = base.split_whitespace().next().unwrap_or(&base);
+                            let prefix = &server_query[1..].to_lowercase();
+                            let servers = mint_core::list_mcp_servers().unwrap_or_default();
+                            let matches: Vec<_> = servers
+                                .keys()
+                                .filter(|name| name.to_lowercase().starts_with(prefix.as_str()))
+                                .collect();
+
+                            if !matches.is_empty() {
+                                let idx = tab_index.unwrap_or(0) % matches.len();
+                                let completed = format!("@{} ", matches[idx]);
+                                input_chars = completed.chars().collect();
+                                cursor_pos = input_chars.len();
+
+                                let current_highlight = Some(idx);
+                                tab_index = Some(idx + 1);
+
+                                disable_raw_mode()?;
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                    Some(&base),
+                                    current_highlight,
+                                    current_dir,
+                                    &mut cursor_row,
+                                );
+                                enable_raw_mode()?;
+                            }
                         }
                     }
                     KeyCode::Down => {
@@ -825,6 +899,39 @@ pub fn read_line_interactive(
                                 };
                                 tab_index = Some(new_idx);
                                 let completed = format!("${} ", matches[new_idx].name);
+                                input_chars = completed.chars().collect();
+                                cursor_pos = input_chars.len();
+
+                                disable_raw_mode()?;
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                    Some(&base),
+                                    Some(new_idx),
+                                    current_dir,
+                                    &mut cursor_row,
+                                );
+                                enable_raw_mode()?;
+                            }
+                        } else if base.starts_with('@') {
+                            let server_query = base.split_whitespace().next().unwrap_or(&base);
+                            let prefix = &server_query[1..].to_lowercase();
+                            let servers = mint_core::list_mcp_servers().unwrap_or_default();
+                            let matches: Vec<_> = servers
+                                .keys()
+                                .filter(|name| name.to_lowercase().starts_with(prefix.as_str()))
+                                .collect();
+
+                            if !matches.is_empty() {
+                                let new_idx = match tab_index {
+                                    Some(idx) => (idx + 1) % matches.len(),
+                                    None => 0,
+                                };
+                                tab_index = Some(new_idx);
+                                let completed = format!("@{} ", matches[new_idx]);
                                 input_chars = completed.chars().collect();
                                 cursor_pos = input_chars.len();
 
@@ -942,6 +1049,45 @@ pub fn read_line_interactive(
                                 };
                                 tab_index = Some(new_idx);
                                 let completed = format!("${} ", matches[new_idx].name);
+                                input_chars = completed.chars().collect();
+                                cursor_pos = input_chars.len();
+
+                                disable_raw_mode()?;
+                                redraw_input_box(
+                                    &input_chars,
+                                    cursor_pos,
+                                    placeholder,
+                                    model,
+                                    path_str,
+                                    Some(&base),
+                                    Some(new_idx),
+                                    current_dir,
+                                    &mut cursor_row,
+                                );
+                                enable_raw_mode()?;
+                            }
+                        } else if base.starts_with('@') {
+                            let server_query = base.split_whitespace().next().unwrap_or(&base);
+                            let prefix = &server_query[1..].to_lowercase();
+                            let servers = mint_core::list_mcp_servers().unwrap_or_default();
+                            let matches: Vec<_> = servers
+                                .keys()
+                                .filter(|name| name.to_lowercase().starts_with(prefix.as_str()))
+                                .collect();
+
+                            if !matches.is_empty() {
+                                let new_idx = match tab_index {
+                                    Some(idx) => {
+                                        if idx == 0 {
+                                            matches.len() - 1
+                                        } else {
+                                            idx - 1
+                                        }
+                                    }
+                                    None => matches.len() - 1,
+                                };
+                                tab_index = Some(new_idx);
+                                let completed = format!("@{} ", matches[new_idx]);
                                 input_chars = completed.chars().collect();
                                 cursor_pos = input_chars.len();
 

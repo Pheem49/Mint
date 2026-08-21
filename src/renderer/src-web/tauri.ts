@@ -382,6 +382,11 @@ export async function streamChatMessage(
   workspacePath?: string | null,
   chatId?: string | null,
   agentId?: string | null,
+  // Unused on web (no plan-mode-approval UI here) — kept only so this positional
+  // arg list stays aligned with the desktop `tauri.ts`, since the shared
+  // `MintDashboard.tsx` call site passes the same argument list to both builds.
+  _planMode?: boolean,
+  pinnedMcpServer?: string | null,
 ): Promise<ChatResponse> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
@@ -389,7 +394,7 @@ export async function streamChatMessage(
     const res = await authFetch(`${API_BASE}/chat-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId })
+      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId, pinnedMcpServer })
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -435,7 +440,7 @@ export async function streamChatMessage(
     else onProgress?.(event.progress)
   }
   const response = await invoke<ChatResponse>('stream_chat_message', {
-    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId },
+    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId, pinnedMcpServer },
     onEvent,
   })
   if (imageDataUri) {

@@ -962,373 +962,92 @@
   }
 }
 
-/* ============================================================
-   CapCut-Style NLE Video Editor Workspace
-   ============================================================ */
 
-.capcut-nle-container {
+/* ── FableMint hand-off notice (Edit tab) ────────────────── */
+.veo-studio-content--single {
   display: flex;
-  flex-direction: column;
-  height: 100%;
-  width: 100%;
-  background: var(--bg-color, #0a0a0b);
-  color: var(--text-main, #e8e8ea);
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  overflow: hidden;
-}
-
-.capcut-header-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 48px;
-  padding: 0 16px;
-  background: var(--chrome-bg, #18181a);
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  flex-shrink: 0;
-}
-
-.capcut-header-left {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.capcut-logo-badge {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 700;
-  font-size: 0.92rem;
-  color: var(--accent, #10b981);
-}
-
-.capcut-nav-tabs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.capcut-nav-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  border: none;
-  color: var(--text-muted, #8f8f94);
-  font-size: 0.82rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.capcut-nav-tab:hover {
-  background: var(--input-bg, rgba(255, 255, 255, 0.05));
-  color: var(--text-main, #e8e8ea);
-}
-
-.capcut-nav-tab.is-active {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent, #10b981);
-  font-weight: 600;
-}
-
-.capcut-header-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.capcut-export-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: var(--radius-sm);
-  background: var(--accent, #10b981);
-  color: #ffffff;
-  border: none;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 30%, transparent);
-  transition: all 0.15s ease;
-}
-
-.capcut-export-btn:hover:not(:disabled) {
-  background: var(--accent-hover, #34d399);
-  transform: translateY(-1px);
-}
-
-/* 3-Pane Upper Workspace */
-.capcut-workspace-top {
-  display: grid;
-  grid-template-columns: 280px 1fr 260px;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--bg-color, #0a0a0b);
-}
-
-/* Left Panel: Media Bin & Prompt Console */
-.capcut-panel-left {
-  display: flex;
-  flex-direction: column;
-  background: var(--panel-bg, #1e1e20);
-  border-right: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  justify-content: center;
+  padding: 32px 20px;
   overflow-y: auto;
-  padding: 14px;
-  gap: 12px;
 }
 
-.capcut-section-title {
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted, #8f8f94);
-}
-
-/* Center Panel: CapCut Video Player Canvas */
-.capcut-player-center {
+.veo-studio-fablemint-notice {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: #09090b;
-  position: relative;
-  overflow: hidden;
-  padding: 12px 16px;
-  min-height: 0;
-}
-
-.capcut-video-canvas-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  gap: 14px;
+  max-width: 560px;
   width: 100%;
-  height: 100%;
-  min-height: 0;
 }
 
-.capcut-video-viewport {
-  position: relative;
-  width: 100%;
-  height: calc(100% - 46px);
-  max-width: 100%;
-  max-height: calc(100% - 46px);
-  background: #000;
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.veo-studio-fablemint-notice h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--text-main, var(--text-soft));
 }
 
-.capcut-video-viewport.aspect-9-16 {
-  max-height: calc(100% - 46px);
+.veo-studio-fablemint-notice p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--text-muted);
 }
 
-.capcut-video-element {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+.veo-studio-fablemint-notice p a {
+  color: var(--accent);
 }
 
-.capcut-player-controls-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  height: 38px;
-  margin-top: 8px;
-  padding: 0 14px;
-  background: var(--chrome-bg, #18181a);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  flex-shrink: 0;
+.veo-studio-fablemint-notice p code,
+.veo-studio-fablemint-notice span code {
+  font-size: 0.85em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--input-bg, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-subtle);
 }
 
-.capcut-timecode {
-  font-family: monospace;
-  font-size: 0.82rem;
-  color: var(--accent, #10b981);
-  font-weight: 600;
+.veo-studio-fablemint-notice ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.84rem;
+  line-height: 1.7;
+  color: var(--text-muted);
 }
 
-/* Right Panel: Inspector & Tool Properties */
-.capcut-inspector-right {
-  display: flex;
-  flex-direction: column;
-  background: var(--panel-bg, #1e1e20);
-  border-left: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  overflow-y: auto;
-  padding: 14px;
-  gap: 16px;
-}
-
-/* ── Bottom Multi-Track Timeline ─────────────────────────── */
-.capcut-timeline-bottom {
-  height: 230px;
-  background: var(--panel-soft, #121214);
-  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.capcut-timeline-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 36px;
-  padding: 0 14px;
-  background: var(--chrome-bg, #18181a);
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-}
-
-.capcut-timeline-tools-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.capcut-timeline-tool-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  border: none;
-  color: var(--text-muted, #8f8f94);
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.capcut-timeline-tool-btn:hover {
-  background: var(--input-bg, rgba(255, 255, 255, 0.08));
-  color: var(--text-main, #f8fafc);
-}
-
-.capcut-timeline-tracks-wrap {
-  position: relative;
-  flex: 1;
+.veo-studio-fablemint-notice pre {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--input-bg, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-subtle);
+  font-size: 0.78rem;
   overflow-x: auto;
-  overflow-y: auto;
-  background: var(--bg-color, #0a0a0b);
+}
+
+.veo-studio-fablemint-step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.veo-studio-fablemint-step-num {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.veo-studio-fablemint-step > div {
   display: flex;
   flex-direction: column;
-}
-
-/* Time Ruler */
-.capcut-time-ruler {
-  position: sticky;
-  top: 0;
-  height: 24px;
-  background: var(--chrome-bg, #18181a);
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  display: flex;
-  align-items: center;
-  z-index: 5;
-  font-family: monospace;
-  font-size: 0.68rem;
-  color: var(--text-muted, #8f8f94);
-  user-select: none;
-}
-
-.capcut-ruler-tick {
-  flex: 1;
-  text-align: left;
-  border-left: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  padding-left: 4px;
-  height: 100%;
-  display: flex;
-  align-items: center;
-}
-
-/* Playhead Red Line */
-.capcut-playhead {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: #ef4444;
-  z-index: 10;
-  pointer-events: none;
-}
-
-.capcut-playhead-head {
-  position: absolute;
-  top: 0;
-  left: -5px;
-  width: 12px;
-  height: 12px;
-  background: #ef4444;
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
-}
-
-/* Timeline Track Rows */
-.capcut-track-row {
-  display: flex;
-  align-items: center;
-  height: 48px;
-  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.05));
-  position: relative;
-  padding: 0 10px;
-}
-
-.capcut-track-header {
-  width: 90px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--text-muted, #8f8f94);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.capcut-track-body {
-  flex: 1;
-  height: 34px;
-  position: relative;
-  background: var(--input-bg, rgba(255, 255, 255, 0.02));
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.capcut-clip-block {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #fff;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2);
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.capcut-clip-block.track-video {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 75%, #000), var(--accent));
-}
-
-.capcut-clip-block.track-audio {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, #059669), color-mix(in srgb, var(--accent) 85%, #34d399));
-}
-
-.capcut-clip-block.track-subtitle {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 40%, #d97706), #f59e0b);
+  gap: 4px;
+  font-size: 0.85rem;
 }

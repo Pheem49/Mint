@@ -40,7 +40,7 @@ const BRIGHT: &str = "\x1b[1;97m";
 const BG_ADD: &str = "\x1b[48;2;20;53;32m\x1b[38;2;166;226;46m";
 const BG_DEL: &str = "\x1b[48;2;61;23;23m\x1b[38;2;255;121;121m";
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct AgentOptions {
     pub fast_mode: bool,
     pub plan_mode: bool,
@@ -53,6 +53,10 @@ pub struct AgentOptions {
     /// interactive TTY; one-shot/non-interactive callers should leave this
     /// `false`.
     pub queueing: bool,
+    /// Restricts this turn's `mcp_tool`/`mcp_list_tools` calls to this one
+    /// configured MCP server — set by an `@servername` mention in the typed
+    /// query, mirroring the GUI composer's `@` mention picker.
+    pub pinned_mcp_server: Option<String>,
 }
 
 pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Result<AgentResult> {
@@ -635,6 +639,7 @@ pub async fn run_code_agent_with_options(
         Some(CHAT_CLI_ID),
         None,
         user_name.as_deref(),
+        options.pinned_mcp_server.as_deref(),
         options.fast_mode,
         options.plan_mode,
         approve_cb,

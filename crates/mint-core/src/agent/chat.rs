@@ -105,6 +105,11 @@ pub struct ChatRequest {
     pub agent_id: Option<String>,
     #[serde(default)]
     pub plan_mode: bool,
+    /// When set, restricts this turn's `mcp_tool`/`mcp_list_tools` calls to this one
+    /// configured MCP server — set by picking a plugin from the composer's `@` mention
+    /// dropdown, rather than leaving server selection to the model's own judgment.
+    #[serde(default)]
+    pub pinned_mcp_server: Option<String>,
     /// Structured conversation history for native tool-calling. When set, provider
     /// adapters build the request from this instead of the flat `message` field.
     #[serde(default)]
@@ -1989,6 +1994,7 @@ mod tests {
             workspace_path: None,
             agent_id: None,
             plan_mode: false,
+            pinned_mcp_server: None,
             messages: None,
             tools: None,
         };
@@ -2036,6 +2042,7 @@ mod tests {
             workspace_path: None,
             agent_id: None,
             plan_mode: false,
+            pinned_mcp_server: None,
             messages: None,
             tools: None,
         })
@@ -2069,6 +2076,7 @@ mod tests {
             workspace_path: None,
             agent_id: None,
             plan_mode: false,
+            pinned_mcp_server: None,
             messages: Some(messages),
             tools,
         }
@@ -2260,6 +2268,7 @@ mod tests {
             workspace_path: None,
             agent_id: None,
             plan_mode: false,
+            pinned_mcp_server: None,
             messages: None,
             tools: None,
         };
@@ -2283,6 +2292,7 @@ mod tests {
             workspace_path: None,
             agent_id: None,
             plan_mode: false,
+            pinned_mcp_server: None,
             messages: None,
             tools: None,
         };

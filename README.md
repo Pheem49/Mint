@@ -101,6 +101,29 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ---
 
+### 10. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> AI Video Editing via FableMint
+- Want an AI that actually cuts your clips? Connect
+  **[FableMint](https://github.com/Pheem49/FableMint)** — a free, open-source,
+  zero-dependency browser video editor — as an MCP server, and Mint can cut,
+  grade, caption, chroma-key, and export edits for you from plain chat.
+- The whole timeline is one JSON document. Mint patches it directly (cuts,
+  keyframes, transitions, kinetic captions, speed ramps) and the open editor
+  tab live-reloads in ~150 ms, so you watch the edit happen in real time.
+- **Setup** — clone FableMint locally (Node 18+ required), then:
+  ```bash
+  mint mcp add fablemint node --args "<path-to>/FableMint/mcp-server.js"
+  mint mcp allow fablemint "*"
+  ```
+  (Desktop/Web: **Settings → MCP servers → custom server**, Command `node`,
+  Args `<path-to>/FableMint/mcp-server.js`.)
+- **Use it** — just ask, e.g. *"cut these six clips to the beat markers, add a
+  teal-orange grade, and put a word-pop caption on top"*: Mint calls
+  FableMint's tools and rebuilds the timeline for you. See
+  [FableMint's README](https://github.com/Pheem49/FableMint#driving-it-with-an-ai-agent)
+  for the full tool list and setup details.
+
+---
+
 ## Highlights
 
 - Reachable from **Telegram, Discord Gateway, Discord RPC, Slack Socket Mode,

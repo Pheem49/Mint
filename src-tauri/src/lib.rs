@@ -462,6 +462,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
     let video_data_uri_clone = request.video_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
     let agent_id_clone = request.agent_id.clone();
+    let pinned_mcp_server_clone = request.pinned_mcp_server.clone();
 
     let join_handle = tokio::spawn(async move {
         orchestrate_agent_loop(
@@ -474,6 +475,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
             None,
+            pinned_mcp_server_clone.as_deref(),
             fast_mode,
             plan_mode,
             approve_cb,
@@ -642,6 +644,7 @@ async fn stream_chat_message(
     let video_data_uri_clone = request.video_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
     let agent_id_clone = request.agent_id.clone();
+    let pinned_mcp_server_clone = request.pinned_mcp_server.clone();
 
     let join_handle = tokio::spawn(async move {
         orchestrate_agent_loop(
@@ -654,6 +657,7 @@ async fn stream_chat_message(
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
             None,
+            pinned_mcp_server_clone.as_deref(),
             fast_mode,
             plan_mode,
             approve_cb,

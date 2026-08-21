@@ -98,6 +98,7 @@ async fn run_job(config: &MintConfig, store: &CronStore, job: &CronJob) {
         Some(&chat_id),
         None,
         None,
+        None,
         false,
         false,
         approve_cb,

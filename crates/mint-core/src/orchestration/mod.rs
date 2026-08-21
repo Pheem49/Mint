@@ -709,6 +709,7 @@ pub fn orchestrate_agent_loop<'a, Approve, Progress, Chunk>(
     chat_id: Option<&'a str>,
     agent_id: Option<&'a str>,
     user_name: Option<&'a str>,
+    pinned_mcp_server: Option<&'a str>,
     fast_mode: bool,
     plan_mode: bool,
     mut approve: Approve,
@@ -749,12 +750,25 @@ where
         let mut pending_video = video_data_uri;
 
         let mut plan_mode = plan_mode;
+        // A pin only means anything if it names a server that's actually configured —
+        // a stale/hand-typed `@name` (e.g. from a since-disabled server) is silently
+        // dropped rather than restricting the turn to a server that doesn't exist.
+        let pinned_mcp_server = pinned_mcp_server.filter(|p| {
+            crate::mcp::list_mcp_servers()
+                .map(|m| m.contains_key(*p))
+                .unwrap_or(false)
+        });
         // Determined once from the base `config` (not the per-step `active_config`
         // multi-agent collaboration can substitute) — matches how `system_prompt`
         // itself is only rebuilt on plan-mode transitions, not every step.
         let system_prompt_native = config.tool_calling_mode() == ToolCallingMode::Native;
-        let mut system_prompt =
-            build_system_prompt(config, plan_mode, system_prompt_native, user_name);
+        let mut system_prompt = build_system_prompt(
+            config,
+            plan_mode,
+            system_prompt_native,
+            user_name,
+            pinned_mcp_server,
+        );
         let hooks = crate::hooks::list_hooks(config);
 
         append_memory_context(&mut system_prompt, chat_id);
@@ -888,6 +902,7 @@ where
                         workspace_path: None,
                         agent_id: None,
                         plan_mode: false,
+                        pinned_mcp_server: None,
                         messages: Some(native_messages.clone()),
                         tools: Some(tool_catalog(
                             &active_config,
@@ -912,6 +927,7 @@ where
                         workspace_path: None,
                         agent_id: None,
                         plan_mode: false,
+                        pinned_mcp_server: None,
                         messages: None,
                         tools: None,
                     },
@@ -1006,6 +1022,7 @@ where
                             workspace_path: None,
                             agent_id: None,
                             plan_mode: false,
+                            pinned_mcp_server: None,
                             messages: None,
                             tools: None,
                         },
@@ -1315,6 +1332,7 @@ where
                                     plan_mode,
                                     system_prompt_native,
                                     user_name,
+                                    pinned_mcp_server,
                                 );
                                 progress(AgentProgress::Thought {
                                     thought: format!(
@@ -1346,7 +1364,7 @@ where
                 }) {
                     Ok(ApprovalOutcome::Approved) => {
                         plan_mode = false;
-                        system_prompt = build_system_prompt(config, plan_mode, system_prompt_native, user_name);
+                        system_prompt = build_system_prompt(config, plan_mode, system_prompt_native, user_name, pinned_mcp_server);
                         "Plan approved by the user. Plan mode is now OFF — write_file, apply_patch, run_shell, and other previously blocked tools are now available. Proceed with implementing the plan.".to_string()
                     }
                     Ok(ApprovalOutcome::Denied) => {
@@ -1369,6 +1387,14 @@ where
                         format!(
                             "Skipped duplicate shell command: {}\n\n[System Tip: This exact shell command already ran once in this task. Do not run it again. Use the finish action now and tell the user the action was completed.]",
                             decision.input.command.trim()
+                        )
+                    } else if pinned_mcp_server.is_some_and(|p| {
+                        (decision.action == "mcp_tool" || decision.action == "mcp_list_tools")
+                            && decision.input.server != p
+                    }) {
+                        let p = pinned_mcp_server.unwrap();
+                        format!(
+                            "Blocked: this turn is pinned to the \"{p}\" MCP server only (selected via @{p} in the composer). Retry with \"server\":\"{p}\", or use a different (non-MCP) tool."
                         )
                     } else {
                         let input_val =
@@ -1688,6 +1714,7 @@ async fn dispatch_one_subagent(
         None,
         None,
         Some(&sub_chat_id),
+        None,
         None,
         None,
         true,
@@ -2161,6 +2188,7 @@ mod tests {
             workspace_path: None,
             agent_id: None,
             plan_mode: false,
+            pinned_mcp_server: None,
             messages: None,
             tools: None,
         };

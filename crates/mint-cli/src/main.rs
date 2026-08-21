@@ -1516,6 +1516,7 @@ async fn main() -> Result<()> {
                             workspace_path: None,
                             agent_id: None,
                             plan_mode: false,
+                            pinned_mcp_server: None,
                             messages: None,
                             tools: None,
                         },
@@ -1779,6 +1780,13 @@ async fn main() -> Result<()> {
                 let config = load_config()?;
                 match command {
                     CodeCommand::Agent { task, root, plan } => {
+                        let pinned_mcp_server =
+                            mint_core::list_mcp_servers().ok().and_then(|servers| {
+                                task.split_whitespace()
+                                    .find_map(|word| word.strip_prefix('@'))
+                                    .filter(|name| servers.contains_key(*name))
+                                    .map(str::to_owned)
+                            });
                         agent::run_code_agent_with_options(
                             &task,
                             &root,
@@ -1789,6 +1797,7 @@ async fn main() -> Result<()> {
                                 fast_mode: false,
                                 plan_mode: plan,
                                 queueing: false,
+                                pinned_mcp_server,
                             },
                             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
                             std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -2557,6 +2566,7 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
             workspace_path: None,
             agent_id: None,
             plan_mode: false,
+            pinned_mcp_server: None,
             messages: None,
             tools: None,
         },

@@ -290,6 +290,18 @@ pub async fn run_interactive_chat() -> Result<()> {
             session.history.push(query_str.clone());
         }
 
+        // An `@servername` mention anywhere in the query (picked from the
+        // composer's `@` suggestions, or hand-typed) restricts this turn's
+        // mcp_tool/mcp_list_tools calls to that one configured server —
+        // mirrors the GUI composer's `@` mention picker.
+        let pinned_mcp_server = mint_core::list_mcp_servers().ok().and_then(|servers| {
+            query_str
+                .split_whitespace()
+                .find_map(|word| word.strip_prefix('@'))
+                .filter(|name| servers.contains_key(*name))
+                .map(str::to_owned)
+        });
+
         if query_str.starts_with('$') {
             let (skill_word, task_part) = query_str
                 .split_once(char::is_whitespace)
@@ -347,6 +359,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                             fast_mode: session.fast_mode,
                             plan_mode: session.plan_mode,
                             queueing: true,
+                            pinned_mcp_server: pinned_mcp_server.clone(),
                         },
                     )
                     .await
@@ -387,6 +400,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                         fast_mode: session.fast_mode,
                         plan_mode: session.plan_mode,
                         queueing: true,
+                        pinned_mcp_server: pinned_mcp_server.clone(),
                     },
                 )
                 .await
@@ -416,6 +430,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                 fast_mode: session.fast_mode,
                 plan_mode: session.plan_mode,
                 queueing: true,
+                pinned_mcp_server: pinned_mcp_server.clone(),
             },
         )
         .await

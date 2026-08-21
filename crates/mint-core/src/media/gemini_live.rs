@@ -204,7 +204,7 @@ where
 
     let mut system_instruction = format!(
         "{}\n\nWhen the user asks you to perform an action, call the `agent_action` function with `action` set to the action name and `input` set to a JSON object of its arguments, rather than describing the action in words.",
-        crate::prompts::agent::build_system_prompt(config, false, true, user_name.as_deref())
+        crate::prompts::agent::build_system_prompt(config, false, true, user_name.as_deref(), None)
     );
     // Same cross-session context (saved profile/preferences + this chat's recent
     // history) the typed-chat agent loop gets, so a Live call isn't a blank slate

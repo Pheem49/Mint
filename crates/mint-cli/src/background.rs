@@ -132,6 +132,7 @@ impl BackgroundJobs {
                 Some(&inner_chat_id),
                 None,
                 None,
+                None,
                 false,
                 false,
                 approve_cb,

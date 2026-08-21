@@ -410,14 +410,22 @@ export default function ChatPanel({
   const atQuery = atMatch ? atMatch[1].toLowerCase() : ''
 
   const CONTEXT_SUGGESTIONS = [
-    { label: '@workspace', desc: 'Include workspace path & context' },
-    { label: '@file', desc: 'Reference workspace file' },
-    { label: '@docs', desc: 'Include documentation context' },
-    { label: '@memory', desc: 'Include long-term memory store' },
+    { label: '@workspace', desc: 'Include workspace path & context', type: 'context' as const },
+    { label: '@file', desc: 'Reference workspace file', type: 'context' as const },
+    { label: '@docs', desc: 'Include documentation context', type: 'context' as const },
+    { label: '@memory', desc: 'Include long-term memory store', type: 'context' as const },
   ]
 
+  const mcpSuggestions = Object.entries(settingsConfig?.mcpServers || {})
+    .filter(([, srv]: [string, any]) => srv?.disabled !== true)
+    .map(([name]) => ({
+      label: `@${name}`,
+      desc: 'Restrict this message to this MCP server/plugin',
+      type: 'plugin' as const,
+    }))
+
   const filteredContexts = isAtInput
-    ? CONTEXT_SUGGESTIONS.filter((item) => item.label.toLowerCase().includes(atQuery))
+    ? [...CONTEXT_SUGGESTIONS, ...mcpSuggestions].filter((item) => item.label.toLowerCase().includes(atQuery))
     : []
 
   useEffect(() => {
@@ -1273,7 +1281,7 @@ export default function ChatPanel({
                       onMouseEnter={() => setSlashSelectedIndex(idx)}
                     >
                       <span className="slash-cmd-name">{item.label}</span>
-                      <span className="skill-badge">[Context]</span>
+                      <span className="skill-badge">{item.type === 'plugin' ? '[Plugin]' : '[Context]'}</span>
                       <span className="slash-cmd-desc">{item.desc}</span>
                     </button>
                   ))}

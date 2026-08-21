@@ -126,6 +126,7 @@ pub fn build_system_prompt(
     plan_mode: bool,
     native: bool,
     user_name: Option<&str>,
+    pinned_mcp_server: Option<&str>,
 ) -> String {
     let mut allowed_actions = base_allowed_actions();
 
@@ -268,9 +269,13 @@ pub fn build_system_prompt(
     }
     let mcp_str;
     if allowed_actions.contains(&"mcp_tool") {
-        let servers = crate::mcp::list_mcp_servers()
-            .map(|m| m.keys().cloned().collect::<Vec<String>>().join(", "))
-            .unwrap_or_default();
+        let servers = if let Some(pin) = pinned_mcp_server {
+            pin.to_string()
+        } else {
+            crate::mcp::list_mcp_servers()
+                .map(|m| m.keys().cloned().collect::<Vec<String>>().join(", "))
+                .unwrap_or_default()
+        };
         mcp_str = format!(
             "- mcp_tool: {{\"server\":\"<name>\",\"tool\":\"tool-name\",\"arguments\":{{}}}} (Available configured servers: {})",
             servers
@@ -468,6 +473,11 @@ pub fn build_system_prompt(
     }
     if allowed_actions.contains(&"mcp_tool") && allowed_actions.contains(&"video_trim") {
         rules.push("10a. Video editing has two paths — pick based on complexity. Use the native video_*/timeline_*/subtitle_* tools for simple, single-step operations (trim, resize, merge, extract audio, remove silence, one-off caption burn) — they're faster and need no extra process. Use mcp_tool with the \"fablemint\" server (call mcp_list_tools/fablecut_docs first if unsure of its tools) for anything needing a multi-clip timeline, transitions, keyframes, chroma key, speed ramps, or iterative edits the user wants to watch live in the browser.");
+    }
+    let pin_rule;
+    if let Some(pin) = pinned_mcp_server {
+        pin_rule = format!("10b. The user explicitly pinned this turn to the \"{pin}\" MCP server via an @mention in the composer. If you use mcp_tool or mcp_list_tools at all this turn, the \"server\" field must be exactly \"{pin}\" — no other configured server is reachable this turn.");
+        rules.push(&pin_rule);
     }
     if native {
         rules.push("11. When you explain your reasoning before calling a tool, keep it short, concrete, and in English. Give your final answer in Thai when the task is written in Thai.");

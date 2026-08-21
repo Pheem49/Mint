@@ -64,6 +64,7 @@ where
                 workspace_path: None,
                 agent_id: None,
                 plan_mode: false,
+                pinned_mcp_server: None,
                 messages: None,
                 tools: None,
             },

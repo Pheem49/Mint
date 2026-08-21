@@ -662,13 +662,15 @@ export default function MintDashboard() {
       documentAttachment?: DocumentAttachment | null
       systemInstruction?: string
       clearComposer?: boolean
+      pinnedMcpServer?: string
+      forceAgentMode?: boolean
     } = {},
   ) {
     if (sending) return
     const outgoingImages = options.imageAttachments ?? []
     const outgoingVideos = options.videoAttachments ?? []
     const outgoingDocument = options.documentAttachment ?? null
-    const shouldUseAgentMode = agentMode || promptText.toLowerCase().startsWith('search web:')
+    const shouldUseAgentMode = agentMode || options.forceAgentMode || promptText.toLowerCase().startsWith('search web:')
     const outgoingImage = outgoingImages.map((img) => img.dataUri).join(' ')
     const outgoingVideo = outgoingVideos.map((vid) => vid.dataUri).join(' ')
     const outgoingImageCount = outgoingImages.length
@@ -708,6 +710,7 @@ export default function MintDashboard() {
         conversationId,
         undefined,
         shouldUseAgentMode ? planMode : false,
+        options.pinnedMcpServer ?? null,
       )
       setStreamedResponse(response)
       const history = (await getRecentInteractions(50, conversationId)).reverse()
@@ -840,11 +843,19 @@ export default function MintDashboard() {
       currentVideos.length > 0 ? (currentVideos.length > 1 ? 'Describe these videos.' : 'Describe this video.') :
       'Summarize this document.'
     )
+    const mcpNames = Object.entries(settingsConfig?.mcpServers || {})
+      .filter(([, srv]: [string, any]) => srv?.disabled !== true)
+      .map(([name]) => name)
+    const pinnedServer = mcpNames.find((name) =>
+      new RegExp(`(^|\\s)@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`).test(trimmed)
+    )
     await sendPrompt(promptText, {
       imageAttachments: currentImages,
       videoAttachments: currentVideos,
       documentAttachment: currentDocument,
       clearComposer: true,
+      pinnedMcpServer: pinnedServer,
+      forceAgentMode: Boolean(pinnedServer),
     })
   }
 

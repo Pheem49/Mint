@@ -27,6 +27,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 video_data_uri: Option<String>,
                 document_attachment: Option<crate::chat::DocumentAttachment>,
                 agent_id: Option<String>,
+                #[serde(default)]
+                pinned_mcp_server: Option<String>,
             }
 
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
@@ -42,6 +44,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     workspace_path: None,
                     agent_id: req.agent_id,
                     plan_mode: false,
+                    pinned_mcp_server: req.pinned_mcp_server,
                     messages: None,
                     tools: None,
                 };
@@ -164,6 +167,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 video_data_uri: Option<String>,
                 document_attachment: Option<crate::chat::DocumentAttachment>,
                 agent_id: Option<String>,
+                #[serde(default)]
+                pinned_mcp_server: Option<String>,
             }
 
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
@@ -179,6 +184,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     workspace_path: None,
                     agent_id: req.agent_id,
                     plan_mode: false,
+                    pinned_mcp_server: req.pinned_mcp_server,
                     messages: None,
                     tools: None,
                 };
@@ -335,6 +341,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             let audio_data_uri = chat_req.audio_data_uri.clone();
                             let video_data_uri = chat_req.video_data_uri.clone();
                             let agent_id = chat_req.agent_id.clone();
+                            let pinned_mcp_server = chat_req.pinned_mcp_server.clone();
 
                             let join_handle = tokio::spawn(async move {
                                 let result = orchestrate_agent_loop(
@@ -347,6 +354,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                     chat_id.as_deref(),
                                     agent_id.as_deref(),
                                     None,
+                                    pinned_mcp_server.as_deref(),
                                     fast_mode,
                                     false,
                                     |_| Ok(ApprovalOutcome::Denied),

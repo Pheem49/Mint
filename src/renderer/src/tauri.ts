@@ -384,6 +384,7 @@ export async function streamChatMessage(
   chatId?: string | null,
   agentId?: string | null,
   planMode?: boolean,
+  pinnedMcpServer?: string | null,
 ): Promise<ChatResponse> {
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();
@@ -391,7 +392,7 @@ export async function streamChatMessage(
     const res = await authFetch(`${API_BASE}/chat-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId })
+      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId, pinnedMcpServer })
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -437,7 +438,7 @@ export async function streamChatMessage(
     else onProgress?.(event.progress)
   }
   const response = await invoke<ChatResponse>('stream_chat_message', {
-    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId, planMode: planMode ?? false },
+    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId, planMode: planMode ?? false, pinnedMcpServer },
     onEvent,
   })
   if (imageDataUri) {

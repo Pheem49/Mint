@@ -1163,6 +1163,7 @@ async fn run_web_agent_loop(
         request.chat_id.as_deref(),
         request.agent_id.as_deref(),
         None,
+        request.pinned_mcp_server.as_deref(),
         fast_mode,
         false,
         |_| Ok(ApprovalOutcome::Denied),
