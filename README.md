@@ -19,20 +19,7 @@ coding tasks — all backed by the same Tauri v2 + Rust + React/TypeScript core,
 so chat, memory, knowledge, tools, and safety policies behave identically no
 matter which door you walk in through.
 
-## 🆕 Recent Updates (v1.11.0)
-
-- **Image Search Tool**: New `image_search` agent action (Google Custom Search Image API with a Brave Images API fallback) lets Mint find and show picture results on request, separate from the automatic thumbnail that already appears on regular web searches. Renders as a native image-grid card on Desktop and Web (`ImageSearchCard.tsx`).
-- **Shared Prompt Module**: Consolidated the previously duplicated persona/system-prompt text across the CLI agent loop, CLI chat mode, and the API server into a single `crates/mint-core/src/prompts/` module (`persona.rs`, `agent.rs`, `chat.rs`), so tone, safety policy, and answer-quality rules only need to be edited once.
-- **More Complete Answers**: Tightened the agent's system prompt so final answers cover everything the user asked instead of being cut short for the sake of brevity.
-- **CLI Markdown Tables**: Tables produced by the agent loop (e.g. skill/repo listings) now render as proper box-drawing tables in the terminal instead of raw `|`-pipe text.
-- **Consolidated Sources UI**: Merged the previously duplicated "image strip + domain cards" layout in the chat Sources panel into a single row, with sources that have a thumbnail shown first and the whole card clickable.
-- **SVG Icons Across Result Cards**: Replaced emoji icons with `lucide-react` SVG icons on the Weather, Stock, Calculation, and Image Search cards for a more consistent look across themes.
-- **Accurate Tool Activity Labels**: The "Working through task" activity table on Desktop and Web now shows the real tool/action name (`web_search`, `image_search`, `weather`, …), matching what the CLI already displays.
-- **Web Deep-Link Fix**: Fixed a bug where opening or refreshing a direct chat URL (e.g. `/chat/<conversation-id>`) on `mint web` showed a blank white page — the production web build used a relative asset base path that broke on any URL besides `/`.
-- **Docker Sandbox for Subagents**: `dispatch_subagent`-spawned subagents can now run their shell commands inside an isolated, ref-counted Docker container (`sandboxBackend: "docker"`, or a per-subagent `sandbox: docker` frontmatter override) instead of only the shared host-level bwrap/sandbox-exec sandbox.
-- **Web UI Is Now Installable (PWA)**: `mint web` can be added to a phone's home screen like a native app — a web manifest, generated icon set, and a narrowly-scoped service worker (never caches `/api/*`, so chat/agent responses stay live) make the existing Web UI installable with no app store and no separate mobile codebase.
-- **Linked Folders Cross-Reference Each Other**: Notes auto-saved into a linked folder can now wiki-link related earlier notes (`[[YYYY-MM-DD#HH:MM]]`, matching the file's own heading format so it resolves in a real Obsidian vault too), instead of being a flat, unlinked pile of daily files.
-- **Self-Evolving Skills, On By Default**: `auto_skill_writing` now defaults to on. When a task matches an existing skill, the agent is shown that skill's full current content and asked to genuinely refine/merge it rather than risk a blind overwrite, and every write stamps a `revisions:` count computed in code (not trusted to the model's own arithmetic).
+See [Release Notes](Release_Note.md) for what's new.
 
 ## <img src="assets/features.svg" width="24" height="24" valign="middle" /> What Mint Can Do
 
