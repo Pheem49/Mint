@@ -47,6 +47,16 @@ static SESSIONS: LazyLock<Mutex<HashMap<String, DockerSession>>> =
 
 struct DockerSession {
     container_id: String,
+    /// How many concurrent `dispatch_one_subagent` calls are currently using
+    /// this container. `run_parallel_subagent_batch` doesn't dedupe subagent
+    /// names, so two dispatches of the *same* name can run concurrently and
+    /// share one `sub_chat_id` — without this, whichever one finished first
+    /// would tear the container down via `stop_session` while the other was
+    /// still mid-`docker exec` against it. `start_session` increments this
+    /// instead of starting a second container when one is already running;
+    /// `stop_session` decrements it and only actually stops/removes the
+    /// container once the count reaches zero.
+    ref_count: usize,
 }
 
 impl Drop for DockerSession {
@@ -72,10 +82,11 @@ pub fn docker_available() -> bool {
         .is_ok_and(|output| output.status.success())
 }
 
-/// Starts the sandbox container for `sub_chat_id`, or does nothing if one is
-/// already registered for it (idempotent — `dispatch_one_subagent` calls
-/// this once per subagent run, so a second call for the same id shouldn't
-/// normally happen, but tolerating it costs nothing).
+/// Starts the sandbox container for `sub_chat_id`, or — if one is already
+/// running for it, e.g. two concurrent dispatches of the same subagent name
+/// (see `DockerSession::ref_count`) — bumps its reference count instead of
+/// starting a second one. Callers must pair every successful call with
+/// exactly one [`stop_session`] call.
 ///
 /// Bind mounts: `writable_roots(config, cwd)` (the same policy bwrap's
 /// Linux path uses) mounted read-write, plus `config.allowed_read_paths`
@@ -93,7 +104,8 @@ pub fn docker_available() -> bool {
 /// why per-command network gating isn't attempted here (`docker exec` has no
 /// per-call network override).
 pub fn start_session(sub_chat_id: &str, cwd: &Path, config: &MintConfig) -> Result<(), ShellError> {
-    if SESSIONS.lock().unwrap().contains_key(sub_chat_id) {
+    if let Some(session) = SESSIONS.lock().unwrap().get_mut(sub_chat_id) {
+        session.ref_count += 1;
         return Ok(());
     }
 
@@ -154,10 +166,30 @@ pub fn start_session(sub_chat_id: &str, cwd: &Path, config: &MintConfig) -> Resu
         )));
     }
 
-    SESSIONS
-        .lock()
-        .unwrap()
-        .insert(sub_chat_id.to_string(), DockerSession { container_id });
+    // Re-check under the lock: another call for this *same brand-new* id
+    // could have raced ahead of the fast path above and already inserted
+    // its own container while this call was blocked in `docker run` —
+    // possible only the very first time two concurrent dispatches share an
+    // id neither has started yet (every call after the first hits the fast
+    // path instead). If so, adopt the winner's container as this call's
+    // reference and discard the redundant one just started here, rather
+    // than leaking an untracked second container for the same session.
+    let mut sessions = SESSIONS.lock().unwrap();
+    if let Some(session) = sessions.get_mut(sub_chat_id) {
+        session.ref_count += 1;
+        drop(sessions);
+        let _ = Command::new("docker")
+            .args(["rm", "-f", &container_id])
+            .output();
+        return Ok(());
+    }
+    sessions.insert(
+        sub_chat_id.to_string(),
+        DockerSession {
+            container_id,
+            ref_count: 1,
+        },
+    );
     Ok(())
 }
 
@@ -188,22 +220,36 @@ pub(crate) fn run_in_session(
     Ok(Some(output))
 }
 
-/// Explicit teardown for one session: a graceful `docker stop` (SIGTERM,
-/// then SIGKILL after Docker's default grace period) followed by `docker rm
-/// -f` as a belt-and-suspenders cleanup, then removes the map entry. Safe to
-/// call even if no session is registered for
-/// `sub_chat_id`, mirroring `mcp::close_mcp_session`'s tolerance of a
+/// Releases this caller's reference to one session. Decrements its
+/// `ref_count`; only once that reaches zero (every concurrent dispatch that
+/// shares this `sub_chat_id` — see `DockerSession::ref_count` — has also
+/// called this) does it actually tear the container down: a graceful
+/// `docker stop` (SIGTERM, then SIGKILL after Docker's default grace
+/// period) followed by `docker rm -f` as a belt-and-suspenders cleanup, then
+/// removing the map entry. Safe to call even if no session is registered
+/// for `sub_chat_id`, mirroring `mcp::close_mcp_session`'s tolerance of a
 /// missing key. Called unconditionally by `dispatch_one_subagent` after its
-/// `orchestrate_agent_loop` call returns, regardless of Ok/Err.
+/// `orchestrate_agent_loop` call returns, regardless of Ok/Err — exactly
+/// once per successful [`start_session`] call.
 pub fn stop_session(sub_chat_id: &str) {
-    if let Some(session) = SESSIONS.lock().unwrap().remove(sub_chat_id) {
-        let _ = Command::new("docker")
-            .args(["stop", &session.container_id])
-            .output();
-        let _ = Command::new("docker")
-            .args(["rm", "-f", &session.container_id])
-            .output();
+    let mut sessions = SESSIONS.lock().unwrap();
+    let Some(session) = sessions.get_mut(sub_chat_id) else {
+        return;
+    };
+    session.ref_count = session.ref_count.saturating_sub(1);
+    if session.ref_count > 0 {
+        return;
     }
+    let Some(session) = sessions.remove(sub_chat_id) else {
+        return;
+    };
+    drop(sessions);
+    let _ = Command::new("docker")
+        .args(["stop", &session.container_id])
+        .output();
+    let _ = Command::new("docker")
+        .args(["rm", "-f", &session.container_id])
+        .output();
 }
 
 /// Whether a session is currently registered for `sub_chat_id`. Used by
@@ -283,6 +329,59 @@ mod tests {
             listed.lines().count(),
             1,
             "only the header line should remain after stop_session: {listed}"
+        );
+    }
+
+    /// Regression test for the bug `dispatch_subagent` hit in practice:
+    /// `run_parallel_subagent_batch` can dispatch the same subagent name
+    /// twice concurrently (it doesn't dedupe names), so two callers can
+    /// share one `sub_chat_id`. Without ref-counting, whichever one finished
+    /// first would tear the shared container down via `stop_session` while
+    /// the other was still using it for `run_in_session`.
+    #[test]
+    fn concurrent_start_sessions_share_a_container_until_every_caller_stops() {
+        if !docker_available_for_test() {
+            return;
+        }
+        let config = MintConfig::default();
+        let cwd = std::env::temp_dir();
+        let id = "docker-sandbox-test::subagent::sibling-refcount";
+
+        start_session(id, &cwd, &config).expect("first caller's docker run should succeed");
+        start_session(id, &cwd, &config)
+            .expect("second concurrent caller should reuse the first's container");
+        assert!(has_session(id));
+
+        // First caller finishes and releases its reference — the container
+        // must still be alive for the second caller, which hasn't stopped
+        // yet.
+        stop_session(id);
+        assert!(
+            has_session(id),
+            "container was torn down while a second caller still held a reference"
+        );
+        let output = run_in_session(id, "echo still-alive", &cwd, &config)
+            .unwrap()
+            .expect("the session the second caller is still using should still be registered");
+        assert!(output.success);
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "still-alive"
+        );
+
+        // Second (last) caller finishes — now it actually tears down.
+        stop_session(id);
+        assert!(!has_session(id));
+
+        let ps = Command::new("docker")
+            .args(["ps", "-a", "--filter", &format!("label=mint-subagent={id}")])
+            .output()
+            .unwrap();
+        let listed = String::from_utf8_lossy(&ps.stdout);
+        assert_eq!(
+            listed.lines().count(),
+            1,
+            "only the header line should remain after the last stop_session: {listed}"
         );
     }
 }
