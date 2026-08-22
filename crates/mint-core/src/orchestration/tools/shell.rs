@@ -10,7 +10,7 @@ pub(in crate::orchestration) async fn execute(
     input: &AgentInput,
     root: &Path,
     config: &MintConfig,
-    _chat_id: &str,
+    chat_id: &str,
     approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
 ) -> Result<String, OrchestrationError> {
     match action {
@@ -36,7 +36,7 @@ pub(in crate::orchestration) async fn execute(
                             .map_or_else(|| "unknown".to_string(), |p| p.to_string()),
                     ))
                 }
-                ApprovalOutcome::Approved => run_shell(root, config, command).await,
+                ApprovalOutcome::Approved => run_shell(root, config, chat_id, command).await,
                 ApprovalOutcome::Denied => Ok(format!("User denied shell command: {}", command)),
                 ApprovalOutcome::Intercepted(obs) => Ok(obs),
             }
@@ -58,7 +58,7 @@ pub(in crate::orchestration) async fn execute(
             }
             let mut output = Vec::new();
             for command in &input.commands {
-                output.push(run_shell(root, config, command).await?);
+                output.push(run_shell(root, config, chat_id, command).await?);
             }
             Ok(output.join("\n\n"))
         }

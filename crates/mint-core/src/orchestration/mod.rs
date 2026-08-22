@@ -1766,6 +1766,41 @@ async fn dispatch_one_subagent(
     );
     let sub_chat_id = format!("{chat_id}::subagent::{}", definition.name);
 
+    // Docker sandbox: a subagent whose resolved backend is "docker" gets one
+    // container for its whole run, started here and torn down unconditionally
+    // below (success or failure) — never per individual `run_shell` call. See
+    // `docker_sandbox`'s module doc for why this is a session-scoped resource
+    // rather than something `run_shell_command` starts itself. Subagents with
+    // no `run_shell` in their tool list (e.g. `explorer`/`plan`) never need a
+    // container, so skip starting one for them.
+    let allows_run_shell = definition
+        .tools
+        .as_ref()
+        .is_none_or(|tools| tools.iter().any(|t| t == "run_shell"));
+    let backend = definition
+        .sandbox
+        .as_deref()
+        .unwrap_or(&config.sandbox_backend);
+    let docker_started = if backend == "docker" && allows_run_shell {
+        match crate::docker_sandbox::start_session(&sub_chat_id, root, &sub_config) {
+            Ok(()) => true,
+            Err(error) if config.sandbox_mode.trim().eq_ignore_ascii_case("enforce") => {
+                return Err(OrchestrationError::Agent(format!(
+                    "subagent '{}' requires the docker sandbox (sandboxMode=enforce) but it \
+                     failed to start: {error}",
+                    definition.name
+                )));
+            }
+            // "prefer" (or any other non-"enforce" value): fall back to the
+            // subagent's shell commands running unconfined/OS-sandboxed,
+            // matching `run_shell_command`'s own fallback semantics for a
+            // missing OS sandbox binary.
+            Err(_) => false,
+        }
+    } else {
+        false
+    };
+
     // Recursing into `orchestrate_agent_loop` from inside `execute_tool`
     // (which it itself calls) requires boxing this one call — Rust
     // can't compute a finite size for a directly self-referential
@@ -1826,7 +1861,7 @@ async fn dispatch_one_subagent(
     )
     .await;
 
-    match result {
+    let outcome = match result {
         Ok(agent_result) => Ok(format!(
             "[Subagent '{}' result]\n{}",
             definition.name, agent_result.summary
@@ -1835,7 +1870,14 @@ async fn dispatch_one_subagent(
             "subagent '{}' failed: {error}",
             definition.name
         ))),
+    };
+    // Unconditional teardown — runs on both the Ok and Err arms above, since
+    // an orphaned container left running after a failed subagent is exactly
+    // the failure mode a session-scoped sandbox needs to avoid.
+    if docker_started {
+        crate::docker_sandbox::stop_session(&sub_chat_id);
     }
+    outcome
 }
 
 /// Runs a step's `dispatch_subagent` decisions concurrently (see

@@ -72,6 +72,7 @@ pub fn run_add_wizard(workspace_root: Option<&Path>) -> Result<SubagentDefinitio
         tools,
         model: Some(model).filter(|m| !m.trim().is_empty()),
         provider: Some(provider).filter(|p| !p.trim().is_empty()),
+        sandbox: None,
         system_prompt,
         scope: scope.to_string(),
         previous_source_path: None,

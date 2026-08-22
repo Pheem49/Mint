@@ -57,6 +57,7 @@ pub use system::auth;
 pub use system::bg_shell;
 pub use system::calculation;
 pub use system::config;
+pub use system::docker_sandbox;
 pub use system::shell;
 pub use system::stock;
 pub use system::weather;
@@ -96,6 +97,7 @@ pub use config::{
 pub use cron::{
     CronError, CronJob, CronJobDraft, CronStore, localize_schedule, start_cron_scheduler,
 };
+pub use docker_sandbox::{docker_available, has_session, start_session, stop_session};
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
 pub use gemini_live::{
     GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session,

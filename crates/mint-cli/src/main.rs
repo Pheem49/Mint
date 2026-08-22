@@ -8,13 +8,13 @@ use std::{
 use mint_core::{
     CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, CronStore, ImageGenRequest,
     KnowledgeStore, MemoryStore, MintConfig, TaskStore, add_linked_folder, apply_code_edits,
-    assert_path_capability, build_code_patch,
-    build_symbol_index, classify_shell_command, config_path, create_folder,
-    fetch_github_repo_summary, find_paths, generate_images, index_semantic_code, initialize_config,
-    inspect_code_plan, list_code_files, list_linked_folders, list_subagents, load_config,
-    orchestrate_chat_with_fallback, parse_github_url, propose_code_edits, read_code_file,
-    remove_linked_folder, repository_summary, run_shell_command, sandbox_availability, save_config,
-    search_code, search_semantic_code, set_config_value,
+    assert_path_capability, build_code_patch, build_symbol_index, classify_shell_command,
+    config_path, create_folder, docker_available, fetch_github_repo_summary, find_paths,
+    generate_images, index_semantic_code, initialize_config, inspect_code_plan, list_code_files,
+    list_linked_folders, list_subagents, load_config, orchestrate_chat_with_fallback,
+    parse_github_url, propose_code_edits, read_code_file, remove_linked_folder, repository_summary,
+    run_shell_command, sandbox_availability, save_config, search_code, search_semantic_code,
+    set_config_value,
 };
 
 mod actions;
@@ -982,6 +982,11 @@ async fn main() -> Result<()> {
                                 "command": config.sandbox_command,
                                 "availability": sandbox_availability(&config),
                             },
+                            "dockerSandbox": {
+                                "backend": config.sandbox_backend,
+                                "image": config.docker_sandbox_image,
+                                "available": docker_available(),
+                            },
                             "updater": {
                                 "enabled": config.extra["enableAutoUpdate"],
                                 "endpointConfigured": configured(&config, &["updaterEndpoint"]),
@@ -1601,7 +1606,8 @@ async fn main() -> Result<()> {
                 cwd,
                 command,
             } => {
-                let output = run_shell_command(&command.join(" "), &cwd, approve, &load_config()?)?;
+                let output =
+                    run_shell_command(&command.join(" "), &cwd, approve, &load_config()?, None)?;
                 actions::print_shell_output(&output);
                 if !output.success {
                     anyhow::bail!(

@@ -126,6 +126,7 @@ pub(super) fn package_test_scripts(root: &Path) -> BTreeMap<String, String> {
 pub(super) async fn read_diagnostics(
     root: &Path,
     config: &MintConfig,
+    chat_id: &str,
 ) -> Result<String, OrchestrationError> {
     let command = if root.join("Cargo.toml").exists() {
         Some("cargo check")
@@ -142,7 +143,7 @@ pub(super) async fn read_diagnostics(
         }
     };
     match command {
-        Some(command) => run_shell(root, config, command).await,
+        Some(command) => run_shell(root, config, chat_id, command).await,
         None => Ok("No diagnostics command detected.".into()),
     }
 }
@@ -201,17 +202,21 @@ pub(super) fn view_image(path: &Path, config: &MintConfig) -> Result<String, Orc
 pub(super) async fn run_shell(
     root: &Path,
     config: &MintConfig,
+    chat_id: &str,
     command: &str,
 ) -> Result<String, OrchestrationError> {
     let root = root.to_path_buf();
     let config = config.clone();
+    let chat_id = chat_id.to_owned();
     let command = command.to_owned();
     let output = {
         let command = command.clone();
-        tokio::task::spawn_blocking(move || run_shell_command(&command, &root, true, &config))
-            .await
-            .map_err(|e| OrchestrationError::Agent(format!("shell command task panicked: {e}")))?
-            .map_err(|e| OrchestrationError::Agent(e.to_string()))?
+        tokio::task::spawn_blocking(move || {
+            run_shell_command(&command, &root, true, &config, Some(&chat_id))
+        })
+        .await
+        .map_err(|e| OrchestrationError::Agent(format!("shell command task panicked: {e}")))?
+        .map_err(|e| OrchestrationError::Agent(e.to_string()))?
     };
     let status_str = output
         .status

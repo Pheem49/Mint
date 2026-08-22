@@ -77,6 +77,18 @@ pub struct MintConfig {
     pub safety_enabled: bool,
     pub sandbox_mode: String,
     pub sandbox_command: String,
+    /// Which backend implements shell sandboxing for `run_shell_command`:
+    /// `"os"` (default) keeps the existing bwrap/sandbox-exec behavior;
+    /// `"docker"` runs a `dispatch_subagent` subagent's shell commands inside
+    /// a per-session container instead (see `system::docker_sandbox`). Only
+    /// takes effect for calls that carry a `chat_id` — i.e. subagent
+    /// sessions — never for the top-level agent loop. A subagent definition's
+    /// own `sandbox:` frontmatter field overrides this per subagent.
+    pub sandbox_backend: String,
+    /// Docker image used to start a subagent's sandbox container when the
+    /// resolved backend is `"docker"`. Must already exist locally or be
+    /// pullable by the configured `docker` CLI.
+    pub docker_sandbox_image: String,
     pub allowed_read_paths: Vec<PathBuf>,
     pub allowed_write_paths: Vec<PathBuf>,
     pub blocked_paths: Vec<PathBuf>,
@@ -303,6 +315,8 @@ impl Default for MintConfig {
             safety_enabled: true,
             sandbox_mode: "prefer".into(),
             sandbox_command: default_sandbox_command().into(),
+            sandbox_backend: "os".into(),
+            docker_sandbox_image: "debian:bookworm-slim".into(),
             allowed_read_paths: allowed_paths.clone(),
             allowed_write_paths: allowed_paths,
             blocked_paths: vec![

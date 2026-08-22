@@ -26,16 +26,18 @@ use crate::{
 /// about how long it would take. A command that's *known* up front to run
 /// long should still use `run_shell(background: true)` (see `bg_shell.rs`)
 /// so it never blocks in the first place.
-const SHELL_COMMAND_TIMEOUT: Duration = Duration::from_secs(180);
+pub(crate) const SHELL_COMMAND_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Same shape as [`std::process::Output`] but owned/plain, so a timed-out
 /// command (which has no real `ExitStatus` to report) can be represented
-/// alongside a normally-completed one.
-struct CommandResult {
-    status_code: Option<i32>,
-    success: bool,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+/// alongside a normally-completed one. `pub(crate)` so [`crate::docker_sandbox`]
+/// can build/return one directly from a `docker exec` instead of inventing a
+/// second parallel "command output" type.
+pub(crate) struct CommandResult {
+    pub(crate) status_code: Option<i32>,
+    pub(crate) success: bool,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
 }
 
 fn spawn_reader(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
@@ -54,8 +56,10 @@ fn spawn_reader(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle
 /// note pointing at the new job id so the caller (and the agent) can follow
 /// up with `shell_output`/`kill_shell`. Only the wall-clock budget is
 /// enforced here — cooperative cancellation (e.g. the user pressing Esc) is
-/// the caller's concern.
-fn run_with_timeout(
+/// the caller's concern. `pub(crate)` so [`crate::docker_sandbox`] can reuse
+/// the same timeout/output-buffering behavior for `docker exec` instead of
+/// duplicating it.
+pub(crate) fn run_with_timeout(
     mut cmd: Command,
     timeout: Duration,
     command: &str,
@@ -177,6 +181,7 @@ pub fn run_shell_command(
     cwd: &Path,
     approved: bool,
     config: &MintConfig,
+    chat_id: Option<&str>,
 ) -> Result<ShellOutput, ShellError> {
     let classification = classify_shell_command(command);
     if classification.tier == SafetyTier::Blocked {
@@ -201,6 +206,27 @@ pub fn run_shell_command(
     }
 
     let prepared_cmd = prepare_shell_command(command);
+
+    // A Docker session is per-subagent (see `docker_sandbox`), not
+    // per-command, so this check comes first and — when a session exists for
+    // `chat_id` — fully replaces the OS-sandbox dispatch below rather than
+    // layering on top of it: a command can't usefully run inside both bwrap
+    // and a container at once, and bwrap's `--ro-bind / /` doesn't even make
+    // sense to attempt inside a filesystem that's already container-isolated.
+    if let Some(id) = chat_id
+        && let Some(output) =
+            super::docker_sandbox::run_in_session(id, &prepared_cmd, &cwd, config)?
+    {
+        return Ok(shell_output(
+            command,
+            cwd,
+            classification.mode.as_str(),
+            true,
+            output,
+            None,
+        ));
+    }
+
     let sandbox_mode = config.sandbox_mode.trim().to_ascii_lowercase();
     let mut sandbox_warning = None;
     if config.safety_enabled && sandbox_mode != "off" {
@@ -383,8 +409,14 @@ fn sandbox_subpaths(mut roots: Vec<PathBuf>) -> String {
         .join("\n")
 }
 
-#[cfg(target_os = "linux")]
-fn writable_roots(config: &MintConfig, cwd: &Path) -> Vec<PathBuf> {
+/// Host paths that should be writable inside a sandbox: `config`'s configured
+/// write paths that actually exist, plus `cwd` itself if it isn't already
+/// covered by one of them. Used by bwrap's `--bind` args on Linux and by
+/// [`crate::docker_sandbox`]'s bind-mount list (both platforms) — kept
+/// `pub(crate)` (not `#[cfg(target_os = "linux")]`-gated) rather than
+/// duplicated, since Docker needs the exact same policy on macOS/Windows
+/// where bwrap itself doesn't exist.
+pub(crate) fn writable_roots(config: &MintConfig, cwd: &Path) -> Vec<PathBuf> {
     let mut roots = config
         .allowed_write_paths
         .iter()
@@ -499,8 +531,8 @@ mod tests {
 
     #[test]
     fn requires_explicit_approval() {
-        let error =
-            run_shell_command("printf mint", Path::new("."), false, &local_config()).unwrap_err();
+        let error = run_shell_command("printf mint", Path::new("."), false, &local_config(), None)
+            .unwrap_err();
         assert!(matches!(error, ShellError::ApprovalRequired(_)));
     }
 
@@ -511,6 +543,7 @@ mod tests {
             Path::new("."),
             true,
             &local_config(),
+            None,
         )
         .unwrap_err();
         assert!(matches!(error, ShellError::Blocked { .. }));
@@ -519,7 +552,7 @@ mod tests {
     #[test]
     fn runs_an_approved_local_command() {
         let output =
-            run_shell_command("printf mint", Path::new("."), true, &local_config()).unwrap();
+            run_shell_command("printf mint", Path::new("."), true, &local_config(), None).unwrap();
         assert!(output.success);
         assert!(!output.sandboxed);
         assert_eq!(output.stdout, "mint");
@@ -532,6 +565,7 @@ mod tests {
             Path::new("."),
             true,
             &local_config(),
+            None,
         )
         .unwrap();
         assert!(!output.success);
@@ -580,6 +614,7 @@ mod tests {
             Path::new("."),
             true,
             &config,
+            None,
         )
         .unwrap();
         assert!(!output.sandboxed);
@@ -598,14 +633,15 @@ mod tests {
         config
             .extra
             .insert("allowedShellModes".into(), serde_json::json!(["*"]));
-        let output = run_shell_command("pwd", Path::new("."), true, &config).unwrap();
+        let output = run_shell_command("pwd", Path::new("."), true, &config, None).unwrap();
         assert!(output.sandbox_warning.is_none());
     }
 
     #[test]
     fn test_background_command_does_not_hang() {
         let start = std::time::Instant::now();
-        let output = run_shell_command("sleep 5 &", Path::new("."), true, &local_config()).unwrap();
+        let output =
+            run_shell_command("sleep 5 &", Path::new("."), true, &local_config(), None).unwrap();
         assert!(output.success);
         assert!(start.elapsed() < std::time::Duration::from_secs(2));
     }

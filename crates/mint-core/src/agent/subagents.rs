@@ -29,6 +29,11 @@ pub struct SubagentDefinition {
     pub tools: Option<Vec<String>>,
     pub model: Option<String>,
     pub provider: Option<String>,
+    /// Overrides `config.sandbox_backend` for this subagent's `run_shell`
+    /// calls — currently only `"docker"` has any effect (see
+    /// `system::docker_sandbox`). `None` (the default for every builtin)
+    /// means "use whatever `config.sandbox_backend` says."
+    pub sandbox: Option<String>,
     /// The Markdown body after the frontmatter block — becomes the
     /// subagent's system prompt.
     pub system_prompt: String,
@@ -75,6 +80,7 @@ pub fn builtin_subagents() -> Vec<SubagentDefinition> {
             tools: read_only_tools(),
             model: None,
             provider: None,
+            sandbox: None,
             system_prompt: "You are a focused, read-only research subagent. Investigate the given \
                 question by reading files, searching code, and checking git history, then report a \
                 clear, concise answer. Do not write, edit, or delete files, and do not run shell \
@@ -90,6 +96,7 @@ pub fn builtin_subagents() -> Vec<SubagentDefinition> {
             tools: None,
             model: None,
             provider: None,
+            sandbox: None,
             system_prompt: "You are a general-purpose subagent with access to the full toolset. \
                 Investigate and carry out the given task end to end — reading, writing, and \
                 running commands as needed — then report a clear, concise summary of what you \
@@ -126,6 +133,7 @@ pub fn builtin_subagents() -> Vec<SubagentDefinition> {
             ),
             model: None,
             provider: None,
+            sandbox: None,
             system_prompt: "You are a focused debugging subagent. Investigate the given bug or \
                 failing test: read the relevant code, check diagnostics, and run commands \
                 (tests, reproduction scripts, log inspection) to pin down the root cause. Report \
@@ -142,6 +150,7 @@ pub fn builtin_subagents() -> Vec<SubagentDefinition> {
             tools: read_only_tools(),
             model: None,
             provider: None,
+            sandbox: None,
             system_prompt: "You are a software-architect subagent for designing implementation \
                 plans. Investigate the codebase as needed to understand the current state, then \
                 return a step-by-step plan: the critical files involved, the order of changes, \
@@ -169,6 +178,7 @@ pub fn parse_subagent_definition(content: &str, source_path: &str) -> Option<Sub
     let mut tools = None;
     let mut model = None;
     let mut provider = None;
+    let mut sandbox = None;
 
     for line in frontmatter.lines() {
         let line = line.trim();
@@ -201,6 +211,11 @@ pub fn parse_subagent_definition(content: &str, source_path: &str) -> Option<Sub
             if !value.is_empty() {
                 provider = Some(value);
             }
+        } else if let Some(value) = line.strip_prefix("sandbox:") {
+            let value = unquote(value.trim());
+            if !value.is_empty() {
+                sandbox = Some(value);
+            }
         }
     }
 
@@ -210,6 +225,7 @@ pub fn parse_subagent_definition(content: &str, source_path: &str) -> Option<Sub
         tools,
         model,
         provider,
+        sandbox,
         system_prompt: body,
         source_path: source_path.to_string(),
         builtin: false,
@@ -303,6 +319,8 @@ pub struct SubagentDraft {
     pub model: Option<String>,
     #[serde(default)]
     pub provider: Option<String>,
+    #[serde(default)]
+    pub sandbox: Option<String>,
     pub system_prompt: String,
     /// `"workspace"` writes to `.agents/subagents/` under `workspace_root`;
     /// anything else (including missing/empty) falls back to the global
@@ -369,6 +387,14 @@ pub fn save_subagent(
         .filter(|p| !p.is_empty())
     {
         frontmatter.push_str(&format!("provider: {provider}\n"));
+    }
+    if let Some(sandbox) = draft
+        .sandbox
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        frontmatter.push_str(&format!("sandbox: {sandbox}\n"));
     }
     frontmatter.push_str("---\n\n");
     let content = format!("{frontmatter}{}\n", draft.system_prompt.trim());
@@ -532,6 +558,7 @@ mod tests {
                     tools: None,
                     model: None,
                     provider: None,
+                    sandbox: None,
                     system_prompt: "Body.".to_string(),
                     scope: "workspace".to_string(),
                     previous_source_path: Some("<builtin>".to_string()),
@@ -556,6 +583,7 @@ mod tests {
             tools: Some(vec!["read_file".to_string(), "search_code".to_string()]),
             model: Some("gemini-2.5-flash".to_string()),
             provider: Some("gemini".to_string()),
+            sandbox: None,
             system_prompt: "You review diffs for bugs.".to_string(),
             scope: "workspace".to_string(),
             previous_source_path: None,
@@ -591,6 +619,7 @@ mod tests {
                 tools: None,
                 model: None,
                 provider: None,
+                sandbox: None,
                 system_prompt: "Body.".to_string(),
                 scope: "workspace".to_string(),
                 previous_source_path: None,
@@ -606,6 +635,7 @@ mod tests {
                 tools: None,
                 model: None,
                 provider: None,
+                sandbox: None,
                 system_prompt: "Body.".to_string(),
                 scope: "workspace".to_string(),
                 previous_source_path: Some(first.source_path.clone()),

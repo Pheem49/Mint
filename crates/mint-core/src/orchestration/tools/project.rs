@@ -10,7 +10,7 @@ pub(in crate::orchestration) async fn execute(
     input: &AgentInput,
     root: &Path,
     config: &MintConfig,
-    _chat_id: &str,
+    chat_id: &str,
     _approve_cb: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
 ) -> Result<String, OrchestrationError> {
     match action {
@@ -26,7 +26,7 @@ pub(in crate::orchestration) async fn execute(
         }
         "read_diagnostics" => {
             let path = workspace_path(root, &input.path)?;
-            read_diagnostics(&path, config).await
+            read_diagnostics(&path, config, chat_id).await
         }
         "view_image" => {
             let path = workspace_path(root, required(&input.path, "path")?)?;
