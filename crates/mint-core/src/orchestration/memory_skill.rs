@@ -100,6 +100,13 @@ workaround, command sequence, or gotcha that will plausibly recur). Do NOT save 
 tasks, one-off questions, or anything already covered by an existing skill listed below
 (reuse that skill's slug to update it instead of creating a near-duplicate).
 
+If this task matches an existing workspace skill (full current content shown below under
+"Existing workspace skill contents"), your "content" must be a genuine refinement/merge of
+that current version — incorporate whatever is new and useful from this task, correct
+anything this task's outcome shows was wrong, and keep everything still correct and worth
+keeping. Do not silently discard existing content by writing a from-scratch replacement
+that happens to reuse the same slug.
+
 You must return strictly valid JSON with no other text, markers, or markdown, and do NOT
 wrap it in ```json fences. Two shapes are allowed:
 
@@ -116,8 +123,11 @@ Worth saving:
         .to_string();
 
     let message = format!(
-        "Existing skills already known (avoid duplicating these; reuse a slug below to update it instead):\n{}\n\nTask:\n{}\n\nOutcome:\n{}",
-        existing_skills, task, summary
+        "Existing skills already known (avoid duplicating these; reuse a slug below to update it instead):\n{}\n\nExisting workspace skill contents (reuse one of these exact slugs, shown as \"--- slug ---\", to refine that skill instead of creating a near-duplicate):\n{}\n\nTask:\n{}\n\nOutcome:\n{}",
+        existing_skills,
+        existing_workspace_skill_bodies(root),
+        task,
+        summary
     );
 
     let request = ChatRequest {
@@ -179,12 +189,101 @@ Worth saving:
     }
 
     let skill_dir = root.join(".agents").join("skills").join(&slug);
+    let skill_path = skill_dir.join("SKILL.md");
+
+    // Computed here rather than trusted to the model's own arithmetic in its
+    // JSON response — a running counter is exactly the kind of thing an LLM
+    // has no reliable way to get right call after call, but reading the
+    // previous file's own `revisions:` line (0 if this slug is brand new)
+    // and adding one is trivial and always correct.
+    let previous_revision = std::fs::read_to_string(&skill_path)
+        .ok()
+        .map(|previous| skill_revision(&previous))
+        .unwrap_or(0);
+    let content = set_skill_revision(content, previous_revision + 1);
+
     std::fs::create_dir_all(&skill_dir)
         .map_err(|e| OrchestrationError::Agent(format!("unable to create {skill_dir:?}: {e}")))?;
-    std::fs::write(skill_dir.join("SKILL.md"), content)
+    std::fs::write(&skill_path, &content)
         .map_err(|e| OrchestrationError::Agent(format!("unable to write SKILL.md: {e}")))?;
 
     Ok(())
+}
+
+/// Full current `SKILL.md` content of every existing workspace skill under
+/// `<root>/.agents/skills/`, formatted for [`auto_write_skill`]'s reflection
+/// prompt so the model can produce a genuine refinement of one instead of
+/// blindly overwriting it from scratch. Deliberately separate from (and
+/// richer than) `skills::learned_skills_context`'s general-purpose listing,
+/// which intentionally keeps workspace skills to a Path+Status pointer to
+/// save context budget on every ordinary agent turn — this one-off
+/// reflection call can afford the real content, since `looks_skill_worthy`
+/// already filtered for a task substantive enough to be worth the extra
+/// tokens.
+pub(super) fn existing_workspace_skill_bodies(root: &Path) -> String {
+    let skills_dir = root.join(".agents").join("skills");
+    let Ok(entries) = std::fs::read_dir(&skills_dir) else {
+        return "(none yet)".to_string();
+    };
+    let mut bodies: Vec<(String, String)> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let slug = entry.file_name().to_string_lossy().into_owned();
+            let content = std::fs::read_to_string(entry.path().join("SKILL.md")).ok()?;
+            Some((slug, content))
+        })
+        .collect();
+    if bodies.is_empty() {
+        return "(none yet)".to_string();
+    }
+    bodies.sort_by(|a, b| a.0.cmp(&b.0));
+    bodies
+        .into_iter()
+        .map(|(slug, content)| format!("--- {slug} ---\n{}", content.trim()))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Reads the `revisions: N` line from `content`'s YAML frontmatter (the
+/// `---`-delimited block [`set_skill_revision`] maintains), defaulting to
+/// `0` if there's no frontmatter or no such line yet. Mirrors
+/// `skills::parse_skill_description`'s frontmatter-scanning style.
+pub(super) fn skill_revision(content: &str) -> u32 {
+    let trimmed = content.trim_start();
+    let Some(rest) = trimmed.strip_prefix("---") else {
+        return 0;
+    };
+    let Some(end_idx) = rest.find("---") else {
+        return 0;
+    };
+    rest[..end_idx]
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("revisions:")?.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// Sets `content`'s frontmatter `revisions:` line to `revision`, replacing
+/// an existing one or adding a frontmatter block if `content` doesn't have
+/// one (defensive — every skill this module writes always starts with one
+/// per its own system prompt above, but a hand-edited `SKILL.md` might
+/// not).
+pub(super) fn set_skill_revision(content: &str, revision: u32) -> String {
+    let trimmed = content.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("---")
+        && let Some(end_idx) = rest.find("---")
+    {
+        let frontmatter = &rest[..end_idx];
+        let after_closing_marker = &rest[end_idx + 3..];
+        let mut lines: Vec<&str> = frontmatter
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("revisions:"))
+            .collect();
+        let revision_line = format!("revisions: {revision}");
+        lines.push(&revision_line);
+        return format!("---{}\n---{}", lines.join("\n"), after_closing_marker);
+    }
+    format!("---\nrevisions: {revision}\n---\n\n{trimmed}")
 }
 
 /// Lowercases, replaces runs of non-alphanumeric characters with a single `-`, and

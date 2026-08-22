@@ -2271,6 +2271,73 @@ mod tests {
     }
 
     #[test]
+    fn skill_revision_defaults_to_zero_without_a_revisions_line() {
+        assert_eq!(skill_revision("no frontmatter at all"), 0);
+        assert_eq!(skill_revision("---\ndescription: a skill\n---\nbody"), 0);
+    }
+
+    #[test]
+    fn skill_revision_reads_back_what_set_skill_revision_wrote() {
+        let original = "---\ndescription: a skill\n---\nstep-by-step body";
+        let bumped = set_skill_revision(original, 1);
+        assert_eq!(skill_revision(&bumped), 1);
+        assert!(
+            bumped.contains("description: a skill"),
+            "must preserve existing frontmatter fields: {bumped}"
+        );
+        assert!(
+            bumped.contains("step-by-step body"),
+            "must preserve the body: {bumped}"
+        );
+
+        // Refining again must replace the old count, not accumulate a
+        // second `revisions:` line alongside it.
+        let bumped_again = set_skill_revision(&bumped, 2);
+        assert_eq!(skill_revision(&bumped_again), 2);
+        assert_eq!(
+            bumped_again.matches("revisions:").count(),
+            1,
+            "expected exactly one revisions line, got: {bumped_again}"
+        );
+    }
+
+    #[test]
+    fn set_skill_revision_adds_a_frontmatter_block_when_content_has_none() {
+        let result = set_skill_revision("just a body, no frontmatter", 1);
+        assert_eq!(skill_revision(&result), 1);
+        assert!(result.contains("just a body, no frontmatter"));
+    }
+
+    #[test]
+    fn existing_workspace_skill_bodies_reports_none_yet_for_a_fresh_workspace() {
+        let root = std::env::temp_dir().join("mint-memory-skill-test-no-skills-yet");
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(existing_workspace_skill_bodies(&root), "(none yet)");
+    }
+
+    #[test]
+    fn existing_workspace_skill_bodies_includes_full_content_by_slug() {
+        let root = std::env::temp_dir().join("mint-memory-skill-test-existing-bodies");
+        let _ = std::fs::remove_dir_all(&root);
+        let skill_dir = root
+            .join(".agents")
+            .join("skills")
+            .join("retry-flaky-tests");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\ndescription: retry flaky tests\n---\nrun with --retries=3",
+        )
+        .unwrap();
+
+        let bodies = existing_workspace_skill_bodies(&root);
+        assert!(bodies.contains("--- retry-flaky-tests ---"));
+        assert!(bodies.contains("run with --retries=3"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn skill_worthy_requires_enough_steps_and_substantive_work() {
         let mut counts = BTreeMap::new();
         counts.insert("read_file:foo.rs".to_string(), 1);
