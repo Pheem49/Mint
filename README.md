@@ -28,126 +28,69 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 ---
 
 ### 1. <img src="assets/bridges.svg" width="18" height="18" valign="middle" /> Reach Mint From Anywhere — Messaging Bridges
-- Message your local AI assistant like you'd message a person, from **Telegram, Discord Gateway, Discord RPC, Slack, LINE, WhatsApp, Signal, and Email (via Gmail)** — no desktop window required.
-- Enabled bridges run automatically in the background alongside the desktop app, `mint api`/`mint web`, or — for running 24/7 on a VPS with no session attached at all — `mint gateway start`. See [Running Mint 24/7 on a VPS](#running-mint-247-on-a-vps-headless-gateway) below.
-- Every bridge locks itself to a single owner the first time it hears from anyone: whoever messages it first is claimed as the owner, and everyone else is ignored from then on.
-- All bridges share one continuous memory/conversation with the terminal CLI — pick up a conversation on Telegram that you started in the terminal, and vice versa.
+- Message it like a person from **Telegram, Discord (Gateway + RPC), Slack, LINE, WhatsApp, Signal, and Email (Gmail)** — no desktop window required. Each bridge locks to whoever messages it first, and all of them share one continuous memory/conversation with the terminal CLI.
+- Runs unattended 24/7 on a VPS via `mint gateway start`/`install` — a systemd service with a `GET /api/gateway/health` endpoint. See [Running Mint 24/7 on a VPS](#running-mint-247-on-a-vps-headless-gateway).
 
 ---
 
 ### 2. <img src="assets/live2d.svg" width="18" height="18" valign="middle" /> Interactive Live2D Desktop Assistant
-- An interactive anime avatar (**Shiroko**) displayed right on your desktop with gaze tracking (eye/face follows your mouse pointer).
-- Toggle expression changes and cycle through character accessories dynamically.
-- Custom interaction zones (Head, Cheek, Hands, Body) that trigger unique animations and message toasts.
+- An interactive anime avatar (**Shiroko**) on your desktop with gaze tracking, expression/accessory toggles, and interaction zones (Head, Cheek, Hands, Body) that trigger animations and message toasts.
 
 ---
 
 ### 3. <img src="assets/chat.svg" width="18" height="18" valign="middle" /> AI Chat & Multi-Providers
-- Connect to **Gemini, OpenAI, Anthropic (Claude), Ollama (Local), Hugging Face**, and LM Studio.
-- Run private local LLMs inside your machine using Ollama or connect to leading cloud APIs.
-- Supports system instructions, temperature adjustments, voice replies, and image analysis (Multimodal).
+- Connect to **Gemini, OpenAI, Anthropic (Claude), Ollama (Local), Hugging Face**, and OpenAI-compatible custom endpoints — system instructions, temperature control, voice replies, and multimodal image analysis.
 
 ---
 
-### 4. <img src="assets/code.svg" width="18" height="18" valign="middle" /> Autonomous Code Agent
-- Run code agent loops via `/code <task>` or the terminal command `mint code agent "<task>"`.
-- Scan your project workspace, build multi-file implementation plans, fix test suite errors, and write edits automatically.
-- Run local tests, cargo checks, and shell commands.
+### 4. <img src="assets/code.svg" width="18" height="18" valign="middle" /> Autonomous Code Agent & Subagents
+- Run code-agent loops via `/code <task>` or `mint code agent "<task>"`: scan the workspace, plan multi-file changes, edit, run tests/shell commands, and verify before finishing.
+- Delegate focused sub-tasks to specialized subagents (`dispatch_subagent`), optionally isolated in a per-session Docker container (`sandboxBackend: "docker"`).
 > [!IMPORTANT]
-> **Safety First:** Risky actions and file writes require your explicit terminal approval first.
+> **Safety First:** Risky actions and file writes require your explicit approval first.
 
 ---
 
-### 5. <img src="assets/memory.svg" width="18" height="18" valign="middle" /> Long-Term Memory & Knowledge Base
-- Persistent conversation memory stored locally in SQLite. Manage user profile memory with `/memory set/get` or CLI commands.
-- Index local directories, text files, and documentation to build your private searchable knowledge base.
+### 5. <img src="assets/memory.svg" width="18" height="18" valign="middle" /> Memory, Knowledge & Self-Written Skills
+- Persistent conversation memory (SQLite), a searchable local knowledge base, and semantic code search.
+- After solving a hard, reusable problem, the agent can write its own skill (`.agents/skills/`) — and genuinely refine an existing one instead of duplicating it, the next time a similar task recurs.
 
 ---
 
-### 6. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Tool & MCP Integrations
-- Support **Model Context Protocol (MCP)** to connect tools like Google/Brave Search, Filesystem servers, and GitHub context.
-- Dedicated **Image Search** tool (Google Custom Search Image / Brave Images) for finding and browsing pictures on request, rendered as an image-grid card on Desktop and Web.
-- **Auto GitHub Link Resolver:** Automatically detects GitHub URLs in chat messages (CLI, Web, and Desktop) and Code Agent tasks. It fetches and injects the repository's metadata, directory structure, and README as prompt context, serving as an instant fallback when the GitHub MCP server is not active.
-- Local plugins for Spotify playback control, Google Calendar, Gmail drafts, and Notion workspace reading.
+### 6. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Scheduled Tasks & Linked Folders
+- `mint cron` runs agent tasks on a schedule with no OS-level daemon — rides along on whatever's already open, or `mint gateway start` for always-on.
+- Link a folder (e.g. "Food") and chat that touches its topic gets a short, cross-referenced note written into it automatically.
 
 ---
 
-### 7. <img src="assets/screencapture.svg" width="18" height="18" valign="middle" /> Screen Capture & Translation
-- Capture screen snapshots for instant visual analysis by the AI.
-- Real-time continuous overlay translation of specific screen regions.
+### 7. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Tool & MCP Integrations
+- **Model Context Protocol (MCP)** servers for Search, Filesystem, GitHub, and more, plus local plugins for Spotify, Google Calendar, Gmail, and Notion — manage all of it interactively with `mint plugins`.
+- Dedicated **Image Search** tool and an **Auto GitHub Link Resolver** that injects a linked repo's metadata/README as context automatically.
 
 ---
 
-### 8. <img src="assets/imagegen.svg" width="18" height="18" valign="middle" /> AI Image Generation
-- Generate high-quality images directly from chat or terminal using **DALL-E 3, Stability AI (Stable Diffusion), Ideogram, Replicate (Flux)**, and Google NanoBanana.
-- Supports aspect ratio selections, negative prompts, custom image counts, and automatic storage of generated pictures to the local library.
+### 8. <img src="assets/screencapture.svg" width="18" height="18" valign="middle" /> Screen Capture & Translation
+- Capture screen snapshots for instant visual analysis, or run real-time continuous overlay translation of a screen region.
 
 ---
 
-### 9. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Browser Automation (`mint auto`)
-- Control and automate web pages directly from either the terminal or the GUI desktop chat.
-- Runs a dedicated, isolated Chromium instance on port `9222` with state separation using the command `mint auto`.
-- Supports opening URLs (`browser_open`), clicking buttons/elements (`browser_click`), typing text (`browser_type`), and extracting content (`browser_read`).
-- **Dynamic Tool Injection:** The agent automatically registers these browser capability tools only when it detects that the automation browser is active on port `9222`.
+### 9. <img src="assets/imagegen.svg" width="18" height="18" valign="middle" /> AI Image Generation
+- Generate images from chat or terminal using **DALL-E 3, Stability AI, Ideogram, Replicate (Flux)**, and Google NanoBanana — aspect ratio, negative prompts, and automatic local storage.
 
 ---
 
-### 10. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> AI Video Editing via FableMint
-- Want an AI that actually cuts your clips? Connect
-  **[FableMint](https://github.com/Pheem49/FableMint)** — a free, open-source,
-  zero-dependency browser video editor — as an MCP server, and Mint can cut,
-  grade, caption, chroma-key, and export edits for you from plain chat.
-- The whole timeline is one JSON document. Mint patches it directly (cuts,
-  keyframes, transitions, kinetic captions, speed ramps) and the open editor
-  tab live-reloads in ~150 ms, so you watch the edit happen in real time.
-- **Setup** — clone FableMint locally (Node 18+ required), then:
+### 10. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Browser Automation (`mint auto`)
+- Drives a dedicated, isolated Chromium instance (port `9222`): open URLs, click, type, and extract page content — the agent registers these tools automatically once it detects the automation browser is running.
+
+---
+
+### 11. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> AI Video Editing via FableMint
+- Connect **[FableMint](https://github.com/Pheem49/FableMint)** — a free, open-source browser video editor — as an MCP server, and Mint can cut, grade, caption, chroma-key, and export edits from plain chat, with the open editor tab live-reloading as it works:
   ```bash
   mint mcp add fablemint node --args "<path-to>/FableMint/mcp-server.js"
   mint mcp allow fablemint "*"
   ```
-  (Desktop/Web: **Settings → MCP servers → custom server**, Command `node`,
-  Args `<path-to>/FableMint/mcp-server.js`.)
-- **Use it** — just ask, e.g. *"cut these six clips to the beat markers, add a
-  teal-orange grade, and put a word-pop caption on top"*: Mint calls
-  FableMint's tools and rebuilds the timeline for you. See
-  [FableMint's README](https://github.com/Pheem49/FableMint#driving-it-with-an-ai-agent)
-  for the full tool list and setup details.
-
----
-
-## Highlights
-
-- Reachable from **Telegram, Discord Gateway, Discord RPC, Slack Socket Mode,
-  LINE, WhatsApp Cloud API, Signal, and Email (Gmail)** — each bridge locked
-  to a single owner on first contact, no desktop window needed to keep
-  chatting with it.
-- Runs unattended 24/7 on a VPS via `mint gateway start`/`mint gateway
-  install` — a real headless mode with no TUI, a systemd unit that survives
-  reboots, and a `GET /api/gateway/health` endpoint to check bridge status
-  remotely.
-- Multi-provider chat with Gemini, OpenAI, Anthropic, Ollama, Hugging Face, and
-  local OpenAI-compatible endpoints.
-- Image generation using DALL-E 3, Stability AI, Ideogram, Replicate, and NanoBanana.
-- Native streaming responses, SQLite-backed memory, tasks, searchable local
-  knowledge, skills, and semantic code search.
-- Desktop dashboard with a Live2D assistant, model interaction areas, pictures,
-  screen capture, continuous translation, spotlight, tray, widget, and proactive
-  suggestions.
-- Native code-agent workflow for workspace inspection, planning, editing, shell
-  execution, and verification with explicit approval for risky actions.
-- MCP servers, local plugins, custom workflows, weather, web search, and
-  optional external services.
-- Signed Tauri update checks with an explicit approval step before installation.
-- Dynamic local Ollama model fetching in the Settings Window to query and display the actual models installed on your machine.
-- Pill-styled clean horizontal system event dividers for provider and model change notifications in the chat panel.
-- Global unrestricted text selection and copying enabled across all application components.
-- Spacious 1100px widescreen layout for the Chat Panel when the interactive model is hidden.
-- Advanced Workspace File Tree featuring:
-  - Automatic directory refreshing upon window focus and 15-second polling.
-  - Quick action buttons to create new files and folders.
-  - Right-click context menu to delete files/folders with confirmation modals.
-  - Drag-and-drop file mentions in the chat input with automatic spacing and dynamic accent-colored history bubble highlighting.
-
+  See [FableMint's README](https://github.com/Pheem49/FableMint#driving-it-with-an-ai-agent) for the full tool list.
 
 ## <img src="assets/setup.svg" width="24" height="24" valign="middle" /> Prerequisites
 
@@ -253,20 +196,25 @@ npm run tauri:build
 *(The Vite renderer output is generated in `out/renderer` and can be manually built via `npm run build:web`)*
 
 ### 3. Native CLI
-To install the `mint` command-line tool globally:
+Pick one way to get the global `mint` command:
 
-* **Option A (Release Build - Recommended for speed):**
+* **Release build (recommended — fastest to run):**
   ```bash
   cargo build --release -p mint-cli
   sudo cp target/release/mint /usr/local/bin/
   ```
-* **Option B (Cargo Install):**
+* **Cargo install:**
   ```bash
   cargo install --path crates/mint-cli
   ```
-* **Option C (Development Shell Alias):**
-  If you are actively modifying code and want changes to reflect instantly, set up the alias under the [Setting up the mint Shortcut](#setting-up-the-mint-shortcut) section.
+  *(make sure `~/.cargo/bin` is on your shell's `$PATH`)*
+* **Dev alias** — recompiles on every run, so code changes apply instantly; best while actively editing Mint itself:
+  ```bash
+  echo 'alias mint="cargo run --manifest-path $(pwd)/Cargo.toml -p mint-cli --"' >> ~/.bashrc  # or ~/.zshrc
+  source ~/.bashrc  # or ~/.zshrc
+  ```
 
+No alias set up? Everything below still works via `npm run cli -- <command>` in place of `mint <command>`.
 
 ## User Interface
 
@@ -305,67 +253,16 @@ To install the `mint` command-line tool globally:
 
 ## Desktop Assistant
 
-The desktop application provides:
-
-- A streaming chat panel with provider selection and optional smart context.
-- A Live2D model panel with gaze tracking, interaction zones, and visual area
-  guides.
-- Local conversation memory, tasks, searchable knowledge, and pictures.
-- Screen capture and continuous screen translation.
-- Spotlight, widget, tray, proactive glow, and background task queue windows.
-- Settings for models, API keys, voice, automation, integrations, MCP servers,
-  workflows, appearance, updates, and agent collaboration.
-
-The sidebar, Live2D interaction state, and area-guide visibility are stored
-locally so the dashboard restores the previous UI state after restarting.
+The desktop app adds Spotlight, a system tray widget, and a background
+task-queue window on top of everything in "What Mint Can Do" above. The
+sidebar, Live2D interaction state, and area-guide visibility persist locally,
+so the dashboard restores its previous state after a restart.
 
 ## Native CLI
 
-You can interact with Mint's Rust backend directly using the command line. If you set up the `mint` shortcut alias, you can run commands directly as `mint <command>`. Otherwise, you can fall back to running them through npm as `npm run cli -- <command>`.
-
-### Setting up the `mint` Shortcut
-
-You can choose one of the following methods to enable the global `mint` command:
-
-**Option 1: Using Shell Alias (For active development - updates instantly on code changes)**
-
-To run the commands using the prefix `mint` from anywhere in your workspace (automatically compiling your code updates on execution):
-
-*For Bash (`~/.bashrc`):*
-```bash
-echo 'alias mint="cargo run --manifest-path /home/pheem49/vscode/Project/Mint-CLI/Cargo.toml -p mint-cli --"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-*For Zsh (`~/.zshrc`):*
-```bash
-echo 'alias mint="cargo run --manifest-path /home/pheem49/vscode/Project/Mint-CLI/Cargo.toml -p mint-cli --"' >> ~/.zshrc
-source ~/.zshrc
-```
-
-**Option 2: Install via Cargo (For standard Rust installation)**
-
-This will compile the Rust CLI and install it inside your native Cargo binary directory:
-
-```bash
-cargo install --path crates/mint-cli
-```
-*Note: Make sure your `~/.cargo/bin` is added to your shell's `$PATH` variable.*
-
-**Option 3: Compile and Install Globally (For release binary - fastest run speed)**
-
-If you want to compile the project in release mode and install it directly to your system's global binaries directory (for the fastest startup time without cargo check overhead):
-
-```bash
-# Build the binary in release mode
-cargo build --release -p mint-cli
-
-# Copy it into your system binary directory
-sudo cp target/release/mint /usr/local/bin/
-```
-Once copied, you can run `mint` globally from any folder in your terminal!mint chat "Hello"
-
----
+You can interact with Mint's Rust backend directly using the command line —
+install the `mint` shortcut in [Installation](#3-native-cli) above, or fall
+back to `npm run cli -- <command>` in its place.
 
 ### Start Interactive Chat Assistant
 
@@ -426,8 +323,6 @@ mint chat "<message>"
 | `mint mcp list` | List configured MCP servers |
 | `mint learn <path>` | Import a persistent learned skill file |
 | `mint update --check` | Check for an available update |
-
-
 
 ### Code Agent
 
@@ -662,7 +557,10 @@ through a TLS tunnel.
 
 Mint keeps high-risk behavior behind explicit policy checks:
 
-- Shell commands are evaluated before execution.
+- Shell commands are evaluated before execution, then run inside an OS-level
+  sandbox by default (bubblewrap on Linux, Seatbelt on macOS —
+  `sandboxMode`). Subagents can additionally be isolated in a per-session
+  Docker container (`sandboxBackend: "docker"`).
 - Code edits and update installation require approval.
 - Sensitive directories such as `.ssh`, `.gnupg`, and Mint's own config
   directory are protected by default.
@@ -715,7 +613,7 @@ above. See [`TAURI_MIGRATION.md`](TAURI_MIGRATION.md) for compatibility notes.
 
 ## Contributing
 
-We welcome contributions from the community! Whether you want to fix a bug, add a new provider, or build a new integration, please check out our [CONTRIBUTING.md](file:///home/pheem49/vscode/Project/Mint-CLI/CONTRIBUTING.md) guide for setup instructions, project architecture details, and our roadmap.
+We welcome contributions from the community! Whether you want to fix a bug, add a new provider, or build a new integration, please check out our [CONTRIBUTING.md](CONTRIBUTING.md) guide for setup instructions, project architecture details, and our roadmap.
 
 ## License
 
