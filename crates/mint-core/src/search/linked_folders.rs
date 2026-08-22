@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -135,6 +135,113 @@ fn matching_candidates<'a>(
         .collect()
 }
 
+const MAX_CROSS_REFERENCE_CANDIDATES: usize = 15;
+
+/// One existing note entry offered to the note-writing LLM call as a
+/// cross-reference candidate. `id` is `"YYYY-MM-DD#HH:MM"` — deliberately the
+/// same shape as an Obsidian block reference, since these files already live
+/// in a real `## HH:MM`-headed daily-note format a user could open in
+/// Obsidian directly; `[[id]]` links written by [`format_note_content`]
+/// resolve there too, not just inside Mint.
+struct NoteEntryRef {
+    id: String,
+    preview: String,
+}
+
+/// Splits one day's note file (`<date>.md`) back into its individual
+/// `## HH:MM` entries — the inverse of how [`write_note_if_relevant`] builds
+/// that file up one `write` at a time. Every entry we've ever written starts
+/// with a literal `"\n## "`, so splitting on that delimiter and dropping the
+/// first piece (whatever came before the first heading — empty for a file
+/// this function created) recovers each one directly.
+fn parse_note_entries(content: &str, date: &str) -> Vec<NoteEntryRef> {
+    content
+        .split("\n## ")
+        .skip(1)
+        .filter_map(|chunk| {
+            let mut lines = chunk.lines();
+            let time = lines.next()?.trim();
+            if time.is_empty() {
+                return None;
+            }
+            let preview: String = lines
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(80)
+                .collect();
+            Some(NoteEntryRef {
+                id: format!("{date}#{time}"),
+                preview,
+            })
+        })
+        .collect()
+}
+
+/// The most recent entries across every `<date>.md` file in `notes_dir`,
+/// newest day first and newest-within-a-day first, capped at `limit` so the
+/// note-writing prompt built in [`write_note_if_relevant`] stays bounded
+/// even for a folder with a long note history. Returns an empty list (never
+/// an error) for a folder with no notes yet — that's the common case for a
+/// newly linked folder, not a failure.
+fn list_recent_note_entries(notes_dir: &Path, limit: usize) -> Vec<NoteEntryRef> {
+    let Ok(read_dir) = fs::read_dir(notes_dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = read_dir
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("md"))
+        .collect();
+    // Filenames are `YYYY-MM-DD.md`, so lexicographic order is chronological
+    // order — reverse it to get newest-first.
+    files.sort();
+    files.reverse();
+
+    let mut entries = Vec::new();
+    for path in files {
+        if entries.len() >= limit {
+            break;
+        }
+        let Some(date) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let mut day_entries = parse_note_entries(&content, date);
+        day_entries.reverse();
+        entries.extend(day_entries);
+    }
+    entries.truncate(limit);
+    entries
+}
+
+/// Appends a `Related:` line of `[[id]]` wiki-links to `content` for every
+/// entry in `related` that's actually present in `known_ids`, silently
+/// dropping anything else. The model was only ever shown `known_ids` as
+/// candidates, so anything outside that set is either a hallucinated id or a
+/// stale one from a race with another note write — either way, writing it in
+/// would produce a permanently broken link with no way to detect it later.
+fn format_note_content(content: &str, related: &[String], known_ids: &BTreeSet<String>) -> String {
+    let valid: Vec<&str> = related
+        .iter()
+        .filter(|id| known_ids.contains(id.as_str()))
+        .map(String::as_str)
+        .collect();
+    if valid.is_empty() {
+        return content.to_string();
+    }
+    let links = valid
+        .iter()
+        .map(|id| format!("[[{id}]]"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{content}\n\nRelated: {links}")
+}
+
 /// Fire-and-forget: after a chat turn, ask the model (in a second, separate
 /// call) whether it touched on a linked folder's topic closely enough to be
 /// worth a note, and if so append one to `<folder>/mint-notes/<date>.md`.
@@ -162,11 +269,35 @@ async fn write_note_if_relevant(
         return Ok(());
     }
 
+    // One pass per candidate folder: list its existing entries, then derive
+    // both the prompt text and the known-id set (kept by folder name so the
+    // `related` ids the model comes back with can be validated against
+    // whichever folder it actually chose — see `format_note_content`'s doc
+    // comment for why that validation matters) from the same listing.
+    let mut known_ids: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let candidate_list = candidates
         .iter()
         .map(|folder| {
+            let entries = list_recent_note_entries(
+                &folder.path.join("mint-notes"),
+                MAX_CROSS_REFERENCE_CANDIDATES,
+            );
+            let existing_notes = if entries.is_empty() {
+                "  Existing notes: (none yet)".to_string()
+            } else {
+                let lines = entries
+                    .iter()
+                    .map(|entry| format!("  - {}: {}", entry.id, entry.preview))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("  Existing notes (id format \"YYYY-MM-DD#HH:MM\"):\n{lines}")
+            };
+            known_ids.insert(
+                folder.name.clone(),
+                entries.into_iter().map(|entry| entry.id).collect(),
+            );
             format!(
-                "- {}: {}",
+                "- {}: {}\n{existing_notes}",
                 folder.name,
                 folder.description.as_deref().unwrap_or("(no description)")
             )
@@ -184,6 +315,12 @@ tangential mentions.
 Linked folders:
 {candidate_list}
 
+If the new note is meaningfully related to one or more existing notes listed
+above for the folder you're saving into (same topic, a follow-up, a
+correction, something a reader would want cross-linked), include their exact
+ids in "related". Only use ids that appear in the list above — never invent
+one. Leave "related" empty or omit it if nothing existing is relevant.
+
 You must return strictly valid JSON with no other text, markers, or markdown,
 and do NOT wrap it in ```json fences. Two shapes are allowed:
 
@@ -191,7 +328,7 @@ Not worth saving:
 {{"should_save": false}}
 
 Worth saving:
-{{"should_save": true, "folder": "<one of the folder names above, exactly>", "content": "<concise markdown note body, a few lines>"}}"#
+{{"should_save": true, "folder": "<one of the folder names above, exactly>", "content": "<concise markdown note body, a few lines>", "related": ["<id>", ...]}}"#
     );
 
     let message = format!("User: {}\nAssistant: {}", user_text, ai_text);
@@ -251,6 +388,22 @@ Worth saving:
     let Some(folder) = folders.get(folder_name) else {
         return Ok(());
     };
+    let related: Vec<String> = obj
+        .get("related")
+        .and_then(|v| v.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let empty_known_ids = BTreeSet::new();
+    let content = format_note_content(
+        content,
+        &related,
+        known_ids.get(folder_name).unwrap_or(&empty_known_ids),
+    );
 
     let notes_dir = folder.path.join("mint-notes");
     let now = Local::now();
@@ -334,5 +487,102 @@ mod tests {
         let folders: BTreeMap<String, LinkedFolder> = BTreeMap::new();
         let hits = matching_candidates(&folders, "anything at all", "");
         assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn parse_note_entries_splits_multiple_headings_in_one_day_file() {
+        let content = "\n## 09:15\n\nGrandma's pad thai uses tamarind, not ketchup.\n\n## 14:30\n\nTried the new ramen place downtown.\n";
+        let entries = parse_note_entries(content, "2026-08-15");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, "2026-08-15#09:15");
+        assert!(entries[0].preview.contains("tamarind"));
+        assert_eq!(entries[1].id, "2026-08-15#14:30");
+        assert!(entries[1].preview.contains("ramen"));
+    }
+
+    #[test]
+    fn parse_note_entries_returns_empty_for_content_with_no_headings() {
+        assert!(parse_note_entries("", "2026-08-15").is_empty());
+        assert!(parse_note_entries("just some raw text, no heading", "2026-08-15").is_empty());
+    }
+
+    #[test]
+    fn parse_note_entries_truncates_long_bodies_to_an_80_char_preview() {
+        let long_body = "x".repeat(500);
+        let content = format!("\n## 09:15\n\n{long_body}\n");
+        let entries = parse_note_entries(&content, "2026-08-15");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].preview.chars().count(), 80);
+    }
+
+    #[test]
+    fn list_recent_note_entries_orders_newest_first_and_respects_limit() {
+        let dir = std::env::temp_dir().join("mint-linked-folders-test-recent-entries");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        fs::write(
+            dir.join("2026-08-10.md"),
+            "\n## 09:00\n\nold day, one entry\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("2026-08-15.md"),
+            "\n## 09:15\n\nnew day, first entry\n\n## 14:30\n\nnew day, second entry\n",
+        )
+        .unwrap();
+        // Not a note file — must be ignored.
+        fs::write(dir.join("notes.txt"), "not markdown").unwrap();
+
+        let entries = list_recent_note_entries(&dir, 10);
+        assert_eq!(
+            entries.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
+            vec!["2026-08-15#14:30", "2026-08-15#09:15", "2026-08-10#09:00"],
+            "expected newest-day-first, newest-within-day-first ordering"
+        );
+
+        let limited = list_recent_note_entries(&dir, 2);
+        assert_eq!(limited.len(), 2);
+        assert_eq!(limited[0].id, "2026-08-15#14:30");
+        assert_eq!(limited[1].id, "2026-08-15#09:15");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_recent_note_entries_is_empty_for_a_folder_with_no_notes_yet() {
+        let dir = std::env::temp_dir().join("mint-linked-folders-test-no-notes-yet");
+        let _ = fs::remove_dir_all(&dir);
+        assert!(list_recent_note_entries(&dir, 10).is_empty());
+    }
+
+    #[test]
+    fn format_note_content_appends_links_only_for_known_ids() {
+        let known: BTreeSet<String> = ["2026-08-10#09:00", "2026-08-12#12:00"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let related = vec![
+            "2026-08-10#09:00".to_string(),
+            "2026-08-99#99:99".to_string(), // hallucinated id — must be dropped
+        ];
+        let result = format_note_content("Tried a new place.", &related, &known);
+        assert_eq!(
+            result,
+            "Tried a new place.\n\nRelated: [[2026-08-10#09:00]]"
+        );
+    }
+
+    #[test]
+    fn format_note_content_leaves_content_untouched_when_nothing_is_related() {
+        let known: BTreeSet<String> = BTreeSet::new();
+        assert_eq!(
+            format_note_content("Tried a new place.", &[], &known),
+            "Tried a new place."
+        );
+        assert_eq!(
+            format_note_content("Tried a new place.", &["unknown#id".to_string()], &known),
+            "Tried a new place."
+        );
     }
 }
