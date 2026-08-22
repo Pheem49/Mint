@@ -29,6 +29,10 @@ matter which door you walk in through.
 - **SVG Icons Across Result Cards**: Replaced emoji icons with `lucide-react` SVG icons on the Weather, Stock, Calculation, and Image Search cards for a more consistent look across themes.
 - **Accurate Tool Activity Labels**: The "Working through task" activity table on Desktop and Web now shows the real tool/action name (`web_search`, `image_search`, `weather`, …), matching what the CLI already displays.
 - **Web Deep-Link Fix**: Fixed a bug where opening or refreshing a direct chat URL (e.g. `/chat/<conversation-id>`) on `mint web` showed a blank white page — the production web build used a relative asset base path that broke on any URL besides `/`.
+- **Docker Sandbox for Subagents**: `dispatch_subagent`-spawned subagents can now run their shell commands inside an isolated, ref-counted Docker container (`sandboxBackend: "docker"`, or a per-subagent `sandbox: docker` frontmatter override) instead of only the shared host-level bwrap/sandbox-exec sandbox.
+- **Web UI Is Now Installable (PWA)**: `mint web` can be added to a phone's home screen like a native app — a web manifest, generated icon set, and a narrowly-scoped service worker (never caches `/api/*`, so chat/agent responses stay live) make the existing Web UI installable with no app store and no separate mobile codebase.
+- **Linked Folders Cross-Reference Each Other**: Notes auto-saved into a linked folder can now wiki-link related earlier notes (`[[YYYY-MM-DD#HH:MM]]`, matching the file's own heading format so it resolves in a real Obsidian vault too), instead of being a flat, unlinked pile of daily files.
+- **Self-Evolving Skills, On By Default**: `auto_skill_writing` now defaults to on. When a task matches an existing skill, the agent is shown that skill's full current content and asked to genuinely refine/merge it rather than risk a blind overwrite, and every write stamps a `revisions:` count computed in code (not trusted to the model's own arithmetic).
 
 ## <img src="assets/features.svg" width="24" height="24" valign="middle" /> What Mint Can Do
 
