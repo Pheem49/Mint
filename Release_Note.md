@@ -493,3 +493,118 @@ explicit guidance on when the agent should actually reach for it.
   sensible default — and explicitly not to use it for permission-to-proceed
   or confirmation, which the existing approval/plan-review flow already
   handles.
+
+---
+
+## 🐳 Docker Sandbox for Subagents
+
+`dispatch_subagent`-spawned subagents can now run their shell commands inside
+an isolated Docker container instead of the shared bwrap/sandbox-exec
+host-level sandbox — the biggest sandboxing gap the agent had, since a
+subagent is exactly the piece of the system most likely to run less-trusted,
+model-generated shell commands.
+
+- **New `crates/mint-core/src/system/docker_sandbox.rs`**: one container per
+  subagent *session*, not per command — `start_session` starts a single
+  detached container keyed by `sub_chat_id`, and every subsequent
+  `run_shell` call from that subagent `docker exec`s into it instead of
+  paying container-startup latency per command. Modeled directly on
+  `integrations::mcp`'s `SESSIONS` registry pattern rather than
+  `bg_shell`'s job registry, which has no reuse/lifecycle semantics.
+- **Ref-counted teardown**: `run_parallel_subagent_batch` can dispatch the
+  same subagent name twice concurrently (it doesn't dedupe names), so two
+  callers can share one container. `stop_session` now decrements a
+  reference count and only actually stops/removes the container once every
+  caller that started it has also stopped it — without this, whichever
+  concurrent dispatch finished first would tear the shared container down
+  out from under the other one still using it.
+- **Filesystem policy stricter than bwrap by design**: only
+  `allowedWritePaths`/`allowedReadPaths` get bind-mounted (rw/ro
+  respectively) rather than exposing the whole host filesystem read-only
+  the way bwrap's `--ro-bind / /` does — a container ships its own
+  `/usr`/`/bin`, so there's no need to also expose the host's.
+- **New config**: `sandboxBackend` (`"os"` default | `"docker"`) and
+  `dockerSandboxImage` (default `debian:bookworm-slim`), settable via `mint
+  config set`; a subagent definition's own `sandbox: docker` frontmatter
+  field overrides the global setting per subagent. `mint config doctor`
+  reports a new `dockerSandbox` block (backend/image/availability).
+- **Verified against a real Docker daemon**, not just compile-checked: unit
+  tests actually start a container, `docker exec` into it, confirm
+  `/.dockerenv` is visible, and confirm `docker ps -a` shows nothing left
+  behind after teardown — including a dedicated regression test for the
+  ref-counting fix and an error-path test proving teardown still runs when
+  the subagent's run fails.
+
+---
+
+## 📱 Web UI, Installable as a PWA
+
+The Web UI can now be installed to a phone's home screen like a native app —
+no app store, no separate mobile codebase — the lowest-effort step toward
+mobile access ahead of a heavier Tauri-mobile investment.
+
+- **New web app manifest** (`manifest.webmanifest`) and a generated icon set
+  (192×192, 512×512, and a padded 512×512 maskable variant) so Android/iOS
+  "Add to Home Screen" gets a proper name, theme color, and icon instead of
+  a generic browser bookmark.
+- **A narrowly-scoped service worker** (`public/sw.js`): stale-while-revalidate
+  for static assets (safe since Vite already content-hashes built
+  filenames, so a new deploy's JS/CSS never collides with a stale cache
+  entry), a network-first app-shell fallback for navigations when the
+  network drops mid-use — and `/api/*` is **never** intercepted, since
+  caching or replaying agent/chat responses would be actively wrong, not
+  just stale.
+- **Production-only registration**: `registerServiceWorker()` is gated on
+  `import.meta.env.PROD` so it never registers under Vite's dev server,
+  where it would otherwise fight with HMR.
+- **Desktop (Tauri) build is untouched** — the manifest/service worker only
+  ever get referenced from `index-web.html`/`src-web`, not the desktop
+  `index.html`/`src`.
+- **Verified in an actual browser**: driven headlessly through Chrome
+  DevTools Protocol against a real production build (`vite preview`) —
+  confirmed the service worker registers, the manifest resolves as valid
+  JSON with the right name/icons, and the page loads with zero console
+  errors or warnings.
+
+---
+
+## 🔗 Cross-Reference Links for Linked Folders
+
+Notes written into a linked folder can now reference each other, closer to
+the Obsidian-style web of notes Linked Folders was originally inspired by
+instead of a flat, unlinked pile of daily files.
+
+- **The note-writing reflection call now sees recent existing entries**
+  (`crates/mint-core/src/search/linked_folders.rs`, up to 15 per candidate
+  folder) and can wiki-link a new note to ones it names as genuinely
+  related — `id` format is `"YYYY-MM-DD#HH:MM"`, deliberately matching the
+  real `## HH:MM` heading each entry is already written under, so
+  `[[2026-08-10#09:00]]` resolves if the folder is ever opened as an actual
+  Obsidian vault, not just inside Mint.
+- **Hallucination-safe**: any id the model returns that wasn't in the
+  candidate list it was actually shown gets silently dropped rather than
+  written into the note as a permanently broken link.
+
+---
+
+## 🧬 Self-Evolving Skills
+
+Auto skill writing now behaves closer to "creates skills from experience,
+improves them during use" instead of a one-shot write-and-forget.
+
+- **On by default**: `auto_skill_writing` now defaults to `true` (was
+  `false`) — `/autoskill off` or the Settings toggle still turns it off, but
+  the self-improving behavior it exists for no longer requires a user to
+  discover and enable it first.
+- **Genuine refinement instead of a blind overwrite**
+  (`orchestration/memory_skill.rs`): when the reflection call's chosen slug
+  matches an existing workspace skill, `auto_write_skill` now shows the
+  model that skill's full current `SKILL.md` content and asks for a real
+  merge — keep what's still correct, incorporate what's new — rather than
+  risking a from-scratch rewrite that silently discards a skill's earlier,
+  hard-won content.
+- **`revisions: N` frontmatter, computed in code, not by the model**: every
+  write stamps a revision count — read the previous file's own count, add
+  one — deterministic rather than trusted to an LLM's arithmetic across
+  calls, so there's visible, verifiable evidence a skill has actually
+  evolved over repeated invocations.
