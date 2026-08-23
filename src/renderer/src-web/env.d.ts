@@ -1,4 +1,9 @@
+/// <reference types="vite/client" />
 declare module '*.css';
+declare module '*.md?raw' {
+  const content: string;
+  export default content;
+}
 
 interface Window {
   api: {

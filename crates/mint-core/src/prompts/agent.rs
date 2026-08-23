@@ -37,6 +37,8 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "list_tests",
     "read_diagnostics",
     "view_image",
+    "video_filmstrip",
+    "video_waveform",
     "note_write",
     "mcp_list_tools",
     "browser_open",
@@ -44,6 +46,9 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "browser_mouse_move",
     "browser_screenshot",
     "run_shell",
+    // Read-only poll of a background job's buffered output; the run_shell
+    // call that started it is still gated to read-only commands above.
+    "shell_output",
 ];
 
 /// The full set of coding-agent actions before plan-mode/disabled-tools/browser
@@ -91,6 +96,8 @@ pub(crate) fn base_allowed_actions() -> Vec<&'static str> {
         "video_merge",
         "video_export",
         "video_extract_audio",
+        "video_filmstrip",
+        "video_waveform",
         "speech_transcribe",
         "subtitle_generate",
         "subtitle_translate",
@@ -119,6 +126,7 @@ pub fn build_system_prompt(
     plan_mode: bool,
     native: bool,
     user_name: Option<&str>,
+    pinned_mcp_server: Option<&str>,
 ) -> String {
     let mut allowed_actions = base_allowed_actions();
 
@@ -137,6 +145,8 @@ pub fn build_system_prompt(
     if plan_mode {
         allowed_actions.retain(|action| PLAN_MODE_ALLOWED_ACTIONS.contains(action));
         allowed_actions.push("exit_plan_mode");
+    } else {
+        allowed_actions.push("enter_plan_mode");
     }
     allowed_actions.push("finish");
 
@@ -236,7 +246,7 @@ pub fn build_system_prompt(
         input_formats.push("- request_user_approval: {\"title\":\"short title\",\"summary\":\"what needs approval\"}");
     }
     if allowed_actions.contains(&"ask_user") {
-        input_formats.push("- ask_user: {\"query\":\"short question\",\"options\":[\"choice 1\",\"choice 2\",\"choice 3\"]} (options is optional, max 3 short choices; omit it for a free-text question — the user can always type a custom answer instead of picking a choice)");
+        input_formats.push("- ask_user: {\"query\":\"short question\",\"header\":\"optional short tag\",\"multiSelect\":false,\"options\":[{\"label\":\"choice 1\",\"description\":\"optional detail\"},{\"label\":\"choice 2\"}]} (header, multiSelect, and options are all optional; options is max 3 choices, each with an optional one-line description; set multiSelect true to let the user pick more than one; omit options entirely for a free-text question — the user can always type a custom answer instead of picking a choice. Use this only when you're blocked on a decision that is genuinely the user's to make — one you can't resolve from the request, the code, or a sensible default. Don't use it to ask for permission to proceed or to confirm something you can just go do.)");
     }
     if allowed_actions.contains(&"detect_project") {
         input_formats.push("- detect_project: {\"path\":\".\"}");
@@ -259,9 +269,13 @@ pub fn build_system_prompt(
     }
     let mcp_str;
     if allowed_actions.contains(&"mcp_tool") {
-        let servers = crate::mcp::list_mcp_servers()
-            .map(|m| m.keys().cloned().collect::<Vec<String>>().join(", "))
-            .unwrap_or_default();
+        let servers = if let Some(pin) = pinned_mcp_server {
+            pin.to_string()
+        } else {
+            crate::mcp::list_mcp_servers()
+                .map(|m| m.keys().cloned().collect::<Vec<String>>().join(", "))
+                .unwrap_or_default()
+        };
         mcp_str = format!(
             "- mcp_tool: {{\"server\":\"<name>\",\"tool\":\"tool-name\",\"arguments\":{{}}}} (Available configured servers: {})",
             servers
@@ -285,6 +299,11 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"exit_plan_mode") {
         input_formats.push(
             "- exit_plan_mode: {\"plan\":\"full plan describing your investigation findings and the exact steps you will take to implement the task, in the language the user wrote in\"}",
+        );
+    }
+    if allowed_actions.contains(&"enter_plan_mode") {
+        input_formats.push(
+            "- enter_plan_mode: {\"reason\":\"short explanation of why this task is risky/complex enough to investigate before touching anything\"} (asks the user to switch you into read-only plan mode; they may approve, decline, or leave feedback instead)",
         );
     }
     if allowed_actions.contains(&"verify") {
@@ -358,6 +377,10 @@ pub fn build_system_prompt(
         rules.push(
             "0p. PLAN MODE IS ACTIVE: you may only investigate (read files, search, inspect diagnostics, etc.). Mutating tools such as write_file, apply_patch, and most run_shell/mcp_tool/run_plugin calls are unavailable and will be blocked. Once you have a clear implementation plan, call exit_plan_mode with the full plan; the user will approve or reject it. Do not attempt to edit files or run mutating commands before that approval.",
         );
+    } else {
+        rules.push(
+            "0o. Before your first mutating action (write_file, apply_patch, or a destructive/hard-to-reverse run_shell command), judge whether this task is risky or complex: a multi-file refactor, a migration, deletions, schema/API changes, or anything else hard to undo. If it is, call enter_plan_mode with a short reason first — the user will approve or decline switching you into read-only investigation. Skip it for small, obviously-safe, single-file changes; do not call it more than once per task unless the user declined and circumstances changed.",
+        );
     }
     if native {
         rules.push(
@@ -407,6 +430,9 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"calculation") {
         rules.push("7c. Use calculation to evaluate math expressions, percentages, or conversions. ALWAYS copy the ```calculation_json ... ``` block from the tool observation into your final summary text.");
     }
+    if allowed_actions.contains(&"generate_image") {
+        rules.push("7g. Use generate_image when the user asks to create, draw, or generate an image/picture/artwork from a text description. ALWAYS copy the ```image_gen_json ... ``` block from the tool observation into your final summary text so the UI card renders.");
+    }
     if allowed_actions.contains(&"browser_open") {
         rules.push("7a. Use browser_open to navigate the virtual browser to a URL.");
     }
@@ -448,12 +474,23 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"run_plugin") {
         rules.push("10. Use run_plugin only when the requested native plugin is explicitly allowed by policy.");
     }
+    if allowed_actions.contains(&"mcp_tool") && allowed_actions.contains(&"video_trim") {
+        rules.push("10a. Video editing has two paths — pick based on complexity. Use the native video_*/timeline_*/subtitle_* tools for simple, single-step operations (trim, resize, merge, extract audio, remove silence, one-off caption burn) — they're faster and need no extra process. Use mcp_tool with the \"fablemint\" server (call mcp_list_tools/fablecut_docs first if unsure of its tools) for anything needing a multi-clip timeline, transitions, keyframes, chroma key, speed ramps, or iterative edits the user wants to watch live in the browser.");
+    }
+    let pin_rule;
+    if let Some(pin) = pinned_mcp_server {
+        pin_rule = format!(
+            "10b. The user explicitly pinned this turn to the \"{pin}\" MCP server via an @mention in the composer. If you use mcp_tool or mcp_list_tools at all this turn, the \"server\" field must be exactly \"{pin}\" — no other configured server is reachable this turn."
+        );
+        rules.push(&pin_rule);
+    }
     if native {
         rules.push("11. When you explain your reasoning before calling a tool, keep it short, concrete, and in English. Give your final answer in Thai when the task is written in Thai.");
     } else {
         rules.push("11. Keep thought short and concrete. Write the thought field in English at all times. Use Thai for the final summary when the task is written in Thai.");
     }
     rules.push("11a. The final summary must be complete, not just concise. Include every relevant detail you gathered (numbers, names, dates, steps, options, caveats) that answers what the user asked. If the user asked multiple things, address all of them. Only cut filler and repetition, never cut substance. Never truncate a list or explanation just to keep the reply short.");
+    rules.push("11b. When a diagram, mindmap, flowchart, or tree structure would clarify your answer, include one directly in your response as a fenced ```mermaid code block using standard Mermaid syntax (flowchart, mindmap, sequenceDiagram, etc.) — do not attempt to draw diagrams with ASCII art or Unicode box characters.");
     if native {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done — reply with your final answer directly, with no further tool call.");
     } else {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { renderSkillsSvgIcon } from '../constants/plugins'
+import { renderSkillsSvgIcon, renderSkillLogoIcon } from '../constants/plugins'
 import '../css/management-views.css'
 import type { LearnedSkill } from '../types'
 
@@ -29,6 +29,7 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
   const [newSkillContent, setNewSkillContent] = useState('')
   const [adding, setAdding] = useState(false)
   const [showTeachModal, setShowTeachModal] = useState(false)
+  const [detailSkill, setDetailSkill] = useState<LearnedSkill | null>(null)
 
   const fetchSkills = async () => {
     setLoading(true)
@@ -70,6 +71,7 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
     if (!window.confirm(`Are you sure you want to forget skill "${name}"?`)) return
     try {
       await deleteSkill(name)
+      setDetailSkill((current) => (current?.name === name ? null : current))
       fetchSkills()
     } catch (err: any) {
       console.error('Failed to delete skill:', err)
@@ -177,14 +179,19 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
       ) : (
         <div className="management-grid">
           {filteredSkills.map((s) => (
-            <div key={s.name} className="management-card">
+            <div
+              key={s.name}
+              className="management-card"
+              onClick={() => setDetailSkill(s)}
+              style={{ cursor: 'pointer' }}
+            >
               <div>
                 <div className="management-card-header">
-                  <span className="management-card-title-badge">
-                    {s.name}
-                  </span>
-                  <span className={`management-badge ${s.is_workspace ? 'workspace' : 'global'}`}>
-                    <span className="management-dot" />
+                  <div className="management-card-title-group">
+                    {renderSkillLogoIcon()}
+                    <h3 className="management-card-title">{s.name}</h3>
+                  </div>
+                  <span className={`management-tag ${s.is_workspace ? 'workspace' : 'global'}`}>
                     {s.is_workspace ? 'Workspace' : 'Global'}
                   </span>
                 </div>
@@ -193,21 +200,61 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
                   {s.description || s.content}
                 </p>
               </div>
-
-              <div className="management-card-footer">
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted, #64748b)' }}>
-                  {s.updatedAt ? new Date(s.updatedAt).toLocaleDateString() : 'Learned'}
-                </span>
-                <button
-                  type="button"
-                  className="management-action-btn danger"
-                  onClick={() => handleDeleteSkill(s.name)}
-                >
-                  Forget
-                </button>
-              </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Skill Detail */}
+      {detailSkill && (
+        <div className="management-modal-overlay" onClick={() => setDetailSkill(null)}>
+          <div className="management-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="management-modal-header">
+              <div className="management-card-title-group">
+                {renderSkillLogoIcon(44)}
+                <h2 className="management-modal-title">{detailSkill.name}</h2>
+              </div>
+              <button
+                type="button"
+                className="management-modal-close"
+                onClick={() => setDetailSkill(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="management-modal-body">
+              <span className={`management-tag ${detailSkill.is_workspace ? 'workspace' : 'global'}`}>
+                {detailSkill.is_workspace ? 'Workspace' : 'Global'}
+              </span>
+
+              {detailSkill.description && (
+                <p style={{ color: 'var(--text-soft, #d1d1d4)', lineHeight: 1.55, marginTop: '14px' }}>
+                  {detailSkill.description}
+                </p>
+              )}
+
+              <div
+                className="management-code-snippet"
+                style={{ whiteSpace: 'pre-wrap', marginTop: '14px', maxHeight: '320px', overflowY: 'auto' }}
+              >
+                {detailSkill.content}
+              </div>
+            </div>
+
+            <div className="management-modal-footer">
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #64748b)' }}>
+                {detailSkill.updatedAt ? new Date(detailSkill.updatedAt).toLocaleDateString() : 'Learned'}
+              </span>
+              <button
+                type="button"
+                className="management-action-btn danger"
+                onClick={() => handleDeleteSkill(detailSkill.name)}
+              >
+                Forget
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

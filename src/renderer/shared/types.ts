@@ -159,6 +159,39 @@ export interface SubagentDraft {
   previousSourcePath?: string | null
 }
 
+export interface CronJob {
+  id: string
+  name: string
+  schedule: string
+  task: string
+  workspace: string
+  enabled: boolean
+  createdAt: string
+  nextRun: string
+  lastRunAt: string | null
+  lastStatus: string | null
+  lastSummary: string | null
+}
+
+export interface CronJobDraft {
+  name: string
+  schedule: string
+  task: string
+  workspace: string
+}
+
+export interface LinkedFolder {
+  name: string
+  path: string
+  description?: string
+}
+
+export interface LinkedFolderDraft {
+  name: string
+  path: string
+  description?: string
+}
+
 export interface DiffHunk {
   oldText: string
   newText: string

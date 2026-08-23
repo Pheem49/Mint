@@ -22,8 +22,8 @@ Tauri writes platform bundles under `target/release/bundle/`.
 Pushing a semver tag starts the release workflow:
 
 ```bash
-git tag v1.10.0
-git push origin v1.10.0
+git tag v1.12.0
+git push origin v1.12.0
 ```
 
 The workflow builds Linux release artifacts on GitHub Actions and publishes them
@@ -55,6 +55,7 @@ To publish the repository package to the npm registry as a public scoped package
 
 2. **Publish the package** (since `@pheem49/mint` is a scoped package, you must specify public access):
    ```bash
+
    npm publish --access public
    ```
 

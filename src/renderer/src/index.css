@@ -5,17 +5,18 @@
 @import './css/pictures.css';
 @import './css/misc.css';
 @import './css/settings/base.css';
-@import './css/settings/general.css';
-@import './css/settings/profile.css';
-@import './css/settings/automation.css';
-@import './css/settings/theme.css';
-@import './css/settings/plugins.css';
-@import './css/settings/shortcuts.css';
+@import '../shared/css/settings/general.css';
+@import '../shared/css/settings/profile.css';
+@import '../shared/css/settings/automation.css';
+@import '../shared/css/settings/theme.css';
+@import '../shared/css/settings/plugins.css';
+@import '../shared/css/settings/agents.css';
+@import '../shared/css/settings/shortcuts.css';
 @import './css/spotlight.css';
 @import './css/widget.css';
-@import './css/image-studio.css';
+@import '../shared/css/image-studio.css';
 @import './css/workflows.css';
-@import './css/veo-studio.css';
+@import '../shared/css/veo-studio.css';
 
 * {
   box-sizing: border-box;

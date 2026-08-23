@@ -12,7 +12,9 @@ path = "src/main.rs"
 anyhow.workspace = true
 base64.workspace = true
 clap.workspace = true
+chrono-tz.workspace = true
 dirs.workspace = true
+iana-time-zone.workspace = true
 mint-core = { path = "../mint-core" }
 reqwest.workspace = true
 serde.workspace = true
@@ -20,6 +22,7 @@ serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 crossterm = "0.28"
+ratatui = "0.28"
 chrono.workspace = true
 textwrap = "0.16"
 indicatif = "0.17"
@@ -27,3 +30,4 @@ indicatif = "0.17"
 # Oniguruma (onig) backend, which needs a C toolchain to build — not worth requiring
 # just to color code blocks in terminal output.
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+ansi-to-tui = "6"

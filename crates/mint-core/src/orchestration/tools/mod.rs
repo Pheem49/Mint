@@ -1,0 +1,11 @@
+pub(super) mod browser;
+pub(super) mod code_search;
+pub(super) mod files;
+pub(super) mod git;
+pub(super) mod media;
+pub(super) mod misc;
+pub(super) mod planning;
+pub(super) mod plugins_mcp;
+pub(super) mod project;
+pub(super) mod shell;
+pub(super) mod web;

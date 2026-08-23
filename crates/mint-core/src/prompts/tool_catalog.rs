@@ -69,6 +69,8 @@ pub fn tool_catalog(
     if plan_mode {
         allowed.retain(|action| PLAN_MODE_ALLOWED_ACTIONS.contains(action));
         allowed.push("exit_plan_mode");
+    } else {
+        allowed.push("enter_plan_mode");
     }
 
     let mut tools: Vec<ToolSpec> = allowed
@@ -349,14 +351,29 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "ask_user",
-            "Ask the user a short question, optionally with up to 3 short pick-a-choice options (the user can still answer freely).",
+            "Ask the user a short question, optionally with up to 3 pick-a-choice options (each with an optional description), optionally allowing multiple selections, and optionally tagged with a short header label. The user can still answer freely. Use this tool only when you're blocked on a decision that is genuinely the user's to make — one you can't resolve from the request, the code, or a sensible default. Don't use it to ask for permission to proceed or to confirm something you can just go do.",
             schema(
                 json!({
                     "query": { "type": "string" },
+                    "header": {
+                        "type": "string",
+                        "description": "Optional short label (a few words) shown as a tag above the question."
+                    },
+                    "multiSelect": {
+                        "type": "boolean",
+                        "description": "Optional. If true, the user may pick more than one option."
+                    },
                     "options": {
                         "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Optional, max 3 short choices."
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": { "type": "string" },
+                                "description": { "type": "string" }
+                            },
+                            "required": ["label"]
+                        },
+                        "description": "Optional, max 3 choices. Each option has a short label and an optional one-line description."
                     }
                 }),
                 &["query"],
@@ -426,8 +443,31 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool(
             "run_shell",
-            "Run a local shell command. Subject to safety classification and user approval; destructive commands are blocked outright.",
-            schema(json!({ "command": { "type": "string" } }), &["command"]),
+            "Run a local shell command. Subject to safety classification and user approval; destructive commands are blocked outright. \
+             Set 'background' to true for a long-running command (a dev server, a watcher, ...) so it doesn't \
+             block you — it returns a job_id immediately instead of waiting for the command to exit. Use the \
+             'shell_output' tool to check on it later and 'kill_shell' to stop it.",
+            schema(
+                json!({
+                    "command": { "type": "string" },
+                    "background": {
+                        "type": "boolean",
+                        "description": "Run detached and return immediately with a job_id instead of waiting for the command to exit. Defaults to false."
+                    }
+                }),
+                &["command"],
+            ),
+        ),
+        tool(
+            "shell_output",
+            "Check on a background shell job started via run_shell(background: true): its status (running/exited/killed) \
+             and any stdout/stderr produced since the last time you polled it.",
+            schema(json!({ "job_id": { "type": "string" } }), &["job_id"]),
+        ),
+        tool(
+            "kill_shell",
+            "Stop a background shell job started via run_shell(background: true).",
+            schema(json!({ "job_id": { "type": "string" } }), &["job_id"]),
         ),
         tool(
             "exit_plan_mode",
@@ -440,6 +480,20 @@ fn all_tools() -> Vec<ToolSpec> {
                     }
                 }),
                 &["plan"],
+            ),
+        ),
+        tool(
+            "enter_plan_mode",
+            "Ask the user to switch into read-only plan mode before acting, when the task looks risky or complex (multi-file refactor, migration, deletions, schema/API changes, or anything hard to reverse). \
+             The user may approve, decline, or leave feedback instead; both entering and exiting plan mode (via exit_plan_mode) require approval.",
+            schema(
+                json!({
+                    "reason": {
+                        "type": "string",
+                        "description": "Short explanation of why this task warrants investigating before touching anything."
+                    }
+                }),
+                &["reason"],
             ),
         ),
         tool(
@@ -569,6 +623,30 @@ fn all_tools() -> Vec<ToolSpec> {
             ),
         ),
         tool(
+            "video_filmstrip",
+            "Generate a grid image of frames sampled evenly across a video's timeline, so you can see what happens without loading the whole video. Use this before deciding where to trim/cut.",
+            schema(
+                json!({
+                    "input": { "type": "string" },
+                    "output": { "type": "string", "description": "Where to save the filmstrip PNG, e.g. \"filmstrip.png\"." },
+                    "frameCount": { "type": "integer", "description": "Number of frames to sample. Default 12." },
+                    "columns": { "type": "integer", "description": "Grid columns. Default 4." }
+                }),
+                &["input", "output"],
+            ),
+        ),
+        tool(
+            "video_waveform",
+            "Generate an image of the audio waveform (amplitude over time) for a video or audio file, to spot silence/loud sections visually.",
+            schema(
+                json!({
+                    "input": { "type": "string" },
+                    "output": { "type": "string", "description": "Where to save the waveform PNG, e.g. \"waveform.png\"." }
+                }),
+                &["input", "output"],
+            ),
+        ),
+        tool(
             "speech_transcribe",
             "Transcribe speech from an audio/video file.",
             schema(
@@ -678,7 +756,10 @@ fn all_tools() -> Vec<ToolSpec> {
                 json!({
                     "prompt": { "type": "string" },
                     "aspectRatio": { "type": "string", "description": "e.g. \"1:1\", \"16:9\". Default \"1:1\"." },
-                    "provider": { "type": "string", "description": "Optional provider override." }
+                    "provider": {
+                        "type": "string",
+                        "description": "Optional provider override. One of: \"nanobanana\" (Gemini image gen — this is the correct value even when you are Gemini, NOT \"gemini\"), \"dalle\", \"stability\", \"ideogram\", \"replicate\", \"bfl\". Omit to use the configured default."
+                    }
                 }),
                 &["prompt"],
             ),
@@ -744,6 +825,20 @@ mod tests {
         assert!(!tools.iter().any(|t| t.name == "exit_plan_mode"));
     }
 
+    #[test]
+    fn non_plan_mode_catalog_offers_enter_plan_mode() {
+        let config = MintConfig::default();
+        let tools = tool_catalog(&config, false, Path::new("."), true);
+        assert!(tools.iter().any(|t| t.name == "enter_plan_mode"));
+    }
+
+    #[test]
+    fn plan_mode_catalog_never_offers_enter_plan_mode() {
+        let config = MintConfig::default();
+        let tools = tool_catalog(&config, true, Path::new("."), true);
+        assert!(!tools.iter().any(|t| t.name == "enter_plan_mode"));
+    }
+
     fn write_subagent(dir: &std::path::Path, name: &str, content: &str) {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join(format!("{name}.md")), content).unwrap();
@@ -760,12 +855,14 @@ mod tests {
         );
         let config = MintConfig::default();
 
-        // No subagents visible at this root -> tool absent even when allowed.
+        // No user-authored subagents at this root, but the builtins
+        // (explorer, general-purpose, plan) are always present -> offered
+        // even here.
         let empty_root = std::env::temp_dir().join("mint-tool-catalog-no-subagents");
         let _ = std::fs::remove_dir_all(&empty_root);
         std::fs::create_dir_all(&empty_root).unwrap();
         let tools = tool_catalog(&config, false, &empty_root, true);
-        assert!(!tools.iter().any(|t| t.name == "dispatch_subagent"));
+        assert!(tools.iter().any(|t| t.name == "dispatch_subagent"));
 
         // Subagents exist + allowed -> offered.
         let tools = tool_catalog(&config, false, &root, true);

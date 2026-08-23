@@ -31,17 +31,20 @@ use tokio::sync::oneshot;
 use integrations::{channel_inventory, list_plugins};
 use mint_core::{
     AgentApproval, AgentProgress, AppliedCodeEdit, ApprovalOutcome, AuthUser, ChatRequest,
-    ChatResponse, ChatSession, CodeEdit, CodeEditProposal, GeminiLiveEvent, GeminiLiveHandle,
-    ImageGenRequest, InteractionMemory, MemoryStore, MintConfig, PictureEntry, SubagentDefinition,
-    SubagentDraft, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport, apply_code_edits,
-    classify_shell_command, config_path, delete_saved_picture,
+    ChatResponse, ChatSession, CodeEdit, CodeEditProposal, CronJob, CronJobDraft, CronStore,
+    GeminiLiveEvent, GeminiLiveHandle, ImageGenRequest, InteractionMemory, LinkedFolder,
+    LinkedFolderDraft, MemoryStore, MicRecordingHandle, MintConfig, PictureEntry,
+    SubagentDefinition, SubagentDraft, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport,
+    apply_code_edits, classify_shell_command, config_path, delete_saved_picture,
     delete_subagent as core_delete_subagent, get_user, google_tts_urls, list_saved_pictures,
     list_subagents as core_list_subagents, load_config, load_workflows, login_user,
     orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    propose_code_edits, register_user, save_avatar_file, save_chat_images, save_config,
-    save_subagent as core_save_subagent, save_workflows, start_channels,
-    start_gemini_live_session as core_start_gemini_live_session, update_profile, weather,
-    workflows_path,
+    propose_code_edits, reauth_mcp_server as core_reauth_mcp_server, register_user,
+    save_avatar_file, save_chat_images, save_config, save_subagent as core_save_subagent,
+    save_workflows, start_channels, start_cron_scheduler,
+    start_gemini_live_session as core_start_gemini_live_session,
+    start_recording as core_start_mic_recording, stop_recording as core_stop_mic_recording,
+    transcribe_recording as core_transcribe_mic_recording, update_profile, weather, workflows_path,
 };
 use plugins::execute_plugin;
 
@@ -52,6 +55,11 @@ pub struct ApprovalsState {
 #[derive(Default)]
 pub struct GeminiLiveState {
     pub sessions: Mutex<HashMap<String, GeminiLiveHandle>>,
+}
+
+#[derive(Default)]
+pub struct MicRecordingState {
+    pub active: Mutex<Option<MicRecordingHandle>>,
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -142,6 +150,19 @@ async fn get_workspace_tree(path: Option<String>) -> Result<WorkspaceTreeEntry, 
     tokio::task::spawn_blocking(move || build_workspace_tree(path))
         .await
         .map_err(|error| format!("workspace tree task failed: {error}"))?
+}
+
+/// Re-runs a configured MCP server's OAuth login in the foreground (fixes an
+/// expired/invalid refresh token, e.g. `invalid_grant` from a Gmail MCP
+/// server). The underlying core call is blocking (spawns a child process and
+/// waits on it while streaming its output), so it runs on a blocking thread
+/// pool task rather than the async runtime.
+#[tauri::command]
+async fn reauth_mcp_server(server_name: String) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || core_reauth_mcp_server(&server_name))
+        .await
+        .map_err(|error| format!("reauth task failed: {error}"))?
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -438,6 +459,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
     let video_data_uri_clone = request.video_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
     let agent_id_clone = request.agent_id.clone();
+    let pinned_mcp_server_clone = request.pinned_mcp_server.clone();
 
     let join_handle = tokio::spawn(async move {
         orchestrate_agent_loop(
@@ -450,6 +472,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
             None,
+            pinned_mcp_server_clone.as_deref(),
             fast_mode,
             plan_mode,
             approve_cb,
@@ -618,6 +641,7 @@ async fn stream_chat_message(
     let video_data_uri_clone = request.video_data_uri.clone();
     let chat_id_clone = request.chat_id.clone();
     let agent_id_clone = request.agent_id.clone();
+    let pinned_mcp_server_clone = request.pinned_mcp_server.clone();
 
     let join_handle = tokio::spawn(async move {
         orchestrate_agent_loop(
@@ -630,6 +654,7 @@ async fn stream_chat_message(
             chat_id_clone.as_deref(),
             agent_id_clone.as_deref(),
             None,
+            pinned_mcp_server_clone.as_deref(),
             fast_mode,
             plan_mode,
             approve_cb,
@@ -769,6 +794,47 @@ async fn stop_gemini_live_session(
         .map_err(|e| e.to_string())?
         .remove(&session_id);
     Ok(())
+}
+
+/// Starts native push-to-talk mic recording (Rust-side, via `cpal`) for the desktop
+/// build's voice input button. Call `stop_mic_recording_and_transcribe` to stop and
+/// get the transcript back.
+#[tauri::command]
+fn start_mic_recording(state: tauri::State<'_, MicRecordingState>) -> Result<(), String> {
+    let mut active = state.active.lock().map_err(|e| e.to_string())?;
+    if active.is_some() {
+        return Err("A recording is already in progress".into());
+    }
+    let handle = core_start_mic_recording().map_err(|e| e.to_string())?;
+    *active = Some(handle);
+    Ok(())
+}
+
+/// Stops the in-progress recording and transcribes it using whichever provider is
+/// configured for chat (`MintConfig.ai_provider`). Rejects with a clear message if
+/// that provider doesn't support audio input.
+#[tauri::command]
+async fn stop_mic_recording_and_transcribe(
+    state: tauri::State<'_, MicRecordingState>,
+) -> Result<String, String> {
+    let handle = state
+        .active
+        .lock()
+        .map_err(|e| e.to_string())?
+        .take()
+        .ok_or_else(|| "No recording is in progress".to_string())?;
+
+    // stop_recording() blocks joining the recorder thread — run it off the async
+    // executor so it doesn't stall this command's tokio task.
+    let wav_bytes = tokio::task::spawn_blocking(move || core_stop_mic_recording(handle))
+        .await
+        .map_err(|e| format!("recording thread panicked: {e}"))?
+        .map_err(|e| e.to_string())?;
+
+    let config = load_config().map_err(|error| error.to_string())?;
+    core_transcribe_mic_recording(&config, wav_bytes)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1046,6 +1112,51 @@ fn save_subagent(
 #[tauri::command]
 fn delete_subagent(source_path: String) -> Result<(), String> {
     core_delete_subagent(&source_path)
+}
+
+#[tauri::command]
+fn list_cron_jobs() -> Result<Vec<CronJob>, String> {
+    CronStore::open_default()
+        .and_then(|store| store.list())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_cron_job(draft: CronJobDraft) -> Result<CronJob, String> {
+    let store = CronStore::open_default().map_err(|e| e.to_string())?;
+    store
+        .add(draft.name, draft.schedule, draft.task, draft.workspace)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_cron_job(id: String) -> Result<bool, String> {
+    CronStore::open_default()
+        .and_then(|store| store.remove(&id))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_cron_job_enabled(id: String, enabled: bool) -> Result<Option<CronJob>, String> {
+    CronStore::open_default()
+        .and_then(|store| store.set_enabled(&id, enabled))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_linked_folders() -> Result<std::collections::BTreeMap<String, LinkedFolder>, String> {
+    mint_core::list_linked_folders().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_linked_folder(draft: LinkedFolderDraft) -> Result<(), String> {
+    mint_core::add_linked_folder(&draft.name, &draft.path, draft.description)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_linked_folder(name: String) -> Result<bool, String> {
+    mint_core::remove_linked_folder(&name).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1505,7 +1616,7 @@ fn install_tray(app: &AppHandle) -> tauri::Result<()> {
                 let _ = app.get_webview_window("main").map(|window| window.show());
             }
             "settings" => {
-                let _ = open_desktop_window(app, "settings");
+                emit_to_main(app, "open-settings", ());
             }
             "spotlight" => {
                 let _ = open_desktop_window(app, "spotlight");
@@ -1578,6 +1689,7 @@ pub fn run() {
             pending: Mutex::new(HashMap::new()),
         })
         .manage(GeminiLiveState::default())
+        .manage(MicRecordingState::default())
         .setup(|app| {
             if let Some(main_window) = app.get_webview_window("main") {
                 allow_media_permission_requests(&main_window);
@@ -1589,6 +1701,7 @@ pub fn run() {
             start_headless_queue(app.handle().clone());
             start_proactive_loop(app.handle().clone());
             start_channels();
+            start_cron_scheduler();
             start_webhooks();
             tauri::async_runtime::spawn(async {
                 let _ = mint_core::start_api_server(3000).await;
@@ -1605,6 +1718,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_runtime_status,
             detect_system_tools,
+            reauth_mcp_server,
             get_workspace_tree,
             create_workspace_file,
             create_workspace_folder,
@@ -1625,6 +1739,8 @@ pub fn run() {
             start_gemini_live_session,
             send_gemini_live_audio_chunk,
             stop_gemini_live_session,
+            start_mic_recording,
+            stop_mic_recording_and_transcribe,
             submit_tool_approval,
             get_recent_interactions,
             save_interaction_agent_activity,
@@ -1646,6 +1762,13 @@ pub fn run() {
             list_subagents,
             save_subagent,
             delete_subagent,
+            list_cron_jobs,
+            add_cron_job,
+            remove_cron_job,
+            set_cron_job_enabled,
+            list_linked_folders,
+            add_linked_folder,
+            remove_linked_folder,
             list_pictures,
             delete_picture,
             save_pictures,

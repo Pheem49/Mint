@@ -6,19 +6,22 @@ use std::{
 };
 
 use mint_core::{
-    CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, ImageGenRequest, KnowledgeStore,
-    MemoryStore, MintConfig, TaskStore, apply_code_edits, assert_path_capability, build_code_patch,
-    build_symbol_index, classify_shell_command, config_path, create_folder,
-    fetch_github_repo_summary, find_paths, generate_images, index_semantic_code, initialize_config,
-    inspect_code_plan, list_code_files, list_subagents, load_config,
-    orchestrate_chat_with_fallback, parse_github_url, propose_code_edits, read_code_file,
-    repository_summary, run_shell_command, sandbox_availability, save_config, search_code,
-    search_semantic_code, set_config_value,
+    CHAT_CLI_ID, Capability, ChatRequest, CodeEdit, CodePatchHunk, CronStore, ImageGenRequest,
+    KnowledgeStore, MemoryStore, MintConfig, TaskStore, add_linked_folder, apply_code_edits,
+    assert_path_capability, build_code_patch, build_symbol_index, classify_shell_command,
+    config_path, create_folder, docker_available, fetch_github_repo_summary, find_paths,
+    generate_images, index_semantic_code, initialize_config, inspect_code_plan, list_code_files,
+    list_linked_folders, list_subagents, load_config, orchestrate_chat_with_fallback,
+    parse_github_url, propose_code_edits, read_code_file, remove_linked_folder, repository_summary,
+    run_shell_command, sandbox_availability, save_config, search_code, search_semantic_code,
+    set_config_value,
 };
 
 mod actions;
 mod agent;
 mod background;
+mod cron_wizard;
+mod gateway;
 mod gmail;
 mod hooks;
 mod image;
@@ -29,6 +32,7 @@ mod onboard;
 mod plugins_cli;
 mod setup;
 mod skills;
+mod subagent_wizard;
 mod updater;
 
 pub use interactive::{
@@ -42,7 +46,6 @@ pub const BLUE: &str = "\x1b[38;2;78;201;216m";
 pub const DIM: &str = "\x1b[90m";
 pub const ERROR: &str = "\x1b[31m";
 pub const WARN: &str = "\x1b[33m";
-pub const COMPOSER_BG: &str = "\x1b[48;2;35;39;45m";
 
 pub(crate) async fn run_code_agent_with_saved_image(
     task: &str,
@@ -51,22 +54,40 @@ pub(crate) async fn run_code_agent_with_saved_image(
     image_data_uri: Option<String>,
     video_data_uri: Option<String>,
     options: agent::AgentOptions,
-) -> Result<()> {
+) -> Result<(Vec<String>, Option<String>)> {
     let sent_image = image_data_uri.clone();
     let sent_video = video_data_uri.clone();
-    agent::run_code_agent_with_options(
+    // Follow-up messages the user typed into the queueing box while this
+    // turn was still running (see `agent::run_code_agent_with_options`)
+    // land here; the caller is responsible for dispatching them. On error
+    // the queue is dropped along with the interrupted turn.
+    let queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    // The box's leftover, not-yet-submitted text (typed but no Enter yet) at
+    // the moment the turn ended — same idea as `queue` above, but for the one
+    // partial entry that was never confirmed, so the caller can hand it back
+    // as the next prompt's starting text instead of dropping it silently.
+    let draft = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let result = agent::run_code_agent_with_options(
         task,
         current_dir,
         config,
         image_data_uri,
         video_data_uri,
         options,
+        std::sync::Arc::clone(&queue),
+        std::sync::Arc::clone(&draft),
     )
-    .await?;
+    .await;
+    result?;
     // Save any attached images and videos that were sent with the task
     image::save_sent_image_after_send(sent_image.as_deref(), task);
     image::save_sent_image_after_send(sent_video.as_deref(), task);
-    Ok(())
+    let queued = queue
+        .lock()
+        .map(|mut q| std::mem::take(&mut *q))
+        .unwrap_or_default();
+    let draft = draft.lock().map(|mut d| d.take()).unwrap_or_default();
+    Ok((queued, draft))
 }
 
 fn configured(config: &mint_core::MintConfig, keys: &[&str]) -> bool {
@@ -144,6 +165,11 @@ enum Command {
         #[command(subcommand)]
         command: TaskCommand,
     },
+    /// Manage scheduled/recurring agent tasks (cron jobs).
+    Cron {
+        #[command(subcommand)]
+        command: CronCommand,
+    },
     /// Search and create local folders through the native safety policy.
     Files {
         #[command(subcommand)]
@@ -185,10 +211,23 @@ enum Command {
         #[arg(long, default_value_t = 3000)]
         port: u16,
     },
+    /// Run Mint headless: chat bridges (Telegram, Discord, Slack, LINE,
+    /// WhatsApp) and the cron scheduler, with no interactive TUI. Meant for
+    /// unattended deployment (e.g. a VPS under systemd), not a terminal
+    /// session.
+    Gateway {
+        #[command(subcommand)]
+        command: GatewayCommand,
+    },
     /// Manage configured MCP stdio servers.
     Mcp {
         #[command(subcommand)]
         command: McpCommand,
+    },
+    /// Manage linked folders that chat can auto-write notes into.
+    Link {
+        #[command(subcommand)]
+        command: LinkCommand,
     },
     /// Manage PreToolUse/PostToolUse hooks.
     Hooks {
@@ -295,6 +334,39 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
+enum GatewayCommand {
+    /// Start the gateway: chat bridges + cron scheduler, blocking until
+    /// terminated (Ctrl+C or, under systemd, SIGTERM).
+    Start {
+        /// Also serve the local REST API + WebUI on this port (reachable
+        /// remotely over an SSH tunnel or Tailscale). Omit to run bridges
+        /// and cron only.
+        #[arg(long)]
+        api_port: Option<u16>,
+    },
+    /// Register `mint gateway start` as a systemd unit so it survives
+    /// reboots and keeps running without a login session (Linux only).
+    Install {
+        /// Passed through to the installed unit's `mint gateway start` command.
+        #[arg(long)]
+        api_port: Option<u16>,
+        /// Write a system-wide unit under /etc/systemd/system (needs root)
+        /// instead of a per-user one under ~/.config/systemd/user.
+        #[arg(long)]
+        system: bool,
+        /// Enable and start the service immediately after installing it.
+        #[arg(long)]
+        now: bool,
+        /// Hard memory cap for the service (systemd size syntax, e.g. "512M",
+        /// "1G", "75%"). Omit to leave it unbounded — Mint's video/image
+        /// tooling can legitimately need real memory for a single task, and a
+        /// guessed default risks an OOM-kill mid-task for no real benefit.
+        #[arg(long)]
+        memory_max: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ConfigCommand {
     /// Create the native config file and fill missing runtime defaults.
     Init,
@@ -313,9 +385,17 @@ enum McpCommand {
     Add {
         name: String,
         command: String,
-        #[arg(long, num_args = 0.., allow_hyphen_values = true)]
+        /// Repeatable: one value per `--args` occurrence (e.g. `--args -y --args --header`).
+        /// `num_args = 1` (not `0..`) is deliberate — with `allow_hyphen_values` and an
+        /// unbounded arity, clap can't tell a fresh `--args` occurrence apart from a
+        /// hyphen-prefixed value being appended to the previous one, so a value like
+        /// `--header` would swallow every following `--args`/value as literal text
+        /// instead of starting a new occurrence. Pinning arity to exactly 1 removes
+        /// that ambiguity: each occurrence is unambiguously one value, hyphen-prefixed
+        /// or not, and repeated occurrences still append into the Vec as usual.
+        #[arg(long, num_args = 1, allow_hyphen_values = true)]
         args: Vec<String>,
-        #[arg(long, num_args = 0..)]
+        #[arg(long, num_args = 1, allow_hyphen_values = true)]
         env: Vec<String>,
     },
     List,
@@ -326,12 +406,33 @@ enum McpCommand {
         server: String,
         tool: String,
     },
+    /// Re-run a server's OAuth flow in the foreground (e.g. after an
+    /// expired/invalid refresh token) by invoking `<command> <args...> auth`.
+    /// Only works for servers whose underlying package supports that
+    /// convention (e.g. @pouyanafisi/gmail-mcp).
+    Reauth {
+        server: String,
+    },
     Clear,
     Call {
         server: String,
         tool: String,
         #[arg(long, default_value = "{}")]
         arguments: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum LinkCommand {
+    Add {
+        name: String,
+        path: PathBuf,
+        #[arg(long)]
+        description: Option<String>,
+    },
+    List,
+    Remove {
+        name: String,
     },
 }
 
@@ -397,6 +498,50 @@ enum TaskCommand {
         result: Option<String>,
     },
     ClearCompleted,
+}
+
+#[derive(Debug, Subcommand)]
+enum CronCommand {
+    /// Create a new scheduled job. `schedule` accepts 5-field unix cron
+    /// ("min hour dom month dow", e.g. "0 8 * * *" for every day at 08:00),
+    /// or 6/7-field forms with seconds/year. Omit `--name`/`--schedule`/
+    /// `--task` entirely to walk through an interactive wizard instead.
+    Add {
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        schedule: Option<String>,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+        /// IANA timezone name (e.g. "Asia/Bangkok") to interpret `schedule`
+        /// in. When set, `schedule` must give a specific minute/hour (and,
+        /// for weekly/monthly/one-time schedules, a specific weekday/day/
+        /// date) — no `*`, ranges, or steps in those fields — since it gets
+        /// converted to the UTC expression the scheduler actually stores and
+        /// evaluates. Omit to keep writing `schedule` in UTC directly, as
+        /// before.
+        #[arg(long)]
+        timezone: Option<String>,
+    },
+    List,
+    Show {
+        id: String,
+    },
+    Remove {
+        id: String,
+    },
+    Enable {
+        id: String,
+    },
+    Disable {
+        id: String,
+    },
+    /// Run a job immediately, without waiting for its schedule.
+    RunNow {
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -727,11 +872,79 @@ pub(crate) fn print_mcp_servers(
     println!();
 }
 
+/// Installs a global panic hook, as early as possible in `main()` so it
+/// covers the whole process lifetime. Two things previously had no safety
+/// net at all: (1) a panic while raw mode is enabled (key reads, inline
+/// `ratatui` draws in the interactive REPL) left the user's shell stuck in
+/// raw mode with no explanation, since raw mode is only ever disabled on the
+/// normal, non-panicking exit path; (2) there was no record of a crash
+/// anywhere — a user hitting a panic had no way to report *what* happened
+/// beyond whatever scrolled off their terminal.
+/// Blocks until the process should stop: Ctrl+C everywhere, plus SIGTERM on
+/// Unix so `systemctl stop`/`docker stop` (which send SIGTERM, not SIGINT)
+/// shut the gateway down cleanly instead of requiring a SIGKILL.
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let Ok(mut sigterm) = signal(SignalKind::terminate()) else {
+            let _ = tokio::signal::ctrl_c().await;
+            return;
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = sigterm.recv() => {},
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = crossterm::terminal::disable_raw_mode();
+        log_panic_to_file(&info.to_string());
+        default_hook(info);
+    }));
+}
+
+/// Appends one panic entry to a local, machine-only log file — deliberately
+/// not sent anywhere off the user's disk, matching Mint's local-first
+/// positioning. Best-effort throughout: a failure to log a panic must never
+/// itself panic or block the real panic handling that follows it.
+fn log_panic_to_file(message: &str) {
+    let Some(config_dir) = dirs::config_dir() else {
+        return;
+    };
+    let log_path = config_dir.join("mint").join("error.log");
+    let Some(parent) = log_path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    let entry = format!("[{timestamp}] {message}\n");
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        use std::io::Write as _;
+        let _ = file.write_all(entry.as_bytes());
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    install_panic_hook();
     match Cli::parse().command {
         None => {
             mint_core::channels::start_channels();
+            mint_core::start_cron_scheduler();
             run_interactive_chat().await?;
         }
         Some(cmd) => match cmd {
@@ -772,6 +985,11 @@ async fn main() -> Result<()> {
                                 "mode": config.sandbox_mode,
                                 "command": config.sandbox_command,
                                 "availability": sandbox_availability(&config),
+                            },
+                            "dockerSandbox": {
+                                "backend": config.sandbox_backend,
+                                "image": config.docker_sandbox_image,
+                                "available": docker_available(),
                             },
                             "updater": {
                                 "enabled": config.extra["enableAutoUpdate"],
@@ -935,6 +1153,8 @@ async fn main() -> Result<()> {
                     ("enableSlackBridge", "Slack Bot Bridge"),
                     ("enableLineBridge", "LINE Bot Bridge"),
                     ("enableWhatsappBridge", "WhatsApp Cloud Bridge"),
+                    ("enableSignalBridge", "Signal Bridge"),
+                    ("enableEmailBridge", "Email Bridge"),
                 ];
 
                 for &(key, name) in &bridges {
@@ -950,10 +1170,84 @@ async fn main() -> Result<()> {
                     }
                 }
 
+                // `start_api_server` below already starts channels/cron itself
+                // (see its own doc comment) — no separate call needed here.
+
                 println!("\n{DIM}(API Requests & Error logs will be displayed below){RESET}\n");
                 println!("{DIM}Press Ctrl+C to stop{RESET}\n");
                 mint_core::start_api_server(port).await?;
             }
+            Command::Gateway { command } => match command {
+                GatewayCommand::Start { api_port } => {
+                    let config = load_config()?;
+                    print_welcome_banner(&config);
+
+                    println!("\n{MINT}✔ Mint Gateway is running (headless){RESET}\n");
+                    println!("Messaging Bridges Status:");
+
+                    let bridges = [
+                        ("enableTelegramBridge", "Telegram Bot Bridge"),
+                        ("enableDiscordBridge", "Discord Bot Bridge"),
+                        ("enableSlackBridge", "Slack Bot Bridge"),
+                        ("enableLineBridge", "LINE Bot Bridge"),
+                        ("enableWhatsappBridge", "WhatsApp Cloud Bridge"),
+                        ("enableSignalBridge", "Signal Bridge"),
+                        ("enableEmailBridge", "Email Bridge"),
+                    ];
+                    let mut any_bridge_enabled = false;
+                    for &(key, name) in &bridges {
+                        let enabled = config
+                            .extra
+                            .get(key)
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        any_bridge_enabled |= enabled;
+                        if enabled {
+                            println!("  {MINT}● {name:<23} [Active]{RESET}");
+                        } else {
+                            println!("  {DIM}○ {name:<23} [Inactive]{RESET}");
+                        }
+                    }
+                    if !any_bridge_enabled {
+                        println!(
+                            "\n{WARN}No chat bridge is enabled — the gateway will only run \
+                             cron jobs. Enable one first, e.g. \
+                             `mint config set enableTelegramBridge true`.{RESET}"
+                        );
+                    }
+
+                    if let Some(port) = api_port {
+                        // `start_api_server` starts channels/cron itself — calling
+                        // them again here would spawn every bridge loop twice
+                        // (duplicate Telegram polling, duplicate Discord gateway
+                        // connections, duplicate replies to the owner).
+                        println!(
+                            "\n    {BLUE}API Server URL:{RESET} {MINT}http://localhost:{port}{RESET}"
+                        );
+                        tokio::spawn(async move {
+                            if let Err(error) = mint_core::start_api_server(port).await {
+                                eprintln!("{ERROR}API server exited: {error}{RESET}");
+                            }
+                        });
+                    } else {
+                        mint_core::channels::start_channels();
+                        mint_core::start_cron_scheduler();
+                    }
+
+                    println!("\n{DIM}(Bridge & cron activity will be logged below){RESET}");
+                    println!("{DIM}Press Ctrl+C to stop{RESET}\n");
+                    wait_for_shutdown_signal().await;
+                    println!("\n👋 Shutting down Mint Gateway...");
+                }
+                GatewayCommand::Install {
+                    api_port,
+                    system,
+                    now,
+                    memory_max,
+                } => {
+                    gateway::install(api_port, system, now, memory_max)?;
+                }
+            },
             Command::Mcp { command } => match command {
                 McpCommand::Add {
                     name,
@@ -985,6 +1279,14 @@ async fn main() -> Result<()> {
                         println!("already allowed {server}/{tool}");
                     }
                 }
+                McpCommand::Reauth { server } => {
+                    println!("Re-authenticating MCP server '{server}'...");
+                    if mcp::reauth(&server)? {
+                        println!("Re-authentication succeeded for '{server}'.");
+                    } else {
+                        println!("Re-authentication failed for '{server}' (see output above).");
+                    }
+                }
                 McpCommand::Clear => {
                     mcp::clear()?;
                     println!("cleared");
@@ -1012,6 +1314,30 @@ async fn main() -> Result<()> {
                     let res = mcp::call(&server, &tool, serde_json::from_str(&arguments)?);
                     spinner.finish_and_clear();
                     println!("{}", serde_json::to_string_pretty(&res?)?);
+                }
+            },
+            Command::Link { command } => match command {
+                LinkCommand::Add {
+                    name,
+                    path,
+                    description,
+                } => {
+                    add_linked_folder(&name, &path, description)?;
+                    println!("Linked folder: {name}");
+                }
+                LinkCommand::List => {
+                    let folders = list_linked_folders()?;
+                    println!("{}", serde_json::to_string_pretty(&folders)?);
+                }
+                LinkCommand::Remove { name } => {
+                    println!(
+                        "{}",
+                        if remove_linked_folder(&name)? {
+                            "removed"
+                        } else {
+                            "not found"
+                        }
+                    )
                 }
             },
             Command::Hooks { command } => match command {
@@ -1200,6 +1526,7 @@ async fn main() -> Result<()> {
                             workspace_path: None,
                             agent_id: None,
                             plan_mode: false,
+                            pinned_mcp_server: None,
                             messages: None,
                             tools: None,
                         },
@@ -1283,7 +1610,8 @@ async fn main() -> Result<()> {
                 cwd,
                 command,
             } => {
-                let output = run_shell_command(&command.join(" "), &cwd, approve, &load_config()?)?;
+                let output =
+                    run_shell_command(&command.join(" "), &cwd, approve, &load_config()?, None)?;
                 actions::print_shell_output(&output);
                 if !output.success {
                     anyhow::bail!(
@@ -1329,6 +1657,86 @@ async fn main() -> Result<()> {
                         )
                     }
                     TaskCommand::ClearCompleted => println!("{}", tasks.clear_completed()?),
+                }
+            }
+            Command::Cron { command } => {
+                let cron_jobs = CronStore::open_default()?;
+                match command {
+                    CronCommand::Add {
+                        name,
+                        schedule,
+                        task,
+                        workspace,
+                        timezone,
+                    } => {
+                        let default_workspace = std::env::current_dir()?;
+                        if name.is_none() && schedule.is_none() && task.is_none() {
+                            let job = cron_wizard::run_add_wizard(&cron_jobs, &default_workspace)?;
+                            println!("\nCreated cron job {} — next run: {}", job.id, job.next_run);
+                        } else {
+                            let name = name.ok_or_else(|| anyhow::anyhow!("--name is required"))?;
+                            let schedule = schedule
+                                .ok_or_else(|| anyhow::anyhow!("--schedule is required"))?;
+                            let task = task.ok_or_else(|| anyhow::anyhow!("--task is required"))?;
+                            let workspace = workspace.unwrap_or(default_workspace);
+                            let schedule = match timezone {
+                                Some(tz) => {
+                                    mint_core::localize_schedule(&schedule, &tz, chrono::Utc::now())
+                                        .map_err(|e| anyhow::anyhow!(e))?
+                                }
+                                None => schedule,
+                            };
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(
+                                    &cron_jobs.add(name, schedule, task, workspace)?
+                                )?
+                            );
+                        }
+                    }
+                    CronCommand::List => {
+                        println!("{}", serde_json::to_string_pretty(&cron_jobs.list()?)?)
+                    }
+                    CronCommand::Show { id } => {
+                        println!("{}", serde_json::to_string_pretty(&cron_jobs.get(&id)?)?)
+                    }
+                    CronCommand::Remove { id } => {
+                        println!("{}", serde_json::to_string_pretty(&cron_jobs.remove(&id)?)?)
+                    }
+                    CronCommand::Enable { id } => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&cron_jobs.set_enabled(&id, true)?)?
+                        )
+                    }
+                    CronCommand::Disable { id } => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&cron_jobs.set_enabled(&id, false)?)?
+                        )
+                    }
+                    CronCommand::RunNow { id } => {
+                        let job = cron_jobs
+                            .get(&id)?
+                            .ok_or_else(|| anyhow::anyhow!("no cron job with id {id}"))?;
+                        println!("Running cron job {}: {}", job.id, job.name);
+                        match agent::run_code_agent(&job.task, &job.workspace, &load_config()?)
+                            .await
+                        {
+                            Ok(result) => {
+                                cron_jobs.record_run(
+                                    &job.id,
+                                    "success",
+                                    Some(result.summary.clone()),
+                                )?;
+                                println!("Job completed: {}", result.summary);
+                            }
+                            Err(error) => {
+                                cron_jobs.record_run(&job.id, "failed", Some(error.to_string()))?;
+                                return Err(error);
+                            }
+                        }
+                    }
                 }
             }
             Command::Files { command } => {
@@ -1381,6 +1789,13 @@ async fn main() -> Result<()> {
                 let config = load_config()?;
                 match command {
                     CodeCommand::Agent { task, root, plan } => {
+                        let pinned_mcp_server =
+                            mint_core::list_mcp_servers().ok().and_then(|servers| {
+                                task.split_whitespace()
+                                    .find_map(|word| word.strip_prefix('@'))
+                                    .filter(|name| servers.contains_key(*name))
+                                    .map(str::to_owned)
+                            });
                         agent::run_code_agent_with_options(
                             &task,
                             &root,
@@ -1390,7 +1805,11 @@ async fn main() -> Result<()> {
                             agent::AgentOptions {
                                 fast_mode: false,
                                 plan_mode: plan,
+                                queueing: false,
+                                pinned_mcp_server,
                             },
+                            std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+                            std::sync::Arc::new(std::sync::Mutex::new(None)),
                         )
                         .await?;
                     }
@@ -2156,6 +2575,7 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
             workspace_path: None,
             agent_id: None,
             plan_mode: false,
+            pinned_mcp_server: None,
             messages: None,
             tools: None,
         },

@@ -5,7 +5,7 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
@@ -115,6 +115,14 @@ pub(crate) fn log_api_err(context: &str, error: &dyn std::fmt::Display) {
     );
 }
 
+/// Binds the local HTTP API on `port` and blocks forever serving requests.
+/// Also starts the messaging bridges and cron scheduler as a side effect —
+/// callers (`mint api`, `mint gateway start --api-port`, ...) must not call
+/// `channels::start_channels`/`start_cron_scheduler` again themselves, or
+/// every bridge loop ends up spawned twice (duplicate Telegram polling,
+/// duplicate Discord gateway connections, duplicate replies to the owner).
+mod routes;
+
 pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await?;
@@ -122,6 +130,8 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
     // Start background messaging bridges (Telegram, Discord, Slack)
     crate::start_channels();
+    // Start the cron scheduler so scheduled agent tasks fire while this server is up
+    crate::start_cron_scheduler();
 
     loop {
         let (mut socket, _) = match listener.accept().await {
@@ -130,6 +140,12 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
         };
 
         tokio::spawn(async move {
+            // Isolates a panic anywhere in this connection's handling (a malformed
+            // request, an unexpected `None` on some edge-case input, ...) so it
+            // only drops this one connection instead of leaving it hung with no
+            // response and no trace in the logs — same reasoning as
+            // `channels::restarting_loop`, which does this for the bridge loops.
+            let outcome = std::panic::AssertUnwindSafe(async move {
             let mut request_bytes = Vec::with_capacity(8192);
             let mut chunk = [0_u8; 8192];
             let mut expected_len: Option<usize> = None;
@@ -216,6 +232,16 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
 
             let (route, query) = path.split_once('?').unwrap_or((path, ""));
 
+            if !api_auth_ok(&request_str) {
+                send_json_response(
+                    socket,
+                    "401 Unauthorized",
+                    "{\"message\":\"Missing or invalid API token. Send it as `Authorization: Bearer <apiAuthToken>`.\"}",
+                )
+                .await;
+                return;
+            }
+
             let auth_label = match authorized_user_id(&request_str) {
                 Some(user_id) => format!("auth:{}", &user_id[..user_id.len().min(8)]),
                 None => "auth:anonymous".to_string(),
@@ -236,2242 +262,882 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
             }
 
             match (method, route) {
-                ("GET", "/api/status") => {
-                    let config = load_config().unwrap_or_default();
-                    let path_str = config_path()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_default();
-                    let active = config.ai_provider.clone();
-                    let available: Vec<String> = config
-                        .available_providers()
-                        .into_iter()
-                        .map(|s| s.to_string())
-                        .collect();
-                    let status_json = serde_json::json!({
-                        "backend": "rust-api-server",
-                        "configPath": path_str,
-                        "activeProvider": active,
-                        "availableProviders": available,
-                        "integrations": {},
-                        "localIp": get_local_ip()
-                    });
-                    send_json_response(socket, "200 OK", &status_json.to_string()).await;
-                }
-                ("POST", "/api/auth/register") => {
-                    #[derive(Deserialize)]
-                    struct RegisterRequest {
-                        #[serde(default)]
-                        name: Option<String>,
-                        email: String,
-                        password: String,
-                    }
-                    let Ok(req) = serde_json::from_str::<RegisterRequest>(body) else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"message\":\"Invalid request body.\"}",
-                        )
-                        .await;
-                        return;
-                    };
-                    match register_user(req.name, &req.email, &req.password) {
-                        Ok(user) => {
-                            let token = create_session(&user.id);
-                            send_json_response(
-                                socket,
-                                "201 Created",
-                                &json!({ "token": token, "user": user }).to_string(),
-                            )
-                            .await;
-                        }
-                        Err(err) => {
-                            let status = match err {
-                                AuthError::EmailTaken => "409 Conflict",
-                                AuthError::MissingCredentials | AuthError::PasswordTooShort => {
-                                    "400 Bad Request"
-                                }
-                                _ => "500 Internal Server Error",
-                            };
-                            send_json_response(
-                                socket,
-                                status,
-                                &json!({ "message": err.to_string() }).to_string(),
-                            )
-                            .await;
-                        }
-                    }
-                    return;
-                }
-                ("POST", "/api/auth/login") => {
-                    #[derive(Deserialize)]
-                    struct LoginRequest {
-                        email: String,
-                        password: String,
-                    }
-                    let Ok(req) = serde_json::from_str::<LoginRequest>(body) else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"message\":\"Invalid request body.\"}",
-                        )
-                        .await;
-                        return;
-                    };
-                    match login_user(&req.email, &req.password) {
-                        Ok(user) => {
-                            let token = create_session(&user.id);
-                            send_json_response(
-                                socket,
-                                "200 OK",
-                                &json!({ "token": token, "user": user }).to_string(),
-                            )
-                            .await;
-                        }
-                        Err(_) => {
-                            send_json_response(
-                                socket,
-                                "401 Unauthorized",
-                                "{\"message\":\"Invalid email or password.\"}",
-                            )
-                            .await;
-                        }
-                    }
-                    return;
-                }
-                ("POST", "/api/auth/logout") => {
-                    if let Some(header) = get_header(&request_str, "Authorization")
-                        && let Some(token) = header.strip_prefix("Bearer ")
-                    {
-                        destroy_session(token.trim());
-                    }
-                    send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                    return;
-                }
-                ("GET", "/api/auth/session") => {
-                    let user = authorized_user_id(&request_str)
-                        .and_then(|id| get_user(&id).ok().flatten());
-                    send_json_response(socket, "200 OK", &json!({ "user": user }).to_string())
-                        .await;
-                    return;
-                }
-                ("GET", "/api/avatar") => {
-                    let key = query_param(query, "key").unwrap_or_default();
-                    // Only ever serve a bare filename from the shared profile
-                    // pictures directory — never treat `key` as a path.
-                    let filename = PathBuf::from(&key)
-                        .file_name()
-                        .map(|name| name.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    let content_type = match filename.rsplit('.').next().unwrap_or("") {
-                        "jpg" | "jpeg" => "image/jpeg",
-                        "webp" => "image/webp",
-                        "gif" => "image/gif",
-                        _ => "image/png",
-                    };
-                    let file_path = profile_pictures_dir()
-                        .ok()
-                        .filter(|_| !filename.is_empty())
-                        .map(|dir| dir.join(&filename));
-                    match file_path.and_then(|path| std::fs::read(path).ok()) {
-                        Some(bytes) => {
-                            send_binary_response(socket, "200 OK", content_type, &bytes).await
-                        }
-                        None => {
-                            send_json_response(
-                                socket,
-                                "404 Not Found",
-                                "{\"message\":\"Avatar not found\"}",
-                            )
-                            .await
-                        }
-                    }
-                    return;
-                }
-                ("PUT", "/api/auth/profile") => {
-                    #[derive(Deserialize)]
-                    struct ProfileUpdateRequest {
-                        #[serde(default)]
-                        name: Option<String>,
-                        #[serde(default)]
-                        image: Option<String>,
-                    }
-                    let Some(user_id) = authorized_user_id(&request_str) else {
-                        send_json_response(
-                            socket,
-                            "401 Unauthorized",
-                            "{\"message\":\"Unauthorized\"}",
-                        )
-                        .await;
-                        return;
-                    };
-                    let Ok(req) = serde_json::from_str::<ProfileUpdateRequest>(body) else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"message\":\"Invalid request body.\"}",
-                        )
-                        .await;
-                        return;
-                    };
-                    match update_profile(&user_id, req.name, req.image) {
-                        Ok(user) => {
-                            send_json_response(
-                                socket,
-                                "200 OK",
-                                &json!({ "user": user }).to_string(),
-                            )
-                            .await;
-                        }
-                        Err(err) => {
-                            send_json_response(
-                                socket,
-                                "500 Internal Server Error",
-                                &json!({ "message": err.to_string() }).to_string(),
-                            )
-                            .await;
-                        }
-                    }
-                    return;
-                }
-                ("POST", "/api/auth/avatar") => {
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct AvatarUploadRequest {
-                        file_name: String,
-                        data_base64: String,
-                    }
-                    let Some(user_id) = authorized_user_id(&request_str) else {
-                        send_json_response(
-                            socket,
-                            "401 Unauthorized",
-                            "{\"message\":\"Unauthorized\"}",
-                        )
-                        .await;
-                        return;
-                    };
-                    let Ok(req) = serde_json::from_str::<AvatarUploadRequest>(body) else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"message\":\"Invalid request body.\"}",
-                        )
-                        .await;
-                        return;
-                    };
-                    let Ok(bytes) = BASE64.decode(req.data_base64.as_bytes()) else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"message\":\"Invalid image data.\"}",
-                        )
-                        .await;
-                        return;
-                    };
-                    let extension = req
-                        .file_name
-                        .rsplit('.')
-                        .next()
-                        .unwrap_or("png")
-                        .to_lowercase();
-                    match save_avatar_file(&bytes, &extension)
-                        .and_then(|url| update_profile(&user_id, None, Some(url)))
-                    {
-                        Ok(user) => {
-                            send_json_response(
-                                socket,
-                                "200 OK",
-                                &json!({ "user": user }).to_string(),
-                            )
-                            .await;
-                        }
-                        Err(err) => {
-                            send_json_response(
-                                socket,
-                                "500 Internal Server Error",
-                                &json!({ "message": err.to_string() }).to_string(),
-                            )
-                            .await;
-                        }
-                    }
-                    return;
-                }
-                ("GET", "/api/detect-tools") => {
-                    let tools_json = serde_json::json!({
-                        "docker": crate::config::which("docker"),
-                        "git": crate::config::which("git"),
-                        "gh": crate::config::which("gh"),
-                        "node": crate::config::which("node")
-                    });
-                    send_json_response(socket, "200 OK", &tools_json.to_string()).await;
-                }
-                ("GET", "/api/system-info") => {
-                    send_json_response(socket, "200 OK", &system_info().to_string()).await;
-                }
-                ("GET", "/api/smart-context") => {
-                    send_json_response(socket, "200 OK", &smart_context().to_string()).await;
-                }
-                ("GET", "/api/interactions") => {
-                    let limit = query_param(query, "limit")
-                        .and_then(|value| value.parse::<usize>().ok())
-                        .unwrap_or(50)
-                        .min(200);
-                    if let Ok(memory) = MemoryStore::open_default() {
-                        let chat_id = query_param(query, "chatId")
-                            .unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
-                        let list = memory
-                            .recent_interactions_for_chat(&chat_id, limit)
-                            .unwrap_or_default();
-                        if let Ok(json_str) = serde_json::to_string(&list) {
-                            send_json_response(socket, "200 OK", &json_str).await;
-                            return;
-                        }
-                    }
-                    send_json_response(socket, "500 Internal Server Error", "[]").await;
-                }
-                ("GET", "/api/chat-sessions") => {
-                    if let Ok(memory) = MemoryStore::open_default() {
-                        let list = memory.list_chat_sessions().unwrap_or_default();
-                        if let Ok(json_str) = serde_json::to_string(&list) {
-                            send_json_response(socket, "200 OK", &json_str).await;
-                            return;
-                        }
-                    }
-                    send_json_response(socket, "500 Internal Server Error", "[]").await;
-                }
-                ("POST", "/api/chat-sessions/delete") => {
-                    let chat_id = query_param(query, "chatId").unwrap_or_default();
-                    if let Ok(memory) = MemoryStore::open_default() {
-                        let deleted = memory.delete_chat_session(&chat_id).unwrap_or(0);
-                        let response = serde_json::json!({ "status": "ok", "deleted": deleted });
-                        send_json_response(socket, "200 OK", &response.to_string()).await;
-                    } else {
-                        send_json_response(
-                            socket,
-                            "500 Internal Server Error",
-                            "{\"status\":\"error\",\"deleted\":0}",
-                        )
-                        .await;
-                    }
-                }
-                ("POST", "/api/chat-sessions/rename") => {
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct RenameRequest {
-                        chat_id: String,
-                        new_title: String,
-                    }
-
-                    if let Ok(req) = serde_json::from_str::<RenameRequest>(body)
-                        && let Ok(memory) = MemoryStore::open_default()
-                    {
-                        let updated = memory
-                            .rename_chat_session(&req.chat_id, &req.new_title)
-                            .unwrap_or(0);
-                        let response = serde_json::json!({ "status": "ok", "updated": updated });
-                        send_json_response(socket, "200 OK", &response.to_string()).await;
-                        return;
-                    }
-                    send_json_response(
-                        socket,
-                        "500 Internal Server Error",
-                        "{\"status\":\"error\",\"updated\":0}",
-                    )
-                    .await;
-                }
-                ("GET", "/api/learned-skills") => {
-                    let mut skills = match MemoryStore::open_default() {
-                        Ok(m) => m.learned_skills(100).unwrap_or_default(),
-                        Err(_) => Vec::new(),
-                    };
-
-                    if let Some(home) = dirs::home_dir() {
-                        let global_agents_path =
-                            home.join(".gemini").join("config").join("AGENTS.md");
-                        crate::skills::load_agent_rules_file(&global_agents_path, &mut skills);
-
-                        let global_skills_path =
-                            home.join(".config").join("mint").join("mint-skills");
-                        crate::skills::load_skills_from_dir(&global_skills_path, &mut skills);
-                    }
-
-                    if let Ok(current_dir) = std::env::current_dir() {
-                        let workspace_agents_path1 = current_dir.join(".agents").join("AGENTS.md");
-                        crate::skills::load_agent_rules_file(&workspace_agents_path1, &mut skills);
-                        let workspace_agents_path2 = current_dir.join("AGENTS.md");
-                        crate::skills::load_agent_rules_file(&workspace_agents_path2, &mut skills);
-
-                        let workspace_skills_path1 = current_dir.join(".agents").join("skills");
-                        crate::skills::load_skills_from_dir(&workspace_skills_path1, &mut skills);
-                        let workspace_skills_path2 = current_dir.join("skills");
-                        crate::skills::load_skills_from_dir(&workspace_skills_path2, &mut skills);
-
-                        if let Ok(canonical_cwd) = current_dir.canonicalize() {
-                            for s in &mut skills {
-                                if let Ok(p) = std::path::Path::new(&s.source_path).canonicalize() {
-                                    if p.starts_with(&canonical_cwd) {
-                                        s.is_workspace = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    let mut unique_skills = std::collections::BTreeMap::new();
-                    for s in skills {
-                        unique_skills.insert(s.name.clone(), s);
-                    }
-
-                    let list: Vec<_> = unique_skills.into_values().collect();
-                    send_json_response(
-                        socket,
-                        "200 OK",
-                        &serde_json::to_string(&list).unwrap_or_default(),
-                    )
-                    .await;
-                    return;
-                }
-                ("GET", "/api/subagents") => {
-                    let root = std::env::current_dir().ok();
-                    let list = crate::subagents::list_subagents(root.as_deref());
-                    send_json_response(
-                        socket,
-                        "200 OK",
-                        &serde_json::to_string(&list).unwrap_or_default(),
-                    )
-                    .await;
-                }
-                ("POST", "/api/subagents") => {
-                    match serde_json::from_str::<crate::subagents::SubagentDraft>(body) {
-                        Ok(draft) => {
-                            let root = std::env::current_dir().ok();
-                            match crate::subagents::save_subagent(&draft, root.as_deref()) {
-                                Ok(saved) => {
-                                    send_json_response(
-                                        socket,
-                                        "200 OK",
-                                        &serde_json::to_string(&saved).unwrap_or_default(),
-                                    )
-                                    .await;
-                                }
-                                Err(err) => {
-                                    let err_msg = json!({ "error": err }).to_string();
-                                    send_json_response(socket, "400 Bad Request", &err_msg).await;
-                                }
-                            }
-                        }
-                        Err(_) => {
-                            send_json_response(
-                                socket,
-                                "400 Bad Request",
-                                "{\"error\":\"Invalid request body.\"}",
-                            )
-                            .await;
-                        }
-                    }
-                }
-                ("DELETE", route) if route.starts_with("/api/subagents/") => {
-                    let source_path = percent_decode(route.trim_start_matches("/api/subagents/"));
-                    match crate::subagents::delete_subagent(&source_path) {
-                        Ok(()) => {
-                            send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                        }
-                        Err(err) => {
-                            let err_msg = json!({ "error": err }).to_string();
-                            send_json_response(socket, "400 Bad Request", &err_msg).await;
-                        }
-                    }
-                }
-                ("GET", "/api/profile") => {
-                    let key = query_param(query, "key").unwrap_or_default();
-                    if let Ok(memory) = MemoryStore::open_default() {
-                        let value = memory.get_profile(&key).unwrap_or(None).unwrap_or_default();
-                        send_json_response(
-                            socket,
-                            "200 OK",
-                            &serde_json::json!({ "value": value }).to_string(),
-                        )
-                        .await;
-                        return;
-                    }
-                    send_json_response(socket, "500 Internal Server Error", "{\"value\":\"\"}")
-                        .await;
-                }
-                ("POST", "/api/profile") => {
-                    #[derive(Deserialize)]
-                    struct ProfileRequest {
-                        key: String,
-                        value: String,
-                    }
-                    if let Ok(req) = serde_json::from_str::<ProfileRequest>(body)
-                        && let Ok(memory) = MemoryStore::open_default()
-                    {
-                        let _ = memory.set_profile(&req.key, &req.value);
-                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                        return;
-                    }
-                    send_json_response(
-                        socket,
-                        "500 Internal Server Error",
-                        "{\"status\":\"error\"}",
-                    )
-                    .await;
-                }
-                ("GET", "/api/oauth/start") => {
-                    let provider =
-                        query_param(query, "provider").unwrap_or_else(|| "google".to_string());
-                    let redirect_uri = format!("http://localhost:3000/api/oauth/callback");
-                    let config = load_config().unwrap_or_default();
-
-                    let custom_client_id = match provider.as_str() {
-                        "google" | "gmail" | "google_calendar" | "youtube_music" => config
-                            .extra
-                            .get("gmailClientId")
-                            .and_then(Value::as_str)
-                            .or_else(|| {
-                                config
-                                    .extra
-                                    .get("googleCalendarClientId")
-                                    .and_then(Value::as_str)
-                            }),
-                        "spotify" => config.extra.get("spotifyClientId").and_then(Value::as_str),
-                        "github" => config.extra.get("githubClientId").and_then(Value::as_str),
-                        "vercel" => config.extra.get("vercelClientId").and_then(Value::as_str),
-                        "notion" => config.extra.get("notionApiKey").and_then(Value::as_str),
-                        _ => None,
-                    };
-
-                    if let Some((auth_url, state)) =
-                        crate::oauth::build_auth_url(&provider, &redirect_uri, custom_client_id)
-                    {
-                        send_json_response(
-                            socket,
-                            "200 OK",
-                            &serde_json::json!({
-                                "status": "ok",
-                                "auth_url": auth_url,
-                                "state": state,
-                                "redirect_uri": redirect_uri
-                            })
-                            .to_string(),
-                        )
-                        .await;
-                    } else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"error\":\"Invalid provider\"}",
-                        )
-                        .await;
-                    }
-                    return;
-                }
-                ("GET", "/api/oauth/callback") => {
-                    let code = query_param(query, "code").unwrap_or_default();
-                    let state = query_param(query, "state").unwrap_or_default();
-                    let provider = state.split('-').next().unwrap_or("google");
-                    let redirect_uri = format!("http://localhost:3000/api/oauth/callback");
-                    let config = load_config().unwrap_or_default();
-
-                    let (custom_client_id, custom_client_secret) = match provider {
-                        "google" | "gmail" | "google_calendar" | "youtube_music" => (
-                            config
-                                .extra
-                                .get("gmailClientId")
-                                .and_then(Value::as_str)
-                                .or_else(|| {
-                                    config
-                                        .extra
-                                        .get("googleCalendarClientId")
-                                        .and_then(Value::as_str)
-                                }),
-                            config
-                                .extra
-                                .get("gmailClientSecret")
-                                .and_then(Value::as_str)
-                                .or_else(|| {
-                                    config
-                                        .extra
-                                        .get("googleCalendarClientSecret")
-                                        .and_then(Value::as_str)
-                                }),
-                        ),
-                        "spotify" => (
-                            config.extra.get("spotifyClientId").and_then(Value::as_str),
-                            config
-                                .extra
-                                .get("spotifyClientSecret")
-                                .and_then(Value::as_str),
-                        ),
-                        "github" => (
-                            config.extra.get("githubClientId").and_then(Value::as_str),
-                            config
-                                .extra
-                                .get("githubClientSecret")
-                                .and_then(Value::as_str),
-                        ),
-                        "vercel" => (
-                            config.extra.get("vercelClientId").and_then(Value::as_str),
-                            config
-                                .extra
-                                .get("vercelClientSecret")
-                                .and_then(Value::as_str),
-                        ),
-                        "notion" => (
-                            config.extra.get("notionApiKey").and_then(Value::as_str),
-                            None,
-                        ),
-                        _ => (None, None),
-                    };
-
-                    let result = crate::oauth::exchange_code(
-                        provider,
-                        &code,
-                        &state,
-                        &redirect_uri,
-                        custom_client_id,
-                        custom_client_secret,
-                    )
-                    .await;
-
-                    let html_body = match result {
-                        Ok(tokens) => format!(
-                            "<!DOCTYPE html><html><head><title>Mint Agent Connected</title><style>body {{ font-family: system-ui, sans-serif; background: #0f172a; color: #fff; text-align: center; padding: 40px; }} .card {{ background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }} h2 {{ color: #10b981; }}</style></head><body><div class='card'><h2>🟢 Connection Successful!</h2><p>Mint Agent has successfully connected to <strong>{}</strong> ({}).</p><p>You can close this tab now and return to Mint.</p></div><script>setTimeout(() => window.close(), 2500);</script></body></html>",
-                            tokens.provider,
-                            tokens.account_email.as_deref().unwrap_or("Connected")
-                        ),
-                        Err(err) => format!(
-                            "<!DOCTYPE html><html><head><title>Mint OAuth Error</title><style>body {{ font-family: system-ui, sans-serif; background: #0f172a; color: #fff; text-align: center; padding: 40px; }} .card {{ background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; border: 1px solid #ef4444; }} h2 {{ color: #ef4444; }}</style></head><body><div class='card'><h2>❌ Connection Failed</h2><p>Error: {}</p></div></body></html>",
-                            err
-                        ),
-                    };
-
-                    let response = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                        html_body.len(),
-                        html_body
-                    );
-                    let _ = socket.write_all(response.as_bytes()).await;
-                    return;
-                }
-                ("GET", "/api/oauth/status") => {
-                    let statuses = crate::oauth::list_oauth_statuses();
-                    send_json_response(
-                        socket,
-                        "200 OK",
-                        &serde_json::json!({ "statuses": statuses }).to_string(),
-                    )
-                    .await;
-                    return;
-                }
-                ("POST", "/api/oauth/revoke") => {
-                    #[derive(Deserialize)]
-                    struct RevokeReq {
-                        provider: String,
-                    }
-                    if let Ok(req) = serde_json::from_str::<RevokeReq>(body) {
-                        let _ = crate::oauth::revoke_oauth_tokens(&req.provider);
-                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                        return;
-                    }
-                    send_json_response(socket, "400 Bad Request", "{\"status\":\"error\"}").await;
-                    return;
-                }
-                ("POST", "/api/active-model") => {
-                    #[derive(Deserialize)]
-                    struct ActiveModelReq {
-                        provider: String,
-                        model: Option<String>,
-                    }
-                    if let Ok(req) = serde_json::from_str::<ActiveModelReq>(body)
-                        && let Ok(mut config) = load_config()
-                    {
-                        if let Ok(display_name) =
-                            config.set_active_model(&req.provider, req.model.as_deref())
-                        {
-                            send_json_response(
-                                socket,
-                                "200 OK",
-                                &serde_json::json!({ "status": "ok", "displayName": display_name })
-                                    .to_string(),
-                            )
-                            .await;
-                            return;
-                        }
-                    }
-                    send_json_response(
-                        socket,
-                        "500 Internal Server Error",
-                        "{\"status\":\"error\"}",
-                    )
-                    .await;
-                }
-                ("POST", "/api/interactions/clear") => {
-                    if let Ok(memory) = MemoryStore::open_default() {
-                        let chat_id = query_param(query, "chatId")
-                            .unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
-                        let _ = memory.clear_interactions_for_chat(&chat_id);
-                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                    } else {
-                        send_json_response(
-                            socket,
-                            "500 Internal Server Error",
-                            "{\"status\":\"error\"}",
-                        )
-                        .await;
-                    }
-                }
-                ("POST", "/api/interactions") => {
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct ApiSaveInteraction {
-                        chat_id: String,
-                        user_text: String,
-                        ai_text: Option<String>,
-                        provider: String,
-                        model: String,
-                    }
-
-                    if let Ok(req) = serde_json::from_str::<ApiSaveInteraction>(body) {
-                        if let Ok(memory) = MemoryStore::open_default() {
-                            match memory.add_interaction_for_chat(
-                                &req.chat_id,
-                                &req.user_text,
-                                req.ai_text.as_deref().unwrap_or(""),
-                                &req.provider,
-                                &req.model,
-                            ) {
-                                Ok(row_id) => {
-                                    let res_json = json!({ "success": true, "id": row_id });
-                                    send_json_response(socket, "200 OK", &res_json.to_string())
-                                        .await;
-                                }
-                                Err(error) => {
-                                    let err_json =
-                                        json!({ "success": false, "message": error.to_string() });
-                                    send_json_response(
-                                        socket,
-                                        "500 Internal Server Error",
-                                        &err_json.to_string(),
-                                    )
-                                    .await;
-                                }
-                            }
-                        } else {
-                            send_json_response(
-                                socket,
-                                "500 Internal Server Error",
-                                "{\"success\":false,\"message\":\"db error\"}",
-                            )
-                            .await;
-                        }
-                    } else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"success\":false,\"message\":\"invalid body\"}",
-                        )
-                        .await;
-                    }
-                }
-                ("POST", "/api/interactions/agent-activity") => {
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct SaveAgentActivityRequest {
-                        interaction_id: i64,
-                        activity: Vec<AgentProgress>,
-                    }
-
-                    if let Ok(payload) = serde_json::from_str::<SaveAgentActivityRequest>(body)
-                        && let Ok(memory) = MemoryStore::open_default()
-                        && let Ok(activity_json) = serde_json::to_string(&payload.activity)
-                        && memory
-                            .set_interaction_agent_activity_json(
-                                payload.interaction_id,
-                                &activity_json,
-                            )
-                            .is_ok()
-                    {
-                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                        return;
-                    }
-                    send_json_response(
-                        socket,
-                        "400 Bad Request",
-                        "{\"status\":\"invalid agent activity payload\"}",
-                    )
-                    .await;
-                }
-                ("GET", "/api/pictures") => match list_saved_pictures() {
-                    Ok(mut pictures) => {
-                        for picture in &mut pictures {
-                            picture.url = Some(format!("/api/pictures/{}", picture.filename));
-                        }
-                        if let Ok(json_str) = serde_json::to_string(&pictures) {
-                            send_json_response(socket, "200 OK", &json_str).await;
-                        } else {
-                            send_json_response(socket, "500 Internal Server Error", "[]").await;
-                        }
-                    }
-                    Err(_) => send_json_response(socket, "500 Internal Server Error", "[]").await,
-                },
-                ("GET", route) if route.starts_with("/api/pictures/") => {
-                    let filename = percent_decode(route.trim_start_matches("/api/pictures/"));
-                    match picture_bytes(&filename) {
-                        Ok((mime_type, bytes)) => {
-                            send_binary_response(socket, "200 OK", &mime_type, &bytes).await
-                        }
-                        Err(_) => {
-                            send_json_response(
-                                socket,
-                                "404 Not Found",
-                                "{\"error\":\"picture not found\"}",
-                            )
-                            .await
-                        }
-                    }
-                }
-                ("DELETE", route) if route.starts_with("/api/pictures/") => {
-                    let id = percent_decode(route.trim_start_matches("/api/pictures/"));
-                    match delete_saved_picture(&id) {
-                        Ok(_) => {
-                            send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                        }
-                        Err(err) => {
-                            let err_msg =
-                                serde_json::json!({ "error": err.to_string() }).to_string();
-                            send_json_response(socket, "400 Bad Request", &err_msg).await;
-                        }
-                    }
-                }
-                ("GET", route) if route.starts_with("/api/thumbnails/") => {
-                    let filename = percent_decode(route.trim_start_matches("/api/thumbnails/"));
-                    match thumbnail_bytes(&filename) {
-                        Ok((mime_type, bytes)) => {
-                            send_binary_response(socket, "200 OK", &mime_type, &bytes).await
-                        }
-                        Err(_) => {
-                            send_json_response(
-                                socket,
-                                "404 Not Found",
-                                "{\"error\":\"thumbnail not found\"}",
-                            )
-                            .await
-                        }
-                    }
-                }
-                ("GET", "/api/config") => {
-                    let config = load_config().unwrap_or_default();
-                    if let Ok(json_str) = serde_json::to_string(&config) {
-                        send_json_response(socket, "200 OK", &json_str).await;
-                    } else {
-                        send_json_response(socket, "500 Internal Server Error", "{}").await;
-                    }
-                }
-                ("POST", "/api/config") => {
-                    if let Ok(new_config) = serde_json::from_str::<MintConfig>(body)
-                        && save_config(&new_config).is_ok()
-                    {
-                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                        return;
-                    }
-                    send_json_response(
-                        socket,
-                        "400 Bad Request",
-                        "{\"status\":\"invalid config json\"}",
-                    )
-                    .await;
-                }
-                ("GET", "/api/weather") => {
-                    let city = query_param(query, "city").unwrap_or_default();
-                    match weather(&city).await {
-                        Ok(report) => {
-                            if let Ok(json_str) = serde_json::to_string(&report) {
-                                send_json_response(socket, "200 OK", &json_str).await;
-                            } else {
-                                send_json_response(socket, "500 Internal Server Error", "{}").await;
-                            }
-                        }
-                        Err(error) => {
-                            let err_json = json!({ "error": error.to_string() });
-                            send_json_response(
-                                socket,
-                                "500 Internal Server Error",
-                                &err_json.to_string(),
-                            )
-                            .await;
-                        }
-                    }
-                }
-                ("POST", "/api/action") => {
-                    if let Ok(action) = serde_json::from_str::<ApiAction>(body) {
-                        let config = load_config().unwrap_or_default();
-                        match execute_api_action(&config, action) {
-                            Ok(value) => {
-                                send_json_response(socket, "200 OK", &value.to_string()).await
-                            }
-                            Err(error) => {
-                                let err_json = json!({ "success": false, "message": error });
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    &err_json.to_string(),
-                                )
-                                .await;
-                            }
-                        }
-                    } else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"success\":false,\"message\":\"invalid action body\"}",
-                        )
-                        .await;
-                    }
-                }
-                ("POST", "/api/uploads") => {
-                    // Accept raw body bytes and optional filename query param.
-                    // Body is the raw file bytes (client should POST the file as the request body).
-                    let filename_param = query_param(query, "filename");
-                    let header_end_idx = header_end as usize;
-                    // extract raw bytes for body
-                    let body_bytes = &request_bytes[header_end_idx + 4..];
-
-                    if body_bytes.is_empty() {
-                        send_json_response(socket, "400 Bad Request", "{\"error\":\"empty body\"}")
-                            .await;
-                        return;
-                    }
-
-                    // Determine mime type from filename or fallback to video/mp4
-                    let (mime_type, _extension) = filename_param
-                        .as_deref()
-                        .and_then(|f| f.rsplit_once('.'))
-                        .map(|(_, ext)| {
-                            let e = ext.to_ascii_lowercase();
-                            match e.as_str() {
-                                "mp4" => ("video/mp4", "mp4"),
-                                "webm" => ("video/webm", "webm"),
-                                "mov" => ("video/quicktime", "mov"),
-                                "mkv" => ("video/x-matroska", "mkv"),
-                                "avi" => ("video/x-msvideo", "avi"),
-                                _ => ("application/octet-stream", "bin"),
-                            }
-                        })
-                        .unwrap_or(("video/mp4", "mp4"));
-
-                    // Build data URI and reuse save_chat_images helper to persist and index file
-                    let encoded = BASE64.encode(body_bytes);
-                    let data_uri = format!("data:{};base64,{}", mime_type, encoded);
-                    match save_chat_images(
-                        vec![data_uri],
-                        Some("upload".into()),
-                        Some("uploaded".into()),
-                    ) {
-                        Ok(saved) => {
-                            if let Some(entry) = saved.into_iter().next() {
-                                let res_json = json!({ "url": format!("/api/pictures/{}", entry.filename), "filename": entry.filename });
-                                send_json_response(socket, "200 OK", &res_json.to_string()).await;
-                                return;
-                            }
-                        }
-                        Err(err) => {
-                            let err_json = json!({ "error": err.to_string() });
-                            send_json_response(
-                                socket,
-                                "500 Internal Server Error",
-                                &err_json.to_string(),
-                            )
-                            .await;
-                            return;
-                        }
-                    }
-                    send_json_response(
-                        socket,
-                        "500 Internal Server Error",
-                        "{\"error\":\"failed to save upload\"}",
-                    )
-                    .await;
-                }
-
-                ("POST", "/api/chat") => {
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct ApiChatRequest {
-                        message: String,
-                        system_instruction: Option<String>,
-                        chat_id: Option<String>,
-                        image_data_uri: Option<String>,
-                        audio_data_uri: Option<String>,
-                        video_data_uri: Option<String>,
-                        document_attachment: Option<crate::chat::DocumentAttachment>,
-                        agent_id: Option<String>,
-                    }
-
-                    if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
-                        let config = load_config().unwrap_or_default();
-                        let chat_req = ChatRequest {
-                            message: req.message,
-                            system_instruction: req.system_instruction.unwrap_or_default(),
-                            chat_id: req.chat_id,
-                            image_data_uri: req.image_data_uri,
-                            audio_data_uri: req.audio_data_uri,
-                            video_data_uri: req.video_data_uri,
-                            document_attachment: req.document_attachment,
-                            workspace_path: None,
-                            agent_id: req.agent_id,
-                            plan_mode: false,
-                            messages: None,
-                            tools: None,
-                        };
-                        let mut chat_req =
-                            chat_req.with_document_context(&config).unwrap_or(chat_req);
-                        let sent_image = chat_req.image_data_uri.clone();
-                        let sent_video = chat_req.video_data_uri.clone();
-                        let sent_message = chat_req.message.clone();
-
-                        let response = if let Some(clean_message) =
-                            chat_req.message.strip_prefix("/chat ").map(str::to_owned)
-                        {
-                            chat_req.message = clean_message;
-                            if chat_req.system_instruction.trim().is_empty() {
-                                chat_req.system_instruction = default_chat_system_instruction();
-                            }
-                            orchestrate_chat_with_fallback(&config, &chat_req)
-                                .await
-                                .map(|(response, _)| response)
-                                .map_err(|error| error.to_string())
-                        } else {
-                            run_web_agent_loop(&config, &chat_req).await
-                        };
-
-                        match response {
-                            Ok(resp) => {
-                                log_api_req(
-                                    "POST",
-                                    "/api/chat",
-                                    "200 OK",
-                                    Some(&format!(
-                                        "Model: {} | {}",
-                                        config.ai_provider, auth_label
-                                    )),
-                                );
-                                if let Some(image) = sent_image {
-                                    let _ = save_chat_images(
-                                        image
-                                            .split_whitespace()
-                                            .map(str::to_owned)
-                                            .collect::<Vec<_>>(),
-                                        Some("web".into()),
-                                        Some(sent_message.clone()),
-                                    );
-                                }
-                                if let Some(video) = sent_video {
-                                    let _ = save_chat_images(
-                                        video
-                                            .split_whitespace()
-                                            .map(str::to_owned)
-                                            .collect::<Vec<_>>(),
-                                        Some("web".into()),
-                                        Some(sent_message),
-                                    );
-                                }
-                                if let Ok(json_str) = serde_json::to_string(&resp) {
-                                    send_json_response(socket, "200 OK", &json_str).await;
-                                    return;
-                                }
-                            }
-                            Err(e) => {
-                                log_api_err("API /api/chat error", &e);
-                                let err_json = serde_json::json!({
-                                    "provider": "error",
-                                    "model": "error",
-                                    "text": format!("Error orchestrating chat: {e}")
-                                });
-                                send_json_response(
-                                    socket,
-                                    "500 Internal Server Error",
-                                    &err_json.to_string(),
-                                )
-                                .await;
-                                return;
-                            }
-                        }
-                    }
-                    send_json_response(
-                        socket,
-                        "400 Bad Request",
-                        "{\"status\":\"invalid chat request body\"}",
-                    )
-                    .await;
-                }
-                ("POST", "/api/cancel-chat") => {
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct CancelRequest {
-                        chat_id: String,
-                    }
-                    if let Ok(req) = serde_json::from_str::<CancelRequest>(body) {
-                        crate::cancel_agent(&req.chat_id);
-                        send_json_response(socket, "200 OK", "{\"status\":\"ok\"}").await;
-                    } else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"status\":\"invalid cancel body\"}",
-                        )
-                        .await;
-                    }
-                }
-                ("POST", "/api/chat-stream") => {
-                    #[derive(Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct ApiChatRequest {
-                        message: String,
-                        system_instruction: Option<String>,
-                        chat_id: Option<String>,
-                        image_data_uri: Option<String>,
-                        audio_data_uri: Option<String>,
-                        video_data_uri: Option<String>,
-                        document_attachment: Option<crate::chat::DocumentAttachment>,
-                        agent_id: Option<String>,
-                    }
-
-                    if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
-                        let config = load_config().unwrap_or_default();
-                        let chat_req = ChatRequest {
-                            message: req.message,
-                            system_instruction: req.system_instruction.unwrap_or_default(),
-                            chat_id: req.chat_id,
-                            image_data_uri: req.image_data_uri,
-                            audio_data_uri: req.audio_data_uri,
-                            video_data_uri: req.video_data_uri,
-                            document_attachment: req.document_attachment,
-                            workspace_path: None,
-                            agent_id: req.agent_id,
-                            plan_mode: false,
-                            messages: None,
-                            tools: None,
-                        };
-                        let mut chat_req =
-                            chat_req.with_document_context(&config).unwrap_or(chat_req);
-                        let sent_image = chat_req.image_data_uri.clone();
-                        let sent_video = chat_req.video_data_uri.clone();
-                        let sent_message = chat_req.message.clone();
-
-                        let is_chat = if let Some(clean_message) =
-                            chat_req.message.strip_prefix("/chat ").map(str::to_owned)
-                        {
-                            chat_req.message = clean_message;
-                            if chat_req.system_instruction.trim().is_empty() {
-                                chat_req.system_instruction = default_chat_system_instruction();
-                            }
-                            true
-                        } else {
-                            false
-                        };
-
-                        let headers = "HTTP/1.1 200 OK\r\n\
-                                       Access-Control-Allow-Origin: *\r\n\
-                                       Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
-                                       Content-Type: application/x-ndjson\r\n\
-                                       Cache-Control: no-cache\r\n\
-                                       Connection: close\r\n\r\n";
-                        if socket.write_all(headers.as_bytes()).await.is_ok() {
-                            let _ = socket.flush().await;
-
-                            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-
-                            {
-                                let tx_progress = tx.clone();
-                                let progress_cb = move |progress: AgentProgress| {
-                                    if let Ok(json_val) =
-                                        serde_json::to_string(&serde_json::json!({
-                                            "type": "progress",
-                                            "progress": progress
-                                        }))
-                                    {
-                                        let _ = tx_progress.send(format!("{}\n", json_val));
-                                    }
-                                };
-
-                                let tx_chunk = tx.clone();
-                                let on_chunk = move |chunk: String| {
-                                    if let Ok(json_val) =
-                                        serde_json::to_string(&serde_json::json!({
-                                            "type": "chunk",
-                                            "chunk": chunk
-                                        }))
-                                    {
-                                        let _ = tx_chunk.send(format!("{}\n", json_val));
-                                    }
-                                };
-
-                                if is_chat {
-                                    let tx_chunk_inner = tx.clone();
-                                    let config_clone = config.clone();
-                                    let chat_req_clone = chat_req.clone();
-                                    let tx_done = tx.clone();
-                                    let chat_id_str = chat_req.chat_id.clone().unwrap_or_default();
-                                    let auth_label_clone = auth_label.clone();
-                                    let join_handle = tokio::spawn(async move {
-                                        let result = orchestrate_chat_stream_with_fallback(
-                                            &config_clone,
-                                            &chat_req_clone,
-                                            move |chunk| {
-                                                if let Ok(json_val) =
-                                                    serde_json::to_string(&serde_json::json!({
-                                                        "type": "chunk",
-                                                        "chunk": chunk
-                                                    }))
-                                                {
-                                                    let _ = tx_chunk_inner
-                                                        .send(format!("{}\n", json_val));
-                                                }
-                                            },
-                                        )
-                                        .await;
-
-                                        match result {
-                                            Ok((response, _)) => {
-                                                log_api_req(
-                                                    "POST",
-                                                    "/api/chat-stream",
-                                                    "200 OK",
-                                                    Some(&format!(
-                                                        "Provider: {} | {}",
-                                                        config_clone.ai_provider, auth_label_clone
-                                                    )),
-                                                );
-                                                if let Ok(json_val) =
-                                                    serde_json::to_string(&serde_json::json!({
-                                                        "type": "done",
-                                                        "response": response
-                                                    }))
-                                                {
-                                                    let _ = tx_done.send(format!("{}\n", json_val));
-                                                }
-                                            }
-                                            Err(e) => {
-                                                log_api_err("API /api/chat-stream error", &e);
-                                                let err_json = serde_json::json!({
-                                                    "type": "done",
-                                                    "response": {
-                                                        "provider": "error",
-                                                        "model": "error",
-                                                        "text": format!("Error orchestrating chat: {e}")
-                                                    }
-                                                });
-                                                let _ = tx_done.send(format!("{}\n", err_json));
-                                            }
-                                        }
-                                    });
-
-                                    let abort_handle = join_handle.abort_handle();
-                                    if !chat_id_str.is_empty() {
-                                        crate::ACTIVE_AGENTS
-                                            .lock()
-                                            .unwrap()
-                                            .insert(chat_id_str.clone(), abort_handle);
-                                    }
-
-                                    let chat_id_str_cleanup = chat_id_str.clone();
-                                    tokio::spawn(async move {
-                                        let _ = join_handle.await;
-                                        if !chat_id_str_cleanup.is_empty() {
-                                            crate::ACTIVE_AGENTS
-                                                .lock()
-                                                .unwrap()
-                                                .remove(&chat_id_str_cleanup);
-                                        }
-                                    });
-                                } else {
-                                    let root = std::env::current_dir().unwrap_or_default();
-                                    let fast_mode = config
-                                        .extra
-                                        .get("enableFastMode")
-                                        .and_then(Value::as_bool)
-                                        .unwrap_or(false);
-
-                                    let tx_done = tx.clone();
-                                    let config_clone = config.clone();
-                                    let chat_id = chat_req.chat_id.clone();
-                                    let chat_id_str = chat_id.clone().unwrap_or_default();
-                                    let message = chat_req.message.clone();
-                                    let image_data_uri = chat_req.image_data_uri.clone();
-                                    let audio_data_uri = chat_req.audio_data_uri.clone();
-                                    let video_data_uri = chat_req.video_data_uri.clone();
-                                    let agent_id = chat_req.agent_id.clone();
-
-                                    let join_handle = tokio::spawn(async move {
-                                        let result = orchestrate_agent_loop(
-                                            &config_clone,
-                                            &message,
-                                            &root,
-                                            image_data_uri,
-                                            audio_data_uri,
-                                            video_data_uri,
-                                            chat_id.as_deref(),
-                                            agent_id.as_deref(),
-                                            None,
-                                            fast_mode,
-                                            false,
-                                            |_| Ok(ApprovalOutcome::Denied),
-                                            progress_cb,
-                                            on_chunk,
-                                        )
-                                        .await;
-
-                                        match result {
-                                            Ok(res) => {
-                                                let response = ChatResponse {
-                                                    provider: res.provider,
-                                                    model: res.model,
-                                                    text: res.summary,
-                                                    fallback_provider: res.fallback,
-                                                    tool_calls: None,
-                                                    stop_reason: None,
-                                                    total_tokens: None,
-                                                };
-                                                if let Ok(json_val) =
-                                                    serde_json::to_string(&serde_json::json!({
-                                                        "type": "done",
-                                                        "response": response
-                                                    }))
-                                                {
-                                                    let _ = tx_done.send(format!("{}\n", json_val));
-                                                }
-                                            }
-                                            Err(e) => {
-                                                let err_json = serde_json::json!({
-                                                    "type": "done",
-                                                    "response": {
-                                                        "provider": "error",
-                                                        "model": "error",
-                                                        "text": format!("Error orchestrating agent: {e}")
-                                                    }
-                                                });
-                                                let _ = tx_done.send(format!("{}\n", err_json));
-                                            }
-                                        }
-                                    });
-
-                                    let abort_handle = join_handle.abort_handle();
-                                    if !chat_id_str.is_empty() {
-                                        crate::ACTIVE_AGENTS
-                                            .lock()
-                                            .unwrap()
-                                            .insert(chat_id_str.clone(), abort_handle);
-                                    }
-
-                                    let chat_id_str_cleanup = chat_id_str.clone();
-                                    tokio::spawn(async move {
-                                        let _ = join_handle.await;
-                                        if !chat_id_str_cleanup.is_empty() {
-                                            crate::ACTIVE_AGENTS
-                                                .lock()
-                                                .unwrap()
-                                                .remove(&chat_id_str_cleanup);
-                                        }
-                                    });
-                                }
-                            }
-
-                            drop(tx);
-
-                            while let Some(line) = rx.recv().await {
-                                if socket.write_all(line.as_bytes()).await.is_err() {
-                                    break;
-                                }
-                                let _ = socket.flush().await;
-                            }
-
-                            if let Some(image) = sent_image {
-                                let _ = save_chat_images(
-                                    image
-                                        .split_whitespace()
-                                        .map(str::to_owned)
-                                        .collect::<Vec<_>>(),
-                                    Some("web".into()),
-                                    Some(sent_message.clone()),
-                                );
-                            }
-                            if let Some(video) = sent_video {
-                                let _ = save_chat_images(
-                                    video
-                                        .split_whitespace()
-                                        .map(str::to_owned)
-                                        .collect::<Vec<_>>(),
-                                    Some("web".into()),
-                                    Some(sent_message),
-                                );
-                            }
-                        }
-                        return;
-                    }
-                    send_json_response(
-                        socket,
-                        "400 Bad Request",
-                        "{\"status\":\"invalid chat request body\"}",
-                    )
-                    .await;
-                }
-                ("POST", "/api/image-generate") => {
-                    #[derive(serde::Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct ImageGenApiRequest {
-                        prompt: String,
-                        #[serde(default)]
-                        negative_prompt: Option<String>,
-                        #[serde(default)]
-                        aspect_ratio: Option<String>,
-                        #[serde(default)]
-                        num_images: Option<u8>,
-                        #[serde(default)]
-                        model: Option<String>,
-                        /// Which image provider to use (overrides config.image_gen_provider).
-                        #[serde(default)]
-                        provider: Option<String>,
-                        #[serde(default)]
-                        image_data_uri: Option<String>,
-                        #[serde(default)]
-                        mask_data_uri: Option<String>,
-                        #[serde(default)]
-                        mode: Option<String>,
-                    }
-
-                    if let Ok(req) = serde_json::from_str::<ImageGenApiRequest>(body) {
-                        let config = load_config().unwrap_or_default();
-                        let gen_request = ImageGenRequest {
-                            prompt: req.prompt.clone(),
-                            negative_prompt: req.negative_prompt,
-                            aspect_ratio: req.aspect_ratio,
-                            num_images: req.num_images,
-                            model: req.model,
-                            provider: req.provider,
-                            image_data_uri: req.image_data_uri,
-                            mask_data_uri: req.mask_data_uri,
-                            mode: req.mode,
-                        };
-                        match generate_images(&config, &gen_request).await {
-                            Ok(result) => {
-                                log_api_req(
-                                    "POST",
-                                    "/api/image-generate",
-                                    "200 OK",
-                                    Some(&format!(
-                                        "Provider: {} | {}",
-                                        result.provider, auth_label
-                                    )),
-                                );
-                                let data_uris: Vec<String> = result
-                                    .images
-                                    .iter()
-                                    .map(|img| img.data_uri.clone())
-                                    .collect();
-                                let mut saved = save_chat_images(
-                                    data_uris,
-                                    Some(result.provider.clone()),
-                                    Some(req.prompt.clone()),
-                                )
-                                .unwrap_or_default();
-                                for picture in &mut saved {
-                                    picture.url =
-                                        Some(format!("/api/pictures/{}", picture.filename));
-                                    picture.thumbnail_url =
-                                        Some(format!("/api/pictures/{}", picture.filename));
-                                }
-                                let response = json!({
-                                    "images": saved,
-                                    "model": result.model,
-                                    "provider": result.provider,
-                                    "prompt": result.prompt,
-                                    "description": result.description
-                                });
-                                send_json_response(socket, "200 OK", &response.to_string()).await;
-                            }
-                            Err(e) => {
-                                log_api_err("API /api/image-generate error", &e);
-                                let err = json!({ "error": e.to_string() });
-                                send_json_response(
-                                    socket,
-                                    "500 Internal Server Error",
-                                    &err.to_string(),
-                                )
-                                .await;
-                            }
-                        }
-                    } else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"error\":\"invalid image generation request body\"}",
-                        )
-                        .await;
-                    }
-                }
-                ("POST", "/api/video-generate") => {
-                    #[derive(serde::Deserialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct VideoGenApiRequest {
-                        prompt: String,
-                        #[serde(default)]
-                        negative_prompt: Option<String>,
-                        #[serde(default)]
-                        aspect_ratio: Option<String>,
-                        #[serde(default)]
-                        duration: Option<u32>,
-                        #[serde(default)]
-                        model: Option<String>,
-                        #[serde(default)]
-                        provider: Option<String>,
-                    }
-
-                    if let Ok(req) = serde_json::from_str::<VideoGenApiRequest>(body) {
-                        let config = load_config().unwrap_or_default();
-                        let gen_request = VideoGenRequest {
-                            prompt: req.prompt.clone(),
-                            negative_prompt: req.negative_prompt,
-                            aspect_ratio: req.aspect_ratio.unwrap_or_else(|| "16:9".to_string()),
-                            duration: req.duration.unwrap_or(5),
-                            model: req.model,
-                            provider: req.provider.unwrap_or_else(|| "veo".to_string()),
-                        };
-                        match generate_video(&config, &gen_request).await {
-                            Ok(result) => {
-                                let mut response =
-                                    serde_json::to_value(&result).unwrap_or(json!({}));
-                                if let Some(videos) =
-                                    response.get_mut("videos").and_then(|v| v.as_array_mut())
-                                {
-                                    for picture in videos {
-                                        let filename = picture
-                                            .get("filename")
-                                            .and_then(|f| f.as_str())
-                                            .map(|s| s.to_string());
-                                        if let Some(filename) = filename {
-                                            picture.as_object_mut().unwrap().insert(
-                                                "url".to_string(),
-                                                json!(format!("/api/pictures/{}", filename)),
-                                            );
-                                        }
-                                        let id = picture
-                                            .get("id")
-                                            .and_then(|i| i.as_str())
-                                            .map(|s| s.to_string());
-                                        if let Some(id) = id {
-                                            let has_thumb = picture.get("thumbnailPath").is_some()
-                                                || picture.get("thumbnailUrl").is_some();
-                                            if has_thumb {
-                                                picture.as_object_mut().unwrap().insert(
-                                                    "thumbnailUrl".to_string(),
-                                                    json!(format!(
-                                                        "/api/thumbnails/{}.thumb.png",
-                                                        id
-                                                    )),
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                log_api_req(
-                                    "POST",
-                                    "/api/video-generate",
-                                    "200 OK",
-                                    Some(&format!(
-                                        "Provider: {} | {}",
-                                        result.provider, auth_label
-                                    )),
-                                );
-                                send_json_response(socket, "200 OK", &response.to_string()).await;
-                            }
-                            Err(e) => {
-                                log_api_err("API /api/video-generate error", &e);
-                                let err = json!({ "error": e.to_string() });
-                                send_json_response(
-                                    socket,
-                                    "500 Internal Server Error",
-                                    &err.to_string(),
-                                )
-                                .await;
-                            }
-                        }
-                    } else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"error\":\"invalid video generation request body\"}",
-                        )
-                        .await;
-                    }
-                }
-                (_, route) if route.starts_with("/api/video/") && method == "POST" => {
-                    // ── Video Editing Routes ────────────────────────────────────────────
-                    match route {
-                        "/api/video/load" => {
-                            #[derive(serde::Deserialize)]
-                            struct VideoLoadReq {
-                                path: String,
-                            }
-                            if let Ok(req) = serde_json::from_str::<VideoLoadReq>(body) {
-                                match video_load(&req.path) {
-                                    Ok(info) => {
-                                        let res = serde_json::to_string(&info).unwrap_or_default();
-                                        log_api_req("POST", "/api/video/load", "200 OK", None);
-                                        send_json_response(socket, "200 OK", &res).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/video/load", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"expected {\\\"path\\\":\\\"...\\\"}\" }",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/video/trim" => {
-                            if let Ok(req) = serde_json::from_str::<TrimRequest>(body) {
-                                match video_trim(&req) {
-                                    Ok(r) => {
-                                        let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req("POST", "/api/video/trim", "200 OK", None);
-                                        send_json_response(socket, "200 OK", &res).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/video/trim", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid trim request\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/video/crop" => {
-                            if let Ok(req) = serde_json::from_str::<CropRequest>(body) {
-                                match video_crop(&req) {
-                                    Ok(r) => {
-                                        let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req("POST", "/api/video/crop", "200 OK", None);
-                                        send_json_response(socket, "200 OK", &res).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/video/crop", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid crop request\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/video/resize" => {
-                            if let Ok(req) = serde_json::from_str::<ResizeRequest>(body) {
-                                match video_resize(&req) {
-                                    Ok(r) => {
-                                        let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req("POST", "/api/video/resize", "200 OK", None);
-                                        send_json_response(socket, "200 OK", &res).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/video/resize", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid resize request\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/video/merge" => {
-                            if let Ok(req) = serde_json::from_str::<MergeRequest>(body) {
-                                match video_merge(&req) {
-                                    Ok(r) => {
-                                        let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req("POST", "/api/video/merge", "200 OK", None);
-                                        send_json_response(socket, "200 OK", &res).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/video/merge", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid merge request\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/video/extract-audio" => {
-                            if let Ok(req) = serde_json::from_str::<ExtractAudioRequest>(body) {
-                                match video_extract_audio(&req) {
-                                    Ok(r) => {
-                                        let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req(
-                                            "POST",
-                                            "/api/video/extract-audio",
-                                            "200 OK",
-                                            None,
-                                        );
-                                        send_json_response(socket, "200 OK", &res).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/video/extract-audio", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid extract-audio request\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/video/remove-silence" => {
-                            if let Ok(req) = serde_json::from_str::<RemoveSilenceRequest>(body) {
-                                match video_remove_silence(&req) {
-                                    Ok(r) => {
-                                        let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req(
-                                            "POST",
-                                            "/api/video/remove-silence",
-                                            "200 OK",
-                                            None,
-                                        );
-                                        send_json_response(socket, "200 OK", &res).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/video/remove-silence", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid remove-silence request\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/video/export" => {
-                            if let Ok(req) = serde_json::from_str::<ExportRequest>(body) {
-                                match video_export(&req) {
-                                    Ok(r) => {
-                                        let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req("POST", "/api/video/export", "200 OK", None);
-                                        send_json_response(socket, "200 OK", &res).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/video/export", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid export request\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/video/render-timeline" => {
-                            if let Ok(req) = serde_json::from_str::<RenderTimelineRequest>(body) {
-                                match render_timeline(&req.timeline) {
-                                    Ok(r) => {
-                                        let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req(
-                                            "POST",
-                                            "/api/video/render-timeline",
-                                            "200 OK",
-                                            Some(&format!("{} clips", r.clips_rendered)),
-                                        );
-                                        send_json_response(socket, "200 OK", &res).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/video/render-timeline", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid timeline request\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/video/make-shorts" => {
-                            if let Ok(req) = serde_json::from_str::<MakeShortsRequest>(body) {
-                                let config = load_config().unwrap_or_default();
-                                match make_shorts(&config, &req).await {
-                                    Ok(r) => {
-                                        let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req(
-                                            "POST",
-                                            "/api/video/make-shorts",
-                                            "200 OK",
-                                            Some(&format!("{} shorts clips", r.clips.len())),
-                                        );
-                                        send_json_response(socket, "200 OK", &res).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/video/make-shorts", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid make-shorts request body\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/video/ai-edit" => {
-                            if let Ok(req) = serde_json::from_str::<AiEditVideoRequest>(body) {
-                                let config = load_config().unwrap_or_default();
-                                match ai_edit_video(&config, &req).await {
-                                    Ok(r) => {
-                                        let res = serde_json::to_string(&r).unwrap_or_default();
-                                        log_api_req(
-                                            "POST",
-                                            "/api/video/ai-edit",
-                                            "200 OK",
-                                            Some(&format!(
-                                                "AI executed prompt: {}",
-                                                req.instruction
-                                            )),
-                                        );
-                                        send_json_response(socket, "200 OK", &res).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/video/ai-edit", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid ai-edit request body\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        _ => {
-                            send_json_response(
-                                socket,
-                                "404 Not Found",
-                                "{\"error\":\"unknown video route\"}",
-                            )
-                            .await;
-                        }
-                    }
-                }
-                (_, route) if route.starts_with("/api/speech/") && method == "POST" => {
-                    // ── Speech Routes ───────────────────────────────────────────────────
-                    match route {
-                        "/api/speech/transcribe" => {
-                            if let Ok(req) = serde_json::from_str::<TranscribeRequest>(body) {
-                                let config = load_config().unwrap_or_default();
-                                match transcribe(&config, &req).await {
-                                    Ok(res) => {
-                                        let json_str =
-                                            serde_json::to_string(&res).unwrap_or_default();
-                                        log_api_req(
-                                            "POST",
-                                            "/api/speech/transcribe",
-                                            "200 OK",
-                                            None,
-                                        );
-                                        send_json_response(socket, "200 OK", &json_str).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/speech/transcribe", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid transcribe request body\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/speech/detect-silence" => {
-                            if let Ok(req) = serde_json::from_str::<DetectSilenceRequest>(body) {
-                                match detect_silence(&req) {
-                                    Ok(ranges) => {
-                                        let json_str =
-                                            serde_json::to_string(&ranges).unwrap_or_default();
-                                        log_api_req(
-                                            "POST",
-                                            "/api/speech/detect-silence",
-                                            "200 OK",
-                                            Some(&format!("{} ranges", ranges.len())),
-                                        );
-                                        send_json_response(socket, "200 OK", &json_str).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/speech/detect-silence", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid detect-silence request body\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        _ => {
-                            send_json_response(
-                                socket,
-                                "404 Not Found",
-                                "{\"error\":\"unknown speech route\"}",
-                            )
-                            .await;
-                        }
-                    }
-                }
-                (_, route) if route.starts_with("/api/subtitle/") && method == "POST" => {
-                    // ── Subtitle Routes ────────────────────────────────────────────────
-                    match route {
-                        "/api/subtitle/generate" => {
-                            #[derive(serde::Deserialize)]
-                            struct GenSubReq {
-                                segments: Vec<crate::speech::TranscriptSegment>,
-                            }
-                            if let Ok(req) = serde_json::from_str::<GenSubReq>(body) {
-                                let srt = generate_srt(&req.segments);
-                                let res = json!({ "srt": srt });
-                                log_api_req("POST", "/api/subtitle/generate", "200 OK", None);
-                                send_json_response(socket, "200 OK", &res.to_string()).await;
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid subtitle generate request body\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/subtitle/translate" => {
-                            if let Ok(req) = serde_json::from_str::<TranslateSubtitleRequest>(body)
-                            {
-                                let config = load_config().unwrap_or_default();
-                                match translate_subtitles(&config, &req).await {
-                                    Ok(srt) => {
-                                        let res = json!({ "srt": srt });
-                                        log_api_req(
-                                            "POST",
-                                            "/api/subtitle/translate",
-                                            "200 OK",
-                                            None,
-                                        );
-                                        send_json_response(socket, "200 OK", &res.to_string())
-                                            .await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/subtitle/translate", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid subtitle translate request body\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        "/api/subtitle/burn" => {
-                            if let Ok(req) = serde_json::from_str::<BurnSubtitleRequest>(body) {
-                                match burn_subtitles(&req) {
-                                    Ok(res) => {
-                                        let json_str =
-                                            serde_json::to_string(&res).unwrap_or_default();
-                                        log_api_req("POST", "/api/subtitle/burn", "200 OK", None);
-                                        send_json_response(socket, "200 OK", &json_str).await;
-                                    }
-                                    Err(e) => {
-                                        log_api_err("/api/subtitle/burn", &e);
-                                        let err = json!({ "error": e.to_string() });
-                                        send_json_response(
-                                            socket,
-                                            "500 Internal Server Error",
-                                            &err.to_string(),
-                                        )
-                                        .await;
-                                    }
-                                }
-                            } else {
-                                send_json_response(
-                                    socket,
-                                    "400 Bad Request",
-                                    "{\"error\":\"invalid subtitle burn request body\"}",
-                                )
-                                .await;
-                            }
-                        }
-                        _ => {
-                            send_json_response(
-                                socket,
-                                "404 Not Found",
-                                "{\"error\":\"unknown subtitle route\"}",
-                            )
-                            .await;
-                        }
-                    }
-                }
-                (_, "/api/video-gen/providers")
-                | (_, "/api/video/providers")
-                | ("GET", "/api/image-gen/providers") => {
-                    let config = load_config().unwrap_or_default();
-                    let mut available: Vec<String> = Vec::new();
-                    if !config.api_key.trim().is_empty() {
-                        available.push("nanobanana".into());
-                    }
-                    if !config.openai_api_key.trim().is_empty() {
-                        available.push("dalle".into());
-                    }
-                    if !config.stability_api_key.trim().is_empty() {
-                        available.push("stability".into());
-                    }
-                    if !config.ideogram_api_key.trim().is_empty() {
-                        available.push("ideogram".into());
-                    }
-                    if !config.replicate_api_key.trim().is_empty() {
-                        available.push("replicate".into());
-                    }
-                    if !config.bfl_api_key.trim().is_empty() {
-                        available.push("bfl".into());
-                    }
-                    let active = if available.contains(&config.image_gen_provider) {
-                        config.image_gen_provider.clone()
-                    } else {
-                        available
-                            .first()
-                            .cloned()
-                            .unwrap_or_else(|| "nanobanana".into())
-                    };
-                    let response = json!({ "active": active, "available": available });
-                    send_json_response(socket, "200 OK", &response.to_string()).await;
-                }
-                ("GET", "/api/gemini-live") => {
-                    let Some(ws_key) = get_header(&request_str, "Sec-WebSocket-Key") else {
-                        send_json_response(
-                            socket,
-                            "400 Bad Request",
-                            "{\"error\":\"missing Sec-WebSocket-Key\"}",
-                        )
-                        .await;
-                        return;
-                    };
-
-                    // A native browser WebSocket can't set an Authorization header, so the
-                    // token travels as a query param instead.
-                    let authorized = query_param(query, "token")
-                        .and_then(|token| session_user_id(token.trim()))
-                        .is_some();
-                    if !authorized {
-                        send_json_response(
-                            socket,
-                            "401 Unauthorized",
-                            "{\"error\":\"unauthorized\"}",
-                        )
-                        .await;
-                        return;
-                    }
-
-                    let accept_key = websocket_accept_header(&ws_key);
-                    let handshake_response = format!(
-                        "HTTP/1.1 101 Switching Protocols\r\n\
-                         Upgrade: websocket\r\n\
-                         Connection: Upgrade\r\n\
-                         Sec-WebSocket-Accept: {accept_key}\r\n\r\n"
-                    );
-                    if socket
-                        .write_all(handshake_response.as_bytes())
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                    let _ = socket.flush().await;
-
-                    // No handshake I/O is performed here — the raw bytes were already
-                    // consumed off `socket` by the connection loop above, and we just
-                    // answered the upgrade by hand.
-                    let ws_stream =
-                        WebSocketStream::from_raw_socket(socket, Role::Server, None).await;
-                    let (mut ws_write, mut ws_read) = ws_stream.split();
-
-                    let config = load_config().unwrap_or_default();
-                    let root = query_param(query, "workspacePath")
-                        .filter(|path| !path.trim().is_empty())
-                        .map(PathBuf::from)
-                        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-                    let chat_id = query_param(query, "chatId").unwrap_or_default();
-
-                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-                    let handle = crate::gemini_live::start_session(
-                        config,
-                        root,
-                        chat_id,
-                        |_| Ok(ApprovalOutcome::Denied),
-                        move |event| {
-                            if let Ok(json_val) = serde_json::to_string(&event) {
-                                let _ = tx.send(json_val);
-                            }
+                                ("GET", "/api/status") => {
+                    routes::status_health::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
                         },
-                    );
-
-                    let writer_task = tokio::spawn(async move {
-                        while let Some(json_val) = rx.recv().await {
-                            if ws_write.send(Message::Text(json_val.into())).await.is_err() {
-                                break;
-                            }
-                        }
-                        let _ = ws_write.close().await;
-                    });
-
-                    while let Some(msg) = ws_read.next().await {
-                        let Ok(msg) = msg else { break };
-                        match msg {
-                            Message::Text(text) => {
-                                if let Ok(payload) = serde_json::from_str::<Value>(&text)
-                                    && let Some(data) = payload["data"].as_str()
-                                    && let Ok(pcm) = BASE64.decode(data)
-                                {
-                                    let _ = handle.push_audio(pcm);
-                                }
-                            }
-                            Message::Close(_) => break,
-                            _ => {}
-                        }
-                    }
-
-                    drop(handle);
-                    let _ = writer_task.await;
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/gateway/health") => {
+                    routes::status_health::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/auth/register") => {
+                    routes::auth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/auth/login") => {
+                    routes::auth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/auth/logout") => {
+                    routes::auth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/auth/session") => {
+                    routes::auth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/avatar") => {
+                    routes::auth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("PUT", "/api/auth/profile") => {
+                    routes::auth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/auth/avatar") => {
+                    routes::auth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/detect-tools") => {
+                    routes::status_health::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/system-info") => {
+                    routes::status_health::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/smart-context") => {
+                    routes::status_health::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/interactions") => {
+                    routes::sessions::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/chat-sessions") => {
+                    routes::sessions::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/chat-sessions/delete") => {
+                    routes::sessions::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/chat-sessions/rename") => {
+                    routes::sessions::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/learned-skills") => {
+                    routes::skills_subagents::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/subagents") => {
+                    routes::skills_subagents::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/subagents") => {
+                    routes::skills_subagents::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("DELETE", route) if route.starts_with("/api/subagents/") => {
+                    routes::skills_subagents::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/mcp/reauth") => {
+                    routes::cron_mcp::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/cron") => {
+                    routes::cron_mcp::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/cron") => {
+                    routes::cron_mcp::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("DELETE", route) if route.starts_with("/api/cron/") => {
+                    routes::cron_mcp::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", route)
+                    if route.starts_with("/api/cron/") && route.ends_with("/enable") => {
+                    routes::cron_mcp::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", route)
+                    if route.starts_with("/api/cron/") && route.ends_with("/disable") => {
+                    routes::cron_mcp::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/linked-folders") => {
+                    routes::linked_folders::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/linked-folders") => {
+                    routes::linked_folders::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("DELETE", route) if route.starts_with("/api/linked-folders/") => {
+                    routes::linked_folders::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/profile") => {
+                    routes::profile_oauth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/profile") => {
+                    routes::profile_oauth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/oauth/start") => {
+                    routes::profile_oauth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/oauth/callback") => {
+                    routes::profile_oauth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/oauth/status") => {
+                    routes::profile_oauth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/oauth/revoke") => {
+                    routes::profile_oauth::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/active-model") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/interactions/clear") => {
+                    routes::sessions::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/interactions") => {
+                    routes::sessions::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/interactions/agent-activity") => {
+                    routes::sessions::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/pictures") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", route) if route.starts_with("/api/pictures/") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("DELETE", route) if route.starts_with("/api/pictures/") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", route) if route.starts_with("/api/thumbnails/") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/config") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/config") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/weather") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/action") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/uploads") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/chat") => {
+                    routes::chat::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/cancel-chat") => {
+                    routes::chat::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/chat-stream") => {
+                    routes::chat::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/image-generate") => {
+                    routes::media_gen::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/video-generate") => {
+                    routes::media_gen::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", "/api/gemini-live") => {
+                    routes::gemini_live::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
                 }
                 _ => {
                     send_json_response(socket, "404 Not Found", "{\"error\":\"Not Found\"}").await;
                 }
+            }
+            })
+            .catch_unwind()
+            .await;
+            if let Err(payload) = outcome {
+                let message = crate::channels::panic_payload_message(&payload);
+                eprintln!("[mint] api_server connection handler panicked: {message}");
             }
         });
     }
@@ -2497,6 +1163,7 @@ async fn run_web_agent_loop(
         request.chat_id.as_deref(),
         request.agent_id.as_deref(),
         None,
+        request.pinned_mcp_server.as_deref(),
         fast_mode,
         false,
         |_| Ok(ApprovalOutcome::Denied),
@@ -2723,6 +1390,46 @@ fn get_header(request_str: &str, header_name: &str) -> Option<String> {
     })
 }
 
+/// Opt-in shared-secret gate for the *whole* API server (every route except
+/// the CORS preflight handled earlier, which returns before this runs).
+/// Unset by default (no `apiAuthToken` in config), so existing local-only
+/// setups — the desktop app, `mint web` — keep working exactly as before.
+/// An operator who exposes this port beyond localhost (e.g. a VPS reachable
+/// over an SSH tunnel/Tailscale) can set `apiAuthToken` via
+/// `mint config set apiAuthToken <token>` to require every request to carry
+/// it as `Authorization: Bearer <token>` — a second layer on top of the
+/// tunnel itself, since only 3 of this server's ~60 routes otherwise check
+/// `authorized_user_id` (that login system is per-user profile data, not a
+/// general access-control boundary for the rest of the API).
+fn api_auth_ok(request_str: &str) -> bool {
+    let Some(expected_token) = load_config().ok().and_then(|config| {
+        config
+            .extra
+            .get("apiAuthToken")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    }) else {
+        return true;
+    };
+    token_matches(request_str, &expected_token)
+}
+
+/// Checks the request's `Authorization: Bearer <token>` header against the
+/// expected token. Split out from `api_auth_ok` so this comparison — the
+/// actual security check — is testable without touching the real on-disk
+/// config that `api_auth_ok` reads `expected_token` from.
+fn token_matches(request_str: &str, expected_token: &str) -> bool {
+    get_header(request_str, "Authorization")
+        .and_then(|header| {
+            header
+                .strip_prefix("Bearer ")
+                .map(|token| token.trim().to_owned())
+        })
+        .is_some_and(|provided_token| provided_token == expected_token)
+}
+
 /// Resolves the logged-in user id (web mode) from the `Authorization: Bearer
 /// <token>` header, if present and valid.
 fn authorized_user_id(request_str: &str) -> Option<String> {
@@ -2851,4 +1558,159 @@ async fn send_binary_response(
     let _ = socket.write_all(response.as_bytes()).await;
     let _ = socket.write_all(body).await;
     let _ = socket.flush().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- get_header --------------------------------------------------
+
+    #[test]
+    fn get_header_finds_header_case_insensitively() {
+        let req =
+            "GET /api/status HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer abc123\r\n\r\n";
+        assert_eq!(
+            get_header(req, "authorization").as_deref(),
+            Some("Bearer abc123")
+        );
+        assert_eq!(
+            get_header(req, "AUTHORIZATION").as_deref(),
+            Some("Bearer abc123")
+        );
+    }
+
+    #[test]
+    fn get_header_trims_leading_whitespace() {
+        let req = "GET / HTTP/1.1\r\nX-Test:    spaced-value  \r\n\r\n";
+        assert_eq!(get_header(req, "X-Test").as_deref(), Some("spaced-value"));
+    }
+
+    #[test]
+    fn get_header_missing_returns_none() {
+        let req = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(get_header(req, "Authorization"), None);
+    }
+
+    #[test]
+    fn get_header_does_not_match_suffix_header_names() {
+        // "Authorization-Extra" must not be picked up when asking for "Authorization".
+        let req = "GET / HTTP/1.1\r\nAuthorization-Extra: nope\r\n\r\n";
+        assert_eq!(get_header(req, "Authorization"), None);
+    }
+
+    #[test]
+    fn get_header_ignores_body_content() {
+        // A header-looking line in the body (after \r\n\r\n) must not be read.
+        let req = "POST / HTTP/1.1\r\nHost: localhost\r\n\r\nAuthorization: Bearer body-smuggled";
+        assert_eq!(get_header(req, "Authorization"), None);
+    }
+
+    // -- token_matches (the actual gateway auth-gate comparison) ------
+
+    #[test]
+    fn token_matches_accepts_correct_bearer_token() {
+        let req = "GET / HTTP/1.1\r\nAuthorization: Bearer secret-token\r\n\r\n";
+        assert!(token_matches(req, "secret-token"));
+    }
+
+    #[test]
+    fn token_matches_rejects_wrong_token() {
+        let req = "GET / HTTP/1.1\r\nAuthorization: Bearer wrong-token\r\n\r\n";
+        assert!(!token_matches(req, "secret-token"));
+    }
+
+    #[test]
+    fn token_matches_rejects_missing_header() {
+        let req = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert!(!token_matches(req, "secret-token"));
+    }
+
+    #[test]
+    fn token_matches_rejects_header_without_bearer_prefix() {
+        let req = "GET / HTTP/1.1\r\nAuthorization: secret-token\r\n\r\n";
+        assert!(!token_matches(req, "secret-token"));
+    }
+
+    #[test]
+    fn token_matches_trims_surrounding_whitespace_on_token() {
+        let req = "GET / HTTP/1.1\r\nAuthorization: Bearer   secret-token  \r\n\r\n";
+        assert!(token_matches(req, "secret-token"));
+    }
+
+    #[test]
+    fn token_matches_rejects_empty_expected_token() {
+        // Callers should never reach here with an empty expected_token (api_auth_ok
+        // filters those out before calling), but the comparison itself must not
+        // treat "no token provided" as matching "no token expected".
+        let req = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert!(!token_matches(req, ""));
+    }
+
+    // -- query_param / percent_decode ---------------------------------
+
+    #[test]
+    fn percent_decode_handles_percent_and_plus_encoding() {
+        assert_eq!(percent_decode("hello%20world"), "hello world");
+        assert_eq!(percent_decode("a+b"), "a b");
+        assert_eq!(percent_decode("100%25"), "100%");
+    }
+
+    #[test]
+    fn percent_decode_leaves_invalid_escapes_intact() {
+        assert_eq!(percent_decode("50%"), "50%");
+        assert_eq!(percent_decode("50%zz"), "50%zz");
+    }
+
+    #[test]
+    fn query_param_extracts_decoded_value() {
+        let query = "path=%2Fhome%2Fuser&limit=10";
+        assert_eq!(query_param(query, "path").as_deref(), Some("/home/user"));
+        assert_eq!(query_param(query, "limit").as_deref(), Some("10"));
+        assert_eq!(query_param(query, "missing"), None);
+    }
+
+    #[test]
+    fn encode_query_percent_encodes_reserved_characters() {
+        assert_eq!(encode_query("a b"), "a+b");
+        assert_eq!(encode_query("100%"), "100%25");
+        assert_eq!(encode_query("safe-Value_1.0~"), "safe-Value_1.0~");
+    }
+
+    #[test]
+    fn encode_query_round_trips_through_percent_decode() {
+        let original = "hello world/ünïcode? 100%";
+        assert_eq!(percent_decode(&encode_query(original)), original);
+    }
+
+    // -- websocket_accept_header ---------------------------------------
+
+    #[test]
+    fn websocket_accept_header_matches_rfc6455_example() {
+        // Worked example straight from RFC 6455 section 1.3.
+        assert_eq!(
+            websocket_accept_header("dGhlIHNhbXBsZSBub25jZQ=="),
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+    }
+
+    // -- misc small helpers ---------------------------------------------
+
+    #[test]
+    fn success_json_shape() {
+        let value = success_json("done");
+        assert_eq!(value["success"], true);
+        assert_eq!(value["message"], "done");
+    }
+
+    #[test]
+    fn unix_timestamp_is_recent_and_monotonic_enough() {
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let ts = unix_timestamp();
+        assert!(ts >= before);
+        assert!(ts < before + 5);
+    }
 }

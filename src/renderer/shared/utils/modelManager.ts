@@ -14,8 +14,8 @@ let setProfileValueFn: ((key: string, value: string) => Promise<boolean>) | null
 async function resolveProfileApis() {
   if (!getProfileValueFn || !setProfileValueFn) {
     try {
-      // Dynamic import to support both Desktop (src/tauri) and Web (src-web/tauri)
-      const mod = await import('../../src/tauri').catch(() => import('../../src-web/tauri'))
+      // '@' resolves to src/tauri (desktop) or src-web/tauri (web) per build — see vite.config*.ts
+      const mod = await import('@/tauri')
       getProfileValueFn = mod.getProfileValue
       setProfileValueFn = mod.setProfileValue
     } catch (e) {

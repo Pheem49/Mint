@@ -55,5 +55,14 @@ jobs:
       - name: Run Rust tests
         run: cargo test -p mint-core -p mint-cli
 
+      - name: Build release binaries
+        # `cargo test`/`cargo check` above don't catch every link-time issue —
+        # e.g. duplicate tree-sitter grammar symbols only failed to link under
+        # a full `--release` build, not in debug/test builds. This step
+        # exercises the same build+link path users hit via `cargo install
+        # --release`, so that class of failure is caught here instead of by
+        # a user's install.
+        run: cargo build --release -p mint-core -p mint-cli
+
       - name: Audit dependencies
         run: npm audit --audit-level=high

@@ -47,10 +47,14 @@ export function renderApprovalDetails(approval: any): ApprovalDetails {
   if (approval.UserApproval) return { title: approval.UserApproval.title, body: approval.UserApproval.prompt, reason: 'The agent requested explicit approval.', isDangerous: false }
   if (approval.AskUser) {
     const hasOptions = Array.isArray(approval.AskUser.options) && approval.AskUser.options.length > 0
+    const multiSelect = !!approval.AskUser.multiSelect
+    const pickReason = multiSelect
+      ? 'Pick one or more choices below, or type your own answer and submit.'
+      : 'Pick a choice below, or type your own answer and submit.'
     return {
       title: 'Question From Agent',
       body: approval.AskUser.question,
-      reason: hasOptions ? 'Pick a choice below, or type your own answer and submit.' : 'Type your answer below and submit to respond to the agent.',
+      reason: hasOptions ? pickReason : 'Type your answer below and submit to respond to the agent.',
       isDangerous: false,
     }
   }

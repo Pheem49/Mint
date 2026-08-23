@@ -3,7 +3,7 @@
 
   # Mint
 
-  **A native desktop AI assistant with a shared Rust core and an optional terminal interface.**
+  **Your AI agent, reachable from Telegram, Discord, Slack, LINE, or WhatsApp — not just a terminal window.**
 
   [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://v2.tauri.app/)
   [![Rust](https://img.shields.io/badge/Rust-backend-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -11,120 +11,86 @@
   [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 </div>
 
-Mint is a local-first AI assistant built with Tauri v2, Rust, React, and TypeScript.
-The desktop application and native CLI share the same Rust domain layer, so chat,
-memory, knowledge, tools, safety policies, and integrations behave consistently
-across both interfaces.
+Mint is a local-first AI assistant that runs on your own machine and follows you
+wherever you already are: message it from Telegram, Discord, Slack, LINE, or
+WhatsApp like you'd message a person, no desktop window required. It's also a
+native desktop app with a Live2D companion, and a full terminal agent for
+coding tasks — all backed by the same Tauri v2 + Rust + React/TypeScript core,
+so chat, memory, knowledge, tools, and safety policies behave identically no
+matter which door you walk in through.
 
-## 🆕 Recent Updates (v1.11.0)
-
-- **Image Search Tool**: New `image_search` agent action (Google Custom Search Image API with a Brave Images API fallback) lets Mint find and show picture results on request, separate from the automatic thumbnail that already appears on regular web searches. Renders as a native image-grid card on Desktop and Web (`ImageSearchCard.tsx`).
-- **Shared Prompt Module**: Consolidated the previously duplicated persona/system-prompt text across the CLI agent loop, CLI chat mode, and the API server into a single `crates/mint-core/src/prompts/` module (`persona.rs`, `agent.rs`, `chat.rs`), so tone, safety policy, and answer-quality rules only need to be edited once.
-- **More Complete Answers**: Tightened the agent's system prompt so final answers cover everything the user asked instead of being cut short for the sake of brevity.
-- **CLI Markdown Tables**: Tables produced by the agent loop (e.g. skill/repo listings) now render as proper box-drawing tables in the terminal instead of raw `|`-pipe text.
-- **Consolidated Sources UI**: Merged the previously duplicated "image strip + domain cards" layout in the chat Sources panel into a single row, with sources that have a thumbnail shown first and the whole card clickable.
-- **SVG Icons Across Result Cards**: Replaced emoji icons with `lucide-react` SVG icons on the Weather, Stock, Calculation, and Image Search cards for a more consistent look across themes.
-- **Accurate Tool Activity Labels**: The "Working through task" activity table on Desktop and Web now shows the real tool/action name (`web_search`, `image_search`, `weather`, …), matching what the CLI already displays.
-- **Web Deep-Link Fix**: Fixed a bug where opening or refreshing a direct chat URL (e.g. `/chat/<conversation-id>`) on `mint web` showed a blank white page — the production web build used a relative asset base path that broke on any URL besides `/`.
+See [Release Notes](Release_Note.md) for what's new.
 
 ## <img src="assets/features.svg" width="24" height="24" valign="middle" /> What Mint Can Do
 
-Mint is a local-first AI assistant running on your machine, capable of handling tasks via either the desktop application or the terminal interface (CLI):
+Mint is a local-first AI assistant running on your machine, capable of handling tasks from a messaging app, the desktop application, or the terminal interface (CLI):
 
 ---
 
-### 1. <img src="assets/chat.svg" width="18" height="18" valign="middle" /> AI Chat & Multi-Providers
-- Connect to **Gemini, OpenAI, Anthropic (Claude), Ollama (Local), Hugging Face**, and LM Studio.
-- Run private local LLMs inside your machine using Ollama or connect to leading cloud APIs.
-- Supports system instructions, temperature adjustments, voice replies, and image analysis (Multimodal).
+### 1. <img src="assets/bridges.svg" width="18" height="18" valign="middle" /> Reach Mint From Anywhere — Messaging Bridges
+- Message it like a person from **Telegram, Discord (Gateway + RPC), Slack, LINE, WhatsApp, Signal, and Email (Gmail)** — no desktop window required. Each bridge locks to whoever messages it first, and all of them share one continuous memory/conversation with the terminal CLI.
+- Runs unattended 24/7 on a VPS via `mint gateway start`/`install` — a systemd service with a `GET /api/gateway/health` endpoint. See [Running Mint 24/7 on a VPS](#running-mint-247-on-a-vps-headless-gateway).
 
 ---
 
 ### 2. <img src="assets/live2d.svg" width="18" height="18" valign="middle" /> Interactive Live2D Desktop Assistant
-- An interactive anime avatar (**Shiroko**) displayed right on your desktop with gaze tracking (eye/face follows your mouse pointer).
-- Toggle expression changes and cycle through character accessories dynamically.
-- Custom interaction zones (Head, Cheek, Hands, Body) that trigger unique animations and message toasts.
+- An interactive anime avatar (**Shiroko**) on your desktop with gaze tracking, expression/accessory toggles, and interaction zones (Head, Cheek, Hands, Body) that trigger animations and message toasts.
 
 ---
 
-### 3. <img src="assets/code.svg" width="18" height="18" valign="middle" /> Autonomous Code Agent
-- Run code agent loops via `/code <task>` or the terminal command `mint code agent "<task>"`.
-- Scan your project workspace, build multi-file implementation plans, fix test suite errors, and write edits automatically.
-- Run local tests, cargo checks, and shell commands.
+### 3. <img src="assets/chat.svg" width="18" height="18" valign="middle" /> AI Chat & Multi-Providers
+- Connect to **Gemini, OpenAI, Anthropic (Claude), Ollama (Local), Hugging Face**, and OpenAI-compatible custom endpoints — system instructions, temperature control, voice replies, and multimodal image analysis.
+
+---
+
+### 4. <img src="assets/code.svg" width="18" height="18" valign="middle" /> Autonomous Code Agent & Subagents
+- Run code-agent loops via `/code <task>` or `mint code agent "<task>"`: scan the workspace, plan multi-file changes, edit, run tests/shell commands, and verify before finishing.
+- Delegate focused sub-tasks to specialized subagents (`dispatch_subagent`), optionally isolated in a per-session Docker container (`sandboxBackend: "docker"`).
 > [!IMPORTANT]
-> **Safety First:** Risky actions and file writes require your explicit terminal approval first.
+> **Safety First:** Risky actions and file writes require your explicit approval first.
 
 ---
 
-### 4. <img src="assets/memory.svg" width="18" height="18" valign="middle" /> Long-Term Memory & Knowledge Base
-- Persistent conversation memory stored locally in SQLite. Manage user profile memory with `/memory set/get` or CLI commands.
-- Index local directories, text files, and documentation to build your private searchable knowledge base.
+### 5. <img src="assets/memory.svg" width="18" height="18" valign="middle" /> Memory, Knowledge & Self-Written Skills
+- Persistent conversation memory (SQLite), a searchable local knowledge base, and semantic code search.
+- After solving a hard, reusable problem, the agent can write its own skill (`.agents/skills/`) — and genuinely refine an existing one instead of duplicating it, the next time a similar task recurs.
 
 ---
 
-### 5. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Tool & MCP Integrations
-- Support **Model Context Protocol (MCP)** to connect tools like Google/Brave Search, Filesystem servers, and GitHub context.
-- Dedicated **Image Search** tool (Google Custom Search Image / Brave Images) for finding and browsing pictures on request, rendered as an image-grid card on Desktop and Web.
-- **Auto GitHub Link Resolver:** Automatically detects GitHub URLs in chat messages (CLI, Web, and Desktop) and Code Agent tasks. It fetches and injects the repository's metadata, directory structure, and README as prompt context, serving as an instant fallback when the GitHub MCP server is not active.
-- Local plugins for Spotify playback control, Google Calendar, Gmail drafts, and Notion workspace reading.
+### 6. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Scheduled Tasks & Linked Folders
+- `mint cron` runs agent tasks on a schedule with no OS-level daemon — rides along on whatever's already open, or `mint gateway start` for always-on.
+- Link a folder (e.g. "Food") and chat that touches its topic gets a short, cross-referenced note written into it automatically.
 
 ---
 
-### 6. <img src="assets/bridges.svg" width="18" height="18" valign="middle" /> Messaging Bridges
-- Bridge your local AI assistant to messaging services: **Telegram, Discord Gateway, Discord RPC, Slack, LINE, and WhatsApp**.
-- Host local chatbot webhooks that relay chat traffic into your configured LLM.
-> [!TIP]
-> **Headless Background Execution:** Enabled bridges automatically run in the background when you launch either the desktop application OR the local API/Web server (`mint api` / `mint web`). This allows you to chat with Mint from anywhere without needing the desktop GUI window open.
+### 7. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Tool & MCP Integrations
+- **Model Context Protocol (MCP)** servers for Search, Filesystem, GitHub, and more, plus local plugins for Spotify, Google Calendar, Gmail, and Notion — manage all of it interactively with `mint plugins`.
+- Dedicated **Image Search** tool and an **Auto GitHub Link Resolver** that injects a linked repo's metadata/README as context automatically.
 
 ---
 
-### 7. <img src="assets/screencapture.svg" width="18" height="18" valign="middle" /> Screen Capture & Translation
-- Capture screen snapshots for instant visual analysis by the AI.
-- Real-time continuous overlay translation of specific screen regions.
+### 8. <img src="assets/screencapture.svg" width="18" height="18" valign="middle" /> Screen Capture & Translation
+- Capture screen snapshots for instant visual analysis, or run real-time continuous overlay translation of a screen region.
 
 ---
 
-### 8. <img src="assets/imagegen.svg" width="18" height="18" valign="middle" /> AI Image Generation
-- Generate high-quality images directly from chat or terminal using **DALL-E 3, Stability AI (Stable Diffusion), Ideogram, Replicate (Flux)**, and Google NanoBanana.
-- Supports aspect ratio selections, negative prompts, custom image counts, and automatic storage of generated pictures to the local library.
+### 9. <img src="assets/imagegen.svg" width="18" height="18" valign="middle" /> AI Image Generation
+- Generate images from chat or terminal using **DALL-E 3, Stability AI, Ideogram, Replicate (Flux)**, and Google NanoBanana — aspect ratio, negative prompts, and automatic local storage.
 
 ---
 
-### 9. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Browser Automation (`mint auto`)
-- Control and automate web pages directly from either the terminal or the GUI desktop chat.
-- Runs a dedicated, isolated Chromium instance on port `9222` with state separation using the command `mint auto`.
-- Supports opening URLs (`browser_open`), clicking buttons/elements (`browser_click`), typing text (`browser_type`), and extracting content (`browser_read`).
-- **Dynamic Tool Injection:** The agent automatically registers these browser capability tools only when it detects that the automation browser is active on port `9222`.
+### 10. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Browser Automation (`mint auto`)
+- Drives a dedicated, isolated Chromium instance (port `9222`): open URLs, click, type, and extract page content — the agent registers these tools automatically once it detects the automation browser is running.
 
 ---
 
-## Highlights
-
-- Multi-provider chat with Gemini, OpenAI, Anthropic, Ollama, Hugging Face, and
-  local OpenAI-compatible endpoints.
-- Image generation using DALL-E 3, Stability AI, Ideogram, Replicate, and NanoBanana.
-- Native streaming responses, SQLite-backed memory, tasks, searchable local
-  knowledge, skills, and semantic code search.
-- Desktop dashboard with a Live2D assistant, model interaction areas, pictures,
-  screen capture, continuous translation, spotlight, tray, widget, and proactive
-  suggestions.
-- Native code-agent workflow for workspace inspection, planning, editing, shell
-  execution, and verification with explicit approval for risky actions.
-- MCP servers, local plugins, custom workflows, weather, web search, and
-  optional external services.
-- Telegram, Discord Gateway, Discord RPC, Slack Socket Mode, LINE, and WhatsApp
-  Cloud API integrations.
-- Signed Tauri update checks with an explicit approval step before installation.
-- Dynamic local Ollama model fetching in the Settings Window to query and display the actual models installed on your machine.
-- Pill-styled clean horizontal system event dividers for provider and model change notifications in the chat panel.
-- Global unrestricted text selection and copying enabled across all application components.
-- Spacious 1100px widescreen layout for the Chat Panel when the interactive model is hidden.
-- Advanced Workspace File Tree featuring:
-  - Automatic directory refreshing upon window focus and 15-second polling.
-  - Quick action buttons to create new files and folders.
-  - Right-click context menu to delete files/folders with confirmation modals.
-  - Drag-and-drop file mentions in the chat input with automatic spacing and dynamic accent-colored history bubble highlighting.
-
+### 11. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> AI Video Editing via FableMint
+- Connect **[FableMint](https://github.com/Pheem49/FableMint)** — a free, open-source browser video editor — as an MCP server, and Mint can cut, grade, caption, chroma-key, and export edits from plain chat, with the open editor tab live-reloading as it works:
+  ```bash
+  mint mcp add fablemint node --args "<path-to>/FableMint/mcp-server.js"
+  mint mcp allow fablemint "*"
+  ```
+  See [FableMint's README](https://github.com/Pheem49/FableMint#driving-it-with-an-ai-agent) for the full tool list.
 
 ## <img src="assets/setup.svg" width="24" height="24" valign="middle" /> Prerequisites
 
@@ -146,6 +112,7 @@ sudo apt-get install -y \
   build-essential curl file pkg-config wget \
   libdbus-1-dev libwebkit2gtk-4.1-dev \
   libayatana-appindicator3-dev librsvg2-dev \
+  libasound2-dev \
   poppler-utils unzip patchelf
 ```
 
@@ -155,6 +122,7 @@ sudo dnf groupinstall -y "Development Tools"
 sudo dnf install -y \
   webkit2gtk4.1-devel openssl-devel curl wget glibc-devel \
   dbus-devel libayatana-appindicator-devel librsvg2-devel \
+  alsa-lib-devel \
   poppler-utils unzip patchelf
 ```
 
@@ -163,8 +131,12 @@ sudo dnf install -y \
 sudo pacman -Syu --needed \
   base-devel webkit2gtk-4.1 openssl curl wget \
   dbus libayatana-appindicator librsvg \
+  alsa-lib \
   poppler unzip patchelf
 ```
+
+> [!NOTE]
+> ALSA development headers (`libasound2-dev`/`alsa-lib-devel`/`alsa-lib`) are required to build `cpal`, used for native microphone capture in the desktop app's voice input feature.
 
 > [!TIP]
 > **Other Platforms:** If you are developing on macOS or Windows, follow the official [Tauri Prerequisites Guide](https://v2.tauri.app/start/prerequisites/) to set up your build environment.
@@ -224,20 +196,25 @@ npm run tauri:build
 *(The Vite renderer output is generated in `out/renderer` and can be manually built via `npm run build:web`)*
 
 ### 3. Native CLI
-To install the `mint` command-line tool globally:
+Pick one way to get the global `mint` command:
 
-* **Option A (Release Build - Recommended for speed):**
+* **Release build (recommended — fastest to run):**
   ```bash
   cargo build --release -p mint-cli
   sudo cp target/release/mint /usr/local/bin/
   ```
-* **Option B (Cargo Install):**
+* **Cargo install:**
   ```bash
   cargo install --path crates/mint-cli
   ```
-* **Option C (Development Shell Alias):**
-  If you are actively modifying code and want changes to reflect instantly, set up the alias under the [Setting up the mint Shortcut](#setting-up-the-mint-shortcut) section.
+  *(make sure `~/.cargo/bin` is on your shell's `$PATH`)*
+* **Dev alias** — recompiles on every run, so code changes apply instantly; best while actively editing Mint itself:
+  ```bash
+  echo 'alias mint="cargo run --manifest-path $(pwd)/Cargo.toml -p mint-cli --"' >> ~/.bashrc  # or ~/.zshrc
+  source ~/.bashrc  # or ~/.zshrc
+  ```
 
+No alias set up? Everything below still works via `npm run cli -- <command>` in place of `mint <command>`.
 
 ## User Interface
 
@@ -276,67 +253,16 @@ To install the `mint` command-line tool globally:
 
 ## Desktop Assistant
 
-The desktop application provides:
-
-- A streaming chat panel with provider selection and optional smart context.
-- A Live2D model panel with gaze tracking, interaction zones, and visual area
-  guides.
-- Local conversation memory, tasks, searchable knowledge, and pictures.
-- Screen capture and continuous screen translation.
-- Spotlight, widget, tray, proactive glow, and background task queue windows.
-- Settings for models, API keys, voice, automation, integrations, MCP servers,
-  workflows, appearance, updates, and agent collaboration.
-
-The sidebar, Live2D interaction state, and area-guide visibility are stored
-locally so the dashboard restores the previous UI state after restarting.
+The desktop app adds Spotlight, a system tray widget, and a background
+task-queue window on top of everything in "What Mint Can Do" above. The
+sidebar, Live2D interaction state, and area-guide visibility persist locally,
+so the dashboard restores its previous state after a restart.
 
 ## Native CLI
 
-You can interact with Mint's Rust backend directly using the command line. If you set up the `mint` shortcut alias, you can run commands directly as `mint <command>`. Otherwise, you can fall back to running them through npm as `npm run cli -- <command>`.
-
-### Setting up the `mint` Shortcut
-
-You can choose one of the following methods to enable the global `mint` command:
-
-**Option 1: Using Shell Alias (For active development - updates instantly on code changes)**
-
-To run the commands using the prefix `mint` from anywhere in your workspace (automatically compiling your code updates on execution):
-
-*For Bash (`~/.bashrc`):*
-```bash
-echo 'alias mint="cargo run --manifest-path /home/pheem49/vscode/Project/Mint-CLI/Cargo.toml -p mint-cli --"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-*For Zsh (`~/.zshrc`):*
-```bash
-echo 'alias mint="cargo run --manifest-path /home/pheem49/vscode/Project/Mint-CLI/Cargo.toml -p mint-cli --"' >> ~/.zshrc
-source ~/.zshrc
-```
-
-**Option 2: Install via Cargo (For standard Rust installation)**
-
-This will compile the Rust CLI and install it inside your native Cargo binary directory:
-
-```bash
-cargo install --path crates/mint-cli
-```
-*Note: Make sure your `~/.cargo/bin` is added to your shell's `$PATH` variable.*
-
-**Option 3: Compile and Install Globally (For release binary - fastest run speed)**
-
-If you want to compile the project in release mode and install it directly to your system's global binaries directory (for the fastest startup time without cargo check overhead):
-
-```bash
-# Build the binary in release mode
-cargo build --release -p mint-cli
-
-# Copy it into your system binary directory
-sudo cp target/release/mint /usr/local/bin/
-```
-Once copied, you can run `mint` globally from any folder in your terminal!mint chat "Hello"
-
----
+You can interact with Mint's Rust backend directly using the command line —
+install the `mint` shortcut in [Installation](#3-native-cli) above, or fall
+back to `npm run cli -- <command>` in its place.
 
 ### Start Interactive Chat Assistant
 
@@ -375,6 +301,9 @@ mint chat "<message>"
 | `mint plugins` | Centralized interactive management for built-in ecosystem plugins & skills |
 | `mint web` | Launch the web UI and local API server |
 | `mint api` | Start only the local API server |
+| `mint gateway start` | Run headless: bridges + cron, no TUI — for VPS/systemd use |
+| `mint gateway start --api-port <N>` | Same, plus the local API/WebUI on port `<N>` |
+| `mint gateway install [--system] [--now] [--memory-max <size>]` | Register `mint gateway start` as a systemd unit |
 | `mint auto` | Launch the GUI browser automation isolated port |
 | `mint status` | Show runtime status |
 | `mint config init` | Create the local configuration file |
@@ -394,8 +323,6 @@ mint chat "<message>"
 | `mint mcp list` | List configured MCP servers |
 | `mint learn <path>` | Import a persistent learned skill file |
 | `mint update --check` | Check for an available update |
-
-
 
 ### Code Agent
 
@@ -480,6 +407,110 @@ mint mcp call filesystem list_directory \
 | `/code <task>` | Start a code-agent task |
 | `/exit` or `/quit` | Leave interactive mode |
 
+## Running Mint 24/7 on a VPS (Headless Gateway)
+
+By default, messaging bridges and cron only run while something's actually
+attached — the interactive terminal, the desktop app, or `mint web`/`mint
+api`. **Gateway mode** is a real headless mode built for unattended
+deployment: no TUI, no desktop window, just the bridges and the cron
+scheduler running in the background, installable as a systemd service that
+survives reboots.
+
+### How it works
+
+- `mint gateway start` calls the exact same `start_channels()`/
+  `start_cron_scheduler()` the interactive app uses — it just never launches
+  the terminal UI, so it needs no TTY and can run under systemd with no
+  login session attached.
+- Every bridge loop auto-restarts on error *or* panic (5s backoff), so a bad
+  payload from one platform can't silently and permanently kill that bridge.
+- All bridges (Telegram, Discord, Slack, LINE, WhatsApp, Signal, Email) share
+  one continuous memory thread with the terminal CLI, not a siloed one per
+  platform.
+- `GET /api/gateway/health` reports each bridge's enabled state, last
+  success, last error, and consecutive-failure count as JSON — check it
+  remotely instead of SSHing in to read `journalctl`.
+
+### Quick start on a fresh VPS
+
+```bash
+# 1. Install Mint (Linux, needs Node/npm + Rust — the installer offers to set both up)
+curl -fsSL https://raw.githubusercontent.com/Pheem49/Mint/main/install.sh | bash
+
+# 2. Configure a provider + the bridge(s) you want (Telegram, Signal, Email, ...)
+mint onboard
+
+# 3. Test in the foreground first — fix any config errors here before installing as a service
+mint gateway start
+# Ctrl+C once you see your bridge(s) come up "Active" and a test message gets a reply
+
+# 4. Install as a systemd service and start it now
+mint gateway install --now --api-port 3000 --memory-max 512M
+
+# 5. Per-user units (the default) only run while you're logged in —
+#    this keeps it running after you log out / reboot with no session at all
+sudo loginctl enable-linger "$(whoami)"
+```
+
+### Gateway commands
+
+| Command | Purpose |
+| --- | --- |
+| `mint gateway start` | Run bridges + cron in the foreground, headless (no TUI) |
+| `mint gateway start --api-port <N>` | Same, plus the local API/WebUI on port `<N>` |
+| `mint gateway install` | Write + enable a per-user systemd unit (`~/.config/systemd/user/`, no root) |
+| `mint gateway install --system` | Same, but system-wide (`/etc/systemd/system/`, needs `sudo`) |
+| `mint gateway install --now` | Also start the service immediately after installing it |
+| `mint gateway install --memory-max <size>` | Cap the service's memory (systemd size syntax, e.g. `512M`, `1G`) — unset by default |
+
+Once installed:
+
+```bash
+systemctl --user status mint.service      # or `systemctl status mint` with --system
+journalctl --user -u mint.service -f      # follow logs
+```
+
+### Checking on it remotely
+
+Don't expose the API/WebUI port to the public internet — reach it over an
+SSH tunnel or [Tailscale](https://tailscale.com/) instead:
+
+```bash
+ssh -L 3000:localhost:3000 you@your-vps
+curl http://localhost:3000/api/gateway/health
+```
+
+For an extra layer beyond the tunnel itself, set a shared secret so every API
+request needs it:
+
+```bash
+mint config set apiAuthToken "$(openssl rand -hex 32)"
+```
+
+Once set, every request (except the browser's CORS preflight) needs
+`Authorization: Bearer <token>` or gets `401 Unauthorized`. Leave it unset to
+keep the previous open-on-localhost behavior (desktop app / `mint web` don't
+need to change anything).
+
+### New bridges built for this: Signal and Email
+
+- **Signal** has no official bot API, so Mint talks to a self-hosted
+  [`signal-cli-rest-api`](https://github.com/bbernhard/signal-cli-rest-api)
+  instance instead (you link the number yourself first). Config:
+  `enableSignalBridge`, `signalApiUrl`, `signalNumber`.
+- **Email** reuses the same Gmail OAuth connection as the `gmail` plugin —
+  set `gmailClientId`/`gmailClientSecret`, run `mint gmail auth` once to get
+  a refresh token, then enable it. Both are offered directly in `mint
+  onboard` under "Messaging Bridges".
+
+> [!NOTE]
+> LINE and WhatsApp are webhook-based (the provider pushes to you), which
+> means they need a real public HTTPS URL — a reverse proxy (Caddy/nginx) +
+> TLS cert in front of the VPS. Telegram, Discord, Slack, Signal, and Email
+> all connect *outbound* instead, so they need nothing public at all. See
+> [`docs/WEBHOOK_FORWARDING.md`](docs/WEBHOOK_FORWARDING.md) before exposing
+> a webhook listener.
+
 ## Configuration
 
 Mint stores its local configuration in the platform config directory:
@@ -526,7 +557,10 @@ through a TLS tunnel.
 
 Mint keeps high-risk behavior behind explicit policy checks:
 
-- Shell commands are evaluated before execution.
+- Shell commands are evaluated before execution, then run inside an OS-level
+  sandbox by default (bubblewrap on Linux, Seatbelt on macOS —
+  `sandboxMode`). Subagents can additionally be isolated in a per-session
+  Docker container (`sandboxBackend: "docker"`).
 - Code edits and update installation require approval.
 - Sensitive directories such as `.ssh`, `.gnupg`, and Mint's own config
   directory are protected by default.
@@ -534,6 +568,18 @@ Mint keeps high-risk behavior behind explicit policy checks:
   routine workspace access.
 - LINE and WhatsApp webhook services listen locally unless you intentionally
   forward them.
+- Every messaging bridge (Telegram, Discord, Slack, LINE, WhatsApp, Signal,
+  Email) locks itself to a single owner: the first sender it ever hears from
+  is claimed as that owner, and every other sender is silently ignored from
+  then on. To hand a bridge to a different sender, clear its stored owner id
+  (e.g. `mint config set telegramOwnerChatId ""`) before they message it.
+- The local API server (`mint api`, `mint web`, `mint gateway start
+  --api-port`) is open by default, matching the assumption that it's only
+  reached from localhost or your own desktop/web frontend. If you expose the
+  port on a VPS, set `apiAuthToken` (`mint config set apiAuthToken
+  "<secret>"`) to require every request to carry `Authorization: Bearer
+  <token>` — and still prefer an SSH tunnel or Tailscale over opening the
+  port publicly regardless. See [Running Mint 24/7 on a VPS](#running-mint-247-on-a-vps-headless-gateway).
 
 Review the generated command or edit preview before approving an action.
 
@@ -567,7 +613,7 @@ above. See [`TAURI_MIGRATION.md`](TAURI_MIGRATION.md) for compatibility notes.
 
 ## Contributing
 
-We welcome contributions from the community! Whether you want to fix a bug, add a new provider, or build a new integration, please check out our [CONTRIBUTING.md](file:///home/pheem49/vscode/Project/Mint-CLI/CONTRIBUTING.md) guide for setup instructions, project architecture details, and our roadmap.
+We welcome contributions from the community! Whether you want to fix a bug, add a new provider, or build a new integration, please check out our [CONTRIBUTING.md](CONTRIBUTING.md) guide for setup instructions, project architecture details, and our roadmap.
 
 ## License
 

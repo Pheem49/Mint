@@ -22,8 +22,8 @@
     "noFallthroughCasesInSwitch": true,
 
     "paths": {
-      "@/*": ["./src/renderer/src/*"],
-      "@shared/*": ["./src/*"]
+      "@/*": ["./src/renderer/src/*", "./src/renderer/src-web/*"],
+      "@shared/*": ["./src/renderer/shared/*"]
     }
   },
   "include": ["src/renderer/src", "src/renderer/src-web", "src/renderer/src/env.d.ts"]

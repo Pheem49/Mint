@@ -18,6 +18,10 @@ import type {
   CodeEditProposal,
   LearnedSkill,
   AuthUser,
+  CronJob,
+  CronJobDraft,
+  LinkedFolder,
+  LinkedFolderDraft,
 } from '../shared/types'
 
 
@@ -280,6 +284,31 @@ export async function detectSystemTools(): Promise<DetectedTools> {
   return invoke<DetectedTools>('detect_system_tools')
 }
 
+/**
+ * Re-runs a configured MCP server's OAuth login in the foreground — fixes a
+ * stale/expired refresh token (e.g. `invalid_grant` from a Gmail MCP
+ * server). Opens the OAuth URL in the user's browser and blocks server-side
+ * until the flow completes, so callers should keep the UI responsive
+ * (disable just the triggering button) rather than blocking the whole view.
+ */
+export async function reauthMcpServer(serverName: string): Promise<boolean> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase()
+    const res = await authFetch(`${API_BASE}/mcp/reauth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serverName }),
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) {
+      throw new Error(data?.error || `Re-authentication failed: HTTP ${res.status}`)
+    }
+    return Boolean(data?.success)
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<boolean>('reauth_mcp_server', { serverName })
+}
+
 export async function sendChatMessage(
   message: string,
   imageDataUri?: string | null,
@@ -353,6 +382,11 @@ export async function streamChatMessage(
   workspacePath?: string | null,
   chatId?: string | null,
   agentId?: string | null,
+  // Unused on web (no plan-mode-approval UI here) — kept only so this positional
+  // arg list stays aligned with the desktop `tauri.ts`, since the shared
+  // `MintDashboard.tsx` call site passes the same argument list to both builds.
+  _planMode?: boolean,
+  pinnedMcpServer?: string | null,
 ): Promise<ChatResponse> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
@@ -360,7 +394,7 @@ export async function streamChatMessage(
     const res = await authFetch(`${API_BASE}/chat-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId })
+      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId, pinnedMcpServer })
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -406,7 +440,7 @@ export async function streamChatMessage(
     else onProgress?.(event.progress)
   }
   const response = await invoke<ChatResponse>('stream_chat_message', {
-    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId },
+    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId, pinnedMcpServer },
     onEvent,
   })
   if (imageDataUri) {
@@ -1558,6 +1592,96 @@ export async function deleteSubagent(sourcePath: string): Promise<void> {
   }
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('delete_subagent', { sourcePath })
+}
+
+export async function listCronJobs(): Promise<CronJob[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/cron`)
+    if (!res.ok) return []
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<CronJob[]>('list_cron_jobs')
+}
+
+export async function addCronJob(draft: CronJobDraft): Promise<CronJob> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/cron`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft)
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to create scheduled task.' }))
+      throw new Error(err.error || 'Failed to create scheduled task.')
+    }
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<CronJob>('add_cron_job', { draft })
+}
+
+export async function removeCronJob(id: string): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/cron/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    })
+    if (!res.ok) throw new Error('Failed to remove scheduled task.')
+    return
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('remove_cron_job', { id })
+}
+
+export async function setCronJobEnabled(id: string, enabled: boolean): Promise<CronJob | null> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/cron/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`, {
+      method: 'POST'
+    })
+    if (!res.ok) throw new Error('Failed to update scheduled task.')
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<CronJob | null>('set_cron_job_enabled', { id, enabled })
+}
+
+export async function listLinkedFolders(): Promise<Record<string, LinkedFolder>> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/linked-folders`)
+    if (!res.ok) return {}
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<Record<string, LinkedFolder>>('list_linked_folders')
+}
+
+export async function addLinkedFolder(draft: LinkedFolderDraft): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/linked-folders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft)
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to link folder.' }))
+      throw new Error(err.error || 'Failed to link folder.')
+    }
+    return
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('add_linked_folder', { draft })
+}
+
+export async function removeLinkedFolder(name: string): Promise<void> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/linked-folders/${encodeURIComponent(name)}`, {
+      method: 'DELETE'
+    })
+    if (!res.ok) throw new Error('Failed to unlink folder.')
+    return
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('remove_linked_folder', { name })
 }
 
 export async function getWorkspaceTree(path?: string | null): Promise<WorkspaceTreeEntry> {

@@ -1,43 +1,66 @@
 #![recursion_limit = "256"]
 
-pub mod agent_loop;
-pub mod auth;
-pub mod auto_shorts;
+// Grouped by theme into subdirectories (agent/media/integrations/search/system)
+// rather than 40 flat sibling files — browser/cron/orchestration/prompts were
+// already organized this way. Each group module just declares its members;
+// the `pub use group::member;` lines below re-export every member at its old
+// flat path (`crate::chat`, `crate::config`, ...) so this reorganization is
+// transparent to every existing `crate::chat::X` / `mint_core::chat::X`
+// reference elsewhere in the workspace — nothing outside this file changed.
+pub mod agent;
 pub mod browser;
-pub mod calculation;
-pub mod chat;
-pub mod code_tools;
-pub mod config;
-pub mod files;
-pub mod gemini_live;
-pub mod hooks;
-pub mod image_gen;
-pub mod image_search;
-pub mod knowledge;
-pub mod mcp;
-pub mod memory;
-pub mod oauth;
+pub mod cron;
+pub mod integrations;
+pub mod media;
 pub mod orchestration;
-pub mod pictures;
-pub mod plugins;
 pub mod prompts;
-pub mod safety;
-pub mod semantic;
-pub mod shell;
-pub mod skills;
-pub mod speech;
-pub mod stock;
-pub mod subagents;
-pub mod subtitle;
-pub mod symbols;
-pub mod tasks;
-pub mod timeline;
-pub mod tts;
-pub mod video_edit;
-pub mod video_gen;
-pub mod weather;
-pub mod web_search;
-pub mod workflows;
+pub mod search;
+pub mod system;
+
+pub use agent::agent_loop;
+pub use agent::chat;
+pub use agent::code_tools;
+pub use agent::memory;
+pub use agent::safety;
+pub use agent::skills;
+pub use agent::subagents;
+pub use agent::tasks;
+
+pub use media::auto_shorts;
+pub use media::gemini_live;
+pub use media::image_gen;
+pub use media::image_search;
+pub use media::mic_transcribe;
+pub use media::pictures;
+pub use media::speech;
+pub use media::subtitle;
+pub use media::timeline;
+pub use media::tts;
+pub use media::video_edit;
+pub use media::video_gen;
+
+pub use integrations::bridge_health;
+pub use integrations::hooks;
+pub use integrations::mcp;
+pub use integrations::oauth;
+pub use integrations::plugins;
+pub use integrations::workflows;
+
+pub use search::files;
+pub use search::knowledge;
+pub use search::linked_folders;
+pub use search::semantic;
+pub use search::symbols;
+pub use search::web_search;
+
+pub use system::auth;
+pub use system::bg_shell;
+pub use system::calculation;
+pub use system::config;
+pub use system::docker_sandbox;
+pub use system::shell;
+pub use system::stock;
+pub use system::weather;
 
 pub use agent_loop::{AgentActionFuture, AgentLoopError, parse_agent_json, run_agent_loop};
 pub use auth::{
@@ -71,6 +94,10 @@ pub use config::{
     MintConfig, PermissionDecision, PermissionRule, ToolCallingMode, config_path,
     initialize_config, load_config, permission_decision_for, save_config, set_config_value,
 };
+pub use cron::{
+    CronError, CronJob, CronJobDraft, CronStore, localize_schedule, start_cron_scheduler,
+};
+pub use docker_sandbox::{docker_available, has_session, start_session, stop_session};
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
 pub use gemini_live::{
     GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session,
@@ -86,18 +113,26 @@ pub use image_search::{ImageHit, ImageSearchError, ImageSearchReport, image_sear
 pub use knowledge::{
     KnowledgeError, KnowledgeHit, KnowledgeSource, KnowledgeStore, extract_document_text,
 };
+pub use linked_folders::{
+    LinkedFolder, LinkedFolderDraft, LinkedFolderError, add_linked_folder,
+    configured_linked_folders, list_linked_folders, remove_linked_folder, spawn_linked_folder_note,
+};
 pub use mcp::{
     McpError, McpServer, add_mcp_server, call_configured_mcp_tool, call_mcp_tool,
     clear_mcp_servers, close_all_mcp_sessions, close_mcp_session, configured_mcp_servers,
     drain_mcp_notifications, get_server_prompt, list_mcp_servers, list_server_prompts,
-    list_server_resources, list_server_tools, read_server_resource, remove_mcp_server,
+    list_server_resources, list_server_tools, read_server_resource, reauth_mcp_server,
+    remove_mcp_server,
 };
 pub use memory::{
     CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, InteractionMemory, LearnedSkill,
     MemoryError, MemoryStore, WorkspaceSession, memory_path,
 };
+pub use mic_transcribe::{
+    MicRecordingHandle, MicTranscribeError, start_recording, stop_recording, transcribe_recording,
+};
 pub use orchestration::{
-    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, OrchestrationError,
+    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption, OrchestrationError,
     orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
     orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
 };
@@ -151,8 +186,8 @@ pub use weather::{WeatherError, WeatherReport, weather};
 pub use workflows::{WorkflowError, load_workflows, save_workflows, workflows_path};
 pub mod api_server;
 pub use api_server::start_api_server;
-pub mod channels;
 pub use channels::start_channels;
+pub use integrations::channels;
 
 pub static HTTP_CLIENT: std::sync::LazyLock<reqwest::Client> =
     std::sync::LazyLock::new(reqwest::Client::new);
@@ -168,5 +203,44 @@ pub fn cancel_agent(chat_id: &str) -> bool {
         true
     } else {
         false
+    }
+}
+
+/// Plain-text notices from detached background tasks (currently just
+/// [`linked_folders::spawn_linked_folder_note`]) that a UI surface can drain
+/// and display whenever convenient — mirrors how `crates/mint-cli`'s `/bg`
+/// job queue works, just at the process level since linked-folder notes can
+/// be written from any of the CLI/desktop/web chat paths, not CLI-only code.
+pub static LINKED_FOLDER_NOTICES: std::sync::LazyLock<std::sync::Mutex<Vec<String>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+
+pub fn push_linked_folder_notice(message: String) {
+    LINKED_FOLDER_NOTICES.lock().unwrap().push(message);
+}
+
+pub fn take_linked_folder_notices() -> Vec<String> {
+    std::mem::take(&mut *LINKED_FOLDER_NOTICES.lock().unwrap())
+}
+
+#[cfg(test)]
+mod linked_folder_notice_tests {
+    use super::*;
+
+    #[test]
+    fn pushed_notices_are_drained_exactly_once() {
+        // Isolate from other tests touching the same process-global queue.
+        let _ = take_linked_folder_notices();
+
+        push_linked_folder_notice("Saved note to Food (Food/mint-notes/2026-08-09.md)".into());
+        push_linked_folder_notice(
+            "Saved note to YouTube (YouTube/mint-notes/2026-08-09.md)".into(),
+        );
+
+        let notices = take_linked_folder_notices();
+        assert_eq!(notices.len(), 2);
+        assert!(notices[0].contains("Food"));
+
+        // Draining empties the queue.
+        assert!(take_linked_folder_notices().is_empty());
     }
 }

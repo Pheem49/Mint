@@ -11,6 +11,8 @@ import WeatherCard from '../components/WeatherCard'
 import StockCard from '../components/StockCard'
 import CalculationCard from '../components/CalculationCard'
 import ImageSearchCard from '../components/ImageSearchCard'
+import ImageGenCard from '../components/ImageGenCard'
+import MermaidCard from '../components/MermaidCard'
 
 export const resolveMediaUrl = (url: string): string => {
   if (!url) return ''
@@ -226,6 +228,15 @@ function renderCodeCard(lang: string, codeText: string): ReactNode {
       } catch {
         return <ChatCodeBlock code={codeText} language={lang} />
       }
+    case 'image_gen_json':
+    case 'image-gen-json':
+      try {
+        return <ImageGenCard data={JSON.parse(codeText)} />
+      } catch {
+        return <ChatCodeBlock code={codeText} language={lang} />
+      }
+    case 'mermaid':
+      return <MermaidCard code={codeText} />
     default:
       return <ChatCodeBlock code={codeText} language={lang} />
   }

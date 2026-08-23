@@ -2,9 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Mint Agent (Web)</title>
   <link rel="icon" type="image/png" href="/assets/icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#111827">
+  <meta name="mobile-web-app-capable" content="yes">
+  <!-- iOS ignores the Web App Manifest for "Add to Home Screen" styling, and
+       ignores the standard `mobile-web-app-capable` tag above — these are
+       its own equivalent of theme_color/icons/display: standalone. -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Mint">
+  <link rel="apple-touch-icon" href="/assets/icon-512.png">
   <!-- Load font families used in settings -->
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Mali:wght@400;500;600&family=Prompt:wght@400;500;600&family=Sarabun:wght@400;500;600&family=Kanit:wght@400;500;600&family=Mitr:wght@400;500&family=Noto+Sans+Thai:wght@400;500;600&family=Inter:wght@400;500;600&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
   <!-- Cubism must be available before the Live2D module is imported. -->

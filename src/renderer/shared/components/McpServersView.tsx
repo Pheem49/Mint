@@ -18,6 +18,7 @@ export interface McpServersViewProps {
   handleAddMcpServer: () => void
   handleRemoveMcpServer: (name: string) => void
   detectTools?: () => Promise<{ docker: boolean; git: boolean; gh: boolean; node: boolean }>
+  onReauth?: (name: string) => Promise<boolean>
 }
 
 export const McpServersView: React.FC<McpServersViewProps> = React.memo(function McpServersView({
@@ -36,11 +37,13 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
   handleAddMcpServer,
   handleRemoveMcpServer,
   detectTools,
+  onReauth,
 }) {
   const [detectedTools, setDetectedTools] = useState({ docker: false, git: false, gh: false, node: false })
-  const [expandedMcp, setExpandedMcp] = useState<string | null>(null)
+  const [detailMcpName, setDetailMcpName] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [reauthStatus, setReauthStatus] = useState<Record<string, 'idle' | 'running' | 'success' | 'error'>>({})
 
   useEffect(() => {
     if (detectTools) {
@@ -124,6 +127,23 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
     (item.description || '').toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  const installedMcpItems = mcpListItems.filter((item) => item.isEnabled)
+
+  const handleReauth = async (name: string) => {
+    if (!onReauth) return
+    setReauthStatus((prev) => ({ ...prev, [name]: 'running' }))
+    try {
+      const success = await onReauth(name)
+      setReauthStatus((prev) => ({ ...prev, [name]: success ? 'success' : 'error' }))
+    } catch {
+      setReauthStatus((prev) => ({ ...prev, [name]: 'error' }))
+    } finally {
+      setTimeout(() => {
+        setReauthStatus((prev) => ({ ...prev, [name]: 'idle' }))
+      }, 2500)
+    }
+  }
+
   const onSubmitAddServer = (e: React.FormEvent) => {
     e.preventDefault()
     handleAddMcpServer()
@@ -184,376 +204,307 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
         </div>
       </div>
 
+      {/* Installed */}
+      {installedMcpItems.length > 0 && (
+        <div className="management-installed-section">
+          <h2 className="management-section-title">Installed</h2>
+          <div className="management-installed-row">
+            {installedMcpItems.map((item) => (
+              <button
+                key={item.name}
+                type="button"
+                className="management-plugin-avatar"
+                title={item.name}
+                onClick={() => setDetailMcpName(item.name)}
+              >
+                {renderMcpSvgIcon(item.name, item.customIcon)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* MCP Server List */}
+      <h2 className="management-section-title">All Servers</h2>
       {filteredMcpItems.length === 0 ? (
-        <div style={{ padding: '48px 24px', textAlign: 'center', background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.08)', borderRadius: '14px', color: '#94a3b8' }}>
-          <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🔌</div>
-          <div style={{ fontWeight: 600, color: '#e2e8f0', marginBottom: '4px' }}>No MCP Servers Configured</div>
-          <div style={{ fontSize: '0.85rem' }}>Click "Add MCP Server" to connect a new Model Context Protocol tool.</div>
+        <div className="management-empty-state">
+          <div className="management-empty-icon">🔌</div>
+          <h3 className="management-empty-title">No MCP Servers Configured</h3>
+          <p className="management-empty-desc">
+            Click "Add MCP Server" to connect a new Model Context Protocol tool.
+          </p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {filteredMcpItems.map((item) => {
-            const isExpanded = expandedMcp === item.name
-            const srvConfig = config.mcpServers?.[item.name] || { command: item.command, args: item.args, env: {}, icon: item.customIcon }
+        <div className="management-grid">
+          {filteredMcpItems.map((item) => (
+            <div
+              key={item.name}
+              className="management-plugin-row"
+              onClick={() => setDetailMcpName(item.name)}
+            >
+              <div className="management-card-icon" style={{ background: 'rgba(255, 255, 255, 0.06)', borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+                {renderMcpSvgIcon(item.name, item.customIcon)}
+              </div>
+              <div className="management-plugin-info">
+                <div className="management-plugin-name">
+                  {item.name}
+                  <span className={`management-dot ${item.isEnabled ? 'connected' : ''}`} title={item.isEnabled ? 'Active' : 'Inactive'} />
+                </div>
+                <div className="management-plugin-desc" style={{ fontFamily: 'monospace' }}>
+                  {item.description}
+                </div>
+              </div>
 
-            return (
-              <div
-                key={item.name}
-                style={{
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '12px',
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  overflow: 'hidden',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', flexWrap: 'wrap', gap: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0 }}>
-                    <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: 'rgba(255, 255, 255, 0.06)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-                      {renderMcpSvgIcon(item.name, item.customIcon)}
-                    </div>
+              {item.isEnabled ? (
+                <button
+                  type="button"
+                  className="management-plugin-icon-btn"
+                  title="View details"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setDetailMcpName(item.name)
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="5" cy="12" r="2" />
+                    <circle cx="12" cy="12" r="2" />
+                    <circle cx="19" cy="12" r="2" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="management-plugin-icon-btn"
+                  title="Enable"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleToggleMcpServer(item.name, true, item.command, item.args)
+                    setDetailMcpName(item.name)
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#f8fafc' }}>
-                          {item.name}
-                        </span>
-                        {!item.isConfigured && (
-                          <span style={{ fontSize: '0.7rem', padding: '2px 6px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', borderRadius: '4px', fontWeight: 600 }}>
-                            Discovered
-                          </span>
-                        )}
-                        {item.isEnabled && (
-                          <span style={{ fontSize: '0.7rem', padding: '2px 6px', background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', borderRadius: '4px', fontWeight: 600 }}>
-                            Active
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: '#94a3b8', marginTop: '3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {item.description}
-                      </div>
-                    </div>
+      {/* MCP Server Detail */}
+      {detailMcpName && (() => {
+        const item = mcpListItems.find((i) => i.name === detailMcpName)
+        if (!item) return null
+        const srvConfig = config.mcpServers?.[item.name] || { command: item.command, args: item.args, env: {}, icon: item.customIcon }
+
+        return (
+          <div className="management-modal-overlay" onClick={() => setDetailMcpName(null)}>
+            <div className="management-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="management-modal-header">
+                <div className="management-card-title-group">
+                  <div className="management-card-icon" style={{ width: 44, height: 44, background: 'rgba(255, 255, 255, 0.06)', borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+                    {renderMcpSvgIcon(item.name, item.customIcon)}
                   </div>
+                  <h2 className="management-modal-title">{item.name}</h2>
+                </div>
+                <button type="button" className="management-modal-close" onClick={() => setDetailMcpName(null)}>
+                  ✕
+                </button>
+              </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: 'auto' }}>
-                    {item.isConfigured && (
-                      <>
-                        <button
-                          type="button"
-                          className="management-action-btn"
-                          onClick={() => setExpandedMcp(isExpanded ? null : item.name)}
-                        >
-                          Configure
-                        </button>
-                        <button
-                          type="button"
-                          className="management-action-btn danger"
-                          onClick={() => handleRemoveMcpServer(item.name)}
-                          title="Remove MCP Server"
-                        >
-                          Remove
-                        </button>
-                      </>
-                    )}
-
-                    <label className="settings-toggle-switch" title={item.isEnabled ? 'Disable server' : 'Enable server'}>
-                      <input
-                        type="checkbox"
-                        checked={item.isEnabled}
-                        onChange={(e) => {
-                          handleToggleMcpServer(item.name, e.target.checked, item.command, item.args)
-                        }}
-                      />
-                      <span className="settings-toggle-slider" />
-                    </label>
-                  </div>
+              <div className="management-modal-body">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <label className="settings-toggle-switch" title={item.isEnabled ? 'Disable server' : 'Enable server'}>
+                    <input
+                      type="checkbox"
+                      checked={item.isEnabled}
+                      onChange={(e) => handleToggleMcpServer(item.name, e.target.checked, item.command, item.args)}
+                    />
+                    <span className="settings-toggle-slider" />
+                  </label>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-muted, #94a3b8)' }}>
+                    {item.isEnabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                  {!item.isConfigured && (
+                    <span className="management-badge workspace" style={{ marginLeft: 'auto' }}>
+                      Discovered
+                    </span>
+                  )}
                 </div>
 
-                {item.isConfigured && isExpanded && (
-                  <div
-                    style={{
-                      padding: '20px',
-                      borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-                      background: 'rgba(0, 0, 0, 0.2)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '14px',
-                    }}
-                  >
-                    <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0 }}>
-                      Edit Server Config ({item.name})
+                {item.isConfigured && (
+                  <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border, rgba(255, 255, 255, 0.08))' }}>
+                    <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent, #3b82f6)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 12px' }}>
+                      Server Config
                     </h4>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px' }}>Command</label>
+                    <div style={{ display: 'grid', gap: '12px' }}>
+                      <div className="management-form-group">
+                        <label className="management-label">Command</label>
                         <input
                           type="text"
+                          className="management-input-field"
                           value={srvConfig.command || ''}
                           onChange={(e) => handleUpdateMcpServerField(item.name, 'command', e.target.value)}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            borderRadius: '8px',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            background: 'rgba(255,255,255,0.04)',
-                            color: '#f8fafc',
-                            fontSize: '0.85rem',
-                            boxSizing: 'border-box',
-                          }}
                         />
                       </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px' }}>Icon (Preset / URL / SVG)</label>
+                      <div className="management-form-group">
+                        <label className="management-label">Arguments (space-separated)</label>
                         <input
                           type="text"
+                          className="management-input-field"
+                          value={(srvConfig.args || []).join(' ')}
+                          onChange={(e) => handleUpdateMcpServerField(item.name, 'args', e.target.value.split(/\s+/).filter(Boolean))}
+                        />
+                      </div>
+                      <div className="management-form-group">
+                        <label className="management-label">Icon (preset / URL / SVG)</label>
+                        <input
+                          type="text"
+                          className="management-input-field"
                           placeholder="e.g. search, database, code"
                           value={srvConfig.icon || ''}
                           onChange={(e) => handleUpdateMcpServerField(item.name, 'icon', e.target.value)}
-                          style={{
-                            width: '100%',
-                            padding: '8px 12px',
-                            borderRadius: '8px',
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            background: 'rgba(255,255,255,0.04)',
-                            color: '#f8fafc',
-                            fontSize: '0.85rem',
-                            boxSizing: 'border-box',
-                          }}
                         />
                       </div>
-                    </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px' }}>Arguments (Space-separated)</label>
-                      <input
-                        type="text"
-                        value={(srvConfig.args || []).join(' ')}
-                        onChange={(e) => handleUpdateMcpServerField(item.name, 'args', e.target.value.split(/\s+/).filter(Boolean))}
-                        style={{
-                          width: '100%',
-                          padding: '8px 12px',
-                          borderRadius: '8px',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          background: 'rgba(255,255,255,0.04)',
-                          color: '#f8fafc',
-                          fontSize: '0.85rem',
-                          boxSizing: 'border-box',
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px' }}>Environment Variables (JSON)</label>
-                      <textarea
-                        value={typeof srvConfig.env === 'object' ? JSON.stringify(srvConfig.env, null, 2) : srvConfig.env || ''}
-                        onChange={(e) => {
-                          try {
-                            const parsed = JSON.parse(e.target.value)
-                            handleUpdateMcpServerField(item.name, 'env', parsed)
-                          } catch {
-                            // allow live editing
-                          }
-                        }}
-                        rows={3}
-                        style={{
-                          width: '100%',
-                          padding: '8px 12px',
-                          borderRadius: '8px',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          background: 'rgba(255,255,255,0.04)',
-                          color: '#f8fafc',
-                          fontSize: '0.85rem',
-                          fontFamily: 'monospace',
-                          boxSizing: 'border-box',
-                          resize: 'vertical',
-                        }}
-                      />
+                      <div className="management-form-group">
+                        <label className="management-label">Environment Variables (JSON)</label>
+                        <textarea
+                          className="management-textarea-field"
+                          value={typeof srvConfig.env === 'object' ? JSON.stringify(srvConfig.env, null, 2) : srvConfig.env || ''}
+                          onChange={(e) => {
+                            try {
+                              const parsed = JSON.parse(e.target.value)
+                              handleUpdateMcpServerField(item.name, 'env', parsed)
+                            } catch {
+                              // allow live editing
+                            }
+                          }}
+                          rows={3}
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
-            )
-          })}
-        </div>
-      )}
+
+              <div className="management-modal-footer">
+                {item.isConfigured && onReauth ? (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted, #94a3b8)' }}>
+                    {reauthStatus[item.name] === 'success' && 'Done ✓'}
+                    {reauthStatus[item.name] === 'error' && 'Re-authentication failed'}
+                  </span>
+                ) : (
+                  <span />
+                )}
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {item.isConfigured && onReauth && (
+                    <button
+                      type="button"
+                      className="management-action-btn"
+                      disabled={reauthStatus[item.name] === 'running'}
+                      onClick={() => handleReauth(item.name)}
+                    >
+                      {reauthStatus[item.name] === 'running' ? 'Re-authenticating...' : 'Re-authenticate'}
+                    </button>
+                  )}
+                  {item.isConfigured && (
+                    <button
+                      type="button"
+                      className="management-action-btn danger"
+                      onClick={() => {
+                        handleRemoveMcpServer(item.name)
+                        setDetailMcpName(null)
+                      }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Add MCP Server Modal */}
       {showAddModal && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.7)',
-            backdropFilter: 'blur(4px)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 1000,
-            padding: '20px',
-          }}
-          onClick={() => setShowAddModal(false)}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: '540px',
-              background: '#18181b',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: '14px',
-              padding: '24px',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc', margin: 0 }}>
-                Add New MCP Server
-              </h2>
-              <button
-                type="button"
-                onClick={() => setShowAddModal(false)}
-                style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.2rem', cursor: 'pointer' }}
-              >
+        <div className="management-modal-overlay" onClick={() => setShowAddModal(false)}>
+          <div className="management-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="management-modal-header">
+              <h2 className="management-modal-title">Add New MCP Server</h2>
+              <button type="button" className="management-modal-close" onClick={() => setShowAddModal(false)}>
                 ✕
               </button>
             </div>
 
-            <form onSubmit={onSubmitAddServer} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px' }}>Server Name</label>
+            <form onSubmit={onSubmitAddServer}>
+              <div className="management-modal-body">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="management-form-group">
+                    <label className="management-label">Server Name</label>
+                    <input
+                      type="text"
+                      className="management-input-field"
+                      placeholder="e.g. google-search"
+                      value={mcpName}
+                      onChange={(e) => setMcpName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="management-form-group">
+                    <label className="management-label">Command</label>
+                    <input
+                      type="text"
+                      className="management-input-field"
+                      placeholder="e.g. npx"
+                      value={mcpCmd}
+                      onChange={(e) => setMcpCmd(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="management-form-group">
+                  <label className="management-label">Arguments</label>
                   <input
                     type="text"
-                    placeholder="e.g. google-search"
-                    value={mcpName}
-                    onChange={(e) => setMcpName(e.target.value)}
-                    required
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      background: 'rgba(255,255,255,0.04)',
-                      color: '#f8fafc',
-                      fontSize: '0.88rem',
-                      boxSizing: 'border-box',
-                    }}
+                    className="management-input-field"
+                    placeholder="e.g. -y @modelcontextprotocol/server-brave-search"
+                    value={mcpArgs}
+                    onChange={(e) => setMcpArgs(e.target.value)}
                   />
                 </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px' }}>Command</label>
+
+                <div className="management-form-group">
+                  <label className="management-label">Icon (Optional)</label>
                   <input
                     type="text"
-                    placeholder="e.g. npx"
-                    value={mcpCmd}
-                    onChange={(e) => setMcpCmd(e.target.value)}
-                    required
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      background: 'rgba(255,255,255,0.04)',
-                      color: '#f8fafc',
-                      fontSize: '0.88rem',
-                      boxSizing: 'border-box',
-                    }}
+                    className="management-input-field"
+                    placeholder="e.g. search, database, cloud, code"
+                    value={mcpIcon}
+                    onChange={(e) => setMcpIcon && setMcpIcon(e.target.value)}
+                  />
+                </div>
+
+                <div className="management-form-group">
+                  <label className="management-label">Environment Variables (JSON)</label>
+                  <textarea
+                    className="management-textarea-field"
+                    placeholder='e.g. {"BRAVE_API_KEY": "your_key_here"}'
+                    value={mcpEnv}
+                    onChange={(e) => setMcpEnv(e.target.value)}
+                    rows={3}
                   />
                 </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px' }}>Arguments</label>
-                <input
-                  type="text"
-                  placeholder="e.g. -y @modelcontextprotocol/server-brave-search"
-                  value={mcpArgs}
-                  onChange={(e) => setMcpArgs(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: 'rgba(255,255,255,0.04)',
-                    color: '#f8fafc',
-                    fontSize: '0.88rem',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px' }}>Icon (Optional)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. search, database, cloud, code"
-                  value={mcpIcon}
-                  onChange={(e) => setMcpIcon && setMcpIcon(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: 'rgba(255,255,255,0.04)',
-                    color: '#f8fafc',
-                    fontSize: '0.88rem',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '4px' }}>Environment Variables (JSON)</label>
-                <textarea
-                  placeholder='e.g. {"BRAVE_API_KEY": "your_key_here"}'
-                  value={mcpEnv}
-                  onChange={(e) => setMcpEnv(e.target.value)}
-                  rows={3}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: 'rgba(255,255,255,0.04)',
-                    color: '#f8fafc',
-                    fontSize: '0.88rem',
-                    fontFamily: 'monospace',
-                    boxSizing: 'border-box',
-                    resize: 'vertical',
-                  }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: '8px',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: 'transparent',
-                    color: '#cbd5e1',
-                    fontSize: '0.85rem',
-                    cursor: 'pointer',
-                  }}
-                >
+              <div className="management-modal-footer">
+                <button type="button" className="management-action-btn" onClick={() => setShowAddModal(false)}>
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  style={{
-                    padding: '8px 18px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: '#3b82f6',
-                    color: '#ffffff',
-                    fontWeight: 600,
-                    fontSize: '0.85rem',
-                    cursor: 'pointer',
-                  }}
-                >
+                <button type="submit" className="management-primary-btn">
                   Add Server
                 </button>
               </div>

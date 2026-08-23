@@ -19,6 +19,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { command: '/multi-agent', description: 'Toggle Multi-Agent Collaboration system', usage: '/multi-agent [on|off]', category: 'system' },
   { command: '/paste', description: 'Attach image from clipboard', usage: '/paste [prompt]', category: 'tools' },
   { command: '/plugins', description: 'List or generate plugins/skills', usage: '/plugins [name]', category: 'tools' },
+  { command: '/release-notes', description: 'Show release notes for the current version', usage: '/release-notes', category: 'system' },
   { command: '/skill add', description: 'Add or install global skill file or folder', usage: '/skill add <path>', category: 'tools' },
   { command: '/stats', description: 'Show session statistics', usage: '/stats', category: 'system' },
   { command: '/veo', description: 'Generate video using Google Veo', usage: '/veo <prompt>', category: 'tools' },

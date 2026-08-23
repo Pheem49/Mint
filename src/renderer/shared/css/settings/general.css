@@ -1,0 +1,114 @@
+/* settings/general.css — split from settings.css, rules kept in original order */
+
+.api-key-field {
+    position: relative;
+}
+
+.api-key-field input {
+    padding-right: 34px;
+}
+
+.api-key-toggle {
+    position: absolute;
+    top: 50%;
+    right: 6px;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.api-key-toggle:hover {
+    background: var(--surface-hover);
+    color: var(--text-main);
+}
+
+.setting-actions {
+    display: flex;
+    gap: 12px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+}
+
+.btn-connect {
+    border: 1px solid transparent;
+    background: var(--accent);
+    color: #ffffff;
+}
+
+/* Provider Cards styling */
+
+.provider-cards-container {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.provider-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: transparent;
+    padding: 14px 16px;
+    transition: border-color 0.2s ease;
+}
+
+.provider-card:hover {
+    border-color: var(--border-strong);
+}
+
+.provider-card.active-provider {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.provider-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+.provider-card-title {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.provider-active-badge {
+    color: var(--accent-hover);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.provider-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.provider-sublist-label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--text-main);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.provider-sublist-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}

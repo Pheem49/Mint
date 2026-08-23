@@ -1,4 +1,5 @@
 import { SLASH_COMMANDS } from '../constants/slashCommands'
+import RELEASE_NOTES from '../../../../Release_Note.md?raw'
 
 export interface SlashCommandExecutionResult {
   handled: boolean
@@ -213,6 +214,14 @@ export function executeSlashCommand(
         handled: true,
         action: 'system_message',
         systemText: statsText,
+      }
+    }
+
+    case '/release-notes': {
+      return {
+        handled: true,
+        action: 'system_message',
+        systemText: RELEASE_NOTES.trim(),
       }
     }
 

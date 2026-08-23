@@ -40,6 +40,10 @@ import type {
   CodeEditProposal,
   LearnedSkill,
   AuthUser,
+  CronJob,
+  CronJobDraft,
+  LinkedFolder,
+  LinkedFolderDraft,
 } from '../shared/types'
 
 
@@ -269,6 +273,18 @@ export async function detectSystemTools(): Promise<DetectedTools> {
   return invoke<DetectedTools>('detect_system_tools')
 }
 
+/**
+ * Re-runs a configured MCP server's OAuth login in the foreground — fixes a
+ * stale/expired refresh token (e.g. `invalid_grant` from a Gmail MCP
+ * server). Opens the OAuth URL in the user's browser and blocks until the
+ * flow completes, so callers should keep the UI responsive (disable just
+ * the triggering button) rather than blocking on this for the whole view.
+ */
+export async function reauthMcpServer(serverName: string): Promise<boolean> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<boolean>('reauth_mcp_server', { serverName })
+}
+
 export async function uploadFile(file: File): Promise<string> {
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();
@@ -368,6 +384,7 @@ export async function streamChatMessage(
   chatId?: string | null,
   agentId?: string | null,
   planMode?: boolean,
+  pinnedMcpServer?: string | null,
 ): Promise<ChatResponse> {
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();
@@ -375,7 +392,7 @@ export async function streamChatMessage(
     const res = await authFetch(`${API_BASE}/chat-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId })
+      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId, pinnedMcpServer })
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -421,7 +438,7 @@ export async function streamChatMessage(
     else onProgress?.(event.progress)
   }
   const response = await invoke<ChatResponse>('stream_chat_message', {
-    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId, planMode: planMode ?? false },
+    request: { message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId, planMode: planMode ?? false, pinnedMcpServer },
     onEvent,
   })
   if (imageDataUri) {
@@ -474,6 +491,28 @@ export async function stopGeminiLiveSession(sessionId: string): Promise<void> {
   if (!isTauriRuntime()) return
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('stop_gemini_live_session', { sessionId })
+}
+
+/** Starts native push-to-talk mic recording (Rust-side, via cpal) — desktop only. */
+export async function startMicRecording(): Promise<void> {
+  if (!isTauriRuntime()) {
+    throw new Error('Native voice input is only available in the desktop app.')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('start_mic_recording')
+}
+
+/**
+ * Stops the in-progress recording and transcribes it using whichever provider is
+ * configured for chat. Rejects with a clear message if that provider doesn't
+ * support audio input.
+ */
+export async function stopMicRecordingAndTranscribe(): Promise<string> {
+  if (!isTauriRuntime()) {
+    throw new Error('Native voice input is only available in the desktop app.')
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string>('stop_mic_recording_and_transcribe')
 }
 
 function withImagePlaceholder(message: string, imageDataUri?: string | null, videoDataUri?: string | null) {
@@ -787,6 +826,96 @@ export async function deleteSubagent(sourcePath: string): Promise<void> {
   }
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('delete_subagent', { sourcePath })
+}
+
+export async function listCronJobs(): Promise<CronJob[]> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/cron`)
+    if (!res.ok) return []
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<CronJob[]>('list_cron_jobs')
+}
+
+export async function addCronJob(draft: CronJobDraft): Promise<CronJob> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/cron`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft)
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to create scheduled task.' }))
+      throw new Error(err.error || 'Failed to create scheduled task.')
+    }
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<CronJob>('add_cron_job', { draft })
+}
+
+export async function removeCronJob(id: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/cron/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    })
+    if (!res.ok) throw new Error('Failed to remove scheduled task.')
+    return
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('remove_cron_job', { id })
+}
+
+export async function setCronJobEnabled(id: string, enabled: boolean): Promise<CronJob | null> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/cron/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`, {
+      method: 'POST'
+    })
+    if (!res.ok) throw new Error('Failed to update scheduled task.')
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<CronJob | null>('set_cron_job_enabled', { id, enabled })
+}
+
+export async function listLinkedFolders(): Promise<Record<string, LinkedFolder>> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/linked-folders`)
+    if (!res.ok) return {}
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<Record<string, LinkedFolder>>('list_linked_folders')
+}
+
+export async function addLinkedFolder(draft: LinkedFolderDraft): Promise<void> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/linked-folders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(draft)
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to link folder.' }))
+      throw new Error(err.error || 'Failed to link folder.')
+    }
+    return
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('add_linked_folder', { draft })
+}
+
+export async function removeLinkedFolder(name: string): Promise<void> {
+  if (!isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/linked-folders/${encodeURIComponent(name)}`, {
+      method: 'DELETE'
+    })
+    if (!res.ok) throw new Error('Failed to unlink folder.')
+    return
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('remove_linked_folder', { name })
 }
 
 export async function clearChatHistory(chatId?: string | null): Promise<number> {
@@ -1295,9 +1424,7 @@ export function installTauriAdapters() {
       return invoke('update_config', { config })
     },
     closeSettings: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      return invoke('close_desktop_window', { label: getCurrentWindow().label })
+      window.location.hash = '#/'
     },
     quitApp: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
@@ -1447,8 +1574,7 @@ export function installTauriAdapters() {
     listSavedPictures,
     deleteSavedPicture,
     openSettings: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('open_window', { kind: 'settings' })
+      window.location.hash = '#/settings'
     },
     openWorkflows: async () => {
       const { invoke } = await import('@tauri-apps/api/core')

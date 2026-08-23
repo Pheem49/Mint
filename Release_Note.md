@@ -1,208 +1,610 @@
-# Release Notes - Mint Agent v1.11.0
+# Release Notes - Mint Agent v1.12.0
 
-We are excited to release **Mint Agent v1.11.0**! This version introduces major enhancements across CLI, Desktop, and Web: Core Rust Crates Integration (`ignore`, `grep-searcher`, `shlex`, `srtlib`, `tree-sitter`), **Interactive Native UI Widgets Suite (Weather, Stock & Financial, Calculation & Unit Conversion)**, Multimodal Video, Remote Messaging Bridges, Browser Automation, LaTeX Sanitization, **AI Image-to-Image & Inpainting Editing Capabilities**, and the **AI Video Editor Core & Auto Shorts Generator**.
-
-## 🧠 Agentic Core Overhaul — Native Tool-Calling, Context Compaction & Safety Hardening
-
-A ground-up rework of the coding-agent loop (`crates/mint-core/src/orchestration.rs`), moving from a hand-parsed JSON-in-text protocol to real provider-native tool-calling, plus a full pass of reliability and safety fixes — including two bugs found and fixed through live testing against real Anthropic, Gemini, OpenAI-family, and DeepSeek APIs.
-
-- **Native Tool-Calling (Anthropic, OpenAI-family, Gemini, allowlisted Ollama models)**: Replaced the old "reply with one JSON blob" scheme with real `tools` / `functionDeclarations` API calls per provider (`crates/mint-core/src/chat.rs`), each backed by request/response golden tests. A per-tool JSON schema catalog (`crates/mint-core/src/prompts/tool_catalog.rs`) now enforces argument shapes at the API level for all 49 agent actions instead of one giant shared free-text struct. Providers without reliable native tool support automatically fall back to the legacy JSON-prompt path — with a **visible warning**, never a silent downgrade.
-- **🐛 System Prompt Fix (found via live API testing)**: The system prompt was unconditionally instructing the model to reply with raw JSON text — even in native tool-calling mode — which actively sabotaged real tool calls for every native-capable provider. Fixed in `crates/mint-core/src/prompts/agent.rs` to build a leaner, tool-calling-appropriate prompt when native mode is active; verified live against Gemini and DeepSeek after the fix.
-- **🐛 `read_file` Silent Truncation Fix (found via live API testing)**: Reading a file longer than 240 lines returned a truncated result with **no indication it was incomplete**, so the agent had no way to know it needed to keep reading. `crates/mint-core/src/code_tools.rs` now reports the file's total line count and tells the model the exact `startLine`/`endLine` to request next — verified end-to-end against a real 323-line file, which the agent now reads and summarizes in full.
-- **Context Compaction**: Long-running agent conversations now track real token usage reported by each provider and automatically summarize older tool-call history into one condensed entry once usage crosses 80% of the model's context window, keeping the most recent steps verbatim.
-- **Subagent Isolation (`dispatch_subagent`)**: New `.agents/subagents/*.md` file-based subagent definitions the top-level agent can delegate focused sub-tasks to. Each subagent runs in a fully isolated context (its own message history, optional restricted tool set, optional different model/provider) and returns only its final summary — its internal steps never leak into the parent conversation. Listable via `mint code subagents`.
-- **Persistent Permission Rules**: Approval prompts for shell commands, file edits, plugins, and MCP tools can now be saved as "always allow" rules (per-project or global) so the same action doesn't need re-approving every time. Manageable via `mint safety permissions list` / `remove`.
-- **Sandbox Visibility**: Shell commands that run unconfined because OS-level sandboxing (`bwrap` / `sandbox-exec`) isn't available now surface an explicit warning instead of silently skipping sandboxing; status visible via `mint config doctor`. Also hardened the destructive-command blocklist (`git push --force`, `find -delete`, `rsync --delete`).
-- **Persistent MCP Sessions**: MCP servers no longer spawn a brand-new process for every single tool call — sessions are now reused across calls, with automatic reconnect if a server process dies. Added support for `resources/list`, `resources/read`, `prompts/list`, and `prompts/get`.
-- **Atomic File Writes & Edit Uniqueness**: File edits now write atomically (temp file + rename) instead of a direct overwrite, and `apply_patch` rejects ambiguous edits that match more than one location in a file instead of silently editing the wrong spot.
+We are excited to release **Mint Agent v1.12.0**! This version focuses on closing
+the gap with modern self-hosted agent products: the agent can now **teach itself
+new skills**, **run tasks on a schedule** without any manual trigger, and **keep
+running notes in folders you care about** as you chat — each shipped end-to-end
+across the Rust core, CLI, interactive chat, and both Desktop/Web GUIs.
 
 ---
 
-## 🎨 Interactive Native UI Widgets Suite (Weather, Stock & Calculation)
+## 🧠 Autonomous Skill Acquisition (Auto Skill Writing)
 
-Ported and integrated native interactive widgets across CLI, Desktop UI, and Web UI:
+Mint's agent can now write its own reusable skills after solving a hard problem,
+instead of only being taught skills manually via `mint learn`.
 
-1. 🌤️ **Weather & Daily Forecast Widget**: Real-time Open-Meteo weather fetch, 5-day daily forecast grid, wind speed, humidity, and radial-gradient Blue Weather Card UI (`WeatherCard.tsx`).
-2. 📈 **Stock & Financial Asset Widget**: Real-time market quotes via Yahoo Finance v8 API for stocks (AAPL, TSLA, NVDA) and cryptocurrencies (BTC, ETH, SOL) with positive/negative price gain/loss indicators, ticker resolution, and styled Stock Card UI (`StockCard.tsx`).
-3. 🧮 **Calculation & Unit Converter Widget**: Expression evaluation, percentage calculations ("25% of 8500"), and unit/currency conversions rendered in a modern, transparent Glassmorphism Calculator Card UI (`CalculationCard.tsx`).
-4. 📱 **Universal Cross-Platform & Dual Desktop/Web Parity**: Single-source-of-truth card components in `src/renderer/shared/components/` rendering seamlessly across Desktop Tauri App and Web Browser Client.
-
----
-
-## ⚙️ Standard Crates Refactoring (URL Opening, Binary Lookup & HTML Scraping)
-
-Replaced custom string manipulations and OS-specific subprocess calls with battle-tested standard Rust crates:
-
-- **`open::that(url)`**: Replaced platform-conditional (`xdg-open` / `open` / `cmd`) process spawning in `crates/mint-core/src/mcp.rs` with `open` crate for seamless cross-platform URL opening across Linux, macOS, Windows, Flatpak, and WSL.
-- **`which::which(command)`**: Replaced process-based `which` CLI calls in `crates/mint-core/src/shell.rs` with `which` crate for cross-platform binary executable lookup.
-- **`scraper::Html`**: Replaced string matching (`.find("og:image")`) in `crates/mint-core/src/web_search.rs` with `scraper` CSS selector query (`meta[property='og:image']`, `meta[name='twitter:image']`) for robust Open Graph thumbnail extraction.
-- **`AST & Syntax Boundary Chunking`**: Refactored `chunk_text()` in `crates/mint-core/src/semantic.rs` to break chunks at natural code boundaries (function/class declarations, doc comments, closing braces, empty lines) instead of fixed character positions, drastically improving code embedding vector quality.
-
----
-
-## 🎨 Enhanced Settings UI (SVG Icons & Visual Theme Swatches)
-
-Upgraded the Settings interface across Desktop (`src/renderer/src`) and Web (`src/renderer/src-web`) to improve visual hierarchy and scanability:
-
-- **Section Group SVG Icons**: Added clean SVG icons to section headers (`GeneralTab.tsx`, `AutomationTab.tsx`) including AI Routing 🧠, API Keys 🔑, Web Search 🔎, Automation Engine 🌐, and Native Headless Queue ⚡.
-- **Authentic Brand Plugin SVG Icons (`plugins.tsx`)**: Replaced generic outline icons in the Plugins tab (`PluginsTab.tsx`) with official multi-colored SVG brand logos for Spotify 🟢, Discord 🟣, Gmail ✉️ (Google 4-color M), Google Calendar 📅 (Google 4-color 31), Notion ⬛ (authentic N logo), YouTube Music 🔴, Vercel 🔺, and GitHub 🐱 across Desktop and Web UIs.
-- **Expanded Settings Modal Width (`styles.css` & `desktop.rs`)**: Increased Settings window width from `920px` to `1180px` (`min(1180px, 95vw)`) in Web UI CSS and updated Desktop Tauri window dimensions to `1180.0` x `780.0`, providing significantly more horizontal space for plugin cards, API key inputs, and integration descriptions.
-- **Action Buttons with SVG Icons**: Enhanced footer buttons (`SettingsWindow.tsx`) with inline SVG icons for Save Settings 💾, Reset Defaults 🔄, and Quit Application 🚪.
-- **Dual UI Build Command (`package.json`)**: Updated `npm run build` script to execute both Desktop UI (`build:desktop:ui`) and Web UI (`build:web`) in sequence for complete platform parity.
-
-- **Updated Google Veo Video Generation Models**: Upgraded Veo video generation presets across CLI, Desktop UI, Web UI, and Rust Core engine to `veo-3.1-generate-preview` ⭐, `veo-3.1-fast-generate-preview`, and `veo-3.1-lite-generate-preview`, removing deprecated Veo 2.x models.
-- **Dedicated Black Forest Labs (FLUX API) Integration**: Added official direct FLUX API (`api.bfl.ml`) provider (`bfl` / `flux`) separate from Replicate across CLI, Desktop UI, Web UI, and Rust Core engine with Text-to-Image models (`flux-pro-1.1`, `flux-pro-1.1-ultra`, `flux-pro`, `flux-dev`, `flux-schnell`) and Image Editing models (`flux-kontext-pro`, `flux-kontext-max`, `flux-fill-pro`).
-- **Updated Model Presets Across Providers**: Updated model option lists across CLI, Desktop UI, and Web UI for Gemini, Anthropic Claude, OpenAI, OpenRouter, Hugging Face, and Image Generation Studio (`gemini-3.1-flash-image` ⭐, `gpt-image-1` ⭐, `stable-image-ultra` ⭐, `Ideogram V3` ⭐, `FLUX 1.1 Pro` ⭐).
-- **Centralized Model Manager & Bi-directional Sync (`modelManager.ts`)**: Built reactive Model Manager bus to synchronize active model selections in real-time between Veo Studio, Image Studio, Chat Panel, and Settings Window across CLI, Desktop UI, and Web UI.
-- **OAuth 2.0 PKCE Popup Sign-In System (`oauth.rs`, `oauthManager.ts` & `lib.rs`)**: Built browser-based OAuth 2.0 PKCE authorization and local callback engine (`GET /api/oauth/callback`) with popup sign-in support for Google Services (Gmail, Calendar, YouTube Music), Vercel, GitHub, Spotify, and Notion across CLI, Desktop UI, and Web UI. Auto-spawns background API server on port 3000 during Desktop Tauri app launch for seamless single-click Sign In parity.
-- **Single Source of Truth Architecture Refactoring**: Refactored `DEFAULT_CONFIG` (`config.ts`), AI model arrays (`models.ts`), aspect ratios, and studio style presets (`studio.ts`) into canonical `shared/` constants, eliminating code duplication across renderers.
-- **Clean Path HTML5 History Routing (`App.tsx` & `MintDashboard.tsx`)**: Upgraded routing engine to HTML5 History API clean path URLs (`/chat`, `/pictures`, `/image-studio`, `/veo-studio`, `/settings`) with zero `#` symbols in the URL bar, while maintaining backwards compatibility for hash URLs (`#/pictures`). Fully supports direct URL linking, browser back/forward history navigation, and state preservation across F5 reloads across Desktop and Web UIs.
+- **Heuristic-gated reflection call (`crates/mint-core/src/orchestration.rs`)**:
+  `looks_skill_worthy()` cheaply pre-filters on step count (≥3) and whether a
+  substantive action ran (`apply_patch`, `write_file`, `run_shell`,
+  `browser_*`, `dispatch_subagent`) before spending a second LLM call. Only then
+  does `spawn_auto_skill_write` / `auto_write_skill` — modeled on the existing
+  `spawn_auto_memory_update` reflection pattern — ask the model whether the task
+  was genuinely reusable and, if so, write a `.agents/skills/<slug>/SKILL.md` file
+  with YAML frontmatter, picked up automatically by the existing
+  `learned_skills_context()` skill-discovery system next session.
+- **Opt-in config toggle**: `auto_skill_writing` (default **off** — it costs an
+  extra LLM call and writes files). Togglable via `mint config set
+  autoSkillWriting true`.
+- **CLI slash command (`/autoskill`)**: `crates/mint-cli/src/interactive.rs` —
+  `/autoskill on|off` for direct toggling, or `/autoskill` alone opens an
+  arrow-key interactive selector (`prompt_interactive_select`, ↑/↓ + Enter) that
+  pre-selects the current state.
+- **Desktop & Web Settings toggle**: New "Self-improvement" section in
+  `AutomationTab.tsx` (both `src/renderer/src` and `src/renderer/src-web`) with a
+  standard toggle switch and explanation of when it fires.
 
 ---
 
-## ⚡ UI Performance & Composite Layer Optimizations (Desktop & Web)
+## ⏰ Cron Scheduling — Recurring Agent Tasks
 
-Optimized rendering pipelines, state updates, and animation loops across both Desktop and Web interfaces:
+A full scheduling subsystem so agent tasks can run automatically on a cron
+expression — no OS-level daemon required, no manual trigger needed.
 
-- **Memoized Chat Message Items (`src/renderer/shared/components/ChatMessageItem.tsx`)**: Refactored `ChatPanel` message list to use `React.memo` with custom prop comparison and `useMemo` markdown parsing caches, preventing full message list re-renders and Regex re-parsing during AI response streaming.
-- **Agent Activity Drawer Toggle Fix (`ChatMessageItem.tsx` & `ChatPanel.tsx`)**: Fixed an issue where clicking _"Working through task >"_ (historical agent activity drawer) did not open/expand. Added `openActivityIds`, `openReviewIds`, and `openFileDiffs` props and comparison checks to `ChatMessageItem`'s `React.memo` comparator, ensuring state updates correctly trigger message re-renders and drawer toggling across both Desktop and Web interfaces. Also restored historical activity fallback (`interaction.agentActivity`) when live snapshots are absent.
-- **Throttled Live2D Pointer Move Tracking (`src/renderer/src/components/Live2DStage.tsx`)**: Capped pointer move events using `requestAnimationFrame` to 60FPS (~16ms), eliminating JavaScript main thread contention and micro-stutters from high-polling gaming mice (500Hz - 1000Hz).
-- **Blob Object URL Attachment Previews (`src/renderer/shared/utils/ui.ts`)**: Replaced heavy Base64 Data URI strings in DOM preview `<img>` tags with lightweight `URL.createObjectURL(file)` blob previews, reducing React state diffing overhead and memory footprint.
-- **CSS Layer Containment (`styles.css`)**: Added `contain: content;` and `will-change: transform;` to `.chat-container` in both Desktop and Web CSS stylesheets to isolate render composite boundaries and eliminate GPU repaint lag during chat scrolling.
-
----
-
-## 🗑️ Picture & Video Deletion System (CLI, Desktop & Web)
-
-Implemented full-stack media deletion across Rust core, Tauri IPC, Web REST API, and Desktop/Web UIs:
-
-- **Rust Core & Disk Storage (`crates/mint-core/src/pictures.rs`)**: Added `delete_saved_picture(id)` function to remove picture/video media files on disk, delete generated thumbnails, and persist updated `pictures.json` metadata index.
-- **REST & IPC Endpoints**: Exposed `DELETE /api/pictures/:id` HTTP REST endpoint in `crates/mint-core/src/api_server.rs` and `delete_picture` Tauri IPC command in `src-tauri/src/lib.rs`.
-- **Interactive Deletion UI (`PicturesLibrary.tsx`)**: Added hover trash action button 🗑️ to picture/video cards and a confirmation modal dialog (_"Are you sure you want to permanently delete...?"_) across both Desktop UI (`src/renderer/src`) and Web UI (`src/renderer/src-web`).
-
----
-
-## 🖼️ Web Search Image Thumbnails + Inline Images in Response
-
-Web searches now fetch and display representative images in two places:
-
-1. **Sources strip** — horizontal thumbnail cards above the source chips
-2. **Inline in the AI's answer** — images embedded between bullet points, just like the Dola AI app
-
-### Changes
-
-- **`crates/mint-core/src/web_search.rs`**: Added `image_url: Option<String>` to `SearchHit`. Google CSE extracts from `pagemap.cse_image[0].src`; Brave from `thumbnail.src`. Added **Open Graph fallback scraper** (`og_image_fallback`) — when the search API returns no thumbnail, fetches up to 8KB of each result URL in parallel (4 URLs, 4s timeout) and extracts `og:image` or `twitter:image` meta tags.
-- **`crates/mint-core/src/orchestration.rs`**: Emits optional `Image: <url>` line per result. Updated the finish-summary instruction to tell the AI to embed `![title](url)` markdown image tags inline in its answer, placed immediately after the bullet point referencing each result. AI applies images only for visual topics (food, people, places, products) and skips them for code/text answers.
-- **`src/renderer/shared/utils/agentActivity.ts`**: Added `imageUrl?` to `WebSearchSource`; `parseWebSearchSources()` detects and strips the `Image:` line.
-- **`src/renderer/shared/utils/markdown.tsx`** (shared): Added two-tier image rendering — external `https://` URLs (web search OG images) use a compact `200px / objectFit: cover` preview card with title label. Internal `/api/` URLs (AI-generated images) keep the original `420px / objectFit: contain` style.
-- **`src/renderer/src/components/ChatPanel.tsx` (Desktop)** & **`src/renderer/src-web/components/ChatPanel.tsx` (Web)**: `renderWebSearchSources()` renders a scrollable image card strip (max 4 cards) above source chips. Full platform parity.
-- **`crates/mint-cli/src/markdown.rs` (CLI)**: `format_line()` now detects `![alt](url)` lines and renders them as `🖼  alt — url` with a cyan-colored clickable URL, instead of printing raw markdown syntax. Ctrl+Click / Cmd+Click the URL in supported terminals (iTerm2, WezTerm, VS Code terminal) to open in browser.
+- **New `crates/mint-core/src/cron/` module**: `store.rs` (`CronJob`/`CronStore`,
+  a JSON-file-backed store mirroring `TaskStore`'s shape), `schedule.rs` (wraps
+  the `cron` crate, normalizes 5-, 6-, and 7-field expressions so plain
+  `min hour dom month dow` cron syntax "just works"), `scheduler.rs` (a
+  self-healing tick loop modeled directly on `channels.rs`'s
+  `start_channels()`/`restarting_loop` pattern).
+- **No daemon needed — rides along on whatever's already open**: the scheduler
+  auto-starts at the exact same points `start_channels()` does (interactive CLI,
+  `mint api`/`mint web`, and the desktop app), so cron jobs fire as long as one of
+  those is running — matching how messaging bridges already behave, with zero new
+  process-management code.
+- **Unattended execution with a safety net**: cron runs auto-approve every agent
+  action for convenience, except any explicit "always deny" permission rule you've
+  already set (`MintConfig::permission_decision`) — that's still honored.
+- **CLI (`mint cron`)**: `add --name --schedule --task --workspace`, `list`,
+  `show <id>`, `remove <id>`, `enable`/`disable <id>`, and `run-now <id>` to fire a
+  job immediately without waiting on its schedule.
+- **Interactive slash command (`/cron`)**: `list | add <name> | <sched> | <task> |
+  remove <id> | enable <id> | disable <id>`.
+- **Desktop & Web GUI — new "Scheduled Tasks" page**: `ScheduledTasksView.tsx`
+  (`src/renderer/shared/components/`), reachable from the sidebar's "More" menu
+  next to Skills/MCP/Plugins. Full CRUD with an enable/disable toggle switch and
+  last-run status per job, backed by new Tauri commands
+  (`list_cron_jobs`/`add_cron_job`/`remove_cron_job`/`set_cron_job_enabled`) and
+  REST endpoints (`GET/POST /api/cron`, `DELETE /api/cron/:id`,
+  `POST /api/cron/:id/enable|disable`) for the web build.
 
 ---
 
-## 🎬 AI Video Editor & Auto Shorts Generator (Milestones 1–4 Complete)
+## 📁 Linked Folders — Auto Note-Taking
 
-Mint Agent now includes a full-featured **AI Video Editor Core** & **Auto Shorts Generator** available across CLI, Desktop UI, and Web UI! Every video operation is built as a first-class tool callable by both the user and the AI Agent.
+Link a named folder (e.g. "Food", "YouTube") to Mint, and chat that touches on its
+topic gets a short note written into it automatically — inspired by the same
+capability in Hermes Agent.
 
-### Features Added
-
-- **Core FFmpeg Video Operations (`crates/mint-core/src/video_edit.rs`)**:
-  - `video_trim`: Precise start and end timestamp clipping.
-  - `video_resize`: Change aspect ratio and resolution (e.g. 1080p, 4K, 9:16 vertical).
-  - `video_merge`: Concatenate multiple video clips cleanly via FFmpeg concat filter.
-  - `video_extract_audio`: Extract high-fidelity audio tracks as WAV files.
-  - `video_remove_silence`: Auto-detect audio quietness via `silencedetect` and trim out dead air.
-  - `render_timeline`: Multi-clip non-linear JSON Timeline Engine.
-- **Speech & Subtitles Engine (`crates/mint-core/src/speech.rs` & `subtitle.rs`)**:
-  - Speech-to-Text (STT) transcription with OpenAI Whisper API integration, local `whisper` CLI fallback, or heuristic chunking.
-  - LLM-based Subtitle Translation preserving SRT timing codes.
-  - Styled Subtitle Burning with customizable ASS presets (`🔥 TikTok Bold`, `✨ Minimal White`, `📺 Standard`).
-- **⚡ Make Auto Shorts (`crates/mint-core/src/auto_shorts.rs`)**:
-  - Automatically analyze long video transcripts via LLM to extract top viral highlight moments.
-  - Auto-crop and resize to 9:16 vertical (1080x1920) format.
-  - Auto-generate and burn yellow TikTok-style subtitles onto output clips.
-- **🖼️ & 🎬 Direct Image & Video Generation in Chat (Agent Mode)**:
-  - Added **Generate image** and **Generate video** action options directly into the Chat plus (`+`) attachment menu dropdown.
-  - Integrated `generate_image` (`DALL-E`, `Stability`, `NanoBanana`, `Replicate`) and `generate_video` (`Google Veo`) tool dispatch actions into `crates/mint-core/src/orchestration.rs`.
-  - Added inline media rendering in `src/renderer/shared/utils/markdown.tsx` so when the AI Agent generates images or videos in Chat, the generated media (`![Image](...)` & `<video controls src="..."></video>`) renders directly inside the chat conversation bubble.
-- **🎬 Fully Interactive Veo Studio AI Video Editor UI**:
-  - Maintained header title **Veo Studio** with **AI Editor** badge across both Desktop UI (`src/renderer/src`) and Web UI (`src/renderer/src-web`).
-  - Expanded video preview canvas Viewport (`.capcut-video-viewport`) to dynamically fill 100% available height and width of the center workspace stage, maximizing video editing screen area.
-  - Integrated Tauri native system file picker (`dialog.open()`) into the **Browse** button so picking a video file automatically captures the full absolute system path (`/path/to/video.mp4`), preventing `ffmpeg` file-not-found errors.
-  - Fully integrated dynamic CSS application theme variables (`var(--accent)`, `var(--bg-color)`, `var(--panel-bg)`, `var(--input-bg)`, `var(--border)`) with a clean neutral dark (`#09090b`) video canvas stage, eliminating unwanted blue theme tinting around player preview.
-  - Replaced all text emojis with high-quality, resolution-independent SVG vector icons across all control buttons, tool options, and timeline cards.
-  - Interactive range scrubber & storyboard transcript cards carousel replacing multi-track lines.
-  - Real-time player canvas controls (Play, Pause, Stop, Skip -5s/+5s) with formatted timecode.
-  - Full Manual Tools control panel (Trim with playhead timestamp capture, Resize, Remove Silence, Extract Audio, Subtitles STT & burning, Auto Shorts, Export).
-  - Instant Output Result vs Source Video toggle preview.
-- **AI Agent Tool Registration & Platform Parity**:
-  - Registered all video tools (`video_trim`, `video_resize`, `video_merge`, `video_extract_audio`, `speech_transcribe`, `subtitle_burn`, `make_shorts`) into `orchestration.rs` system prompt and dispatch arms so the AI Agent can execute video editing requests automatically from chat prompts.
-  - CLI: `mint video load|trim|merge|resize|extract-audio|export|transcribe|subtitle|translate-subtitle|make-shorts` subcommands.
-  - Full UI parity across Desktop (`src/renderer/src/components/VeoStudioPanel.tsx`) and Web (`src/renderer/src-web/components/VeoStudioPanel.tsx`).
-
-- **🎨 Image Studio & Chat Image Generation Parity**:
-  - Fixed `generate_image` tool dispatch in `crates/mint-core/src/orchestration.rs` to automatically invoke `crate::pictures::save_chat_images`, persisting generated images directly to physical disk (`~/.config/mint/Pictures/`) and indexing them into `pictures.json`.
-  - Updated `generate_image` tool system prompt format by removing hardcoded `"provider": "dalle"`, allowing the AI Agent to respect the user's default selected provider in Image Studio / Settings (`NanoBanana (Gemini)`).
-  - Added smart fallback from DALL-E to `call_nanobanana` (Gemini) when OpenAI API key is missing.
-  - Updated `ImageStudioPanel.tsx` (Desktop UI & Web UI) gallery filtering to seamlessly display all AI-generated images from Chat (`chat`, `image_gen`, `cli`) while filtering out non-AI chat attachment uploads.
-  - Implemented `resolveMediaUrl` in `src/renderer/shared/utils/markdown.tsx` to automatically resolve `/api/pictures/` URLs to origin server (`http://localhost:3000`), ensuring 100% image card rendering parity on Web UI (port 9000).
-  - Added automatic media & model feedback attribution appending (`![Generated Image]`, `✓ Image generated successfully with model...`, and `Saved to: ...`) in `orchestration.rs` to guarantee complete model feedback display in chat bubbles.
-- **💻 CLI Interactive Mode Slash Command Parity**:
-  - Added `/generate-image <prompt>` and `/gen-image <prompt>` slash commands to CLI interactive `/help` menu and `AUTOCOMPLETE_COMMANDS` autocompletion list.
-  - Connected `/generate-image` slash command directly to `SlashResult::ForwardToAgent`, sharing 100% of the native Agent Thinking animation engine (moon phase spinner frames, wave effect, real-time elapsed timer, and `Esc to interrupt`), central image persistence, and model attribution.
+- **New `crates/mint-core/src/linked_folders.rs`**: `LinkedFolder`/
+  `LinkedFolderDraft` stored under `config.extra["linkedFolders"]`, mirroring the
+  MCP-servers storage pattern (`add_linked_folder`/`remove_linked_folder`/
+  `list_linked_folders`) — the only existing precedent in the codebase for a
+  by-name CRUD list with real CLI verbs.
+- **Reflection hook on every chat surface**: `spawn_linked_folder_note` is wired
+  into all five places `spawn_auto_memory_update` already lives (all four
+  `orchestrate_chat*` functions plus `orchestrate_agent_loop`'s finish block) —
+  necessary because interactive CLI, desktop, and web chat all default through the
+  agent loop, not the plain-chat functions. A cheap case-insensitive keyword
+  pre-filter against each folder's name/description skips the LLM call entirely
+  unless there's a plausible topic match.
+- **Notes land in a dedicated subfolder**: writes go to
+  `<folder>/mint-notes/<YYYY-MM-DD>.md`, appended under a `## HH:MM` heading per
+  entry, so your real files never get mixed with Mint's notes.
+- **Safety**: both linking a folder and writing a note re-check
+  `assert_path_capability` (the same guard used for the agent's file-write tools),
+  so linking or silently writing into a blocked path (e.g. `~/.ssh`) is rejected.
+- **CLI (`mint link`)**: `add <name> <path> [--description ...]`, `list`,
+  `remove <name>`.
+- **Interactive slash command (`/link`)**: `list | add <name> | <path> |
+  <description> | remove <name>`.
+- **CLI save indicator**: a background notices queue
+  (`mint_core::LINKED_FOLDER_NOTICES`, mirroring the `/bg` job-notices pattern)
+  surfaces a `Saved note to <folder> (<path>)` line in the interactive prompt's
+  idle tick whenever a note gets written, so it's never a silent operation.
+- **Desktop & Web GUI — new "Linked Folders" page**: `LinkedFoldersView.tsx`,
+  reachable from the sidebar's "More" menu next to Scheduled Tasks. Add/remove
+  folders with a name, path, and optional description; the Desktop build adds a
+  **Browse...** button next to the path field that opens a native folder picker
+  (reusing the existing `select_workspace_directory` Tauri command) — omitted on
+  Web, since browsers cannot expose a real filesystem path from a folder picker.
 
 ---
 
-## 📦 Core Engine Crate Integrations (`crates/mint-core`)
+## 🛡️ Agent-Initiated Plan Mode
 
-- **`ignore` Crate Integration**: Replaced legacy `collect_files` with `ignore::WalkBuilder` in `list_code_files`, automatically respecting `.gitignore` and `.ignore` rules across workspaces.
-- **`grep-searcher` & `grep-regex` Engine**: Refactored `search_code` to use `grep_searcher::Searcher` and `grep_regex::RegexMatcherBuilder` for fast, streaming code text searching powered by `ripgrep` internals.
-- **`shlex` Shell Tokenization**: Upgraded `classify_shell_command` in `safety.rs` to use `shlex::split` POSIX shell lexing, ensuring quoted or escaped command strings (e.g. `rm\ -rf`) are properly tokenized before safety evaluation.
-- **`srtlib` Subtitle Formatting**: Integrated `srtlib::Subtitle`, `Subtitles`, and `Timestamp` structs into `subtitle.rs` for standard `.srt` subtitle generation and millisecond timecode conversion.
-- **`tree-sitter` AST Symbol Extraction**: Integrated `tree-sitter` (0.20.10) with `tree-sitter-rust` and `tree-sitter-typescript` grammars into `symbols.rs`, extracting function, struct, class, enum, trait, interface, and type declarations at the Abstract Syntax Tree level across Rust, TypeScript, JavaScript, and TSX files with automatic regex fallback.
+Plan mode used to be something only the user could switch on. The agent can now
+propose switching into it itself, mid-task — subject to the same kind of
+approval gate as any other risky action.
 
----
-
-## 🎨 Ecosystem Plugins, Utilitarian UI Redesign & OAuth 2.0 Client ID Engine
-
-- **Single-Source-of-Truth Plugins Architecture (`src/renderer/shared/constants/plugins.tsx`)**: Extracted `BUILTIN_PLUGINS_LIST` and vector SVG logos (`renderMcpSvgIcon`) into shared constants, enforcing complete feature and visual parity across CLI (`crates/mint-cli`), Desktop UI (`src/renderer/src`), and Web UI (`src/renderer/src-web`).
-- **Product-Native UI Redesign (Anti-AI Slop Aesthetic)**: Completely revamped `PluginsTab.tsx` in Desktop and Web UIs:
-  - Stripped out emoji headings (`🧠`, `🔌`, `🧩`, `⚡`, `🟢`, `⚪`) and inline dashed card boxes.
-  - Applied the clean Mint typography system (`section-kicker`, `section-title`, `section-description`).
-  - Upgraded skill tiles and plugin cards with flat surface borders, high-contrast status tags (`Connected`, `Not Connected`, `Workspace`, `Global`), and high-resolution SVG brand logos.
-- **Web UI Tauri IPC Crash Fix**: Resolved Web UI white screen crash by replacing direct `@tauri-apps/api` desktop IPC imports in `src-web/components/Settings/PluginsTab.tsx` with safe REST API HTTP endpoints (`src-web/tauri.ts`).
-- **Dynamic OAuth Client ID Pass-Through (`api_server.rs`)**: Updated `/api/oauth/start` REST endpoint in Rust Core to dynamically inject user-configured Client IDs (`gmailClientId`, `googleCalendarClientId`, `spotifyClientId`, `notionApiKey`) into PKCE authorization flows.
-- **Interactive CLI & Documentation**: Added `mint plugins` subcommand documentation and ecosystem configuration guide to `README.md`.
-
----
-
-## 🎨 Dynamic Theme Engine, Management Views Redesign & Workspace Skills Detection
-
-- **🎨 Dynamic Theme Management Views (`management-views.css`, `ui.ts`)**:
-  - Consolidated standalone management stylesheets into `src/renderer/shared/css/management-views.css`.
-  - Driven theme variables (`--accent`, `--accent-hover`, `--accent-glow`, `--accent-subtle`, `--accent-border`, `--text-main`) dynamically from Accent Color and Text Accent Color settings.
-  - Set background of `/skills`, `/mcp`, and `/plugins` views in `MintDashboard.tsx` to `transparent`, allowing custom background gradients and wallpapers to show through seamlessly.
-- **🎛️ Settings-Parity Toggle Sliders & Far-Right Controls (`McpServersView.tsx` & `PluginsView.tsx`)**:
-  - Upgraded MCP and Plugin item rows to use iOS-style pill toggle sliders (`.settings-toggle-switch` & `.settings-toggle-slider`).
-  - Added complete action button controls (`Sign In 🌐`, `Disconnect`, `Configure`, `Remove`).
-  - Aligned right-side control containers to the far right edge (`marginLeft: 'auto'`, `flex: 1`) across all item cards.
-  - Fixed MCP server toggle behavior to toggle `disabled: true / false` property instead of deleting the server configuration on toggle OFF.
-- **✨ Vector SVG Icons (`plugins.tsx` & `DashboardSidebar.tsx`)**:
-  - Replaced text emojis with vector SVG icons (`renderSkillsSvgIcon`, `renderMcpHubSvgIcon`, `renderPluginsSvgIcon`) in Sidebar `More` popover menu and page headers.
-  - Updated section title from `Built-in Plugins & Integrations` to `Plugins & Integrations`.
-- **🌐 Clean Routing & Form Submit Hash Cleanup (`SettingsWindow.tsx`, `MintDashboard.tsx` & `tauri.ts`)**:
-  - Added `type="button"` and `e.preventDefault()` to `SettingsWindow` footer buttons.
-  - Built automatic hash cleanup in `MintDashboard.tsx` and `closeSettings()`, preventing unwanted `#/settings` hash accumulation in browser address bar.
-- **🦀 Rust Workspace vs. Global Skills Engine (`memory.rs`, `skills.rs` & `api_server.rs`)**:
-  - Added `is_workspace` field (`#[serde(rename = "is_workspace")]`) to `LearnedSkill` struct in `mint-core`.
-  - Updated `/api/learned-skills` REST endpoint in `api_server.rs` to compute whether a skill file (`.agents/skills/*`, `AGENTS.md`) is located within the active project workspace root (`current_dir`), rendering accurate teal **`• Workspace`** badges vs. purple **`• Global`** badges in the UI.
+- **New `enter_plan_mode` action** (`crates/mint-core/src/prompts/agent.rs`,
+  `prompts/tool_catalog.rs`) — offered to the model only while plan mode is
+  off, symmetric to the existing `exit_plan_mode` (offered only while it's on),
+  so the two can never both appear at once. The system prompt tells the agent
+  to call it before its first mutating action on anything that looks like a
+  multi-file refactor, a migration, deletions, or another hard-to-reverse
+  change.
+- **New `AgentApproval::EnterPlanMode`** (`orchestration.rs`) gates the switch
+  behind the same approval flow as every other risky action — declining or
+  leaving feedback keeps plan mode off and the agent proceeds directly.
+  Unattended contexts (cron jobs) auto-approve it like everything else there.
+- **CLI approval card matches every other picker-style approval** (`agent.rs`):
+  both `EnterPlanMode` and `ExitPlanMode` now render through the same
+  arrow-key `run_option_picker` used for `AskUser`/file-write approvals
+  (↑/↓ + Enter, type to answer freely, Esc to decline) instead of the old
+  plain `[y/N]` text prompt.
+- **Status bar reflects plan mode**: the interactive composer's bottom-line
+  label switches from `[Agent]` to `[Plan]` whenever `session.plan_mode` is on
+  (`interactive/input_box.rs`).
 
 ---
 
-## 🎙️ Gemini Live Voice Fixes, Messaging Bridges & CLI Syntax Highlighting
+## ⏰🌏 Scheduled Tasks — Fixes & Timezone Support
 
-- **🐛 Gemini Live Silent-Session Fix (found via live API testing)**: `crates/mint-core/src/gemini_live.rs` only matched `Message::Text` when reading server frames, but the Gemini Live WebSocket sends every event — `setupComplete`, audio replies, transcripts, tool calls — as `Message::Binary`. Every single server event was being silently dropped by a `_ => continue` arm, so Live Mode connected and streamed mic audio fine but the model's replies never reached the UI. Fixed to decode both frame types; verified end-to-end against the real Gemini Live API (setup handshake, a spoken text-turn reply, and clean session close).
-- **🗣️ Gemini Live Voice Selection**: Added `speechConfig.voiceConfig.prebuiltVoiceConfig` to the Live session setup (`gemini_live.rs`, `resolve_live_voice`), configurable via a new `geminiLiveVoice` setting. Exposed as a dropdown in Settings → Audio (`AudioTab.tsx`, both Desktop and Web) and as a live voice-picker button directly inside the Live overlay (`GeminiLiveOverlay.tsx`) that reconnects the session with the new voice immediately, without losing the persisted setting.
-- **📲 LINE & WhatsApp Messaging Bridges (real implementations, not just Settings UI)**: The Settings UI for LINE Messaging and WhatsApp Cloud API bridges existed with zero backend behind it — enabling either toggle did nothing. Implemented `line_webhook_loop()` and `whatsapp_webhook_loop()` in `crates/mint-core/src/channels.rs`: small hand-rolled HTTP servers (`lineWebhookHost:lineWebhookPort`, `whatsappWebhookHost:whatsappWebhookPort`) with HMAC-SHA256 signature verification (`X-Line-Signature`, `X-Hub-Signature-256`), the WhatsApp `hub.challenge` verification handshake, and replies routed through the same `answer_channel` path Telegram/Discord/Slack already use. Verified end-to-end over real loopback HTTP requests (valid/invalid signatures, verification handshake, message delivery).
-- **🧩 Subagent Settings UI (`dispatch_subagent`)**: The file-based subagent-delegation system (`subagents.rs`, `.agents/subagents/*.md`) had a fully working backend and zero way to create one without hand-writing Markdown frontmatter. Added `save_subagent()`/`delete_subagent()` write functions to `subagents.rs`, exposed via Tauri commands (`list_subagents`, `save_subagent`, `delete_subagent` in `src-tauri/src/lib.rs`) and REST endpoints (`GET/POST /api/subagents`, `DELETE /api/subagents/:sourcePath` in `api_server.rs`), and built a full CRUD section in Settings → Agents (`AgentsTab.tsx`, both Desktop and Web) — create/edit/delete subagents with name, description, system prompt, allowed-tools list, model/provider override, and workspace-vs-global scope.
-- **🎨 CLI Code Block Syntax Highlighting**: Code blocks in `mint`'s interactive/agent output got a bordered box with a language label but no coloring of the code itself. Integrated `syntect` (pure-Rust `fancy-regex` backend, no C toolchain required) into `crates/mint-cli/src/agent.rs`'s `format_markdown_bold` — the fenced block's language hint now drives real token-level syntax highlighting (`base16-ocean.dark` theme), with a clean fallback to plain unhighlighted text for unrecognized or missing language hints.
+Two real bugs found and fixed in the cron system shipped above, plus proper
+timezone handling and a friendlier way to create a job.
+
+- **Fixed: orphaned empty conversations in the chat sidebar.** `CronStore::add`
+  pre-creates the job's conversation up front (so it's titled in the sidebar
+  immediately) via `MemoryStore::open_default()` — which, unlike
+  `CronStore`'s own store, has no test-scoped path override. Every
+  `cargo test` run was silently leaving real, permanent, empty conversation
+  rows in the developer's *actual* chat database. Fixed with a `cfg!(test)`
+  guard on both sides (`cron/store.rs`), matching the existing pattern already
+  used in `memory.rs`.
+- **Fixed: deleting/replacing a task could still leave an empty conversation
+  behind.** New `MemoryStore::delete_chat_session_if_empty` (`memory.rs`) is
+  now called from `CronStore::remove` — cleans up the placeholder only if the
+  job never actually ran (zero interactions), leaving real report history
+  untouched for jobs that did run.
+- **Timezone-aware scheduling, backend and frontend:**
+  - New `mint_core::cron::localize_schedule()` (`cron/schedule.rs`, built on
+    `chrono-tz`) converts a wall-clock time in an explicit IANA timezone into
+    the UTC cron expression the scheduler actually evaluates against —
+    correctly handling daily/weekly/monthly/one-time shapes and DST (verified
+    against real `America/New_York` EST/EDT transitions in tests).
+  - `mint cron add --name/--schedule/--task --timezone <IANA zone>` and
+    `/cron add <name> | <schedule> | <task> | [timezone]` (a new optional 4th
+    field) now do this conversion automatically instead of requiring the
+    schedule to already be written in UTC.
+  - The Desktop/Web "New Scheduled Task" form (`ScheduledTasksView.tsx`) does
+    the same conversion client-side via `luxon`, plus a new **Timezone**
+    dropdown (defaults to the device's zone, not locked to it) — previously
+    the time picker silently assumed UTC, so picking "08:00" could fire at a
+    different hour than intended depending on the browser's real timezone.
+- **New interactive wizard**: running `mint cron add` or `/cron add` with no
+  arguments now walks through name → repeat type (daily/weekly/monthly/
+  one-time/custom) → time → weekday/day-of-month/date → timezone
+  (auto-detected via `iana-time-zone`, editable) → task → workspace, reusing
+  the onboarding flow's own `prompt_choice`/`prompt_input` helpers
+  (`cron_wizard.rs`). The flag-based and pipe-delimited forms still work
+  unchanged for scripting.
+- **`/cron add` is now its own entry** in the CLI's slash-command suggestion
+  list, not just documented under the parent `/cron` entry.
+
+---
+
+## 🔧 `mint setup` — Full Tool Coverage
+
+`mint setup`'s tool-enable wizard had drifted out of sync with the agent's
+actual tool catalog as new tools were added over time — 21 real tools had no
+way to be toggled off through it at all. `crates/mint-cli/src/setup.rs` now
+lists all 49 tools from `base_allowed_actions()`, in the same order, verified
+by direct comparison: `image_search`, `weather`, `stock`, `calculation`,
+`mcp_list_tools`, the full video/subtitle/audio editing set (`video_trim`,
+`video_remove_silence`, `video_resize`, `video_merge`, `video_export`,
+`video_extract_audio`, `speech_transcribe`, `subtitle_generate`,
+`subtitle_translate`, `subtitle_burn`, `timeline_reorder`,
+`effect_zoom_on_speaker`, `audio_duck_music`, `make_shorts`), and
+`generate_image`/`generate_video`.
+
+---
+
+## 🔒 Messaging Bridges — Owner Allowlist (Security Fix)
+
+Found and fixed a real gap: none of Telegram, Discord, Slack, LINE, or
+WhatsApp verified *who* was messaging the bot. Any stranger who could reach
+one — DM a public Telegram bot, share a Discord server or Slack workspace
+with it, message a LINE/WhatsApp account — could trigger `answer_channel`'s
+agent loop, which auto-approves every action (`write_file`, `apply_patch`,
+`run_shell`, …) since there's no human present on a bridge to click approve.
+
+- **New `authorize_sender()`** (`channels.rs`): the first sender any bridge
+  ever hears from is claimed as its owner (persisted to
+  `config.extra["<platform>OwnerChatId"/"OwnerUserId"/"OwnerPhone"]`);
+  everyone else is silently ignored from then on. Zero setup required. Wired
+  into all five loops (Telegram `from.id`, Discord `author.id`, Slack
+  `event.user`, LINE `source.userId`, WhatsApp `message.from`).
+- Decision logic split into a pure, directly-testable `sender_authorization()`
+  core so tests never touch the real on-disk config (the same class of bug
+  fixed in cron's tests above).
+- `README.md`'s Safety And Privacy section documents the behavior and how to
+  reset an owner (`mint config set telegramOwnerChatId ""`).
+
+---
+
+## 📣 README Repositioning — Reach Is The Headline
+
+Messaging-bridge reach was buried as feature #6 of 9; it's Mint's most
+distinctive capability (a local agent reachable from a chat app, not just a
+terminal or desktop window), so `README.md` now leads with it: the top
+tagline, intro paragraph, feature-list ordering (now #1), and Highlights list
+all foreground it, done only after the owner-allowlist fix above closed the
+security gap that would have made a louder headline risky.
+
+---
+
+## 🎧 Multimodal — OpenAI Audio Input
+
+Audio attachments were Gemini-only; OpenAI's real API supports them too via
+`input_audio` content parts, so `crates/mint-core/src/chat.rs` now builds that
+payload shape for it (`openai_audio_part`, wired into both the single-turn and
+native multi-turn message paths).
+
+Scoped honestly rather than claimed as blanket "provider-agnostic multimodal":
+video stays Gemini-only, since OpenAI/Anthropic have no native video
+ingestion at all in their chat APIs — a genuine provider capability gap, not
+an integration gap. Audio also stays unsupported for `local_openai`,
+`openrouter`, `deepseek`, and `huggingface` — proxies/other services on
+similar wire formats that aren't confirmed to speak the same `input_audio`
+schema as the real OpenAI API.
+
+---
+
+## 🎯 Agent Honesty — Don't Report Success On A Real Failure
+
+The existing "did you verify your changes" gate only checked that the `verify`
+tool had been *called* after the last edit — not whether it actually passed.
+An agent could run `verify`, see real test failures in the output, and still
+call `finish` claiming success, and nothing would catch it. That matters more
+for Mint than for an interactively-watched coding assistant: a task run from
+a scheduled job or a messaging bridge has nobody watching live to notice the
+lie until they check back later.
+
+- **Fixed a real bug along the way**: the in-context "your command failed"
+  nudge that fires right after `run_shell`/`verify` only scanned the *first*
+  `"exit: "` line in the result before stopping — a multi-command `verify`
+  call where an earlier command passed but a later one failed never
+  triggered it. New `shell_result_failed()` (`orchestration.rs`) scans every
+  line instead.
+- **New hard gate at `finish` time**: `last_verify_failed` now tracks whether
+  the most recent `verify` call actually passed, separately from whether it
+  merely ran. `unacknowledged_verify_failure()` rejects `finish` outright if
+  the last verify failed and the agent's `finish.verification` field says
+  nothing about it — forcing the agent to either fix the problem, re-verify
+  successfully, or explicitly explain the failure (e.g. "pre-existing,
+  unrelated to this change") rather than silently claiming success over it.
+- Mirrors the existing `unverified_modification` gate's shape and escape
+  hatch (a non-empty, non-placeholder `verification` field satisfies it) so
+  the two gates behave consistently.
+- **Known limit, stated plainly**: this stops silent success claims, not a
+  sufficiently motivated *false* explanation typed into the verification
+  field — a text-based gate can't fully replace actually re-running the
+  check itself, which is out of scope here.
+
+---
+
+## 🎙️ Native Voice Input — Desktop Mic Replaces Browser Speech Recognition
+
+The desktop app's push-to-talk mic button ran on the browser's
+`window.SpeechRecognition` API — Chrome/Edge-only, and effectively broken
+inside Tauri's WebKitGTK webview on Linux. It's now a native Rust recorder
+that works regardless of webview engine.
+
+- **New `crates/mint-core/src/mic_transcribe.rs`**: `cpal`-based mic capture
+  running on a dedicated OS thread (`cpal::Stream` isn't `Send` on every
+  backend, notably ALSA, so it can't live on a tokio task) with a
+  `start_recording()`/`stop_recording()` handle pair; recording is encoded to
+  an in-memory WAV via `hound` at the device's native sample rate — no forced
+  16kHz resampling, since a WAV header self-describes its own rate.
+- **Reuses whichever provider is already configured for chat** — Gemini or
+  OpenAI's existing multimodal audio support in `chat.rs`, not a separate
+  Whisper API key. If the configured provider doesn't accept audio
+  (Anthropic, Ollama, HuggingFace, local/custom endpoints), the mic button
+  shows a specific "switch provider" error instead of silently falling back
+  or faking a transcript. Deliberately calls `send_chat`, not
+  `send_chat_with_fallback`, so an unsupported-attachment error can't be
+  silently retried on a different provider.
+- **Not the same as the existing Whisper-based transcription** —
+  `crates/mint-core/src/speech.rs`'s OpenAI Whisper API → local `whisper` CLI
+  → placeholder fallback chain (used for subtitle generation) is untouched
+  and still exists for that separate use case.
+- **New Tauri commands** (`start_mic_recording`, `stop_mic_recording_and_transcribe`)
+  and a new frontend hook, `useNativeVoiceInput.ts`, replacing
+  `useSpeechToText` in the desktop build's `ChatPanel.tsx` only — the `mint
+  web` browser build keeps the old browser-based mic button unchanged, since
+  its server can be reached from a different device than the browser
+  (native recording would capture the wrong machine's mic).
+- **New Linux build prerequisite**: ALSA development headers
+  (`libasound2-dev` / `alsa-lib-devel` / `alsa-lib`) to build `cpal`,
+  documented in the README's Linux Dependencies section.
+- **Verified end-to-end** with real captured speech through the actual
+  record → encode → transcribe pipeline (not just a compile check) — a
+  spoken test phrase came back transcribed correctly via Gemini's audio
+  input.
+
+---
+
+## 🎞️ Video Filmstrip & Waveform — Cheap Visual Context Instead of Frame-Dumping
+
+Inspired by the open-source `browser-use/video-use` project's approach:
+give the agent cheap visual context on a video instead of shipping the
+whole file. Previously, `video_data_uri` sent a video's entire raw bytes as
+base64 straight into Gemini's `inlineData` (the only provider that accepts
+video at all) with no size limiting whatsoever.
+
+- **Two new agent actions** in `crates/mint-core/src/video_edit.rs`:
+  `video_filmstrip` (a grid image of frames sampled evenly across the
+  timeline, composited with the `image` crate — no new dependency) and
+  `video_waveform` (an audio amplitude image via ffmpeg's built-in
+  `showwavespic` filter) — a couple of small PNGs instead of the whole file,
+  and it works on any vision-capable provider, not just Gemini.
+- **Found and fixed a real vision-attachment gap while building this**: an
+  image only ever reached the model as something it could actually *see* on
+  a task's very first turn (attached from the frontend before the loop
+  starts). A `step_images` mechanism already existed to attach a **mid-task**
+  tool result as real vision on the next turn, but only `browser_screenshot`
+  used it — the existing `view_image` tool returned a JSON-wrapped data URI
+  that failed the attach check, so its image was dumped as unreadable base64
+  text instead of actually being seen. Generalized the check in
+  `orchestration.rs` to cover `browser_screenshot | video_filmstrip |
+  video_waveform | view_image`, and simplified `view_image` to return the
+  bare data URI so it benefits too.
+- Both new actions registered in `prompts/agent.rs`'s allowed-actions list
+  (including plan mode's read-only allowlist, alongside `view_image` and
+  `browser_screenshot` — generating an inspection image doesn't modify
+  project files) and `prompts/tool_catalog.rs`'s native tool-calling schemas.
+- **Verified end-to-end** against a real synthetic test video: the agent
+  correctly read a moving on-screen counter from the generated filmstrip and
+  correctly located a silent audio gap from the generated waveform — genuine
+  visual reasoning grounded in the actual pixels, not placeholder text.
+
+---
+
+## 🔌 Companion Service Shortcuts — `/n8n` and `/notebook`
+
+Two self-hosted open-source projects — [n8n](https://n8n.io) (workflow
+automation) and [SurfSense](https://github.com/MODSetter/SurfSense) (a
+self-hosted NotebookLM alternative) — can now be driven straight from Mint's
+agent, each wired in as its own MCP server. Neither ships with Mint; both
+are separate projects you clone and run yourself, connected the same way any
+third-party MCP server is.
+
+- **New slash commands `/n8n [task]` and `/notebook [task]`**
+  (`crates/mint-cli/src/interactive/slash_commands.rs`): with no task, each
+  checks whether its service is actually reachable (a 300ms TCP probe via a
+  new `is_reachable()` helper) and opens it in the browser
+  (`crate::actions::open_system_handler`); with a task, it forwards to the
+  agent loop tagged `[n8n]`/`[notebook]` — the same `ForwardToAgent` pattern
+  `/code` already uses — so the model reaches for that service's MCP tools
+  specifically.
+- **Guarded against the obvious silent-failure case**: both commands check
+  `mint mcp list` for a server registered under the exact name `n8n` /
+  `surfsense` before forwarding a task, so a task never gets silently sent
+  to an agent with no matching tools to call.
+- **New inline status panel instead of walls of warning text**
+  (`render_companion_status_panel`): reuses the same "flash an inline
+  `ratatui` `Terminal`, draw once, `clear()` to finalize into scrollback"
+  pattern `picker.rs` already uses for `/mcp` and `/models`, just without
+  the interactive redraw loop since there's nothing to select — a colored
+  `●`/`○` dot per service plus its MCP-connection status and a setup-doc
+  pointer, shown whenever either command can't proceed.
+- **New setup docs** (`docs/N8N_INTEGRATION.md`,
+  `docs/SURFSENSE_INTEGRATION.md`): full clone-and-run steps for each
+  project, how to register it with `mint mcp add`, and — for n8n
+  specifically — a correction that its MCP support moved from a per-workflow
+  "MCP Server Trigger" node (older versions) to a single instance-wide
+  `/mcp-server/http` endpoint authenticated by a dedicated MCP API key
+  (distinct from n8n's general Public API key, which shares the same JWT
+  shape and is easy to grab by mistake), found by inspecting a running n8n
+  v2.34.6 container directly since public docs hadn't caught up yet.
+- **Fixed a real `mint mcp add --args` parsing bug found while wiring this
+  up** (`crates/mint-cli/src/main.rs`): `args`/`env` were declared with
+  `num_args = 0..` (unbounded) plus `allow_hyphen_values`, which made clap
+  unable to distinguish a fresh `--args` occurrence from a hyphen-prefixed
+  value continuing the previous one — passing a value like `--header` (needed
+  to bridge n8n's MCP endpoint through `mcp-remote`) silently swallowed every
+  following `--args`/value as literal text instead of starting a new
+  occurrence. Pinned both to `num_args = 1` (one value per occurrence,
+  still repeatable) to remove the ambiguity entirely.
+
+---
+
+## 🖥️ Headless Gateway Mode — Run Mint 24/7 on a VPS
+
+- **`mint gateway start [--api-port <N>]`**: headless mode — bridges + cron,
+  no TUI, no TTY required. Clean shutdown on Ctrl+C and SIGTERM.
+- **`mint gateway install [--system] [--now] [--memory-max <size>]`**:
+  registers a systemd unit (per-user by default, `--system` for root-level).
+  Hardened out of the box (`TasksMax`, crash-loop limits, `NoNewPrivileges`);
+  `--memory-max` is opt-in, not a guessed default.
+
+## 📡✉️ Signal & Email Bridges, Unified Cross-Channel Memory
+
+- **Signal**: talks to a self-hosted `signal-cli-rest-api` instance (no
+  official bot API exists). **Email**: reuses the existing Gmail OAuth
+  connection (`mint gmail auth`) instead of separate IMAP/SMTP setup. Both
+  configurable via `mint onboard`.
+- **All seven bridges now share one memory thread** with the terminal CLI
+  instead of one per platform — pick up a Telegram conversation from the
+  terminal and vice versa.
+
+## 🩺 Bridge Reliability — Panic Isolation & Health Monitoring
+
+- A panic inside any bridge loop used to kill it silently and permanently.
+  `restarting_loop` now catches panics too, not just errors, and retries
+  with backoff like normal.
+- **New `GET /api/gateway/health`**: each bridge's enabled state, last
+  success/error, and failure count as JSON — check status remotely without
+  SSHing in.
+
+## 🔐 Opt-in API Authentication + a Real Bug Fixed Along the Way
+
+- **`apiAuthToken`** config value gates the whole local API server: set it
+  and every request needs `Authorization: Bearer <token>` or gets `401`.
+  Unset by default — no change for existing desktop/`mint web` users.
+- **Bonus fix**: `mint api` and `mint gateway start --api-port` were both
+  starting every bridge *twice* (duplicate Telegram polling, duplicate
+  Discord sessions) — `start_api_server` already starts them internally.
+  Found while wiring up the auth check above; now fixed.
+
+---
+
+## 💬 `ask_user` — Descriptions, Multi-Select, and a Claude-Code-Style Picker
+
+The agent's `ask_user` tool could already offer up to 3 plain-text options
+plus an always-available free-text fallback. This round brings it closer to
+feature parity with Claude Code's own `AskUserQuestion` tool — richer option
+data, a matching visual style in both the CLI and desktop/web GUI, and
+explicit guidance on when the agent should actually reach for it.
+
+- **Per-option `description`, `multiSelect`, and a short `header` tag**
+  (`crates/mint-core/src/orchestration/mod.rs`): new `AskUserOption { label,
+  description }` struct on `AgentApproval::AskUser`, plus `header:
+  Option<String>` and `multi_select: bool` (wire name `multiSelect`).
+  Decoding uses an untagged `AskUserOptionInput` enum (`Plain(String) |
+  Detailed{label, description}`) so a model that still emits the old bare
+  `["a","b"]` array shape keeps working — no breaking change for in-flight
+  models. `ApprovalOutcome` itself is untouched (still just `Approved |
+  Denied | Intercepted(String)`, shared by every other approval type); a
+  multi-select answer is pre-joined by the CLI/GUI into one canonical string
+  (`"A, B"`, or `"A, B — <free text>"` if the user also typed something)
+  before it ever becomes `Intercepted`.
+- **Native tool schema and legacy prompt both updated**
+  (`prompts/tool_catalog.rs`, `prompts/agent.rs`) to document the new
+  `header`/`multiSelect`/`{label, description}` shape for both the
+  native-tool-calling and prose-JSON code paths.
+- **CLI picker restyled to match Claude Code's own look**
+  (`crates/mint-cli/src/agent/approval_prompts.rs`): a highlighted header
+  chip, the question wrapped in a left-bordered quote block
+  (`textwrap`-powered, sized to the real terminal width), bold option
+  labels with dimmed descriptions underneath, and — new — an explicit,
+  navigable **"Chat about this"** row at the bottom of the list instead of
+  free text only being reachable via a hidden "type any key" gesture. Ships
+  for single-select (`run_option_picker`), multi-select checkboxes
+  (`run_multi_option_picker`, new), and the non-raw-mode numbered fallback
+  alike.
+- **Desktop & Web GUI** (`ApprovalCard.tsx`): numbered, described option
+  buttons; a header chip; multi-select toggle buttons that build the same
+  canonical joined answer the CLI does, submitted alongside (not gated
+  behind) an always-visible free-text box.
+- **New usage guidance on the tool itself**: both prompt paths now tell the
+  model to call `ask_user` *only* when genuinely blocked on a decision that
+  is the user's to make — not resolvable from the request, the code, or a
+  sensible default — and explicitly not to use it for permission-to-proceed
+  or confirmation, which the existing approval/plan-review flow already
+  handles.
+
+---
+
+## 🐳 Docker Sandbox for Subagents
+
+`dispatch_subagent`-spawned subagents can now run their shell commands inside
+an isolated Docker container instead of the shared bwrap/sandbox-exec
+host-level sandbox — the biggest sandboxing gap the agent had, since a
+subagent is exactly the piece of the system most likely to run less-trusted,
+model-generated shell commands.
+
+- **New `crates/mint-core/src/system/docker_sandbox.rs`**: one container per
+  subagent *session*, not per command — `start_session` starts a single
+  detached container keyed by `sub_chat_id`, and every subsequent
+  `run_shell` call from that subagent `docker exec`s into it instead of
+  paying container-startup latency per command. Modeled directly on
+  `integrations::mcp`'s `SESSIONS` registry pattern rather than
+  `bg_shell`'s job registry, which has no reuse/lifecycle semantics.
+- **Ref-counted teardown**: `run_parallel_subagent_batch` can dispatch the
+  same subagent name twice concurrently (it doesn't dedupe names), so two
+  callers can share one container. `stop_session` now decrements a
+  reference count and only actually stops/removes the container once every
+  caller that started it has also stopped it — without this, whichever
+  concurrent dispatch finished first would tear the shared container down
+  out from under the other one still using it.
+- **Filesystem policy stricter than bwrap by design**: only
+  `allowedWritePaths`/`allowedReadPaths` get bind-mounted (rw/ro
+  respectively) rather than exposing the whole host filesystem read-only
+  the way bwrap's `--ro-bind / /` does — a container ships its own
+  `/usr`/`/bin`, so there's no need to also expose the host's.
+- **New config**: `sandboxBackend` (`"os"` default | `"docker"`) and
+  `dockerSandboxImage` (default `debian:bookworm-slim`), settable via `mint
+  config set`; a subagent definition's own `sandbox: docker` frontmatter
+  field overrides the global setting per subagent. `mint config doctor`
+  reports a new `dockerSandbox` block (backend/image/availability).
+- **Verified against a real Docker daemon**, not just compile-checked: unit
+  tests actually start a container, `docker exec` into it, confirm
+  `/.dockerenv` is visible, and confirm `docker ps -a` shows nothing left
+  behind after teardown — including a dedicated regression test for the
+  ref-counting fix and an error-path test proving teardown still runs when
+  the subagent's run fails.
+
+---
+
+## 📱 Web UI, Installable as a PWA
+
+The Web UI can now be installed to a phone's home screen like a native app —
+no app store, no separate mobile codebase — the lowest-effort step toward
+mobile access ahead of a heavier Tauri-mobile investment.
+
+- **New web app manifest** (`manifest.webmanifest`) and a generated icon set
+  (192×192, 512×512, and a padded 512×512 maskable variant) so Android/iOS
+  "Add to Home Screen" gets a proper name, theme color, and icon instead of
+  a generic browser bookmark.
+- **A narrowly-scoped service worker** (`public/sw.js`): stale-while-revalidate
+  for static assets (safe since Vite already content-hashes built
+  filenames, so a new deploy's JS/CSS never collides with a stale cache
+  entry), a network-first app-shell fallback for navigations when the
+  network drops mid-use — and `/api/*` is **never** intercepted, since
+  caching or replaying agent/chat responses would be actively wrong, not
+  just stale.
+- **Production-only registration**: `registerServiceWorker()` is gated on
+  `import.meta.env.PROD` so it never registers under Vite's dev server,
+  where it would otherwise fight with HMR.
+- **Desktop (Tauri) build is untouched** — the manifest/service worker only
+  ever get referenced from `index-web.html`/`src-web`, not the desktop
+  `index.html`/`src`.
+- **Verified in an actual browser**: driven headlessly through Chrome
+  DevTools Protocol against a real production build (`vite preview`) —
+  confirmed the service worker registers, the manifest resolves as valid
+  JSON with the right name/icons, and the page loads with zero console
+  errors or warnings.
+
+---
+
+## 🔗 Cross-Reference Links for Linked Folders
+
+Notes written into a linked folder can now reference each other, closer to
+the Obsidian-style web of notes Linked Folders was originally inspired by
+instead of a flat, unlinked pile of daily files.
+
+- **The note-writing reflection call now sees recent existing entries**
+  (`crates/mint-core/src/search/linked_folders.rs`, up to 15 per candidate
+  folder) and can wiki-link a new note to ones it names as genuinely
+  related — `id` format is `"YYYY-MM-DD#HH:MM"`, deliberately matching the
+  real `## HH:MM` heading each entry is already written under, so
+  `[[2026-08-10#09:00]]` resolves if the folder is ever opened as an actual
+  Obsidian vault, not just inside Mint.
+- **Hallucination-safe**: any id the model returns that wasn't in the
+  candidate list it was actually shown gets silently dropped rather than
+  written into the note as a permanently broken link.
+
+---
+
+## 🧬 Self-Evolving Skills
+
+Auto skill writing now behaves closer to "creates skills from experience,
+improves them during use" instead of a one-shot write-and-forget.
+
+- **On by default**: `auto_skill_writing` now defaults to `true` (was
+  `false`) — `/autoskill off` or the Settings toggle still turns it off, but
+  the self-improving behavior it exists for no longer requires a user to
+  discover and enable it first.
+- **Genuine refinement instead of a blind overwrite**
+  (`orchestration/memory_skill.rs`): when the reflection call's chosen slug
+  matches an existing workspace skill, `auto_write_skill` now shows the
+  model that skill's full current `SKILL.md` content and asks for a real
+  merge — keep what's still correct, incorporate what's new — rather than
+  risking a from-scratch rewrite that silently discards a skill's earlier,
+  hard-won content.
+- **`revisions: N` frontmatter, computed in code, not by the model**: every
+  write stamps a revision count — read the previous file's own count, add
+  one — deterministic rather than trusted to an LLM's arithmetic across
+  calls, so there's visible, verifiable evidence a skill has actually
+  evolved over repeated invocations.

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use mint_core::{
     McpServer, add_mcp_server, call_configured_mcp_tool, clear_mcp_servers, list_mcp_servers,
-    load_config, remove_mcp_server, save_config,
+    load_config, reauth_mcp_server, remove_mcp_server, save_config,
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -24,6 +24,10 @@ pub fn clear() -> Result<()> {
 
 pub fn call(server_name: &str, tool_name: &str, arguments: Value) -> Result<Value> {
     Ok(call_configured_mcp_tool(server_name, tool_name, arguments)?)
+}
+
+pub fn reauth(server_name: &str) -> Result<bool> {
+    Ok(reauth_mcp_server(server_name)?)
 }
 
 pub fn allow(server_name: &str, tool_name: &str) -> Result<bool> {

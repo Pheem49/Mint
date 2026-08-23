@@ -9,6 +9,30 @@ export function numericSetting(value: unknown, fallback: number): number {
   return Number.isFinite(numeric) ? numeric : fallback
 }
 
+/** Gap between two messages large enough to draw a divider between them —
+ * long enough that they read as separate sitting-down-to-chat sessions
+ * rather than back-and-forth replies in the same one. */
+const SESSION_GAP_MS = 30 * 60 * 1000
+
+export function shouldShowSessionDivider(prevCreatedAt: unknown, createdAt: unknown): boolean {
+  const prev = new Date(prevCreatedAt as string).getTime()
+  const curr = new Date(createdAt as string).getTime()
+  if (!Number.isFinite(prev) || !Number.isFinite(curr)) return false
+  return Math.abs(curr - prev) > SESSION_GAP_MS
+}
+
+export function formatSessionDividerLabel(createdAt: unknown): string {
+  const date = new Date(createdAt as string)
+  if (Number.isNaN(date.getTime())) return ''
+  const now = new Date()
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  if (date.toDateString() === now.toDateString()) return time
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return `Yesterday, ${time}`
+  return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`
+}
+
 export function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
 }

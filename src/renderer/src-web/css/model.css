@@ -29,7 +29,7 @@
   place-items: center;
   position: relative;
   background: rgba(0, 0, 0, 0.2);
-  border-radius: 24px;
+  border-radius: var(--radius-3xl);
   border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.2);
   overflow: hidden;
@@ -68,7 +68,7 @@
   opacity: 0;
   pointer-events: none;
   padding: 7px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: rgba(15, 23, 42, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #f8fafc;
@@ -120,7 +120,7 @@
   top: 50%;
   transform: translate(-50%, -50%);
   padding: 4px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: rgba(3, 7, 18, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #e0f2fe;
@@ -203,7 +203,7 @@
   gap: 7px;
   padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: rgba(18, 18, 22, 0.72);
   color: var(--text-main);
   font-size: 0.72rem;
@@ -223,7 +223,7 @@
   gap: 6px;
   padding: 5px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgba(18, 18, 22, 0.68);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
   backdrop-filter: blur(12px);
@@ -236,7 +236,7 @@
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-soft);
   cursor: pointer;
@@ -257,7 +257,7 @@
   gap: 7px;
   padding: 0 6px;
   color: var(--text-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .model-scale-control:hover {
@@ -286,7 +286,7 @@
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-soft);
   cursor: pointer;
@@ -313,7 +313,7 @@
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -384,7 +384,7 @@
   align-items: center;
   gap: 14px;
   padding: 40px 28px 28px;
-  border-radius: 24px;
+  border-radius: var(--radius-3xl);
   background: var(--surface-bg, #1e293b);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
@@ -401,14 +401,14 @@
   text-transform: uppercase;
   color: var(--text-muted);
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
 }
 
 .gemini-live-orb {
   width: 88px;
   height: 88px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: radial-gradient(circle at 35% 30%, #60a5fa, #6366f1 55%, #a855f7 100%);
   box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.45);
   animation: gemini-live-pulse 2.2s ease-in-out infinite;
@@ -474,7 +474,7 @@
   align-items: center;
   gap: 6px;
   padding: 5px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-soft, #94a3b8);
@@ -499,7 +499,7 @@
   gap: 2px;
   min-width: 140px;
   padding: 6px;
-  border-radius: 14px;
+  border-radius: var(--radius-2xl);
   background: var(--surface-bg, #1e293b);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
   box-shadow: 0 12px 30px -8px rgba(0, 0, 0, 0.55);
@@ -508,7 +508,7 @@
 
 .gemini-live-voice-option {
   padding: 7px 10px;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   border: none;
   background: transparent;
   color: var(--text-soft, #94a3b8);
@@ -534,7 +534,7 @@
   gap: 14px;
   margin-top: 6px;
   padding: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
 }
@@ -545,7 +545,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   border: none;
   cursor: pointer;
   background: rgba(255, 255, 255, 0.08);
@@ -590,7 +590,7 @@
   height: 100%;
   background: var(--panel-soft);
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025), 0 18px 52px rgba(0, 0, 0, 0.16);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);

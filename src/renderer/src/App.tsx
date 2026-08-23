@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react'
 import AuthGate from '../shared/components/AuthGate'
 import ChunkErrorBoundary from '../shared/components/ChunkErrorBoundary'
+import { listen } from './tauri'
 
 const SettingsWindow = lazy(() => import('./components/SettingsWindow'))
 const SpotlightWindow = lazy(() => import('./components/SpotlightWindow'))
@@ -24,9 +25,17 @@ export default function App() {
     }
     window.addEventListener('popstate', handleUrlChange)
     window.addEventListener('hashchange', handleUrlChange)
+
+    // Fired by the tray "Settings" item (src-tauri/src/lib.rs) so it opens
+    // the settings view in this window instead of spawning a separate one.
+    const unlistenPromise = listen('open-settings', () => {
+      window.location.hash = '#/settings'
+    })
+
     return () => {
       window.removeEventListener('popstate', handleUrlChange)
       window.removeEventListener('hashchange', handleUrlChange)
+      unlistenPromise.then((unlisten) => unlisten())
     }
   }, [])
 
@@ -62,7 +71,20 @@ export default function App() {
     )
   }
 
-  const content = route.startsWith('/settings') ? <SettingsWindow /> : <MintDashboard />
+  const content = route.startsWith('/settings') ? (
+    <>
+      <MintDashboard />
+      <div className="settings-modal-overlay" onClick={() => { window.location.hash = '#/' }}>
+        <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+          <Suspense fallback={null}>
+            <SettingsWindow />
+          </Suspense>
+        </div>
+      </div>
+    </>
+  ) : (
+    <MintDashboard />
+  )
 
   return (
     <ChunkErrorBoundary>
