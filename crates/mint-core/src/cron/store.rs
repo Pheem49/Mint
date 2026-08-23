@@ -175,8 +175,7 @@ impl CronStore {
             if !cfg!(test)
                 && let Ok(memory) = crate::memory::MemoryStore::open_default()
             {
-                let _ = memory
-                    .delete_chat_session_if_empty(&super::scheduler::chat_id_for_job(id));
+                let _ = memory.delete_chat_session_if_empty(&super::scheduler::chat_id_for_job(id));
             }
         }
         Ok(removed)
@@ -218,11 +217,7 @@ impl CronStore {
         })
     }
 
-    fn mutate(
-        &self,
-        id: &str,
-        f: impl FnOnce(&mut CronJob),
-    ) -> Result<Option<CronJob>, CronError> {
+    fn mutate(&self, id: &str, f: impl FnOnce(&mut CronJob)) -> Result<Option<CronJob>, CronError> {
         let mut jobs = self.list()?;
         let Some(job) = jobs.iter_mut().find(|job| job.id == id) else {
             return Ok(None);
@@ -281,7 +276,12 @@ mod tests {
     fn add_list_get_round_trip() {
         let store = temp_store();
         let job = store
-            .add("stock report", "0 8 * * *", "fetch stock prices", PathBuf::from("/tmp"))
+            .add(
+                "stock report",
+                "0 8 * * *",
+                "fetch stock prices",
+                PathBuf::from("/tmp"),
+            )
             .unwrap();
         assert!(job.enabled);
         assert!(job.last_run_at.is_none());
@@ -294,9 +294,16 @@ mod tests {
     #[test]
     fn add_rejects_invalid_schedule() {
         let store = temp_store();
-        assert!(store
-            .add("bad", "not a cron expression", "task", PathBuf::from("/tmp"))
-            .is_err());
+        assert!(
+            store
+                .add(
+                    "bad",
+                    "not a cron expression",
+                    "task",
+                    PathBuf::from("/tmp")
+                )
+                .is_err()
+        );
     }
 
     #[test]

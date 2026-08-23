@@ -82,10 +82,14 @@ fn parse_literal_list(field: &str) -> Option<Vec<i64>> {
 /// wrap or split unpredictably). Anything else is rejected with a message
 /// telling the caller to write the schedule in UTC directly instead of
 /// silently producing a schedule that doesn't mean what was typed.
-pub fn localize_schedule(expression: &str, tz_name: &str, now: DateTime<Utc>) -> Result<String, String> {
-    let tz: Tz = tz_name
-        .parse()
-        .map_err(|_| format!("unknown timezone {tz_name:?} (expected an IANA name like \"Asia/Bangkok\")"))?;
+pub fn localize_schedule(
+    expression: &str,
+    tz_name: &str,
+    now: DateTime<Utc>,
+) -> Result<String, String> {
+    let tz: Tz = tz_name.parse().map_err(|_| {
+        format!("unknown timezone {tz_name:?} (expected an IANA name like \"Asia/Bangkok\")")
+    })?;
 
     let normalized = normalize(expression);
     let fields: Vec<&str> = normalized.split_whitespace().collect();
@@ -95,10 +99,14 @@ pub fn localize_schedule(expression: &str, tz_name: &str, now: DateTime<Utc>) ->
 
     let minute = parse_literal(min)
         .filter(|m| (0..60).contains(m))
-        .ok_or_else(|| "timezone conversion needs a specific minute (no *, ranges, or steps)".to_string())?;
+        .ok_or_else(|| {
+            "timezone conversion needs a specific minute (no *, ranges, or steps)".to_string()
+        })?;
     let hour_val = parse_literal(hour)
         .filter(|h| (0..24).contains(h))
-        .ok_or_else(|| "timezone conversion needs a specific hour (no *, ranges, or steps)".to_string())?;
+        .ok_or_else(|| {
+            "timezone conversion needs a specific hour (no *, ranges, or steps)".to_string()
+        })?;
 
     if dow != "*" && dom != "*" {
         return Err(
@@ -152,7 +160,8 @@ pub fn localize_schedule(expression: &str, tz_name: &str, now: DateTime<Utc>) ->
         for cron_dow in cron_dows {
             let target_weekday = cron_dow_to_weekday(cron_dow)?;
             let days_ahead =
-                (weekday_to_cron_dow(target_weekday) - weekday_to_cron_dow(today.weekday()) + 7) % 7;
+                (weekday_to_cron_dow(target_weekday) - weekday_to_cron_dow(today.weekday()) + 7)
+                    % 7;
             let ref_date = today + chrono::Duration::days(days_ahead);
             let utc = localize(ref_date)?;
             utc_hour = Some(utc.hour());
@@ -174,7 +183,10 @@ pub fn localize_schedule(expression: &str, tz_name: &str, now: DateTime<Utc>) ->
     if dom != "*" {
         let d = parse_literal(dom)
             .filter(|d| (1..=31).contains(d))
-            .ok_or_else(|| "timezone conversion needs a specific day-of-month (no *, ranges, or steps)".to_string())?;
+            .ok_or_else(|| {
+                "timezone conversion needs a specific day-of-month (no *, ranges, or steps)"
+                    .to_string()
+            })?;
         let naive_date = NaiveDate::from_ymd_opt(today.year(), today.month(), d as u32)
             .ok_or_else(|| format!("day {d} doesn't exist in the current month — try again next month, or write the schedule in UTC directly"))?;
         let utc = localize(naive_date)?;

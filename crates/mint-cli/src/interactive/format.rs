@@ -144,6 +144,9 @@ mod tests {
 
     #[test]
     fn format_placeholders_leaves_plain_text_untouched() {
-        assert_eq!(format_placeholders("just typing normally"), "just typing normally");
+        assert_eq!(
+            format_placeholders("just typing normally"),
+            "just typing normally"
+        );
     }
 }

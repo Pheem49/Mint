@@ -213,7 +213,10 @@ pub async fn handle_slash_command(
                     "/mcp reauth <server>",
                     "Re-run a server's OAuth login (e.g. expired token)",
                 ),
-                ("/release-notes", "Show release notes for the current version"),
+                (
+                    "/release-notes",
+                    "Show release notes for the current version",
+                ),
                 ("/stats", "Show session statistics"),
                 ("/exit", "Exit Mint"),
                 ("/code <task>", "Run in code-agent mode"),
@@ -1595,14 +1598,12 @@ pub async fn handle_slash_command(
                     }
                     println!();
                 }
-                "add" => {
-                    match crate::subagent_wizard::run_add_wizard(Some(&session.current_dir)) {
-                        Ok(definition) => {
-                            println!("\n{DIM}Created subagent {}.{RESET}\n", definition.name)
-                        }
-                        Err(e) => println!("\n{ERROR}Error:{RESET} {e}\n"),
+                "add" => match crate::subagent_wizard::run_add_wizard(Some(&session.current_dir)) {
+                    Ok(definition) => {
+                        println!("\n{DIM}Created subagent {}.{RESET}\n", definition.name)
                     }
-                }
+                    Err(e) => println!("\n{ERROR}Error:{RESET} {e}\n"),
+                },
                 "remove" => {
                     if args.is_empty() {
                         println!("{WARN}/subagent remove <name>{RESET}\n");
@@ -1621,9 +1622,7 @@ pub async fn handle_slash_command(
                         }
                     }
                 }
-                _ => println!(
-                    "{WARN}/subagent usage: list | add | remove <name>{RESET}\n"
-                ),
+                _ => println!("{WARN}/subagent usage: list | add | remove <name>{RESET}\n"),
             }
             Some(SlashResult::Handled)
         }
@@ -1809,9 +1808,9 @@ pub async fn handle_slash_command(
                             "{DIM}Re-authenticating MCP server '{args}'... (a browser tab may open){RESET}\n"
                         );
                         match crate::mcp::reauth(args) {
-                            Ok(true) => println!(
-                                "{MINT}Re-authentication succeeded for '{args}'.{RESET}\n"
-                            ),
+                            Ok(true) => {
+                                println!("{MINT}Re-authentication succeeded for '{args}'.{RESET}\n")
+                            }
                             Ok(false) => println!(
                                 "{ERROR}Re-authentication failed for '{args}' (see output above).{RESET}\n"
                             ),

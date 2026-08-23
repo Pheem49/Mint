@@ -20,7 +20,6 @@ pub use input_box::*;
 pub use picker::*;
 pub use slash_commands::*;
 
-
 pub static SESSION_APPROVED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 

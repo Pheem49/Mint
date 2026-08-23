@@ -131,9 +131,7 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
         "git_status" | "git_diff" | "git_log" | "git_branch" => {
             (false, format!("[{}] Reading repository state...", action))
         }
-        "create_plan" | "update_plan" => {
-            (false, format!("[{}] Updating task plan...", action))
-        }
+        "create_plan" | "update_plan" => (false, format!("[{}] Updating task plan...", action)),
         "request_user_approval" => (
             false,
             "[request_user_approval] Waiting for approval...".into(),
@@ -578,7 +576,10 @@ pub async fn run_code_agent_with_options(
                         let prefix = subagent.as_deref().unwrap_or("");
                         for (index, cmd) in commands.into_iter().enumerate() {
                             status.tasks.push(TaskEntry {
-                                label: format!("{DIM}{prefix}{RESET} \u{2192} Finished command: `{}`", cmd),
+                                label: format!(
+                                    "{DIM}{prefix}{RESET} \u{2192} Finished command: `{}`",
+                                    cmd
+                                ),
                                 output: if index == last_index {
                                     preview.clone()
                                 } else {

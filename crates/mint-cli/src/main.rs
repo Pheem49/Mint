@@ -928,7 +928,11 @@ fn log_panic_to_file(message: &str) {
     }
     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
     let entry = format!("[{timestamp}] {message}\n");
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
         use std::io::Write as _;
         let _ = file.write_all(entry.as_bytes());
     }
@@ -1671,24 +1675,22 @@ async fn main() -> Result<()> {
                             println!("\nCreated cron job {} — next run: {}", job.id, job.next_run);
                         } else {
                             let name = name.ok_or_else(|| anyhow::anyhow!("--name is required"))?;
-                            let schedule =
-                                schedule.ok_or_else(|| anyhow::anyhow!("--schedule is required"))?;
+                            let schedule = schedule
+                                .ok_or_else(|| anyhow::anyhow!("--schedule is required"))?;
                             let task = task.ok_or_else(|| anyhow::anyhow!("--task is required"))?;
                             let workspace = workspace.unwrap_or(default_workspace);
                             let schedule = match timezone {
-                                Some(tz) => mint_core::localize_schedule(
-                                    &schedule,
-                                    &tz,
-                                    chrono::Utc::now(),
-                                )
-                                .map_err(|e| anyhow::anyhow!(e))?,
+                                Some(tz) => {
+                                    mint_core::localize_schedule(&schedule, &tz, chrono::Utc::now())
+                                        .map_err(|e| anyhow::anyhow!(e))?
+                                }
                                 None => schedule,
                             };
                             println!(
                                 "{}",
-                                serde_json::to_string_pretty(&cron_jobs.add(
-                                    name, schedule, task, workspace
-                                )?)?
+                                serde_json::to_string_pretty(
+                                    &cron_jobs.add(name, schedule, task, workspace)?
+                                )?
                             );
                         }
                     }

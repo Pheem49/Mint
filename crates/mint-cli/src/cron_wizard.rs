@@ -17,8 +17,14 @@ fn parse_time(input: &str) -> Result<(u32, u32), String> {
     let (h, m) = input
         .split_once(':')
         .ok_or_else(|| "expected HH:MM, e.g. 08:00".to_string())?;
-    let hour: u32 = h.trim().parse().map_err(|_| "hour must be a number".to_string())?;
-    let minute: u32 = m.trim().parse().map_err(|_| "minute must be a number".to_string())?;
+    let hour: u32 = h
+        .trim()
+        .parse()
+        .map_err(|_| "hour must be a number".to_string())?;
+    let minute: u32 = m
+        .trim()
+        .parse()
+        .map_err(|_| "minute must be a number".to_string())?;
     if hour > 23 || minute > 59 {
         return Err("hour must be 0-23 and minute 0-59".to_string());
     }
@@ -43,7 +49,10 @@ fn parse_weekdays(input: &str) -> Result<Vec<i64>, String> {
             let lower = part.to_ascii_lowercase();
             WEEKDAY_NAMES
                 .iter()
-                .position(|name| name.to_ascii_lowercase().starts_with(&lower) || lower.starts_with(&name.to_ascii_lowercase()))
+                .position(|name| {
+                    name.to_ascii_lowercase().starts_with(&lower)
+                        || lower.starts_with(&name.to_ascii_lowercase())
+                })
                 .map(|idx| idx as i64)
                 .ok_or_else(|| format!("{part:?} isn't a day of the week"))
         })
@@ -147,7 +156,10 @@ pub fn run_add_wizard(
         let tz = prompt_until_valid("Timezone (IANA name)", Some(&default_tz), |s| {
             s.parse::<chrono_tz::Tz>()
                 .map(|_| s.trim().to_string())
-                .map_err(|_| "not a recognized IANA timezone (e.g. \"Asia/Bangkok\", \"America/New_York\")".to_string())
+                .map_err(|_| {
+                    "not a recognized IANA timezone (e.g. \"Asia/Bangkok\", \"America/New_York\")"
+                        .to_string()
+                })
         })?;
 
         mint_core::localize_schedule(&raw, &tz, chrono::Utc::now())
@@ -155,10 +167,7 @@ pub fn run_add_wizard(
     };
 
     let task = prompt_required("Task / prompt for the agent")?;
-    let workspace_str = prompt_input(
-        "Workspace path",
-        Some(&default_workspace.to_string_lossy()),
-    )?;
+    let workspace_str = prompt_input("Workspace path", Some(&default_workspace.to_string_lossy()))?;
     let workspace = PathBuf::from(workspace_str);
 
     let job = cron_jobs

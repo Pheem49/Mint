@@ -1699,7 +1699,10 @@ where
 /// Providers that don't report a stop reason at all (huggingface, ollama)
 /// can't be checked this way and are treated as not truncated.
 fn provider_truncated_response(stop_reason: Option<&str>) -> bool {
-    matches!(stop_reason, Some("length") | Some("max_tokens") | Some("MAX_TOKENS"))
+    matches!(
+        stop_reason,
+        Some("length") | Some("max_tokens") | Some("MAX_TOKENS")
+    )
 }
 
 fn plan_mode_allows(action: &str, input: &AgentInput) -> bool {

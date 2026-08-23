@@ -272,10 +272,8 @@ impl MemoryStore {
         // Restricting to `kind = 'conversation'` used to also block deleting
         // any other kind (e.g. a stale row left behind by a since-removed
         // feature) even though nothing else needs that protection.
-        let deleted = transaction.execute(
-            "DELETE FROM chat_sessions WHERE id = ?1",
-            params![chat_id],
-        )?;
+        let deleted =
+            transaction.execute("DELETE FROM chat_sessions WHERE id = ?1", params![chat_id])?;
         transaction.commit()?;
         Ok(deleted)
     }

@@ -169,7 +169,9 @@ pub async fn run() -> Result<Option<String>> {
         ToolOption {
             name: "mcp_list_tools (List MCP Server Tools)",
             key: "mcp_list_tools",
-            enabled: !config.disabled_tools.contains(&"mcp_list_tools".to_string()),
+            enabled: !config
+                .disabled_tools
+                .contains(&"mcp_list_tools".to_string()),
         },
         ToolOption {
             name: "run_shell (Run Shell Commands)",
@@ -280,12 +282,16 @@ pub async fn run() -> Result<Option<String>> {
         ToolOption {
             name: "generate_image (Generate Image)",
             key: "generate_image",
-            enabled: !config.disabled_tools.contains(&"generate_image".to_string()),
+            enabled: !config
+                .disabled_tools
+                .contains(&"generate_image".to_string()),
         },
         ToolOption {
             name: "generate_video (Generate Video)",
             key: "generate_video",
-            enabled: !config.disabled_tools.contains(&"generate_video".to_string()),
+            enabled: !config
+                .disabled_tools
+                .contains(&"generate_video".to_string()),
         },
     ];
 

@@ -479,7 +479,9 @@ pub fn build_system_prompt(
     }
     let pin_rule;
     if let Some(pin) = pinned_mcp_server {
-        pin_rule = format!("10b. The user explicitly pinned this turn to the \"{pin}\" MCP server via an @mention in the composer. If you use mcp_tool or mcp_list_tools at all this turn, the \"server\" field must be exactly \"{pin}\" — no other configured server is reachable this turn.");
+        pin_rule = format!(
+            "10b. The user explicitly pinned this turn to the \"{pin}\" MCP server via an @mention in the composer. If you use mcp_tool or mcp_list_tools at all this turn, the \"server\" field must be exactly \"{pin}\" — no other configured server is reachable this turn."
+        );
         rules.push(&pin_rule);
     }
     if native {

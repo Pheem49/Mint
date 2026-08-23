@@ -336,7 +336,9 @@ pub(super) fn run_option_picker(options: &[AskUserOption]) -> Result<ApprovalOut
 /// `run_option_picker` uses for an unrecognized keypress. Esc declines, Esc
 /// while raw mode is unavailable falls back to a comma-separated-numbers
 /// prompt via [`ask_numbered_multi_fallback`].
-pub(super) fn run_multi_option_picker(options: &[AskUserOption]) -> Result<ApprovalOutcome, String> {
+pub(super) fn run_multi_option_picker(
+    options: &[AskUserOption],
+) -> Result<ApprovalOutcome, String> {
     use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
@@ -454,7 +456,10 @@ pub(super) fn render_options(options: &[AskUserOption], selected: usize, first: 
     }
     let chat_idx = options.len();
     let _ = execute!(out, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine));
-    println!("    {DIM}{}{RESET}", "\u{2500}".repeat(OPTION_DIVIDER_WIDTH));
+    println!(
+        "    {DIM}{}{RESET}",
+        "\u{2500}".repeat(OPTION_DIVIDER_WIDTH)
+    );
     let _ = execute!(out, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine));
     if selected == chat_idx {
         println!(
@@ -467,7 +472,12 @@ pub(super) fn render_options(options: &[AskUserOption], selected: usize, first: 
     let _ = out.flush();
 }
 
-fn render_multi_options(options: &[AskUserOption], checked: &[bool], cursor_pos: usize, first: bool) {
+fn render_multi_options(
+    options: &[AskUserOption],
+    checked: &[bool],
+    cursor_pos: usize,
+    first: bool,
+) {
     use crossterm::terminal::{Clear, ClearType};
     use crossterm::{cursor, execute};
 
@@ -493,7 +503,10 @@ fn render_multi_options(options: &[AskUserOption], checked: &[bool], cursor_pos:
     }
     let chat_idx = options.len();
     let _ = execute!(out, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine));
-    println!("    {DIM}{}{RESET}", "\u{2500}".repeat(OPTION_DIVIDER_WIDTH));
+    println!(
+        "    {DIM}{}{RESET}",
+        "\u{2500}".repeat(OPTION_DIVIDER_WIDTH)
+    );
     let _ = execute!(out, cursor::MoveToColumn(0), Clear(ClearType::CurrentLine));
     if cursor_pos == chat_idx {
         println!("  {CYAN}\u{276f}{RESET} {CYAN}[ ]{RESET} {BOLD}Chat about this{RESET}");
@@ -514,7 +527,10 @@ fn print_numbered_options(options: &[AskUserOption]) -> usize {
             println!("       {DIM}{}{RESET}", description);
         }
     }
-    println!("    {DIM}{}{RESET}", "\u{2500}".repeat(OPTION_DIVIDER_WIDTH));
+    println!(
+        "    {DIM}{}{RESET}",
+        "\u{2500}".repeat(OPTION_DIVIDER_WIDTH)
+    );
     let chat_idx = options.len();
     println!("    {}) Chat about this", chat_idx + 1);
     chat_idx

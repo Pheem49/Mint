@@ -204,7 +204,10 @@ pub(crate) fn compose_input_box(
     let content_max_len = input_content_width();
 
     let mut lines: Vec<String> = Vec::new();
-    lines.push(format!("{DIM}{}{RESET}", "─".repeat(width.saturating_sub(2))));
+    lines.push(format!(
+        "{DIM}{}{RESET}",
+        "─".repeat(width.saturating_sub(2))
+    ));
 
     let (cursor_row_idx, cursor_col);
     if input_chars.is_empty() {
@@ -221,12 +224,18 @@ pub(crate) fn compose_input_box(
         for (i, row) in rows.iter().enumerate() {
             let row_prefix = if i == 0 { prefix } else { cont_prefix };
             let display_row = format_placeholders(row);
-            lines.push(format!(" \x1b[1m{MINT}{}{RESET}{}", row_prefix, display_row));
+            lines.push(format!(
+                " \x1b[1m{MINT}{}{RESET}{}",
+                row_prefix, display_row
+            ));
         }
     }
     let _ = cursor_col; // visual column is derived below via `cursor_visual_column`
 
-    lines.push(format!("{DIM}{}{RESET}", "─".repeat(width.saturating_sub(2))));
+    lines.push(format!(
+        "{DIM}{}{RESET}",
+        "─".repeat(width.saturating_sub(2))
+    ));
 
     // Plan mode is read-only until the user approves a plan, so the status
     // bar swaps [Agent] for [Plan] to keep that state visible at a glance.
@@ -296,7 +305,10 @@ pub(crate) fn compose_input_box(
             for i in s_start_idx..s_end_idx {
                 let (cmd, desc) = matches[i];
                 if Some(i) == highlight_idx {
-                    lines.push(format!("  {BLUE}▶ {:<16}{RESET} {DIM}- {}{RESET}", cmd, desc));
+                    lines.push(format!(
+                        "  {BLUE}▶ {:<16}{RESET} {DIM}- {}{RESET}",
+                        cmd, desc
+                    ));
                 } else {
                     lines.push(format!("    {DIM}{:<16} - {}{RESET}", cmd, desc));
                 }
@@ -406,8 +418,8 @@ pub(crate) fn compose_input_box(
     // absolute column (it's what the old `\x1b[{}G` code used directly), so
     // subtracting 1 gives `ratatui`'s 0-indexed x.
     let cursor_y = 1 + cursor_row_idx as u16;
-    let cursor_x = (cursor_visual_column(input_chars, cursor_pos, content_max_len) as u16)
-        .saturating_sub(1);
+    let cursor_x =
+        (cursor_visual_column(input_chars, cursor_pos, content_max_len) as u16).saturating_sub(1);
 
     (lines, cursor_x, cursor_y)
 }
@@ -478,14 +490,14 @@ pub fn read_line_interactive(
     // so every existing `redraw_input_box(...)`/`clear_input_box(...)` call
     // site below keeps working unchanged — only what happens inside changed.
     let redraw_input_box = |input_chars: &[char],
-                             cursor_pos: usize,
-                             placeholder: &str,
-                             model: &str,
-                             path_str: &str,
-                             tab_base_input: Option<&str>,
-                             tab_index: Option<usize>,
-                             current_dir: &Path,
-                             _cursor_row: &mut usize| {
+                            cursor_pos: usize,
+                            placeholder: &str,
+                            model: &str,
+                            path_str: &str,
+                            tab_base_input: Option<&str>,
+                            tab_index: Option<usize>,
+                            current_dir: &Path,
+                            _cursor_row: &mut usize| {
         let (lines, cursor_x, cursor_y) = compose_input_box(
             input_chars,
             cursor_pos,

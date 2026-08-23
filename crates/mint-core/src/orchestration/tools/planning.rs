@@ -69,7 +69,11 @@ pub(in crate::orchestration) async fn execute(
                 .collect();
             let header = {
                 let h = input.header.trim();
-                if h.is_empty() { None } else { Some(h.to_owned()) }
+                if h.is_empty() {
+                    None
+                } else {
+                    Some(h.to_owned())
+                }
             };
             // Canonical multi-select answer format, matched identically by the
             // CLI picker (mint-cli/src/agent/approval_prompts.rs) and the

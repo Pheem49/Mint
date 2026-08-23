@@ -66,7 +66,9 @@ pub fn install(
         .unwrap_or_default();
 
     let unit_contents = if system {
-        let home = dirs::home_dir().map(|p| p.display().to_string()).unwrap_or_default();
+        let home = dirs::home_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
         format!(
             "[Unit]\n\
              Description=Mint Gateway (headless chat bridges + cron)\n\
@@ -166,7 +168,12 @@ fn run_systemctl(scope: &[&str], args: &[&str]) -> Result<()> {
         .status()
         .context("could not run `systemctl` — is systemd installed on this machine?")?;
     if !status.success() {
-        let full = scope.iter().chain(args).copied().collect::<Vec<_>>().join(" ");
+        let full = scope
+            .iter()
+            .chain(args)
+            .copied()
+            .collect::<Vec<_>>()
+            .join(" ");
         bail!("{ERROR}`systemctl {full}` failed{RESET}");
     }
     Ok(())

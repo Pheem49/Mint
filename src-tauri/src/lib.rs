@@ -34,9 +34,8 @@ use mint_core::{
     ChatResponse, ChatSession, CodeEdit, CodeEditProposal, CronJob, CronJobDraft, CronStore,
     GeminiLiveEvent, GeminiLiveHandle, ImageGenRequest, InteractionMemory, LinkedFolder,
     LinkedFolderDraft, MemoryStore, MicRecordingHandle, MintConfig, PictureEntry,
-    SubagentDefinition, SubagentDraft,
-    TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport, apply_code_edits,
-    classify_shell_command, config_path, delete_saved_picture,
+    SubagentDefinition, SubagentDraft, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport,
+    apply_code_edits, classify_shell_command, config_path, delete_saved_picture,
     delete_subagent as core_delete_subagent, get_user, google_tts_urls, list_saved_pictures,
     list_subagents as core_list_subagents, load_config, load_workflows, login_user,
     orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
@@ -44,10 +43,8 @@ use mint_core::{
     save_avatar_file, save_chat_images, save_config, save_subagent as core_save_subagent,
     save_workflows, start_channels, start_cron_scheduler,
     start_gemini_live_session as core_start_gemini_live_session,
-    start_recording as core_start_mic_recording,
-    stop_recording as core_stop_mic_recording,
-    transcribe_recording as core_transcribe_mic_recording, update_profile, weather,
-    workflows_path,
+    start_recording as core_start_mic_recording, stop_recording as core_stop_mic_recording,
+    transcribe_recording as core_transcribe_mic_recording, update_profile, weather, workflows_path,
 };
 use plugins::execute_plugin;
 

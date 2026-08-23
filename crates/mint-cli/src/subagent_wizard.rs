@@ -27,9 +27,8 @@ fn prompt_required(label: &str) -> Result<String> {
 pub fn run_add_wizard(workspace_root: Option<&Path>) -> Result<SubagentDefinition> {
     println!("\x1b[1mNew subagent\x1b[0m");
     let name = prompt_required("Name")?;
-    let description = prompt_required(
-        "Description (the agent reads this to decide when to dispatch to it)",
-    )?;
+    let description =
+        prompt_required("Description (the agent reads this to decide when to dispatch to it)")?;
     let system_prompt = prompt_required("System prompt (what should this subagent do?)")?;
 
     let tools_raw = prompt_input(

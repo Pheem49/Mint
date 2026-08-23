@@ -8,7 +8,10 @@
 /// wrapping every line down to one character when that happened.
 pub fn terminal_size_or_default() -> (u16, u16) {
     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-    (if cols == 0 { 80 } else { cols }, if rows == 0 { 24 } else { rows })
+    (
+        if cols == 0 { 80 } else { cols },
+        if rows == 0 { 24 } else { rows },
+    )
 }
 
 pub fn is_table_line(line: &str) -> bool {
