@@ -35,6 +35,7 @@ jobs:
             build-essential curl file pkg-config wget \
             libdbus-1-dev libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev librsvg2-dev \
+            libasound2-dev \
             poppler-utils unzip patchelf
 
       - name: Install dependencies
