@@ -65,6 +65,7 @@
     "lucide-react": "^1.28.0",
     "luxon": "^3.7.2",
     "material-icon-theme": "5.34.0",
+    "mermaid": "^11.17.0",
     "pixi-live2d-display": "^0.4.0",
     "pixi.js": "^6.5.10",
     "react": "^19.2.5",

@@ -756,7 +756,10 @@ fn all_tools() -> Vec<ToolSpec> {
                 json!({
                     "prompt": { "type": "string" },
                     "aspectRatio": { "type": "string", "description": "e.g. \"1:1\", \"16:9\". Default \"1:1\"." },
-                    "provider": { "type": "string", "description": "Optional provider override." }
+                    "provider": {
+                        "type": "string",
+                        "description": "Optional provider override. One of: \"nanobanana\" (Gemini image gen — this is the correct value even when you are Gemini, NOT \"gemini\"), \"dalle\", \"stability\", \"ideogram\", \"replicate\", \"bfl\". Omit to use the configured default."
+                    }
                 }),
                 &["prompt"],
             ),

@@ -272,22 +272,37 @@ pub(in crate::orchestration) async fn execute(
                 Some(res.provider.clone()),
                 Some(prompt_text.to_string()),
             ) {
-                if let Some(first_saved) = saved.first() {
-                    let img_url = format!("/api/pictures/{}", first_saved.filename);
-                    let saved_path = first_saved.path.display();
-                    let img_md = format!(
-                        "![Generated Image]({})\n\n✓ Image generated successfully with model `{}` ({})\nSaved to: {}\n\nNote: In your final response or finish summary, you MUST copy the exact image markdown (`![Generated Image]({})`), model feedback (`✓ Image generated successfully...`), and saved path line (`Saved to: {}`) so the user can see them in their chat bubble.",
-                        img_url, res.model, res.provider, saved_path, img_url, saved_path
+                if !saved.is_empty() {
+                    let saved_path = saved[0].path.display().to_string();
+                    let json_payload = serde_json::json!({
+                        "prompt": prompt_text,
+                        "model": res.model,
+                        "provider": res.provider,
+                        "images": saved.iter()
+                            .map(|s| serde_json::json!({ "url": format!("/api/pictures/{}", s.filename) }))
+                            .collect::<Vec<_>>(),
+                    });
+                    let json_str = serde_json::to_string_pretty(&json_payload).unwrap_or_default();
+                    let data = format!(
+                        "Image generated successfully with model `{}` ({}). Saved to: {}\n\n```image_gen_json\n{}\n```\n\nNote: Image generation succeeded. In your finish summary, you MUST include the exact ```image_gen_json ... ``` code block from above in your response so the user sees the generated image card.",
+                        res.model, res.provider, saved_path, json_str
                     );
-                    return Ok(img_md);
+                    return Ok(data);
                 }
             }
             if let Some(first) = res.images.first() {
-                let img_md = format!(
-                    "![Generated Image]({})\n\n✓ Image generated successfully with model `{}` ({})",
-                    first.data_uri, res.model, res.provider
+                let json_payload = serde_json::json!({
+                    "prompt": prompt_text,
+                    "model": res.model,
+                    "provider": res.provider,
+                    "images": [{ "url": first.data_uri }],
+                });
+                let json_str = serde_json::to_string_pretty(&json_payload).unwrap_or_default();
+                let data = format!(
+                    "Image generated successfully with model `{}` ({}).\n\n```image_gen_json\n{}\n```\n\nNote: Image generation succeeded. In your finish summary, you MUST include the exact ```image_gen_json ... ``` code block from above in your response so the user sees the generated image card.",
+                    res.model, res.provider, json_str
                 );
-                Ok(img_md)
+                Ok(data)
             } else {
                 Ok("No image returned from provider".to_string())
             }

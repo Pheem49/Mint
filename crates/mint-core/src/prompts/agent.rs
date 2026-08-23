@@ -430,6 +430,9 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"calculation") {
         rules.push("7c. Use calculation to evaluate math expressions, percentages, or conversions. ALWAYS copy the ```calculation_json ... ``` block from the tool observation into your final summary text.");
     }
+    if allowed_actions.contains(&"generate_image") {
+        rules.push("7g. Use generate_image when the user asks to create, draw, or generate an image/picture/artwork from a text description. ALWAYS copy the ```image_gen_json ... ``` block from the tool observation into your final summary text so the UI card renders.");
+    }
     if allowed_actions.contains(&"browser_open") {
         rules.push("7a. Use browser_open to navigate the virtual browser to a URL.");
     }
@@ -485,6 +488,7 @@ pub fn build_system_prompt(
         rules.push("11. Keep thought short and concrete. Write the thought field in English at all times. Use Thai for the final summary when the task is written in Thai.");
     }
     rules.push("11a. The final summary must be complete, not just concise. Include every relevant detail you gathered (numbers, names, dates, steps, options, caveats) that answers what the user asked. If the user asked multiple things, address all of them. Only cut filler and repetition, never cut substance. Never truncate a list or explanation just to keep the reply short.");
+    rules.push("11b. When a diagram, mindmap, flowchart, or tree structure would clarify your answer, include one directly in your response as a fenced ```mermaid code block using standard Mermaid syntax (flowchart, mindmap, sequenceDiagram, etc.) — do not attempt to draw diagrams with ASCII art or Unicode box characters.");
     if native {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done — reply with your final answer directly, with no further tool call.");
     } else {

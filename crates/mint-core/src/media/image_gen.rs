@@ -127,7 +127,7 @@ pub async fn generate_images(
     };
 
     match provider {
-        "nanobanana" => call_nanobanana(&client, config, request).await,
+        "nanobanana" | "gemini" | "google" => call_nanobanana(&client, config, request).await,
         "dalle" => match call_dalle(&client, config, request).await {
             Err(ImageGenError::MissingOpenAiKey)
                 if !config.api_key.trim().is_empty() || std::env::var("GEMINI_API_KEY").is_ok() =>

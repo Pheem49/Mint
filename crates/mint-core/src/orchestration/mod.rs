@@ -1305,10 +1305,7 @@ where
                         for step in trajectory.iter() {
                             for line in step.lines() {
                                 let trimmed = line.trim();
-                                if trimmed.starts_with("![Generated Image](")
-                                    || trimmed.starts_with("✓ Image generated successfully")
-                                    || trimmed.starts_with("Saved to:")
-                                    || trimmed.starts_with("<video")
+                                if trimmed.starts_with("<video")
                                     || trimmed.starts_with("✓ Video generated successfully")
                                 {
                                     if !summary.contains(trimmed) {
