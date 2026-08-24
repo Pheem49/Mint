@@ -1,20 +1,6 @@
 import React, { useMemo } from 'react';
-import {
-  Sun,
-  CloudSun,
-  Cloud,
-  Cloudy,
-  CloudFog,
-  CloudDrizzle,
-  CloudRain,
-  CloudSunRain,
-  CloudRainWind,
-  CloudSnow,
-  Snowflake,
-  CloudLightning,
-  Droplet,
-  type LucideIcon,
-} from 'lucide-react';
+import { Droplet } from 'lucide-react';
+import { getWeatherIconUrl } from '../assets/weather-icons';
 
 export interface WeatherData {
   location: string;
@@ -39,47 +25,32 @@ export interface WeatherData {
 }
 
 const getWeatherInfo = (code: number, isDay: boolean = true) => {
-  const weatherMap: Record<number, { icon: LucideIcon; description: string; gradient: string }> = {
-    0: {
-      icon: Sun,
-      description: 'Clear Sky',
-      gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e3a8a, #1d4ed8 40%, #0284c7 80%, #0369a1)',
-    },
-    1: {
-      icon: CloudSun,
-      description: 'Mainly Clear',
-      gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e3a8a, #1d4ed8 40%, #0284c7 80%, #0369a1)',
-    },
-    2: {
-      icon: Cloud,
-      description: 'Partly Cloudy',
-      gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #334155 45%, #0284c7 85%)',
-    },
-    3: {
-      icon: Cloudy,
-      description: 'Overcast',
-      gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #334155 50%, #475569)',
-    },
-    45: { icon: CloudFog, description: 'Foggy', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #475569)' },
-    48: { icon: CloudFog, description: 'Rime Fog', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #475569)' },
-    51: { icon: CloudDrizzle, description: 'Light Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
-    53: { icon: CloudDrizzle, description: 'Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
-    55: { icon: CloudRain, description: 'Heavy Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0369a1 60%)' },
-    61: { icon: CloudRain, description: 'Light Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
-    63: { icon: CloudRain, description: 'Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 50%, #0369a1)' },
-    65: { icon: CloudRain, description: 'Heavy Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e3a8a 60%, #0284c7)' },
-    71: { icon: CloudSnow, description: 'Light Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #38bdf8 70%)' },
-    73: { icon: CloudSnow, description: 'Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #38bdf8 70%)' },
-    75: { icon: Snowflake, description: 'Heavy Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 70%)' },
-    80: { icon: CloudSunRain, description: 'Light Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
-    81: { icon: CloudRain, description: 'Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 50%, #0369a1)' },
-    82: { icon: CloudRainWind, description: 'Heavy Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e3a8a 50%, #312e81)' },
-    95: { icon: CloudLightning, description: 'Thunderstorm', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 50%, #312e81)' },
-    96: { icon: CloudLightning, description: 'Thunderstorm & Hail', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 60%)' },
-    99: { icon: CloudLightning, description: 'Severe Thunderstorm', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 60%)' },
+  const weatherMap: Record<number, { description: string; gradient: string }> = {
+    0: { description: 'Clear Sky', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e3a8a, #1d4ed8 40%, #0284c7 80%, #0369a1)' },
+    1: { description: 'Mainly Clear', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e3a8a, #1d4ed8 40%, #0284c7 80%, #0369a1)' },
+    2: { description: 'Partly Cloudy', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #334155 45%, #0284c7 85%)' },
+    3: { description: 'Overcast', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #334155 50%, #475569)' },
+    45: { description: 'Foggy', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #475569)' },
+    48: { description: 'Rime Fog', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #475569)' },
+    51: { description: 'Light Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
+    53: { description: 'Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
+    55: { description: 'Heavy Drizzle', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0369a1 60%)' },
+    61: { description: 'Light Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
+    63: { description: 'Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 50%, #0369a1)' },
+    65: { description: 'Heavy Rain', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e3a8a 60%, #0284c7)' },
+    71: { description: 'Light Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #38bdf8 70%)' },
+    73: { description: 'Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e293b, #38bdf8 70%)' },
+    75: { description: 'Heavy Snow', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 70%)' },
+    80: { description: 'Light Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0c4a6e, #0284c7 50%, #0369a1)' },
+    81: { description: 'Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #0284c7 50%, #0369a1)' },
+    82: { description: 'Heavy Showers', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e3a8a 50%, #312e81)' },
+    95: { description: 'Thunderstorm', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 50%, #312e81)' },
+    96: { description: 'Thunderstorm & Hail', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 60%)' },
+    99: { description: 'Severe Thunderstorm', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #0f172a, #1e1b4b 60%)' },
   };
 
-  return weatherMap[code] || { icon: CloudSun, description: 'Weather', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e3a8a, #0284c7)' };
+  const info = weatherMap[code] || { description: 'Weather', gradient: 'radial-gradient(ellipse 150% 100% at 50% 100%, #1e3a8a, #0284c7)' };
+  return { ...info, iconUrl: getWeatherIconUrl(code, isDay) };
 };
 
 export default function WeatherCard({ data }: { data: WeatherData }) {
@@ -104,7 +75,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
 
       return {
         day: dayName,
-        icon: info.icon,
+        iconUrl: info.iconUrl,
         high,
         low,
         precipitation: prob,
@@ -135,7 +106,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
       {/* Header Info */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <weatherInfo.icon size={42} strokeWidth={1.75} style={{ flexShrink: 0 }} />
+          <img src={weatherInfo.iconUrl} alt={weatherInfo.description} width={42} height={42} style={{ flexShrink: 0 }} />
           <div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
               <span style={{ fontSize: '36px', fontWeight: 'bold', letterSpacing: '-1px' }}>
@@ -195,7 +166,7 @@ export default function WeatherCard({ data }: { data: WeatherData }) {
               }}
             >
               <span style={{ fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>{day.day}</span>
-              <day.icon size={20} strokeWidth={2} style={{ marginBottom: '4px' }} />
+              <img src={day.iconUrl} alt={day.day} width={20} height={20} style={{ marginBottom: '4px' }} />
               <div style={{ fontSize: '11px', display: 'flex', gap: '3px' }}>
                 <span style={{ fontWeight: 700 }}>{day.high}°</span>
                 <span style={{ opacity: 0.65 }}>{day.low}°</span>
