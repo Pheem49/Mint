@@ -45,6 +45,31 @@
   border-radius: var(--radius-lg);
 }
 
+.scroll-to-bottom-btn {
+  position: sticky;
+  bottom: 12px;
+  align-self: center;
+  z-index: 5;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--surface-strong);
+  color: var(--text-main);
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+
+.scroll-to-bottom-btn:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-strong));
+  transform: translateY(-2px);
+}
+
 .message {
   display: flex;
   max-width: 95%;
