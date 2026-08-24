@@ -207,6 +207,32 @@ pub fn cancel_agent(chat_id: &str) -> bool {
     }
 }
 
+/// Pending web-side approval requests, keyed by a random token — the HTTP
+/// equivalent of desktop's `ApprovalsState` (`src-tauri/src/lib.rs`). A
+/// `oneshot::Sender` can only be consumed once, so entries are removed (not
+/// just read) on resolution, same as desktop's `submit_tool_approval`.
+pub static PENDING_APPROVALS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<ApprovalOutcome>>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Resolves a pending approval by token — mirrors desktop's
+/// `submit_tool_approval` command exactly (a non-empty `answer` always wins
+/// over `approved`, used for the "ask a clarifying question" flow). Returns
+/// `false` if the token was never pending (already resolved, expired, or
+/// bogus) rather than erroring, matching `cancel_agent`'s lenient style.
+pub fn resolve_pending_approval(token: &str, approved: bool, answer: Option<String>) -> bool {
+    let Some(tx) = PENDING_APPROVALS.lock().unwrap().remove(token) else {
+        return false;
+    };
+    let outcome = match answer.filter(|a| !a.trim().is_empty()) {
+        Some(ans) => ApprovalOutcome::Intercepted(ans),
+        None if approved => ApprovalOutcome::Approved,
+        None => ApprovalOutcome::Denied,
+    };
+    let _ = tx.send(outcome);
+    true
+}
+
 /// Plain-text notices from detached background tasks (currently just
 /// [`linked_folders::spawn_linked_folder_note`]) that a UI surface can drain
 /// and display whenever convenient — mirrors how `crates/mint-cli`'s `/bg`

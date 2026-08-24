@@ -157,6 +157,28 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
             }
         }
 
+        ("POST", "/api/submit-approval") => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SubmitApprovalRequest {
+                token: String,
+                approved: bool,
+                #[serde(default)]
+                answer: Option<String>,
+            }
+            if let Ok(req) = serde_json::from_str::<SubmitApprovalRequest>(body) {
+                let ok = crate::resolve_pending_approval(&req.token, req.approved, req.answer);
+                send_json_response(socket, "200 OK", &format!("{{\"ok\":{ok}}}")).await;
+            } else {
+                send_json_response(
+                    socket,
+                    "400 Bad Request",
+                    "{\"status\":\"invalid submit-approval body\"}",
+                )
+                .await;
+            }
+        }
+
         ("POST", "/api/chat-stream") => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -364,8 +386,35 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             let video_data_uri = chat_req.video_data_uri.clone();
                             let agent_id = chat_req.agent_id.clone();
                             let pinned_mcp_server = chat_req.pinned_mcp_server.clone();
+                            let tx_approval = tx.clone();
 
                             let join_handle = tokio::spawn(async move {
+                                // Real (not auto-deny) approval flow: the request-payload
+                                // shape and blocking mechanism mirror desktop's approve_cb
+                                // (src-tauri/src/lib.rs) exactly, but the "requested" event
+                                // rides this same ndjson stream instead of a Tauri event,
+                                // and the token is a UUID (not a sequential counter) since
+                                // this endpoint, unlike Tauri IPC, is LAN-reachable by
+                                // default — see mint_core::PENDING_APPROVALS' docs.
+                                let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+                                    let (approval_tx, approval_rx) = tokio::sync::oneshot::channel();
+                                    let token = uuid::Uuid::new_v4().to_string();
+                                    crate::PENDING_APPROVALS
+                                        .lock()
+                                        .unwrap()
+                                        .insert(token.clone(), approval_tx);
+                                    if let Ok(json_val) = serde_json::to_string(&serde_json::json!({
+                                        "type": "approval-requested",
+                                        "token": token,
+                                        "approval": approval
+                                    })) {
+                                        let _ = tx_approval.send(format!("{}\n", json_val));
+                                    }
+                                    Ok(tokio::task::block_in_place(move || {
+                                        tokio::runtime::Handle::current().block_on(approval_rx)
+                                    })
+                                    .unwrap_or(ApprovalOutcome::Denied))
+                                };
                                 let result = orchestrate_agent_loop(
                                     &config_clone,
                                     &message,
@@ -379,7 +428,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                     pinned_mcp_server.as_deref(),
                                     fast_mode,
                                     false,
-                                    |_| Ok(ApprovalOutcome::Denied),
+                                    approve_cb,
                                     progress_cb,
                                     on_chunk,
                                 )

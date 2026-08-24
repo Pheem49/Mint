@@ -17,6 +17,7 @@ use tokio_tungstenite::{
 };
 
 use crate::{
+    AgentApproval,
     AgentProgress,
     // Video editing & Speech & Subtitles & Auto Shorts
     AiEditVideoRequest,
@@ -1065,6 +1066,22 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     .await;
                 }
                                 ("POST", "/api/chat-stream") => {
+                    routes::chat::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/submit-approval") => {
                     routes::chat::execute(
                         routes::RequestCtx {
                             method,

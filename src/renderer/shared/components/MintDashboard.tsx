@@ -167,6 +167,45 @@ function getCleanPathForView(v: string, activeId?: string): string {
   return '/chat'
 }
 
+/** Keeps a desktop/browser notification body to one readable line. */
+function truncateForNotification(text: string, maxChars = 120): string {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  return clean.length > maxChars ? `${clean.slice(0, maxChars)}…` : clean
+}
+
+/** One-line plain-text summary of an AgentApproval for a notification body
+ * — ApprovalCard's own renderApprovalDetails returns JSX, not text, so
+ * this is a separate, notification-only summary. AgentApproval serializes
+ * as a single-key-tagged object per variant, e.g. {"WriteFile": {path, ...}}. */
+function describeApproval(payload: any): string {
+  const entry = Object.entries(payload?.approval ?? {})[0]
+  const kind = entry?.[0]
+  const detail: any = entry?.[1]
+  switch (kind) {
+    case 'WriteFile': return `Write to ${detail?.path}?`
+    case 'ApplyPatch': return `Edit ${detail?.path}?`
+    case 'RunShell': return `Run: ${detail?.command}`
+    case 'NoteWrite': return `Save note to ${detail?.path}?`
+    case 'RunPlugin': return `Run plugin: ${detail?.name}?`
+    case 'McpTool': return `Use ${detail?.tool} on ${detail?.server}?`
+    case 'UserApproval': return detail?.title ?? 'Approval needed'
+    case 'AskUser': return detail?.question ?? 'Mint has a question'
+    case 'ExitPlanMode':
+    case 'EnterPlanMode':
+      return 'Plan mode change needs approval'
+    default: return 'Mint needs your approval to continue'
+  }
+}
+
+/** Fires the same notification mechanism as a finished AI reply, but only
+ * while the window is unfocused — reused so both surfaces get identical
+ * title/permission/dedupe behavior, just a different body string. */
+function notifyPendingApproval(payload: any) {
+  if (document.hidden || !document.hasFocus()) {
+    window.api?.notifyAiResponse?.(truncateForNotification(describeApproval(payload)))
+  }
+}
+
 export default function MintDashboard() {
   const isDesktopApp = isTauriRuntime()
   const [view, setViewState] = useState<DashboardView>(getInitialViewFromUrl)
@@ -535,6 +574,7 @@ export default function MintDashboard() {
           applyThemeStyles(loaded)
         }
       }).catch(() => {})
+      window.api?.clearAiNotifications?.()
     }
     window.addEventListener('focus', handleWindowFocus)
 
@@ -551,6 +591,7 @@ export default function MintDashboard() {
         })
       } else {
         setPendingApproval(event.payload)
+        notifyPendingApproval(event.payload)
       }
     })
     return () => {
@@ -714,8 +755,21 @@ export default function MintDashboard() {
         undefined,
         shouldUseAgentMode ? planMode : false,
         options.pinnedMcpServer ?? null,
+        (payload) => {
+          if (sessionAutoApprovedRef.current) {
+            submitToolApproval(payload.token, true).catch((err) => {
+              console.error("Auto approval failed:", err)
+            })
+          } else {
+            setPendingApproval(payload)
+            notifyPendingApproval(payload)
+          }
+        },
       )
       setStreamedResponse(response)
+      if (document.hidden || !document.hasFocus()) {
+        window.api?.notifyAiResponse?.(truncateForNotification(response.text))
+      }
       const history = (await getRecentInteractions(50, conversationId, workspacePath || null)).reverse()
       let enrichedHistory = history
       if (progressSnapshot.length > 0) {

@@ -37,6 +37,10 @@ export const isTauriRuntime = () => (
   typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__)
 )
 
+/** The last browser Notification shown by notifyAiResponse's fallback
+ * (non-Tauri) branch, so clearAiNotifications can dismiss it. */
+let lastAiNotification: Notification | null = null
+
 /**
  * Root-relative: the web build's SPA fallback serves index-web.html at deep
  * paths like /chat/<id>, and a page-relative "./assets/..." would resolve
@@ -387,6 +391,11 @@ export async function streamChatMessage(
   // `MintDashboard.tsx` call site passes the same argument list to both builds.
   _planMode?: boolean,
   pinnedMcpServer?: string | null,
+  // Web has no separate Tauri event bus for approvals (unlike desktop's
+  // global `listen('tool-approval-requested', ...)`), so the server sends
+  // an `approval-requested` event down this same ndjson stream instead —
+  // this callback is how the caller learns about it.
+  onApprovalRequested?: (payload: { token: string; approval: any }) => void,
 ): Promise<ChatResponse> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
@@ -423,6 +432,8 @@ export async function streamChatMessage(
             onProgress?.(event.progress);
           } else if (event.type === 'done') {
             finalResponse = event.response;
+          } else if (event.type === 'approval-requested') {
+            onApprovalRequested?.({ token: event.token, approval: event.approval });
           }
         } catch (e) {
           console.error("Failed to parse stream line:", line, e);
@@ -886,6 +897,12 @@ export async function setDefaultImageProvider(provider: string): Promise<boolean
 
 export async function submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    await authFetch(`${API_BASE}/submit-approval`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, approved, answer }),
+    });
     return;
   }
   const { invoke } = await import('@tauri-apps/api/core')
@@ -1158,8 +1175,20 @@ export function installTauriAdapters() {
         }
       },
       onSpotlightToChat: async () => () => {},
-      notifyAiResponse: () => {},
-      clearAiNotifications: () => {},
+      notifyAiResponse: async (preview: string) => {
+        if (typeof Notification === 'undefined') return
+        let permission = Notification.permission
+        if (permission === 'default') {
+          permission = await Notification.requestPermission()
+        }
+        if (permission === 'granted') {
+          lastAiNotification = new Notification('Mint Agent', { body: preview })
+        }
+      },
+      clearAiNotifications: () => {
+        lastAiNotification?.close()
+        lastAiNotification = null
+      },
       getTtsUrls: async () => [],
       setAiState: () => {},
     };
@@ -1420,7 +1449,19 @@ export function installTauriAdapters() {
       const { listen } = await import('@tauri-apps/api/event')
       return listen<string>('spotlight-to-chat', (event) => callback(event.payload))
     },
-    notifyAiResponse: () => {},
+    notifyAiResponse: async (preview) => {
+      const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification')
+      let granted = await isPermissionGranted()
+      if (!granted) {
+        granted = (await requestPermission()) === 'granted'
+      }
+      if (granted) {
+        sendNotification({ title: 'Mint Agent', body: preview })
+      }
+    },
+    // The plugin has no reliable cross-platform way to dismiss an
+    // already-shown OS notification from JS — best-effort no-op; there's
+    // simply nothing stale left for the next unfocused reply to build on.
     clearAiNotifications: () => {},
     getTtsUrls: async (text) => {
       const { invoke } = await import('@tauri-apps/api/core')
