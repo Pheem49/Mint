@@ -2,31 +2,22 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const CHAT_CLI_ID: &str = "cli";
 pub const DEFAULT_CONVERSATION_ID: &str = "conversation-default";
 
-/// Scopes the shared "cli" conversation by workspace so unrelated projects
-/// don't share context/history — every other `chat_id` (regular
-/// conversations, subagent ids, ...) passes through unchanged. Idempotent:
-/// calling this again on an already-scoped id (`"cli::<hash>"`) is a no-op,
-/// since the guard below only fires on the literal `CHAT_CLI_ID`. With no
-/// workspace known, falls back to the plain `"cli"` bucket — today's
-/// behavior, so existing history never needs migrating.
-pub fn scoped_chat_id(chat_id: &str, workspace_path: Option<&str>) -> String {
-    if chat_id != CHAT_CLI_ID {
-        return chat_id.to_owned();
-    }
-    let Some(path) = workspace_path.map(str::trim).filter(|p| !p.is_empty()) else {
-        return CHAT_CLI_ID.to_owned();
-    };
-    let canonical = std::fs::canonicalize(path)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| path.to_owned());
-    let digest = format!("{:x}", Sha256::digest(canonical.as_bytes()));
-    format!("{CHAT_CLI_ID}::{}", &digest[..12])
+/// Disabled: previously scoped the shared "cli" conversation by workspace,
+/// but "workspace" in this app is a UI selection the user switches often
+/// (the Workspace picker), not a stable per-process identity like a
+/// terminal's cwd — scoping on it fragmented the one conversation meant to
+/// stay shared across the CLI, desktop, and web into a different bucket
+/// every time the selected workspace changed, making history disappear.
+/// Always returns `chat_id` unchanged now; kept as a passthrough (rather
+/// than removing it and its call sites) so this can be revisited later
+/// with a stabler workspace identity.
+pub fn scoped_chat_id(chat_id: &str, _workspace_path: Option<&str>) -> String {
+    chat_id.to_owned()
 }
 
 /// True for the unscoped `"cli"` id or any workspace-scoped variant of it
@@ -831,12 +822,10 @@ mod scoped_chat_id_tests {
     }
 
     #[test]
-    fn a_workspace_produces_a_stable_scoped_id() {
+    fn a_workspace_no_longer_changes_the_shared_cli_id() {
         let cwd = std::env::current_dir().unwrap();
         let path = cwd.to_string_lossy().into_owned();
-        let scoped = scoped_chat_id(CHAT_CLI_ID, Some(&path));
-        assert!(scoped.starts_with("cli::"));
-        assert_eq!(scoped, scoped_chat_id(CHAT_CLI_ID, Some(&path)));
+        assert_eq!(scoped_chat_id(CHAT_CLI_ID, Some(&path)), CHAT_CLI_ID);
     }
 
     #[test]
