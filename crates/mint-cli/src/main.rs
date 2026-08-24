@@ -79,6 +79,15 @@ pub(crate) async fn run_code_agent_with_saved_image(
     )
     .await;
     result?;
+    // This turn just committed a row to chat_id="cli" — raise live_sync's
+    // watermark past it so the next poll tick doesn't mistake the user's own
+    // just-sent message for one that arrived from another surface (web/desktop).
+    if let Ok(memory) = mint_core::MemoryStore::open_default()
+        && let Ok(rows) = memory.recent_interactions_for_chat(mint_core::CHAT_CLI_ID, 1)
+        && let Some(row) = rows.first()
+    {
+        mint_core::live_sync::note_own_interaction(row.id);
+    }
     // Save any attached images and videos that were sent with the task
     image::save_sent_image_after_send(sent_image.as_deref(), task);
     image::save_sent_image_after_send(sent_video.as_deref(), task);

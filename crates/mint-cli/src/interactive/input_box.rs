@@ -1276,6 +1276,7 @@ pub fn read_line_interactive(
             let mut notices = jobs.take_notices();
             notices.extend(mint_core::bg_shell::take_finished_notices());
             notices.extend(mint_core::take_linked_folder_notices());
+            notices.extend(mint_core::live_sync::take_live_sync_notices());
             if !notices.is_empty() {
                 disable_raw_mode()?;
                 clear_input_box(cursor_row);

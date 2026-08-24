@@ -11,6 +11,7 @@ pub mod agent;
 pub mod browser;
 pub mod cron;
 pub mod integrations;
+pub mod live_sync;
 pub mod media;
 pub mod orchestration;
 pub mod prompts;

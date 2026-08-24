@@ -195,6 +195,11 @@ pub fn print_welcome_banner(config: &MintConfig) {
 pub async fn run_interactive_chat() -> Result<()> {
     let config = mint_core::load_config()?;
 
+    // Notifies this prompt loop when web/desktop writes a message into the
+    // same "cli" conversation while this terminal is open — see live_sync's
+    // module docs for why this is DB polling rather than a server push.
+    mint_core::live_sync::start_live_sync_poller();
+
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     print_welcome_banner(&config);

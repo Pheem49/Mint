@@ -421,6 +421,13 @@ impl MemoryStore {
             })?;
         }
         let connection = Connection::open(&self.path)?;
+        // journal_mode=WAL (set in `initialize` below) means readers never
+        // block writers, but two concurrent writers — always possible with
+        // multiple Mint surfaces sharing this DB, more so now that
+        // `live_sync` polls it continuously — still serialize against each
+        // other. Without a busy_timeout the losing writer fails immediately
+        // with SQLITE_BUSY instead of waiting briefly for the lock.
+        connection.busy_timeout(std::time::Duration::from_millis(5000))?;
 
         static INITIALIZED_DATABASES: std::sync::LazyLock<
             std::sync::Mutex<std::collections::HashSet<PathBuf>>,
