@@ -2855,7 +2855,7 @@ dependencies = [
 
 [[package]]
 name = "mint-cli"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
@@ -2880,7 +2880,7 @@ dependencies = [
 
 [[package]]
 name = "mint-core"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "base64 0.22.1",
  "bcrypt",
@@ -2919,7 +2919,7 @@ dependencies = [
 
 [[package]]
 name = "mint-desktop"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "base64 0.22.1",
  "dirs",
