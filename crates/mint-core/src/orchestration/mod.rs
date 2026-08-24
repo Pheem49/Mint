@@ -111,7 +111,7 @@ pub async fn orchestrate_chat(
     let enriched = enrich_request(config, &memory, &resolved_request)?;
     let response = send_chat(config, &enriched).await?;
     memory.add_interaction_for_chat_with_fallback(
-        request_chat_id(request),
+        &request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -145,7 +145,7 @@ where
     let enriched = enrich_request(config, &memory, &resolved_request)?;
     let response = stream_chat(config, &enriched, on_chunk).await?;
     memory.add_interaction_for_chat_with_fallback(
-        request_chat_id(request),
+        &request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -175,7 +175,7 @@ pub async fn orchestrate_chat_with_fallback(
     let enriched = enrich_request(config, &memory, &resolved_request)?;
     let (response, fallback) = send_chat_with_fallback(config, &enriched).await?;
     memory.add_interaction_for_chat_with_fallback(
-        request_chat_id(request),
+        &request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -209,7 +209,7 @@ where
     let enriched = enrich_request(config, &memory, &resolved_request)?;
     let (response, fallback) = stream_chat_with_fallback(config, &enriched, on_chunk).await?;
     memory.add_interaction_for_chat_with_fallback(
-        request_chat_id(request),
+        &request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -247,7 +247,7 @@ fn enrich_request(
     request: &ChatRequest,
 ) -> Result<ChatRequest, MemoryError> {
     let mut interactions =
-        memory.recent_interactions_for_chat(request_chat_id(request), CONTEXT_LIMIT)?;
+        memory.recent_interactions_for_chat(&request_chat_id(request), CONTEXT_LIMIT)?;
     interactions.reverse();
     let transcript = interactions
         .into_iter()
@@ -309,13 +309,14 @@ fn enrich_request(
     Ok(enriched)
 }
 
-fn request_chat_id(request: &ChatRequest) -> &str {
-    request
+fn request_chat_id(request: &ChatRequest) -> String {
+    let raw = request
         .chat_id
         .as_deref()
         .map(str::trim)
         .filter(|chat_id| !chat_id.is_empty())
-        .unwrap_or(DEFAULT_CONVERSATION_ID)
+        .unwrap_or(DEFAULT_CONVERSATION_ID);
+    crate::agent::memory::scoped_chat_id(raw, request.workspace_path.as_deref())
 }
 
 use crate::prompts::agent::build_system_prompt;
@@ -777,6 +778,14 @@ where
             .map(str::trim)
             .filter(|chat_id| !chat_id.is_empty())
             .unwrap_or(DEFAULT_CONVERSATION_ID);
+        // `root` is always resolved to a real, canonicalized directory above
+        // (never optional here, unlike the plain-chat path's `ChatRequest.
+        // workspace_path`), so an agent-mode conversation is always scoped to
+        // *some* workspace — it just never falls back to the plain global
+        // "cli" bucket the way plain chat can. Idempotent on chat ids that
+        // are already scoped or aren't "cli" at all (see `scoped_chat_id`).
+        let chat_id = crate::agent::memory::scoped_chat_id(chat_id, Some(&root.to_string_lossy()));
+        let chat_id = chat_id.as_str();
         // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
         // (see the `dispatch_subagent` arm in `execute_tool`) so their own memory
         // interaction doesn't leak into the parent conversation's history. That

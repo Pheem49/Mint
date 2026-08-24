@@ -23,8 +23,11 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             if let Ok(memory) = MemoryStore::open_default() {
                 let chat_id = query_param(query, "chatId")
                     .unwrap_or_else(|| DEFAULT_CONVERSATION_ID.to_owned());
+                let workspace_path = query_param(query, "workspacePath");
+                let scoped_chat_id =
+                    crate::agent::memory::scoped_chat_id(&chat_id, workspace_path.as_deref());
                 let list = memory
-                    .recent_interactions_for_chat(&chat_id, limit)
+                    .recent_interactions_for_chat(&scoped_chat_id, limit)
                     .unwrap_or_default();
                 if let Ok(json_str) = serde_json::to_string(&list) {
                     send_json_response(socket, "200 OK", &json_str).await;

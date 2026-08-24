@@ -79,11 +79,18 @@ pub(crate) async fn run_code_agent_with_saved_image(
     )
     .await;
     result?;
-    // This turn just committed a row to chat_id="cli" — raise live_sync's
-    // watermark past it so the next poll tick doesn't mistake the user's own
-    // just-sent message for one that arrived from another surface (web/desktop).
+    // This turn just committed a row to the workspace-scoped "cli" chat_id
+    // (see `scoped_chat_id`) — raise live_sync's watermark past it so the
+    // next poll tick doesn't mistake the user's own just-sent message for
+    // one that arrived from another surface (web/desktop).
     if let Ok(memory) = mint_core::MemoryStore::open_default()
-        && let Ok(rows) = memory.recent_interactions_for_chat(mint_core::CHAT_CLI_ID, 1)
+        && let Ok(rows) = memory.recent_interactions_for_chat(
+            &mint_core::scoped_chat_id(
+                mint_core::CHAT_CLI_ID,
+                Some(&current_dir.to_string_lossy()),
+            ),
+            1,
+        )
         && let Some(row) = rows.first()
     {
         mint_core::live_sync::note_own_interaction(row.id);
@@ -1532,7 +1539,9 @@ async fn main() -> Result<()> {
                             audio_data_uri: None,
                             video_data_uri: None,
                             document_attachment: None,
-                            workspace_path: None,
+                            workspace_path: Some(
+                                std::env::current_dir()?.to_string_lossy().into_owned(),
+                            ),
                             agent_id: None,
                             plan_mode: false,
                             pinned_mcp_server: None,
@@ -1556,10 +1565,15 @@ async fn main() -> Result<()> {
                         println!("stored");
                     }
                     MemoryCommand::Recent { limit } => {
+                        let current_dir = std::env::current_dir()?;
+                        let scoped_chat_id = mint_core::scoped_chat_id(
+                            CHAT_CLI_ID,
+                            Some(&current_dir.to_string_lossy()),
+                        );
                         println!(
                             "{}",
                             serde_json::to_string_pretty(
-                                &memory.recent_interactions_for_chat(CHAT_CLI_ID, limit)?
+                                &memory.recent_interactions_for_chat(&scoped_chat_id, limit)?
                             )?
                         );
                     }

@@ -331,7 +331,7 @@ export async function sendChatMessage(
       const res = await authFetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId })
+        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId })
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
@@ -392,7 +392,7 @@ export async function streamChatMessage(
     const res = await authFetch(`${API_BASE}/chat-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId, pinnedMcpServer })
+      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId, pinnedMcpServer })
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -550,12 +550,13 @@ export async function cancelChatMessage(chatId: string): Promise<void> {
   await invoke('cancel_chat_message', { chatId })
 }
 
-export async function getRecentInteractions(limit = 50, chatId?: string | null): Promise<InteractionMemory[]> {
+export async function getRecentInteractions(limit = 50, chatId?: string | null, workspacePath?: string | null): Promise<InteractionMemory[]> {
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();
     try {
       const params = new URLSearchParams({ limit: String(limit) });
       if (chatId) params.set('chatId', chatId);
+      if (workspacePath) params.set('workspacePath', workspacePath);
       const res = await authFetch(`${API_BASE}/interactions?${params.toString()}`);
       return await res.json();
     } catch (e) {
@@ -564,7 +565,7 @@ export async function getRecentInteractions(limit = 50, chatId?: string | null):
     }
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<InteractionMemory[]>('get_recent_interactions', { limit, chatId })
+  return invoke<InteractionMemory[]>('get_recent_interactions', { limit, chatId, workspacePath })
 }
 
 export async function saveSystemInteraction(

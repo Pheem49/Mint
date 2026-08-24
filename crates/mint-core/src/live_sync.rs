@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use crate::agent::memory::{CHAT_CLI_ID, MemoryStore};
+use crate::agent::memory::MemoryStore;
 
 /// How often the background loop re-checks `interaction_memories` for the
 /// "cli" chat. 1.5s: fast enough that a message sent from web/desktop shows
@@ -69,7 +69,10 @@ pub fn note_own_interaction(id: i64) {
     }
 }
 
-/// Starts the polling loop. Mirrors
+/// Starts the polling loop for `chat_id` (the CLI's own, already
+/// workspace-scoped id — see `scoped_chat_id` — so this only ever surfaces
+/// messages from the same workspace, not every "cli" conversation on the
+/// machine). Mirrors
 /// [`crate::cron::scheduler::start_cron_scheduler`]'s runtime-detection
 /// dance: ride the caller's Tokio runtime if there is one, else spin up a
 /// dedicated thread + runtime. Detached, no join handle, no shutdown signal
@@ -78,31 +81,31 @@ pub fn note_own_interaction(id: i64) {
 /// it for free). Call exactly once, from `run_interactive_chat()` — NOT from
 /// `mint gateway` or any other headless path that has no prompt loop to
 /// drain notices into.
-pub fn start_live_sync_poller() {
+pub fn start_live_sync_poller(chat_id: String) {
     if tokio::runtime::Handle::try_current().is_ok() {
-        tokio::spawn(restarting_loop());
+        tokio::spawn(restarting_loop(chat_id));
     } else {
-        std::thread::spawn(|| {
+        std::thread::spawn(move || {
             if let Ok(runtime) = tokio::runtime::Runtime::new() {
-                runtime.block_on(restarting_loop());
+                runtime.block_on(restarting_loop(chat_id));
             }
         });
     }
 }
 
-async fn restarting_loop() {
-    initialize_watermark().await;
+async fn restarting_loop(chat_id: String) {
+    initialize_watermark(&chat_id).await;
     loop {
-        tick().await;
+        tick(&chat_id).await;
         tokio::time::sleep(POLL_INTERVAL).await;
     }
 }
 
 /// Seeds `LAST_SEEN_ID` from whatever is already in the DB at startup, so
 /// the CLI's own prior history never gets replayed as a "live" notice.
-async fn initialize_watermark() {
+async fn initialize_watermark(chat_id: &str) {
     if let Ok(memory) = MemoryStore::open_default()
-        && let Ok(latest) = memory.recent_interactions_for_chat(CHAT_CLI_ID, 1)
+        && let Ok(latest) = memory.recent_interactions_for_chat(chat_id, 1)
     {
         let start_id = latest.first().map(|row| row.id).unwrap_or(0);
         LAST_SEEN_ID.store(start_id, Ordering::SeqCst);
@@ -114,11 +117,11 @@ async fn initialize_watermark() {
     // than silently never polling.
 }
 
-async fn tick() {
+async fn tick(chat_id: &str) {
     let Ok(memory) = MemoryStore::open_default() else {
         return;
     };
-    let Ok(rows) = memory.recent_interactions_for_chat(CHAT_CLI_ID, POLL_BATCH) else {
+    let Ok(rows) = memory.recent_interactions_for_chat(chat_id, POLL_BATCH) else {
         return;
     };
     let last_seen = LAST_SEEN_ID.load(Ordering::SeqCst);

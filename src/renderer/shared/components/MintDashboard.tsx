@@ -171,6 +171,10 @@ export default function MintDashboard() {
   const isDesktopApp = isTauriRuntime()
   const [view, setViewState] = useState<DashboardView>(getInitialViewFromUrl)
   const [conversationId, setConversationId] = useState(activeConversationId)
+  // Declared here (not further down with the rest of the workspace-related
+  // state) so the URL-change effect below can read it — that effect closes
+  // over `workspacePath` to scope its own `getRecentInteractions` call.
+  const [workspacePath, setWorkspacePath] = useState(() => window.localStorage.getItem(LAST_WORKSPACE_PATH_KEY) || '')
   // Web only in practice (desktop's window has no mobile-width breakpoint,
   // so nothing ever sets this true there) — declared unconditionally so
   // `changeView` can close it on every navigation without branching.
@@ -214,7 +218,7 @@ export default function MintDashboard() {
       if (urlSessionId && urlSessionId !== conversationId) {
         window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, urlSessionId)
         setConversationId(urlSessionId)
-        getRecentInteractions(50, urlSessionId).then((history) => {
+        getRecentInteractions(50, urlSessionId, workspacePath || null).then((history) => {
           const reversed = history.reverse()
           setInteractions(reversed)
           setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
@@ -227,7 +231,7 @@ export default function MintDashboard() {
       window.removeEventListener('popstate', handleUrlChange)
       window.removeEventListener('hashchange', handleUrlChange)
     }
-  }, [conversationId])
+  }, [conversationId, workspacePath])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -258,7 +262,6 @@ export default function MintDashboard() {
   const [dashboardDataReady, setDashboardDataReady] = useState(false)
   const [startupTimedOut, setStartupTimedOut] = useState(false)
   const [settingsConfig, setSettingsConfig] = useState<any>(null)
-  const [workspacePath, setWorkspacePath] = useState(() => window.localStorage.getItem(LAST_WORKSPACE_PATH_KEY) || '')
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const lastNativePasteTimeRef = useRef(0)
@@ -396,7 +399,7 @@ export default function MintDashboard() {
       // reply with stale history).
       if (document.visibilityState !== 'visible' || sending) return
       try {
-        const history = (await getRecentInteractions(50, conversationId)).reverse()
+        const history = (await getRecentInteractions(50, conversationId, workspacePath || null)).reverse()
         const current = interactionsRef.current
         const currentLast = current[current.length - 1]
         const nextLast = history[history.length - 1]
@@ -408,7 +411,7 @@ export default function MintDashboard() {
       }
     }, 3000)
     return () => window.clearInterval(interval)
-  }, [view, conversationId, sending])
+  }, [view, conversationId, sending, workspacePath])
 
   const filteredSessions = chatSessions.filter((session) => {
     if (session.kind === 'cli' || session.id === 'conversation-default') return false
@@ -462,7 +465,7 @@ export default function MintDashboard() {
 
 
   async function refreshHistory() {
-    const history = await getRecentInteractions(50, conversationId)
+    const history = await getRecentInteractions(50, conversationId, workspacePath || null)
     const reversed = history.reverse()
     setInteractions(reversed)
     setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
@@ -713,7 +716,7 @@ export default function MintDashboard() {
         options.pinnedMcpServer ?? null,
       )
       setStreamedResponse(response)
-      const history = (await getRecentInteractions(50, conversationId)).reverse()
+      const history = (await getRecentInteractions(50, conversationId, workspacePath || null)).reverse()
       let enrichedHistory = history
       if (progressSnapshot.length > 0) {
         const newestInteraction = [...history]
@@ -1056,7 +1059,7 @@ export default function MintDashboard() {
     setImageAttachments([])
     setDocumentAttachment(null)
     setAgentProgress([])
-    const history = await getRecentInteractions(50, id)
+    const history = await getRecentInteractions(50, id, workspacePath || null)
     const reversed = history.reverse()
     setInteractions(reversed)
     setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
@@ -1079,7 +1082,7 @@ export default function MintDashboard() {
         window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, nextActive)
         setConversationId(nextActive)
         setAgentProgress([])
-        const history = await getRecentInteractions(50, nextActive)
+        const history = await getRecentInteractions(50, nextActive, workspacePath || null)
         const reversed = history.reverse()
         setInteractions(reversed)
         setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))

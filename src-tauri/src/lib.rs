@@ -877,15 +877,17 @@ fn save_system_interaction(
 fn get_recent_interactions(
     limit: Option<usize>,
     chat_id: Option<String>,
+    workspace_path: Option<String>,
 ) -> Result<Vec<InteractionMemory>, String> {
+    let scoped_chat_id = mint_core::scoped_chat_id(
+        chat_id
+            .as_deref()
+            .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID),
+        workspace_path.as_deref(),
+    );
     MemoryStore::open_default()
         .and_then(|memory| {
-            memory.recent_interactions_for_chat(
-                chat_id
-                    .as_deref()
-                    .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID),
-                limit.unwrap_or(5),
-            )
+            memory.recent_interactions_for_chat(&scoped_chat_id, limit.unwrap_or(5))
         })
         .map_err(|error| error.to_string())
 }

@@ -2,10 +2,42 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const CHAT_CLI_ID: &str = "cli";
 pub const DEFAULT_CONVERSATION_ID: &str = "conversation-default";
+
+/// Scopes the shared "cli" conversation by workspace so unrelated projects
+/// don't share context/history — every other `chat_id` (regular
+/// conversations, subagent ids, ...) passes through unchanged. Idempotent:
+/// calling this again on an already-scoped id (`"cli::<hash>"`) is a no-op,
+/// since the guard below only fires on the literal `CHAT_CLI_ID`. With no
+/// workspace known, falls back to the plain `"cli"` bucket — today's
+/// behavior, so existing history never needs migrating.
+pub fn scoped_chat_id(chat_id: &str, workspace_path: Option<&str>) -> String {
+    if chat_id != CHAT_CLI_ID {
+        return chat_id.to_owned();
+    }
+    let Some(path) = workspace_path.map(str::trim).filter(|p| !p.is_empty()) else {
+        return CHAT_CLI_ID.to_owned();
+    };
+    let canonical = std::fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_owned());
+    let digest = format!("{:x}", Sha256::digest(canonical.as_bytes()));
+    format!("{CHAT_CLI_ID}::{}", &digest[..12])
+}
+
+/// True for the unscoped `"cli"` id or any workspace-scoped variant of it
+/// (`"cli::<hash>"`), but NOT a subagent id nested under one
+/// (`"cli::subagent::<name>"`, or `"cli::<hash>::subagent::<name>"`) —
+/// those must keep behaving like a normal, deletable conversation exactly
+/// as they do today, unaffected by workspace scoping.
+fn is_cli_chat_id(chat_id: &str) -> bool {
+    chat_id == CHAT_CLI_ID
+        || (chat_id.starts_with(&format!("{CHAT_CLI_ID}::")) && !chat_id.contains("::subagent::"))
+}
 
 #[derive(Debug, Error)]
 pub enum MemoryError {
@@ -258,7 +290,7 @@ impl MemoryStore {
 
     pub fn delete_chat_session(&self, chat_id: &str) -> Result<usize, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
-        if chat_id == CHAT_CLI_ID {
+        if is_cli_chat_id(&chat_id) {
             return Ok(0);
         }
         let connection = self.connection()?;
@@ -267,8 +299,8 @@ impl MemoryStore {
             "DELETE FROM interaction_memories WHERE chat_id = ?1",
             params![chat_id],
         )?;
-        // No `kind` filter here: the `chat_id == CHAT_CLI_ID` guard above is
-        // what protects the one session that must never be deleted this way.
+        // No `kind` filter here: the `is_cli_chat_id` guard above is what
+        // protects the cli session(s) that must never be deleted this way.
         // Restricting to `kind = 'conversation'` used to also block deleting
         // any other kind (e.g. a stale row left behind by a since-removed
         // feature) even though nothing else needs that protection.
@@ -290,7 +322,7 @@ impl MemoryStore {
     /// *did* run keeps its history: this only clears the empty case.
     pub fn delete_chat_session_if_empty(&self, chat_id: &str) -> Result<bool, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
-        if chat_id == CHAT_CLI_ID {
+        if is_cli_chat_id(&chat_id) {
             return Ok(false);
         }
         let connection = self.connection()?;
@@ -768,7 +800,7 @@ fn ensure_builtin_chat_sessions(connection: &Connection) -> Result<(), rusqlite:
 }
 
 fn ensure_chat_session_row(connection: &Connection, chat_id: &str) -> Result<(), rusqlite::Error> {
-    let (title, kind) = if chat_id == CHAT_CLI_ID {
+    let (title, kind) = if is_cli_chat_id(chat_id) {
         ("Chat CLI", "cli")
     } else {
         ("New chat", "conversation")
@@ -779,4 +811,49 @@ fn ensure_chat_session_row(connection: &Connection, chat_id: &str) -> Result<(),
         params![chat_id, title, kind],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod scoped_chat_id_tests {
+    use super::*;
+
+    #[test]
+    fn non_cli_ids_pass_through_unchanged() {
+        assert_eq!(scoped_chat_id("conversation-default", Some("/tmp")), "conversation-default");
+        assert_eq!(scoped_chat_id("cli::subagent::search", Some("/tmp")), "cli::subagent::search");
+    }
+
+    #[test]
+    fn no_workspace_falls_back_to_the_plain_global_bucket() {
+        assert_eq!(scoped_chat_id(CHAT_CLI_ID, None), CHAT_CLI_ID);
+        assert_eq!(scoped_chat_id(CHAT_CLI_ID, Some("")), CHAT_CLI_ID);
+        assert_eq!(scoped_chat_id(CHAT_CLI_ID, Some("   ")), CHAT_CLI_ID);
+    }
+
+    #[test]
+    fn a_workspace_produces_a_stable_scoped_id() {
+        let cwd = std::env::current_dir().unwrap();
+        let path = cwd.to_string_lossy().into_owned();
+        let scoped = scoped_chat_id(CHAT_CLI_ID, Some(&path));
+        assert!(scoped.starts_with("cli::"));
+        assert_eq!(scoped, scoped_chat_id(CHAT_CLI_ID, Some(&path)));
+    }
+
+    #[test]
+    fn scoping_is_idempotent() {
+        let cwd = std::env::current_dir().unwrap();
+        let path = cwd.to_string_lossy().into_owned();
+        let once = scoped_chat_id(CHAT_CLI_ID, Some(&path));
+        let twice = scoped_chat_id(&once, Some(&path));
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn is_cli_chat_id_excludes_subagents_but_includes_scoped_variants() {
+        assert!(is_cli_chat_id(CHAT_CLI_ID));
+        assert!(is_cli_chat_id("cli::abc123456789"));
+        assert!(!is_cli_chat_id("cli::subagent::search"));
+        assert!(!is_cli_chat_id("cli::abc123456789::subagent::search"));
+        assert!(!is_cli_chat_id("conversation-default"));
+    }
 }

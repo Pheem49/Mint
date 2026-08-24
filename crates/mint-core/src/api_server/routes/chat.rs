@@ -26,6 +26,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 audio_data_uri: Option<String>,
                 video_data_uri: Option<String>,
                 document_attachment: Option<crate::chat::DocumentAttachment>,
+                #[serde(default)]
+                workspace_path: Option<String>,
                 agent_id: Option<String>,
                 #[serde(default)]
                 pinned_mcp_server: Option<String>,
@@ -41,7 +43,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     audio_data_uri: req.audio_data_uri,
                     video_data_uri: req.video_data_uri,
                     document_attachment: req.document_attachment,
-                    workspace_path: None,
+                    workspace_path: req.workspace_path,
                     agent_id: req.agent_id,
                     plan_mode: false,
                     pinned_mcp_server: req.pinned_mcp_server,
@@ -166,6 +168,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 audio_data_uri: Option<String>,
                 video_data_uri: Option<String>,
                 document_attachment: Option<crate::chat::DocumentAttachment>,
+                #[serde(default)]
+                workspace_path: Option<String>,
                 agent_id: Option<String>,
                 #[serde(default)]
                 pinned_mcp_server: Option<String>,
@@ -181,7 +185,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     audio_data_uri: req.audio_data_uri,
                     video_data_uri: req.video_data_uri,
                     document_attachment: req.document_attachment,
-                    workspace_path: None,
+                    workspace_path: req.workspace_path,
                     agent_id: req.agent_id,
                     plan_mode: false,
                     pinned_mcp_server: req.pinned_mcp_server,
@@ -336,6 +340,24 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             let config_clone = config.clone();
                             let chat_id = chat_req.chat_id.clone();
                             let chat_id_str = chat_id.clone().unwrap_or_default();
+                            // Unlike `root` above (this route's agent-mode tools
+                            // deliberately still operate against the API server
+                            // process's own cwd, not any client-sent workspace —
+                            // out of scope for the chat_id-scoping fix), the
+                            // conversation identity itself DOES need the client's
+                            // workspace: `orchestrate_agent_loop` would otherwise
+                            // self-derive from `root` (constant across every web
+                            // request), which can't distinguish workspaces at
+                            // all. Pre-scoping here is safe/idempotent — see
+                            // `scoped_chat_id`'s docs — so its self-derivation
+                            // becomes a no-op on the id we hand it below. The raw,
+                            // unscoped `chat_id_str` above is left untouched: it's
+                            // only a cancellation-token key, and `/api/cancel-chat`
+                            // sends back the same raw id it started with.
+                            let agent_scoped_chat_id = crate::agent::memory::scoped_chat_id(
+                                chat_id.as_deref().unwrap_or(DEFAULT_CONVERSATION_ID),
+                                chat_req.workspace_path.as_deref(),
+                            );
                             let message = chat_req.message.clone();
                             let image_data_uri = chat_req.image_data_uri.clone();
                             let audio_data_uri = chat_req.audio_data_uri.clone();
@@ -351,7 +373,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                     image_data_uri,
                                     audio_data_uri,
                                     video_data_uri,
-                                    chat_id.as_deref(),
+                                    Some(agent_scoped_chat_id.as_str()),
                                     agent_id.as_deref(),
                                     None,
                                     pinned_mcp_server.as_deref(),

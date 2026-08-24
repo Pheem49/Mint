@@ -1311,7 +1311,13 @@ pub async fn handle_slash_command(
                 .map(|(c, a)| (c, a.trim()))
                 .unwrap_or((rest, ""));
             match subcmd {
-                "list" | "" => match memory.recent_interactions_for_chat(CHAT_CLI_ID, 10) {
+                "list" | "" => match memory.recent_interactions_for_chat(
+                    &mint_core::scoped_chat_id(
+                        CHAT_CLI_ID,
+                        Some(&session.current_dir.to_string_lossy()),
+                    ),
+                    10,
+                ) {
                     Ok(items) => {
                         if items.is_empty() {
                             println!("{DIM}No interactions yet.{RESET}\n");
@@ -1374,7 +1380,10 @@ pub async fn handle_slash_command(
                     }
                     Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
-                "clear" => match memory.clear_interactions_for_chat(CHAT_CLI_ID) {
+                "clear" => match memory.clear_interactions_for_chat(&mint_core::scoped_chat_id(
+                    CHAT_CLI_ID,
+                    Some(&session.current_dir.to_string_lossy()),
+                )) {
                     Ok(count) => println!("{DIM}Cleared {count} interactions.{RESET}\n"),
                     Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
@@ -1829,7 +1838,15 @@ pub async fn handle_slash_command(
             let provider = &session.config.ai_provider;
             let model = active_model(provider, &session.config);
             let interactions = MemoryStore::open_default()
-                .and_then(|m| m.recent_interactions_for_chat(CHAT_CLI_ID, 1000))
+                .and_then(|m| {
+                    m.recent_interactions_for_chat(
+                        &mint_core::scoped_chat_id(
+                            CHAT_CLI_ID,
+                            Some(&session.current_dir.to_string_lossy()),
+                        ),
+                        1000,
+                    )
+                })
                 .map(|v| v.len())
                 .unwrap_or(0);
             println!("\n{BLUE}─ Session Stats ─────────────────────────{RESET}");
