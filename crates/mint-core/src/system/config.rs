@@ -111,6 +111,13 @@ pub struct MintConfig {
     /// so a user doesn't have to re-approve the same shell command or file edit
     /// every single time. See [`MintConfig::permission_decision`].
     pub permission_rules: Vec<PermissionRule>,
+    /// Project Avatar relay push endpoint. See [`crate::avatar_bridge`].
+    pub avatar_relay_url: String,
+    /// Project Avatar viewer app, for building the `/?token=` share link.
+    pub avatar_app_url: String,
+    /// Relay channel token. Empty = avatar bridge disabled (no config UI writes
+    /// this yet — set via `mint avatar link` which generates one on first use).
+    pub avatar_token: String,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -335,6 +342,9 @@ impl Default for MintConfig {
             auto_skill_writing: true,
             custom_providers: Vec::new(),
             permission_rules: Vec::new(),
+            avatar_relay_url: "https://relay.projectavatar.io".into(),
+            avatar_app_url: "https://app.projectavatar.io".into(),
+            avatar_token: String::new(),
             extra: runtime_extra_defaults(),
         }
     }

@@ -1,3 +1,4 @@
+pub(super) mod avatar;
 pub(super) mod browser;
 pub(super) mod code_search;
 pub(super) mod files;

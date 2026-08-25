@@ -615,12 +615,19 @@ async fn stream_chat_message(
     };
 
     let on_progress_event = on_event.clone();
+    let avatar_app = app.clone();
     let progress_cb = move |progress| {
+        avatar_app
+            .state::<mint_core::avatar_bridge::AvatarBridge>()
+            .on_agent_progress(&progress);
         let _ = on_progress_event.send(DesktopStreamEvent::Progress { progress });
     };
 
     let on_event_clone = on_event.clone();
+    let chunk_app = app.clone();
     let on_chunk = move |summary: String| {
+        let bridge = chunk_app.state::<mint_core::avatar_bridge::AvatarBridge>();
+        bridge.on_talking(true);
         let chars: Vec<char> = summary.chars().collect();
         let mut i = 0;
         while i < chars.len() {
@@ -630,6 +637,7 @@ async fn stream_chat_message(
             i = end;
             std::thread::sleep(std::time::Duration::from_millis(15));
         }
+        bridge.on_talking(false);
     };
 
     let chat_id_str = request.chat_id.clone().unwrap_or_default();
@@ -681,11 +689,24 @@ async fn stream_chat_message(
             .remove(&chat_id_str);
     }
 
+    let avatar_bridge = app.state::<mint_core::avatar_bridge::AvatarBridge>();
     let res = match res {
-        Ok(Ok(val)) => val,
-        Ok(Err(e)) => return Err(e.to_string()),
-        Err(e) if e.is_cancelled() => return Err("Agent execution cancelled by user".to_string()),
-        Err(e) => return Err(format!("Task panicked: {}", e)),
+        Ok(Ok(val)) => {
+            avatar_bridge.on_turn_end(true);
+            val
+        }
+        Ok(Err(e)) => {
+            avatar_bridge.on_turn_end(false);
+            return Err(e.to_string());
+        }
+        Err(e) if e.is_cancelled() => {
+            avatar_bridge.on_turn_end(false);
+            return Err("Agent execution cancelled by user".to_string());
+        }
+        Err(e) => {
+            avatar_bridge.on_turn_end(false);
+            return Err(format!("Task panicked: {}", e));
+        }
     };
 
     Ok(ChatResponse {
@@ -1693,6 +1714,11 @@ pub fn run() {
         })
         .manage(GeminiLiveState::default())
         .manage(MicRecordingState::default())
+        .manage(mint_core::avatar_bridge::AvatarBridge::new(
+            load_config()
+                .map(|c| mint_core::avatar_bridge::AvatarBridgeConfig::from_mint_config(&c))
+                .unwrap_or_else(|_| mint_core::avatar_bridge::AvatarBridgeConfig::from_env()),
+        ))
         .setup(|app| {
             if let Some(main_window) = app.get_webview_window("main") {
                 allow_media_permission_requests(&main_window);

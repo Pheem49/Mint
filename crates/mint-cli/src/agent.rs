@@ -444,7 +444,19 @@ pub async fn run_code_agent_with_options(
     let progress_live_status = Arc::clone(&live_status);
     let progress_approval_active = Arc::clone(&approval_active);
     let progress_tool_running = Arc::clone(&tool_running);
-    let progress_cb = |progress: AgentProgress| match progress {
+    // Built fresh per turn from the config passed in, so a token generated or
+    // cleared via `/avatar` mid-session takes effect on the very next turn
+    // without restarting `mint`. The tradeoff: cross-turn cooldown state
+    // (see `AvatarBridge`) resets every turn instead of persisting across
+    // the whole CLI session the way the Tauri desktop app's `.manage()`'d
+    // instance does — acceptable since cooldowns only matter for rapid tool
+    // calls *within* one turn anyway.
+    let avatar_bridge = mint_core::avatar_bridge::AvatarBridge::new(
+        mint_core::avatar_bridge::AvatarBridgeConfig::from_mint_config(config),
+    );
+    let progress_cb = |progress: AgentProgress| {
+        avatar_bridge.on_agent_progress(&progress);
+        match progress {
         AgentProgress::Thinking {
             elapsed_secs,
             agent_name,
@@ -646,6 +658,7 @@ pub async fn run_code_agent_with_options(
                 status.web_sources.extend(sources);
             }
         }
+        }
     };
 
     let chunk_live_status = Arc::clone(&live_status);
@@ -684,7 +697,9 @@ pub async fn run_code_agent_with_options(
         let _ = crossterm::terminal::disable_raw_mode();
         let formatted_summary = format_markdown_bold(&sanitize_latex(&summary));
         print!("\n  {MINT}Mint:{RESET} ");
+        avatar_bridge.on_talking(true);
         render_live_summary(&formatted_summary);
+        avatar_bridge.on_talking(false);
 
         // Print web search sources if any were collected (grouped by domain)
         if let Ok(mut status) = chunk_live_status.lock()
@@ -760,6 +775,7 @@ pub async fn run_code_agent_with_options(
             }
         }
     };
+    avatar_bridge.on_turn_end(res.is_ok());
     agent_done.store(true, Ordering::Relaxed);
     if !options.fast_mode
         && let Ok(mut status) = live_status.lock()

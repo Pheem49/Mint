@@ -149,92 +149,13 @@ pub async fn handle_slash_command(
             println!("\n{BLUE}────────────────────────────────────────────{RESET}");
             println!("{MINT}  Mint Interactive Commands{RESET}");
             println!("{BLUE}────────────────────────────────────────────{RESET}");
-            let commands = [
-                ("/help", "Show this help"),
-                ("/fast [on|off]", "Toggle fast mode (hide thinking traces)"),
-                (
-                    "/plan [on|off]",
-                    "Toggle plan mode (read-only until you approve a plan)",
-                ),
-                ("/models [name]", "List providers or switch provider"),
-                ("/clear", "Clear conversation history"),
-                ("/cd <path>", "Change workspace directory"),
-                ("/image <path> [prompt]", "Attach image from file"),
-                ("/paste [prompt]", "Attach image from clipboard"),
-                ("Ctrl+V", "Paste clipboard image as [Image #1]"),
-                ("↑ / ↓", "Recall previously submitted input"),
-                ("/learn <path>", "Import a persistent .md or .txt skill"),
-                (
-                    "/skill add <path>",
-                    "Copy/install skill file or folder to global config",
-                ),
-                (
-                    "/plugins <name> [prompt]",
-                    "Generate a skill.md file for a plugin/skill",
-                ),
-                ("/memory list", "Show recent interactions"),
-                ("/memory clear", "Clear all interactions"),
-                ("/memory get <key>", "Read a profile value"),
-                ("/memory set <key> <val>", "Store a profile value"),
-                (
-                    "/autoskill [on|off]",
-                    "Toggle auto-writing a SKILL.md after hard tasks",
-                ),
-                (
-                    "/cron add <name> | <sched> | <task>",
-                    "Create/list/remove/enable/disable scheduled agent tasks",
-                ),
-                (
-                    "/link add <name> | <path> | <desc>",
-                    "Link a folder chat can auto-write notes into",
-                ),
-                (
-                    "/image-provider [name]",
-                    "List image gen providers or switch default provider",
-                ),
-                ("/generate-image <prompt>", "Generate image using AI model"),
-                ("/veo <prompt>", "Generate video using Google Veo"),
-                (
-                    "/video-provider [name]",
-                    "List video gen providers or switch default provider",
-                ),
-                (
-                    "/search-provider [name]",
-                    "List web search providers or switch default provider",
-                ),
-                ("/bg <query>", "Run a query in the background, non-blocking"),
-                (
-                    "/jobs [show|cancel <id>]",
-                    "List, inspect, or cancel background jobs",
-                ),
-                ("/mcp list", "List configured MCP servers"),
-                ("/mcp allow <server> <tool>", "Allow an MCP tool"),
-                (
-                    "/mcp reauth <server>",
-                    "Re-run a server's OAuth login (e.g. expired token)",
-                ),
-                (
-                    "/release-notes",
-                    "Show release notes for the current version",
-                ),
-                ("/stats", "Show session statistics"),
-                ("/exit", "Exit Mint"),
-                ("/code <task>", "Run in code-agent mode"),
-                (
-                    "/n8n [task]",
-                    "Open n8n in your browser, or trigger a workflow via the n8n MCP server",
-                ),
-                (
-                    "/notebook [task]",
-                    "Open SurfSense in your browser, or run a task via the surfsense MCP server",
-                ),
-                (
-                    "/multi-agent [on|off]",
-                    "Show or toggle Multi-Agent Collaboration system",
-                ),
-            ];
-            for (cmd_name, desc) in &commands {
-                println!("  {MINT}{:<30}{RESET} {DIM}{}{RESET}", cmd_name, desc);
+            for spec in SLASH_COMMANDS {
+                let label = if spec.usage.is_empty() {
+                    spec.token.to_string()
+                } else {
+                    format!("{} {}", spec.token, spec.usage)
+                };
+                println!("  {MINT}{:<30}{RESET} {DIM}{}{RESET}", label, spec.description);
             }
             println!();
             Some(SlashResult::Handled)
@@ -484,6 +405,109 @@ pub async fn handle_slash_command(
                     }
                     _ => {}
                 }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/avatar" => {
+            use mint_core::avatar_bridge::{AvatarBridgeConfig, fetch_channel_state};
+
+            match rest {
+                "" | "link" | "web" | "link web" | "desktop" | "link desktop" => {
+                    if session.config.avatar_token.is_empty() {
+                        session.config.avatar_token = AvatarBridgeConfig::generate_token();
+                        if let Err(error) = mint_core::save_config(&session.config) {
+                            println!("{ERROR}Config error:{RESET} {error}\n");
+                            return Some(SlashResult::Handled);
+                        }
+                    }
+                    let cfg = AvatarBridgeConfig::from_mint_config(&session.config);
+                    let token = session.config.avatar_token.clone();
+
+                    // Explicit "web"/"desktop" skip the picker, same as
+                    // `/fast on` skipping `/fast`'s interactive select.
+                    let target = match rest {
+                        "web" | "link web" => "web",
+                        "desktop" | "link desktop" => "desktop",
+                        _ => {
+                            let options =
+                                vec!["Web browser".to_string(), "Desktop app".to_string()];
+                            match prompt_interactive_select(
+                                "Where will you view the avatar?",
+                                &options,
+                                &options[0],
+                            ) {
+                                Ok(Some(sel)) if sel.starts_with("Desktop") => "desktop",
+                                // Cancelled, or no TTY to prompt in (e.g. piped) — the
+                                // web link is always useful on its own, so fall back
+                                // to it rather than printing nothing.
+                                Ok(_) => "web",
+                                Err(e) => {
+                                    println!("{ERROR}Error selecting target:{RESET} {e}\n");
+                                    return Some(SlashResult::Handled);
+                                }
+                            }
+                        }
+                    };
+
+                    if target == "desktop" {
+                        println!(
+                            "\n{MINT}[Avatar] Desktop app:{RESET}\n\
+                             1. Open the Project Avatar desktop app.\n\
+                             2. It has no address bar, so on first launch it generates its \
+                             own token — paste this one into its \"Paste existing token...\" \
+                             field instead so it connects to the same channel Mint pushes to:\n\
+                             {DIM}{token}{RESET}\n\
+                             It remembers the token after that; you won't need to paste it again.\n"
+                        );
+                    } else {
+                        println!(
+                            "\n{MINT}[Avatar] Share link:{RESET}\n{}\n",
+                            cfg.share_link().expect("token was just ensured non-empty")
+                        );
+                    }
+                }
+                "status" => {
+                    let cfg = AvatarBridgeConfig::from_mint_config(&session.config);
+                    if !cfg.enabled {
+                        println!(
+                            "{WARN}[Avatar] No token yet — run /avatar link first.{RESET}\n"
+                        );
+                    } else {
+                        match fetch_channel_state(&cfg).await {
+                            Ok(state) => {
+                                let now_ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as i64)
+                                    .unwrap_or(0);
+                                println!("\n{BLUE}[Avatar] Channel status:{RESET}");
+                                println!(
+                                    "  Model:       {}",
+                                    state.model.unwrap_or_else(|| "not selected".into())
+                                );
+                                println!("  Viewers:     {}", state.connected_clients);
+                                println!(
+                                    "  Last event:  {}\n",
+                                    state
+                                        .last_agent_event_at
+                                        .map(|t| format!("{}s ago", (now_ms - t).max(0) / 1000))
+                                        .unwrap_or_else(|| "never".into())
+                                );
+                            }
+                            Err(error) => println!("{ERROR}[Avatar] {error}{RESET}\n"),
+                        }
+                    }
+                }
+                "off" | "disable" => {
+                    session.config.avatar_token = String::new();
+                    match mint_core::save_config(&session.config) {
+                        Ok(()) => println!("{DIM}[Avatar] Bridge disabled.{RESET}\n"),
+                        Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                    }
+                }
+                _ => println!(
+                    "{WARN}Usage: /avatar [web|desktop|status|off] — connects agent activity to Project Avatar{RESET}\n"
+                ),
             }
             Some(SlashResult::Handled)
         }
@@ -2247,5 +2271,64 @@ pub async fn handle_slash_command(
             // Unknown slash command — treat as normal message to the agent
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Commands that are dispatched but deliberately left undocumented —
+    /// shortcuts for another command's own token, not gaps in `SLASH_COMMANDS`.
+    const UNDOCUMENTED_ALIASES: &[&str] = &["/quit", "/reset", "/plugin", "/searchProvider"];
+
+    /// Regression guard for the exact bug that motivated `SLASH_COMMANDS`:
+    /// `/edit-image`, `/gen-image`, `/shells`, and `/subagent` all worked but
+    /// were missing from `/help` (and briefly `/avatar` was missing from the
+    /// autocomplete list) because command metadata used to live in two
+    /// separate hand-maintained arrays with nothing tying them to the
+    /// dispatcher below. This parses `handle_slash_command`'s own source for
+    /// every top-level `"/xxx" => ` (and `"/xxx" | "/yyy" => `) match arm and
+    /// asserts each token is documented in `SLASH_COMMANDS` — so a new arm
+    /// added without a table entry fails `cargo test` instead of silently
+    /// shipping undocumented.
+    #[test]
+    fn dispatcher_tokens_are_documented() {
+        let source = include_str!("slash_commands.rs");
+        let arm_re = regex::Regex::new(r#"(?m)^ {8}((?:"/[a-zA-Z-]+"\s*\|?\s*)+)=>"#).unwrap();
+        let token_re = regex::Regex::new(r#""(/[a-zA-Z-]+)""#).unwrap();
+
+        let mut dispatcher_tokens = std::collections::BTreeSet::new();
+        for arm in arm_re.captures_iter(source) {
+            for tok in token_re.captures_iter(&arm[1]) {
+                dispatcher_tokens.insert(tok[1].to_string());
+            }
+        }
+
+        // Sanity check the extraction itself isn't silently matching nothing
+        // (e.g. after a reformat that changes indentation).
+        assert!(
+            dispatcher_tokens.len() > 20,
+            "expected to extract dozens of dispatcher tokens, got {}: {:?} — \
+             did the match arm indentation or format change?",
+            dispatcher_tokens.len(),
+            dispatcher_tokens,
+        );
+
+        let documented: std::collections::BTreeSet<&str> =
+            SLASH_COMMANDS.iter().map(|s| s.token).collect();
+
+        let undocumented: Vec<&String> = dispatcher_tokens
+            .iter()
+            .filter(|t| !UNDOCUMENTED_ALIASES.contains(&t.as_str()))
+            .filter(|t| !documented.contains(t.as_str()))
+            .collect();
+
+        assert!(
+            undocumented.is_empty(),
+            "dispatcher handles {undocumented:?} but SLASH_COMMANDS (in commands.rs) has no \
+             entry for it — add one, or add it to UNDOCUMENTED_ALIASES if it's a deliberately \
+             undocumented shortcut for another command's token.",
+        );
     }
 }

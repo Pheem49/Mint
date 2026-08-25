@@ -49,6 +49,9 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     // Read-only poll of a background job's buffered output; the run_shell
     // call that started it is still gated to read-only commands above.
     "shell_output",
+    // Cosmetic/non-mutating — no reason to block it during read-only
+    // plan-mode investigation.
+    "avatar_signal",
 ];
 
 /// The full set of coding-agent actions before plan-mode/disabled-tools/browser
@@ -141,6 +144,10 @@ pub fn build_system_prompt(
         allowed_actions.push("browser_screenshot");
     }
 
+    if !config.avatar_token.is_empty() {
+        allowed_actions.push("avatar_signal");
+    }
+
     allowed_actions.retain(|action| !config.disabled_tools.contains(&action.to_string()));
     if plan_mode {
         allowed_actions.retain(|action| PLAN_MODE_ALLOWED_ACTIONS.contains(action));
@@ -222,6 +229,9 @@ pub fn build_system_prompt(
     }
     if allowed_actions.contains(&"memory_recall") {
         input_formats.push("- memory_recall: {\"query\":\"what did user say about X\"}");
+    }
+    if allowed_actions.contains(&"avatar_signal") {
+        input_formats.push("- avatar_signal: {\"emotions\":{\"joy\":\"high\"},\"action\":\"greeting\",\"prop\":\"none\",\"intensity\":\"medium\",\"talking\":true} (all fields optional partial update; emotions: joy/sadness/anger/fear/surprise/disgust/interest -> subtle/low/medium/high; action: idle/typing/nodding/laughing/celebrating/dismissive/searching/nervous/sad/plotting/greeting/talking; prop: none/keyboard/magnifying_glass/coffee_cup/book/phone/scroll; intensity: low/medium/high)");
     }
     if allowed_actions.contains(&"git_status") {
         input_formats.push("- git_status: {}");
@@ -432,6 +442,9 @@ pub fn build_system_prompt(
     }
     if allowed_actions.contains(&"generate_image") {
         rules.push("7g. Use generate_image when the user asks to create, draw, or generate an image/picture/artwork from a text description. ALWAYS copy the ```image_gen_json ... ``` block from the tool observation into your final summary text so the UI card renders.");
+    }
+    if allowed_actions.contains(&"avatar_signal") {
+        rules.push("7v. A Project Avatar is connected. Call avatar_signal when your reply carries an emotional beat the automatic tool-based reactions can't express — greeting, joking, apologizing, thinking something over. Don't call it for routine tool-driven turns (shell, browser, image/video generation); those already react on their own.");
     }
     if allowed_actions.contains(&"browser_open") {
         rules.push("7a. Use browser_open to navigate the virtual browser to a URL.");

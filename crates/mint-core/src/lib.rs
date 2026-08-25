@@ -8,6 +8,7 @@
 // transparent to every existing `crate::chat::X` / `mint_core::chat::X`
 // reference elsewhere in the workspace — nothing outside this file changed.
 pub mod agent;
+pub mod avatar_bridge;
 pub mod browser;
 pub mod cron;
 pub mod integrations;

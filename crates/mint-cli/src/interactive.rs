@@ -8,12 +8,14 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+mod commands;
 mod confirm;
 mod format;
 mod input_box;
 mod picker;
 mod slash_commands;
 
+pub use commands::*;
 pub use confirm::*;
 pub use format::*;
 pub use input_box::*;

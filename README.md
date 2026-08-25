@@ -92,6 +92,19 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
   ```
   See [FableMint's README](https://github.com/Pheem49/FableMint#driving-it-with-an-ai-agent) for the full tool list.
 
+---
+
+### 12. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Real-Time 3D Avatar via Project Avatar
+- Connect **[Project Avatar](https://github.com/projectavatar/projectavatar)** — a free, open-source 3D VRM avatar that reacts live to what the agent is doing — with `/avatar` in chat (or `mint avatar` from the CLI):
+  ```
+  /avatar          # pick Web or Desktop, get your share link / token
+  /avatar status   # check connection, selected model, viewer count
+  /avatar off      # disable
+  ```
+- The agent reacts as it works — typing/searching while a tool runs, celebrating on a finished image/video — and can call `avatar_signal` directly for anything a tool call can't express, like a greeting, a joke, or an apology.
+- **Web viewing just works** — picking Web opens `app.projectavatar.io/?token=...`, a page the Project Avatar team already hosts for free. No install, no clone, nothing to build; any browser works.
+- **Desktop viewing** needs Project Avatar's own desktop app, built separately from [their repo](https://github.com/projectavatar/projectavatar#desktop-app) — it isn't bundled with Mint. Its first-run screen generates its own token; paste the one `/avatar` gave you into its "Paste existing token" field instead so it joins Mint's channel rather than its own.
+
 ## <img src="assets/setup.svg" width="24" height="24" valign="middle" /> Prerequisites
 
 Before you can build or run Mint locally, make sure you have the following system tools installed:
@@ -405,6 +418,7 @@ mint mcp call filesystem list_directory \
 | `/mcp [subcmd]` | Manage configured MCP servers (list, allow, disallow) |
 | `/stats` | Show session statistics |
 | `/code <task>` | Start a code-agent task |
+| `/avatar [web\|desktop\|status\|off]` | Connect agent activity to [Project Avatar](https://github.com/projectavatar/projectavatar) |
 | `/exit` or `/quit` | Leave interactive mode |
 
 ## Running Mint 24/7 on a VPS (Headless Gateway)

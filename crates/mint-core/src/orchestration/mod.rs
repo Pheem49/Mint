@@ -607,6 +607,22 @@ struct AgentInput {
     provider: String,
     #[serde(default)]
     duration: Option<f64>,
+    // avatar_signal input fields — Rust-side `avatar_` prefix only to read
+    // unambiguously in this shared flat struct; explicit renames keep the
+    // wire/JSON keys unprefixed (matching the relay's AvatarEvent schema —
+    // see `crate::avatar_bridge`).
+    #[serde(default, rename = "emotions")]
+    avatar_emotions: std::collections::HashMap<String, String>,
+    #[serde(default, rename = "action")]
+    avatar_action: String,
+    #[serde(default, rename = "prop")]
+    avatar_prop: String,
+    #[serde(default, rename = "intensity")]
+    avatar_intensity: String,
+    #[serde(default, rename = "color")]
+    avatar_color: String,
+    #[serde(default, rename = "talking")]
+    avatar_talking: Option<bool>,
 }
 
 /// Decode shim for `ask_user`'s `options`: accepts either a bare string
@@ -2133,6 +2149,7 @@ async fn execute_tool(
             )
             .await
         }
+        "avatar_signal" => tools::avatar::execute(input).await,
         "run_plugin" | "dispatch_subagent" | "mcp_tool" | "mcp_list_tools" => {
             tools::plugins_mcp::execute(
                 decision.action.as_str(),

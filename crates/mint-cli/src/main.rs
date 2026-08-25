@@ -347,6 +347,28 @@ enum Command {
         #[command(subcommand)]
         command: VideoCommand,
     },
+    /// Connect agent activity to Project Avatar (github.com/projectavatar/projectavatar) —
+    /// a real-time 3D avatar that reacts to tool calls, thinking, and errors.
+    Avatar {
+        #[command(subcommand)]
+        command: AvatarCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AvatarCommand {
+    /// Print your avatar share link, generating a channel token on first use.
+    Link,
+    /// Show relay channel status: selected model, viewer count, last event.
+    Status,
+    /// Point at a self-hosted relay/app instead of the public default.
+    SetRelay {
+        relay_url: String,
+        #[arg(long)]
+        app_url: Option<String>,
+    },
+    /// Clear the saved token, disabling the bridge.
+    Disable,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2416,6 +2438,74 @@ async fn main() -> Result<()> {
                                 anyhow::bail!("{e}");
                             }
                         }
+                    }
+                }
+            }
+            Command::Avatar { command } => {
+                use mint_core::avatar_bridge::{AvatarBridgeConfig, fetch_channel_state};
+                match command {
+                    AvatarCommand::Link => {
+                        let mut config = load_config()?;
+                        if config.avatar_token.is_empty() {
+                            config.avatar_token = AvatarBridgeConfig::generate_token();
+                            save_config(&config)?;
+                        }
+                        let cfg = AvatarBridgeConfig::from_mint_config(&config);
+                        println!(
+                            "{MINT}Avatar share link:{RESET}\n{}",
+                            cfg.share_link().expect("token was just ensured non-empty")
+                        );
+                    }
+                    AvatarCommand::Status => {
+                        let config = load_config()?;
+                        let cfg = AvatarBridgeConfig::from_mint_config(&config);
+                        if !cfg.enabled {
+                            println!("No avatar token set yet. Run `mint avatar link` first.");
+                        } else {
+                            match fetch_channel_state(&cfg).await {
+                                Ok(state) => {
+                                    let now_ms = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_millis() as i64)
+                                        .unwrap_or(0);
+                                    println!("{MINT}Avatar channel status:{RESET}");
+                                    println!(
+                                        "  model:       {}",
+                                        state.model.unwrap_or_else(|| "not selected".into())
+                                    );
+                                    println!("  viewers:     {}", state.connected_clients);
+                                    println!(
+                                        "  last event:  {}",
+                                        state
+                                            .last_agent_event_at
+                                            .map(|t| format!("{}s ago", (now_ms - t).max(0) / 1000))
+                                            .unwrap_or_else(|| "never".into())
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("{ERROR}✗ {e}{RESET}");
+                                    anyhow::bail!("{e}");
+                                }
+                            }
+                        }
+                    }
+                    AvatarCommand::SetRelay { relay_url, app_url } => {
+                        let mut config = load_config()?;
+                        config.avatar_relay_url = relay_url.trim_end_matches('/').to_string();
+                        if let Some(app) = app_url {
+                            config.avatar_app_url = app.trim_end_matches('/').to_string();
+                        }
+                        save_config(&config)?;
+                        println!(
+                            "Relay set to {} (app: {})",
+                            config.avatar_relay_url, config.avatar_app_url
+                        );
+                    }
+                    AvatarCommand::Disable => {
+                        let mut config = load_config()?;
+                        config.avatar_token = String::new();
+                        save_config(&config)?;
+                        println!("Avatar bridge disabled.");
                     }
                 }
             }
