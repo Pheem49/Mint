@@ -1262,61 +1262,52 @@ pub async fn handle_slash_command(
                 .unwrap_or((rest, ""));
 
             match subcmd {
+                "" | "list" => {
+                    let skills = load_all_available_skills(&session.current_dir);
+                    if skills.is_empty() {
+                        println!(
+                            "No skills found. Use `/skill add <path|github-repo|url>` to add one.\n"
+                        );
+                    } else {
+                        println!("Skills:");
+                        for skill in &skills {
+                            let loc = if skill.source_path.contains("/.config/mint/mint-skills") {
+                                "Global"
+                            } else if skill.source_path.contains("/skills")
+                                || skill.source_path.contains("/.agents/skills")
+                            {
+                                "Workspace"
+                            } else {
+                                "Taught"
+                            };
+                            println!("  ● [{}] {}", loc, skill.name);
+                        }
+                        println!();
+                    }
+                }
                 "add" | "install" => {
                     if args.is_empty() {
                         println!(
                             "{WARN}/skill add <path> requires a path to a skill file or folder{RESET}\n"
                         );
                     } else {
-                        let source_path = PathBuf::from(args);
-                        let source_path = if source_path.is_absolute() {
-                            source_path
-                        } else {
-                            session.current_dir.join(source_path)
-                        };
-
-                        if !source_path.exists() {
-                            println!("{ERROR}Source skill path not found: {}{RESET}\n", args);
-                        } else if let Some(home) = dirs::home_dir() {
-                            let global_skills_path =
-                                home.join(".config").join("mint").join("mint-skills");
-                            if !global_skills_path.exists() {
-                                let _ = std::fs::create_dir_all(&global_skills_path);
-                            }
-
-                            let name = source_path
-                                .file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("skill");
-
-                            let dest_path = global_skills_path.join(name);
-                            let copy_res = if source_path.is_dir() {
-                                copy_dir_all(&source_path, &dest_path)
-                            } else {
-                                std::fs::copy(&source_path, &dest_path)
-                                    .map(|_| ())
-                                    .map_err(|e| e)
-                            };
-
-                            match copy_res {
-                                Ok(()) => println!(
-                                    "{DIM}Skill successfully copied to Global config: {}{RESET}\n",
-                                    dest_path.display()
-                                ),
-                                Err(e) => println!(
-                                    "{ERROR}Failed to copy skill to Global: {}{RESET}\n",
-                                    e
-                                ),
-                            }
-                        } else {
-                            println!(
-                                "{ERROR}Unable to resolve home directory for Global config.{RESET}\n"
-                            );
+                        // First whitespace-separated token is the source;
+                        // anything after is forwarded to `npx skills` as-is
+                        // (e.g. `/skill add owner/repo --skill find-skills`).
+                        let mut tokens = args.split_whitespace();
+                        let source = tokens.next().unwrap_or("");
+                        let extra_args: Vec<&str> = tokens.collect();
+                        match crate::skills::add(source, &extra_args, &session.current_dir) {
+                            Ok(msg) => println!("{DIM}{msg}{RESET}\n"),
+                            Err(msg) => println!("{ERROR}{msg}{RESET}\n"),
                         }
                     }
                 }
                 _ => {
-                    println!("{WARN}Usage: /skill add <path>  (or /skill install <path>){RESET}\n");
+                    println!(
+                        "{WARN}Usage: /skill [list] | /skill add <path> (or /skill install <path>) — <path> \
+                         can also be a GitHub repo (owner/repo) or URL, resolved via `npx skills`{RESET}\n"
+                    );
                 }
             }
             Some(SlashResult::Handled)

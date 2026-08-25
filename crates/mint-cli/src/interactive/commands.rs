@@ -82,13 +82,13 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     },
     SlashCommandSpec {
         token: "/skill",
-        usage: "",
-        description: "Manage global skills (add/install)",
+        usage: "[list]",
+        description: "List skills (global/workspace/taught) — see also /skill add",
     },
     SlashCommandSpec {
         token: "/skill add",
-        usage: "<path>",
-        description: "Copy/install skill file or folder to global config",
+        usage: "<path|github-repo|url>",
+        description: "Install a local skill, or pull one via `npx skills` (GitHub repo/URL)",
     },
     SlashCommandSpec {
         token: "/plugins",

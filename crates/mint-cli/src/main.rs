@@ -353,6 +353,11 @@ enum Command {
         #[command(subcommand)]
         command: AvatarCommand,
     },
+    /// Install, or list, local AI skills.
+    Skills {
+        #[command(subcommand)]
+        command: SkillsCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -369,6 +374,23 @@ enum AvatarCommand {
     },
     /// Clear the saved token, disabling the bridge.
     Disable,
+}
+
+#[derive(Debug, Subcommand)]
+enum SkillsCommand {
+    /// Install a skill: a local file/folder path, or a GitHub repo/URL
+    /// (resolved via `npx skills`, landing in ./.agents/skills/).
+    Add {
+        source: String,
+        /// Forwarded as-is to `npx skills add` — e.g. `--skill find-skills`
+        /// to install just one skill out of a multi-skill repo, or `--agent
+        /// cursor` to target a different agent's directory. Ignored for a
+        /// local-path source.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        extra: Vec<String>,
+    },
+    /// List all skills Mint can currently see (global, workspace, taught).
+    List,
 }
 
 #[derive(Debug, Subcommand)]
@@ -2509,6 +2531,40 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+            Command::Skills { command } => match command {
+                SkillsCommand::Add { source, extra } => {
+                    let cwd = std::env::current_dir()?;
+                    let extra_args: Vec<&str> = extra.iter().map(String::as_str).collect();
+                    match crate::skills::add(&source, &extra_args, &cwd) {
+                        Ok(msg) => println!("{MINT}✓{RESET} {msg}"),
+                        Err(msg) => {
+                            eprintln!("{ERROR}✗ {msg}{RESET}");
+                            anyhow::bail!("{msg}");
+                        }
+                    }
+                }
+                SkillsCommand::List => {
+                    let cwd = std::env::current_dir()?;
+                    let skills = crate::interactive::load_all_available_skills(&cwd);
+                    if skills.is_empty() {
+                        println!("No skills found. Use `mint skills add <source>` to add one.");
+                    } else {
+                        println!("{MINT}Skills:{RESET}");
+                        for skill in &skills {
+                            let loc = if skill.source_path.contains("/.config/mint/mint-skills") {
+                                "Global"
+                            } else if skill.source_path.contains("/skills")
+                                || skill.source_path.contains("/.agents/skills")
+                            {
+                                "Workspace"
+                            } else {
+                                "Taught"
+                            };
+                            println!("  [{}] {} ({})", loc, skill.name, skill.source_path);
+                        }
+                    }
+                }
+            },
         },
     }
     Ok(())
