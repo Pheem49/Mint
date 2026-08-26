@@ -13,7 +13,27 @@ import {
   CustomProviderHeader,
 } from '@/components/SettingsWindow'
 import { setActiveModel } from '../../utils/modelManager'
+import { providerLabel as aiProviderLabel } from '../../utils/providers'
 import ApiKeyInput from './ApiKeyInput'
+
+const SEARCH_PROVIDER_LABELS: Record<string, string> = {
+  brave: 'Brave',
+  google: 'Google',
+  searxng: 'SearXNG',
+}
+
+const IMAGE_PROVIDER_LABELS: Record<string, string> = {
+  gemini: 'NanoBanana',
+  dalle: 'DALL·E',
+  stability: 'Stability',
+  ideogram: 'Ideogram',
+  replicate: 'Replicate',
+  bfl: 'FLUX',
+}
+
+const VIDEO_PROVIDER_LABELS: Record<string, string> = {
+  veo: 'Veo',
+}
 
 interface GeneralTabProps {
   config: typeof DEFAULT_CONFIG
@@ -122,9 +142,12 @@ export default function GeneralTab({
       <section
         className={`setting-section collapsible-section ${isOpen ? 'is-open' : 'is-collapsed'}`}
       >
-        <div 
+        <div
           className="section-heading-collapsible"
           onClick={() => toggleSection(key)}
+          role="button"
+          aria-expanded={isOpen}
+          aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${title}`}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -143,19 +166,18 @@ export default function GeneralTab({
               {title}
             </h2>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted)' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: '500' }}>{isOpen ? 'Collapse' : 'Expand'}</span>
-            <svg 
-              width="18" height="18" viewBox="0 0 24 24" fill="none" 
-              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              style={{ 
-                transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                transition: 'transform 0.25s ease'
-              }}
-            >
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </div>
+          <svg
+            width="18" height="18" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            style={{
+              color: 'var(--text-muted)',
+              flexShrink: 0,
+              transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.25s ease'
+            }}
+          >
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
         </div>
 
         {isOpen && (
@@ -166,6 +188,14 @@ export default function GeneralTab({
       </section>
     )
   }
+
+  const activeProviderLabel = config.aiProvider.startsWith('custom:')
+    ? ((config.customProviders ?? []).find(p => `custom:${p.id}` === config.aiProvider)?.displayName || 'Custom')
+    : aiProviderLabel(config.aiProvider)
+  const activeSearchLabel = SEARCH_PROVIDER_LABELS[config.searchProvider] ?? config.searchProvider
+  const activeImageLabel = IMAGE_PROVIDER_LABELS[config.imageGenProvider] ?? config.imageGenProvider
+  const activeVideoLabel = VIDEO_PROVIDER_LABELS[config.videoGenProvider] ?? config.videoGenProvider
+  const customProviderCount = (config.customProviders ?? []).length
 
   return (
     <div className="tab-pane active">
@@ -197,21 +227,35 @@ export default function GeneralTab({
           <div className="form-grid compact">
             <div className="setting-row wide">
               <label>Active Provider</label>
-              <select value={config.aiProvider} onChange={(e) => updateField('aiProvider', e.target.value)}>
-                <option value="gemini">Google Gemini (Cloud)</option>
-                <option value="anthropic">Anthropic Claude</option>
-                <option value="openai">OpenAI</option>
-                <option value="openrouter">OpenRouter</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="ollama">Ollama (Local / Private)</option>
-                <option value="huggingface">Hugging Face (Inference API)</option>
-                <option value="local_openai">Local (LM Studio / OpenAI Compatible)</option>
-                {(config.customProviders ?? []).map(cp => (
-                  <option key={`custom:${cp.id}`} value={`custom:${cp.id}`}>
-                    {cp.displayName || cp.id} (Custom)
-                  </option>
+              <div className="pill-segmented" role="radiogroup" aria-label="Active Provider">
+                {[
+                  { id: 'gemini', label: aiProviderLabel('gemini'), title: 'Google Gemini (Cloud)' },
+                  { id: 'anthropic', label: aiProviderLabel('anthropic'), title: 'Anthropic Claude' },
+                  { id: 'openai', label: aiProviderLabel('openai'), title: 'OpenAI' },
+                  { id: 'openrouter', label: aiProviderLabel('openrouter'), title: 'OpenRouter' },
+                  { id: 'deepseek', label: aiProviderLabel('deepseek'), title: 'DeepSeek' },
+                  { id: 'ollama', label: aiProviderLabel('ollama'), title: 'Ollama (Local / Private)' },
+                  { id: 'huggingface', label: aiProviderLabel('huggingface'), title: 'Hugging Face (Inference API)' },
+                  { id: 'local_openai', label: aiProviderLabel('local_openai'), title: 'Local (LM Studio / OpenAI Compatible)' },
+                  ...(config.customProviders ?? []).map(cp => ({
+                    id: `custom:${cp.id}`,
+                    label: cp.displayName || cp.id,
+                    title: `${cp.displayName || cp.id} (Custom)`,
+                  })),
+                ].map(o => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={config.aiProvider === o.id}
+                    title={o.title}
+                    className={`pill-segmented-btn ${config.aiProvider === o.id ? 'active' : ''}`}
+                    onClick={() => updateField('aiProvider', o.id)}
+                  >
+                    {o.label}
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
             {config.aiProvider.startsWith('custom:') && (() => {
               const activeId = config.aiProvider.replace(/^custom:/, '')
@@ -626,7 +670,8 @@ export default function GeneralTab({
               </div>
             </div>
           </div>
-        </>
+        </>,
+        <span className="section-current-badge">{activeProviderLabel}</span>
       )}
 
       {/* ── Section 2: Web Search ── */}
@@ -735,9 +780,9 @@ export default function GeneralTab({
               <p className="hint" style={{ margin: 0 }}>Self-hosted, no API key needed. The instance must have JSON output enabled (search.formats in settings.yml).</p>
             </div>
           </div>
-        </div>
+        </div>,
+        <span className="section-current-badge">{activeSearchLabel}</span>
       )}
-
 
 
       {/* ── Section 4: Image Generation ── */}
@@ -915,7 +960,8 @@ export default function GeneralTab({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        <span className="section-current-badge">{activeImageLabel}</span>
       )}
 
       {/* ── Section 5: Video Generation ── */}
@@ -962,7 +1008,8 @@ export default function GeneralTab({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        <span className="section-current-badge">{activeVideoLabel}</span>
       )}
 
       {/* ── Section 6: Custom Providers ── */}
@@ -1163,7 +1210,8 @@ export default function GeneralTab({
               + Add custom provider
             </button>
           </div>
-        </>
+        </>,
+        <span className="section-current-badge">{customProviderCount > 0 ? `${customProviderCount} added` : 'None'}</span>
       )}
 
       {/* ── Section 7: Desktop Updates ── */}
@@ -1202,7 +1250,8 @@ export default function GeneralTab({
             {updateAvailable && <button type="button" className="btn-primary" onClick={handleInstallUpdate}>Install signed update</button>}
           </div>
           {updateMessage && <p className="hint">{updateMessage}</p>}
-        </>
+        </>,
+        <span className="section-current-badge">{config.enableAutoUpdate ? 'On' : 'Off'}</span>
       )}
 
       {/* ── Section 8: Assistant Presence ── */}
@@ -1217,14 +1266,15 @@ export default function GeneralTab({
             <p className="hint">Show the mini AI character on your desktop.</p>
           </div>
           <label className="settings-toggle-switch">
-            <input 
-              type="checkbox" 
-              checked={config.showDesktopWidget} 
-              onChange={(e) => updateField('showDesktopWidget', e.target.checked)} 
+            <input
+              type="checkbox"
+              checked={config.showDesktopWidget}
+              onChange={(e) => updateField('showDesktopWidget', e.target.checked)}
             />
             <span className="settings-toggle-slider"></span>
           </label>
-        </div>
+        </div>,
+        <span className="section-current-badge">{config.showDesktopWidget ? 'On' : 'Off'}</span>
       )}
     </div>
   )

@@ -21,44 +21,60 @@ export default function AudioTab({ config, updateField }: AudioTabProps) {
           </div>
         </div>
 
-        <div className="toggle-row">
-          <div>
-            <label>Enable Voice Reply</label>
-            <p className="hint">Mint will speak responses out loud when this is enabled.</p>
-          </div>
-          <label className="settings-toggle-switch">
-            <input 
-              type="checkbox" 
-              checked={config.enableVoiceReply} 
-              onChange={(e) => updateField('enableVoiceReply', e.target.checked)} 
-            />
-            <span className="settings-toggle-slider"></span>
-          </label>
-        </div>
-
-        <div className="form-grid single">
-          <div className="setting-row">
-            <label>Voice Engine</label>
-            <select value={config.ttsProvider} onChange={(e) => updateField('ttsProvider', e.target.value)}>
-              <option value="google">Google Cloud (Natural, Auto Lang)</option>
-              <option value="native">OS Native (Supports Pitch)</option>
-            </select>
+        <div className="toggle-card">
+          <div className="toggle-row">
+            <div>
+              <label>Enable Voice Reply</label>
+              <p className="hint">Speaks responses out loud when enabled.</p>
+            </div>
+            <label className="settings-toggle-switch">
+              <input
+                type="checkbox"
+                checked={config.enableVoiceReply}
+                onChange={(e) => updateField('enableVoiceReply', e.target.checked)}
+              />
+              <span className="settings-toggle-slider"></span>
+            </label>
           </div>
         </div>
 
-        <div className="toggle-row">
-          <div>
-            <label>Enable Gemini Live (Beta)</label>
-            <p className="hint">Adds a "Live" button for real-time voice conversation with Gemini, including running Mint's tools by voice. Requires a Gemini API key.</p>
+        <div className="setting-row">
+          <label>Voice Engine</label>
+          <div className="pill-segmented" role="radiogroup" aria-label="Voice Engine">
+            {[
+              { id: 'google', label: 'Google Cloud', title: 'Google Cloud (Natural, Auto Lang)' },
+              { id: 'native', label: 'OS Native', title: 'OS Native (Supports Pitch)' },
+            ].map(o => (
+              <button
+                key={o.id}
+                type="button"
+                role="radio"
+                aria-checked={config.ttsProvider === o.id}
+                title={o.title}
+                className={`pill-segmented-btn ${config.ttsProvider === o.id ? 'active' : ''}`}
+                onClick={() => updateField('ttsProvider', o.id)}
+              >
+                {o.label}
+              </button>
+            ))}
           </div>
-          <label className="settings-toggle-switch">
-            <input
-              type="checkbox"
-              checked={config.voiceMode === 'geminiLive'}
-              onChange={(e) => updateField('voiceMode', e.target.checked ? 'geminiLive' : 'legacy')}
-            />
-            <span className="settings-toggle-slider"></span>
-          </label>
+        </div>
+
+        <div className="toggle-card">
+          <div className="toggle-row">
+            <div>
+              <label>Enable Gemini Live (Beta)</label>
+              <p className="hint">Adds real-time voice conversation with Gemini, including running Mint's tools by voice. Requires a Gemini API key.</p>
+            </div>
+            <label className="settings-toggle-switch">
+              <input
+                type="checkbox"
+                checked={config.voiceMode === 'geminiLive'}
+                onChange={(e) => updateField('voiceMode', e.target.checked ? 'geminiLive' : 'legacy')}
+              />
+              <span className="settings-toggle-slider"></span>
+            </label>
+          </div>
         </div>
 
         {config.voiceMode === 'geminiLive' && (

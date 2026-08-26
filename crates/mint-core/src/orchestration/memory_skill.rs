@@ -2,6 +2,14 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 
+/// Hard ceiling on the stored `preferences` profile value. This text is
+/// injected into the system prompt on every single turn (see
+/// `append_memory_context`), so letting it grow without bound quietly
+/// inflates the token cost and latency of every future conversation.
+/// Enforced as a backstop even though the extraction prompt below also
+/// asks the model to keep itself under this budget.
+const MAX_PREFERENCES_CHARS: usize = 2500;
+
 /// Appends saved cross-session memory — the user's profile/preferences (Settings
 /// → Memory) and this chat's recent interaction history — onto `system_prompt`.
 /// Shared by the typed-chat agent loop and the Gemini Live bridge so a Live
@@ -325,23 +333,32 @@ pub async fn auto_extract_and_update_memory(
         .unwrap_or_default();
 
     // System instruction for memory extraction
-    let system_instruction = r#"You are a background agent responsible for updating a user's profile memory.
+    let system_instruction = format!(
+        r#"You are a background agent responsible for maintaining a user's profile memory.
 Analyze the latest conversation turn below.
 Determine if the user shared their name, nickname, or any preferences, hobbies, or instructions on how they want the assistant to behave (e.g. language, formatting preference, details).
 Update the existing Profile Name and Profile Preferences accordingly.
-Keep existing preferences, add new ones, and resolve conflicts. Do not add metadata (like "preferred name") unless it is a generic preference. Keep formatting simple (e.g. list style or bullet points).
+
+The preferences list must stay a tight, deduplicated summary, not an ever-growing log:
+- Do not just append the new fact to the end. Rewrite/reorganize the whole list each time.
+- Merge similar or related points into a single bullet instead of listing near-duplicates separately.
+- Drop preferences that are outdated, contradicted, or superseded by a newer statement in this turn.
+- Keep the total under about {MAX_PREFERENCES_CHARS} characters. If you're close to the limit, tighten the phrasing of older or less important groups rather than dropping the newest information.
+
+Do not add metadata (like "preferred name") unless it is a generic preference. Keep formatting simple (e.g. list style or bullet points).
 You must return the updated profile strictly as a valid JSON object with keys:
 - "name": (string) updated name or same if not changed.
-- "preferences": (string) updated preferences list or same if not changed.
+- "preferences": (string) updated, consolidated preferences list or same if not changed.
 
 Format the response strictly as valid JSON, with no other text, markers, or markdown.
 Do NOT wrap the JSON in ```json ... ``` code blocks. Just output the raw JSON object.
 
 Example response:
-{
+{{
   "name": "Pheem",
   "preferences": "Always explain code step-by-step. Prefers TypeScript. Default language is Thai."
-}"#.to_string();
+}}"#
+    );
 
     let message = format!(
         "Current Name: {}\nCurrent Preferences:\n{}\n\nLatest Turn:\nUser: {}\nAssistant: {}",
@@ -395,7 +412,12 @@ Example response:
         if let Some(new_pref) = obj.get("preferences").and_then(|v| v.as_str()) {
             let trimmed_pref = new_pref.trim();
             if !trimmed_pref.is_empty() && trimmed_pref != current_pref {
-                memory.set_profile("preferences", trimmed_pref)?;
+                let capped_pref = if trimmed_pref.chars().count() > MAX_PREFERENCES_CHARS {
+                    truncate_for_context(trimmed_pref, MAX_PREFERENCES_CHARS)
+                } else {
+                    trimmed_pref.to_string()
+                };
+                memory.set_profile("preferences", &capped_pref)?;
             }
         }
     }

@@ -51,9 +51,10 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ---
 
-### 5. <img src="assets/memory.svg" width="18" height="18" valign="middle" /> Memory, Knowledge & Self-Written Skills
+### 5. <img src="assets/memory.svg" width="18" height="18" valign="middle" /> Memory, Knowledge & Skills
 - Persistent conversation memory (SQLite), a searchable local knowledge base, and semantic code search.
 - After solving a hard, reusable problem, the agent can write its own skill (`.agents/skills/`) — and genuinely refine an existing one instead of duplicating it, the next time a similar task recurs.
+- Install ready-made skills too, from a local file/folder or straight from a GitHub repo/URL — `mint skills add <source>` (or `/skill add <source>` in chat). See [Skills](#skills-mint-skills) below.
 
 ---
 
@@ -335,6 +336,8 @@ mint chat "<message>"
 | `mint plugin list` | List local plugins |
 | `mint mcp list` | List configured MCP servers |
 | `mint learn <path>` | Import a persistent learned skill file |
+| `mint skills add <path\|github-repo\|url>` | Install a skill — local path, or a GitHub repo/URL via `npx skills` |
+| `mint skills list` | List all skills Mint can see (global, workspace, taught) |
 | `mint update --check` | Check for an available update |
 
 ### Code Agent
@@ -370,6 +373,32 @@ mint open README.md
 mint open-app code
 mint learn ./skill.md
 ```
+
+### Skills (`mint skills`)
+
+Reusable instruction sets the agent loads into context. Besides the ones Mint writes for itself after a hard task, you can install skills from a local file/folder, or straight from a GitHub repo/URL — resolved via the community [`npx skills`](https://github.com/vercel-labs/skills) CLI, so any skill written for Claude Code, Cursor, or the many other agents it supports works with Mint too, no conversion needed:
+
+```bash
+# Local file or folder — goes to Mint's global config (~/.config/mint/mint-skills)
+mint skills add ./my-skill.md
+mint skills add ~/Documents/my-skill-folder
+
+# GitHub repo shorthand, or a full GitHub/GitLab/git URL — lands in
+# ./.agents/skills/ of the current project, picked up automatically
+mint skills add vercel-labs/agent-skills
+mint skills add https://github.com/owner/repo
+
+# Multi-skill repo? Extra flags forward straight to `npx skills` —
+# install just the one you want instead of the whole repo
+mint skills add vercel-labs/skills --skill find-skills
+
+# See every skill Mint can currently see (global / workspace / self-written)
+mint skills list
+```
+
+The same two operations work in interactive chat: `/skill add <source>` and `/skill` (or `/skill list`). Browse [skills.sh](https://skills.sh) — an open directory for this same ecosystem — for ready-made skills; every listing's `owner/repo` installs with the command above as-is.
+
+The GitHub/URL path needs Node.js (`npx`) on your machine; local file/folder installs don't need anything extra.
 
 ### Ecosystem Plugins (`mint plugins`)
 
@@ -410,6 +439,8 @@ mint mcp call filesystem list_directory \
 | `/image <path> [prompt]` | Send an image with an optional prompt |
 | `/paste [prompt]` | Use an image from the clipboard |
 | `/learn <path>` | Import a local skill |
+| `/skill [list]` | List all skills Mint can see (global, workspace, taught) |
+| `/skill add <path\|github-repo\|url>` | Install a skill — local path, or a GitHub repo/URL via `npx skills` |
 | `/plugins [name]` | List or interact with available plugins/skills |
 | `/memory list` | List stored memories |
 | `/memory clear` | Clear stored memories |

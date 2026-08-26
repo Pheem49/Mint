@@ -1,4 +1,4 @@
-import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react'
+import { type ChangeEvent, type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react'
 import { mergeActivitySnapshots, trimAgentProgress } from '../agentProgress'
 import {
   clearChatHistory,
@@ -66,6 +66,12 @@ import { DEFAULT_CONFIG } from '../constants/config'
 
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
 const ACTIVE_CONVERSATION_ID_KEY = 'mint:active-conversation-id'
+
+const SIDEBAR_DEFAULT_WIDTH = 264
+const SIDEBAR_MIN_WIDTH = 200
+const SIDEBAR_MAX_WIDTH = 420
+/** Drag the sidebar edge past this width and it snaps fully closed on release. */
+const SIDEBAR_COLLAPSE_THRESHOLD = 170
 
 function createConversationId() {
   const random = Math.random().toString(36).slice(2, 10)
@@ -294,6 +300,10 @@ export default function MintDashboard() {
   const [sessionAutoApproved, setSessionAutoApproved] = useState(false)
   const sessionAutoApprovedRef = useRef(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = Number(window.localStorage.getItem('mint:sidebar-width'))
+    return saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH ? saved : SIDEBAR_DEFAULT_WIDTH
+  })
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
   const [planMode, setPlanMode] = useState(() => window.localStorage.getItem('mint:plan-mode') === 'true')
@@ -633,6 +643,24 @@ export default function MintDashboard() {
     window.localStorage.setItem('mint:sidebar-collapsed', String(next))
     setSidebarCollapsed(next)
     setMobileSidebarOpen(false)
+  }
+
+  const handleSidebarResize = (width: number) => {
+    setSidebarWidth(Math.max(SIDEBAR_COLLAPSE_THRESHOLD, Math.min(SIDEBAR_MAX_WIDTH, width)))
+  }
+
+  const handleSidebarResizeEnd = (width: number) => {
+    if (width < SIDEBAR_COLLAPSE_THRESHOLD) {
+      // Dragged small enough — snap fully closed instead of leaving a sliver.
+      setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)
+      window.localStorage.setItem('mint:sidebar-width', String(SIDEBAR_DEFAULT_WIDTH))
+      window.localStorage.setItem('mint:sidebar-collapsed', 'true')
+      setSidebarCollapsed(true)
+      return
+    }
+    const clamped = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, width))
+    setSidebarWidth(clamped)
+    window.localStorage.setItem('mint:sidebar-width', String(clamped))
   }
 
   const updateSmartContext = (enabled: boolean) => {
@@ -1330,7 +1358,10 @@ export default function MintDashboard() {
 
   return (
     <div className={`app-container ${startupReady ? '' : 'is-loading'}`}>
-      <div className={`app-body ${(sidebarCollapsed && window.innerWidth > 760) ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''}`}>
+      <div
+        className={`app-body ${(sidebarCollapsed && window.innerWidth > 760) ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''}`}
+        style={{ '--sidebar-expanded-width': `${sidebarWidth}px` } as CSSProperties}
+      >
         {mobileSidebarOpen && (
           <div
             className="sidebar-backdrop"
@@ -1359,6 +1390,8 @@ export default function MintDashboard() {
           interactionEnabled={interactionEnabled}
           showInteractionGuide={showInteractionGuide}
           onToggleSidebar={toggleSidebar}
+          onSidebarResize={handleSidebarResize}
+          onSidebarResizeEnd={handleSidebarResizeEnd}
           onClearHistory={clearHistory}
           chatSessions={chatSessions}
           activeConversationId={conversationId}

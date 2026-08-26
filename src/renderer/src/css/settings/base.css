@@ -435,6 +435,10 @@ select {
     background-color: var(--input-bg) !important;
     color: var(--text-main) !important;
     color-scheme: dark;
+    width: auto;
+    min-width: 200px;
+    max-width: 100%;
+    justify-self: end;
 }
 
 select:focus {
