@@ -836,6 +836,8 @@ mod tests {
             agent_name: None,
             model_name: None,
             context_pct: None,
+            tokens_used: 0,
+            estimated_tokens: 0,
         });
         // Thinking carries no subagent identity of its own — it should still
         // be attributed to whichever session pushed last, not silently reset

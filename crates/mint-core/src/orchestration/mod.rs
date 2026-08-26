@@ -30,7 +30,7 @@ use crate::{
     stream_chat,
 };
 
-const CONTEXT_LIMIT: usize = 6;
+const CONTEXT_LIMIT: usize = 3;
 /// Per-message cap (in `chars`, not bytes — Thai text is multi-byte UTF-8)
 /// applied to each recalled `user_text`/`ai_text` when building the "recent
 /// conversation context" injected into a new task's opening system prompt.
@@ -39,7 +39,7 @@ const CONTEXT_LIMIT: usize = 6;
 /// unrelated turn for as long as it stays within the last `CONTEXT_LIMIT`
 /// interactions — this exists purely to nudge the model with recent
 /// continuity, not to re-litigate a whole previous answer.
-const MAX_CONTEXT_MESSAGE_CHARS: usize = 400;
+const MAX_CONTEXT_MESSAGE_CHARS: usize = 200;
 
 #[derive(Debug, Error)]
 pub enum OrchestrationError {
@@ -446,6 +446,20 @@ pub enum AgentProgress {
         /// the first step of a task has completed at least once.
         #[serde(skip_serializing_if = "Option::is_none")]
         context_pct: Option<u8>,
+        /// Running sum of `total_tokens` across every step completed so far
+        /// this turn — same accumulator as `AgentResult::total_tokens`, just
+        /// surfaced live instead of only once the turn finishes, so the CLI
+        /// can count it up next to the "Thinking…" label the way Claude Code
+        /// does. 0 until the first step has completed.
+        #[serde(default)]
+        tokens_used: u64,
+        /// Rough char-count-based estimate of the very first request's size
+        /// — constant across every step of the turn. Only meaningful to a
+        /// consumer while `tokens_used` is still 0 (i.e. step 1's response
+        /// hasn't come back yet), as a stand-in until the real number
+        /// exists; ignored once `tokens_used` is nonzero.
+        #[serde(default)]
+        estimated_tokens: u64,
     },
     Thought {
         thought: String,
@@ -487,6 +501,9 @@ pub struct AgentResult {
     pub summary: String,
     pub verification: String,
     pub fallback: Option<String>,
+    /// Sum of `total_tokens` across every step's API response this turn —
+    /// see the doc comment on `turn_total_tokens` where it's accumulated.
+    pub total_tokens: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -897,6 +914,16 @@ where
         let hooks = crate::hooks::list_hooks(config);
 
         append_memory_context(&mut system_prompt, chat_id);
+        // Rough token estimate for the very first request going out — lets
+        // the CLI seed its live counter before step 1's real response comes
+        // back and there's nothing else to go on yet (~4 chars/token, a
+        // widely-used approximation; ignores the tool catalog's own size —
+        // built per-step further down, not worth duplicating here just for
+        // this — so it undercounts a bit for native tool-calling, but only
+        // needs to be in the right ballpark for a still-updating live label,
+        // not exact).
+        let estimated_first_step_tokens =
+            ((system_prompt.chars().count() + observation.chars().count()) / 4) as u64;
 
         #[allow(unused_assignments)]
         let mut final_provider = config.ai_provider.clone();
@@ -937,6 +964,12 @@ where
         // progress event can show a live number instead of only learning
         // about it retroactively once `COMPACTION_TRIGGER_RATIO` is crossed.
         let mut last_context_pct: Option<u8> = None;
+        // Sum of `total_tokens` reported by every step's API response this
+        // turn — each step resends the full accumulated history (see the
+        // module-level "resend everything" note), so this is the actual
+        // billed token volume for the whole turn, not just the final step's
+        // context size (`last_context_pct` above tracks that separately).
+        let mut turn_total_tokens: u64 = 0;
 
         'steps: for step in 1..=MAX_STEPS {
             let (active_config, agent_instruction, active_agent_name, active_model_name) =
@@ -947,6 +980,8 @@ where
                 agent_name: active_agent_name,
                 model_name: active_model_name.clone(),
                 context_pct: last_context_pct,
+                tokens_used: turn_total_tokens,
+                estimated_tokens: estimated_first_step_tokens,
             });
 
             let mut active_system_prompt = system_prompt.clone();
@@ -1070,6 +1105,7 @@ where
 
             final_provider = response.provider.clone();
             final_model = response.model.clone();
+            turn_total_tokens += response.total_tokens.unwrap_or(0) as u64;
             if fallback.is_some() {
                 // `fallback` (this function's own return value) is the provider
                 // that actually served this response; `response.fallback_provider`
@@ -1459,6 +1495,7 @@ where
                             summary,
                             verification,
                             fallback: final_fallback,
+                            total_tokens: turn_total_tokens,
                         });
                     }
 

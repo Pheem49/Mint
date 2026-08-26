@@ -189,6 +189,29 @@ fn context_pct_suffix(context_pct: Option<u8>) -> String {
         .unwrap_or_default()
 }
 
+/// Live-status token-count suffix, honest about whether it's real progress
+/// or a pre-first-response guess: `" • ↓ 4.0k tokens"` once step 1 has
+/// actually reported a count (counting up during the turn the way Claude
+/// Code's own status line does — see `projected_tokens_used`), or
+/// `" • ~2.1k tokens"` before that, using the request-size estimate so a
+/// single-step turn still shows *some* number while waiting instead of
+/// nothing until it's done. Empty when neither is available. Shared by the
+/// per-step `AgentProgress::Thinking` handler and the 150ms ticker, same
+/// reasoning as `context_pct_suffix` above.
+fn live_tokens_suffix(status: &LiveStatus) -> String {
+    if status.tokens_used == 0 {
+        return if status.estimated_tokens == 0 {
+            String::new()
+        } else {
+            format!(
+                " • ~{}",
+                format_token_count(projected_estimated_tokens(status))
+            )
+        };
+    }
+    format!(" • ↓ {}", format_token_count(projected_tokens_used(status)))
+}
+
 /// Live-status label shown while every configured provider is unreachable —
 /// built once here so both the per-attempt `AgentProgress::WaitingForNetwork`
 /// handler and the 150ms ticker (which must keep re-rendering it between
@@ -517,8 +540,9 @@ pub async fn run_code_agent_with_options(
                                 waiting_for_network_label(attempt, max_attempts)
                             } else {
                                 let context_suffix = context_pct_suffix(status.context_pct);
+                                let tokens_suffix = live_tokens_suffix(&status);
                                 format!(
-                                    "{thinking_verb} ({}{context_suffix} • Esc to interrupt)",
+                                    "{thinking_verb} ({}{tokens_suffix}{context_suffix} • Esc to interrupt)",
                                     format_elapsed(timer_started_at.elapsed())
                                 )
                             },
@@ -551,17 +575,35 @@ pub async fn run_code_agent_with_options(
                 agent_name,
                 model_name,
                 context_pct,
+                tokens_used,
+                estimated_tokens,
             } => {
                 if !options.fast_mode
                     && !progress_approval_active.load(Ordering::Relaxed)
                     && let Ok(mut status) = progress_live_status.lock()
                 {
                     status.context_pct = context_pct;
+                    status.tokens_used = tokens_used;
+                    status.estimated_tokens = estimated_tokens;
+                    // Re-derive the animation rate from this real data point
+                    // every time one arrives (cumulative tokens / elapsed
+                    // turn time so far) — see `projected_tokens_used`'s docs
+                    // for why the ticker extrapolates from here instead of
+                    // just displaying `tokens_used` and freezing between
+                    // steps.
+                    let turn_elapsed = started_at.elapsed().as_secs_f64();
+                    status.tokens_rate = if turn_elapsed > 0.0 {
+                        tokens_used as f64 / turn_elapsed
+                    } else {
+                        0.0
+                    };
+                    status.tokens_used_at = Some(Instant::now());
                     status.waiting_for_network = None;
                     let context_suffix = context_pct_suffix(context_pct);
+                    let tokens_suffix = live_tokens_suffix(&status);
                     let label = if let (Some(a), Some(m)) = (agent_name, model_name) {
                         format!(
-                            "{} ({}) is {} ({}{context_suffix} • Esc to interrupt)",
+                            "{} ({}) is {} ({}{tokens_suffix}{context_suffix} • Esc to interrupt)",
                             a,
                             m,
                             thinking_verb.to_lowercase(),
@@ -569,7 +611,7 @@ pub async fn run_code_agent_with_options(
                         )
                     } else {
                         format!(
-                            "{thinking_verb} ({}{context_suffix} • Esc to interrupt)",
+                            "{thinking_verb} ({}{tokens_suffix}{context_suffix} • Esc to interrupt)",
                             format_elapsed(Duration::from_secs(elapsed_secs))
                         )
                     };
@@ -792,6 +834,7 @@ pub async fn run_code_agent_with_options(
         // that window instead of only the (much narrower) one the
         // `accepting_input` flag below covers.
         chunk_agent_done.store(true, Ordering::Relaxed);
+        let mut committed_activity = false;
         if !options.fast_mode
             && let Ok(mut status) = chunk_live_status.lock()
         {
@@ -804,7 +847,7 @@ pub async fn run_code_agent_with_options(
             // `InlineTui::ensure`) at whatever the cursor's current position
             // happens to be, underneath the answer that just printed.
             status.accepting_input = false;
-            commit_activity_snapshot(&mut status);
+            committed_activity = commit_activity_snapshot(&mut status);
             clear_live_status(&mut status);
         }
         // Same reasoning as `approve_cb`: drop raw mode synchronously,
@@ -813,7 +856,15 @@ pub async fn run_code_agent_with_options(
         // below need cooked mode's `\n` → `\r\n` translation immediately.
         let _ = crossterm::terminal::disable_raw_mode();
         let formatted_summary = format_markdown_bold(&sanitize_latex(&summary));
-        print!("\n  {MINT}Mint:{RESET} ");
+        // `commit_activity_snapshot` above already ended on a blank line when
+        // it committed anything (e.g. a tool-use activity block) — printing
+        // this leading "\n" unconditionally on top of that stacked two blank
+        // lines before every answer that followed tool use.
+        if committed_activity {
+            print!("  {MINT}Mint:{RESET} ");
+        } else {
+            print!("\n  {MINT}Mint:{RESET} ");
+        }
         avatar_bridge.on_talking(true);
         render_live_summary(&formatted_summary);
         avatar_bridge.on_talking(false);
@@ -942,8 +993,13 @@ pub async fn run_code_agent_with_options(
     // jobs, matching the box below it.
     let (tw, _) = markdown::terminal_size_or_default();
     let width = tw as usize;
+    let tokens_suffix = if res.total_tokens > 0 {
+        format!(" • ↓ {}", format_token_count(res.total_tokens))
+    } else {
+        String::new()
+    };
     let label = format!(
-        "─ Worked for {} • {badge_plain}",
+        "─ Worked for {}{tokens_suffix} • {badge_plain}",
         format_elapsed(started_at.elapsed())
     );
     let fill_len = width

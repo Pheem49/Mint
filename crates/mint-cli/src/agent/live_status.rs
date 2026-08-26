@@ -97,6 +97,72 @@ pub(super) fn format_elapsed(duration: Duration) -> String {
     }
 }
 
+/// Formats a token count the way Claude Code's own turn footer does —
+/// "4.0k tokens" / "1.2m tokens" above 1000, the bare number below.
+pub(super) fn format_token_count(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}m tokens", tokens as f64 / 1_000_000.0)
+    } else if tokens >= 1_000 {
+        format!("{:.1}k tokens", tokens as f64 / 1_000.0)
+    } else {
+        format!("{tokens} tokens")
+    }
+}
+
+/// How long the 150ms ticker keeps extrapolating `tokens_used` forward via
+/// `tokens_rate` before holding steady — long enough to animate a normal
+/// step, short enough that one unusually slow step doesn't show a token
+/// count climbing indefinitely with no real data behind it.
+const TOKENS_PROJECTION_CAP_SECS: f64 = 20.0;
+
+/// The token count to actually display right now: `tokens_used` (the last
+/// *real* value a step reported) plus an estimate of how much it's grown
+/// since then, at `tokens_rate` tokens/sec — purely cosmetic, so the live
+/// counter visibly climbs between steps (like Claude Code's) instead of
+/// sitting frozen at the same number for a step's whole duration. Falls
+/// back to the bare real value once there's no rate yet (the very first
+/// step) or after `TOKENS_PROJECTION_CAP_SECS` of no new real data.
+pub(super) fn projected_tokens_used(status: &LiveStatus) -> u64 {
+    let (Some(since), true) = (status.tokens_used_at, status.tokens_rate > 0.0) else {
+        return status.tokens_used;
+    };
+    project_tokens(status.tokens_used, status.tokens_rate, since.elapsed().as_secs_f64())
+}
+
+/// The actual math behind `projected_tokens_used`, split out so it's
+/// testable without needing a real elapsed `Instant`.
+fn project_tokens(base: u64, rate: f64, elapsed_secs: f64) -> u64 {
+    base + (rate * elapsed_secs.min(TOKENS_PROJECTION_CAP_SECS)) as u64
+}
+
+/// How long `estimated_tokens` (step 1's pre-response size guess) takes to
+/// visibly ramp up to its full value once shown, instead of appearing
+/// already at the final number — a flat instant jump read as "not counting
+/// at all" even though the *real* counter (once step 1 finishes) does climb.
+const ESTIMATE_RAMP_SECS: f64 = 1.2;
+
+/// `estimated_tokens` ramped from 0 up to its full value over
+/// `ESTIMATE_RAMP_SECS`, then held there — cosmetic in the same way
+/// `projected_tokens_used`'s extrapolation is; the real count immediately
+/// takes over the moment step 1 actually reports one (`tokens_used` goes
+/// nonzero, at which point callers stop calling this and use
+/// `projected_tokens_used` instead). Reuses `tokens_used_at` as this ramp's
+/// start time — it's set to "now" on every `Thinking` event including step
+/// 1's, which is exactly when the estimate first has a value to show.
+pub(super) fn projected_estimated_tokens(status: &LiveStatus) -> u64 {
+    let Some(since) = status.tokens_used_at else {
+        return status.estimated_tokens;
+    };
+    ramp_estimate(status.estimated_tokens, since.elapsed().as_secs_f64())
+}
+
+/// The actual math behind `projected_estimated_tokens`, split out so it's
+/// testable without needing a real elapsed `Instant`.
+fn ramp_estimate(estimated: u64, elapsed_secs: f64) -> u64 {
+    let elapsed = elapsed_secs.min(ESTIMATE_RAMP_SECS);
+    ((estimated as f64) * (elapsed / ESTIMATE_RAMP_SECS)) as u64
+}
+
 pub(super) fn render_live_summary(summary: &str) {
     let (tw, _) = markdown::terminal_size_or_default();
     let width = tw as usize;
@@ -188,6 +254,28 @@ pub(super) struct LiveStatus {
     /// frequent) `AgentProgress::Thinking` events, instead of silently
     /// dropping it on every tick.
     pub(super) context_pct: Option<u8>,
+    /// Last *real* token count reported by a completed step — same
+    /// mirroring reasoning as `context_pct`. The 150ms ticker doesn't
+    /// display this raw value directly; it projects forward from it using
+    /// `tokens_rate`/`tokens_used_at` below so the counter visibly climbs
+    /// between steps instead of sitting frozen (see those fields' docs).
+    pub(super) tokens_used: u64,
+    /// Rough char-count-based estimate of the very first request's size,
+    /// from `AgentProgress::Thinking::estimated_tokens` — the ticker shows
+    /// this (marked with a leading `~`, see `live_tokens_suffix`) while
+    /// `tokens_used` is still 0, so a single-step turn still shows *some*
+    /// number while waiting instead of nothing at all until it finishes.
+    pub(super) estimated_tokens: u64,
+    /// Estimated tokens/sec throughput so far this turn (cumulative
+    /// `tokens_used` divided by elapsed time) — purely cosmetic, to animate
+    /// the counter between real updates. `tokens_used` itself is always the
+    /// source of truth once a step actually reports a number.
+    pub(super) tokens_rate: f64,
+    /// When `tokens_used` was last set to a real value — the ticker
+    /// extrapolates `tokens_used + tokens_rate * elapsed_since` from this
+    /// instant, capped at `TOKENS_PROJECTION_CAP_SECS` so a single very
+    /// long-running step doesn't make the estimate run away unboundedly.
+    pub(super) tokens_used_at: Option<Instant>,
     /// `Some((attempt, max_attempts))` while retrying after every provider
     /// came back unreachable — same reasoning as `context_pct`: the 150ms
     /// ticker rebuilds `thinking` far more often than `AgentProgress` events
@@ -631,6 +719,14 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
     // that — same information, anchored to the thing it describes instead
     // of to whatever happened to print last.
     let thinking_display = status.thinking.as_ref().map(|thinking| {
+        // Moon phases, forced to *text* presentation via `\u{FE0E}` so they
+        // stay single-column-width instead of the wide (2-column) emoji
+        // glyph — deliberate, even though it means some terminal fonts only
+        // ship one fallback glyph for all 8 text-style variants and the
+        // spin won't visibly animate there. Width consistency was chosen
+        // over guaranteed animation; swap to a plain-text spinner (e.g.
+        // Braille patterns) instead of dropping this selector if that
+        // trade-off ever needs to flip back.
         let frames = &[
             "🌑\u{FE0E}",
             "🌒\u{FE0E}",
@@ -788,7 +884,11 @@ pub(super) fn render_live_status(status: &mut LiveStatus) {
     });
 }
 
-pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) {
+/// Freezes any in-flight activity into scrollback. Returns whether it
+/// actually committed anything — callers that print their own leading blank
+/// line right after (e.g. the final answer) use this to skip it when this
+/// already ended on one, instead of stacking two.
+pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
     let explored_start = status.committed_explored.min(status.explored.len());
     let activities_start = status.committed_activities.min(status.activities.len());
     let tasks_start = status.committed_tasks.min(status.tasks.len());
@@ -801,7 +901,7 @@ pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) {
         0,
     );
     if lines.is_empty() {
-        return;
+        return false;
     }
 
     let (tw, _) = markdown::terminal_size_or_default();
@@ -814,6 +914,7 @@ pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) {
     status.committed_explored = status.explored.len();
     status.committed_activities = status.activities.len();
     status.committed_tasks = status.tasks.len();
+    true
 }
 
 pub(super) fn print_timeline_note(status: &mut LiveStatus, thought: &str) {
@@ -1299,4 +1400,72 @@ pub(super) fn grouped_explored_actions(actions: &[ExploredAction]) -> Vec<String
         .into_iter()
         .map(|(kind, targets)| format!("{} {}", kind, targets.join(", ")))
         .collect()
+}
+
+#[cfg(test)]
+mod format_token_count_tests {
+    use super::*;
+
+    #[test]
+    fn under_a_thousand_shows_the_bare_number() {
+        assert_eq!(format_token_count(732), "732 tokens");
+    }
+
+    #[test]
+    fn thousands_round_to_one_decimal_place() {
+        assert_eq!(format_token_count(4_000), "4.0k tokens");
+        assert_eq!(format_token_count(4_567), "4.6k tokens");
+    }
+
+    #[test]
+    fn millions_round_to_one_decimal_place() {
+        assert_eq!(format_token_count(1_234_567), "1.2m tokens");
+    }
+}
+
+#[cfg(test)]
+mod project_tokens_tests {
+    use super::*;
+
+    #[test]
+    fn grows_from_the_base_at_the_given_rate() {
+        // 100 tokens/sec for 2s on top of a base of 1000.
+        assert_eq!(project_tokens(1000, 100.0, 2.0), 1200);
+    }
+
+    #[test]
+    fn zero_elapsed_returns_the_base_unchanged() {
+        assert_eq!(project_tokens(1000, 100.0, 0.0), 1000);
+    }
+
+    #[test]
+    fn caps_growth_at_the_projection_ceiling() {
+        // Way past TOKENS_PROJECTION_CAP_SECS (20s) — growth stops at the
+        // cap instead of climbing forever on a stuck/slow step.
+        let capped = project_tokens(1000, 100.0, 500.0);
+        assert_eq!(capped, 1000 + (100.0 * TOKENS_PROJECTION_CAP_SECS) as u64);
+    }
+}
+
+#[cfg(test)]
+mod ramp_estimate_tests {
+    use super::*;
+
+    #[test]
+    fn starts_at_zero() {
+        assert_eq!(ramp_estimate(5000, 0.0), 0);
+    }
+
+    #[test]
+    fn climbs_linearly_partway_through_the_ramp() {
+        // Halfway through ESTIMATE_RAMP_SECS (1.2s) should be ~half the estimate.
+        assert_eq!(ramp_estimate(5000, ESTIMATE_RAMP_SECS / 2.0), 2500);
+    }
+
+    #[test]
+    fn holds_at_the_full_estimate_once_the_ramp_finishes() {
+        assert_eq!(ramp_estimate(5000, ESTIMATE_RAMP_SECS), 5000);
+        // Long after the ramp — still holds, doesn't keep climbing or wrap.
+        assert_eq!(ramp_estimate(5000, 60.0), 5000);
+    }
 }
