@@ -213,7 +213,9 @@ pub fn cancel_agent(chat_id: &str) -> bool {
 /// `oneshot::Sender` can only be consumed once, so entries are removed (not
 /// just read) on resolution, same as desktop's `submit_tool_approval`.
 pub static PENDING_APPROVALS: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<ApprovalOutcome>>>,
+    std::sync::Mutex<
+        std::collections::HashMap<String, tokio::sync::oneshot::Sender<ApprovalOutcome>>,
+    >,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 /// Resolves a pending approval by token — mirrors desktop's

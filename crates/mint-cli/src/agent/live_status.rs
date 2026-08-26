@@ -181,6 +181,20 @@ pub(super) fn should_show_verification(verification: &str) -> bool {
 #[derive(Debug, Default)]
 pub(super) struct LiveStatus {
     pub(super) thinking: Option<String>,
+    /// Context-window usage (0-100) as of the last completed step —
+    /// mirrored here (not just built into `thinking`'s label text) so the
+    /// 150ms elapsed-time ticker in `run_code_agent_with_options` can keep
+    /// including it too when it rebuilds `thinking` between the (much less
+    /// frequent) `AgentProgress::Thinking` events, instead of silently
+    /// dropping it on every tick.
+    pub(super) context_pct: Option<u8>,
+    /// `Some((attempt, max_attempts))` while retrying after every provider
+    /// came back unreachable — same reasoning as `context_pct`: the 150ms
+    /// ticker rebuilds `thinking` far more often than `AgentProgress` events
+    /// arrive, so it needs its own copy to keep rendering "retrying (N/4)"
+    /// instead of silently reverting to the generic "Thinking (Xs)…" label
+    /// on its very next tick.
+    pub(super) waiting_for_network: Option<(usize, usize)>,
     pub(super) explored: Vec<ExploredAction>,
     pub(super) activities: Vec<String>,
     pub(super) tasks: Vec<TaskEntry>,

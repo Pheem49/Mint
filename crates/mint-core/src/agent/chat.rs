@@ -6,30 +6,67 @@ use thiserror::Error;
 
 use crate::MintConfig;
 
+/// `available_providers()`'s configured-providers list, reordered so
+/// `gemini` is tried first among fallbacks (when it's configured and isn't
+/// already the primary) — the user's explicit preference, ahead of
+/// `available_providers()`'s own anthropic/openai/openrouter/deepseek/
+/// gemini/... ordering (which exists for display purposes, e.g. the
+/// `/models` picker, and is left alone). Everything else keeps its existing
+/// relative order.
+fn fallback_provider_order(config: &MintConfig) -> Vec<String> {
+    let mut providers = config.available_providers();
+    if let Some(pos) = providers.iter().position(|p| p == "gemini") {
+        let gemini = providers.remove(pos);
+        providers.insert(0, gemini);
+    }
+    providers
+}
+
 /// Send a chat request, automatically falling back to other configured providers
-/// if the primary one returns a recoverable error.
+/// if the primary one returns a recoverable error. Tries `gemini` first among
+/// the fallbacks when it's configured (see `fallback_provider_order`), then
+/// the rest in their usual order.
 /// Returns `(response, Option<fallback_provider>)`.
 pub async fn send_chat_with_fallback(
     config: &MintConfig,
     request: &ChatRequest,
 ) -> Result<(ChatResponse, Option<String>), ChatError> {
-    match send_chat(config, request).await {
+    let primary_error = match send_chat(config, request).await {
         Ok(r) => return Ok((r, None)),
         Err(e) if !is_recoverable(&e) => return Err(e),
-        Err(_) => {}
+        Err(e) => e,
+    };
+    // No point cycling through other cloud providers if the network itself is
+    // unreachable — they all sit behind the same dead link, so every attempt
+    // would just fail the same way after its own connect timeout. Surface
+    // this immediately so the caller can retry-and-wait instead.
+    if matches!(primary_error, ChatError::NetworkUnavailable) {
+        return Err(primary_error);
     }
-    for provider in config.available_providers() {
+    let fallback_reason = fallback_reason_text(&config.ai_provider, &primary_error);
+    for provider in fallback_provider_order(config) {
         if provider.as_str() == config.ai_provider.as_str() {
             continue;
         }
         let alt = config_for_provider(config, &provider);
         if let Ok(mut r) = send_chat(&alt, request).await {
             r.fallback_provider = Some(config.ai_provider.clone());
+            r.fallback_reason = fallback_reason.clone();
             return Ok((r, Some(provider)));
         }
     }
     // all fallbacks failed — retry primary to surface original error
     send_chat(config, request).await.map(|r| (r, None))
+}
+
+/// Short, human-readable explanation for why `send_chat_with_fallback` swapped
+/// away from `provider` — `None` for an ordinary transient failure, so routine
+/// hiccups don't get an extra notice while specific, actionable ones do.
+fn fallback_reason_text(provider: &str, error: &ChatError) -> Option<String> {
+    match error {
+        ChatError::InsufficientBalance(_) => Some(format!("{provider} ran out of balance")),
+        _ => None,
+    }
 }
 
 /// Stream a chat request with automatic provider fallback.
@@ -42,20 +79,26 @@ pub async fn stream_chat_with_fallback<F>(
 where
     F: FnMut(String),
 {
-    match stream_chat(config, request, &mut on_chunk).await {
+    let primary_error = match stream_chat(config, request, &mut on_chunk).await {
         Ok(r) => return Ok((r, None)),
         Err(e) if !is_recoverable(&e) => return Err(e),
         Err(e) => {
             eprintln!("Ollama stream chat failed, falling back: {:?}", e);
+            e
         }
+    };
+    if matches!(primary_error, ChatError::NetworkUnavailable) {
+        return Err(primary_error);
     }
-    for provider in config.available_providers() {
+    let fallback_reason = fallback_reason_text(&config.ai_provider, &primary_error);
+    for provider in fallback_provider_order(config) {
         if provider.as_str() == config.ai_provider.as_str() {
             continue;
         }
         let alt = config_for_provider(config, &provider);
         if let Ok(mut r) = stream_chat(&alt, request, &mut on_chunk).await {
             r.fallback_provider = Some(config.ai_provider.clone());
+            r.fallback_reason = fallback_reason.clone();
             return Ok((r, Some(provider)));
         }
     }
@@ -72,6 +115,8 @@ fn is_recoverable(e: &ChatError) -> bool {
             | ChatError::Request(_)
             | ChatError::MissingResponseText
             | ChatError::UnsupportedAttachments(_)
+            | ChatError::InsufficientBalance(_)
+            | ChatError::NetworkUnavailable
     )
 }
 
@@ -307,6 +352,13 @@ pub struct ChatResponse {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_provider: Option<String>,
+    /// Short, human-readable reason `send_chat_with_fallback` swapped providers,
+    /// when the primary's failure was specific enough to explain (insufficient
+    /// balance, no network) — `None` for an ordinary transient error, so a
+    /// ordinary hiccup doesn't get an extra notice while a genuinely actionable
+    /// one does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
     /// Tool calls the model requested via native function/tool-calling, when the
     /// request set `ChatRequest.tools` and the provider honored it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -332,18 +384,6 @@ struct ProviderReply {
     total_tokens: Option<u32>,
 }
 
-impl ProviderReply {
-    fn text_only(model: String, text: String) -> Self {
-        ProviderReply {
-            model,
-            text,
-            tool_calls: None,
-            stop_reason: None,
-            total_tokens: None,
-        }
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum ChatError {
     #[error("provider '{0}' is not implemented in the Rust backend yet")]
@@ -358,6 +398,19 @@ pub enum ChatError {
     UnsupportedAttachments(String),
     #[error("invalid multimodal data URI")]
     InvalidAttachment,
+    /// Provider returned `402 Payment Required` — distinguished from the generic
+    /// `Request` case so callers can tell "your account ran out of balance" apart
+    /// from an ordinary transient failure instead of silently swapping providers
+    /// with no explanation.
+    #[error("provider '{0}' rejected the request: insufficient balance")]
+    InsufficientBalance(String),
+    /// The request never reached any server at all (DNS failure, connection
+    /// refused, no route) — as opposed to reaching a server that returned an
+    /// error. Distinguished so a caller can retry-and-wait instead of pointlessly
+    /// cycling through other cloud providers that sit behind the same dead
+    /// network link.
+    #[error("no network connection to reach the provider")]
+    NetworkUnavailable,
 }
 
 pub async fn send_chat(
@@ -383,6 +436,7 @@ pub async fn send_chat(
         model: reply.model,
         text: reply.text,
         fallback_provider: None,
+        fallback_reason: None,
         tool_calls: reply.tool_calls,
         stop_reason: reply.stop_reason,
         total_tokens: reply.total_tokens,
@@ -418,6 +472,7 @@ where
         model,
         text,
         fallback_provider: None,
+        fallback_reason: None,
         tool_calls: None,
         stop_reason: None,
         total_tokens: None,
@@ -453,6 +508,26 @@ async fn call_gemini(
     parse_gemini_reply(model, &response)
 }
 
+/// Strips JSON Schema keywords that standard tool-parameter schemas use (built
+/// once and shared across OpenAI/Anthropic/Gemini) but that Gemini's function-
+/// calling `Schema` proto rejects outright — e.g. `additionalProperties` on an
+/// object property, as in `avatar_signal`'s `emotions` map, previously caused
+/// every native tool-calling turn to fail with `400 INVALID_ARGUMENT: Unknown
+/// name "additionalProperties"`, silently falling back to a weaker provider on
+/// every single Gemini turn.
+fn gemini_sanitize_schema(schema: &Value) -> Value {
+    match schema {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .filter(|(key, _)| key.as_str() != "additionalProperties")
+                .map(|(key, value)| (key.clone(), gemini_sanitize_schema(value)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(gemini_sanitize_schema).collect()),
+        other => other.clone(),
+    }
+}
+
 /// Builds a Gemini `generateContent` payload from structured history, using
 /// native `functionDeclarations`/`functionCall`/`functionResponse` instead of
 /// the legacy `responseSchema` JSON-prompt scheme (see `gemini_chat_payload`).
@@ -467,7 +542,7 @@ fn gemini_native_payload(request: &ChatRequest) -> Result<Value, ChatError> {
             "functionDeclarations": tools.iter().map(|tool| json!({
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.parameters,
+                "parameters": gemini_sanitize_schema(&tool.parameters),
             })).collect::<Vec<_>>()
         }]);
     }
@@ -643,16 +718,38 @@ async fn call_openai(
     } else {
         config.openai_model.clone()
     };
-    let response: Value = client
-        .post(format!("{base_url}/chat/completions"))
-        .bearer_auth(if local { "not-needed" } else { &api_key })
-        .json(&openai_chat_payload(&model, request, false)?)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let response: Value = send_openai_style_request(
+        client
+            .post(format!("{base_url}/chat/completions"))
+            .bearer_auth(if local { "not-needed" } else { &api_key })
+            .json(&openai_chat_payload(&model, request, false)?),
+        &config.ai_provider,
+    )
+    .await?;
     parse_openai_style_reply(model, &response)
+}
+
+/// Sends a built request, classifying the failure modes `.error_for_status()`
+/// would otherwise flatten into one opaque `reqwest::Error`: a connect-level
+/// failure (DNS, refused, no route — never reached the server at all) becomes
+/// `NetworkUnavailable`, and an HTTP `402 Payment Required` becomes
+/// `InsufficientBalance(provider)`. Shared by every OpenAI Chat
+/// Completions-shaped provider (`call_openai`, `call_huggingface`).
+async fn send_openai_style_request(
+    request: reqwest::RequestBuilder,
+    provider: &str,
+) -> Result<Value, ChatError> {
+    let response = request.send().await.map_err(|e| {
+        if e.is_connect() {
+            ChatError::NetworkUnavailable
+        } else {
+            ChatError::Request(e)
+        }
+    })?;
+    if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
+        return Err(ChatError::InsufficientBalance(provider.to_string()));
+    }
+    Ok(response.error_for_status()?.json().await?)
 }
 
 /// Parses an OpenAI Chat Completions-shaped response (`choices[0].message`),
@@ -1114,26 +1211,25 @@ async fn call_huggingface(
     let api_key = provider_key(&config.hf_api_key, "HF_TOKEN");
     required_key("huggingface", &api_key)?;
     let model = config.hf_model.clone();
-    let response: Value = client
-        .post("https://router.huggingface.co/v1/chat/completions")
-        .bearer_auth(api_key)
-        .json(&json!({
-            "model": model,
-            "messages": [
-                { "role": "system", "content": request.system_instruction },
-                { "role": "user", "content": request.message }
-            ]
-        }))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-    let text = response["choices"][0]["message"]["content"]
-        .as_str()
-        .ok_or(ChatError::MissingResponseText)?
-        .into();
-    Ok(ProviderReply::text_only(model, text))
+    // Hugging Face's router is an OpenAI Chat Completions-compatible
+    // endpoint, so it can (and must) take the same native `messages`/`tools`
+    // payload `call_openai` builds — this used to hand-roll a bare
+    // `{system, user: request.message}` request instead, which ignored the
+    // agent loop's full tool-call history and `tools` catalog. `message` is
+    // deliberately left empty (see the step-loop in `orchestration/mod.rs`)
+    // whenever `messages` carries the real conversation, so any mid-task
+    // fallback onto this provider was silently losing all task context —
+    // the model would see an empty user turn and reply with generic
+    // small talk, which the agent loop then treated as the final answer.
+    let response: Value = send_openai_style_request(
+        client
+            .post("https://router.huggingface.co/v1/chat/completions")
+            .bearer_auth(api_key)
+            .json(&openai_chat_payload(&model, request, false)?),
+        "huggingface",
+    )
+    .await?;
+    parse_openai_style_reply(model, &response)
 }
 
 async fn stream_gemini<F>(
@@ -1299,17 +1395,13 @@ where
     let api_key = provider_key(&config.hf_api_key, "HF_TOKEN");
     required_key("huggingface", &api_key)?;
     let model = config.hf_model.clone();
+    // Same fix as `call_huggingface`: build the real `messages`/`tools`
+    // payload instead of a bare `{system, user: request.message}` request
+    // that dropped the agent loop's tool-call history on a fallback.
     let response = client
         .post("https://router.huggingface.co/v1/chat/completions")
         .bearer_auth(api_key)
-        .json(&json!({
-            "model": model,
-            "stream": true,
-            "messages": [
-                { "role": "system", "content": request.system_instruction },
-                { "role": "user", "content": request.message }
-            ]
-        }))
+        .json(&openai_chat_payload(&model, request, true)?)
         .send()
         .await?
         .error_for_status()?;
@@ -2391,6 +2483,59 @@ mod tests {
     }
 
     #[test]
+    fn gemini_sanitize_schema_strips_additional_properties_at_any_depth() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "emotions": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" }
+                },
+                "nested": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
+                }
+            }
+        });
+        let sanitized = gemini_sanitize_schema(&schema);
+        assert!(sanitized["properties"]["emotions"].get("additionalProperties").is_none());
+        assert!(
+            sanitized["properties"]["nested"]["items"]
+                .get("additionalProperties")
+                .is_none()
+        );
+        // Everything else is preserved untouched.
+        assert_eq!(sanitized["properties"]["emotions"]["type"], "object");
+    }
+
+    #[test]
+    fn gemini_native_payload_strips_additional_properties_from_tool_schemas() {
+        let tool = ToolSpec {
+            name: "avatar_signal".into(),
+            description: "set avatar state".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "emotions": {
+                        "type": "object",
+                        "additionalProperties": { "type": "string" }
+                    }
+                }
+            }),
+        };
+        let request = native_request(vec![ChatMessage::text(ChatRole::User, "hi")], Some(vec![tool]));
+        let payload = gemini_native_payload(&request).unwrap();
+        assert!(
+            payload["tools"][0]["functionDeclarations"][0]["parameters"]["properties"]["emotions"]
+                .get("additionalProperties")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn gemini_native_payload_uses_function_declarations_and_resolves_tool_result_names() {
         let messages = vec![
             ChatMessage::text(ChatRole::User, "check weather"),
@@ -2630,5 +2775,87 @@ mod tests {
         )
         .unwrap();
         assert_eq!(reply.total_tokens, None);
+    }
+
+    #[tokio::test]
+    async fn send_openai_style_request_classifies_a_connect_failure_as_network_unavailable() {
+        let client = Client::new();
+        // Port 1 is reserved and nothing listens on it, so this fails fast
+        // with a connection error rather than timing out.
+        let result = send_openai_style_request(
+            client.post("http://127.0.0.1:1/chat/completions"),
+            "deepseek",
+        )
+        .await;
+        assert!(
+            matches!(result, Err(ChatError::NetworkUnavailable)),
+            "expected NetworkUnavailable, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_openai_style_request_classifies_402_as_insufficient_balance() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = socket.read(&mut buf).await;
+            let body = "{}";
+            let response = format!(
+                "HTTP/1.1 402 Payment Required\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        });
+
+        let client = Client::new();
+        let result = send_openai_style_request(
+            client.post(format!("http://{addr}/chat/completions")),
+            "deepseek",
+        )
+        .await;
+        assert!(
+            matches!(&result, Err(ChatError::InsufficientBalance(p)) if p == "deepseek"),
+            "expected InsufficientBalance(\"deepseek\"), got {result:?}"
+        );
+    }
+
+    #[test]
+    fn fallback_provider_order_moves_gemini_to_the_front() {
+        let config = MintConfig {
+            anthropic_api_key: "a".into(),
+            openai_api_key: "b".into(),
+            deepseek_api_key: "c".into(),
+            api_key: "d".into(), // gemini
+            hf_api_key: "e".into(),
+            ..MintConfig::default()
+        };
+        let order = fallback_provider_order(&config);
+        assert_eq!(order[0], "gemini");
+        // Everyone else keeps their existing relative order from
+        // `available_providers()` — only gemini moves.
+        let without_gemini: Vec<&String> = order.iter().skip(1).collect();
+        assert_eq!(
+            without_gemini,
+            vec!["anthropic", "openai", "deepseek", "huggingface", "ollama"]
+        );
+    }
+
+    #[test]
+    fn fallback_provider_order_is_unchanged_without_gemini_configured() {
+        let config = MintConfig {
+            deepseek_api_key: "c".into(),
+            hf_api_key: "e".into(),
+            ..MintConfig::default()
+        };
+        assert_eq!(
+            fallback_provider_order(&config),
+            config.available_providers()
+        );
     }
 }

@@ -441,6 +441,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                             model: res.model,
                                             text: res.summary,
                                             fallback_provider: res.fallback,
+                                            fallback_reason: None,
                                             tool_calls: None,
                                             stop_reason: None,
                                             total_tokens: None,

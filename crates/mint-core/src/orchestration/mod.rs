@@ -335,18 +335,33 @@ use workspace_helpers::*;
 
 /// Hard ceiling on tool-call round-trips per task. Each step resends the
 /// whole accumulated conversation, so total tokens for one task scale
-/// roughly with step count — lowered from 32 to cap runaway/looping tasks
-/// earlier without cutting off most real multi-file work.
-const MAX_STEPS: usize = 24;
+/// roughly with step count. Was lowered from 32 to 24 to cap runaway/looping
+/// tasks earlier, but 24 turned out too tight for legitimate multi-file
+/// work, cutting it off mid-task — raised to 40 as a middle ground.
+const MAX_STEPS: usize = 40;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
 /// Compact `native_messages` once reported token usage crosses this fraction
-/// of the active model's context window. Lowered from 0.8 so long tasks
-/// start shedding old tool output earlier — every step after the trigger
-/// resends less, which is where the real per-task token cost comes from.
-const COMPACTION_TRIGGER_RATIO: f64 = 0.6;
+/// of the active model's context window. Every step resends the whole
+/// accumulated history (see `MAX_STEPS`'s doc comment above), so this is the
+/// main lever on real per-task token volume — not just cost, since provider
+/// prompt caching (automatic for OpenAI-compatible providers, explicit
+/// `cache_control` breakpoints for Anthropic) only discounts *price* on a
+/// resend, it doesn't shrink what's actually sent/counted. Lowered from 0.8,
+/// then from 0.6 to compact considerably earlier still — a task observed
+/// hitting 80,949/128,000 tokens on a single step at the 0.6 ratio (63% of
+/// window) was well past the point of real benefit from keeping that much
+/// verbatim.
+const COMPACTION_TRIGGER_RATIO: f64 = 0.4;
 /// Number of most-recent Assistant/Tool step-pairs kept verbatim (uncompacted)
 /// in `native_messages`.
 const COMPACTION_KEEP_RECENT_STEPS: usize = 3;
+/// How many times a step retries after every configured provider comes back
+/// `ChatError::NetworkUnavailable` before finally giving up — swapping
+/// providers is pointless when the network itself is down, so this waits and
+/// tries the same request again instead, with `AgentProgress::WaitingForNetwork`
+/// keeping the user informed of which attempt it's on.
+const NETWORK_RETRY_ATTEMPTS: usize = 4;
+const NETWORK_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// A single pick-a-choice option offered by the `ask_user` tool, with an
 /// optional one-line explanation shown under the label in both the CLI
@@ -425,9 +440,23 @@ pub enum AgentProgress {
         agent_name: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         model_name: Option<String>,
+        /// Context-window usage as of the last completed step, 0-100 — the
+        /// last thing we actually know, since usage is only reported in a
+        /// step's *response*, not predictable mid-generation. `None` until
+        /// the first step of a task has completed at least once.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        context_pct: Option<u8>,
     },
     Thought {
         thought: String,
+    },
+    /// Emitted while retrying a step after every configured provider was
+    /// unreachable (`ChatError::NetworkUnavailable`) — distinct from
+    /// `Thinking` because there's nothing to wait *on* here except the
+    /// network itself coming back, not a model generating a reply.
+    WaitingForNetwork {
+        attempt: usize,
+        max_attempts: usize,
     },
     ToolStart {
         action: String,
@@ -746,6 +775,35 @@ fn resolve_agent_config(
     )
 }
 
+/// Calls `send_chat_with_fallback`, retrying up to `NETWORK_RETRY_ATTEMPTS`
+/// times (waiting `NETWORK_RETRY_DELAY` between each) when every configured
+/// provider comes back `ChatError::NetworkUnavailable` — swapping providers
+/// is pointless when the network itself is down, so this waits for it to
+/// come back instead of burning through the provider list, keeping the user
+/// informed via `AgentProgress::WaitingForNetwork` in the meantime. Any other
+/// error (including `NetworkUnavailable` after the last attempt) is returned
+/// immediately, unchanged.
+async fn send_chat_with_network_retry(
+    config: &MintConfig,
+    request: &ChatRequest,
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+) -> Result<(ChatResponse, Option<String>), ChatError> {
+    let mut attempt = 0;
+    loop {
+        match send_chat_with_fallback(config, request).await {
+            Err(ChatError::NetworkUnavailable) if attempt < NETWORK_RETRY_ATTEMPTS => {
+                attempt += 1;
+                progress(AgentProgress::WaitingForNetwork {
+                    attempt,
+                    max_attempts: NETWORK_RETRY_ATTEMPTS,
+                });
+                tokio::time::sleep(NETWORK_RETRY_DELAY).await;
+            }
+            other => return other,
+        }
+    }
+}
+
 /// Returns a boxed `dyn Future` trait object rather than being a plain
 /// `async fn` (whose return type would otherwise be an opaque, compiler-
 /// inferred type). This is required, not just a style choice: `execute_tool`
@@ -874,6 +932,11 @@ where
         let mut step_thought_signatures: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         let mut warned_json_prompt_fallback = false;
+        // Last known context-window usage, as a percentage — updated after
+        // every step's response (see below) so the *next* step's `Thinking`
+        // progress event can show a live number instead of only learning
+        // about it retroactively once `COMPACTION_TRIGGER_RATIO` is crossed.
+        let mut last_context_pct: Option<u8> = None;
 
         'steps: for step in 1..=MAX_STEPS {
             let (active_config, agent_instruction, active_agent_name, active_model_name) =
@@ -883,6 +946,7 @@ where
                 elapsed_secs: started_at.elapsed().as_secs(),
                 agent_name: active_agent_name,
                 model_name: active_model_name.clone(),
+                context_pct: last_context_pct,
             });
 
             let mut active_system_prompt = system_prompt.clone();
@@ -956,7 +1020,7 @@ where
                         content,
                     });
                 }
-                send_chat_with_fallback(
+                send_chat_with_network_retry(
                     &active_config,
                     &ChatRequest {
                         message: String::new(),
@@ -978,10 +1042,11 @@ where
                             allow_subagent_dispatch,
                         )),
                     },
+                    &mut progress,
                 )
                 .await?
             } else {
-                send_chat_with_fallback(
+                send_chat_with_network_retry(
                     &active_config,
                     &ChatRequest {
                         message: observation.clone(),
@@ -998,6 +1063,7 @@ where
                         messages: None,
                         tools: None,
                     },
+                    &mut progress,
                 )
                 .await?
             };
@@ -1013,6 +1079,14 @@ where
                 // gemini • Qwen..." in the CLI badge instead of "gemini →
                 // fallback: huggingface • Qwen...".
                 final_fallback = fallback.clone();
+                if let Some(reason) = &response.fallback_reason {
+                    progress(AgentProgress::Thought {
+                        thought: format!(
+                            "⚠️ Switched provider: {reason} — continuing with {}.",
+                            response.provider
+                        ),
+                    });
+                }
             }
             if let Some(calls) = &response.tool_calls {
                 for call in calls {
@@ -1667,15 +1741,28 @@ where
 
                 if let Some(total_tokens) = response.total_tokens {
                     let window = active_config.context_window_tokens();
+                    last_context_pct = Some(
+                        ((total_tokens as f64 / window as f64) * 100.0).clamp(0.0, 255.0) as u8,
+                    );
                     if (total_tokens as f64) >= (window as f64) * COMPACTION_TRIGGER_RATIO {
                         match compact_native_messages(&active_config, &native_messages).await {
-                            Ok(Some(compacted)) => {
+                            Ok(Some((compacted, fallback_provider))) => {
                                 native_messages = compacted;
+                                let fallback_note = fallback_provider
+                                    .as_deref()
+                                    .map(|p| {
+                                        format!(
+                                            " (summary generated via fallback provider \
+                                             \"{p}\" — the primary provider failed for this \
+                                             call)"
+                                        )
+                                    })
+                                    .unwrap_or_default();
                                 progress(AgentProgress::Thought {
                                     thought: format!(
                                         "[Context] Compacted earlier steps to stay under the \
                                      context window ({total_tokens}/{window} tokens before \
-                                     compaction)."
+                                     compaction){fallback_note}."
                                     ),
                                 });
                             }

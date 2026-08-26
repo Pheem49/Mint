@@ -32,8 +32,8 @@ pub const SLASH_COMMANDS: &[SlashCommandSpec] = &[
     },
     SlashCommandSpec {
         token: "/plan",
-        usage: "[on|off]",
-        description: "Toggle plan mode (read-only until you approve a plan)",
+        usage: "[on|off|list|show <name>]",
+        description: "Toggle plan mode, or list/show plans saved under .agents/plans/",
     },
     SlashCommandSpec {
         token: "/models",

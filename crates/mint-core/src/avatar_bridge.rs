@@ -78,7 +78,10 @@ impl AvatarEvent {
 
     fn apply(&self, signal: &AvatarSignal) -> Self {
         Self {
-            emotions: signal.emotions.clone().unwrap_or_else(|| self.emotions.clone()),
+            emotions: signal
+                .emotions
+                .clone()
+                .unwrap_or_else(|| self.emotions.clone()),
             action: signal.action.unwrap_or(self.action),
             prop: signal.prop.or(self.prop),
             intensity: signal.intensity.or(self.intensity),
@@ -163,26 +166,28 @@ pub fn parse_avatar_signal(input: &serde_json::Value) -> Result<AvatarSignal, St
     if let Some(action) = input.get("action").and_then(|v| v.as_str())
         && !action.is_empty()
     {
-        signal.action = Some(
-            intern(ACTIONS, action)
-                .ok_or_else(|| format!("Unknown action \"{action}\". Valid actions: {ACTIONS:?}"))?,
-        );
+        signal.action =
+            Some(intern(ACTIONS, action).ok_or_else(|| {
+                format!("Unknown action \"{action}\". Valid actions: {ACTIONS:?}")
+            })?);
     }
 
     if let Some(prop) = input.get("prop").and_then(|v| v.as_str())
         && !prop.is_empty()
     {
         signal.prop = Some(
-            intern(PROPS, prop).ok_or_else(|| format!("Unknown prop \"{prop}\". Valid props: {PROPS:?}"))?,
+            intern(PROPS, prop)
+                .ok_or_else(|| format!("Unknown prop \"{prop}\". Valid props: {PROPS:?}"))?,
         );
     }
 
     if let Some(intensity) = input.get("intensity").and_then(|v| v.as_str())
         && !intensity.is_empty()
     {
-        signal.intensity = Some(intern(INTENSITIES, intensity).ok_or_else(|| {
-            format!("Unknown intensity \"{intensity}\". Valid: {INTENSITIES:?}")
-        })?);
+        signal.intensity =
+            Some(intern(INTENSITIES, intensity).ok_or_else(|| {
+                format!("Unknown intensity \"{intensity}\". Valid: {INTENSITIES:?}")
+            })?);
     }
 
     if let Some(color) = input.get("color").and_then(|v| v.as_str())
@@ -353,8 +358,13 @@ fn resolve_tool_signal(action: &str, had_error: bool, is_start: bool) -> Option<
             return None; // silent on success — avatar_signal from the model is the source of truth
         }),
 
-        "browser_open" | "browser_click" | "browser_type" | "browser_read"
-        | "browser_mouse_move" | "browser_mouse_click" | "browser_key_press"
+        "browser_open"
+        | "browser_click"
+        | "browser_type"
+        | "browser_read"
+        | "browser_mouse_move"
+        | "browser_mouse_click"
+        | "browser_key_press"
         | "browser_screenshot" => Some(if is_start {
             AvatarSignal {
                 action: Some("searching"),
@@ -370,7 +380,10 @@ fn resolve_tool_signal(action: &str, had_error: bool, is_start: bool) -> Option<
             return None;
         }),
 
-        "generate_image" | "image_studio.generate" | "generate_video" | "veo.generate"
+        "generate_image"
+        | "image_studio.generate"
+        | "generate_video"
+        | "veo.generate"
         | "video_generate" => Some(if is_start {
             AvatarSignal {
                 action: Some("typing"),
@@ -543,6 +556,7 @@ impl AvatarBridge {
                 self.transition(AvatarSignal::emotions(&[("interest", "medium")]), None);
             }
             AgentProgress::Thought { .. } => {}
+            AgentProgress::WaitingForNetwork { .. } => {}
         }
     }
 
@@ -622,8 +636,12 @@ impl AvatarBridge {
             }
         }
 
-        if applied.emotions.is_none() && applied.action.is_none() && applied.prop.is_none()
-            && applied.intensity.is_none() && applied.talking.is_none() {
+        if applied.emotions.is_none()
+            && applied.action.is_none()
+            && applied.prop.is_none()
+            && applied.intensity.is_none()
+            && applied.talking.is_none()
+        {
             return; // fully suppressed by cooldowns — drop it (no pending-flush retry in this sketch)
         }
 
@@ -658,7 +676,9 @@ impl AvatarBridge {
     }
 
     fn push(&self, event: AvatarEvent, session: Option<SessionMeta>) {
-        let Some(token) = self.cfg.token.clone() else { return };
+        let Some(token) = self.cfg.token.clone() else {
+            return;
+        };
         let url = format!("{}/push/{}", self.cfg.relay_url, token);
         let client = self.client.clone();
         let payload = PushPayload {
@@ -815,6 +835,7 @@ mod tests {
             elapsed_secs: 1,
             agent_name: None,
             model_name: None,
+            context_pct: None,
         });
         // Thinking carries no subagent identity of its own — it should still
         // be attributed to whichever session pushed last, not silently reset

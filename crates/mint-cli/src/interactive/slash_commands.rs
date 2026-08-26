@@ -128,6 +128,43 @@ fn parse_path_and_prompt(rest: &str) -> (String, String) {
         (rest.to_string(), String::new())
     }
 }
+/// Newest-first list of saved plan files under `<root>/.agents/plans/`
+/// (written by `agent::save_plan_file` when a plan is approved) — the
+/// `YYYYMMDD-HHMMSS-slug.md` filename already sorts chronologically, so a
+/// reverse lexicographic sort on the filename is enough.
+fn list_plan_files(root: &Path) -> Vec<PathBuf> {
+    let plans_dir = root.join(".agents").join("plans");
+    let Ok(entries) = std::fs::read_dir(&plans_dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("md"))
+        .collect();
+    files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    files
+}
+
+/// First non-empty line of a file, truncated to 80 chars — same preview
+/// style `/memory list` uses for its interaction previews.
+fn first_line_preview(path: &Path) -> String {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return String::new();
+    };
+    let first = content
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    if first.chars().count() > 80 {
+        let short: String = first.chars().take(80).collect();
+        format!("{short}…")
+    } else {
+        first.to_string()
+    }
+}
+
 /// Route `/…` commands. Returns `None` if the input is not a slash command.
 pub async fn handle_slash_command(
     session: &mut InteractiveSession,
@@ -155,7 +192,10 @@ pub async fn handle_slash_command(
                 } else {
                     format!("{} {}", spec.token, spec.usage)
                 };
-                println!("  {MINT}{:<30}{RESET} {DIM}{}{RESET}", label, spec.description);
+                println!(
+                    "  {MINT}{:<30}{RESET} {DIM}{}{RESET}",
+                    label, spec.description
+                );
             }
             println!();
             Some(SlashResult::Handled)
@@ -204,6 +244,48 @@ pub async fn handle_slash_command(
                 } else {
                     println!("{DIM}[Fast] mode OFF{RESET}\n");
                 }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/plan" if rest == "list" => {
+            let files = list_plan_files(&session.current_dir);
+            if files.is_empty() {
+                println!("{DIM}No saved plans yet.{RESET}\n");
+            } else {
+                println!("\n{BLUE}Saved plans:{RESET}");
+                for (idx, path) in files.iter().enumerate() {
+                    println!(
+                        "  {DIM}[{}]{RESET} {BLUE}{}{RESET}",
+                        idx + 1,
+                        first_line_preview(path)
+                    );
+                }
+                println!();
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/plan" if rest.starts_with("show") => {
+            let arg = rest.trim_start_matches("show").trim();
+            let files = list_plan_files(&session.current_dir);
+            let found = if let Ok(idx) = arg.parse::<usize>() {
+                idx.checked_sub(1).and_then(|i| files.get(i))
+            } else {
+                files.iter().find(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.contains(arg))
+                })
+            };
+            match found {
+                Some(path) => match std::fs::read_to_string(path) {
+                    Ok(content) => println!("\n{content}\n"),
+                    Err(e) => println!("{ERROR}Could not read plan file:{RESET} {e}\n"),
+                },
+                None => println!(
+                    "{WARN}No saved plan matching \"{arg}\" — run /plan list to see saved plans.{RESET}\n"
+                ),
             }
             Some(SlashResult::Handled)
         }
@@ -470,9 +552,7 @@ pub async fn handle_slash_command(
                 "status" => {
                     let cfg = AvatarBridgeConfig::from_mint_config(&session.config);
                     if !cfg.enabled {
-                        println!(
-                            "{WARN}[Avatar] No token yet — run /avatar link first.{RESET}\n"
-                        );
+                        println!("{WARN}[Avatar] No token yet — run /avatar link first.{RESET}\n");
                     } else {
                         match fetch_channel_state(&cfg).await {
                             Ok(state) => {

@@ -30,8 +30,7 @@ pub fn add(
     };
 
     if source_path.exists() {
-        let home =
-            dirs::home_dir().ok_or("Unable to resolve home directory for Global config.")?;
+        let home = dirs::home_dir().ok_or("Unable to resolve home directory for Global config.")?;
         let global_skills_path = home.join(".config").join("mint").join("mint-skills");
         if !global_skills_path.exists() {
             let _ = std::fs::create_dir_all(&global_skills_path);

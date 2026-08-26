@@ -1162,7 +1162,14 @@ pub fn read_line_interactive(
                             expanded_str = expanded_str.replace(placeholder_str, content);
                         }
 
+                        let (term_width, _) = crate::markdown::terminal_size_or_default();
+                        let echo_divider = format!(
+                            "{DIM}{}{RESET}",
+                            "─".repeat((term_width as usize).saturating_sub(2))
+                        );
+
                         let lines: Vec<&str> = expanded_str.lines().collect();
+                        println!("{echo_divider}");
                         if lines.len() <= 1 {
                             println!("  {BLUE}You ›{RESET} {}", expanded_str);
                         } else {
@@ -1174,6 +1181,7 @@ pub fn read_line_interactive(
                                 }
                             }
                         }
+                        println!("{echo_divider}");
                         let _ = io::stdout().flush();
 
                         break Some(InteractiveInput {

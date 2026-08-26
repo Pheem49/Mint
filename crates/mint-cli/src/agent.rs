@@ -178,6 +178,76 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
     }
 }
 
+/// Renders a live-status context-window suffix like `" • Context: 42%"`, or
+/// empty once the fresh-task/low-single-digit case isn't worth the noise.
+/// Shared by the per-step `AgentProgress::Thinking` handler and the 150ms
+/// ticker below it, which both rebuild the same `thinking` label text.
+fn context_pct_suffix(context_pct: Option<u8>) -> String {
+    context_pct
+        .filter(|&p| p >= 5)
+        .map(|p| format!(" • Context: {p}%"))
+        .unwrap_or_default()
+}
+
+/// Live-status label shown while every configured provider is unreachable —
+/// built once here so both the per-attempt `AgentProgress::WaitingForNetwork`
+/// handler and the 150ms ticker (which must keep re-rendering it between
+/// attempts, not just at the moment each one starts) stay in sync.
+fn waiting_for_network_label(attempt: usize, max_attempts: usize) -> String {
+    format!("No internet connection — retrying ({attempt}/{max_attempts}) • Esc to interrupt")
+}
+
+/// Slugifies the first non-empty line of an approved plan for its saved
+/// filename — a local copy of `orchestration::memory_skill::slugify`'s
+/// lowercase/dash logic (that one is private to mint-core, so duplicating
+/// ~15 lines here is simpler than plumbing a new public export for this one
+/// caller). Only ASCII letters/digits survive, same limitation the skill
+/// slugs already have, so an all-Thai plan falls back to just the timestamp.
+fn slugify_plan_title(plan: &str) -> String {
+    let first_line = plan
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("plan")
+        .trim_start_matches(['#', '-', '*'])
+        .trim();
+    let mut slug = String::new();
+    let mut last_was_dash = false;
+    for ch in first_line.chars().take(60) {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            last_was_dash = false;
+        } else if !last_was_dash && !slug.is_empty() {
+            slug.push('-');
+            last_was_dash = true;
+        }
+    }
+    if slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        "plan".to_string()
+    } else {
+        slug
+    }
+}
+
+/// Persists an approved plan to `<root>/.agents/plans/<timestamp>-<slug>.md`,
+/// mirroring the `.agents/skills/<slug>/SKILL.md` convention
+/// `orchestration::memory_skill::auto_write_skill` already uses in
+/// mint-core — giving plans the same "reopen it later" durability Claude
+/// Code's own `~/.claude/plans/*.md` files have, scoped per-workspace
+/// instead of globally.
+fn save_plan_file(root: &Path, plan: &str) -> io::Result<std::path::PathBuf> {
+    let plans_dir = root.join(".agents").join("plans");
+    std::fs::create_dir_all(&plans_dir)?;
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let slug = slugify_plan_title(plan);
+    let path = plans_dir.join(format!("{timestamp}-{slug}.md"));
+    std::fs::write(&path, plan)?;
+    Ok(path)
+}
+
 pub async fn run_code_agent_with_options(
     task: &str,
     root: &Path,
@@ -364,7 +434,19 @@ pub async fn run_code_agent_with_options(
             }
             AgentApproval::ExitPlanMode { plan } => {
                 print_approval_card("Review Plan", &[("Plan", plan)]);
-                plan_mode_option_picker("Yes, approve and start implementing", "No, keep planning")
+                let outcome = plan_mode_option_picker(
+                    "Yes, approve and start implementing",
+                    "No, keep planning",
+                );
+                if matches!(outcome, Ok(ApprovalOutcome::Approved)) {
+                    match save_plan_file(root, plan) {
+                        Ok(path) => println!("  {DIM}Plan saved to: {}{RESET}\n", path.display()),
+                        Err(e) => {
+                            println!("  {}Could not save plan file:{RESET} {e}\n", crate::WARN)
+                        }
+                    }
+                }
+                outcome
             }
             AgentApproval::AskUser {
                 question,
@@ -430,10 +512,17 @@ pub async fn run_code_agent_with_options(
                         break;
                     }
                     if !timer_tool_running.load(Ordering::Relaxed) {
-                        status.thinking = Some(format!(
-                            "{thinking_verb} ({} • Esc to interrupt)",
-                            format_elapsed(timer_started_at.elapsed())
-                        ));
+                        status.thinking = Some(
+                            if let Some((attempt, max_attempts)) = status.waiting_for_network {
+                                waiting_for_network_label(attempt, max_attempts)
+                            } else {
+                                let context_suffix = context_pct_suffix(status.context_pct);
+                                format!(
+                                    "{thinking_verb} ({}{context_suffix} • Esc to interrupt)",
+                                    format_elapsed(timer_started_at.elapsed())
+                                )
+                            },
+                        );
                     }
                     render_live_status(&mut status);
                 }
@@ -457,141 +546,193 @@ pub async fn run_code_agent_with_options(
     let progress_cb = |progress: AgentProgress| {
         avatar_bridge.on_agent_progress(&progress);
         match progress {
-        AgentProgress::Thinking {
-            elapsed_secs,
-            agent_name,
-            model_name,
-        } => {
-            if !options.fast_mode
-                && !progress_approval_active.load(Ordering::Relaxed)
-                && let Ok(mut status) = progress_live_status.lock()
-            {
-                let label = if let (Some(a), Some(m)) = (agent_name, model_name) {
-                    format!(
-                        "{} ({}) is {} ({} • Esc to interrupt)",
-                        a,
-                        m,
-                        thinking_verb.to_lowercase(),
-                        format_elapsed(Duration::from_secs(elapsed_secs))
-                    )
-                } else {
-                    format!(
-                        "{thinking_verb} ({} • Esc to interrupt)",
-                        format_elapsed(Duration::from_secs(elapsed_secs))
-                    )
-                };
-                status.thinking = Some(label);
-                render_live_status(&mut status);
-            }
-        }
-        AgentProgress::Thought { thought } => {
-            if !options.fast_mode
-                && !progress_approval_active.load(Ordering::Relaxed)
-                && let Ok(mut status) = progress_live_status.lock()
-            {
-                commit_activity_snapshot(&mut status);
-                print_timeline_note(&mut status, &thought);
-                status.thinking = None;
-                render_live_status(&mut status);
-            }
-        }
-        AgentProgress::ToolStart {
-            action,
-            input,
-            subagent,
-        } => {
-            progress_tool_running.store(true, Ordering::Relaxed);
-            if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
-                if let Some(subagent_name) = subagent {
-                    // A tool call happening *inside* a running subagent's own
-                    // nested loop (tagged by `dispatch_one_subagent`) — render
-                    // it as one indented line under the `[dispatch_subagent]
-                    // Dispatching to subagent: ...` line already pushed when
-                    // the dispatch itself started, rather than merging it into
-                    // `status.explored`/`status.activities` where it'd be
-                    // indistinguishable from the top-level agent's own calls.
-                    let inner = explored_action_label(&action, &input)
-                        .map(|explored| explored.as_label())
-                        .unwrap_or_else(|| generic_tool_label(&action, &input).1);
-                    if let Ok(mut status) = progress_live_status.lock() {
-                        status.thinking = None;
-                        status.tasks.push(TaskEntry {
-                            label: format!("{DIM}{subagent_name}{RESET} \u{2192} {inner}"),
-                            output: Vec::new(),
-                        });
-                        render_live_status(&mut status);
-                    }
-                    return;
-                }
-                if (action == "create_plan" || action == "update_plan")
-                    && let Some(steps) = extract_plan_steps(&input)
+            AgentProgress::Thinking {
+                elapsed_secs,
+                agent_name,
+                model_name,
+                context_pct,
+            } => {
+                if !options.fast_mode
+                    && !progress_approval_active.load(Ordering::Relaxed)
+                    && let Ok(mut status) = progress_live_status.lock()
                 {
-                    if let Ok(mut status) = progress_live_status.lock() {
-                        status.thinking = None;
-                        status.plan_steps = steps;
-                        render_live_status(&mut status);
-                    }
-                    return;
-                }
-                if action == "read_file"
-                    && let Some(path) = input.get("path").and_then(|v| v.as_str())
-                    && skill_name_for_read_path(path).is_some()
-                {
-                    // The agent chose to read a skill file on its own initiative
-                    // (as opposed to the human typing `$skillname`). Skip the
-                    // generic explored-files grouping — ToolEnd below renders a
-                    // dedicated Skill(...) card for this instead.
-                    return;
-                }
-                if let Some(label) = explored_action_label(&action, &input) {
-                    if let Ok(mut status) = progress_live_status.lock() {
-                        status.thinking = None;
-                        status.explored.push(label);
-                        render_live_status(&mut status);
-                    }
-                    return;
-                }
-
-                let (is_activity, label) = generic_tool_label(&action, &input);
-
-                if let Ok(mut status) = progress_live_status.lock() {
-                    status.thinking = None;
-                    if is_activity {
-                        status.activities.push(label);
+                    status.context_pct = context_pct;
+                    status.waiting_for_network = None;
+                    let context_suffix = context_pct_suffix(context_pct);
+                    let label = if let (Some(a), Some(m)) = (agent_name, model_name) {
+                        format!(
+                            "{} ({}) is {} ({}{context_suffix} • Esc to interrupt)",
+                            a,
+                            m,
+                            thinking_verb.to_lowercase(),
+                            format_elapsed(Duration::from_secs(elapsed_secs))
+                        )
                     } else {
-                        status.tasks.push(label.into());
-                    }
+                        format!(
+                            "{thinking_verb} ({}{context_suffix} • Esc to interrupt)",
+                            format_elapsed(Duration::from_secs(elapsed_secs))
+                        )
+                    };
+                    status.thinking = Some(label);
                     render_live_status(&mut status);
                 }
             }
-        }
-        AgentProgress::ToolEnd {
-            action,
-            input,
-            result,
-            subagent,
-        } => {
-            progress_tool_running.store(false, Ordering::Relaxed);
-            if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
-                if subagent.is_some() {
-                    // Nested call inside a subagent finished — the ToolStart
-                    // line already shown covers it; only the command-output
-                    // preview below (which every caller, nested or not,
-                    // benefits from seeing) still applies.
-                    if command_was_run(&result)
+            AgentProgress::WaitingForNetwork {
+                attempt,
+                max_attempts,
+            } => {
+                if !options.fast_mode
+                    && !progress_approval_active.load(Ordering::Relaxed)
+                    && let Ok(mut status) = progress_live_status.lock()
+                {
+                    status.waiting_for_network = Some((attempt, max_attempts));
+                    status.thinking = Some(waiting_for_network_label(attempt, max_attempts));
+                    render_live_status(&mut status);
+                }
+            }
+            AgentProgress::Thought { thought } => {
+                if !options.fast_mode
+                    && !progress_approval_active.load(Ordering::Relaxed)
+                    && let Ok(mut status) = progress_live_status.lock()
+                {
+                    commit_activity_snapshot(&mut status);
+                    print_timeline_note(&mut status, &thought);
+                    status.thinking = None;
+                    status.waiting_for_network = None;
+                    render_live_status(&mut status);
+                }
+            }
+            AgentProgress::ToolStart {
+                action,
+                input,
+                subagent,
+            } => {
+                progress_tool_running.store(true, Ordering::Relaxed);
+                if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
+                    if let Some(subagent_name) = subagent {
+                        // A tool call happening *inside* a running subagent's own
+                        // nested loop (tagged by `dispatch_one_subagent`) — render
+                        // it as one indented line under the `[dispatch_subagent]
+                        // Dispatching to subagent: ...` line already pushed when
+                        // the dispatch itself started, rather than merging it into
+                        // `status.explored`/`status.activities` where it'd be
+                        // indistinguishable from the top-level agent's own calls.
+                        let inner = explored_action_label(&action, &input)
+                            .map(|explored| explored.as_label())
+                            .unwrap_or_else(|| generic_tool_label(&action, &input).1);
+                        if let Ok(mut status) = progress_live_status.lock() {
+                            status.thinking = None;
+                            status.waiting_for_network = None;
+                            status.tasks.push(TaskEntry {
+                                label: format!("{DIM}{subagent_name}{RESET} \u{2192} {inner}"),
+                                output: Vec::new(),
+                            });
+                            render_live_status(&mut status);
+                        }
+                        return;
+                    }
+                    if (action == "create_plan" || action == "update_plan")
+                        && let Some(steps) = extract_plan_steps(&input)
+                    {
+                        if let Ok(mut status) = progress_live_status.lock() {
+                            status.thinking = None;
+                            status.waiting_for_network = None;
+                            status.plan_steps = steps;
+                            render_live_status(&mut status);
+                        }
+                        return;
+                    }
+                    if action == "read_file"
+                        && let Some(path) = input.get("path").and_then(|v| v.as_str())
+                        && skill_name_for_read_path(path).is_some()
+                    {
+                        // The agent chose to read a skill file on its own initiative
+                        // (as opposed to the human typing `$skillname`). Skip the
+                        // generic explored-files grouping — ToolEnd below renders a
+                        // dedicated Skill(...) card for this instead.
+                        return;
+                    }
+                    if let Some(label) = explored_action_label(&action, &input) {
+                        if let Ok(mut status) = progress_live_status.lock() {
+                            status.thinking = None;
+                            status.waiting_for_network = None;
+                            status.explored.push(label);
+                            render_live_status(&mut status);
+                        }
+                        return;
+                    }
+
+                    let (is_activity, label) = generic_tool_label(&action, &input);
+
+                    if let Ok(mut status) = progress_live_status.lock() {
+                        status.thinking = None;
+                        status.waiting_for_network = None;
+                        if is_activity {
+                            status.activities.push(label);
+                        } else {
+                            status.tasks.push(label.into());
+                        }
+                        render_live_status(&mut status);
+                    }
+                }
+            }
+            AgentProgress::ToolEnd {
+                action,
+                input,
+                result,
+                subagent,
+            } => {
+                progress_tool_running.store(false, Ordering::Relaxed);
+                if !options.fast_mode && !progress_approval_active.load(Ordering::Relaxed) {
+                    if subagent.is_some() {
+                        // Nested call inside a subagent finished — the ToolStart
+                        // line already shown covers it; only the command-output
+                        // preview below (which every caller, nested or not,
+                        // benefits from seeing) still applies.
+                        if command_was_run(&result)
+                            && let Some(commands) = ran_command_labels(&action, &input)
+                            && let Ok(mut status) = progress_live_status.lock()
+                        {
+                            status.thinking = None;
+                            status.waiting_for_network = None;
+                            let preview = command_output_preview(&result);
+                            let last_index = commands.len().saturating_sub(1);
+                            let prefix = subagent.as_deref().unwrap_or("");
+                            for (index, cmd) in commands.into_iter().enumerate() {
+                                status.tasks.push(TaskEntry {
+                                    label: format!(
+                                        "{DIM}{prefix}{RESET} \u{2192} Finished command: `{}`",
+                                        cmd
+                                    ),
+                                    output: if index == last_index {
+                                        preview.clone()
+                                    } else {
+                                        Vec::new()
+                                    },
+                                });
+                            }
+                            render_live_status(&mut status);
+                        }
+                    } else if action == "create_plan" || action == "update_plan" {
+                        if let Some(steps) = extract_plan_steps(&input)
+                            && let Ok(mut status) = progress_live_status.lock()
+                        {
+                            status.thinking = None;
+                            status.waiting_for_network = None;
+                            status.plan_steps = steps;
+                            render_live_status(&mut status);
+                        }
+                    } else if command_was_run(&result)
                         && let Some(commands) = ran_command_labels(&action, &input)
                         && let Ok(mut status) = progress_live_status.lock()
                     {
                         status.thinking = None;
+                        status.waiting_for_network = None;
                         let preview = command_output_preview(&result);
                         let last_index = commands.len().saturating_sub(1);
-                        let prefix = subagent.as_deref().unwrap_or("");
                         for (index, cmd) in commands.into_iter().enumerate() {
                             status.tasks.push(TaskEntry {
-                                label: format!(
-                                    "{DIM}{prefix}{RESET} \u{2192} Finished command: `{}`",
-                                    cmd
-                                ),
+                                label: format!("Finished command: `{}`", cmd),
                                 output: if index == last_index {
                                     preview.clone()
                                 } else {
@@ -600,64 +741,39 @@ pub async fn run_code_agent_with_options(
                             });
                         }
                         render_live_status(&mut status);
-                    }
-                } else if action == "create_plan" || action == "update_plan" {
-                    if let Some(steps) = extract_plan_steps(&input)
+                    } else if action == "read_file"
+                        && let Some(path) = input.get("path").and_then(|v| v.as_str())
+                        && let Some(skill_name) = skill_name_for_read_path(path)
                         && let Ok(mut status) = progress_live_status.lock()
                     {
                         status.thinking = None;
-                        status.plan_steps = steps;
+                        status.waiting_for_network = None;
+                        status.tasks.push(skill_card(&skill_name));
                         render_live_status(&mut status);
-                    }
-                } else if command_was_run(&result)
-                    && let Some(commands) = ran_command_labels(&action, &input)
-                    && let Ok(mut status) = progress_live_status.lock()
-                {
-                    status.thinking = None;
-                    let preview = command_output_preview(&result);
-                    let last_index = commands.len().saturating_sub(1);
-                    for (index, cmd) in commands.into_iter().enumerate() {
-                        status.tasks.push(TaskEntry {
-                            label: format!("Finished command: `{}`", cmd),
-                            output: if index == last_index {
-                                preview.clone()
-                            } else {
-                                Vec::new()
-                            },
-                        });
-                    }
-                    render_live_status(&mut status);
-                } else if action == "read_file"
-                    && let Some(path) = input.get("path").and_then(|v| v.as_str())
-                    && let Some(skill_name) = skill_name_for_read_path(path)
-                    && let Ok(mut status) = progress_live_status.lock()
-                {
-                    status.thinking = None;
-                    status.tasks.push(skill_card(&skill_name));
-                    render_live_status(&mut status);
-                } else if action == "memory_recall" {
-                    let skill_names = skill_names_from_memory_recall(&result);
-                    if !skill_names.is_empty()
-                        && let Ok(mut status) = progress_live_status.lock()
-                    {
-                        status.thinking = None;
-                        for name in skill_names {
-                            status.tasks.push(skill_card(&name));
+                    } else if action == "memory_recall" {
+                        let skill_names = skill_names_from_memory_recall(&result);
+                        if !skill_names.is_empty()
+                            && let Ok(mut status) = progress_live_status.lock()
+                        {
+                            status.thinking = None;
+                            status.waiting_for_network = None;
+                            for name in skill_names {
+                                status.tasks.push(skill_card(&name));
+                            }
+                            render_live_status(&mut status);
                         }
-                        render_live_status(&mut status);
                     }
                 }
+                // Parse web search sources from the result and store them for display
+                if action == "web_search"
+                    && !result.starts_with("Web search error:")
+                    && result != "No web search results found."
+                    && let Ok(mut status) = progress_live_status.lock()
+                {
+                    let sources = parse_web_search_sources(&result);
+                    status.web_sources.extend(sources);
+                }
             }
-            // Parse web search sources from the result and store them for display
-            if action == "web_search"
-                && !result.starts_with("Web search error:")
-                && result != "No web search results found."
-                && let Ok(mut status) = progress_live_status.lock()
-            {
-                let sources = parse_web_search_sources(&result);
-                status.web_sources.extend(sources);
-            }
-        }
         }
     };
 
@@ -680,6 +796,7 @@ pub async fn run_code_agent_with_options(
             && let Ok(mut status) = chunk_live_status.lock()
         {
             status.thinking = None;
+            status.waiting_for_network = None;
             // Stop accepting keystrokes for the queueing box before it's torn
             // down below — otherwise a keypress landing between this
             // `clear_live_status` and the final answer's plain `println!`
@@ -781,6 +898,7 @@ pub async fn run_code_agent_with_options(
         && let Ok(mut status) = live_status.lock()
     {
         status.thinking = None;
+        status.waiting_for_network = None;
         status.accepting_input = false;
         if let Ok(mut out) = queued_out.lock() {
             *out = status.queued.clone();
@@ -834,6 +952,45 @@ pub async fn run_code_agent_with_options(
     println!("  {DIM}{label} {}{RESET}", "─".repeat(fill_len));
 
     Ok(res)
+}
+
+#[cfg(test)]
+mod save_plan_file_tests {
+    use super::*;
+
+    #[test]
+    fn slugify_plan_title_uses_first_line_and_strips_markdown_bullet() {
+        let plan = "# Add dark mode\n\nStep 1: ...";
+        assert_eq!(slugify_plan_title(plan), "add-dark-mode");
+    }
+
+    #[test]
+    fn slugify_plan_title_falls_back_when_first_line_has_no_ascii() {
+        // An all-Thai first line has no ASCII alphanumerics to keep, so this
+        // falls back to a fixed placeholder rather than an empty slug.
+        assert_eq!(slugify_plan_title("แผนงานภาษาไทยล้วน"), "plan");
+    }
+
+    #[test]
+    fn save_plan_file_writes_under_agents_plans_and_round_trips_content() {
+        let root = std::env::temp_dir().join(format!(
+            "mint-cli-save-plan-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let plan = "# Ship the thing\n\n1. Do it\n2. Verify it";
+        let path = save_plan_file(&root, plan).expect("save_plan_file should succeed");
+
+        assert!(path.starts_with(root.join(".agents").join("plans")));
+        assert!(path.to_string_lossy().ends_with("-ship-the-thing.md"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), plan);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 #[cfg(test)]

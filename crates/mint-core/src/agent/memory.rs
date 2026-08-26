@@ -810,8 +810,14 @@ mod scoped_chat_id_tests {
 
     #[test]
     fn non_cli_ids_pass_through_unchanged() {
-        assert_eq!(scoped_chat_id("conversation-default", Some("/tmp")), "conversation-default");
-        assert_eq!(scoped_chat_id("cli::subagent::search", Some("/tmp")), "cli::subagent::search");
+        assert_eq!(
+            scoped_chat_id("conversation-default", Some("/tmp")),
+            "conversation-default"
+        );
+        assert_eq!(
+            scoped_chat_id("cli::subagent::search", Some("/tmp")),
+            "cli::subagent::search"
+        );
     }
 
     #[test]

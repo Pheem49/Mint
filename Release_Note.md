@@ -1,5 +1,41 @@
 # Release Notes - Mint Agent v1.13.0
 
+## 🗂️ Plan Mode Now Saves Plans (CLI)
+
+Plan mode previously showed an approved plan once in the terminal's approval
+card and then discarded it — no way to reopen what was actually agreed on.
+It now persists.
+
+- **Approved plans are saved to `<workspace>/.agents/plans/`** as a
+  timestamped Markdown file the moment you approve them, printing a
+  `Plan saved to: ...` line right after — mirrors the existing
+  `.agents/skills/<slug>/SKILL.md` convention auto-learned skills already
+  use, scoped per-workspace rather than global.
+- **`/plan list`** shows saved plans (newest first) with a one-line preview
+  of each; **`/plan show <number|name>`** prints one in full. `/plan [on|off]`
+  still toggles plan mode itself, unchanged.
+
+---
+
+## ➖ User-Message Dividers in Interactive Chat
+
+Echoed user input in the terminal chat loop is now visually separated from
+agent replies with a dim `─` divider across the full terminal width, drawn
+above and below the `You ›` line. Applies both to messages typed in the
+input box and to queued inputs (`/send`, piped stdin) — so long logs stay
+easier to read at a glance.
+
+## 🔧 n8n Docs: Inline Auth Header + Non-Default Hosts
+
+`docs/N8N_INTEGRATION.md` now puts the `Bearer <key>` inline in the
+`Authorization` header for the `mint mcp add n8n` step — the old
+`AUTH_HEADER` env-var trick relied on shell expansion Mint's verbatim
+argument passing never performs. Also documents that `/n8n` with no
+arguments only auto-opens the browser for a hardcoded `127.0.0.1:5678`;
+pointing the MCP URL at another host/port keeps `/n8n <task>` working.
+
+---
+
 This release adds a real-time 3D avatar you can point at Mint — connected
 via a new `/avatar` command, driven by both automatic tool-call reactions
 and a model-callable `avatar_signal` tool — on top of the same

@@ -266,7 +266,14 @@ pub async fn run_interactive_chat() -> Result<()> {
         let model_str = active_model(&session.config.ai_provider, &session.config).to_owned();
 
         let query_str = if let Some(queued) = pending_inputs.pop_front() {
+            let (term_width, _) = crate::markdown::terminal_size_or_default();
+            let echo_divider = format!(
+                "{DIM}{}{RESET}",
+                "─".repeat((term_width as usize).saturating_sub(2))
+            );
+            println!("{echo_divider}");
             println!("  {BLUE}You ›{RESET} {}", queued);
+            println!("{echo_divider}");
             queued
         } else if let Some(input) = read_line_interactive(
             &session.config.ai_provider,
