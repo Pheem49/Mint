@@ -385,17 +385,52 @@ fn default_agents() -> Vec<AgentConfig> {
 /// Local model families known to support native tool/function calling via
 /// Ollama's `/api/chat` `tools` parameter. Not exhaustive — Ollama's ecosystem
 /// evolves quickly, so this is a conservative allowlist rather than a guarantee.
+/// Matched with `model.starts_with(prefix)` against the lowercased tag, so each
+/// entry covers its whole size/quant range (e.g. `qwen3` also matches
+/// `qwen3-coder:30b`). Last reviewed 2026-08.
 const OLLAMA_NATIVE_TOOL_MODEL_PREFIXES: &[&str] = &[
+    // Google Gemma 4 — native function calling (unlike Gemma 2/3)
+    "gemma4",
+    // Meta Llama 3.1+ / Llama 4
     "llama3.1",
     "llama3.2",
     "llama3.3",
+    "llama4",
+    "llama3-groq-tool-use",
+    // Alibaba Qwen ("qwen2" also matches qwen2.5 / qwen2.5-coder)
     "qwen2",
     "qwen2.5",
     "qwen3",
+    "qwq",
+    // Mistral
     "mistral-nemo",
     "mistral-large",
-    "firefunction",
+    "mistral-small",
+    "mixtral",
+    "devstral",
+    "magistral",
+    // Cohere ("command-r" also matches command-r7b / command-r-plus)
     "command-r",
+    "command-a",
+    // IBM Granite 3.x / 4.x
+    "granite3",
+    "granite4",
+    // NVIDIA Nemotron (incl. nemotron-mini)
+    "nemotron",
+    // Nous Research Hermes 3
+    "hermes3",
+    // OpenAI open-weight models
+    "gpt-oss",
+    // DeepSeek V3 / V3.1
+    "deepseek-v3",
+    // Microsoft Phi — only the -mini instruct variant does tools, not bare "phi4"
+    "phi4-mini",
+    // Deep Cogito — trained for tool calling / agentic use
+    "cogito",
+    // Small / purpose-built tool-calling models
+    "smollm2",
+    "athene-v2",
+    "firefunction",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

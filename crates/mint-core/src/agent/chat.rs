@@ -369,9 +369,20 @@ pub struct ChatResponse {
     pub stop_reason: Option<String>,
     /// Total tokens (input + output) the provider billed for this turn, when
     /// reported. Used to track how close a long-running conversation is to the
-    /// model's context window, rather than estimating client-side.
+    /// model's context window, rather than estimating client-side. Derived from
+    /// `input_tokens + output_tokens` when both are present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_tokens: Option<u32>,
+    /// Prompt/context tokens the provider processed for this turn (the whole
+    /// resent history + system prompt + tool schemas), when reported — the
+    /// "sent up to the model" half, tracked separately from `output_tokens` so
+    /// the UI can show `↑ context · ↓ generated` instead of one opaque sum.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u32>,
+    /// Completion tokens the model generated this turn, when reported — the
+    /// "came back down from the model" half. See `input_tokens`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u32>,
 }
 
 /// Internal, provider-agnostic result of a single non-streaming provider call.
@@ -381,7 +392,12 @@ struct ProviderReply {
     text: String,
     tool_calls: Option<Vec<ToolCall>>,
     stop_reason: Option<String>,
-    total_tokens: Option<u32>,
+    /// Prompt/context tokens processed for this call, when the provider reports
+    /// usage. `send_chat` derives `ChatResponse::total_tokens` from this plus
+    /// `output_tokens`.
+    input_tokens: Option<u32>,
+    /// Completion tokens generated for this call, when reported.
+    output_tokens: Option<u32>,
 }
 
 #[derive(Debug, Error)]
@@ -439,7 +455,12 @@ pub async fn send_chat(
         fallback_reason: None,
         tool_calls: reply.tool_calls,
         stop_reason: reply.stop_reason,
-        total_tokens: reply.total_tokens,
+        total_tokens: match (reply.input_tokens, reply.output_tokens) {
+            (Some(i), Some(o)) => Some(i + o),
+            (i, o) => i.or(o),
+        },
+        input_tokens: reply.input_tokens,
+        output_tokens: reply.output_tokens,
     })
 }
 
@@ -476,6 +497,8 @@ where
         tool_calls: None,
         stop_reason: None,
         total_tokens: None,
+        input_tokens: None,
+        output_tokens: None,
     })
 }
 
@@ -672,7 +695,10 @@ fn parse_gemini_reply(model: String, response: &Value) -> Result<ProviderReply, 
         stop_reason: response["candidates"][0]["finishReason"]
             .as_str()
             .map(str::to_owned),
-        total_tokens: response["usageMetadata"]["totalTokenCount"]
+        input_tokens: response["usageMetadata"]["promptTokenCount"]
+            .as_u64()
+            .map(|n| n as u32),
+        output_tokens: response["usageMetadata"]["candidatesTokenCount"]
             .as_u64()
             .map(|n| n as u32),
     })
@@ -791,7 +817,12 @@ fn parse_openai_style_reply(model: String, response: &Value) -> Result<ProviderR
         stop_reason: response["choices"][0]["finish_reason"]
             .as_str()
             .map(str::to_owned),
-        total_tokens: response["usage"]["total_tokens"].as_u64().map(|n| n as u32),
+        input_tokens: response["usage"]["prompt_tokens"]
+            .as_u64()
+            .map(|n| n as u32),
+        output_tokens: response["usage"]["completion_tokens"]
+            .as_u64()
+            .map(|n| n as u32),
     })
 }
 
@@ -971,19 +1002,13 @@ fn parse_ollama_reply(model: String, response: &Value) -> Result<ProviderReply, 
     if text.is_empty() && tool_calls.is_empty() {
         return Err(ChatError::MissingResponseText);
     }
-    let total_tokens = match (
-        response["prompt_eval_count"].as_u64(),
-        response["eval_count"].as_u64(),
-    ) {
-        (Some(prompt), Some(completion)) => Some((prompt + completion) as u32),
-        _ => None,
-    };
     Ok(ProviderReply {
         model,
         text,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: None,
-        total_tokens,
+        input_tokens: response["prompt_eval_count"].as_u64().map(|n| n as u32),
+        output_tokens: response["eval_count"].as_u64().map(|n| n as u32),
     })
 }
 
@@ -1187,19 +1212,15 @@ fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderRepl
     if text.is_empty() && tool_calls.is_empty() {
         return Err(ChatError::MissingResponseText);
     }
-    let total_tokens = match (
-        response["usage"]["input_tokens"].as_u64(),
-        response["usage"]["output_tokens"].as_u64(),
-    ) {
-        (Some(input), Some(output)) => Some((input + output) as u32),
-        _ => None,
-    };
     Ok(ProviderReply {
         model,
         text,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: response["stop_reason"].as_str().map(str::to_owned),
-        total_tokens,
+        input_tokens: response["usage"]["input_tokens"].as_u64().map(|n| n as u32),
+        output_tokens: response["usage"]["output_tokens"]
+            .as_u64()
+            .map(|n| n as u32),
     })
 }
 
@@ -2724,7 +2745,7 @@ mod tests {
     }
 
     #[test]
-    fn extracts_total_tokens_from_each_provider_usage_shape() {
+    fn extracts_input_and_output_tokens_from_each_provider_usage_shape() {
         let anthropic = parse_anthropic_reply(
             "claude-x".into(),
             &json!({
@@ -2733,27 +2754,40 @@ mod tests {
             }),
         )
         .unwrap();
-        assert_eq!(anthropic.total_tokens, Some(120));
+        assert_eq!(
+            (anthropic.input_tokens, anthropic.output_tokens),
+            (Some(100), Some(20))
+        );
 
         let openai = parse_openai_style_reply(
             "gpt-x".into(),
             &json!({
                 "choices": [{ "message": { "content": "hi" } }],
-                "usage": { "total_tokens": 150 }
+                "usage": { "prompt_tokens": 130, "completion_tokens": 20, "total_tokens": 150 }
             }),
         )
         .unwrap();
-        assert_eq!(openai.total_tokens, Some(150));
+        assert_eq!(
+            (openai.input_tokens, openai.output_tokens),
+            (Some(130), Some(20))
+        );
 
         let gemini = parse_gemini_reply(
             "gemini-x".into(),
             &json!({
                 "candidates": [{ "content": { "parts": [{ "text": "hi" }] } }],
-                "usageMetadata": { "totalTokenCount": 200 }
+                "usageMetadata": {
+                    "promptTokenCount": 160,
+                    "candidatesTokenCount": 40,
+                    "totalTokenCount": 200
+                }
             }),
         )
         .unwrap();
-        assert_eq!(gemini.total_tokens, Some(200));
+        assert_eq!(
+            (gemini.input_tokens, gemini.output_tokens),
+            (Some(160), Some(40))
+        );
 
         let ollama = parse_ollama_reply(
             "llama3.1".into(),
@@ -2764,17 +2798,20 @@ mod tests {
             }),
         )
         .unwrap();
-        assert_eq!(ollama.total_tokens, Some(120));
+        assert_eq!(
+            (ollama.input_tokens, ollama.output_tokens),
+            (Some(80), Some(40))
+        );
     }
 
     #[test]
-    fn missing_usage_data_yields_no_total_tokens() {
+    fn missing_usage_data_yields_no_token_counts() {
         let reply = parse_openai_style_reply(
             "gpt-x".into(),
             &json!({ "choices": [{ "message": { "content": "hi" } }] }),
         )
         .unwrap();
-        assert_eq!(reply.total_tokens, None);
+        assert_eq!((reply.input_tokens, reply.output_tokens), (None, None));
     }
 
     #[tokio::test]

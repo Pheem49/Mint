@@ -190,26 +190,34 @@ fn context_pct_suffix(context_pct: Option<u8>) -> String {
 }
 
 /// Live-status token-count suffix, honest about whether it's real progress
-/// or a pre-first-response guess: `" • ↓ 4.0k tokens"` once step 1 has
-/// actually reported a count (counting up during the turn the way Claude
-/// Code's own status line does — see `projected_tokens_used`), or
-/// `" • ~2.1k tokens"` before that, using the request-size estimate so a
-/// single-step turn still shows *some* number while waiting instead of
-/// nothing until it's done. Empty when neither is available. Shared by the
-/// per-step `AgentProgress::Thinking` handler and the 150ms ticker, same
-/// reasoning as `context_pct_suffix` above.
+/// or a pre-first-response guess. Once step 1 has reported real counts:
+/// `" • ↑ 7.4k · ↓ 50"` — `↑` is the latest step's context (prompt) size,
+/// `↓` is the running generated total, counting up during the turn the way
+/// Claude Code's own status line does (see `projected_generated_tokens`).
+/// Before that: `" • ↑ ~2.1k"`, the request-size estimate (an estimate of
+/// the *input*), so a single-step turn still shows *some* number while
+/// waiting instead of nothing. Empty when neither is available. No ANSI
+/// styling here — this string is embedded in the wave-animated "Thinking…"
+/// label, whose `{BRIGHT}…{RESET}` metadata wrapper would fight an inline
+/// dim code; the `↑` dim treatment lives only in the final turn footer
+/// (`res.*` path below). Shared by the per-step `AgentProgress::Thinking`
+/// handler and the 150ms ticker, same reasoning as `context_pct_suffix`.
 fn live_tokens_suffix(status: &LiveStatus) -> String {
     if status.tokens_used == 0 {
         return if status.estimated_tokens == 0 {
             String::new()
         } else {
             format!(
-                " • ~{}",
-                format_token_count(projected_estimated_tokens(status))
+                " • ↑ ~{}",
+                format_token_count_bare(projected_estimated_tokens(status))
             )
         };
     }
-    format!(" • ↓ {}", format_token_count(projected_tokens_used(status)))
+    format!(
+        " • ↑ {} · ↓ {}",
+        format_token_count_bare(status.input_tokens),
+        format_token_count_bare(projected_generated_tokens(status))
+    )
 }
 
 /// Live-status label shown while every configured provider is unreachable —
@@ -576,6 +584,8 @@ pub async fn run_code_agent_with_options(
                 model_name,
                 context_pct,
                 tokens_used,
+                input_tokens,
+                generated_tokens,
                 estimated_tokens,
             } => {
                 if !options.fast_mode
@@ -584,16 +594,18 @@ pub async fn run_code_agent_with_options(
                 {
                     status.context_pct = context_pct;
                     status.tokens_used = tokens_used;
+                    status.input_tokens = input_tokens;
+                    status.generated_tokens = generated_tokens;
                     status.estimated_tokens = estimated_tokens;
                     // Re-derive the animation rate from this real data point
-                    // every time one arrives (cumulative tokens / elapsed
-                    // turn time so far) — see `projected_tokens_used`'s docs
-                    // for why the ticker extrapolates from here instead of
-                    // just displaying `tokens_used` and freezing between
-                    // steps.
+                    // every time one arrives (cumulative generated tokens /
+                    // elapsed turn time so far) — see
+                    // `projected_generated_tokens`'s docs for why the ticker
+                    // extrapolates from here instead of just displaying
+                    // `generated_tokens` and freezing between steps.
                     let turn_elapsed = started_at.elapsed().as_secs_f64();
                     status.tokens_rate = if turn_elapsed > 0.0 {
-                        tokens_used as f64 / turn_elapsed
+                        generated_tokens as f64 / turn_elapsed
                     } else {
                         0.0
                     };
@@ -993,8 +1005,15 @@ pub async fn run_code_agent_with_options(
     // jobs, matching the box below it.
     let (tw, _) = markdown::terminal_size_or_default();
     let width = tw as usize;
-    let tokens_suffix = if res.total_tokens > 0 {
-        format!(" • ↓ {}", format_token_count(res.total_tokens))
+    // `↑` context stays dim with the rest of the footer; `↓` generated drops
+    // out of DIM for its segment so the "what the model actually produced"
+    // number reads a touch stronger than the divider around it.
+    let tokens_suffix = if res.input_tokens > 0 || res.generated_tokens > 0 {
+        format!(
+            " • ↑ {} · {RESET}↓ {}{DIM}",
+            format_token_count_bare(res.input_tokens),
+            format_token_count_bare(res.generated_tokens)
+        )
     } else {
         String::new()
     };
@@ -1002,9 +1021,10 @@ pub async fn run_code_agent_with_options(
         "─ Worked for {}{tokens_suffix} • {badge_plain}",
         format_elapsed(started_at.elapsed())
     );
-    let fill_len = width
-        .saturating_sub(2)
-        .saturating_sub(label.chars().count() + 1);
+    // Count only visible columns for the fill — `tokens_suffix` carries ANSI
+    // codes that don't occupy screen width.
+    let label_width = strip_ansi_escapes(&label).chars().count();
+    let fill_len = width.saturating_sub(2).saturating_sub(label_width + 1);
     println!("  {DIM}{label} {}{RESET}", "─".repeat(fill_len));
 
     Ok(res)

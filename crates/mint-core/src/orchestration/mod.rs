@@ -453,6 +453,19 @@ pub enum AgentProgress {
         /// does. 0 until the first step has completed.
         #[serde(default)]
         tokens_used: u64,
+        /// Prompt/context tokens the *most recent* completed step processed
+        /// (system prompt + tool schemas + the whole resent history) — the
+        /// `↑` half of the live counter. Latest-step, not summed: it tracks
+        /// how full the context window is, and summing would count the resent
+        /// history once per step. 0 until the first step has completed.
+        #[serde(default)]
+        input_tokens: u64,
+        /// Running sum of completion tokens the model generated across every
+        /// step this turn — the `↓` half. Summed (unlike `input_tokens`),
+        /// since each step's output is distinct work. 0 until the first step
+        /// has completed.
+        #[serde(default)]
+        generated_tokens: u64,
         /// Rough char-count-based estimate of the very first request's size
         /// — constant across every step of the turn. Only meaningful to a
         /// consumer while `tokens_used` is still 0 (i.e. step 1's response
@@ -504,6 +517,15 @@ pub struct AgentResult {
     /// Sum of `total_tokens` across every step's API response this turn —
     /// see the doc comment on `turn_total_tokens` where it's accumulated.
     pub total_tokens: u64,
+    /// Prompt/context tokens the final step processed (latest-step, not summed
+    /// — see `AgentProgress::Thinking::input_tokens`). The `↑` half of the
+    /// turn footer's token counter.
+    #[serde(default)]
+    pub input_tokens: u64,
+    /// Sum of completion tokens generated across every step this turn — the
+    /// `↓` half of the turn footer's token counter.
+    #[serde(default)]
+    pub generated_tokens: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -970,6 +992,13 @@ where
         // billed token volume for the whole turn, not just the final step's
         // context size (`last_context_pct` above tracks that separately).
         let mut turn_total_tokens: u64 = 0;
+        // The `↑ context · ↓ generated` split of `turn_total_tokens`:
+        // `last_input_tokens` is the *most recent* step's prompt size (not
+        // summed — it tracks context-window fill, and the resent history
+        // would otherwise be counted once per step), `turn_generated_tokens`
+        // sums every step's completion since each step's output is new work.
+        let mut last_input_tokens: u64 = 0;
+        let mut turn_generated_tokens: u64 = 0;
 
         'steps: for step in 1..=MAX_STEPS {
             let (active_config, agent_instruction, active_agent_name, active_model_name) =
@@ -981,6 +1010,8 @@ where
                 model_name: active_model_name.clone(),
                 context_pct: last_context_pct,
                 tokens_used: turn_total_tokens,
+                input_tokens: last_input_tokens,
+                generated_tokens: turn_generated_tokens,
                 estimated_tokens: estimated_first_step_tokens,
             });
 
@@ -1106,6 +1137,10 @@ where
             final_provider = response.provider.clone();
             final_model = response.model.clone();
             turn_total_tokens += response.total_tokens.unwrap_or(0) as u64;
+            turn_generated_tokens += response.output_tokens.unwrap_or(0) as u64;
+            if let Some(input) = response.input_tokens {
+                last_input_tokens = input as u64;
+            }
             if fallback.is_some() {
                 // `fallback` (this function's own return value) is the provider
                 // that actually served this response; `response.fallback_provider`
@@ -1496,6 +1531,8 @@ where
                             verification,
                             fallback: final_fallback,
                             total_tokens: turn_total_tokens,
+                            input_tokens: last_input_tokens,
+                            generated_tokens: turn_generated_tokens,
                         });
                     }
 

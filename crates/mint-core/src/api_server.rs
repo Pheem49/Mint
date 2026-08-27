@@ -1212,6 +1212,8 @@ async fn run_web_agent_loop(
         tool_calls: None,
         stop_reason: None,
         total_tokens: None,
+        input_tokens: None,
+        output_tokens: None,
     })
 }
 

@@ -837,6 +837,8 @@ mod tests {
             model_name: None,
             context_pct: None,
             tokens_used: 0,
+            input_tokens: 0,
+            generated_tokens: 0,
             estimated_tokens: 0,
         });
         // Thinking carries no subagent identity of its own — it should still

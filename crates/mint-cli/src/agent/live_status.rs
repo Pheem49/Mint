@@ -97,39 +97,46 @@ pub(super) fn format_elapsed(duration: Duration) -> String {
     }
 }
 
-/// Formats a token count the way Claude Code's own turn footer does —
-/// "4.0k tokens" / "1.2m tokens" above 1000, the bare number below.
-pub(super) fn format_token_count(tokens: u64) -> String {
+/// Formats a token count compactly — `7.4k` / `1.2m` above 1000, the bare
+/// number below. Used for the `↑ 7.4k · ↓ 50` status counter, where the
+/// arrows already say what the numbers are so the word "tokens" would just
+/// cost width.
+pub(super) fn format_token_count_bare(tokens: u64) -> String {
     if tokens >= 1_000_000 {
-        format!("{:.1}m tokens", tokens as f64 / 1_000_000.0)
+        format!("{:.1}m", tokens as f64 / 1_000_000.0)
     } else if tokens >= 1_000 {
-        format!("{:.1}k tokens", tokens as f64 / 1_000.0)
+        format!("{:.1}k", tokens as f64 / 1_000.0)
     } else {
-        format!("{tokens} tokens")
+        format!("{tokens}")
     }
 }
 
-/// How long the 150ms ticker keeps extrapolating `tokens_used` forward via
-/// `tokens_rate` before holding steady — long enough to animate a normal
+/// How long the 150ms ticker keeps extrapolating `generated_tokens` forward
+/// via `tokens_rate` before holding steady — long enough to animate a normal
 /// step, short enough that one unusually slow step doesn't show a token
 /// count climbing indefinitely with no real data behind it.
 const TOKENS_PROJECTION_CAP_SECS: f64 = 20.0;
 
-/// The token count to actually display right now: `tokens_used` (the last
-/// *real* value a step reported) plus an estimate of how much it's grown
-/// since then, at `tokens_rate` tokens/sec — purely cosmetic, so the live
-/// counter visibly climbs between steps (like Claude Code's) instead of
-/// sitting frozen at the same number for a step's whole duration. Falls
-/// back to the bare real value once there's no rate yet (the very first
-/// step) or after `TOKENS_PROJECTION_CAP_SECS` of no new real data.
-pub(super) fn projected_tokens_used(status: &LiveStatus) -> u64 {
+/// The `↓` generated-token count to actually display right now:
+/// `generated_tokens` (the last *real* value a step reported) plus an
+/// estimate of how much it's grown since then, at `tokens_rate` tokens/sec —
+/// purely cosmetic, so the live counter visibly climbs between steps (like
+/// Claude Code's) instead of sitting frozen at the same number for a step's
+/// whole duration. Falls back to the bare real value once there's no rate
+/// yet (the very first step) or after `TOKENS_PROJECTION_CAP_SECS` of no new
+/// real data.
+pub(super) fn projected_generated_tokens(status: &LiveStatus) -> u64 {
     let (Some(since), true) = (status.tokens_used_at, status.tokens_rate > 0.0) else {
-        return status.tokens_used;
+        return status.generated_tokens;
     };
-    project_tokens(status.tokens_used, status.tokens_rate, since.elapsed().as_secs_f64())
+    project_tokens(
+        status.generated_tokens,
+        status.tokens_rate,
+        since.elapsed().as_secs_f64(),
+    )
 }
 
-/// The actual math behind `projected_tokens_used`, split out so it's
+/// The actual math behind `projected_generated_tokens`, split out so it's
 /// testable without needing a real elapsed `Instant`.
 fn project_tokens(base: u64, rate: f64, elapsed_secs: f64) -> u64 {
     base + (rate * elapsed_secs.min(TOKENS_PROJECTION_CAP_SECS)) as u64
@@ -143,12 +150,12 @@ const ESTIMATE_RAMP_SECS: f64 = 1.2;
 
 /// `estimated_tokens` ramped from 0 up to its full value over
 /// `ESTIMATE_RAMP_SECS`, then held there — cosmetic in the same way
-/// `projected_tokens_used`'s extrapolation is; the real count immediately
-/// takes over the moment step 1 actually reports one (`tokens_used` goes
-/// nonzero, at which point callers stop calling this and use
-/// `projected_tokens_used` instead). Reuses `tokens_used_at` as this ramp's
-/// start time — it's set to "now" on every `Thinking` event including step
-/// 1's, which is exactly when the estimate first has a value to show.
+/// `projected_generated_tokens`'s extrapolation is; the real `↑` count
+/// (`input_tokens`) takes over the moment step 1 actually reports one
+/// (`tokens_used` goes nonzero, at which point `live_tokens_suffix` stops
+/// calling this). Reuses `tokens_used_at` as this ramp's start time — it's
+/// set to "now" on every `Thinking` event including step 1's, which is
+/// exactly when the estimate first has a value to show.
 pub(super) fn projected_estimated_tokens(status: &LiveStatus) -> u64 {
     let Some(since) = status.tokens_used_at else {
         return status.estimated_tokens;
@@ -254,26 +261,33 @@ pub(super) struct LiveStatus {
     /// frequent) `AgentProgress::Thinking` events, instead of silently
     /// dropping it on every tick.
     pub(super) context_pct: Option<u8>,
-    /// Last *real* token count reported by a completed step — same
-    /// mirroring reasoning as `context_pct`. The 150ms ticker doesn't
-    /// display this raw value directly; it projects forward from it using
-    /// `tokens_rate`/`tokens_used_at` below so the counter visibly climbs
-    /// between steps instead of sitting frozen (see those fields' docs).
+    /// Last *real* total (input + output) token count reported by a completed
+    /// step — same mirroring reasoning as `context_pct`. Kept as the "has the
+    /// first step come back yet?" sentinel for `live_tokens_suffix`; the
+    /// counter itself displays `input_tokens`/`generated_tokens` split.
     pub(super) tokens_used: u64,
+    /// Prompt/context tokens the most recent completed step processed — the
+    /// `↑` half of the live counter, shown as a static number (context-window
+    /// fill doesn't stream, so it just snaps to each step's real value).
+    pub(super) input_tokens: u64,
+    /// Running sum of completion tokens generated this turn — the `↓` half.
+    /// The 150ms ticker projects forward from this using `tokens_rate`/
+    /// `tokens_used_at` so it visibly climbs between steps (see those docs).
+    pub(super) generated_tokens: u64,
     /// Rough char-count-based estimate of the very first request's size,
     /// from `AgentProgress::Thinking::estimated_tokens` — the ticker shows
-    /// this (marked with a leading `~`, see `live_tokens_suffix`) while
-    /// `tokens_used` is still 0, so a single-step turn still shows *some*
-    /// number while waiting instead of nothing at all until it finishes.
+    /// this as the `↑` value (marked with a leading `~`, see
+    /// `live_tokens_suffix`) while `tokens_used` is still 0, so a single-step
+    /// turn still shows *some* number while waiting instead of nothing.
     pub(super) estimated_tokens: u64,
-    /// Estimated tokens/sec throughput so far this turn (cumulative
-    /// `tokens_used` divided by elapsed time) — purely cosmetic, to animate
-    /// the counter between real updates. `tokens_used` itself is always the
-    /// source of truth once a step actually reports a number.
+    /// Estimated generated-tokens/sec throughput so far this turn (cumulative
+    /// `generated_tokens` divided by elapsed time) — purely cosmetic, to
+    /// animate the `↓` counter between real updates. `generated_tokens` is
+    /// always the source of truth once a step actually reports a number.
     pub(super) tokens_rate: f64,
-    /// When `tokens_used` was last set to a real value — the ticker
-    /// extrapolates `tokens_used + tokens_rate * elapsed_since` from this
-    /// instant, capped at `TOKENS_PROJECTION_CAP_SECS` so a single very
+    /// When `generated_tokens` was last set to a real value — the ticker
+    /// extrapolates `generated_tokens + tokens_rate * elapsed_since` from
+    /// this instant, capped at `TOKENS_PROJECTION_CAP_SECS` so a single very
     /// long-running step doesn't make the estimate run away unboundedly.
     pub(super) tokens_used_at: Option<Instant>,
     /// `Some((attempt, max_attempts))` while retrying after every provider
@@ -1408,18 +1422,18 @@ mod format_token_count_tests {
 
     #[test]
     fn under_a_thousand_shows_the_bare_number() {
-        assert_eq!(format_token_count(732), "732 tokens");
+        assert_eq!(format_token_count_bare(732), "732");
     }
 
     #[test]
     fn thousands_round_to_one_decimal_place() {
-        assert_eq!(format_token_count(4_000), "4.0k tokens");
-        assert_eq!(format_token_count(4_567), "4.6k tokens");
+        assert_eq!(format_token_count_bare(4_000), "4.0k");
+        assert_eq!(format_token_count_bare(4_567), "4.6k");
     }
 
     #[test]
     fn millions_round_to_one_decimal_place() {
-        assert_eq!(format_token_count(1_234_567), "1.2m tokens");
+        assert_eq!(format_token_count_bare(1_234_567), "1.2m");
     }
 }
 

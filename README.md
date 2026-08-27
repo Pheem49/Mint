@@ -580,6 +580,20 @@ voice and TTS, proactive suggestions, headless tasks, updates, workflows, MCP
 servers, and optional integrations such as Calendar, Gmail, Notion, Telegram,
 Discord, Slack, LINE, WhatsApp, Google Search, and Brave Search.
 
+### Ollama tool calling
+
+Mint drives Ollama through native `/api/chat` tool calling when the model family
+is known to support it (Llama 3.1+/4, Qwen2+/3/QwQ, Mistral/Mixtral, Gemma 4,
+Granite 3–4, Command-R/A, Hermes 3, gpt-oss, DeepSeek V3, Phi-4-mini, and others
+— see `OLLAMA_NATIVE_TOOL_MODEL_PREFIXES` in
+`crates/mint-core/src/system/config.rs`). Anything else falls back to a less
+reliable prompt-based JSON mode and warns once per run.
+
+Check a specific model with `ollama show <model>` (look for `tools` under
+**Capabilities**) or browse [`ollama.com/search?c=tools`](https://ollama.com/search?c=tools).
+Force the JSON fallback regardless of model with `"forceJsonPromptMode": true` in
+the config.
+
 The optional browser smart-context helper can provide active-tab context from:
 
 ```text
