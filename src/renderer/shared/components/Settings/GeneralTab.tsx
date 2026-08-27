@@ -791,175 +791,83 @@ export default function GeneralTab({
         'AI image creation',
         'Image Generation',
         'Choose which image generation provider Mint uses.',
-        <div className="provider-cards-container">
-          {/* Gemini Images */}
-          <div className={`provider-card ${config.imageGenProvider === 'gemini' ? 'active-provider' : ''}`}>
-            <div className="provider-card-header">
-              <div className="provider-card-title">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-                </svg>
-                Google NanoBanana (Gemini Images)
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {config.imageGenProvider === 'gemini' && <span className="provider-active-badge">Active</span>}
-                <label className="settings-toggle-switch" style={{ marginBottom: 0 }}>
-                  <input type="radio" name="imageGenProvider" style={{ display: 'none' }} checked={config.imageGenProvider === 'gemini'} onChange={() => updateField('imageGenProvider', 'gemini')} />
-                  <span className="settings-toggle-slider" style={{ cursor: 'pointer' }} onClick={() => updateField('imageGenProvider', 'gemini')} />
-                </label>
-              </div>
+        <div className="form-grid compact">
+          <div className="setting-row wide">
+            <label>Active Provider</label>
+            <div className="pill-segmented" role="radiogroup" aria-label="Image Provider">
+              {[
+                { id: 'gemini', label: 'NanoBanana', title: 'Google NanoBanana (Gemini Images) — uses your Gemini API key' },
+                { id: 'dalle', label: 'DALL·E', title: 'OpenAI DALL·E — uses your OpenAI API key' },
+                { id: 'stability', label: 'Stability AI', title: 'Stability AI (Stable Diffusion)' },
+                { id: 'ideogram', label: 'Ideogram v3', title: 'Ideogram v3' },
+                { id: 'replicate', label: 'Replicate', title: 'Replicate (FLUX / SDXL / custom)' },
+                { id: 'bfl', label: 'Black Forest Labs', title: 'Black Forest Labs (FLUX API)' },
+              ].map(o => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={config.imageGenProvider === o.id}
+                  title={o.title}
+                  className={`pill-segmented-btn ${config.imageGenProvider === o.id ? 'active' : ''}`}
+                  onClick={() => updateField('imageGenProvider', o.id)}
+                >
+                  {o.label}
+                </button>
+              ))}
             </div>
-            <div className="provider-card-body">
+          </div>
+
+          {config.imageGenProvider === 'gemini' && (
+            <div className="setting-row wide">
               <p className="hint" style={{ margin: 0 }}>Uses your Gemini API key — no extra key needed.</p>
             </div>
-          </div>
-
-          {/* DALL·E */}
-          <div className={`provider-card ${config.imageGenProvider === 'dalle' ? 'active-provider' : ''}`}>
-            <div className="provider-card-header">
-              <div className="provider-card-title">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="12" y1="2" x2="12" y2="22"/>
-                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-                </svg>
-                OpenAI DALL·E
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {config.imageGenProvider === 'dalle' && <span className="provider-active-badge">Active</span>}
-                <label className="settings-toggle-switch" style={{ marginBottom: 0 }}>
-                  <input type="radio" name="imageGenProvider" style={{ display: 'none' }} checked={config.imageGenProvider === 'dalle'} onChange={() => updateField('imageGenProvider', 'dalle')} />
-                  <span className="settings-toggle-slider" style={{ cursor: 'pointer' }} onClick={() => updateField('imageGenProvider', 'dalle')} />
-                </label>
-              </div>
-            </div>
-            <div className="provider-card-body">
+          )}
+          {config.imageGenProvider === 'dalle' && (
+            <div className="setting-row wide">
               <p className="hint" style={{ margin: 0 }}>Uses your OpenAI API key — no extra key needed.</p>
             </div>
-          </div>
-
-          {/* Stability AI */}
-          <div className={`provider-card ${config.imageGenProvider === 'stability' ? 'active-provider' : ''}`}>
-            <div className="provider-card-header">
-              <div className="provider-card-title">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10z"/>
-                  <path d="M8 12l2 2 4-4"/>
-                </svg>
-                Stability AI (Stable Diffusion)
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {config.imageGenProvider === 'stability' && <span className="provider-active-badge">Active</span>}
-                <label className="settings-toggle-switch" style={{ marginBottom: 0 }}>
-                  <input type="radio" name="imageGenProvider" style={{ display: 'none' }} checked={config.imageGenProvider === 'stability'} onChange={() => updateField('imageGenProvider', 'stability')} />
-                  <span className="settings-toggle-slider" style={{ cursor: 'pointer' }} onClick={() => updateField('imageGenProvider', 'stability')} />
-                </label>
-              </div>
+          )}
+          {config.imageGenProvider === 'stability' && (
+            <div className="setting-row wide">
+              <label>Stability AI API Key</label>
+              <ApiKeyInput
+                value={config.stabilityApiKey}
+                onChange={(value) => updateField('stabilityApiKey', value)}
+                placeholder="Enter Stability AI API Key..."
+              />
             </div>
-            <div className="provider-card-body">
-              <div className="setting-row">
-                <label>Stability AI API Key</label>
-                <ApiKeyInput
-                  value={config.stabilityApiKey}
-                  onChange={(value) => updateField('stabilityApiKey', value)}
-                  placeholder="Enter Stability AI API Key..."
-                />
-              </div>
+          )}
+          {config.imageGenProvider === 'ideogram' && (
+            <div className="setting-row wide">
+              <label>Ideogram API Key</label>
+              <ApiKeyInput
+                value={config.ideogramApiKey}
+                onChange={(value) => updateField('ideogramApiKey', value)}
+                placeholder="Enter Ideogram API Key..."
+              />
             </div>
-          </div>
-
-          {/* Ideogram */}
-          <div className={`provider-card ${config.imageGenProvider === 'ideogram' ? 'active-provider' : ''}`}>
-            <div className="provider-card-header">
-              <div className="provider-card-title">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2"/>
-                  <circle cx="8.5" cy="8.5" r="1.5"/>
-                  <polyline points="21 15 16 10 5 21"/>
-                </svg>
-                Ideogram v3
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {config.imageGenProvider === 'ideogram' && <span className="provider-active-badge">Active</span>}
-                <label className="settings-toggle-switch" style={{ marginBottom: 0 }}>
-                  <input type="radio" name="imageGenProvider" style={{ display: 'none' }} checked={config.imageGenProvider === 'ideogram'} onChange={() => updateField('imageGenProvider', 'ideogram')} />
-                  <span className="settings-toggle-slider" style={{ cursor: 'pointer' }} onClick={() => updateField('imageGenProvider', 'ideogram')} />
-                </label>
-              </div>
+          )}
+          {config.imageGenProvider === 'replicate' && (
+            <div className="setting-row wide">
+              <label>Replicate API Key</label>
+              <ApiKeyInput
+                value={config.replicateApiKey}
+                onChange={(value) => updateField('replicateApiKey', value)}
+                placeholder="Enter Replicate API Key..."
+              />
             </div>
-            <div className="provider-card-body">
-              <div className="setting-row">
-                <label>Ideogram API Key</label>
-                <ApiKeyInput
-                  value={config.ideogramApiKey}
-                  onChange={(value) => updateField('ideogramApiKey', value)}
-                  placeholder="Enter Ideogram API Key..."
-                />
-              </div>
+          )}
+          {config.imageGenProvider === 'bfl' && (
+            <div className="setting-row wide">
+              <label>Black Forest Labs API Key</label>
+              <ApiKeyInput
+                value={config.bflApiKey}
+                onChange={(value) => updateField('bflApiKey', value)}
+                placeholder="Enter BFL API Key..."
+              />
             </div>
-          </div>
-
-          {/* Replicate */}
-          <div className={`provider-card ${config.imageGenProvider === 'replicate' ? 'active-provider' : ''}`}>
-            <div className="provider-card-header">
-              <div className="provider-card-title">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="16 3 21 3 21 8"/>
-                  <line x1="4" y1="20" x2="21" y2="3"/>
-                  <polyline points="21 16 21 21 16 21"/>
-                  <line x1="15" y1="15" x2="21" y2="21"/>
-                  <line x1="4" y1="4" x2="9" y2="9"/>
-                </svg>
-                Replicate (FLUX / SDXL / custom)
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {config.imageGenProvider === 'replicate' && <span className="provider-active-badge">Active</span>}
-                <label className="settings-toggle-switch" style={{ marginBottom: 0 }}>
-                  <input type="radio" name="imageGenProvider" style={{ display: 'none' }} checked={config.imageGenProvider === 'replicate'} onChange={() => updateField('imageGenProvider', 'replicate')} />
-                  <span className="settings-toggle-slider" style={{ cursor: 'pointer' }} onClick={() => updateField('imageGenProvider', 'replicate')} />
-                </label>
-              </div>
-            </div>
-            <div className="provider-card-body">
-              <div className="setting-row">
-                <label>Replicate API Key</label>
-                <ApiKeyInput
-                  value={config.replicateApiKey}
-                  onChange={(value) => updateField('replicateApiKey', value)}
-                  placeholder="Enter Replicate API Key..."
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Black Forest Labs */}
-          <div className={`provider-card ${config.imageGenProvider === 'bfl' ? 'active-provider' : ''}`}>
-            <div className="provider-card-header">
-              <div className="provider-card-title">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                </svg>
-                Black Forest Labs (FLUX API)
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {config.imageGenProvider === 'bfl' && <span className="provider-active-badge">Active</span>}
-                <label className="settings-toggle-switch" style={{ marginBottom: 0 }}>
-                  <input type="radio" name="imageGenProvider" style={{ display: 'none' }} checked={config.imageGenProvider === 'bfl'} onChange={() => updateField('imageGenProvider', 'bfl')} />
-                  <span className="settings-toggle-slider" style={{ cursor: 'pointer' }} onClick={() => updateField('imageGenProvider', 'bfl')} />
-                </label>
-              </div>
-            </div>
-            <div className="provider-card-body">
-              <div className="setting-row">
-                <label>Black Forest Labs API Key</label>
-                <ApiKeyInput
-                  value={config.bflApiKey}
-                  onChange={(value) => updateField('bflApiKey', value)}
-                  placeholder="Enter BFL API Key..."
-                />
-              </div>
-            </div>
-          </div>
+          )}
         </div>,
         <span className="section-current-badge">{activeImageLabel}</span>
       )}
