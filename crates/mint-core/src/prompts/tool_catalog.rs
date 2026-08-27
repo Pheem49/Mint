@@ -65,7 +65,7 @@ pub fn tool_catalog(
         allowed.push("browser_key_press");
         allowed.push("browser_screenshot");
     }
-    if !config.avatar_token.is_empty() {
+    if !config.avatar_token.is_empty() && !config.avatar_signal_disabled {
         allowed.push("avatar_signal");
     }
     allowed.retain(|action| !config.disabled_tools.contains(&action.to_string()));
@@ -890,6 +890,11 @@ mod tests {
         config.avatar_token = "test-token".into();
         let tools = tool_catalog(&config, false, Path::new("."), true);
         assert!(tools.iter().any(|t| t.name == "avatar_signal"));
+
+        // Soft toggle: `/avatar` → "Off" hides the tool but keeps the token.
+        config.avatar_signal_disabled = true;
+        let tools = tool_catalog(&config, false, Path::new("."), true);
+        assert!(!tools.iter().any(|t| t.name == "avatar_signal"));
     }
 
     fn write_subagent(dir: &std::path::Path, name: &str, content: &str) {

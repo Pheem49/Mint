@@ -144,7 +144,9 @@ import {
   listLinkedFolders,
   addLinkedFolder,
   removeLinkedFolder,
+  runSlashCommand,
 } from '@/tauri'
+import type { SlashResponse } from '../platform'
 
 function getInitialViewFromUrl(): DashboardView {
   if (typeof window === 'undefined') return 'chat'
@@ -407,6 +409,10 @@ export default function MintDashboard() {
   const handleConnectPlugin = (_plugin: string) => {}
 
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+  // A pending `needs_choice` from the shared slash engine — rendered as a chip bar.
+  const [pendingSlashChoice, setPendingSlashChoice] = useState<
+    { command: string; title: string; options: { label: string; value: string }[] } | null
+  >(null)
   const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
@@ -852,17 +858,24 @@ export default function MintDashboard() {
     if ((!trimmed && !hasAttachments) || sending) return
 
     if (trimmed.startsWith('/')) {
-      const activeP = status?.activeProvider || ''
-      const activeM = settingsConfig?.model || ''
-      const slashResult = executeSlashCommand(trimmed, {
-        activeProvider: activeP,
-        activeModel: activeM,
-        availableProviders: status?.availableProviders || [],
-        workspacePath,
-        interactionsCount: interactions.length,
-        fastMode: settingsConfig?.fastMode ?? false,
-        multiAgent: settingsConfig?.multiAgent ?? false,
-      })
+      // Shared Rust engine first (mint_core::slash). Anything it doesn't own
+      // comes back as `not_handled` and falls through to the TS processor below.
+      let engineResp: SlashResponse | null = null
+      try {
+        engineResp = await runSlashCommand(trimmed, workspacePath || null)
+      } catch {
+        engineResp = null
+      }
+      if (engineResp && engineResp.kind !== 'not_handled') {
+        setMessage('')
+        setImageAttachments([])
+        setVideoAttachments([])
+        setDocumentAttachment(null)
+        await handleEngineSlashResponse(trimmed, engineResp)
+        return
+      }
+
+      const slashResult = executeSlashCommand(trimmed)
 
       if (slashResult.handled) {
         setMessage('')
@@ -870,23 +883,7 @@ export default function MintDashboard() {
         setVideoAttachments([])
         setDocumentAttachment(null)
 
-        if (slashResult.action === 'set_agent_mode') {
-          setAgentMode(true)
-          if (slashResult.payload?.prompt) {
-            await sendPrompt(slashResult.payload.prompt, { clearComposer: true })
-          }
-          return
-        }
-
-        if (slashResult.action === 'change_workspace') {
-          if (slashResult.payload?.path) {
-            setWorkspacePath(slashResult.payload.path)
-          } else {
-            selectWorkspaceDirectory().then((res) => {
-              if (res) setWorkspacePath(res)
-            }).catch(() => {})
-          }
-        } else if (slashResult.action === 'open_image_picker') {
+        if (slashResult.action === 'open_image_picker') {
           document.getElementById('vision-file-input')?.click()
           return
         } else if (slashResult.action === 'paste_image') {
@@ -894,17 +891,9 @@ export default function MintDashboard() {
             if (uri) setImageAttachments((curr) => [...curr, { dataUri: uri, name: 'Clipboard Image' }])
           }).catch(() => {})
           return
-        } else if (slashResult.action === 'open_plugins') {
-          changeView('plugins')
-          return
         } else if (slashResult.action === 'generate_veo') {
           changeView('veo')
           return
-        } else if (slashResult.action === 'set_provider_model' && slashResult.payload?.target) {
-          const target = slashResult.payload.target
-          if (status?.availableProviders.includes(target)) {
-            setActiveModel(target).then(() => getRuntimeStatus().then(setStatus)).catch(() => {})
-          }
         }
 
         if (slashResult.systemText) {
@@ -1123,6 +1112,100 @@ export default function MintDashboard() {
       setImageAttachments([])
     } catch (reason) {
       setError(errorMessage(reason))
+    }
+  }
+
+  // Append a synthetic "system" message to the current conversation — used by
+  // the slash-command dispatcher for `/help`-style output and `/cron` etc.
+  // listings. Mirrors the inline push in `handleSubmit`.
+  function pushSystemMessage(userText: string, aiText: string) {
+    const systemMsg = {
+      id: Date.now(),
+      userText,
+      aiText,
+      createdAt: new Date().toISOString(),
+      provider: 'system',
+      model: 'mint-cli',
+    }
+    setInteractions((prev) => [...prev, systemMsg])
+    saveSystemInteraction(conversationId, userText, aiText, 'system', 'mint-cli').catch(() => {})
+  }
+
+  // Map the shared engine's nav target onto a DashboardView.
+  function slashNavView(target: string): DashboardView {
+    switch (target) {
+      case 'linked_folders':
+        return 'link'
+      case 'cron':
+        return 'cron'
+      case 'skills':
+        return 'skills'
+      case 'plugins':
+        return 'plugins'
+      case 'mcp':
+        return 'mcp'
+      case 'veo':
+        return 'veo'
+      default:
+        return 'chat'
+    }
+  }
+
+  // Act on a response from the shared Rust slash engine (mint_core::slash).
+  async function handleEngineSlashResponse(userText: string, resp: SlashResponse) {
+    switch (resp.kind) {
+      case 'message':
+        pushSystemMessage(userText, resp.markdown)
+        break
+      case 'applied': {
+        const wsChange = resp.effects.find((e) => e.kind === 'workspace_changed') as
+          | { kind: 'workspace_changed'; path: string }
+          | undefined
+        if (wsChange) setWorkspacePath(wsChange.path)
+        const providerChange = resp.effects.find((e) => e.kind === 'provider_changed') as
+          | { kind: 'provider_changed'; display: string }
+          | undefined
+        if (providerChange) {
+          // Render the same "✨ Gemini • model" chip the GUI's own /models shows.
+          // The engine already logged the `provider_change` row into the shared
+          // "cli" conversation, so this is just the immediate local echo.
+          setInteractions((prev) => [
+            ...prev,
+            {
+              id: Date.now(),
+              userText: providerChange.display,
+              aiText: '',
+              createdAt: new Date().toISOString(),
+              provider: 'system',
+              model: 'provider_change',
+            },
+          ])
+        }
+        if (resp.effects.some((e) => e.kind === 'history_cleared')) {
+          await clearChatHistory(conversationId).catch(() => {})
+          setInteractions([])
+        }
+        if (resp.markdown) pushSystemMessage(userText, resp.markdown)
+        if (resp.effects.some((e) => e.kind !== 'history_cleared' && e.kind !== 'workspace_changed')) {
+          // Desktop also gets a `settings-changed` push; refetch anyway so web stays in sync.
+          ;(window as any).settingsApi?.getSettings?.().then((c: any) => c && setSettingsConfig(c)).catch(() => {})
+          getRuntimeStatus().then(setStatus).catch(() => {})
+        }
+        break
+      }
+      case 'navigate':
+        if (resp.markdown) pushSystemMessage(userText, resp.markdown)
+        changeView(slashNavView(resp.target as any))
+        break
+      case 'forward_to_agent':
+        if (resp.agent_mode) setAgentMode(true)
+        await sendPrompt(resp.prompt, { clearComposer: true })
+        break
+      case 'needs_choice':
+        setPendingSlashChoice({ command: resp.command, title: resp.title, options: resp.options })
+        break
+      case 'exit':
+        break
     }
   }
 
@@ -1429,6 +1512,34 @@ export default function MintDashboard() {
                     onClick={() => handleProactiveAction(sug.action)}
                   >
                     {sug.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {pendingSlashChoice && (
+            <div className="proactive-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
+              <div className="proactive-header">
+                <span className="proactive-icon">⚡</span>
+                <div className="proactive-message">{pendingSlashChoice.title}</div>
+                <button className="proactive-dismiss-btn" onClick={() => setPendingSlashChoice(null)}>
+                  Dismiss
+                </button>
+              </div>
+              <div className="proactive-chips">
+                {pendingSlashChoice.options.map((opt) => (
+                  <button
+                    key={opt.value}
+                    className="suggestion-chip"
+                    onClick={() => {
+                      const next = `${pendingSlashChoice.command} ${opt.value}`
+                      setPendingSlashChoice(null)
+                      runSlashCommand(next, workspacePath || null)
+                        .then((r) => handleEngineSlashResponse(next, r))
+                        .catch(() => {})
+                    }}
+                  >
+                    {opt.label}
                   </button>
                 ))}
               </div>

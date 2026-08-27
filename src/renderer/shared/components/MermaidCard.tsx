@@ -46,6 +46,21 @@ function buildMermaidTheme(): Record<string, string> {
   }
 }
 
+// When a parse fails, mermaid still leaves its throwaway render/measurement
+// containers attached to <body> — the `d`-prefixed sizing div and, on older
+// minors that ignore `suppressErrorRendering`, the "Syntax error" bomb graphic.
+// They carry no styling of ours, so they escape the card and show up as a stray
+// white strip pinned to the page edge. Sweep any such node that mermaid parked
+// directly on <body>; a successfully rendered diagram lives inside a card div,
+// so the parent check leaves it alone.
+function cleanupOrphanMermaidNodes(): void {
+  document
+    .querySelectorAll('[id^="dmermaid-diagram-"], [id^="mermaid-diagram-"]')
+    .forEach((el) => {
+      if (el.parentElement === document.body) el.remove()
+    })
+}
+
 type Status = 'loading' | 'ready' | 'error'
 
 export default function MermaidCard({ code }: { code: string }) {
@@ -84,7 +99,17 @@ export default function MermaidCard({ code }: { code: string }) {
             securityLevel: 'strict',
             theme: 'base',
             themeVariables: buildMermaidTheme(),
+            // Don't let mermaid inject its own "Syntax error" bomb graphic into
+            // the DOM on a parse failure — we render our own fallback (the raw
+            // fenced source) from the `error` status below.
+            suppressErrorRendering: true,
           })
+          // Validate before rendering. `parse` with `suppressErrors` resolves
+          // falsy instead of throwing/DOM-injecting on bad syntax — models
+          // (especially smaller local ones) routinely emit invalid mermaid, and
+          // this keeps that off the main render path entirely.
+          const parsed = await mermaid.parse(code, { suppressErrors: true })
+          if (!parsed) throw new Error('Invalid mermaid syntax')
           // A fresh id every call, not one fixed per component instance — mermaid
           // treats the id as a DOM element id it may look up and reuse, so reusing
           // the same id across repeat renders risks it colliding with (and tearing
@@ -97,6 +122,7 @@ export default function MermaidCard({ code }: { code: string }) {
         setStatus('ready')
       } catch (err) {
         console.error('Mermaid render failed:', err)
+        cleanupOrphanMermaidNodes()
         if (!cancelled) setStatus('error')
       }
     }
@@ -123,6 +149,7 @@ export default function MermaidCard({ code }: { code: string }) {
       cancelled = true
       if (debounceTimer) clearTimeout(debounceTimer)
       observer?.disconnect()
+      cleanupOrphanMermaidNodes()
     }
   }, [code])
 

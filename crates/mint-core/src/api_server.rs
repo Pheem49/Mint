@@ -1017,6 +1017,22 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
+                                ("POST", "/api/slash") => {
+                    routes::slash::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
                                 ("POST", "/api/uploads") => {
                     routes::misc::execute(
                         routes::RequestCtx {

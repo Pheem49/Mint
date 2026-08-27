@@ -186,7 +186,7 @@ pub async fn handle_slash_command(
             println!("\n{BLUE}────────────────────────────────────────────{RESET}");
             println!("{MINT}  Mint Interactive Commands{RESET}");
             println!("{BLUE}────────────────────────────────────────────{RESET}");
-            for spec in SLASH_COMMANDS {
+            for spec in SLASH_COMMANDS.iter() {
                 let label = if spec.usage.is_empty() {
                     spec.token.to_string()
                 } else {
@@ -494,59 +494,57 @@ pub async fn handle_slash_command(
         "/avatar" => {
             use mint_core::avatar_bridge::{AvatarBridgeConfig, fetch_channel_state};
 
-            match rest {
-                "" | "link" | "web" | "link web" | "desktop" | "link desktop" => {
-                    if session.config.avatar_token.is_empty() {
-                        session.config.avatar_token = AvatarBridgeConfig::generate_token();
-                        if let Err(error) = mint_core::save_config(&session.config) {
-                            println!("{ERROR}Config error:{RESET} {error}\n");
-                            return Some(SlashResult::Handled);
+            // Soft toggle: `avatar_signal_disabled` hides the tool while keeping
+            // the token so the paired viewer never needs re-linking.
+            let set_signal_disabled = |session: &mut InteractiveSession, disabled: bool| {
+                session.config.avatar_signal_disabled = disabled;
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => {
+                        if disabled {
+                            println!("{DIM}[Avatar] avatar_signal disabled (token kept — run /avatar to re-enable).{RESET}\n");
+                        } else {
+                            println!("{DIM}[Avatar] avatar_signal enabled.{RESET}\n");
                         }
                     }
-                    let cfg = AvatarBridgeConfig::from_mint_config(&session.config);
-                    let token = session.config.avatar_token.clone();
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                }
+            };
 
-                    // Explicit "web"/"desktop" skip the picker, same as
-                    // `/fast on` skipping `/fast`'s interactive select.
-                    let target = match rest {
-                        "web" | "link web" => "web",
-                        "desktop" | "link desktop" => "desktop",
-                        _ => {
-                            let options =
-                                vec!["Web browser".to_string(), "Desktop app".to_string()];
-                            match prompt_interactive_select(
-                                "Where will you view the avatar?",
-                                &options,
-                                &options[0],
-                            ) {
-                                Ok(Some(sel)) if sel.starts_with("Desktop") => "desktop",
-                                // Cancelled, or no TTY to prompt in (e.g. piped) — the
-                                // web link is always useful on its own, so fall back
-                                // to it rather than printing nothing.
-                                Ok(_) => "web",
-                                Err(e) => {
-                                    println!("{ERROR}Error selecting target:{RESET} {e}\n");
-                                    return Some(SlashResult::Handled);
-                                }
-                            }
+            // Resolve to a share target ("web"/"desktop"), or bail out for the
+            // No / Off / On / status / bad-usage sub-actions.
+            let target: &str = match rest {
+                "web" | "link web" => "web",
+                "desktop" | "link desktop" => "desktop",
+                "on" | "enable" => {
+                    set_signal_disabled(session, false);
+                    return Some(SlashResult::Handled);
+                }
+                "off" | "disable" => {
+                    set_signal_disabled(session, true);
+                    return Some(SlashResult::Handled);
+                }
+                "" | "link" => {
+                    let options = vec![
+                        "No".to_string(),
+                        "Off (disable avatar_signal)".to_string(),
+                        "Web browser".to_string(),
+                        "Desktop app".to_string(),
+                    ];
+                    match prompt_interactive_select("Avatar output", &options, &options[2]) {
+                        Ok(Some(sel)) if sel == "No" => return Some(SlashResult::Handled),
+                        Ok(Some(sel)) if sel.starts_with("Off") => {
+                            set_signal_disabled(session, true);
+                            return Some(SlashResult::Handled);
                         }
-                    };
-
-                    if target == "desktop" {
-                        println!(
-                            "\n{MINT}[Avatar] Desktop app:{RESET}\n\
-                             1. Open the Project Avatar desktop app.\n\
-                             2. It has no address bar, so on first launch it generates its \
-                             own token — paste this one into its \"Paste existing token...\" \
-                             field instead so it connects to the same channel Mint pushes to:\n\
-                             {DIM}{token}{RESET}\n\
-                             It remembers the token after that; you won't need to paste it again.\n"
-                        );
-                    } else {
-                        println!(
-                            "\n{MINT}[Avatar] Share link:{RESET}\n{}\n",
-                            cfg.share_link().expect("token was just ensured non-empty")
-                        );
+                        Ok(Some(sel)) if sel.starts_with("Desktop") => "desktop",
+                        Ok(Some(_)) => "web",
+                        // Cancelled / no TTY — the picker has an explicit "No",
+                        // so treat a cancel as "do nothing".
+                        Ok(None) => return Some(SlashResult::Handled),
+                        Err(e) => {
+                            println!("{ERROR}Error selecting target:{RESET} {e}\n");
+                            return Some(SlashResult::Handled);
+                        }
                     }
                 }
                 "status" => {
@@ -554,6 +552,14 @@ pub async fn handle_slash_command(
                     if !cfg.enabled {
                         println!("{WARN}[Avatar] No token yet — run /avatar link first.{RESET}\n");
                     } else {
+                        println!(
+                            "{DIM}[Avatar] avatar_signal tool: {}{RESET}",
+                            if session.config.avatar_signal_disabled {
+                                "disabled"
+                            } else {
+                                "enabled"
+                            }
+                        );
                         match fetch_channel_state(&cfg).await {
                             Ok(state) => {
                                 let now_ms = std::time::SystemTime::now()
@@ -577,17 +583,43 @@ pub async fn handle_slash_command(
                             Err(error) => println!("{ERROR}[Avatar] {error}{RESET}\n"),
                         }
                     }
+                    return Some(SlashResult::Handled);
                 }
-                "off" | "disable" => {
-                    session.config.avatar_token = String::new();
-                    match mint_core::save_config(&session.config) {
-                        Ok(()) => println!("{DIM}[Avatar] Bridge disabled.{RESET}\n"),
-                        Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
-                    }
+                _ => {
+                    println!(
+                        "{WARN}Usage: /avatar [web|desktop|on|off|status] — connects agent activity to Project Avatar{RESET}\n"
+                    );
+                    return Some(SlashResult::Handled);
                 }
-                _ => println!(
-                    "{WARN}Usage: /avatar [web|desktop|status|off] — connects agent activity to Project Avatar{RESET}\n"
-                ),
+            };
+
+            // Web / Desktop chosen — make sure the tool is on and a token exists,
+            // then print the connection instructions.
+            session.config.avatar_signal_disabled = false;
+            if session.config.avatar_token.is_empty() {
+                session.config.avatar_token = AvatarBridgeConfig::generate_token();
+            }
+            if let Err(error) = mint_core::save_config(&session.config) {
+                println!("{ERROR}Config error:{RESET} {error}\n");
+                return Some(SlashResult::Handled);
+            }
+            let cfg = AvatarBridgeConfig::from_mint_config(&session.config);
+            let token = session.config.avatar_token.clone();
+            if target == "desktop" {
+                println!(
+                    "\n{MINT}[Avatar] Desktop app:{RESET}\n\
+                     1. Open the Project Avatar desktop app.\n\
+                     2. It has no address bar, so on first launch it generates its \
+                     own token — paste this one into its \"Paste existing token...\" \
+                     field instead so it connects to the same channel Mint pushes to:\n\
+                     {DIM}{token}{RESET}\n\
+                     It remembers the token after that; you won't need to paste it again.\n"
+                );
+            } else {
+                println!(
+                    "\n{MINT}[Avatar] Share link:{RESET}\n{}\n",
+                    cfg.share_link().expect("token was just ensured non-empty")
+                );
             }
             Some(SlashResult::Handled)
         }
@@ -2387,7 +2419,7 @@ mod tests {
         );
 
         let documented: std::collections::BTreeSet<&str> =
-            SLASH_COMMANDS.iter().map(|s| s.token).collect();
+            SLASH_COMMANDS.iter().map(|s| s.token.as_str()).collect();
 
         let undocumented: Vec<&String> = dispatcher_tokens
             .iter()

@@ -118,6 +118,9 @@ pub struct MintConfig {
     /// Relay channel token. Empty = avatar bridge disabled (no config UI writes
     /// this yet — set via `mint avatar link` which generates one on first use).
     pub avatar_token: String,
+    /// Soft-disable the `avatar_signal` tool while keeping `avatar_token` (so the
+    /// paired viewer doesn't need re-linking). Toggled by `/avatar` → "Off"/"On".
+    pub avatar_signal_disabled: bool,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -345,6 +348,7 @@ impl Default for MintConfig {
             avatar_relay_url: "https://relay.projectavatar.io".into(),
             avatar_app_url: "https://app.projectavatar.io".into(),
             avatar_token: String::new(),
+            avatar_signal_disabled: false,
             extra: runtime_extra_defaults(),
         }
     }

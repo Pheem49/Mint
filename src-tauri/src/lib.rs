@@ -1144,6 +1144,33 @@ fn delete_subagent(source_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn run_slash_command(
+    app: AppHandle,
+    input: String,
+    cwd: Option<String>,
+) -> Result<mint_core::slash::SlashResponse, String> {
+    use mint_core::slash::{SlashEffect, SlashResponse};
+    let mut config = load_config().map_err(|error| error.to_string())?;
+    let request = mint_core::slash::SlashRequest {
+        input,
+        cwd,
+        surface: Some("desktop".to_string()),
+    };
+    let response = mint_core::slash::execute(&request, &mut config);
+
+    let persists_config = matches!(
+        &response,
+        SlashResponse::Applied { effects, .. }
+            if effects.iter().any(|e| !matches!(e, SlashEffect::HistoryCleared))
+    );
+    if persists_config {
+        save_config(&config).map_err(|error| error.to_string())?;
+        let _ = app.emit("settings-changed", &config);
+    }
+    Ok(response)
+}
+
+#[tauri::command]
 fn list_cron_jobs() -> Result<Vec<CronJob>, String> {
     CronStore::open_default()
         .and_then(|store| store.list())
@@ -1797,6 +1824,7 @@ pub fn run() {
             list_subagents,
             save_subagent,
             delete_subagent,
+            run_slash_command,
             list_cron_jobs,
             add_cron_job,
             remove_cron_job,

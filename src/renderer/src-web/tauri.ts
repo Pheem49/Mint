@@ -1636,6 +1636,23 @@ export async function deleteSubagent(sourcePath: string): Promise<void> {
   await invoke('delete_subagent', { sourcePath })
 }
 
+export async function runSlashCommand(
+  input: string,
+  cwd?: string | null
+): Promise<import('../shared/platform').SlashResponse> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/slash`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input, cwd: cwd ?? null })
+    })
+    if (!res.ok) return { kind: 'not_handled' }
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('run_slash_command', { input, cwd: cwd ?? null })
+}
+
 export async function listCronJobs(): Promise<CronJob[]> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const res = await authFetch(`${getLocalApiBase()}/cron`)
@@ -2120,6 +2137,7 @@ export async function videoAiEdit(req: VideoAiEditRequest): Promise<AiEditVideoR
 
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
+  runSlashCommand,
   authRegister,
   authLogin,
   authLogout,

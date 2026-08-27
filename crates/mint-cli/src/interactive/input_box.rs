@@ -226,7 +226,7 @@ pub(crate) fn compose_input_box(
                 total_pages
             ));
             for i in s_start_idx..s_end_idx {
-                let (cmd, desc) = (matches[i].token, matches[i].description);
+                let (cmd, desc) = (matches[i].token.as_str(), matches[i].description.as_str());
                 if Some(i) == highlight_idx {
                     lines.push(format!(
                         "  {BLUE}▶ {:<16}{RESET} {DIM}- {}{RESET}",
