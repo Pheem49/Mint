@@ -17,6 +17,7 @@ use tokio_tungstenite::{
 };
 
 use crate::{
+    AgentApproval,
     AgentProgress,
     // Video editing & Speech & Subtitles & Auto Shorts
     AiEditVideoRequest,
@@ -1016,6 +1017,22 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
+                                ("POST", "/api/slash") => {
+                    routes::slash::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
                                 ("POST", "/api/uploads") => {
                     routes::misc::execute(
                         routes::RequestCtx {
@@ -1065,6 +1082,22 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     .await;
                 }
                                 ("POST", "/api/chat-stream") => {
+                    routes::chat::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("POST", "/api/submit-approval") => {
                     routes::chat::execute(
                         routes::RequestCtx {
                             method,
@@ -1153,6 +1186,19 @@ async fn run_web_agent_loop(
         .get("enableFastMode")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    // Same pre-scoping as `/api/chat-stream`'s agent-mode branch in
+    // routes/chat.rs and for the same reason: `root` above deliberately
+    // stays this server process's own cwd (not the client's workspace), so
+    // `orchestrate_agent_loop`'s self-derivation from `root` alone can't
+    // distinguish workspaces here — scope from the client's `workspace_path`
+    // explicitly instead. Idempotent/safe either way (see `scoped_chat_id`).
+    let scoped_chat_id = crate::agent::memory::scoped_chat_id(
+        request
+            .chat_id
+            .as_deref()
+            .unwrap_or(DEFAULT_CONVERSATION_ID),
+        request.workspace_path.as_deref(),
+    );
     let result = orchestrate_agent_loop(
         config,
         &request.message,
@@ -1160,7 +1206,7 @@ async fn run_web_agent_loop(
         request.image_data_uri.clone(),
         request.audio_data_uri.clone(),
         request.video_data_uri.clone(),
-        request.chat_id.as_deref(),
+        Some(scoped_chat_id.as_str()),
         request.agent_id.as_deref(),
         None,
         request.pinned_mcp_server.as_deref(),
@@ -1178,9 +1224,12 @@ async fn run_web_agent_loop(
         model: result.model,
         text: result.summary,
         fallback_provider: result.fallback,
+        fallback_reason: None,
         tool_calls: None,
         stop_reason: None,
         total_tokens: None,
+        input_tokens: None,
+        output_tokens: None,
     })
 }
 

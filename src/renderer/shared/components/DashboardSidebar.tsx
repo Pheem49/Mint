@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react'
 import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon, renderScheduledTasksSvgIcon, renderLinkedFoldersSvgIcon } from '../constants/plugins'
 import { useAuthUser } from './AuthGate'
 import { APP_ICON_PATH } from '@/tauri'
@@ -20,6 +20,10 @@ interface DashboardSidebarProps {
   chatSessions: ChatSessionItem[]
   activeConversationId: string
   onToggleSidebar: () => void
+  /** Live width in px while the user drags the resize handle. */
+  onSidebarResize?: (width: number) => void
+  /** Fires once on drag release with the final width the user let go at. */
+  onSidebarResizeEnd?: (width: number) => void
   onClearHistory: (action: 'New chat' | 'Clear history') => void
   onSelectConversation: (id: string) => void
   onDeleteConversation: (id: string) => void
@@ -67,6 +71,8 @@ export default function DashboardSidebar({
   interactionEnabled,
   showInteractionGuide,
   onToggleSidebar,
+  onSidebarResize,
+  onSidebarResizeEnd,
   onClearHistory,
   onSelectConversation,
   onDeleteConversation,
@@ -90,7 +96,55 @@ export default function DashboardSidebar({
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false)
   const moreContainerRef = useRef<HTMLDivElement>(null)
   const accountContainerRef = useRef<HTMLDivElement>(null)
+  const asideRef = useRef<HTMLElement>(null)
   const { user, avatarUrl, logout } = useAuthUser()
+  const [isResizing, setIsResizing] = useState(false)
+  const dragRef = useRef<{ startX: number; startWidth: number; lastWidth: number; frame: number | null } | null>(null)
+
+  useEffect(() => {
+    if (!isResizing) return
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const drag = dragRef.current
+      if (!drag) return
+      const nextWidth = drag.startWidth + (event.clientX - drag.startX)
+      drag.lastWidth = nextWidth
+      if (drag.frame != null) return
+      drag.frame = requestAnimationFrame(() => {
+        if (dragRef.current) {
+          dragRef.current.frame = null
+          onSidebarResize?.(dragRef.current.lastWidth)
+        }
+      })
+    }
+
+    const handleMouseUp = () => {
+      const drag = dragRef.current
+      if (drag?.frame != null) cancelAnimationFrame(drag.frame)
+      setIsResizing(false)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      if (drag) onSidebarResizeEnd?.(drag.lastWidth)
+      dragRef.current = null
+    }
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isResizing, onSidebarResize, onSidebarResizeEnd])
+
+  const handleResizeStart = (event: ReactMouseEvent) => {
+    if (sidebarCollapsed) return
+    event.preventDefault()
+    const startWidth = asideRef.current?.getBoundingClientRect().width ?? 264
+    dragRef.current = { startX: event.clientX, startWidth, lastWidth: startWidth, frame: null }
+    setIsResizing(true)
+  }
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -131,7 +185,14 @@ export default function DashboardSidebar({
   }
 
   return (
-    <aside className="workspace-sidebar">
+    <aside className={`workspace-sidebar ${isResizing ? 'is-resizing' : ''}`} ref={asideRef}>
+      {!sidebarCollapsed && (
+        <div
+          className={`sidebar-resize-handle ${isResizing ? 'is-active' : ''}`}
+          onMouseDown={handleResizeStart}
+          title="Drag to resize sidebar"
+        />
+      )}
       <div
         className="sidebar-brand clickable"
         onClick={onToggleSidebar}

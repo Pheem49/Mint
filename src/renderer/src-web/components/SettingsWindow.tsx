@@ -49,7 +49,7 @@ type TabType = 'sect-general' | 'sect-profile' | 'sect-audio' | 'sect-automation
 interface SettingsNavItem {
   id: TabType
   label: string
-  group: 'Settings' | 'Customize'
+  group: 'Account' | 'Workspace' | 'Appearance' | 'Advanced'
   icon: React.ReactNode
 }
 
@@ -57,7 +57,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   {
     id: 'sect-general',
     label: 'General',
-    group: 'Settings',
+    group: 'Workspace',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="3"></circle>
@@ -68,7 +68,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   {
     id: 'sect-profile',
     label: 'Profile',
-    group: 'Settings',
+    group: 'Account',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -79,7 +79,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   {
     id: 'sect-automation',
     label: 'Automation',
-    group: 'Settings',
+    group: 'Workspace',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
@@ -91,7 +91,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   {
     id: 'sect-theme',
     label: 'Theme & UI',
-    group: 'Settings',
+    group: 'Appearance',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="5"></circle>
@@ -109,7 +109,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   {
     id: 'sect-memory',
     label: 'Memory & Profile',
-    group: 'Customize',
+    group: 'Workspace',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
@@ -119,7 +119,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   {
     id: 'sect-audio',
     label: 'Audio & Voice',
-    group: 'Customize',
+    group: 'Appearance',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
@@ -130,7 +130,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   {
     id: 'sect-plugins',
     label: 'Plugins',
-    group: 'Customize',
+    group: 'Advanced',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
@@ -142,7 +142,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   {
     id: 'sect-agents',
     label: 'Multi-Agent (Beta)',
-    group: 'Customize',
+    group: 'Workspace',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -154,7 +154,7 @@ const SETTINGS_NAV: SettingsNavItem[] = [
   },
 ]
 
-const SETTINGS_NAV_GROUPS: Array<'Settings' | 'Customize'> = ['Settings', 'Customize']
+const SETTINGS_NAV_GROUPS: Array<'Account' | 'Workspace' | 'Appearance' | 'Advanced'> = ['Account', 'Workspace', 'Appearance', 'Advanced']
 
 export {
   GEMINI_MODELS,

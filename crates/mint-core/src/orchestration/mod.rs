@@ -30,7 +30,7 @@ use crate::{
     stream_chat,
 };
 
-const CONTEXT_LIMIT: usize = 6;
+const CONTEXT_LIMIT: usize = 3;
 /// Per-message cap (in `chars`, not bytes — Thai text is multi-byte UTF-8)
 /// applied to each recalled `user_text`/`ai_text` when building the "recent
 /// conversation context" injected into a new task's opening system prompt.
@@ -39,7 +39,7 @@ const CONTEXT_LIMIT: usize = 6;
 /// unrelated turn for as long as it stays within the last `CONTEXT_LIMIT`
 /// interactions — this exists purely to nudge the model with recent
 /// continuity, not to re-litigate a whole previous answer.
-const MAX_CONTEXT_MESSAGE_CHARS: usize = 400;
+const MAX_CONTEXT_MESSAGE_CHARS: usize = 200;
 
 #[derive(Debug, Error)]
 pub enum OrchestrationError {
@@ -111,7 +111,7 @@ pub async fn orchestrate_chat(
     let enriched = enrich_request(config, &memory, &resolved_request)?;
     let response = send_chat(config, &enriched).await?;
     memory.add_interaction_for_chat_with_fallback(
-        request_chat_id(request),
+        &request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -145,7 +145,7 @@ where
     let enriched = enrich_request(config, &memory, &resolved_request)?;
     let response = stream_chat(config, &enriched, on_chunk).await?;
     memory.add_interaction_for_chat_with_fallback(
-        request_chat_id(request),
+        &request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -175,7 +175,7 @@ pub async fn orchestrate_chat_with_fallback(
     let enriched = enrich_request(config, &memory, &resolved_request)?;
     let (response, fallback) = send_chat_with_fallback(config, &enriched).await?;
     memory.add_interaction_for_chat_with_fallback(
-        request_chat_id(request),
+        &request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -209,7 +209,7 @@ where
     let enriched = enrich_request(config, &memory, &resolved_request)?;
     let (response, fallback) = stream_chat_with_fallback(config, &enriched, on_chunk).await?;
     memory.add_interaction_for_chat_with_fallback(
-        request_chat_id(request),
+        &request_chat_id(request),
         &request.message,
         &response.text,
         &response.provider,
@@ -247,7 +247,7 @@ fn enrich_request(
     request: &ChatRequest,
 ) -> Result<ChatRequest, MemoryError> {
     let mut interactions =
-        memory.recent_interactions_for_chat(request_chat_id(request), CONTEXT_LIMIT)?;
+        memory.recent_interactions_for_chat(&request_chat_id(request), CONTEXT_LIMIT)?;
     interactions.reverse();
     let transcript = interactions
         .into_iter()
@@ -309,13 +309,14 @@ fn enrich_request(
     Ok(enriched)
 }
 
-fn request_chat_id(request: &ChatRequest) -> &str {
-    request
+fn request_chat_id(request: &ChatRequest) -> String {
+    let raw = request
         .chat_id
         .as_deref()
         .map(str::trim)
         .filter(|chat_id| !chat_id.is_empty())
-        .unwrap_or(DEFAULT_CONVERSATION_ID)
+        .unwrap_or(DEFAULT_CONVERSATION_ID);
+    crate::agent::memory::scoped_chat_id(raw, request.workspace_path.as_deref())
 }
 
 use crate::prompts::agent::build_system_prompt;
@@ -334,18 +335,33 @@ use workspace_helpers::*;
 
 /// Hard ceiling on tool-call round-trips per task. Each step resends the
 /// whole accumulated conversation, so total tokens for one task scale
-/// roughly with step count — lowered from 32 to cap runaway/looping tasks
-/// earlier without cutting off most real multi-file work.
-const MAX_STEPS: usize = 24;
+/// roughly with step count. Was lowered from 32 to 24 to cap runaway/looping
+/// tasks earlier, but 24 turned out too tight for legitimate multi-file
+/// work, cutting it off mid-task — raised to 40 as a middle ground.
+const MAX_STEPS: usize = 40;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
 /// Compact `native_messages` once reported token usage crosses this fraction
-/// of the active model's context window. Lowered from 0.8 so long tasks
-/// start shedding old tool output earlier — every step after the trigger
-/// resends less, which is where the real per-task token cost comes from.
-const COMPACTION_TRIGGER_RATIO: f64 = 0.6;
+/// of the active model's context window. Every step resends the whole
+/// accumulated history (see `MAX_STEPS`'s doc comment above), so this is the
+/// main lever on real per-task token volume — not just cost, since provider
+/// prompt caching (automatic for OpenAI-compatible providers, explicit
+/// `cache_control` breakpoints for Anthropic) only discounts *price* on a
+/// resend, it doesn't shrink what's actually sent/counted. Lowered from 0.8,
+/// then from 0.6 to compact considerably earlier still — a task observed
+/// hitting 80,949/128,000 tokens on a single step at the 0.6 ratio (63% of
+/// window) was well past the point of real benefit from keeping that much
+/// verbatim.
+const COMPACTION_TRIGGER_RATIO: f64 = 0.4;
 /// Number of most-recent Assistant/Tool step-pairs kept verbatim (uncompacted)
 /// in `native_messages`.
 const COMPACTION_KEEP_RECENT_STEPS: usize = 3;
+/// How many times a step retries after every configured provider comes back
+/// `ChatError::NetworkUnavailable` before finally giving up — swapping
+/// providers is pointless when the network itself is down, so this waits and
+/// tries the same request again instead, with `AgentProgress::WaitingForNetwork`
+/// keeping the user informed of which attempt it's on.
+const NETWORK_RETRY_ATTEMPTS: usize = 4;
+const NETWORK_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// A single pick-a-choice option offered by the `ask_user` tool, with an
 /// optional one-line explanation shown under the label in both the CLI
@@ -424,9 +440,50 @@ pub enum AgentProgress {
         agent_name: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         model_name: Option<String>,
+        /// Context-window usage as of the last completed step, 0-100 — the
+        /// last thing we actually know, since usage is only reported in a
+        /// step's *response*, not predictable mid-generation. `None` until
+        /// the first step of a task has completed at least once.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        context_pct: Option<u8>,
+        /// Running sum of `total_tokens` across every step completed so far
+        /// this turn — same accumulator as `AgentResult::total_tokens`, just
+        /// surfaced live instead of only once the turn finishes, so the CLI
+        /// can count it up next to the "Thinking…" label the way Claude Code
+        /// does. 0 until the first step has completed.
+        #[serde(default)]
+        tokens_used: u64,
+        /// Prompt/context tokens the *most recent* completed step processed
+        /// (system prompt + tool schemas + the whole resent history) — the
+        /// `↑` half of the live counter. Latest-step, not summed: it tracks
+        /// how full the context window is, and summing would count the resent
+        /// history once per step. 0 until the first step has completed.
+        #[serde(default)]
+        input_tokens: u64,
+        /// Running sum of completion tokens the model generated across every
+        /// step this turn — the `↓` half. Summed (unlike `input_tokens`),
+        /// since each step's output is distinct work. 0 until the first step
+        /// has completed.
+        #[serde(default)]
+        generated_tokens: u64,
+        /// Rough char-count-based estimate of the very first request's size
+        /// — constant across every step of the turn. Only meaningful to a
+        /// consumer while `tokens_used` is still 0 (i.e. step 1's response
+        /// hasn't come back yet), as a stand-in until the real number
+        /// exists; ignored once `tokens_used` is nonzero.
+        #[serde(default)]
+        estimated_tokens: u64,
     },
     Thought {
         thought: String,
+    },
+    /// Emitted while retrying a step after every configured provider was
+    /// unreachable (`ChatError::NetworkUnavailable`) — distinct from
+    /// `Thinking` because there's nothing to wait *on* here except the
+    /// network itself coming back, not a model generating a reply.
+    WaitingForNetwork {
+        attempt: usize,
+        max_attempts: usize,
     },
     ToolStart {
         action: String,
@@ -457,6 +514,18 @@ pub struct AgentResult {
     pub summary: String,
     pub verification: String,
     pub fallback: Option<String>,
+    /// Sum of `total_tokens` across every step's API response this turn —
+    /// see the doc comment on `turn_total_tokens` where it's accumulated.
+    pub total_tokens: u64,
+    /// Prompt/context tokens the final step processed (latest-step, not summed
+    /// — see `AgentProgress::Thinking::input_tokens`). The `↑` half of the
+    /// turn footer's token counter.
+    #[serde(default)]
+    pub input_tokens: u64,
+    /// Sum of completion tokens generated across every step this turn — the
+    /// `↓` half of the turn footer's token counter.
+    #[serde(default)]
+    pub generated_tokens: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -606,6 +675,22 @@ struct AgentInput {
     provider: String,
     #[serde(default)]
     duration: Option<f64>,
+    // avatar_signal input fields — Rust-side `avatar_` prefix only to read
+    // unambiguously in this shared flat struct; explicit renames keep the
+    // wire/JSON keys unprefixed (matching the relay's AvatarEvent schema —
+    // see `crate::avatar_bridge`).
+    #[serde(default, rename = "emotions")]
+    avatar_emotions: std::collections::HashMap<String, String>,
+    #[serde(default, rename = "action")]
+    avatar_action: String,
+    #[serde(default, rename = "prop")]
+    avatar_prop: String,
+    #[serde(default, rename = "intensity")]
+    avatar_intensity: String,
+    #[serde(default, rename = "color")]
+    avatar_color: String,
+    #[serde(default, rename = "talking")]
+    avatar_talking: Option<bool>,
 }
 
 /// Decode shim for `ask_user`'s `options`: accepts either a bare string
@@ -729,6 +814,35 @@ fn resolve_agent_config(
     )
 }
 
+/// Calls `send_chat_with_fallback`, retrying up to `NETWORK_RETRY_ATTEMPTS`
+/// times (waiting `NETWORK_RETRY_DELAY` between each) when every configured
+/// provider comes back `ChatError::NetworkUnavailable` — swapping providers
+/// is pointless when the network itself is down, so this waits for it to
+/// come back instead of burning through the provider list, keeping the user
+/// informed via `AgentProgress::WaitingForNetwork` in the meantime. Any other
+/// error (including `NetworkUnavailable` after the last attempt) is returned
+/// immediately, unchanged.
+async fn send_chat_with_network_retry(
+    config: &MintConfig,
+    request: &ChatRequest,
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+) -> Result<(ChatResponse, Option<String>), ChatError> {
+    let mut attempt = 0;
+    loop {
+        match send_chat_with_fallback(config, request).await {
+            Err(ChatError::NetworkUnavailable) if attempt < NETWORK_RETRY_ATTEMPTS => {
+                attempt += 1;
+                progress(AgentProgress::WaitingForNetwork {
+                    attempt,
+                    max_attempts: NETWORK_RETRY_ATTEMPTS,
+                });
+                tokio::time::sleep(NETWORK_RETRY_DELAY).await;
+            }
+            other => return other,
+        }
+    }
+}
+
 /// Returns a boxed `dyn Future` trait object rather than being a plain
 /// `async fn` (whose return type would otherwise be an opaque, compiler-
 /// inferred type). This is required, not just a style choice: `execute_tool`
@@ -777,6 +891,14 @@ where
             .map(str::trim)
             .filter(|chat_id| !chat_id.is_empty())
             .unwrap_or(DEFAULT_CONVERSATION_ID);
+        // `root` is always resolved to a real, canonicalized directory above
+        // (never optional here, unlike the plain-chat path's `ChatRequest.
+        // workspace_path`), so an agent-mode conversation is always scoped to
+        // *some* workspace — it just never falls back to the plain global
+        // "cli" bucket the way plain chat can. Idempotent on chat ids that
+        // are already scoped or aren't "cli" at all (see `scoped_chat_id`).
+        let chat_id = crate::agent::memory::scoped_chat_id(chat_id, Some(&root.to_string_lossy()));
+        let chat_id = chat_id.as_str();
         // Subagent runs use a synthetic `{parent_chat_id}::subagent::{name}` chat id
         // (see the `dispatch_subagent` arm in `execute_tool`) so their own memory
         // interaction doesn't leak into the parent conversation's history. That
@@ -814,6 +936,16 @@ where
         let hooks = crate::hooks::list_hooks(config);
 
         append_memory_context(&mut system_prompt, chat_id);
+        // Rough token estimate for the very first request going out — lets
+        // the CLI seed its live counter before step 1's real response comes
+        // back and there's nothing else to go on yet (~4 chars/token, a
+        // widely-used approximation; ignores the tool catalog's own size —
+        // built per-step further down, not worth duplicating here just for
+        // this — so it undercounts a bit for native tool-calling, but only
+        // needs to be in the right ballpark for a still-updating live label,
+        // not exact).
+        let estimated_first_step_tokens =
+            ((system_prompt.chars().count() + observation.chars().count()) / 4) as u64;
 
         #[allow(unused_assignments)]
         let mut final_provider = config.ai_provider.clone();
@@ -849,6 +981,24 @@ where
         let mut step_thought_signatures: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         let mut warned_json_prompt_fallback = false;
+        // Last known context-window usage, as a percentage — updated after
+        // every step's response (see below) so the *next* step's `Thinking`
+        // progress event can show a live number instead of only learning
+        // about it retroactively once `COMPACTION_TRIGGER_RATIO` is crossed.
+        let mut last_context_pct: Option<u8> = None;
+        // Sum of `total_tokens` reported by every step's API response this
+        // turn — each step resends the full accumulated history (see the
+        // module-level "resend everything" note), so this is the actual
+        // billed token volume for the whole turn, not just the final step's
+        // context size (`last_context_pct` above tracks that separately).
+        let mut turn_total_tokens: u64 = 0;
+        // The `↑ context · ↓ generated` split of `turn_total_tokens`:
+        // `last_input_tokens` is the *most recent* step's prompt size (not
+        // summed — it tracks context-window fill, and the resent history
+        // would otherwise be counted once per step), `turn_generated_tokens`
+        // sums every step's completion since each step's output is new work.
+        let mut last_input_tokens: u64 = 0;
+        let mut turn_generated_tokens: u64 = 0;
 
         'steps: for step in 1..=MAX_STEPS {
             let (active_config, agent_instruction, active_agent_name, active_model_name) =
@@ -858,6 +1008,11 @@ where
                 elapsed_secs: started_at.elapsed().as_secs(),
                 agent_name: active_agent_name,
                 model_name: active_model_name.clone(),
+                context_pct: last_context_pct,
+                tokens_used: turn_total_tokens,
+                input_tokens: last_input_tokens,
+                generated_tokens: turn_generated_tokens,
+                estimated_tokens: estimated_first_step_tokens,
             });
 
             let mut active_system_prompt = system_prompt.clone();
@@ -931,7 +1086,7 @@ where
                         content,
                     });
                 }
-                send_chat_with_fallback(
+                send_chat_with_network_retry(
                     &active_config,
                     &ChatRequest {
                         message: String::new(),
@@ -953,10 +1108,11 @@ where
                             allow_subagent_dispatch,
                         )),
                     },
+                    &mut progress,
                 )
                 .await?
             } else {
-                send_chat_with_fallback(
+                send_chat_with_network_retry(
                     &active_config,
                     &ChatRequest {
                         message: observation.clone(),
@@ -973,12 +1129,18 @@ where
                         messages: None,
                         tools: None,
                     },
+                    &mut progress,
                 )
                 .await?
             };
 
             final_provider = response.provider.clone();
             final_model = response.model.clone();
+            turn_total_tokens += response.total_tokens.unwrap_or(0) as u64;
+            turn_generated_tokens += response.output_tokens.unwrap_or(0) as u64;
+            if let Some(input) = response.input_tokens {
+                last_input_tokens = input as u64;
+            }
             if fallback.is_some() {
                 // `fallback` (this function's own return value) is the provider
                 // that actually served this response; `response.fallback_provider`
@@ -988,6 +1150,14 @@ where
                 // gemini • Qwen..." in the CLI badge instead of "gemini →
                 // fallback: huggingface • Qwen...".
                 final_fallback = fallback.clone();
+                if let Some(reason) = &response.fallback_reason {
+                    progress(AgentProgress::Thought {
+                        thought: format!(
+                            "⚠️ Switched provider: {reason} — continuing with {}.",
+                            response.provider
+                        ),
+                    });
+                }
             }
             if let Some(calls) = &response.tool_calls {
                 for call in calls {
@@ -1360,6 +1530,9 @@ where
                             summary,
                             verification,
                             fallback: final_fallback,
+                            total_tokens: turn_total_tokens,
+                            input_tokens: last_input_tokens,
+                            generated_tokens: turn_generated_tokens,
                         });
                     }
 
@@ -1642,15 +1815,28 @@ where
 
                 if let Some(total_tokens) = response.total_tokens {
                     let window = active_config.context_window_tokens();
+                    last_context_pct = Some(
+                        ((total_tokens as f64 / window as f64) * 100.0).clamp(0.0, 255.0) as u8,
+                    );
                     if (total_tokens as f64) >= (window as f64) * COMPACTION_TRIGGER_RATIO {
                         match compact_native_messages(&active_config, &native_messages).await {
-                            Ok(Some(compacted)) => {
+                            Ok(Some((compacted, fallback_provider))) => {
                                 native_messages = compacted;
+                                let fallback_note = fallback_provider
+                                    .as_deref()
+                                    .map(|p| {
+                                        format!(
+                                            " (summary generated via fallback provider \
+                                             \"{p}\" — the primary provider failed for this \
+                                             call)"
+                                        )
+                                    })
+                                    .unwrap_or_default();
                                 progress(AgentProgress::Thought {
                                     thought: format!(
                                         "[Context] Compacted earlier steps to stay under the \
                                      context window ({total_tokens}/{window} tokens before \
-                                     compaction)."
+                                     compaction){fallback_note}."
                                     ),
                                 });
                             }
@@ -2124,6 +2310,7 @@ async fn execute_tool(
             )
             .await
         }
+        "avatar_signal" => tools::avatar::execute(input).await,
         "run_plugin" | "dispatch_subagent" | "mcp_tool" | "mcp_list_tools" => {
             tools::plugins_mcp::execute(
                 decision.action.as_str(),

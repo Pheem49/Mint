@@ -40,7 +40,7 @@ interface Window {
     executeProactiveAction: (action: any) => Promise<any>;
     executeApprovedAction: (action: any) => Promise<any>;
     onSpotlightToChat: (callback: (query: string) => void) => Promise<Unlisten>;
-    notifyAiResponse: () => void;
+    notifyAiResponse: (preview: string) => void;
     clearAiNotifications: () => void;
     getTtsUrls: (text: string) => Promise<Array<{ shortText: string; url: string }>>;
     setAiState: (state: string) => void;

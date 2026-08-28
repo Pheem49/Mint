@@ -1,4 +1,4 @@
-import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react'
+import { type ChangeEvent, type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react'
 import { mergeActivitySnapshots, trimAgentProgress } from '../agentProgress'
 import {
   clearChatHistory,
@@ -66,6 +66,12 @@ import { DEFAULT_CONFIG } from '../constants/config'
 
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
 const ACTIVE_CONVERSATION_ID_KEY = 'mint:active-conversation-id'
+
+const SIDEBAR_DEFAULT_WIDTH = 264
+const SIDEBAR_MIN_WIDTH = 200
+const SIDEBAR_MAX_WIDTH = 420
+/** Drag the sidebar edge past this width and it snaps fully closed on release. */
+const SIDEBAR_COLLAPSE_THRESHOLD = 170
 
 function createConversationId() {
   const random = Math.random().toString(36).slice(2, 10)
@@ -138,7 +144,9 @@ import {
   listLinkedFolders,
   addLinkedFolder,
   removeLinkedFolder,
+  runSlashCommand,
 } from '@/tauri'
+import type { SlashResponse } from '../platform'
 
 function getInitialViewFromUrl(): DashboardView {
   if (typeof window === 'undefined') return 'chat'
@@ -167,10 +175,53 @@ function getCleanPathForView(v: string, activeId?: string): string {
   return '/chat'
 }
 
+/** Keeps a desktop/browser notification body to one readable line. */
+function truncateForNotification(text: string, maxChars = 120): string {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  return clean.length > maxChars ? `${clean.slice(0, maxChars)}…` : clean
+}
+
+/** One-line plain-text summary of an AgentApproval for a notification body
+ * — ApprovalCard's own renderApprovalDetails returns JSX, not text, so
+ * this is a separate, notification-only summary. AgentApproval serializes
+ * as a single-key-tagged object per variant, e.g. {"WriteFile": {path, ...}}. */
+function describeApproval(payload: any): string {
+  const entry = Object.entries(payload?.approval ?? {})[0]
+  const kind = entry?.[0]
+  const detail: any = entry?.[1]
+  switch (kind) {
+    case 'WriteFile': return `Write to ${detail?.path}?`
+    case 'ApplyPatch': return `Edit ${detail?.path}?`
+    case 'RunShell': return `Run: ${detail?.command}`
+    case 'NoteWrite': return `Save note to ${detail?.path}?`
+    case 'RunPlugin': return `Run plugin: ${detail?.name}?`
+    case 'McpTool': return `Use ${detail?.tool} on ${detail?.server}?`
+    case 'UserApproval': return detail?.title ?? 'Approval needed'
+    case 'AskUser': return detail?.question ?? 'Mint has a question'
+    case 'ExitPlanMode':
+    case 'EnterPlanMode':
+      return 'Plan mode change needs approval'
+    default: return 'Mint needs your approval to continue'
+  }
+}
+
+/** Fires the same notification mechanism as a finished AI reply, but only
+ * while the window is unfocused — reused so both surfaces get identical
+ * title/permission/dedupe behavior, just a different body string. */
+function notifyPendingApproval(payload: any) {
+  if (document.hidden || !document.hasFocus()) {
+    window.api?.notifyAiResponse?.(truncateForNotification(describeApproval(payload)))
+  }
+}
+
 export default function MintDashboard() {
   const isDesktopApp = isTauriRuntime()
   const [view, setViewState] = useState<DashboardView>(getInitialViewFromUrl)
   const [conversationId, setConversationId] = useState(activeConversationId)
+  // Declared here (not further down with the rest of the workspace-related
+  // state) so the URL-change effect below can read it — that effect closes
+  // over `workspacePath` to scope its own `getRecentInteractions` call.
+  const [workspacePath, setWorkspacePath] = useState(() => window.localStorage.getItem(LAST_WORKSPACE_PATH_KEY) || '')
   // Web only in practice (desktop's window has no mobile-width breakpoint,
   // so nothing ever sets this true there) — declared unconditionally so
   // `changeView` can close it on every navigation without branching.
@@ -214,7 +265,7 @@ export default function MintDashboard() {
       if (urlSessionId && urlSessionId !== conversationId) {
         window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, urlSessionId)
         setConversationId(urlSessionId)
-        getRecentInteractions(50, urlSessionId).then((history) => {
+        getRecentInteractions(50, urlSessionId, workspacePath || null).then((history) => {
           const reversed = history.reverse()
           setInteractions(reversed)
           setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
@@ -227,7 +278,7 @@ export default function MintDashboard() {
       window.removeEventListener('popstate', handleUrlChange)
       window.removeEventListener('hashchange', handleUrlChange)
     }
-  }, [conversationId])
+  }, [conversationId, workspacePath])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -251,6 +302,10 @@ export default function MintDashboard() {
   const [sessionAutoApproved, setSessionAutoApproved] = useState(false)
   const sessionAutoApprovedRef = useRef(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem('mint:sidebar-collapsed') === 'true')
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = Number(window.localStorage.getItem('mint:sidebar-width'))
+    return saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH ? saved : SIDEBAR_DEFAULT_WIDTH
+  })
   const [smartContext, setSmartContext] = useState(() => window.localStorage.getItem('mint:smart-context') !== 'false')
   const [agentMode, setAgentMode] = useState(() => window.localStorage.getItem('mint:agent-mode') === 'true')
   const [planMode, setPlanMode] = useState(() => window.localStorage.getItem('mint:plan-mode') === 'true')
@@ -258,7 +313,6 @@ export default function MintDashboard() {
   const [dashboardDataReady, setDashboardDataReady] = useState(false)
   const [startupTimedOut, setStartupTimedOut] = useState(false)
   const [settingsConfig, setSettingsConfig] = useState<any>(null)
-  const [workspacePath, setWorkspacePath] = useState(() => window.localStorage.getItem(LAST_WORKSPACE_PATH_KEY) || '')
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([])
   const chatEnd = useRef<HTMLDivElement | null>(null)
   const lastNativePasteTimeRef = useRef(0)
@@ -355,6 +409,10 @@ export default function MintDashboard() {
   const handleConnectPlugin = (_plugin: string) => {}
 
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+  // A pending `needs_choice` from the shared slash engine — rendered as a chip bar.
+  const [pendingSlashChoice, setPendingSlashChoice] = useState<
+    { command: string; title: string; options: { label: string; value: string }[] } | null
+  >(null)
   const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
@@ -396,7 +454,7 @@ export default function MintDashboard() {
       // reply with stale history).
       if (document.visibilityState !== 'visible' || sending) return
       try {
-        const history = (await getRecentInteractions(50, conversationId)).reverse()
+        const history = (await getRecentInteractions(50, conversationId, workspacePath || null)).reverse()
         const current = interactionsRef.current
         const currentLast = current[current.length - 1]
         const nextLast = history[history.length - 1]
@@ -408,7 +466,7 @@ export default function MintDashboard() {
       }
     }, 3000)
     return () => window.clearInterval(interval)
-  }, [view, conversationId, sending])
+  }, [view, conversationId, sending, workspacePath])
 
   const filteredSessions = chatSessions.filter((session) => {
     if (session.kind === 'cli' || session.id === 'conversation-default') return false
@@ -462,7 +520,7 @@ export default function MintDashboard() {
 
 
   async function refreshHistory() {
-    const history = await getRecentInteractions(50, conversationId)
+    const history = await getRecentInteractions(50, conversationId, workspacePath || null)
     const reversed = history.reverse()
     setInteractions(reversed)
     setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
@@ -532,6 +590,7 @@ export default function MintDashboard() {
           applyThemeStyles(loaded)
         }
       }).catch(() => {})
+      window.api?.clearAiNotifications?.()
     }
     window.addEventListener('focus', handleWindowFocus)
 
@@ -548,6 +607,7 @@ export default function MintDashboard() {
         })
       } else {
         setPendingApproval(event.payload)
+        notifyPendingApproval(event.payload)
       }
     })
     return () => {
@@ -589,6 +649,24 @@ export default function MintDashboard() {
     window.localStorage.setItem('mint:sidebar-collapsed', String(next))
     setSidebarCollapsed(next)
     setMobileSidebarOpen(false)
+  }
+
+  const handleSidebarResize = (width: number) => {
+    setSidebarWidth(Math.max(SIDEBAR_COLLAPSE_THRESHOLD, Math.min(SIDEBAR_MAX_WIDTH, width)))
+  }
+
+  const handleSidebarResizeEnd = (width: number) => {
+    if (width < SIDEBAR_COLLAPSE_THRESHOLD) {
+      // Dragged small enough — snap fully closed instead of leaving a sliver.
+      setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)
+      window.localStorage.setItem('mint:sidebar-width', String(SIDEBAR_DEFAULT_WIDTH))
+      window.localStorage.setItem('mint:sidebar-collapsed', 'true')
+      setSidebarCollapsed(true)
+      return
+    }
+    const clamped = Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, width))
+    setSidebarWidth(clamped)
+    window.localStorage.setItem('mint:sidebar-width', String(clamped))
   }
 
   const updateSmartContext = (enabled: boolean) => {
@@ -711,9 +789,22 @@ export default function MintDashboard() {
         undefined,
         shouldUseAgentMode ? planMode : false,
         options.pinnedMcpServer ?? null,
+        (payload) => {
+          if (sessionAutoApprovedRef.current) {
+            submitToolApproval(payload.token, true).catch((err) => {
+              console.error("Auto approval failed:", err)
+            })
+          } else {
+            setPendingApproval(payload)
+            notifyPendingApproval(payload)
+          }
+        },
       )
       setStreamedResponse(response)
-      const history = (await getRecentInteractions(50, conversationId)).reverse()
+      if (document.hidden || !document.hasFocus()) {
+        window.api?.notifyAiResponse?.(truncateForNotification(response.text))
+      }
+      const history = (await getRecentInteractions(50, conversationId, workspacePath || null)).reverse()
       let enrichedHistory = history
       if (progressSnapshot.length > 0) {
         const newestInteraction = [...history]
@@ -767,17 +858,24 @@ export default function MintDashboard() {
     if ((!trimmed && !hasAttachments) || sending) return
 
     if (trimmed.startsWith('/')) {
-      const activeP = status?.activeProvider || ''
-      const activeM = settingsConfig?.model || ''
-      const slashResult = executeSlashCommand(trimmed, {
-        activeProvider: activeP,
-        activeModel: activeM,
-        availableProviders: status?.availableProviders || [],
-        workspacePath,
-        interactionsCount: interactions.length,
-        fastMode: settingsConfig?.fastMode ?? false,
-        multiAgent: settingsConfig?.multiAgent ?? false,
-      })
+      // Shared Rust engine first (mint_core::slash). Anything it doesn't own
+      // comes back as `not_handled` and falls through to the TS processor below.
+      let engineResp: SlashResponse | null = null
+      try {
+        engineResp = await runSlashCommand(trimmed, workspacePath || null)
+      } catch {
+        engineResp = null
+      }
+      if (engineResp && engineResp.kind !== 'not_handled') {
+        setMessage('')
+        setImageAttachments([])
+        setVideoAttachments([])
+        setDocumentAttachment(null)
+        await handleEngineSlashResponse(trimmed, engineResp)
+        return
+      }
+
+      const slashResult = executeSlashCommand(trimmed)
 
       if (slashResult.handled) {
         setMessage('')
@@ -785,23 +883,7 @@ export default function MintDashboard() {
         setVideoAttachments([])
         setDocumentAttachment(null)
 
-        if (slashResult.action === 'set_agent_mode') {
-          setAgentMode(true)
-          if (slashResult.payload?.prompt) {
-            await sendPrompt(slashResult.payload.prompt, { clearComposer: true })
-          }
-          return
-        }
-
-        if (slashResult.action === 'change_workspace') {
-          if (slashResult.payload?.path) {
-            setWorkspacePath(slashResult.payload.path)
-          } else {
-            selectWorkspaceDirectory().then((res) => {
-              if (res) setWorkspacePath(res)
-            }).catch(() => {})
-          }
-        } else if (slashResult.action === 'open_image_picker') {
+        if (slashResult.action === 'open_image_picker') {
           document.getElementById('vision-file-input')?.click()
           return
         } else if (slashResult.action === 'paste_image') {
@@ -809,17 +891,9 @@ export default function MintDashboard() {
             if (uri) setImageAttachments((curr) => [...curr, { dataUri: uri, name: 'Clipboard Image' }])
           }).catch(() => {})
           return
-        } else if (slashResult.action === 'open_plugins') {
-          changeView('plugins')
-          return
         } else if (slashResult.action === 'generate_veo') {
           changeView('veo')
           return
-        } else if (slashResult.action === 'set_provider_model' && slashResult.payload?.target) {
-          const target = slashResult.payload.target
-          if (status?.availableProviders.includes(target)) {
-            setActiveModel(target).then(() => getRuntimeStatus().then(setStatus)).catch(() => {})
-          }
         }
 
         if (slashResult.systemText) {
@@ -1041,6 +1115,100 @@ export default function MintDashboard() {
     }
   }
 
+  // Append a synthetic "system" message to the current conversation — used by
+  // the slash-command dispatcher for `/help`-style output and `/cron` etc.
+  // listings. Mirrors the inline push in `handleSubmit`.
+  function pushSystemMessage(userText: string, aiText: string) {
+    const systemMsg = {
+      id: Date.now(),
+      userText,
+      aiText,
+      createdAt: new Date().toISOString(),
+      provider: 'system',
+      model: 'mint-cli',
+    }
+    setInteractions((prev) => [...prev, systemMsg])
+    saveSystemInteraction(conversationId, userText, aiText, 'system', 'mint-cli').catch(() => {})
+  }
+
+  // Map the shared engine's nav target onto a DashboardView.
+  function slashNavView(target: string): DashboardView {
+    switch (target) {
+      case 'linked_folders':
+        return 'link'
+      case 'cron':
+        return 'cron'
+      case 'skills':
+        return 'skills'
+      case 'plugins':
+        return 'plugins'
+      case 'mcp':
+        return 'mcp'
+      case 'veo':
+        return 'veo'
+      default:
+        return 'chat'
+    }
+  }
+
+  // Act on a response from the shared Rust slash engine (mint_core::slash).
+  async function handleEngineSlashResponse(userText: string, resp: SlashResponse) {
+    switch (resp.kind) {
+      case 'message':
+        pushSystemMessage(userText, resp.markdown)
+        break
+      case 'applied': {
+        const wsChange = resp.effects.find((e) => e.kind === 'workspace_changed') as
+          | { kind: 'workspace_changed'; path: string }
+          | undefined
+        if (wsChange) setWorkspacePath(wsChange.path)
+        const providerChange = resp.effects.find((e) => e.kind === 'provider_changed') as
+          | { kind: 'provider_changed'; display: string }
+          | undefined
+        if (providerChange) {
+          // Render the same "✨ Gemini • model" chip the GUI's own /models shows.
+          // The engine already logged the `provider_change` row into the shared
+          // "cli" conversation, so this is just the immediate local echo.
+          setInteractions((prev) => [
+            ...prev,
+            {
+              id: Date.now(),
+              userText: providerChange.display,
+              aiText: '',
+              createdAt: new Date().toISOString(),
+              provider: 'system',
+              model: 'provider_change',
+            },
+          ])
+        }
+        if (resp.effects.some((e) => e.kind === 'history_cleared')) {
+          await clearChatHistory(conversationId).catch(() => {})
+          setInteractions([])
+        }
+        if (resp.markdown) pushSystemMessage(userText, resp.markdown)
+        if (resp.effects.some((e) => e.kind !== 'history_cleared' && e.kind !== 'workspace_changed')) {
+          // Desktop also gets a `settings-changed` push; refetch anyway so web stays in sync.
+          ;(window as any).settingsApi?.getSettings?.().then((c: any) => c && setSettingsConfig(c)).catch(() => {})
+          getRuntimeStatus().then(setStatus).catch(() => {})
+        }
+        break
+      }
+      case 'navigate':
+        if (resp.markdown) pushSystemMessage(userText, resp.markdown)
+        changeView(slashNavView(resp.target as any))
+        break
+      case 'forward_to_agent':
+        if (resp.agent_mode) setAgentMode(true)
+        await sendPrompt(resp.prompt, { clearComposer: true })
+        break
+      case 'needs_choice':
+        setPendingSlashChoice({ command: resp.command, title: resp.title, options: resp.options })
+        break
+      case 'exit':
+        break
+    }
+  }
+
   function handleThinkingExpandedChange(key: string, open: boolean) {
     if (key === 'live') liveThinkingOpenRef.current = open
     setThinkingExpanded((current) => ({ ...current, [key]: open }))
@@ -1056,7 +1224,7 @@ export default function MintDashboard() {
     setImageAttachments([])
     setDocumentAttachment(null)
     setAgentProgress([])
-    const history = await getRecentInteractions(50, id)
+    const history = await getRecentInteractions(50, id, workspacePath || null)
     const reversed = history.reverse()
     setInteractions(reversed)
     setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
@@ -1079,7 +1247,7 @@ export default function MintDashboard() {
         window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, nextActive)
         setConversationId(nextActive)
         setAgentProgress([])
-        const history = await getRecentInteractions(50, nextActive)
+        const history = await getRecentInteractions(50, nextActive, workspacePath || null)
         const reversed = history.reverse()
         setInteractions(reversed)
         setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
@@ -1273,7 +1441,10 @@ export default function MintDashboard() {
 
   return (
     <div className={`app-container ${startupReady ? '' : 'is-loading'}`}>
-      <div className={`app-body ${(sidebarCollapsed && window.innerWidth > 760) ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''}`}>
+      <div
+        className={`app-body ${(sidebarCollapsed && window.innerWidth > 760) ? 'sidebar-collapsed' : ''} ${view === 'pictures' ? 'pictures-open' : ''} ${mobileSidebarOpen ? 'mobile-sidebar-open' : ''}`}
+        style={{ '--sidebar-expanded-width': `${sidebarWidth}px` } as CSSProperties}
+      >
         {mobileSidebarOpen && (
           <div
             className="sidebar-backdrop"
@@ -1302,6 +1473,8 @@ export default function MintDashboard() {
           interactionEnabled={interactionEnabled}
           showInteractionGuide={showInteractionGuide}
           onToggleSidebar={toggleSidebar}
+          onSidebarResize={handleSidebarResize}
+          onSidebarResizeEnd={handleSidebarResizeEnd}
           onClearHistory={clearHistory}
           chatSessions={chatSessions}
           activeConversationId={conversationId}
@@ -1339,6 +1512,34 @@ export default function MintDashboard() {
                     onClick={() => handleProactiveAction(sug.action)}
                   >
                     {sug.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {pendingSlashChoice && (
+            <div className="proactive-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
+              <div className="proactive-header">
+                <span className="proactive-icon">⚡</span>
+                <div className="proactive-message">{pendingSlashChoice.title}</div>
+                <button className="proactive-dismiss-btn" onClick={() => setPendingSlashChoice(null)}>
+                  Dismiss
+                </button>
+              </div>
+              <div className="proactive-chips">
+                {pendingSlashChoice.options.map((opt) => (
+                  <button
+                    key={opt.value}
+                    className="suggestion-chip"
+                    onClick={() => {
+                      const next = `${pendingSlashChoice.command} ${opt.value}`
+                      setPendingSlashChoice(null)
+                      runSlashCommand(next, workspacePath || null)
+                        .then((r) => handleEngineSlashResponse(next, r))
+                        .catch(() => {})
+                    }}
+                  >
+                    {opt.label}
                   </button>
                 ))}
               </div>

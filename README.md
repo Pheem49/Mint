@@ -51,9 +51,10 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 ---
 
-### 5. <img src="assets/memory.svg" width="18" height="18" valign="middle" /> Memory, Knowledge & Self-Written Skills
+### 5. <img src="assets/memory.svg" width="18" height="18" valign="middle" /> Memory, Knowledge & Skills
 - Persistent conversation memory (SQLite), a searchable local knowledge base, and semantic code search.
 - After solving a hard, reusable problem, the agent can write its own skill (`.agents/skills/`) — and genuinely refine an existing one instead of duplicating it, the next time a similar task recurs.
+- Install ready-made skills too, from a local file/folder or straight from a GitHub repo/URL — `mint skills add <source>` (or `/skill add <source>` in chat). See [Skills](#skills-mint-skills) below.
 
 ---
 
@@ -91,6 +92,19 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
   mint mcp allow fablemint "*"
   ```
   See [FableMint's README](https://github.com/Pheem49/FableMint#driving-it-with-an-ai-agent) for the full tool list.
+
+---
+
+### 12. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Real-Time 3D Avatar via Project Avatar
+- Connect **[Project Avatar](https://github.com/projectavatar/projectavatar)** — a free, open-source 3D VRM avatar that reacts live to what the agent is doing — with `/avatar` in chat (or `mint avatar` from the CLI):
+  ```
+  /avatar          # pick Web or Desktop, get your share link / token
+  /avatar status   # check connection, selected model, viewer count
+  /avatar off      # disable
+  ```
+- The agent reacts as it works — typing/searching while a tool runs, celebrating on a finished image/video — and can call `avatar_signal` directly for anything a tool call can't express, like a greeting, a joke, or an apology.
+- **Web viewing just works** — picking Web opens `app.projectavatar.io/?token=...`, a page the Project Avatar team already hosts for free. No install, no clone, nothing to build; any browser works.
+- **Desktop viewing** needs Project Avatar's own desktop app, built separately from [their repo](https://github.com/projectavatar/projectavatar#desktop-app) — it isn't bundled with Mint. Its first-run screen generates its own token; paste the one `/avatar` gave you into its "Paste existing token" field instead so it joins Mint's channel rather than its own.
 
 ## <img src="assets/setup.svg" width="24" height="24" valign="middle" /> Prerequisites
 
@@ -322,6 +336,8 @@ mint chat "<message>"
 | `mint plugin list` | List local plugins |
 | `mint mcp list` | List configured MCP servers |
 | `mint learn <path>` | Import a persistent learned skill file |
+| `mint skills add <path\|github-repo\|url>` | Install a skill — local path, or a GitHub repo/URL via `npx skills` |
+| `mint skills list` | List all skills Mint can see (global, workspace, taught) |
 | `mint update --check` | Check for an available update |
 
 ### Code Agent
@@ -357,6 +373,32 @@ mint open README.md
 mint open-app code
 mint learn ./skill.md
 ```
+
+### Skills (`mint skills`)
+
+Reusable instruction sets the agent loads into context. Besides the ones Mint writes for itself after a hard task, you can install skills from a local file/folder, or straight from a GitHub repo/URL — resolved via the community [`npx skills`](https://github.com/vercel-labs/skills) CLI, so any skill written for Claude Code, Cursor, or the many other agents it supports works with Mint too, no conversion needed:
+
+```bash
+# Local file or folder — goes to Mint's global config (~/.config/mint/mint-skills)
+mint skills add ./my-skill.md
+mint skills add ~/Documents/my-skill-folder
+
+# GitHub repo shorthand, or a full GitHub/GitLab/git URL — lands in
+# ./.agents/skills/ of the current project, picked up automatically
+mint skills add vercel-labs/agent-skills
+mint skills add https://github.com/owner/repo
+
+# Multi-skill repo? Extra flags forward straight to `npx skills` —
+# install just the one you want instead of the whole repo
+mint skills add vercel-labs/skills --skill find-skills
+
+# See every skill Mint can currently see (global / workspace / self-written)
+mint skills list
+```
+
+The same two operations work in interactive chat: `/skill add <source>` and `/skill` (or `/skill list`). Browse [skills.sh](https://skills.sh) — an open directory for this same ecosystem — for ready-made skills; every listing's `owner/repo` installs with the command above as-is.
+
+The GitHub/URL path needs Node.js (`npx`) on your machine; local file/folder installs don't need anything extra.
 
 ### Ecosystem Plugins (`mint plugins`)
 
@@ -397,6 +439,8 @@ mint mcp call filesystem list_directory \
 | `/image <path> [prompt]` | Send an image with an optional prompt |
 | `/paste [prompt]` | Use an image from the clipboard |
 | `/learn <path>` | Import a local skill |
+| `/skill [list]` | List all skills Mint can see (global, workspace, taught) |
+| `/skill add <path\|github-repo\|url>` | Install a skill — local path, or a GitHub repo/URL via `npx skills` |
 | `/plugins [name]` | List or interact with available plugins/skills |
 | `/memory list` | List stored memories |
 | `/memory clear` | Clear stored memories |
@@ -405,6 +449,7 @@ mint mcp call filesystem list_directory \
 | `/mcp [subcmd]` | Manage configured MCP servers (list, allow, disallow) |
 | `/stats` | Show session statistics |
 | `/code <task>` | Start a code-agent task |
+| `/avatar [web\|desktop\|status\|off]` | Connect agent activity to [Project Avatar](https://github.com/projectavatar/projectavatar) |
 | `/exit` or `/quit` | Leave interactive mode |
 
 ## Running Mint 24/7 on a VPS (Headless Gateway)
@@ -534,6 +579,20 @@ Configuration covers provider credentials, model preferences, browser context,
 voice and TTS, proactive suggestions, headless tasks, updates, workflows, MCP
 servers, and optional integrations such as Calendar, Gmail, Notion, Telegram,
 Discord, Slack, LINE, WhatsApp, Google Search, and Brave Search.
+
+### Ollama tool calling
+
+Mint drives Ollama through native `/api/chat` tool calling when the model family
+is known to support it (Llama 3.1+/4, Qwen2+/3/QwQ, Mistral/Mixtral, Gemma 4,
+Granite 3–4, Command-R/A, Hermes 3, gpt-oss, DeepSeek V3, Phi-4-mini, and others
+— see `OLLAMA_NATIVE_TOOL_MODEL_PREFIXES` in
+`crates/mint-core/src/system/config.rs`). Anything else falls back to a less
+reliable prompt-based JSON mode and warns once per run.
+
+Check a specific model with `ollama show <model>` (look for `tools` under
+**Capabilities**) or browse [`ollama.com/search?c=tools`](https://ollama.com/search?c=tools).
+Force the JSON fallback regardless of model with `"forceJsonPromptMode": true` in
+the config.
 
 The optional browser smart-context helper can provide active-tab context from:
 

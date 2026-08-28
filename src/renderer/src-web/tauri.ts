@@ -37,6 +37,10 @@ export const isTauriRuntime = () => (
   typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__)
 )
 
+/** The last browser Notification shown by notifyAiResponse's fallback
+ * (non-Tauri) branch, so clearAiNotifications can dismiss it. */
+let lastAiNotification: Notification | null = null
+
 /**
  * Root-relative: the web build's SPA fallback serves index-web.html at deep
  * paths like /chat/<id>, and a page-relative "./assets/..." would resolve
@@ -326,7 +330,7 @@ export async function sendChatMessage(
       const res = await authFetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId })
+        body: JSON.stringify({ message: outgoingMessage, systemInstruction: '', chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId })
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
@@ -387,6 +391,11 @@ export async function streamChatMessage(
   // `MintDashboard.tsx` call site passes the same argument list to both builds.
   _planMode?: boolean,
   pinnedMcpServer?: string | null,
+  // Web has no separate Tauri event bus for approvals (unlike desktop's
+  // global `listen('tool-approval-requested', ...)`), so the server sends
+  // an `approval-requested` event down this same ndjson stream instead —
+  // this callback is how the caller learns about it.
+  onApprovalRequested?: (payload: { token: string; approval: any }) => void,
 ): Promise<ChatResponse> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
@@ -394,7 +403,7 @@ export async function streamChatMessage(
     const res = await authFetch(`${API_BASE}/chat-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, agentId, pinnedMcpServer })
+      body: JSON.stringify({ message: outgoingMessage, systemInstruction, chatId, imageDataUri, audioDataUri, videoDataUri, documentAttachment, workspacePath, agentId, pinnedMcpServer })
     });
     if (!res.ok) {
       const data = await res.json().catch(() => null);
@@ -423,6 +432,8 @@ export async function streamChatMessage(
             onProgress?.(event.progress);
           } else if (event.type === 'done') {
             finalResponse = event.response;
+          } else if (event.type === 'approval-requested') {
+            onApprovalRequested?.({ token: event.token, approval: event.approval });
           }
         } catch (e) {
           console.error("Failed to parse stream line:", line, e);
@@ -570,12 +581,13 @@ export async function cancelChatMessage(chatId: string): Promise<void> {
   await invoke('cancel_chat_message', { chatId })
 }
 
-export async function getRecentInteractions(limit = 50, chatId?: string | null): Promise<InteractionMemory[]> {
+export async function getRecentInteractions(limit = 50, chatId?: string | null, workspacePath?: string | null): Promise<InteractionMemory[]> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
       const params = new URLSearchParams({ limit: String(limit) });
       if (chatId) params.set('chatId', chatId);
+      if (workspacePath) params.set('workspacePath', workspacePath);
       const res = await authFetch(`${API_BASE}/interactions?${params.toString()}`);
       return await res.json();
     } catch (e) {
@@ -584,7 +596,7 @@ export async function getRecentInteractions(limit = 50, chatId?: string | null):
     }
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke<InteractionMemory[]>('get_recent_interactions', { limit, chatId })
+  return invoke<InteractionMemory[]>('get_recent_interactions', { limit, chatId, workspacePath })
 }
 
 export async function saveSystemInteraction(
@@ -885,6 +897,12 @@ export async function setDefaultImageProvider(provider: string): Promise<boolean
 
 export async function submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase();
+    await authFetch(`${API_BASE}/submit-approval`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, approved, answer }),
+    });
     return;
   }
   const { invoke } = await import('@tauri-apps/api/core')
@@ -1157,8 +1175,20 @@ export function installTauriAdapters() {
         }
       },
       onSpotlightToChat: async () => () => {},
-      notifyAiResponse: () => {},
-      clearAiNotifications: () => {},
+      notifyAiResponse: async (preview: string) => {
+        if (typeof Notification === 'undefined') return
+        let permission = Notification.permission
+        if (permission === 'default') {
+          permission = await Notification.requestPermission()
+        }
+        if (permission === 'granted') {
+          lastAiNotification = new Notification('Mint Agent', { body: preview })
+        }
+      },
+      clearAiNotifications: () => {
+        lastAiNotification?.close()
+        lastAiNotification = null
+      },
       getTtsUrls: async () => [],
       setAiState: () => {},
     };
@@ -1419,7 +1449,19 @@ export function installTauriAdapters() {
       const { listen } = await import('@tauri-apps/api/event')
       return listen<string>('spotlight-to-chat', (event) => callback(event.payload))
     },
-    notifyAiResponse: () => {},
+    notifyAiResponse: async (preview) => {
+      const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification')
+      let granted = await isPermissionGranted()
+      if (!granted) {
+        granted = (await requestPermission()) === 'granted'
+      }
+      if (granted) {
+        sendNotification({ title: 'Mint Agent', body: preview })
+      }
+    },
+    // The plugin has no reliable cross-platform way to dismiss an
+    // already-shown OS notification from JS — best-effort no-op; there's
+    // simply nothing stale left for the next unfocused reply to build on.
     clearAiNotifications: () => {},
     getTtsUrls: async (text) => {
       const { invoke } = await import('@tauri-apps/api/core')
@@ -1592,6 +1634,23 @@ export async function deleteSubagent(sourcePath: string): Promise<void> {
   }
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('delete_subagent', { sourcePath })
+}
+
+export async function runSlashCommand(
+  input: string,
+  cwd?: string | null
+): Promise<import('../shared/platform').SlashResponse> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const res = await authFetch(`${getLocalApiBase()}/slash`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input, cwd: cwd ?? null })
+    })
+    if (!res.ok) return { kind: 'not_handled' }
+    return res.json()
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('run_slash_command', { input, cwd: cwd ?? null })
 }
 
 export async function listCronJobs(): Promise<CronJob[]> {
@@ -2078,6 +2137,7 @@ export async function videoAiEdit(req: VideoAiEditRequest): Promise<AiEditVideoR
 
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
+  runSlashCommand,
   authRegister,
   authLogin,
   authLogout,

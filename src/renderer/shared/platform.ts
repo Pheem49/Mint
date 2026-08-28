@@ -32,8 +32,36 @@ export function getLocalApiBase(): string {
   return 'http://localhost:3000/api'
 }
 
+// --- Shared slash-command engine (mint_core::slash) -------------------------
+// Mirrors the serde-serialized Rust enums. `kind` is the internal tag.
+
+export type SlashNavTarget = 'cron' | 'linked_folders' | 'skills' | 'plugins' | 'mcp' | 'veo'
+
+export interface SlashChoice {
+  label: string
+  value: string
+}
+
+export type SlashEffect =
+  | { kind: 'config_changed' }
+  | { kind: 'provider_changed'; display: string }
+  | { kind: 'workspace_changed'; path: string }
+  | { kind: 'history_cleared' }
+  | { kind: 'fast_mode_changed'; enabled: boolean }
+  | { kind: 'multi_agent_changed'; enabled: boolean }
+
+export type SlashResponse =
+  | { kind: 'message'; markdown: string }
+  | { kind: 'applied'; markdown: string; effects: SlashEffect[] }
+  | { kind: 'needs_choice'; command: string; title: string; options: SlashChoice[] }
+  | { kind: 'forward_to_agent'; prompt: string; agent_mode: boolean }
+  | { kind: 'navigate'; target: SlashNavTarget; markdown: string }
+  | { kind: 'exit' }
+  | { kind: 'not_handled' }
+
 export interface MintPlatformApi {
   authRegister(name: string | undefined, email: string, password: string): Promise<AuthUser>
+  runSlashCommand(input: string, cwd?: string | null): Promise<SlashResponse>
   authLogin(email: string, password: string): Promise<AuthUser>
   authLogout(): Promise<void>
   authGetCurrentUser(): Promise<AuthUser | null>

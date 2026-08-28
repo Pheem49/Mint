@@ -206,6 +206,20 @@ export default function ChatPanel({
   const [speakingText, setSpeakingText] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | number | null>(null)
 
+  const chatContainerRef = useRef<HTMLDivElement | null>(null)
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+
+  const handleChatScroll = useCallback(() => {
+    const el = chatContainerRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    setShowScrollToBottom(distanceFromBottom > 240)
+  }, [])
+
+  const scrollToBottom = useCallback(() => {
+    chatEnd.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatEnd])
+
   const handleCopyMessage = useCallback(async (id: string | number, text: string) => {
     try {
       const cleanText = readableAssistantText(text) || text
@@ -1039,7 +1053,7 @@ export default function ChatPanel({
           </svg>
         </button>
       </div>
-      <div className="chat-container">
+      <div className="chat-container" ref={chatContainerRef} onScroll={handleChatScroll}>
         {interactions.map((interaction, index) => (
           <Fragment key={interaction.id}>
             {index > 0 && shouldShowSessionDivider(interactions[index - 1].createdAt, interaction.createdAt) && (
@@ -1167,6 +1181,20 @@ export default function ChatPanel({
             pendingApproval={pendingApproval}
             onApproval={onApproval}
           />
+        )}
+        {showScrollToBottom && (
+          <button
+            type="button"
+            className="scroll-to-bottom-btn"
+            onClick={scrollToBottom}
+            title="Scroll to latest message"
+            aria-label="Scroll to latest message"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14"></path>
+              <path d="M6 13l6 6 6-6"></path>
+            </svg>
+          </button>
         )}
         <div ref={chatEnd} />
       </div>

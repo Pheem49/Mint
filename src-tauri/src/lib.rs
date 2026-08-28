@@ -511,9 +511,12 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
         model: res.model,
         text: res.summary,
         fallback_provider: res.fallback,
+        fallback_reason: None,
         tool_calls: None,
         stop_reason: None,
         total_tokens: None,
+        input_tokens: None,
+        output_tokens: None,
     })
 }
 
@@ -615,12 +618,19 @@ async fn stream_chat_message(
     };
 
     let on_progress_event = on_event.clone();
+    let avatar_app = app.clone();
     let progress_cb = move |progress| {
+        avatar_app
+            .state::<mint_core::avatar_bridge::AvatarBridge>()
+            .on_agent_progress(&progress);
         let _ = on_progress_event.send(DesktopStreamEvent::Progress { progress });
     };
 
     let on_event_clone = on_event.clone();
+    let chunk_app = app.clone();
     let on_chunk = move |summary: String| {
+        let bridge = chunk_app.state::<mint_core::avatar_bridge::AvatarBridge>();
+        bridge.on_talking(true);
         let chars: Vec<char> = summary.chars().collect();
         let mut i = 0;
         while i < chars.len() {
@@ -630,6 +640,7 @@ async fn stream_chat_message(
             i = end;
             std::thread::sleep(std::time::Duration::from_millis(15));
         }
+        bridge.on_talking(false);
     };
 
     let chat_id_str = request.chat_id.clone().unwrap_or_default();
@@ -681,11 +692,24 @@ async fn stream_chat_message(
             .remove(&chat_id_str);
     }
 
+    let avatar_bridge = app.state::<mint_core::avatar_bridge::AvatarBridge>();
     let res = match res {
-        Ok(Ok(val)) => val,
-        Ok(Err(e)) => return Err(e.to_string()),
-        Err(e) if e.is_cancelled() => return Err("Agent execution cancelled by user".to_string()),
-        Err(e) => return Err(format!("Task panicked: {}", e)),
+        Ok(Ok(val)) => {
+            avatar_bridge.on_turn_end(true);
+            val
+        }
+        Ok(Err(e)) => {
+            avatar_bridge.on_turn_end(false);
+            return Err(e.to_string());
+        }
+        Err(e) if e.is_cancelled() => {
+            avatar_bridge.on_turn_end(false);
+            return Err("Agent execution cancelled by user".to_string());
+        }
+        Err(e) => {
+            avatar_bridge.on_turn_end(false);
+            return Err(format!("Task panicked: {}", e));
+        }
     };
 
     Ok(ChatResponse {
@@ -693,9 +717,12 @@ async fn stream_chat_message(
         model: res.model,
         text: res.summary,
         fallback_provider: res.fallback,
+        fallback_reason: None,
         tool_calls: None,
         stop_reason: None,
         total_tokens: None,
+        input_tokens: None,
+        output_tokens: None,
     })
 }
 
@@ -877,15 +904,17 @@ fn save_system_interaction(
 fn get_recent_interactions(
     limit: Option<usize>,
     chat_id: Option<String>,
+    workspace_path: Option<String>,
 ) -> Result<Vec<InteractionMemory>, String> {
+    let scoped_chat_id = mint_core::scoped_chat_id(
+        chat_id
+            .as_deref()
+            .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID),
+        workspace_path.as_deref(),
+    );
     MemoryStore::open_default()
         .and_then(|memory| {
-            memory.recent_interactions_for_chat(
-                chat_id
-                    .as_deref()
-                    .unwrap_or(mint_core::DEFAULT_CONVERSATION_ID),
-                limit.unwrap_or(5),
-            )
+            memory.recent_interactions_for_chat(&scoped_chat_id, limit.unwrap_or(5))
         })
         .map_err(|error| error.to_string())
 }
@@ -1112,6 +1141,33 @@ fn save_subagent(
 #[tauri::command]
 fn delete_subagent(source_path: String) -> Result<(), String> {
     core_delete_subagent(&source_path)
+}
+
+#[tauri::command]
+fn run_slash_command(
+    app: AppHandle,
+    input: String,
+    cwd: Option<String>,
+) -> Result<mint_core::slash::SlashResponse, String> {
+    use mint_core::slash::{SlashEffect, SlashResponse};
+    let mut config = load_config().map_err(|error| error.to_string())?;
+    let request = mint_core::slash::SlashRequest {
+        input,
+        cwd,
+        surface: Some("desktop".to_string()),
+    };
+    let response = mint_core::slash::execute(&request, &mut config);
+
+    let persists_config = matches!(
+        &response,
+        SlashResponse::Applied { effects, .. }
+            if effects.iter().any(|e| !matches!(e, SlashEffect::HistoryCleared))
+    );
+    if persists_config {
+        save_config(&config).map_err(|error| error.to_string())?;
+        let _ = app.emit("settings-changed", &config);
+    }
+    Ok(response)
 }
 
 #[tauri::command]
@@ -1684,12 +1740,18 @@ fn install_shortcuts(app: &AppHandle) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(ApprovalsState {
             pending: Mutex::new(HashMap::new()),
         })
         .manage(GeminiLiveState::default())
         .manage(MicRecordingState::default())
+        .manage(mint_core::avatar_bridge::AvatarBridge::new(
+            load_config()
+                .map(|c| mint_core::avatar_bridge::AvatarBridgeConfig::from_mint_config(&c))
+                .unwrap_or_else(|_| mint_core::avatar_bridge::AvatarBridgeConfig::from_env()),
+        ))
         .setup(|app| {
             if let Some(main_window) = app.get_webview_window("main") {
                 allow_media_permission_requests(&main_window);
@@ -1762,6 +1824,7 @@ pub fn run() {
             list_subagents,
             save_subagent,
             delete_subagent,
+            run_slash_command,
             list_cron_jobs,
             add_cron_job,
             remove_cron_job,

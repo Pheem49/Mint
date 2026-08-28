@@ -8,12 +8,14 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+mod commands;
 mod confirm;
 mod format;
 mod input_box;
 mod picker;
 mod slash_commands;
 
+pub use commands::*;
 pub use confirm::*;
 pub use format::*;
 pub use input_box::*;
@@ -197,6 +199,15 @@ pub async fn run_interactive_chat() -> Result<()> {
 
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
+    // Notifies this prompt loop when web/desktop writes a message into the
+    // same, workspace-scoped "cli" conversation while this terminal is open
+    // — see live_sync's module docs for why this is DB polling rather than
+    // a server push.
+    mint_core::live_sync::start_live_sync_poller(mint_core::scoped_chat_id(
+        mint_core::CHAT_CLI_ID,
+        Some(&current_dir.to_string_lossy()),
+    ));
+
     print_welcome_banner(&config);
     println!("Type naturally or /help for commands. Ctrl+V pastes images. Ctrl+D exits.\n");
 
@@ -255,7 +266,14 @@ pub async fn run_interactive_chat() -> Result<()> {
         let model_str = active_model(&session.config.ai_provider, &session.config).to_owned();
 
         let query_str = if let Some(queued) = pending_inputs.pop_front() {
+            let (term_width, _) = crate::markdown::terminal_size_or_default();
+            let echo_divider = format!(
+                "{DIM}{}{RESET}",
+                "─".repeat((term_width as usize).saturating_sub(2))
+            );
+            println!("{echo_divider}");
             println!("  {BLUE}You ›{RESET} {}", queued);
+            println!("{echo_divider}");
             queued
         } else if let Some(input) = read_line_interactive(
             &session.config.ai_provider,

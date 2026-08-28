@@ -128,6 +128,43 @@ fn parse_path_and_prompt(rest: &str) -> (String, String) {
         (rest.to_string(), String::new())
     }
 }
+/// Newest-first list of saved plan files under `<root>/.agents/plans/`
+/// (written by `agent::save_plan_file` when a plan is approved) — the
+/// `YYYYMMDD-HHMMSS-slug.md` filename already sorts chronologically, so a
+/// reverse lexicographic sort on the filename is enough.
+fn list_plan_files(root: &Path) -> Vec<PathBuf> {
+    let plans_dir = root.join(".agents").join("plans");
+    let Ok(entries) = std::fs::read_dir(&plans_dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("md"))
+        .collect();
+    files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    files
+}
+
+/// First non-empty line of a file, truncated to 80 chars — same preview
+/// style `/memory list` uses for its interaction previews.
+fn first_line_preview(path: &Path) -> String {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return String::new();
+    };
+    let first = content
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    if first.chars().count() > 80 {
+        let short: String = first.chars().take(80).collect();
+        format!("{short}…")
+    } else {
+        first.to_string()
+    }
+}
+
 /// Route `/…` commands. Returns `None` if the input is not a slash command.
 pub async fn handle_slash_command(
     session: &mut InteractiveSession,
@@ -149,92 +186,16 @@ pub async fn handle_slash_command(
             println!("\n{BLUE}────────────────────────────────────────────{RESET}");
             println!("{MINT}  Mint Interactive Commands{RESET}");
             println!("{BLUE}────────────────────────────────────────────{RESET}");
-            let commands = [
-                ("/help", "Show this help"),
-                ("/fast [on|off]", "Toggle fast mode (hide thinking traces)"),
-                (
-                    "/plan [on|off]",
-                    "Toggle plan mode (read-only until you approve a plan)",
-                ),
-                ("/models [name]", "List providers or switch provider"),
-                ("/clear", "Clear conversation history"),
-                ("/cd <path>", "Change workspace directory"),
-                ("/image <path> [prompt]", "Attach image from file"),
-                ("/paste [prompt]", "Attach image from clipboard"),
-                ("Ctrl+V", "Paste clipboard image as [Image #1]"),
-                ("↑ / ↓", "Recall previously submitted input"),
-                ("/learn <path>", "Import a persistent .md or .txt skill"),
-                (
-                    "/skill add <path>",
-                    "Copy/install skill file or folder to global config",
-                ),
-                (
-                    "/plugins <name> [prompt]",
-                    "Generate a skill.md file for a plugin/skill",
-                ),
-                ("/memory list", "Show recent interactions"),
-                ("/memory clear", "Clear all interactions"),
-                ("/memory get <key>", "Read a profile value"),
-                ("/memory set <key> <val>", "Store a profile value"),
-                (
-                    "/autoskill [on|off]",
-                    "Toggle auto-writing a SKILL.md after hard tasks",
-                ),
-                (
-                    "/cron add <name> | <sched> | <task>",
-                    "Create/list/remove/enable/disable scheduled agent tasks",
-                ),
-                (
-                    "/link add <name> | <path> | <desc>",
-                    "Link a folder chat can auto-write notes into",
-                ),
-                (
-                    "/image-provider [name]",
-                    "List image gen providers or switch default provider",
-                ),
-                ("/generate-image <prompt>", "Generate image using AI model"),
-                ("/veo <prompt>", "Generate video using Google Veo"),
-                (
-                    "/video-provider [name]",
-                    "List video gen providers or switch default provider",
-                ),
-                (
-                    "/search-provider [name]",
-                    "List web search providers or switch default provider",
-                ),
-                ("/bg <query>", "Run a query in the background, non-blocking"),
-                (
-                    "/jobs [show|cancel <id>]",
-                    "List, inspect, or cancel background jobs",
-                ),
-                ("/mcp list", "List configured MCP servers"),
-                ("/mcp allow <server> <tool>", "Allow an MCP tool"),
-                (
-                    "/mcp reauth <server>",
-                    "Re-run a server's OAuth login (e.g. expired token)",
-                ),
-                (
-                    "/release-notes",
-                    "Show release notes for the current version",
-                ),
-                ("/stats", "Show session statistics"),
-                ("/exit", "Exit Mint"),
-                ("/code <task>", "Run in code-agent mode"),
-                (
-                    "/n8n [task]",
-                    "Open n8n in your browser, or trigger a workflow via the n8n MCP server",
-                ),
-                (
-                    "/notebook [task]",
-                    "Open SurfSense in your browser, or run a task via the surfsense MCP server",
-                ),
-                (
-                    "/multi-agent [on|off]",
-                    "Show or toggle Multi-Agent Collaboration system",
-                ),
-            ];
-            for (cmd_name, desc) in &commands {
-                println!("  {MINT}{:<30}{RESET} {DIM}{}{RESET}", cmd_name, desc);
+            for spec in SLASH_COMMANDS.iter() {
+                let label = if spec.usage.is_empty() {
+                    spec.token.to_string()
+                } else {
+                    format!("{} {}", spec.token, spec.usage)
+                };
+                println!(
+                    "  {MINT}{:<30}{RESET} {DIM}{}{RESET}",
+                    label, spec.description
+                );
             }
             println!();
             Some(SlashResult::Handled)
@@ -283,6 +244,48 @@ pub async fn handle_slash_command(
                 } else {
                     println!("{DIM}[Fast] mode OFF{RESET}\n");
                 }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/plan" if rest == "list" => {
+            let files = list_plan_files(&session.current_dir);
+            if files.is_empty() {
+                println!("{DIM}No saved plans yet.{RESET}\n");
+            } else {
+                println!("\n{BLUE}Saved plans:{RESET}");
+                for (idx, path) in files.iter().enumerate() {
+                    println!(
+                        "  {DIM}[{}]{RESET} {BLUE}{}{RESET}",
+                        idx + 1,
+                        first_line_preview(path)
+                    );
+                }
+                println!();
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/plan" if rest.starts_with("show") => {
+            let arg = rest.trim_start_matches("show").trim();
+            let files = list_plan_files(&session.current_dir);
+            let found = if let Ok(idx) = arg.parse::<usize>() {
+                idx.checked_sub(1).and_then(|i| files.get(i))
+            } else {
+                files.iter().find(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.contains(arg))
+                })
+            };
+            match found {
+                Some(path) => match std::fs::read_to_string(path) {
+                    Ok(content) => println!("\n{content}\n"),
+                    Err(e) => println!("{ERROR}Could not read plan file:{RESET} {e}\n"),
+                },
+                None => println!(
+                    "{WARN}No saved plan matching \"{arg}\" — run /plan list to see saved plans.{RESET}\n"
+                ),
             }
             Some(SlashResult::Handled)
         }
@@ -484,6 +487,139 @@ pub async fn handle_slash_command(
                     }
                     _ => {}
                 }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/avatar" => {
+            use mint_core::avatar_bridge::{AvatarBridgeConfig, fetch_channel_state};
+
+            // Soft toggle: `avatar_signal_disabled` hides the tool while keeping
+            // the token so the paired viewer never needs re-linking.
+            let set_signal_disabled = |session: &mut InteractiveSession, disabled: bool| {
+                session.config.avatar_signal_disabled = disabled;
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => {
+                        if disabled {
+                            println!("{DIM}[Avatar] avatar_signal disabled (token kept — run /avatar to re-enable).{RESET}\n");
+                        } else {
+                            println!("{DIM}[Avatar] avatar_signal enabled.{RESET}\n");
+                        }
+                    }
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                }
+            };
+
+            // Resolve to a share target ("web"/"desktop"), or bail out for the
+            // No / Off / On / status / bad-usage sub-actions.
+            let target: &str = match rest {
+                "web" | "link web" => "web",
+                "desktop" | "link desktop" => "desktop",
+                "on" | "enable" => {
+                    set_signal_disabled(session, false);
+                    return Some(SlashResult::Handled);
+                }
+                "off" | "disable" => {
+                    set_signal_disabled(session, true);
+                    return Some(SlashResult::Handled);
+                }
+                "" | "link" => {
+                    let options = vec![
+                        "No".to_string(),
+                        "Off (disable avatar_signal)".to_string(),
+                        "Web browser".to_string(),
+                        "Desktop app".to_string(),
+                    ];
+                    match prompt_interactive_select("Avatar output", &options, &options[2]) {
+                        Ok(Some(sel)) if sel == "No" => return Some(SlashResult::Handled),
+                        Ok(Some(sel)) if sel.starts_with("Off") => {
+                            set_signal_disabled(session, true);
+                            return Some(SlashResult::Handled);
+                        }
+                        Ok(Some(sel)) if sel.starts_with("Desktop") => "desktop",
+                        Ok(Some(_)) => "web",
+                        // Cancelled / no TTY — the picker has an explicit "No",
+                        // so treat a cancel as "do nothing".
+                        Ok(None) => return Some(SlashResult::Handled),
+                        Err(e) => {
+                            println!("{ERROR}Error selecting target:{RESET} {e}\n");
+                            return Some(SlashResult::Handled);
+                        }
+                    }
+                }
+                "status" => {
+                    let cfg = AvatarBridgeConfig::from_mint_config(&session.config);
+                    if !cfg.enabled {
+                        println!("{WARN}[Avatar] No token yet — run /avatar link first.{RESET}\n");
+                    } else {
+                        println!(
+                            "{DIM}[Avatar] avatar_signal tool: {}{RESET}",
+                            if session.config.avatar_signal_disabled {
+                                "disabled"
+                            } else {
+                                "enabled"
+                            }
+                        );
+                        match fetch_channel_state(&cfg).await {
+                            Ok(state) => {
+                                let now_ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as i64)
+                                    .unwrap_or(0);
+                                println!("\n{BLUE}[Avatar] Channel status:{RESET}");
+                                println!(
+                                    "  Model:       {}",
+                                    state.model.unwrap_or_else(|| "not selected".into())
+                                );
+                                println!("  Viewers:     {}", state.connected_clients);
+                                println!(
+                                    "  Last event:  {}\n",
+                                    state
+                                        .last_agent_event_at
+                                        .map(|t| format!("{}s ago", (now_ms - t).max(0) / 1000))
+                                        .unwrap_or_else(|| "never".into())
+                                );
+                            }
+                            Err(error) => println!("{ERROR}[Avatar] {error}{RESET}\n"),
+                        }
+                    }
+                    return Some(SlashResult::Handled);
+                }
+                _ => {
+                    println!(
+                        "{WARN}Usage: /avatar [web|desktop|on|off|status] — connects agent activity to Project Avatar{RESET}\n"
+                    );
+                    return Some(SlashResult::Handled);
+                }
+            };
+
+            // Web / Desktop chosen — make sure the tool is on and a token exists,
+            // then print the connection instructions.
+            session.config.avatar_signal_disabled = false;
+            if session.config.avatar_token.is_empty() {
+                session.config.avatar_token = AvatarBridgeConfig::generate_token();
+            }
+            if let Err(error) = mint_core::save_config(&session.config) {
+                println!("{ERROR}Config error:{RESET} {error}\n");
+                return Some(SlashResult::Handled);
+            }
+            let cfg = AvatarBridgeConfig::from_mint_config(&session.config);
+            let token = session.config.avatar_token.clone();
+            if target == "desktop" {
+                println!(
+                    "\n{MINT}[Avatar] Desktop app:{RESET}\n\
+                     1. Open the Project Avatar desktop app.\n\
+                     2. It has no address bar, so on first launch it generates its \
+                     own token — paste this one into its \"Paste existing token...\" \
+                     field instead so it connects to the same channel Mint pushes to:\n\
+                     {DIM}{token}{RESET}\n\
+                     It remembers the token after that; you won't need to paste it again.\n"
+                );
+            } else {
+                println!(
+                    "\n{MINT}[Avatar] Share link:{RESET}\n{}\n",
+                    cfg.share_link().expect("token was just ensured non-empty")
+                );
             }
             Some(SlashResult::Handled)
         }
@@ -1238,61 +1374,52 @@ pub async fn handle_slash_command(
                 .unwrap_or((rest, ""));
 
             match subcmd {
+                "" | "list" => {
+                    let skills = load_all_available_skills(&session.current_dir);
+                    if skills.is_empty() {
+                        println!(
+                            "No skills found. Use `/skill add <path|github-repo|url>` to add one.\n"
+                        );
+                    } else {
+                        println!("Skills:");
+                        for skill in &skills {
+                            let loc = if skill.source_path.contains("/.config/mint/mint-skills") {
+                                "Global"
+                            } else if skill.source_path.contains("/skills")
+                                || skill.source_path.contains("/.agents/skills")
+                            {
+                                "Workspace"
+                            } else {
+                                "Taught"
+                            };
+                            println!("  ● [{}] {}", loc, skill.name);
+                        }
+                        println!();
+                    }
+                }
                 "add" | "install" => {
                     if args.is_empty() {
                         println!(
                             "{WARN}/skill add <path> requires a path to a skill file or folder{RESET}\n"
                         );
                     } else {
-                        let source_path = PathBuf::from(args);
-                        let source_path = if source_path.is_absolute() {
-                            source_path
-                        } else {
-                            session.current_dir.join(source_path)
-                        };
-
-                        if !source_path.exists() {
-                            println!("{ERROR}Source skill path not found: {}{RESET}\n", args);
-                        } else if let Some(home) = dirs::home_dir() {
-                            let global_skills_path =
-                                home.join(".config").join("mint").join("mint-skills");
-                            if !global_skills_path.exists() {
-                                let _ = std::fs::create_dir_all(&global_skills_path);
-                            }
-
-                            let name = source_path
-                                .file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("skill");
-
-                            let dest_path = global_skills_path.join(name);
-                            let copy_res = if source_path.is_dir() {
-                                copy_dir_all(&source_path, &dest_path)
-                            } else {
-                                std::fs::copy(&source_path, &dest_path)
-                                    .map(|_| ())
-                                    .map_err(|e| e)
-                            };
-
-                            match copy_res {
-                                Ok(()) => println!(
-                                    "{DIM}Skill successfully copied to Global config: {}{RESET}\n",
-                                    dest_path.display()
-                                ),
-                                Err(e) => println!(
-                                    "{ERROR}Failed to copy skill to Global: {}{RESET}\n",
-                                    e
-                                ),
-                            }
-                        } else {
-                            println!(
-                                "{ERROR}Unable to resolve home directory for Global config.{RESET}\n"
-                            );
+                        // First whitespace-separated token is the source;
+                        // anything after is forwarded to `npx skills` as-is
+                        // (e.g. `/skill add owner/repo --skill find-skills`).
+                        let mut tokens = args.split_whitespace();
+                        let source = tokens.next().unwrap_or("");
+                        let extra_args: Vec<&str> = tokens.collect();
+                        match crate::skills::add(source, &extra_args, &session.current_dir) {
+                            Ok(msg) => println!("{DIM}{msg}{RESET}\n"),
+                            Err(msg) => println!("{ERROR}{msg}{RESET}\n"),
                         }
                     }
                 }
                 _ => {
-                    println!("{WARN}Usage: /skill add <path>  (or /skill install <path>){RESET}\n");
+                    println!(
+                        "{WARN}Usage: /skill [list] | /skill add <path> (or /skill install <path>) — <path> \
+                         can also be a GitHub repo (owner/repo) or URL, resolved via `npx skills`{RESET}\n"
+                    );
                 }
             }
             Some(SlashResult::Handled)
@@ -1311,7 +1438,13 @@ pub async fn handle_slash_command(
                 .map(|(c, a)| (c, a.trim()))
                 .unwrap_or((rest, ""));
             match subcmd {
-                "list" | "" => match memory.recent_interactions_for_chat(CHAT_CLI_ID, 10) {
+                "list" | "" => match memory.recent_interactions_for_chat(
+                    &mint_core::scoped_chat_id(
+                        CHAT_CLI_ID,
+                        Some(&session.current_dir.to_string_lossy()),
+                    ),
+                    10,
+                ) {
                     Ok(items) => {
                         if items.is_empty() {
                             println!("{DIM}No interactions yet.{RESET}\n");
@@ -1374,7 +1507,10 @@ pub async fn handle_slash_command(
                     }
                     Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
-                "clear" => match memory.clear_interactions_for_chat(CHAT_CLI_ID) {
+                "clear" => match memory.clear_interactions_for_chat(&mint_core::scoped_chat_id(
+                    CHAT_CLI_ID,
+                    Some(&session.current_dir.to_string_lossy()),
+                )) {
                     Ok(count) => println!("{DIM}Cleared {count} interactions.{RESET}\n"),
                     Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
@@ -1829,7 +1965,15 @@ pub async fn handle_slash_command(
             let provider = &session.config.ai_provider;
             let model = active_model(provider, &session.config);
             let interactions = MemoryStore::open_default()
-                .and_then(|m| m.recent_interactions_for_chat(CHAT_CLI_ID, 1000))
+                .and_then(|m| {
+                    m.recent_interactions_for_chat(
+                        &mint_core::scoped_chat_id(
+                            CHAT_CLI_ID,
+                            Some(&session.current_dir.to_string_lossy()),
+                        ),
+                        1000,
+                    )
+                })
                 .map(|v| v.len())
                 .unwrap_or(0);
             println!("\n{BLUE}─ Session Stats ─────────────────────────{RESET}");
@@ -2230,5 +2374,64 @@ pub async fn handle_slash_command(
             // Unknown slash command — treat as normal message to the agent
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Commands that are dispatched but deliberately left undocumented —
+    /// shortcuts for another command's own token, not gaps in `SLASH_COMMANDS`.
+    const UNDOCUMENTED_ALIASES: &[&str] = &["/quit", "/reset", "/plugin", "/searchProvider"];
+
+    /// Regression guard for the exact bug that motivated `SLASH_COMMANDS`:
+    /// `/edit-image`, `/gen-image`, `/shells`, and `/subagent` all worked but
+    /// were missing from `/help` (and briefly `/avatar` was missing from the
+    /// autocomplete list) because command metadata used to live in two
+    /// separate hand-maintained arrays with nothing tying them to the
+    /// dispatcher below. This parses `handle_slash_command`'s own source for
+    /// every top-level `"/xxx" => ` (and `"/xxx" | "/yyy" => `) match arm and
+    /// asserts each token is documented in `SLASH_COMMANDS` — so a new arm
+    /// added without a table entry fails `cargo test` instead of silently
+    /// shipping undocumented.
+    #[test]
+    fn dispatcher_tokens_are_documented() {
+        let source = include_str!("slash_commands.rs");
+        let arm_re = regex::Regex::new(r#"(?m)^ {8}((?:"/[a-zA-Z-]+"\s*\|?\s*)+)=>"#).unwrap();
+        let token_re = regex::Regex::new(r#""(/[a-zA-Z-]+)""#).unwrap();
+
+        let mut dispatcher_tokens = std::collections::BTreeSet::new();
+        for arm in arm_re.captures_iter(source) {
+            for tok in token_re.captures_iter(&arm[1]) {
+                dispatcher_tokens.insert(tok[1].to_string());
+            }
+        }
+
+        // Sanity check the extraction itself isn't silently matching nothing
+        // (e.g. after a reformat that changes indentation).
+        assert!(
+            dispatcher_tokens.len() > 20,
+            "expected to extract dozens of dispatcher tokens, got {}: {:?} — \
+             did the match arm indentation or format change?",
+            dispatcher_tokens.len(),
+            dispatcher_tokens,
+        );
+
+        let documented: std::collections::BTreeSet<&str> =
+            SLASH_COMMANDS.iter().map(|s| s.token.as_str()).collect();
+
+        let undocumented: Vec<&String> = dispatcher_tokens
+            .iter()
+            .filter(|t| !UNDOCUMENTED_ALIASES.contains(&t.as_str()))
+            .filter(|t| !documented.contains(t.as_str()))
+            .collect();
+
+        assert!(
+            undocumented.is_empty(),
+            "dispatcher handles {undocumented:?} but SLASH_COMMANDS (in commands.rs) has no \
+             entry for it — add one, or add it to UNDOCUMENTED_ALIASES if it's a deliberately \
+             undocumented shortcut for another command's token.",
+        );
     }
 }

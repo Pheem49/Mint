@@ -79,6 +79,22 @@ pub(crate) async fn run_code_agent_with_saved_image(
     )
     .await;
     result?;
+    // This turn just committed a row to the workspace-scoped "cli" chat_id
+    // (see `scoped_chat_id`) — raise live_sync's watermark past it so the
+    // next poll tick doesn't mistake the user's own just-sent message for
+    // one that arrived from another surface (web/desktop).
+    if let Ok(memory) = mint_core::MemoryStore::open_default()
+        && let Ok(rows) = memory.recent_interactions_for_chat(
+            &mint_core::scoped_chat_id(
+                mint_core::CHAT_CLI_ID,
+                Some(&current_dir.to_string_lossy()),
+            ),
+            1,
+        )
+        && let Some(row) = rows.first()
+    {
+        mint_core::live_sync::note_own_interaction(row.id);
+    }
     // Save any attached images and videos that were sent with the task
     image::save_sent_image_after_send(sent_image.as_deref(), task);
     image::save_sent_image_after_send(sent_video.as_deref(), task);
@@ -331,6 +347,50 @@ enum Command {
         #[command(subcommand)]
         command: VideoCommand,
     },
+    /// Connect agent activity to Project Avatar (github.com/projectavatar/projectavatar) —
+    /// a real-time 3D avatar that reacts to tool calls, thinking, and errors.
+    Avatar {
+        #[command(subcommand)]
+        command: AvatarCommand,
+    },
+    /// Install, or list, local AI skills.
+    Skills {
+        #[command(subcommand)]
+        command: SkillsCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AvatarCommand {
+    /// Print your avatar share link, generating a channel token on first use.
+    Link,
+    /// Show relay channel status: selected model, viewer count, last event.
+    Status,
+    /// Point at a self-hosted relay/app instead of the public default.
+    SetRelay {
+        relay_url: String,
+        #[arg(long)]
+        app_url: Option<String>,
+    },
+    /// Clear the saved token, disabling the bridge.
+    Disable,
+}
+
+#[derive(Debug, Subcommand)]
+enum SkillsCommand {
+    /// Install a skill: a local file/folder path, or a GitHub repo/URL
+    /// (resolved via `npx skills`, landing in ./.agents/skills/).
+    Add {
+        source: String,
+        /// Forwarded as-is to `npx skills add` — e.g. `--skill find-skills`
+        /// to install just one skill out of a multi-skill repo, or `--agent
+        /// cursor` to target a different agent's directory. Ignored for a
+        /// local-path source.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        extra: Vec<String>,
+    },
+    /// List all skills Mint can currently see (global, workspace, taught).
+    List,
 }
 
 #[derive(Debug, Subcommand)]
@@ -1523,7 +1583,9 @@ async fn main() -> Result<()> {
                             audio_data_uri: None,
                             video_data_uri: None,
                             document_attachment: None,
-                            workspace_path: None,
+                            workspace_path: Some(
+                                std::env::current_dir()?.to_string_lossy().into_owned(),
+                            ),
                             agent_id: None,
                             plan_mode: false,
                             pinned_mcp_server: None,
@@ -1547,10 +1609,15 @@ async fn main() -> Result<()> {
                         println!("stored");
                     }
                     MemoryCommand::Recent { limit } => {
+                        let current_dir = std::env::current_dir()?;
+                        let scoped_chat_id = mint_core::scoped_chat_id(
+                            CHAT_CLI_ID,
+                            Some(&current_dir.to_string_lossy()),
+                        );
                         println!(
                             "{}",
                             serde_json::to_string_pretty(
-                                &memory.recent_interactions_for_chat(CHAT_CLI_ID, limit)?
+                                &memory.recent_interactions_for_chat(&scoped_chat_id, limit)?
                             )?
                         );
                     }
@@ -2396,6 +2463,108 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+            Command::Avatar { command } => {
+                use mint_core::avatar_bridge::{AvatarBridgeConfig, fetch_channel_state};
+                match command {
+                    AvatarCommand::Link => {
+                        let mut config = load_config()?;
+                        if config.avatar_token.is_empty() {
+                            config.avatar_token = AvatarBridgeConfig::generate_token();
+                            save_config(&config)?;
+                        }
+                        let cfg = AvatarBridgeConfig::from_mint_config(&config);
+                        println!(
+                            "{MINT}Avatar share link:{RESET}\n{}",
+                            cfg.share_link().expect("token was just ensured non-empty")
+                        );
+                    }
+                    AvatarCommand::Status => {
+                        let config = load_config()?;
+                        let cfg = AvatarBridgeConfig::from_mint_config(&config);
+                        if !cfg.enabled {
+                            println!("No avatar token set yet. Run `mint avatar link` first.");
+                        } else {
+                            match fetch_channel_state(&cfg).await {
+                                Ok(state) => {
+                                    let now_ms = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_millis() as i64)
+                                        .unwrap_or(0);
+                                    println!("{MINT}Avatar channel status:{RESET}");
+                                    println!(
+                                        "  model:       {}",
+                                        state.model.unwrap_or_else(|| "not selected".into())
+                                    );
+                                    println!("  viewers:     {}", state.connected_clients);
+                                    println!(
+                                        "  last event:  {}",
+                                        state
+                                            .last_agent_event_at
+                                            .map(|t| format!("{}s ago", (now_ms - t).max(0) / 1000))
+                                            .unwrap_or_else(|| "never".into())
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("{ERROR}✗ {e}{RESET}");
+                                    anyhow::bail!("{e}");
+                                }
+                            }
+                        }
+                    }
+                    AvatarCommand::SetRelay { relay_url, app_url } => {
+                        let mut config = load_config()?;
+                        config.avatar_relay_url = relay_url.trim_end_matches('/').to_string();
+                        if let Some(app) = app_url {
+                            config.avatar_app_url = app.trim_end_matches('/').to_string();
+                        }
+                        save_config(&config)?;
+                        println!(
+                            "Relay set to {} (app: {})",
+                            config.avatar_relay_url, config.avatar_app_url
+                        );
+                    }
+                    AvatarCommand::Disable => {
+                        let mut config = load_config()?;
+                        config.avatar_token = String::new();
+                        save_config(&config)?;
+                        println!("Avatar bridge disabled.");
+                    }
+                }
+            }
+            Command::Skills { command } => match command {
+                SkillsCommand::Add { source, extra } => {
+                    let cwd = std::env::current_dir()?;
+                    let extra_args: Vec<&str> = extra.iter().map(String::as_str).collect();
+                    match crate::skills::add(&source, &extra_args, &cwd) {
+                        Ok(msg) => println!("{MINT}✓{RESET} {msg}"),
+                        Err(msg) => {
+                            eprintln!("{ERROR}✗ {msg}{RESET}");
+                            anyhow::bail!("{msg}");
+                        }
+                    }
+                }
+                SkillsCommand::List => {
+                    let cwd = std::env::current_dir()?;
+                    let skills = crate::interactive::load_all_available_skills(&cwd);
+                    if skills.is_empty() {
+                        println!("No skills found. Use `mint skills add <source>` to add one.");
+                    } else {
+                        println!("{MINT}Skills:{RESET}");
+                        for skill in &skills {
+                            let loc = if skill.source_path.contains("/.config/mint/mint-skills") {
+                                "Global"
+                            } else if skill.source_path.contains("/skills")
+                                || skill.source_path.contains("/.agents/skills")
+                            {
+                                "Workspace"
+                            } else {
+                                "Taught"
+                            };
+                            println!("  [{}] {} ({})", loc, skill.name, skill.source_path);
+                        }
+                    }
+                }
+            },
         },
     }
     Ok(())

@@ -26,6 +26,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 audio_data_uri: Option<String>,
                 video_data_uri: Option<String>,
                 document_attachment: Option<crate::chat::DocumentAttachment>,
+                #[serde(default)]
+                workspace_path: Option<String>,
                 agent_id: Option<String>,
                 #[serde(default)]
                 pinned_mcp_server: Option<String>,
@@ -41,7 +43,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     audio_data_uri: req.audio_data_uri,
                     video_data_uri: req.video_data_uri,
                     document_attachment: req.document_attachment,
-                    workspace_path: None,
+                    workspace_path: req.workspace_path,
                     agent_id: req.agent_id,
                     plan_mode: false,
                     pinned_mcp_server: req.pinned_mcp_server,
@@ -155,6 +157,28 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
             }
         }
 
+        ("POST", "/api/submit-approval") => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SubmitApprovalRequest {
+                token: String,
+                approved: bool,
+                #[serde(default)]
+                answer: Option<String>,
+            }
+            if let Ok(req) = serde_json::from_str::<SubmitApprovalRequest>(body) {
+                let ok = crate::resolve_pending_approval(&req.token, req.approved, req.answer);
+                send_json_response(socket, "200 OK", &format!("{{\"ok\":{ok}}}")).await;
+            } else {
+                send_json_response(
+                    socket,
+                    "400 Bad Request",
+                    "{\"status\":\"invalid submit-approval body\"}",
+                )
+                .await;
+            }
+        }
+
         ("POST", "/api/chat-stream") => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -166,6 +190,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 audio_data_uri: Option<String>,
                 video_data_uri: Option<String>,
                 document_attachment: Option<crate::chat::DocumentAttachment>,
+                #[serde(default)]
+                workspace_path: Option<String>,
                 agent_id: Option<String>,
                 #[serde(default)]
                 pinned_mcp_server: Option<String>,
@@ -181,7 +207,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     audio_data_uri: req.audio_data_uri,
                     video_data_uri: req.video_data_uri,
                     document_attachment: req.document_attachment,
-                    workspace_path: None,
+                    workspace_path: req.workspace_path,
                     agent_id: req.agent_id,
                     plan_mode: false,
                     pinned_mcp_server: req.pinned_mcp_server,
@@ -336,14 +362,59 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                             let config_clone = config.clone();
                             let chat_id = chat_req.chat_id.clone();
                             let chat_id_str = chat_id.clone().unwrap_or_default();
+                            // Unlike `root` above (this route's agent-mode tools
+                            // deliberately still operate against the API server
+                            // process's own cwd, not any client-sent workspace —
+                            // out of scope for the chat_id-scoping fix), the
+                            // conversation identity itself DOES need the client's
+                            // workspace: `orchestrate_agent_loop` would otherwise
+                            // self-derive from `root` (constant across every web
+                            // request), which can't distinguish workspaces at
+                            // all. Pre-scoping here is safe/idempotent — see
+                            // `scoped_chat_id`'s docs — so its self-derivation
+                            // becomes a no-op on the id we hand it below. The raw,
+                            // unscoped `chat_id_str` above is left untouched: it's
+                            // only a cancellation-token key, and `/api/cancel-chat`
+                            // sends back the same raw id it started with.
+                            let agent_scoped_chat_id = crate::agent::memory::scoped_chat_id(
+                                chat_id.as_deref().unwrap_or(DEFAULT_CONVERSATION_ID),
+                                chat_req.workspace_path.as_deref(),
+                            );
                             let message = chat_req.message.clone();
                             let image_data_uri = chat_req.image_data_uri.clone();
                             let audio_data_uri = chat_req.audio_data_uri.clone();
                             let video_data_uri = chat_req.video_data_uri.clone();
                             let agent_id = chat_req.agent_id.clone();
                             let pinned_mcp_server = chat_req.pinned_mcp_server.clone();
+                            let tx_approval = tx.clone();
 
                             let join_handle = tokio::spawn(async move {
+                                // Real (not auto-deny) approval flow: the request-payload
+                                // shape and blocking mechanism mirror desktop's approve_cb
+                                // (src-tauri/src/lib.rs) exactly, but the "requested" event
+                                // rides this same ndjson stream instead of a Tauri event,
+                                // and the token is a UUID (not a sequential counter) since
+                                // this endpoint, unlike Tauri IPC, is LAN-reachable by
+                                // default — see mint_core::PENDING_APPROVALS' docs.
+                                let approve_cb = move |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+                                    let (approval_tx, approval_rx) = tokio::sync::oneshot::channel();
+                                    let token = uuid::Uuid::new_v4().to_string();
+                                    crate::PENDING_APPROVALS
+                                        .lock()
+                                        .unwrap()
+                                        .insert(token.clone(), approval_tx);
+                                    if let Ok(json_val) = serde_json::to_string(&serde_json::json!({
+                                        "type": "approval-requested",
+                                        "token": token,
+                                        "approval": approval
+                                    })) {
+                                        let _ = tx_approval.send(format!("{}\n", json_val));
+                                    }
+                                    Ok(tokio::task::block_in_place(move || {
+                                        tokio::runtime::Handle::current().block_on(approval_rx)
+                                    })
+                                    .unwrap_or(ApprovalOutcome::Denied))
+                                };
                                 let result = orchestrate_agent_loop(
                                     &config_clone,
                                     &message,
@@ -351,13 +422,13 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                     image_data_uri,
                                     audio_data_uri,
                                     video_data_uri,
-                                    chat_id.as_deref(),
+                                    Some(agent_scoped_chat_id.as_str()),
                                     agent_id.as_deref(),
                                     None,
                                     pinned_mcp_server.as_deref(),
                                     fast_mode,
                                     false,
-                                    |_| Ok(ApprovalOutcome::Denied),
+                                    approve_cb,
                                     progress_cb,
                                     on_chunk,
                                 )
@@ -370,9 +441,12 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                             model: res.model,
                                             text: res.summary,
                                             fallback_provider: res.fallback,
+                                            fallback_reason: None,
                                             tool_calls: None,
                                             stop_reason: None,
                                             total_tokens: None,
+                                            input_tokens: None,
+                                            output_tokens: None,
                                         };
                                         if let Ok(json_val) =
                                             serde_json::to_string(&serde_json::json!({

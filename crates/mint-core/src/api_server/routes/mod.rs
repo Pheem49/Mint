@@ -8,6 +8,7 @@ pub(super) mod misc;
 pub(super) mod profile_oauth;
 pub(super) mod sessions;
 pub(super) mod skills_subagents;
+pub(super) mod slash;
 pub(super) mod status_health;
 
 /// Parsed pieces of a request, shared across every route handler — grouped

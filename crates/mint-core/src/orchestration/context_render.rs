@@ -50,10 +50,16 @@ pub(super) fn render_messages_as_text(messages: &[ChatMessage]) -> String {
 /// so callers should fall back to the uncompacted messages rather than failing
 /// the agent run, but may want to surface the failure differently than a
 /// routine no-op.
+///
+/// `Ok(Some((_, fallback_provider)))`'s second element names the provider
+/// actually used to generate the summary when it differs from the caller's
+/// primary (`send_chat_with_fallback` silently retries on another configured
+/// provider if the primary fails) — surfaced rather than discarded so a
+/// summary quietly written by a different model isn't invisible to the user.
 pub(super) async fn compact_native_messages(
     config: &MintConfig,
     messages: &[ChatMessage],
-) -> Result<Option<Vec<ChatMessage>>, ChatError> {
+) -> Result<Option<(Vec<ChatMessage>, Option<String>)>, ChatError> {
     let step_pairs = messages.len().saturating_sub(1) / 2;
     if step_pairs <= COMPACTION_KEEP_RECENT_STEPS || messages.is_empty() {
         return Ok(None);
@@ -72,7 +78,7 @@ pub(super) async fn compact_native_messages(
          the log.\n\n{transcript}"
     );
 
-    let (summary_response, _) = send_chat_with_fallback(
+    let (summary_response, fallback_provider) = send_chat_with_fallback(
         config,
         &ChatRequest {
             message: summary_prompt,
@@ -116,7 +122,7 @@ pub(super) async fn compact_native_messages(
         }],
     });
     compacted.extend_from_slice(&messages[1 + compact_message_count..]);
-    Ok(Some(compacted))
+    Ok(Some((compacted, fallback_provider)))
 }
 
 pub(super) fn initial_observation(task: &str, root: &Path, skills: &str) -> String {

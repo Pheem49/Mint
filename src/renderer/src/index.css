@@ -29,6 +29,9 @@ body, html, #root {
   overflow: hidden;
   color: #e5e7eb;
   background: transparent;
+}
+
+body, html {
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
 }
 

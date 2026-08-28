@@ -60,15 +60,131 @@ jobs:
         run: npm run tauri:build
 
       - name: Collect artifacts
+        # Published asset names follow mint-agent_<platform>_<arch>.<ext> across
+        # all three jobs. `npm run tauri:build` already renames the raw bundles
+        # to mint-agent_amd64.deb / mint-agent.tar.gz.
         run: |
           mkdir -p release-artifacts
-          cp target/release/bundle/deb/*.deb release-artifacts/
-          cp target/release/bundle/tar/*.tar.gz release-artifacts/
+          cp target/release/bundle/deb/mint-agent_amd64.deb release-artifacts/mint-agent_linux_x86_64.deb
+          cp target/release/bundle/tar/mint-agent.tar.gz release-artifacts/mint-agent_linux_x86_64.tar.gz
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
           name: mint-linux-release
+          path: release-artifacts/*
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          body_path: Release_Note.md
+
+  windows:
+    name: Build Windows desktop installer
+    runs-on: windows-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Install Node dependencies
+        # --ignore-scripts skips the repo's `postinstall`, which builds the CLI
+        # with a bash-only `mkdir -p`/`cp` line that fails under cmd.exe and
+        # isn't needed to produce the desktop bundle.
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck UI
+        run: npm run typecheck
+
+      - name: Build desktop installer
+        # `tauri build` runs the config's `beforeBuildCommand` (Vite UI build)
+        # itself. WebView2 is preinstalled on windows-latest and the NSIS
+        # bundle also ships the WebView2 bootstrapper for end users without it.
+        run: npx tauri build --bundles nsis
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-artifacts | Out-Null
+          Copy-Item target/release/bundle/nsis/*-setup.exe release-artifacts/mint-agent_windows_x64.exe
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mint-windows-release
+          path: release-artifacts/*
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/*
+          body_path: Release_Note.md
+
+  macos:
+    name: Build macOS desktop bundle
+    # macos-latest is Apple Silicon; the default Rust target is
+    # aarch64-apple-darwin, so no --target flag is needed for an arm64 build.
+    runs-on: macos-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        run: |
+          rustup update stable
+          rustup default stable
+
+      - name: Install Node dependencies
+        # Same as the Windows job: skip the CLI-building `postinstall`, which the
+        # desktop bundle doesn't need.
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck UI
+        run: npm run typecheck
+
+      - name: Build desktop bundle
+        # No signing identity configured, so the bundler applies an ad-hoc
+        # signature (required for arm64 apps to launch at all). The .dmg is not
+        # notarized: Gatekeeper blocks it until the user right-clicks > Open or
+        # runs `xattr -cr` on the app.
+        run: npx tauri build --bundles dmg
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p release-artifacts
+          cp target/release/bundle/dmg/*.dmg release-artifacts/mint-agent_macos_arm64.dmg
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mint-macos-release
           path: release-artifacts/*
           if-no-files-found: error
 

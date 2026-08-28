@@ -161,12 +161,25 @@ export default function ThemeTab({ config, updateField }: ThemeTabProps) {
         <div className="form-grid">
           <div className="setting-row">
             <label>Glass Blur</label>
-            <select value={config.glassBlur} onChange={(e) => updateField('glassBlur', e.target.value)}>
-              <option value="blur(4px)">Low (4px)</option>
-              <option value="blur(16px)">Medium (16px) - Default</option>
-              <option value="blur(32px)">High (32px)</option>
-              <option value="none">Off (Solid)</option>
-            </select>
+            <div className="pill-segmented" role="radiogroup" aria-label="Glass Blur">
+              {[
+                { id: 'blur(4px)', label: 'Low' },
+                { id: 'blur(16px)', label: 'Medium' },
+                { id: 'blur(32px)', label: 'High' },
+                { id: 'none', label: 'Off' },
+              ].map(o => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={config.glassBlur === o.id}
+                  className={`pill-segmented-btn ${config.glassBlur === o.id ? 'active' : ''}`}
+                  onClick={() => updateField('glassBlur', o.id)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="setting-row">
             <label>Font Family</label>
@@ -184,13 +197,26 @@ export default function ThemeTab({ config, updateField }: ThemeTabProps) {
           </div>
           <div className="setting-row">
             <label>Font Size</label>
-            <select value={config.fontSize} onChange={(e) => updateField('fontSize', e.target.value)}>
-              <option value="16px">Small</option>
-              <option value="18px">Medium (Default)</option>
-              <option value="22px">Large</option>
-              <option value="26px">Extra Large</option>
-              <option value="30px">Extra Extra Large</option>
-            </select>
+            <div className="pill-segmented" role="radiogroup" aria-label="Font Size">
+              {[
+                { id: '16px', label: 'Small' },
+                { id: '18px', label: 'Medium' },
+                { id: '22px', label: 'Large' },
+                { id: '26px', label: 'XL' },
+                { id: '30px', label: 'XXL' },
+              ].map(o => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={config.fontSize === o.id}
+                  className={`pill-segmented-btn ${config.fontSize === o.id ? 'active' : ''}`}
+                  onClick={() => updateField('fontSize', o.id)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </section>

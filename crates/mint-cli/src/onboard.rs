@@ -2,9 +2,10 @@ use anyhow::{Result, bail};
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use mint_core::{load_config, save_config};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
 struct OnboardService {
     category: &'static str,
@@ -539,10 +540,12 @@ pub async fn run() -> Result<()> {
     if is_selected("ollama", &services) {
         println!("\n\x1b[36m--- Ollama ---\x1b[0m");
         config.ollama_host = prompt_input("Ollama Host", Some(&config.ollama_host))?;
+        // Get the server up first, so the model list below can actually see it.
+        ensure_ollama_serving(&config.ollama_host);
         let ollama_models = installed_ollama_models();
         if ollama_models.is_empty() {
             println!(
-                "\x1b[90mNo local Ollama models found. Run `ollama pull <model>` to install one, or type a model name manually.\x1b[0m"
+                "\x1b[90mCouldn't read any local Ollama models (server not ready, or `ollama` not on PATH). Run `ollama pull <model>` to install one, or type a model name manually.\x1b[0m"
             );
             config.ollama_model = prompt_input("Ollama Model Name", Some(&config.ollama_model))?;
         } else {
@@ -557,7 +560,6 @@ pub async fn run() -> Result<()> {
                 "Custom local model name...",
             )?;
         }
-        ensure_ollama_serving(&config.ollama_host);
     } else {
         config.ollama_host = String::new();
         config.ollama_model = String::new();
@@ -1350,19 +1352,72 @@ fn static_model_options(presets: &[&str]) -> Vec<String> {
     presets.iter().map(|value| value.to_string()).collect()
 }
 
-pub(crate) fn installed_ollama_models() -> Vec<String> {
-    let output = match Command::new("ollama").arg("list").output() {
-        Ok(output) if output.status.success() => output,
-        _ => return Vec::new(),
+/// Blocking HTTP GET against a local Ollama endpoint (this build's `reqwest` has
+/// no `blocking` feature). Tries every resolved address — `localhost` often
+/// resolves to `::1` first while Ollama binds `127.0.0.1` — and returns the
+/// response body on `200 OK`.
+fn ollama_http_get(base: &str, path: &str) -> Option<String> {
+    let base = base.trim().trim_end_matches('/');
+    let hostport = base
+        .strip_prefix("http://")
+        .or_else(|| base.strip_prefix("https://"))
+        .unwrap_or(base);
+    let hostport = if hostport.contains(':') {
+        hostport.to_string()
+    } else {
+        format!("{hostport}:11434")
     };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout
-        .lines()
-        .skip(1)
-        .filter_map(|line| line.split_whitespace().next())
-        .filter(|name| !name.trim().is_empty())
-        .map(|name| name.to_string())
-        .collect()
+
+    for addr in hostport.to_socket_addrs().ok()?.collect::<Vec<_>>() {
+        let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_secs(2)) else {
+            continue;
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+        let request =
+            format!("GET {path} HTTP/1.1\r\nHost: {hostport}\r\nConnection: close\r\n\r\n");
+        if stream.write_all(request.as_bytes()).is_err() {
+            continue;
+        }
+        let mut raw = String::new();
+        let _ = stream.read_to_string(&mut raw);
+        let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((raw.as_str(), ""));
+        if head.lines().next().is_some_and(|l| l.contains("200")) {
+            return Some(body.to_string());
+        }
+    }
+    None
+}
+
+pub(crate) fn installed_ollama_models() -> Vec<String> {
+    // Prefer the `ollama` CLI (it honours OLLAMA_HOST); fall back to the HTTP API
+    // so "no models" and "`ollama` not on PATH" aren't silently the same result.
+    if let Ok(output) = Command::new("ollama").arg("list").output() {
+        if output.status.success() {
+            let models: Vec<String> = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .skip(1)
+                .filter_map(|line| line.split_whitespace().next())
+                .filter(|name| !name.trim().is_empty())
+                .map(str::to_string)
+                .collect();
+            if !models.is_empty() {
+                return models;
+            }
+        }
+    }
+
+    if let Some(body) = ollama_http_get("http://localhost:11434", "/api/tags") {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+            if let Some(models) = json.get("models").and_then(|m| m.as_array()) {
+                return models
+                    .iter()
+                    .filter_map(|m| m.get("name").and_then(|n| n.as_str()))
+                    .map(str::to_string)
+                    .collect();
+            }
+        }
+    }
+    Vec::new()
 }
 
 fn ensure_ollama_serving(host: &str) {
@@ -1383,28 +1438,20 @@ fn ensure_ollama_serving(host: &str) {
         addr.to_string()
     };
 
-    // Resolve once up front — `addr` may be a DNS name (e.g. a Docker
-    // service name), which `SocketAddr::parse` can't handle, so we go
-    // through `ToSocketAddrs` instead of silently falling back to
-    // 127.0.0.1 on parse failure.
-    let resolved_addr = addr.to_socket_addrs().ok().and_then(|mut it| it.next());
+    // Resolve up front — `addr` may be a DNS name (e.g. a Docker service name).
+    // Try EVERY resolved address, not just the first: `localhost` usually
+    // resolves to `::1` ahead of `127.0.0.1`, but Ollama binds IPv4 by default,
+    // so `.next()` alone reports "not running" when it actually is.
+    let resolved_addrs: Vec<_> = addr.to_socket_addrs().map(Iterator::collect).unwrap_or_default();
     let is_ollama_reachable = |timeout_secs: u64| -> bool {
-        match resolved_addr {
-            Some(socket_addr) => TcpStream::connect_timeout(
-                &socket_addr,
-                std::time::Duration::from_secs(timeout_secs),
-            )
-            .is_ok(),
-            None => false,
-        }
+        resolved_addrs
+            .iter()
+            .any(|sa| TcpStream::connect_timeout(sa, Duration::from_secs(timeout_secs)).is_ok())
     };
 
     // Check if Ollama is already serving
     if is_ollama_reachable(1) {
-        println!(
-            "\x1b[32m✔ Ollama server is already running at {}\x1b[0m",
-            host
-        );
+        println!("\x1b[32m✔ Ollama server is already running at {}\x1b[0m", host);
         return;
     }
 
@@ -1414,18 +1461,36 @@ fn ensure_ollama_serving(host: &str) {
 
     match Command::new("ollama")
         .arg("serve")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
     {
-        Ok(_) => {
-            // Wait for server to become ready (up to 10 seconds)
+        Ok(mut child) => {
+            // Wait for the server to become reachable (up to 10 seconds).
             let mut ready = false;
             for _ in 0..20 {
-                std::thread::sleep(std::time::Duration::from_millis(500));
+                std::thread::sleep(Duration::from_millis(500));
                 if is_ollama_reachable(1) {
                     ready = true;
                     break;
+                }
+                // If `ollama serve` already exited, it failed to bind (usually
+                // the port is taken by another instance) — surface why.
+                if let Ok(Some(status)) = child.try_wait() {
+                    let mut err = String::new();
+                    if let Some(mut stderr) = child.stderr.take() {
+                        let _ = stderr.read_to_string(&mut err);
+                    }
+                    let reason = err
+                        .lines()
+                        .rev()
+                        .find(|l| !l.trim().is_empty())
+                        .unwrap_or("no output");
+                    println!(
+                        "\r\x1b[31m✘ `ollama serve` exited ({status}): {}\x1b[0m",
+                        reason.trim()
+                    );
+                    return;
                 }
             }
             if ready {
@@ -1435,14 +1500,13 @@ fn ensure_ollama_serving(host: &str) {
                 );
             } else {
                 println!(
-                    "\r\x1b[31m✘ Ollama server started but not responding yet. It may need more time.\x1b[0m"
+                    "\r\x1b[31m✘ Ollama server not reachable at {host} after 10s. Try running `ollama serve` in another terminal.\x1b[0m"
                 );
             }
         }
         Err(e) => {
             println!(
-                "\r\x1b[31m✘ Failed to start Ollama server: {}. Please run `ollama serve` manually.\x1b[0m",
-                e
+                "\r\x1b[31m✘ Couldn't run `ollama serve`: {e}. Is Ollama installed and on your PATH?\x1b[0m"
             );
         }
     }

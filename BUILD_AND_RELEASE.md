@@ -22,17 +22,30 @@ Tauri writes platform bundles under `target/release/bundle/`.
 Pushing a semver tag starts the release workflow:
 
 ```bash
-git tag v1.12.0
-git push origin v1.12.0
+git tag v1.13.0
+git push origin v1.13.0
 ```
 
-The workflow builds Linux release artifacts on GitHub Actions and publishes them
-to the tagged GitHub Release:
+The workflow runs one job per platform on GitHub Actions and publishes their
+artifacts to the same tagged GitHub Release. Every asset is renamed to
+`mint-agent_<platform>_<arch>.<ext>` before upload:
 
-- Debian package from `target/release/bundle/deb/*.deb`
-- Portable desktop tarball from `target/release/bundle/tar/*.tar.gz`
-- CLI binary as `mint-cli-linux-x86_64`
-- `SHA256SUMS`
+| Platform | Job | Build command | Published asset |
+| --- | --- | --- | --- |
+| Linux (`ubuntu-latest`) | `linux` | `npm run tauri:build` | `mint-agent_linux_x86_64.deb`, `mint-agent_linux_x86_64.tar.gz` |
+| Windows (`windows-latest`) | `windows` | `npx tauri build --bundles nsis` | `mint-agent_windows_x64.exe` |
+| macOS (`macos-latest`, arm64) | `macos` | `npx tauri build --bundles dmg` | `mint-agent_macos_arm64.dmg` |
+
+- `mint-agent_linux_x86_64.deb` — Debian package (`target/release/bundle/deb/`).
+- `mint-agent_linux_x86_64.tar.gz` — portable bundle of the `mint-desktop`
+  binary (`target/release/bundle/tar/`).
+- `mint-agent_windows_x64.exe` — NSIS installer (`target/release/bundle/nsis/`).
+  Currently **unsigned**, so SmartScreen shows an "unknown publisher" warning
+  on first run.
+- `mint-agent_macos_arm64.dmg` — disk image containing `Mint.app`
+  (`target/release/bundle/dmg/`). **Ad-hoc signed, not notarized** — Gatekeeper
+  blocks it until the user right-clicks the app and chooses Open, or runs
+  `xattr -cr /Applications/Mint.app`. arm64 only; no Intel build.
 
 The same workflow can be started manually from the Actions tab with
 `workflow_dispatch`; manual runs upload workflow artifacts but only tag-triggered

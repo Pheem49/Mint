@@ -65,6 +65,9 @@ pub fn tool_catalog(
         allowed.push("browser_key_press");
         allowed.push("browser_screenshot");
     }
+    if !config.avatar_token.is_empty() && !config.avatar_signal_disabled {
+        allowed.push("avatar_signal");
+    }
     allowed.retain(|action| !config.disabled_tools.contains(&action.to_string()));
     if plan_mode {
         allowed.retain(|action| PLAN_MODE_ALLOWED_ACTIONS.contains(action));
@@ -299,6 +302,44 @@ fn all_tools() -> Vec<ToolSpec> {
             "memory_recall",
             "Search past interactions/memory before asking the user to repeat context.",
             schema(json!({ "query": { "type": "string" } }), &["query"]),
+        ),
+        tool(
+            "avatar_signal",
+            "Set the connected Project Avatar's emotion/pose/prop directly — for conversational \
+             intent that no other tool call implies (greeting, joking, apologizing, thinking \
+             something over). Routine tool-driven turns (shell, browser, image/video generation) \
+             already react on their own; don't call this for those. Every field is an optional \
+             partial update — the avatar keeps whatever you don't set.",
+            schema(
+                json!({
+                    "emotions": {
+                        "type": "object",
+                        "description": "Map of primary emotion -> intensity word. Emotions: joy, sadness, anger, fear, surprise, disgust, interest. Intensities: subtle, low, medium, high.",
+                        "additionalProperties": { "type": "string" }
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "idle, typing, nodding, laughing, celebrating, dismissive, searching, nervous, sad, plotting, greeting, talking"
+                    },
+                    "prop": {
+                        "type": "string",
+                        "description": "none, keyboard, magnifying_glass, coffee_cup, book, phone, scroll"
+                    },
+                    "intensity": {
+                        "type": "string",
+                        "description": "Overall pose intensity: low, medium, high"
+                    },
+                    "color": {
+                        "type": "string",
+                        "description": "Optional color override, e.g. a hex code."
+                    },
+                    "talking": {
+                        "type": "boolean",
+                        "description": "Mouth-flap layer, independent of action."
+                    }
+                }),
+                &[],
+            ),
         ),
         tool(
             "git_status",
@@ -837,6 +878,23 @@ mod tests {
         let config = MintConfig::default();
         let tools = tool_catalog(&config, true, Path::new("."), true);
         assert!(!tools.iter().any(|t| t.name == "enter_plan_mode"));
+    }
+
+    #[test]
+    fn avatar_signal_offered_only_when_a_token_is_configured() {
+        let config = MintConfig::default();
+        let tools = tool_catalog(&config, false, Path::new("."), true);
+        assert!(!tools.iter().any(|t| t.name == "avatar_signal"));
+
+        let mut config = MintConfig::default();
+        config.avatar_token = "test-token".into();
+        let tools = tool_catalog(&config, false, Path::new("."), true);
+        assert!(tools.iter().any(|t| t.name == "avatar_signal"));
+
+        // Soft toggle: `/avatar` → "Off" hides the tool but keeps the token.
+        config.avatar_signal_disabled = true;
+        let tools = tool_catalog(&config, false, Path::new("."), true);
+        assert!(!tools.iter().any(|t| t.name == "avatar_signal"));
     }
 
     fn write_subagent(dir: &std::path::Path, name: &str, content: &str) {

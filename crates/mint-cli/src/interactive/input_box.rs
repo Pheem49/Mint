@@ -1,83 +1,6 @@
 use super::*;
 use ansi_to_tui::IntoText;
 
-const AUTOCOMPLETE_COMMANDS: &[(&str, &str)] = &[
-    (
-        "/autoskill",
-        "Toggle auto-writing a SKILL.md after hard tasks",
-    ),
-    ("/bg", "Run a query in the background, non-blocking"),
-    ("/cd", "Change active workspace directory"),
-    (
-        "/cron",
-        "Create/list/remove/enable/disable scheduled agent tasks",
-    ),
-    (
-        "/cron add",
-        "Create a scheduled task — walks through a wizard if you don't type more",
-    ),
-    ("/link", "Link a folder chat can auto-write notes into"),
-    ("/clear", "Clear conversation history"),
-    ("/code", "Run in code-agent mode"),
-    ("/edit-image", "Edit attached image with prompt instruction"),
-    ("/exit", "Exit Mint CLI"),
-    ("/fast", "Toggle fast mode (hide thinking traces)"),
-    (
-        "/plan",
-        "Toggle plan mode (read-only until you approve a plan)",
-    ),
-    ("/gen-image", "Generate image using AI model"),
-    ("/generate-image", "Generate image using AI model"),
-    ("/help", "Show help menu"),
-    ("/image", "Attach image from disk"),
-    (
-        "/image-provider",
-        "List image gen providers or switch default provider",
-    ),
-    ("/jobs", "List, inspect, or cancel background jobs"),
-    ("/learn", "Import persistent skill/instruction"),
-    ("/mcp", "List configured MCP servers"),
-    ("/memory", "Manage long-term memory store"),
-    (
-        "/n8n",
-        "Open n8n, or trigger a workflow via the n8n MCP server",
-    ),
-    (
-        "/notebook",
-        "Open SurfSense, or run a task via the surfsense MCP server",
-    ),
-    ("/models", "List AI providers or switch active provider"),
-    ("/multi-agent", "Toggle Multi-Agent Collaboration system"),
-    ("/paste", "Attach image from clipboard"),
-    ("/plugins", "List or generate plugins/skills"),
-    (
-        "/release-notes",
-        "Show release notes for the current version",
-    ),
-    (
-        "/search-provider",
-        "List web search providers or switch default provider",
-    ),
-    (
-        "/shells",
-        "List, inspect, or kill background shell jobs run_shell started",
-    ),
-    ("/skill add", "Add or install global skill file or folder"),
-    ("/stats", "Show session statistics"),
-    (
-        "/subagent",
-        "List/create/remove subagents the agent can delegate to",
-    ),
-    (
-        "/subagent add",
-        "Create a subagent — walks through a wizard",
-    ),
-    ("/veo", "Generate video using Google Veo"),
-    (
-        "/video-provider",
-        "List video gen providers or switch default provider",
-    ),
-];
 /// Width, in raw characters, available for input text within the box —
 /// shared by every function that needs to reason about row layout, so the
 /// terminal-width query and margin/prefix math stay in one place.
@@ -283,9 +206,9 @@ pub(crate) fn compose_input_box(
     let raw_input: String = input_chars.iter().collect();
     let search_query = tab_base_input.unwrap_or(&raw_input);
     if search_query.starts_with('/') {
-        let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
+        let matches: Vec<_> = SLASH_COMMANDS
             .iter()
-            .filter(|(cmd, _)| cmd.starts_with(search_query))
+            .filter(|c| c.token.starts_with(search_query))
             .collect();
 
         if !matches.is_empty() {
@@ -303,7 +226,7 @@ pub(crate) fn compose_input_box(
                 total_pages
             ));
             for i in s_start_idx..s_end_idx {
-                let (cmd, desc) = matches[i];
+                let (cmd, desc) = (matches[i].token.as_str(), matches[i].description.as_str());
                 if Some(i) == highlight_idx {
                     lines.push(format!(
                         "  {BLUE}▶ {:<16}{RESET} {DIM}- {}{RESET}",
@@ -768,14 +691,14 @@ pub fn read_line_interactive(
                         };
 
                         if base.starts_with('/') {
-                            let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
+                            let matches: Vec<_> = SLASH_COMMANDS
                                 .iter()
-                                .filter(|(cmd, _)| cmd.starts_with(&base))
+                                .filter(|c| c.token.starts_with(&base))
                                 .collect();
 
                             if !matches.is_empty() {
                                 let idx = tab_index.unwrap_or(0) % matches.len();
-                                let completed = format!("{} ", matches[idx].0);
+                                let completed = format!("{} ", matches[idx].token);
                                 input_chars = completed.chars().collect();
                                 cursor_pos = input_chars.len();
 
@@ -874,9 +797,9 @@ pub fn read_line_interactive(
                         };
 
                         if base.starts_with('/') {
-                            let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
+                            let matches: Vec<_> = SLASH_COMMANDS
                                 .iter()
-                                .filter(|(cmd, _)| cmd.starts_with(&base))
+                                .filter(|c| c.token.starts_with(&base))
                                 .collect();
 
                             if !matches.is_empty() {
@@ -885,7 +808,7 @@ pub fn read_line_interactive(
                                     None => 0,
                                 };
                                 tab_index = Some(new_idx);
-                                let completed = format!("{} ", matches[new_idx].0);
+                                let completed = format!("{} ", matches[new_idx].token);
                                 input_chars = completed.chars().collect();
                                 cursor_pos = input_chars.len();
 
@@ -1012,9 +935,9 @@ pub fn read_line_interactive(
                         };
 
                         if base.starts_with('/') {
-                            let matches: Vec<_> = AUTOCOMPLETE_COMMANDS
+                            let matches: Vec<_> = SLASH_COMMANDS
                                 .iter()
-                                .filter(|(cmd, _)| cmd.starts_with(&base))
+                                .filter(|c| c.token.starts_with(&base))
                                 .collect();
 
                             if !matches.is_empty() {
@@ -1029,7 +952,7 @@ pub fn read_line_interactive(
                                     None => matches.len() - 1,
                                 };
                                 tab_index = Some(new_idx);
-                                let completed = format!("{} ", matches[new_idx].0);
+                                let completed = format!("{} ", matches[new_idx].token);
                                 input_chars = completed.chars().collect();
                                 cursor_pos = input_chars.len();
 
@@ -1239,7 +1162,14 @@ pub fn read_line_interactive(
                             expanded_str = expanded_str.replace(placeholder_str, content);
                         }
 
+                        let (term_width, _) = crate::markdown::terminal_size_or_default();
+                        let echo_divider = format!(
+                            "{DIM}{}{RESET}",
+                            "─".repeat((term_width as usize).saturating_sub(2))
+                        );
+
                         let lines: Vec<&str> = expanded_str.lines().collect();
+                        println!("{echo_divider}");
                         if lines.len() <= 1 {
                             println!("  {BLUE}You ›{RESET} {}", expanded_str);
                         } else {
@@ -1251,6 +1181,7 @@ pub fn read_line_interactive(
                                 }
                             }
                         }
+                        println!("{echo_divider}");
                         let _ = io::stdout().flush();
 
                         break Some(InteractiveInput {
@@ -1276,6 +1207,7 @@ pub fn read_line_interactive(
             let mut notices = jobs.take_notices();
             notices.extend(mint_core::bg_shell::take_finished_notices());
             notices.extend(mint_core::take_linked_folder_notices());
+            notices.extend(mint_core::live_sync::take_live_sync_notices());
             if !notices.is_empty() {
                 disable_raw_mode()?;
                 clear_input_box(cursor_row);

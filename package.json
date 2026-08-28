@@ -1,6 +1,6 @@
 {
   "name": "@pheem49/mint",
-  "version": "1.12.1",
+  "version": "1.13.0",
   "description": "A native Tauri desktop AI assistant with a Rust backend and React UI.",
   "scripts": {
     "dev:web": "vite --config vite.config.web.ts",
@@ -58,8 +58,18 @@
     "mint": "src/bin/index.js"
   },
   "dependencies": {
+    "@fontsource/fira-code": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/kanit": "^5.3.0",
+    "@fontsource/mali": "^5.3.0",
+    "@fontsource/mitr": "^5.3.0",
+    "@fontsource/noto-sans-thai": "^5.3.0",
+    "@fontsource/outfit": "^5.3.0",
+    "@fontsource/prompt": "^5.3.0",
+    "@fontsource/sarabun": "^5.3.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "@vitejs/plugin-react": "^6.0.1",
     "@xyflow/react": "^12.11.1",
     "lucide-react": "^1.28.0",
