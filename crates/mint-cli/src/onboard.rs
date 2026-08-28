@@ -1442,7 +1442,10 @@ fn ensure_ollama_serving(host: &str) {
     // Try EVERY resolved address, not just the first: `localhost` usually
     // resolves to `::1` ahead of `127.0.0.1`, but Ollama binds IPv4 by default,
     // so `.next()` alone reports "not running" when it actually is.
-    let resolved_addrs: Vec<_> = addr.to_socket_addrs().map(Iterator::collect).unwrap_or_default();
+    let resolved_addrs: Vec<_> = addr
+        .to_socket_addrs()
+        .map(Iterator::collect)
+        .unwrap_or_default();
     let is_ollama_reachable = |timeout_secs: u64| -> bool {
         resolved_addrs
             .iter()
@@ -1451,7 +1454,10 @@ fn ensure_ollama_serving(host: &str) {
 
     // Check if Ollama is already serving
     if is_ollama_reachable(1) {
-        println!("\x1b[32m✔ Ollama server is already running at {}\x1b[0m", host);
+        println!(
+            "\x1b[32m✔ Ollama server is already running at {}\x1b[0m",
+            host
+        );
         return;
     }
 

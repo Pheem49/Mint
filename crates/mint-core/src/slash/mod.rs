@@ -95,13 +95,21 @@ pub enum SlashEffect {
     /// `config` was mutated in place — caller must `save_config`.
     ConfigChanged,
     /// Active provider/model changed (also implies `ConfigChanged`).
-    ProviderChanged { display: String },
+    ProviderChanged {
+        display: String,
+    },
     /// `/cd` resolved to a new workspace.
-    WorkspaceChanged { path: String },
+    WorkspaceChanged {
+        path: String,
+    },
     /// `/clear` — caller wipes the current conversation.
     HistoryCleared,
-    FastModeChanged { enabled: bool },
-    MultiAgentChanged { enabled: bool },
+    FastModeChanged {
+        enabled: bool,
+    },
+    MultiAgentChanged {
+        enabled: bool,
+    },
 }
 
 #[derive(serde::Serialize)]
@@ -155,7 +163,11 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
     match token.as_str() {
         "/help" => cmd_help(req.is_cli()),
         "/release-notes" => message(
-            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Release_Note.md")).trim(),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../Release_Note.md"
+            ))
+            .trim(),
         ),
         "/clear" => SlashResponse::Applied {
             markdown: "🧹 Conversation history cleared.".into(),
@@ -410,7 +422,10 @@ fn cmd_models(rest: &str, config: &mut MintConfig) -> SlashResponse {
         }
     }
 
-    let was = (config.ai_provider.clone(), config.active_model().to_string());
+    let was = (
+        config.ai_provider.clone(),
+        config.active_model().to_string(),
+    );
 
     // Mutate the config in place and let the caller persist (via the
     // `ConfigChanged` effect) — deliberately NOT `config.set_active_model`,
@@ -432,7 +447,13 @@ fn cmd_models(rest: &str, config: &mut MintConfig) -> SlashResponse {
     // real user data dir with no test-scoped override, so without this guard
     // every `cmd_models` test run leaves a junk row in the developer's own chat
     // (same reasoning as `cron::store`'s `ensure_named_chat_session` guard).
-    if !cfg!(test) && was != (config.ai_provider.clone(), config.active_model().to_string()) {
+    if !cfg!(test)
+        && was
+            != (
+                config.ai_provider.clone(),
+                config.active_model().to_string(),
+            )
+    {
         if let Ok(memory) = crate::MemoryStore::open_default() {
             let _ = memory.add_interaction_for_chat_with_fallback(
                 crate::CHAT_CLI_ID,
@@ -480,7 +501,11 @@ fn cmd_multi_agent_status(config: &MintConfig) -> SlashResponse {
     let mut md = md_heading("🤖 Multi-Agent Collaboration");
     md.push_str(&format!(
         "Global collaboration: **{}**\n\n",
-        if config.enable_agent_collaboration { "on" } else { "off" }
+        if config.enable_agent_collaboration {
+            "on"
+        } else {
+            "off"
+        }
     ));
     if config.agents.is_empty() {
         md.push_str("_No agents configured._\n");
@@ -542,7 +567,11 @@ fn cmd_stats(config: &MintConfig, workspace: &Path) -> SlashResponse {
         format!("Fast mode: {}", if fast { "on" } else { "off" }),
         format!(
             "Multi-agent: {}",
-            if config.enable_agent_collaboration { "on" } else { "off" }
+            if config.enable_agent_collaboration {
+                "on"
+            } else {
+                "off"
+            }
         ),
         format!("Cron jobs: {cron_count}"),
         format!("Linked folders: {link_count}"),
@@ -615,9 +644,9 @@ fn cmd_cron(rest: &str, workspace: &Path) -> SlashResponse {
     let (sub, args) = split_sub(rest);
     match sub.as_str() {
         "" | "list" => match store.list() {
-            Ok(jobs) if jobs.is_empty() => {
-                message("⏰ No scheduled tasks. Add one with `/cron add <name> | <schedule> | <task>`.")
-            }
+            Ok(jobs) if jobs.is_empty() => message(
+                "⏰ No scheduled tasks. Add one with `/cron add <name> | <schedule> | <task>`.",
+            ),
             Ok(jobs) => {
                 let rows = jobs
                     .iter()
@@ -641,9 +670,7 @@ fn cmd_cron(rest: &str, workspace: &Path) -> SlashResponse {
             let (name, schedule, task, tz) = match fields.as_slice() {
                 [n, s, t] => (*n, *s, *t, None),
                 [n, s, t, z] => (*n, *s, *t, Some(*z)),
-                _ => return error(
-                    "Usage: /cron add <name> | <schedule> | <task> | [timezone]",
-                ),
+                _ => return error("Usage: /cron add <name> | <schedule> | <task> | [timezone]"),
             };
             if name.is_empty() || task.is_empty() {
                 return error("Usage: /cron add <name> | <schedule> | <task> | [timezone]");
@@ -824,7 +851,9 @@ fn allow_mcp_tool(config: &mut MintConfig, server: &str, tool: &str) -> bool {
         *allowed = json!({});
     }
     let servers = allowed.as_object_mut().expect("normalized to object");
-    let tools = servers.entry(server.to_owned()).or_insert_with(|| json!([]));
+    let tools = servers
+        .entry(server.to_owned())
+        .or_insert_with(|| json!([]));
     if !tools.is_array() {
         *tools = json!([]);
     }
@@ -909,7 +938,10 @@ mod tests {
         let mut cfg = MintConfig::default();
         match execute(&req("/fast on"), &mut cfg) {
             SlashResponse::Applied { effects, .. } => {
-                assert_eq!(cfg.extra.get("fastMode"), Some(&serde_json::Value::Bool(true)));
+                assert_eq!(
+                    cfg.extra.get("fastMode"),
+                    Some(&serde_json::Value::Bool(true))
+                );
                 assert!(effects.contains(&SlashEffect::FastModeChanged { enabled: true }));
             }
             _ => panic!("expected Applied"),
@@ -932,20 +964,27 @@ mod tests {
         let mut cfg = MintConfig::default();
         // provider given, no model -> model picker (gemini has static presets)
         match execute(&req("/models gemini"), &mut cfg) {
-            SlashResponse::NeedsChoice { command, options, .. } => {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
                 assert_eq!(command, "/models gemini");
                 assert!(!options.is_empty());
             }
-            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
         // provider + model -> applied
         match execute(&req("/models gemini gemini-2.5-flash"), &mut cfg) {
             SlashResponse::Applied { effects, .. } => {
                 assert_eq!(cfg.ai_provider, "gemini");
                 assert_eq!(cfg.gemini_model, "gemini-2.5-flash");
-                assert!(effects
-                    .iter()
-                    .any(|e| matches!(e, SlashEffect::ProviderChanged { .. })));
+                assert!(
+                    effects
+                        .iter()
+                        .any(|e| matches!(e, SlashEffect::ProviderChanged { .. }))
+                );
             }
             other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
         }
@@ -957,9 +996,11 @@ mod tests {
         let tmp = std::env::temp_dir();
         match execute(&req(&format!("/cd {}", tmp.display())), &mut cfg) {
             SlashResponse::Applied { effects, .. } => {
-                assert!(effects
-                    .iter()
-                    .any(|e| matches!(e, SlashEffect::WorkspaceChanged { .. })));
+                assert!(
+                    effects
+                        .iter()
+                        .any(|e| matches!(e, SlashEffect::WorkspaceChanged { .. }))
+                );
             }
             other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
         }
@@ -990,7 +1031,10 @@ mod tests {
                 assert_eq!(prompt, "fix the parser");
                 assert!(agent_mode);
             }
-            other => panic!("expected ForwardToAgent, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected ForwardToAgent, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
     }
 

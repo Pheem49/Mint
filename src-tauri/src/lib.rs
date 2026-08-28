@@ -913,9 +913,7 @@ fn get_recent_interactions(
         workspace_path.as_deref(),
     );
     MemoryStore::open_default()
-        .and_then(|memory| {
-            memory.recent_interactions_for_chat(&scoped_chat_id, limit.unwrap_or(5))
-        })
+        .and_then(|memory| memory.recent_interactions_for_chat(&scoped_chat_id, limit.unwrap_or(5)))
         .map_err(|error| error.to_string())
 }
 
