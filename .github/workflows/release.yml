@@ -59,14 +59,20 @@ jobs:
       - name: Build desktop bundle
         run: npm run tauri:build
 
+      - name: Build CLI binary
+        # Reuses the deps already compiled for the desktop bundle, so this is a
+        # fast incremental build of just the `mint` binary.
+        run: cargo build --release -p mint-cli
+
       - name: Collect artifacts
-        # Published asset names follow mint-agent_<platform>_<arch>.<ext> across
-        # all three jobs. `npm run tauri:build` already renames the raw bundles
-        # to mint-agent_amd64.deb / mint-agent.tar.gz.
+        # Published asset names: desktop bundles are mint-agent_<platform>_<arch>.<ext>,
+        # the standalone CLI is mint-cli_<platform>_<arch>. `npm run tauri:build`
+        # already renames the raw bundles to mint-agent_amd64.deb / mint-agent.tar.gz.
         run: |
           mkdir -p release-artifacts
           cp target/release/bundle/deb/mint-agent_amd64.deb release-artifacts/mint-agent_linux_x86_64.deb
           cp target/release/bundle/tar/mint-agent.tar.gz release-artifacts/mint-agent_linux_x86_64.tar.gz
+          cp target/release/mint release-artifacts/mint-cli_linux_x86_64
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -118,11 +124,15 @@ jobs:
         # bundle also ships the WebView2 bootstrapper for end users without it.
         run: npx tauri build --bundles nsis
 
+      - name: Build CLI binary
+        run: cargo build --release -p mint-cli
+
       - name: Collect artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release-artifacts | Out-Null
           Copy-Item target/release/bundle/nsis/*-setup.exe release-artifacts/mint-agent_windows_x64.exe
+          Copy-Item target/release/mint.exe release-artifacts/mint-cli_windows_x64.exe
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -176,10 +186,18 @@ jobs:
         # runs `xattr -cr` on the app.
         run: npx tauri build --bundles dmg
 
+      - name: Build CLI binary
+        # `cargo build` on Apple Silicon ad-hoc signs the binary, which arm64
+        # requires to run at all. It is not notarized, so a downloaded copy
+        # carries a quarantine flag until the user clears it (`xattr -d
+        # com.apple.quarantine ./mint-cli_macos_arm64`).
+        run: cargo build --release -p mint-cli
+
       - name: Collect artifacts
         run: |
           mkdir -p release-artifacts
           cp target/release/bundle/dmg/*.dmg release-artifacts/mint-agent_macos_arm64.dmg
+          cp target/release/mint release-artifacts/mint-cli_macos_arm64
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

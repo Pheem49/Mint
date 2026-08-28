@@ -3,12 +3,25 @@
 const { spawn } = require('child_process');
 const path = require('path');
 
-// ชี้ไปยังไฟล์ Rust Binary ที่คอมไพล์สำเร็จแล้วในเครื่องผู้ใช้
-const binaryPath = path.join(__dirname, '..', '..', 'bin', 'mint');
+// The `postinstall` script runs `cargo build -p mint-cli --release`, which
+// produces the native binary here. `.exe` suffix on Windows.
+const exe = process.platform === 'win32' ? 'mint.exe' : 'mint';
+const binaryPath = path.join(__dirname, '..', '..', 'target', 'release', exe);
 
-// สั่งทำงานไฟล์ Binary โดยส่งอาร์กิวเมนต์ทั้งหมดต่อเข้าไป
+// Forward every argument straight through to the Rust binary.
 const child = spawn(binaryPath, process.argv.slice(2), {
   stdio: 'inherit'
+});
+
+child.on('error', (err) => {
+  if (err.code === 'ENOENT') {
+    console.error(
+      `mint: native binary not found at ${binaryPath}\n` +
+      `Reinstall with a Rust toolchain available: npm install -g @pheem49/mint`
+    );
+    process.exit(1);
+  }
+  throw err;
 });
 
 child.on('close', (code) => {

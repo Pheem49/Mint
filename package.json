@@ -27,7 +27,7 @@
     "test": "cargo test -p mint-core -p mint-cli",
     "cli": "cargo run -p mint-cli --",
     "prepublishOnly": "npm run build:web",
-    "postinstall": "cargo build -p mint-cli --release && mkdir -p bin && cp target/release/mint bin/mint"
+    "postinstall": "cargo build -p mint-cli --release"
   },
   "keywords": [
     "mint",
