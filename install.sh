@@ -24,15 +24,21 @@ set -e
 
 NPM_PKG="@pheem49/mint@latest"
 SKIP_OPTIONAL="${MINT_SKIP_OPTIONAL:-0}"
+ASSUME_YES="${MINT_YES:-0}"
 
 OS="$(uname -s)"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
 ask() {
-  # ask "question" -> returns 0 for yes (default yes)
-  local reply
-  read -r -p "$1 [Y/n]: " reply
+  # ask "question" -> 0 for yes (default yes). Reads the real terminal so the
+  # prompt still works under `curl ... | bash`; auto-yes when non-interactive
+  # or MINT_YES=1.
+  [ "$ASSUME_YES" = "1" ] && return 0
+  local reply=""
+  if [ -r /dev/tty ]; then
+    read -r -p "$1 [Y/n]: " reply </dev/tty || true
+  fi
   reply="${reply:-Y}"
   [[ "$reply" =~ ^([yY][eE][sS]|[yY])$ ]]
 }
@@ -67,6 +73,32 @@ if [ "$OS" = "Linux" ]; then
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Summary + confirmation
+# ---------------------------------------------------------------------------
+echo "This installer will:"
+if [ "$OS" = "Darwin" ]; then
+  echo "  - ensure the Xcode Command Line Tools (C toolchain) are present"
+elif [ -n "$PM" ]; then
+  echo "  - install build deps via ${SUDO:-(root)} $PM: C toolchain, pkg-config, ALSA libs"
+else
+  echo "  - (unknown package manager: you'll be asked to install build deps yourself)"
+fi
+have npm   || echo "  - install Node.js + npm"
+have cargo || echo "  - install the Rust toolchain (rustup)"
+if [ "$SKIP_OPTIONAL" != "1" ]; then
+  echo "  - install optional feature tools: git, poppler (pdftotext), ffmpeg"
+fi
+echo "  - run 'npm install -g $NPM_PKG' (compiles mint-cli from source)"
+echo
+echo "  Env toggles: MINT_YES=1 (no prompts)  MINT_SKIP_OPTIONAL=1 (skip extras)"
+echo
+if ! ask "Proceed?"; then
+  echo "Aborted."
+  exit 1
+fi
+echo
+
 pm_install() {
   # pm_install <apt pkgs> ||| <dnf pkgs> ||| <pacman pkgs> ||| <zypper pkgs>
   case "$PM" in
@@ -85,16 +117,11 @@ echo "--- Checking system build dependencies ---"
 
 if [ "$OS" = "Darwin" ]; then
   if ! have cc || ! xcode-select -p >/dev/null 2>&1; then
-    echo "Xcode Command Line Tools are required to compile Mint (C toolchain + linker)."
-    if ask "Install them now? (opens Apple's installer)"; then
-      xcode-select --install || true
-      echo
-      echo "Finish the Xcode Command Line Tools installer, then re-run this script."
-      exit 1
-    else
-      echo "Installation aborted. Xcode Command Line Tools are required."
-      exit 1
-    fi
+    echo "Installing the Xcode Command Line Tools (C toolchain + linker)..."
+    xcode-select --install || true
+    echo
+    echo "Finish the Xcode Command Line Tools installer, then re-run this script."
+    exit 1
   fi
   echo "OK: Xcode Command Line Tools present."
 elif [ "$OS" = "Linux" ]; then
@@ -125,38 +152,30 @@ echo
 # ---------------------------------------------------------------------------
 echo "--- Checking Node.js / npm ---"
 if ! have npm; then
-  echo "Node.js / npm is not installed (required to install and manage Mint CLI)."
-  if ask "Install Node.js and npm automatically?"; then
-    case "$OS" in
-      Darwin)
-        if have brew; then
-          brew install node
+  echo "Node.js / npm not found — installing..."
+  case "$OS" in
+    Darwin)
+      if have brew; then
+        brew install node
+      else
+        echo "Homebrew not found — installing the official Node.js package."
+        node_pkg="$(mktemp -d)/node.pkg"
+        if curl -fsSL "https://nodejs.org/dist/v22.11.0/node-v22.11.0.pkg" -o "$node_pkg"; then
+          $SUDO installer -pkg "$node_pkg" -target /
+          rm -f "$node_pkg"
+          hash -r 2>/dev/null || true
         else
-          echo "Homebrew not found — installing the official Node.js package."
-          node_pkg="$(mktemp -d)/node.pkg"
-          if curl -fsSL "https://nodejs.org/dist/v22.11.0/node-v22.11.0.pkg" -o "$node_pkg"; then
-            $SUDO installer -pkg "$node_pkg" -target /
-            rm -f "$node_pkg"
-            hash -r 2>/dev/null || true
-          else
-            echo "Error: could not download Node.js. Install it from https://nodejs.org and re-run."
-            exit 1
-          fi
-        fi ;;
-      Linux)
-        case "$PM" in
-          apt)    pm_install nodejs npm ;;
-          dnf)    pm_install nodejs npm ;;
-          pacman) pm_install nodejs npm ;;
-          zypper) pm_install nodejs npm ;;
-          *)      echo "Error: install Node.js manually from https://nodejs.org"; exit 1 ;;
-        esac ;;
-      *) echo "Error: install Node.js manually from https://nodejs.org"; exit 1 ;;
-    esac
-  else
-    echo "Installation aborted. Node.js/npm is required."
-    exit 1
-  fi
+          echo "Error: could not download Node.js. Install it from https://nodejs.org and re-run."
+          exit 1
+        fi
+      fi ;;
+    Linux)
+      case "$PM" in
+        apt | dnf | pacman | zypper) pm_install nodejs npm ;;
+        *) echo "Error: install Node.js manually from https://nodejs.org"; exit 1 ;;
+      esac ;;
+    *) echo "Error: install Node.js manually from https://nodejs.org"; exit 1 ;;
+  esac
 fi
 echo "OK: $(node --version 2>/dev/null || echo node) / npm $(npm --version 2>/dev/null)"
 echo
@@ -166,15 +185,10 @@ echo
 # ---------------------------------------------------------------------------
 echo "--- Checking Rust / Cargo ---"
 if ! have cargo; then
-  echo "Rust / Cargo is not installed (the npm package compiles Mint CLI from source)."
-  if ask "Install Rust via rustup?"; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    # shellcheck disable=SC1091
-    . "$HOME/.cargo/env"
-  else
-    echo "Installation aborted. Rust/Cargo is required."
-    exit 1
-  fi
+  echo "Rust / Cargo not found — installing via rustup..."
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  # shellcheck disable=SC1091
+  . "$HOME/.cargo/env"
 fi
 echo "OK: $(cargo --version)"
 echo

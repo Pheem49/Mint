@@ -20,8 +20,15 @@
 $ErrorActionPreference = "Stop"
 $NpmPkg = "@pheem49/mint@latest"
 $SkipOptional = $env:MINT_SKIP_OPTIONAL -eq "1"
+$AssumeYes = $env:MINT_YES -eq "1"
 
 function Have($name) { $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
+
+function Confirm-Yes($msg) {
+    if ($AssumeYes) { return $true }
+    $r = Read-Host "$msg [Y/n]"
+    return ($r -eq "" -or $r -like "y*")
+}
 
 function Refresh-Path {
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
@@ -31,26 +38,33 @@ function Refresh-Path {
 Write-Host "=== Installing Mint CLI ===" -ForegroundColor Green
 Write-Host ""
 
+Write-Host "This installer will:"
+Write-Host "  - install the MSVC C++ Build Tools (if missing)"
+if (-not (Have "npm"))   { Write-Host "  - install Node.js + npm" }
+if (-not (Have "cargo")) { Write-Host "  - install the Rust toolchain (rustup)" }
+if (-not $SkipOptional)  { Write-Host "  - install optional feature tools: git, ffmpeg" }
+Write-Host "  - run 'npm install -g $NpmPkg' (compiles mint-cli from source)"
+Write-Host ""
+Write-Host "  Env toggles: MINT_YES=1 (no prompts)  MINT_SKIP_OPTIONAL=1 (skip extras)"
+Write-Host ""
+if (-not (Confirm-Yes "Proceed?")) { Write-Host "Aborted."; exit 1 }
+Write-Host ""
+
 # ---------------------------------------------------------------------------
 # 1. Node.js / npm
 # ---------------------------------------------------------------------------
 Write-Host "--- Checking Node.js / npm ---" -ForegroundColor Cyan
 if (-not (Have "npm")) {
-    Write-Host "Node.js / npm not found (required to install and manage Mint CLI)." -ForegroundColor Yellow
-    $r = Read-Host "Install Node.js automatically? [Y/n]"
-    if ($r -eq "" -or $r -like "y*") {
-        if (Have "winget") {
-            winget install --id OpenJS.NodeJS.LTS --exact --silent `
-                --accept-package-agreements --accept-source-agreements
-        } else {
-            $msi = Join-Path $env:TEMP "node-install.msi"
-            Invoke-WebRequest -Uri "https://nodejs.org/dist/v22.11.0/node-v22.11.0-x64.msi" -OutFile $msi -UseBasicParsing
-            Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait
-        }
-        Refresh-Path
+    Write-Host "Node.js / npm not found - installing..." -ForegroundColor Yellow
+    if (Have "winget") {
+        winget install --id OpenJS.NodeJS.LTS --exact --silent `
+            --accept-package-agreements --accept-source-agreements
     } else {
-        Write-Error "Node.js/npm is required."; exit 1
+        $msi = Join-Path $env:TEMP "node-install.msi"
+        Invoke-WebRequest -Uri "https://nodejs.org/dist/v22.11.0/node-v22.11.0-x64.msi" -OutFile $msi -UseBasicParsing
+        Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait
     }
+    Refresh-Path
 }
 Write-Host ("OK: node {0} / npm {1}" -f (node --version), (npm --version)) -ForegroundColor Green
 Write-Host ""
@@ -70,21 +84,15 @@ if (Test-Path $vswhere) {
 if (-not $hasVC -and (Have "cl")) { $hasVC = $true }
 
 if (-not $hasVC) {
-    Write-Host "MSVC C++ Build Tools not found (cargo cannot link rusqlite / tree-sitter without them)." -ForegroundColor Yellow
-    $r = Read-Host "Install 'Visual Studio 2022 Build Tools' with the C++ workload now? (~2-3 GB) [Y/n]"
-    if ($r -eq "" -or $r -like "y*") {
-        if (Have "winget") {
-            winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --silent `
-                --accept-package-agreements --accept-source-agreements `
-                --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-            Refresh-Path
-        } else {
-            Write-Error ("winget not available. Install the C++ Build Tools manually from " +
-                "https://visualstudio.microsoft.com/visual-cpp-build-tools/ and re-run.")
-            exit 1
-        }
+    Write-Host "MSVC C++ Build Tools not found - installing the C++ workload (~2-3 GB)..." -ForegroundColor Yellow
+    if (Have "winget") {
+        winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --silent `
+            --accept-package-agreements --accept-source-agreements `
+            --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+        Refresh-Path
     } else {
-        Write-Error "The C++ Build Tools are required to compile Mint CLI."
+        Write-Error ("winget not available. Install the C++ Build Tools manually from " +
+            "https://visualstudio.microsoft.com/visual-cpp-build-tools/ and re-run.")
         exit 1
     }
 }
@@ -96,17 +104,12 @@ Write-Host ""
 # ---------------------------------------------------------------------------
 Write-Host "--- Checking Rust / Cargo ---" -ForegroundColor Cyan
 if (-not (Have "cargo")) {
-    Write-Host "Rust / Cargo not found (the npm package compiles Mint CLI from source)." -ForegroundColor Yellow
-    $r = Read-Host "Install Rust via rustup? [Y/n]"
-    if ($r -eq "" -or $r -like "y*") {
-        $rustup = Join-Path $env:TEMP "rustup-init.exe"
-        Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $rustup -UseBasicParsing
-        Start-Process $rustup -ArgumentList "-y --default-host x86_64-pc-windows-msvc" -Wait
-        $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
-        if ($env:Path -notlike "*$cargoBin*") { $env:Path += ";$cargoBin" }
-    } else {
-        Write-Error "Rust/Cargo is required."; exit 1
-    }
+    Write-Host "Rust / Cargo not found - installing via rustup..." -ForegroundColor Yellow
+    $rustup = Join-Path $env:TEMP "rustup-init.exe"
+    Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile $rustup -UseBasicParsing
+    Start-Process $rustup -ArgumentList "-y --default-host x86_64-pc-windows-msvc" -Wait
+    $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+    if ($env:Path -notlike "*$cargoBin*") { $env:Path += ";$cargoBin" }
 }
 Write-Host ("OK: {0}" -f (cargo --version)) -ForegroundColor Green
 Write-Host ""
