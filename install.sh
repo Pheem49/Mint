@@ -37,6 +37,18 @@ ask() {
   [[ "$reply" =~ ^([yY][eE][sS]|[yY])$ ]]
 }
 
+# Prefix for privileged commands. Empty when we are already root (common in
+# containers, where `sudo` frequently isn't installed); `sudo` otherwise.
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+  if have sudo; then
+    SUDO="sudo"
+  else
+    echo "Warning: not root and 'sudo' is not installed — package installs may fail."
+    echo "Re-run as root or install sudo if you hit permission errors below."
+  fi
+fi
+
 echo "=== Installing Mint CLI ==="
 echo
 
@@ -58,10 +70,10 @@ fi
 pm_install() {
   # pm_install <apt pkgs> ||| <dnf pkgs> ||| <pacman pkgs> ||| <zypper pkgs>
   case "$PM" in
-    apt)    sudo apt-get update -qq && sudo apt-get install -y "$@" ;;
-    dnf)    sudo dnf install -y "$@" ;;
-    pacman) sudo pacman -S --needed --noconfirm "$@" ;;
-    zypper) sudo zypper --non-interactive install "$@" ;;
+    apt)    $SUDO apt-get update -qq && $SUDO apt-get install -y "$@" ;;
+    dnf)    $SUDO dnf install -y "$@" ;;
+    pacman) $SUDO pacman -S --needed --noconfirm "$@" ;;
+    zypper) $SUDO zypper --non-interactive install "$@" ;;
     *)      return 1 ;;
   esac
 }
@@ -88,10 +100,10 @@ if [ "$OS" = "Darwin" ]; then
 elif [ "$OS" = "Linux" ]; then
   case "$PM" in
     apt)    pm_install build-essential pkg-config libasound2-dev libasound2 curl file ;;
-    dnf)    sudo dnf groupinstall -y "Development Tools" || true
+    dnf)    $SUDO dnf groupinstall -y "Development Tools" || true
             pm_install pkgconf-pkg-config alsa-lib-devel alsa-lib curl file ;;
     pacman) pm_install base-devel pkgconf alsa-lib curl file ;;
-    zypper) sudo zypper --non-interactive install -t pattern devel_basis || true
+    zypper) $SUDO zypper --non-interactive install -t pattern devel_basis || true
             pm_install pkg-config alsa-devel libasound2 curl file ;;
   esac
   echo "OK: C toolchain, pkg-config and ALSA libraries installed."
