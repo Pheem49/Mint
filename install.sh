@@ -186,13 +186,31 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 7. Reminder: heavier, feature-specific tools
+# 7. Feature-tool status report
 # ---------------------------------------------------------------------------
-cat <<'EOF'
+echo
+echo "Optional feature tools (Mint runs without them; each unlocks a feature):"
 
-Optional, install only if you use the feature:
-  - ollama   local LLM provider ......... https://ollama.com/download
-  - docker   sandboxed shell execution .. https://docs.docker.com/engine/install/
-  - chromium / google-chrome ............ browser-automation tools
-  - whisper  offline speech-to-text ..... pip install -U openai-whisper
-EOF
+report_tool() {
+  # report_tool <command> <description> <install hint>
+  if command -v "$1" >/dev/null 2>&1; then
+    printf '  [ok]      %-10s %s\n' "$1" "$2"
+  else
+    printf '  [missing] %-10s %s  -> %s\n' "$1" "$2" "$3"
+  fi
+}
+
+report_tool git       "repo-aware tools"           "https://git-scm.com/downloads"
+report_tool ffmpeg    "video / subtitle / speech"  "https://ffmpeg.org/download.html"
+report_tool pdftotext "PDF ingestion (poppler)"    "install poppler-utils / poppler"
+report_tool ollama    "local LLM provider"         "https://ollama.com/download"
+report_tool docker    "sandboxed shell execution"  "https://docs.docker.com/engine/install/"
+report_tool whisper   "offline speech-to-text"     "pip install -U openai-whisper"
+
+if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1 \
+  || command -v google-chrome >/dev/null 2>&1 || command -v google-chrome-stable >/dev/null 2>&1 \
+  || command -v chrome >/dev/null 2>&1; then
+  printf '  [ok]      %-10s %s\n' "browser" "browser-automation tools"
+else
+  printf '  [missing] %-10s %s  -> %s\n' "browser" "browser-automation tools" "install Chromium or Google Chrome"
+fi

@@ -145,7 +145,29 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 Write-Host ""
-Write-Host "Optional, install only if you use the feature:" -ForegroundColor Cyan
-Write-Host "  - ollama   local LLM provider ......... https://ollama.com/download"
-Write-Host "  - docker   sandboxed shell execution .. https://docs.docker.com/desktop/install/windows-install/"
-Write-Host "  - Chrome / Edge ...................... browser-automation tools"
+Write-Host "Optional feature tools (Mint runs without them; each unlocks a feature):" -ForegroundColor Cyan
+
+function Report-Tool($cmd, $desc, $hint) {
+    if (Have $cmd) {
+        Write-Host ("  [ok]      {0,-10} {1}" -f $cmd, $desc)
+    } else {
+        Write-Host ("  [missing] {0,-10} {1}  -> {2}" -f $cmd, $desc, $hint) -ForegroundColor Yellow
+    }
+}
+
+Report-Tool "git"       "repo-aware tools"          "https://git-scm.com/download/win"
+Report-Tool "ffmpeg"    "video / subtitle / speech" "https://www.gyan.dev/ffmpeg/builds/"
+Report-Tool "pdftotext" "PDF ingestion (poppler)"   "https://github.com/oschwartz10612/poppler-windows/releases"
+Report-Tool "ollama"    "local LLM provider"        "https://ollama.com/download"
+Report-Tool "docker"    "sandboxed shell execution" "https://docs.docker.com/desktop/install/windows-install/"
+Report-Tool "whisper"   "offline speech-to-text"    "pip install -U openai-whisper"
+
+$hasBrowser = (Have "chrome") -or (Have "chromium") -or (Have "msedge") -or
+    (Test-Path "$env:ProgramFiles\Google\Chrome\Application\chrome.exe") -or
+    (Test-Path "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe") -or
+    (Test-Path "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe")
+if ($hasBrowser) {
+    Write-Host ("  [ok]      {0,-10} {1}" -f "browser", "browser-automation tools")
+} else {
+    Write-Host ("  [missing] {0,-10} {1}  -> {2}" -f "browser", "browser-automation tools", "install Chrome or Chromium") -ForegroundColor Yellow
+}
