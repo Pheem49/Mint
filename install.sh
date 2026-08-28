@@ -98,6 +98,7 @@ if [ "$OS" = "Darwin" ]; then
   fi
   echo "OK: Xcode Command Line Tools present."
 elif [ "$OS" = "Linux" ]; then
+  deps_ok=1
   case "$PM" in
     apt)    pm_install build-essential pkg-config libasound2-dev libasound2 curl file ;;
     dnf)    $SUDO dnf groupinstall -y "Development Tools" || true
@@ -105,8 +106,17 @@ elif [ "$OS" = "Linux" ]; then
     pacman) pm_install base-devel pkgconf alsa-lib curl file ;;
     zypper) $SUDO zypper --non-interactive install -t pattern devel_basis || true
             pm_install pkg-config alsa-devel libasound2 curl file ;;
+    *)      deps_ok=0
+            echo "Could not auto-install system build dependencies (unknown package manager)."
+            echo "Install these manually first, then re-run:"
+            echo "  - a C toolchain (gcc/clang + make)"
+            echo "  - pkg-config"
+            echo "  - ALSA dev + runtime libs (libasound2-dev / alsa-lib-devel / alsa-lib)"
+            ask "Continue anyway?" || exit 1 ;;
   esac
-  echo "OK: C toolchain, pkg-config and ALSA libraries installed."
+  if [ "$deps_ok" = 1 ]; then
+    echo "OK: C toolchain, pkg-config and ALSA libraries installed."
+  fi
 fi
 echo
 
