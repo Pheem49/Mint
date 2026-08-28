@@ -129,8 +129,20 @@ if ! have npm; then
   if ask "Install Node.js and npm automatically?"; then
     case "$OS" in
       Darwin)
-        if have brew; then brew install node
-        else echo "Error: Homebrew not found. Install Node.js from https://nodejs.org"; exit 1; fi ;;
+        if have brew; then
+          brew install node
+        else
+          echo "Homebrew not found — installing the official Node.js package."
+          node_pkg="$(mktemp -d)/node.pkg"
+          if curl -fsSL "https://nodejs.org/dist/v22.11.0/node-v22.11.0.pkg" -o "$node_pkg"; then
+            $SUDO installer -pkg "$node_pkg" -target /
+            rm -f "$node_pkg"
+            hash -r 2>/dev/null || true
+          else
+            echo "Error: could not download Node.js. Install it from https://nodejs.org and re-run."
+            exit 1
+          fi
+        fi ;;
       Linux)
         case "$PM" in
           apt)    pm_install nodejs npm ;;
@@ -176,7 +188,8 @@ if [ "$SKIP_OPTIONAL" != "1" ]; then
     if have brew; then
       brew install git poppler ffmpeg || true
     else
-      echo "Homebrew not found — skipping optional tools (git, poppler, ffmpeg)."
+      echo "Homebrew not found — skipping poppler / ffmpeg (git ships with the Xcode tools)."
+      echo "For those: install Homebrew (https://brew.sh), then 'brew install poppler ffmpeg'."
     fi
   elif [ "$OS" = "Linux" ]; then
     case "$PM" in
