@@ -22,7 +22,11 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+# `macos-private-api` is required for transparent windows on macOS (the
+# spotlight/widget overlays and the main window all set `transparent`); it is a
+# no-op on other platforms. It also rules out Mac App Store distribution, which
+# is fine — macOS ships as a notarization-optional `.dmg`.
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "macos-private-api"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
