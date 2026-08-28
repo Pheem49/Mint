@@ -7,7 +7,10 @@ use super::super::*;
 /// (`crate::slash`). Body: `{ "input": "/cron", "cwd": "/path" }`.
 pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStream) {
     let RequestCtx {
-        method, route, body, ..
+        method,
+        route,
+        body,
+        ..
     } = ctx;
     match (method, route) {
         ("POST", "/api/slash") => {
@@ -32,7 +35,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             let mut config = match load_config() {
                 Ok(config) => config,
                 Err(err) => {
-                    let msg = json!({ "error": format!("could not load config: {err}") }).to_string();
+                    let msg =
+                        json!({ "error": format!("could not load config: {err}") }).to_string();
                     send_json_response(socket, "500 Internal Server Error", &msg).await;
                     return;
                 }

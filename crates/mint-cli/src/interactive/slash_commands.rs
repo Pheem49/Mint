@@ -501,7 +501,9 @@ pub async fn handle_slash_command(
                 match mint_core::save_config(&session.config) {
                     Ok(()) => {
                         if disabled {
-                            println!("{DIM}[Avatar] avatar_signal disabled (token kept — run /avatar to re-enable).{RESET}\n");
+                            println!(
+                                "{DIM}[Avatar] avatar_signal disabled (token kept — run /avatar to re-enable).{RESET}\n"
+                            );
                         } else {
                             println!("{DIM}[Avatar] avatar_signal enabled.{RESET}\n");
                         }

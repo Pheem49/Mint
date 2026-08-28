@@ -2522,7 +2522,11 @@ mod tests {
             }
         });
         let sanitized = gemini_sanitize_schema(&schema);
-        assert!(sanitized["properties"]["emotions"].get("additionalProperties").is_none());
+        assert!(
+            sanitized["properties"]["emotions"]
+                .get("additionalProperties")
+                .is_none()
+        );
         assert!(
             sanitized["properties"]["nested"]["items"]
                 .get("additionalProperties")
@@ -2547,7 +2551,10 @@ mod tests {
                 }
             }),
         };
-        let request = native_request(vec![ChatMessage::text(ChatRole::User, "hi")], Some(vec![tool]));
+        let request = native_request(
+            vec![ChatMessage::text(ChatRole::User, "hi")],
+            Some(vec![tool]),
+        );
         let payload = gemini_native_payload(&request).unwrap();
         assert!(
             payload["tools"][0]["functionDeclarations"][0]["parameters"]["properties"]["emotions"]
