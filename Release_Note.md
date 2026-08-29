@@ -3,8 +3,11 @@
 A reliability-and-polish release: scheduled tasks no longer lose a run when
 the app is closed mid-execution, the five management pages (Scheduled Tasks,
 Skills, MCP Servers, Plugins, Linked Folders) were rebuilt as one consistent
-list-style UI, typing a `~/…` path when linking a folder finally works, and
-the web UI's "Browse…" button now opens a real folder picker.
+list-style UI, typing a `~/…` path when linking a folder finally works, the
+web UI's "Browse…" button now opens a real folder picker, Settings' General
+and Plugins tabs were cleaned up (and image generation gained per-provider
+model pickers), the half-finished Custom Workflows feature was removed, and
+a new `/init` command writes an AGENTS.md for the project.
 
 ---
 
@@ -74,3 +77,50 @@ machine as the browser pointed at it, so:
   machines can't be made to pop a dialog on the server host; remote web
   sessions get no button rather than a dead one.
 - Desktop keeps its existing native Tauri picker.
+
+---
+
+## ⚙️ Settings: General/Plugins Tab Cleanup + Per-Provider Image Models
+
+The two heaviest settings tabs were still carrying pre-redesign markup — ~90
+inline `style={{…}}` blocks between them, and hardcoded colors that broke the
+light and midnight themes (a Veo model `<select>` was pinned to white text on
+a translucent-white background).
+
+- **GeneralTab & PluginsTab** now use the same section / row / card
+  primitives as the other tabs. The accordion chrome, plugin cards, badges,
+  and icon buttons all moved to CSS classes; a provider picker with many
+  options now spans the full row and wraps naturally instead of shrinking
+  into a lopsided box.
+- **Image Generation** gained a card per provider (NanoBanana, DALL·E,
+  Stability, Ideogram, Replicate, BFL) — mirroring the chat "Provider &
+  Model" section — each with a **model dropdown** plus its API-key field or a
+  shared-key note. Five new default-model config fields back it; the Rust
+  side already had matching fields, and each image call reads its provider's
+  configured model.
+
+---
+
+## 🗑️ Removed: Custom Workflows / "If This Then Mint"
+
+The workflow engine was desktop-only, Unix-only (trigger detection shelled
+out to `ps -A`), and had a single trigger type — "is process X running" —
+that fired a proactive suggestion rather than running anything. Not worth the
+maintenance surface.
+
+Gone: the 15-second monitor thread, `workflows.json` read/write, the
+Settings > Automation "Custom Workflows" section, the `enableCustomWorkflows`
+flag, the sidebar "Workflow (Beta)" entry, the Workflow Builder panel (and a
+dead standalone window), and the related Tauri commands. The `/n8n` slash
+command and n8n MCP integration are unrelated and untouched.
+
+---
+
+## 📝 New: `/init` Writes an AGENTS.md for the Project
+
+`/init` (CLI, web, desktop) mirrors Claude Code's `/init`: it asks the code
+agent to scan the codebase and write — or extend — an `AGENTS.md` at the
+workspace root, the file every Mint surface already loads as workspace
+rules. It captures the build/test/lint commands, the high-level
+architecture, project conventions, and gotchas, folding in any existing
+rules file rather than replacing it.
