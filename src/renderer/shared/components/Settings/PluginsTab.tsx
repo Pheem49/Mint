@@ -265,8 +265,8 @@ export default function PluginsTab({
   }
 
   return (
-    <div className="tab-pane active" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      
+    <div className="tab-pane active">
+
       {/* ── 1. Learned AI Skills ── */}
       <section className="setting-section">
         <div className="section-heading">
@@ -277,68 +277,25 @@ export default function PluginsTab({
         </div>
 
         {skills.length === 0 ? (
-          <div className="empty-skills-notice" style={{
-            padding: '24px',
-            border: '1px dashed var(--border)',
-            borderRadius: '12px',
-            textAlign: 'center',
-            color: 'var(--text-muted)',
-            background: 'rgba(0,0,0,0.06)',
-            fontSize: '0.9rem',
-            marginBottom: '20px'
-          }}>
+          <div className="empty-skills-notice">
             No learned skills found. Teach Mint a skill below or run <code>/learn</code> in chat.
           </div>
         ) : (
-          <div className="skills-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
+          <div className="skills-list">
             {skills.map((s) => (
-              <div className="skill-card" key={s.name} style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '16px 20px',
-                border: '1px solid var(--border)',
-                borderRadius: '12px',
-                background: 'var(--surface-bg)',
-                gap: '16px'
-              }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span className="badge" style={{
-                      background: 'var(--accent)',
-                      color: '#fff',
-                      fontSize: '0.75rem',
-                      fontWeight: '600',
-                      padding: '2px 8px',
-                      borderRadius: '4px'
-                    }}>{s.name}</span>
-                    <span className="location-badge" style={{
-                      background: s.is_workspace ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                      color: s.is_workspace ? '#10b981' : '#3b82f6',
-                      fontSize: '0.7rem',
-                      fontWeight: '600',
-                      padding: '2px 6px',
-                      borderRadius: '4px'
-                    }}>
+              <div className="skill-card" key={s.name}>
+                <div className="skill-card-body">
+                  <div className="plugin-name-row">
+                    <span className="plugin-tag accent">{s.name}</span>
+                    <span className={`plugin-tag ${s.is_workspace ? 'ok' : 'info'}`}>
                       {s.is_workspace ? 'Workspace' : 'Global'}
                     </span>
                   </div>
-                  <p style={{
-                    fontSize: '0.8rem',
-                    color: 'var(--text-muted)',
-                    margin: '6px 0 0 0',
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden'
-                  }}>
-                    {s.description || s.content}
-                  </p>
+                  <p className="skill-card-desc">{s.description || s.content}</p>
                 </div>
-                <button 
-                  className="btn btn-danger" 
+                <button
+                  className="btn-danger btn-sm"
                   onClick={() => handleDeleteSkill(s.name)}
-                  style={{ padding: '6px 12px', fontSize: '0.8rem', height: '34px', flexShrink: 0 }}
                 >
                   Forget
                 </button>
@@ -367,18 +324,18 @@ export default function PluginsTab({
               placeholder="# Instructions&#10;Write only clean TypeScript. Use async/await."
               value={newSkillContent}
               onChange={(e) => setNewSkillContent(e.target.value)}
-              style={{ height: '100px' }}
+              rows={5}
             />
           </div>
 
-          <button type="submit" className="btn-primary" disabled={skillsLoading} style={{ width: '100%' }}>
+          <button type="submit" className="btn-primary btn-full" disabled={skillsLoading}>
             {skillsLoading ? 'Learning...' : 'Teach Skill'}
           </button>
         </form>
       </section>
 
       {/* ── 2. External tools (MCP Servers) ── */}
-      <section className="setting-section" style={{ borderTop: '1px solid var(--border)', paddingTop: '24px' }}>
+      <section className="setting-section">
         <div className="section-heading">
           <div>
             <p className="section-kicker">External tools</p>
@@ -388,7 +345,7 @@ export default function PluginsTab({
 
         <div className="mcp-list">
           {mcpListItems.length === 0 ? (
-            <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+            <div className="mcp-empty-notice">
               No MCP servers configured or discovered.
             </div>
           ) : (
@@ -397,74 +354,44 @@ export default function PluginsTab({
               const srvConfig = config.mcpServers?.[item.name] || { command: item.command, args: item.args, env: {}, icon: item.customIcon };
 
               return (
-                <div 
-                  className={`plugin-card-wrapper ${isExpanded ? 'active-plugin-card' : ''}`}
-                  key={item.name} 
-                  style={{
-                    border: '1px solid var(--border)',
-                    borderRadius: '12px',
-                    background: item.isConfigured ? 'var(--surface-bg)' : 'rgba(16, 185, 129, 0.03)',
-                    opacity: item.isConfigured ? 1 : 0.65,
-                    marginBottom: '10px',
-                    transition: 'all 0.2s ease',
-                    overflow: 'hidden'
-                  }}
+                <div
+                  className={`plugin-card-wrapper${isExpanded ? ' active-plugin-card' : ''}${item.isConfigured ? '' : ' is-discovered'}`}
+                  key={item.name}
                 >
-                  <div className="plugin-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                      <div className="plugin-icon" style={{ fontSize: '1.5rem', width: '40px', height: '40px', display: 'grid', placeItems: 'center', background: 'var(--surface-strong)', borderRadius: '10px' }}>
+                  <div className="plugin-card">
+                    <div className="plugin-card-main">
+                      <div className="plugin-icon">
                         {renderMcpSvgIcon(item.name, item.customIcon)}
                       </div>
                       <div className="plugin-info">
-                        <div className="plugin-name" style={{ fontWeight: '600', color: 'var(--text-main)' }}>
-                          {item.name} {!item.isConfigured && <span style={{ fontSize: '0.75rem', padding: '2px 6px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', borderRadius: '4px', marginLeft: '6px' }}>Discovered</span>}
+                        <div className="plugin-name plugin-name-row">
+                          {item.name}
+                          {!item.isConfigured && <span className="plugin-tag ok">Discovered</span>}
                         </div>
-                        <div className="plugin-desc" style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        <div className="plugin-desc mono">
                           {item.description}
                         </div>
                       </div>
                     </div>
-                    <div className="plugin-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div className="plugin-actions">
                       {item.isConfigured && (
                         <>
-                          <button 
-                            className="btn-icon-edit" 
+                          <button
+                            type="button"
+                            className={`btn-icon${isExpanded ? ' is-active' : ''}`}
                             onClick={() => setExpandedMcp(isExpanded ? null : item.name)}
-                            style={{ 
-                              background: isExpanded ? 'var(--accent)' : 'transparent',
-                              border: 'none',
-                              color: isExpanded ? '#fff' : 'var(--text-soft)',
-                              cursor: 'pointer',
-                              padding: '6px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              borderRadius: '6px',
-                              transition: 'all 0.2s'
-                            }}
-                            title="Edit MCP Server Settings"
+                            title="Edit MCP server settings"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                             </svg>
                           </button>
-                          <button 
-                            className="btn-icon-danger" 
-                            onClick={() => handleRemoveMcpServer(item.name)} 
-                            style={{ 
-                              background: 'transparent',
-                              border: 'none',
-                              color: '#ef4444',
-                              cursor: 'pointer',
-                              padding: '6px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              borderRadius: '6px',
-                              transition: 'background 0.2s'
-                            }}
-                            title="Delete MCP Server"
+                          <button
+                            type="button"
+                            className="btn-icon danger"
+                            onClick={() => handleRemoveMcpServer(item.name)}
+                            title="Delete MCP server"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <polyline points="3 6 5 6 21 6"></polyline>
@@ -490,9 +417,7 @@ export default function PluginsTab({
 
                   {item.isConfigured && isExpanded && (
                     <div className="plugin-config-panel">
-                      <h4 style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        Edit Settings for {item.name}
-                      </h4>
+                      <h4>Edit settings for {item.name}</h4>
 
                       <div className="form-grid two-col">
                         <div className="setting-row stacked">
@@ -535,7 +460,7 @@ export default function PluginsTab({
                               // allow live typing
                             }
                           }}
-                          style={{ height: '65px' }}
+                          rows={3}
                         />
                       </div>
                     </div>
@@ -592,136 +517,82 @@ export default function PluginsTab({
               placeholder='e.g. {"BRAVE_API_KEY": "your_key_here"}'
               value={mcpEnv}
               onChange={(e) => setMcpEnv(e.target.value)}
-              style={{ height: '70px' }}
+              rows={3}
             />
           </div>
-          <button className="btn-primary" onClick={handleAddMcpServer} style={{ width: '100%' }}>Add MCP Server</button>
+          <button className="btn-primary btn-full" onClick={handleAddMcpServer}>Add MCP Server</button>
         </div>
       </section>
 
       {/* ── 3. Built-in Plugins ── */}
-      <section className="setting-section" style={{ borderTop: '1px solid var(--border)', paddingTop: '24px' }}>
+      <section className="setting-section">
         <div className="section-heading">
           <div>
             <p className="section-kicker">Integrations</p>
-            <h2 className="section-title">Plugins & Integrations</h2>
+            <h2 className="section-title">Plugins &amp; Integrations</h2>
           </div>
         </div>
-        <div className="plugin-list" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className="plugin-list">
           {pluginsList.map(p => {
             const isEnabled = (config as any)[p.enabledField]
             const isExpanded = expandedPlugin === p.key
 
             return (
-              <div className={`plugin-card-wrapper ${isEnabled ? 'active-plugin-card' : ''}`} key={p.key} style={{
-                border: '1px solid var(--border)',
-                borderRadius: '12px',
-                background: 'var(--surface-bg)',
-                transition: 'all 0.2s ease',
-                overflow: 'hidden'
-              }}>
-                <div className="plugin-card" style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '16px 20px',
-                  background: isEnabled ? 'color-mix(in srgb, var(--accent) 3%, var(--surface-bg))' : 'transparent'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                    <div className="plugin-icon" style={{ fontSize: '1.5rem', width: '40px', height: '40px', display: 'grid', placeItems: 'center', background: 'var(--surface-strong)', borderRadius: '10px' }}>
+              <div className={`plugin-card-wrapper${isEnabled ? ' active-plugin-card' : ''}`} key={p.key}>
+                <div className="plugin-card">
+                  <div className="plugin-card-main">
+                    <div className="plugin-icon">
                       {renderMcpSvgIcon(p.key)}
                     </div>
                     <div className="plugin-info">
-                      <div className="plugin-name" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                        <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>{p.name}</span>
+                      <div className="plugin-name plugin-name-row">
+                        {p.name}
                         {p.isOAuth && (() => {
                           const oauthMatch = oauthStatuses.find(s => s.provider === p.oauthProvider)
                           const isConn = oauthMatch?.connected
                           return (
-                            <span style={{
-                              fontSize: '0.72rem',
-                              padding: '2px 8px',
-                              borderRadius: '6px',
-                              background: isConn ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                              color: isConn ? '#10b981' : 'var(--text-muted)',
-                              border: `1px solid ${isConn ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)'}`,
-                              fontWeight: '500',
-                              whiteSpace: 'nowrap',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '5px'
-                            }}>
-                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isConn ? '#10b981' : 'var(--text-muted)' }} />
-                              {isConn ? `Connected ${oauthMatch.accountEmail ? `(${oauthMatch.accountEmail})` : ''}` : 'Not Connected'}
+                            <span className={`plugin-status${isConn ? ' connected' : ''}`}>
+                              {isConn ? `Connected ${oauthMatch.accountEmail ? `(${oauthMatch.accountEmail})` : ''}` : 'Not connected'}
                             </span>
                           )
                         })()}
                       </div>
-                      <div className="plugin-desc" style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '2px' }}>{p.desc}</div>
+                      <div className="plugin-desc">{p.desc}</div>
                     </div>
                   </div>
-                  <div className="plugin-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                  <div className="plugin-actions">
                     {p.isOAuth && (() => {
                       const oauthMatch = oauthStatuses.find(s => s.provider === p.oauthProvider)
                       const isConn = oauthMatch?.connected
                       return isConn ? (
                         <button
-                          className="btn-danger"
+                          className="btn-danger btn-sm"
                           onClick={() => handleRevokeOAuth(p.oauthProvider!)}
-                          style={{ padding: '6px 14px', fontSize: '0.8rem', height: '34px', whiteSpace: 'nowrap', borderRadius: '8px' }}
                         >
                           Disconnect
                         </button>
                       ) : (
                         <button
-                          className="btn-primary"
+                          className="btn-primary btn-sm"
                           onClick={() => handleConnectOAuth(p.oauthProvider!, p.key)}
                           disabled={authenticatingProvider === p.oauthProvider}
-                          style={{ 
-                            padding: '6px 14px', 
-                            fontSize: '0.8rem', 
-                            height: '34px', 
-                            whiteSpace: 'nowrap', 
-                            borderRadius: '8px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            background: '#10b981',
-                            color: '#ffffff',
-                            border: 'none',
-                            fontWeight: '600',
-                            cursor: 'pointer'
-                          }}
                         >
-                          {authenticatingProvider === p.oauthProvider ? (
-                            'Signing In...'
-                          ) : (
-                            <>
-                              Sign In
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                                <circle cx="12" cy="12" r="10"/>
-                                <line x1="2" y1="12" x2="22" y2="12"/>
-                                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-                              </svg>
-                            </>
-                          )}
+                          {authenticatingProvider === p.oauthProvider ? 'Signing In...' : 'Sign In'}
                         </button>
                       )
                     })()}
                     {p.hasCredentials && (
                       <button
-                        className="btn-secondary"
+                        className="btn-secondary btn-sm"
                         onClick={() => toggleExpand(p.key)}
-                        style={{ padding: '6px 14px', fontSize: '0.8rem', height: '34px', whiteSpace: 'nowrap', borderRadius: '8px' }}
                       >
                         {isExpanded ? 'Hide Config' : 'Configure'}
                       </button>
                     )}
                     {p.key === 'discord' && isEnabled && (
                       <button
-                        className="btn-secondary"
+                        className="btn-secondary btn-sm"
                         onClick={() => handleConnectPlugin('discord')}
-                        style={{ padding: '6px 12px', fontSize: '0.8rem', height: '34px' }}
                       >
                         Update RPC
                       </button>
@@ -741,7 +612,7 @@ export default function PluginsTab({
 
                 {p.hasCredentials && isExpanded && (
                   <div className="plugin-config-panel">
-                    <h4 style={{ fontSize: '0.9rem', fontWeight: '600', color: 'var(--text-soft)', marginBottom: '4px' }}>Credentials Configuration</h4>
+                    <h4>Credentials</h4>
                     <div className="form-grid compact">
                       {p.fields?.map(f => (
                         <div className="setting-row stacked" key={f.field}>

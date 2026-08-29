@@ -151,3 +151,21 @@ export const VEO_STUDIO_MODELS = {
     { value: 'veo-3.1-lite-generate-preview', label: 'Veo 3.1 Lite Generate Preview' },
   ],
 }
+
+/**
+ * Wiring for the image-gen provider picker in Settings: the provider id it
+ * uses (which calls NanoBanana "gemini") -> its IMAGE_STUDIO_MODELS list key
+ * and the config field that stores its default model. Keep it here next to
+ * the model lists rather than inline in the settings component.
+ */
+export const IMAGE_GEN_PROVIDER_MODELS: Record<
+  string,
+  { listKey: keyof typeof IMAGE_STUDIO_MODELS; configField: string }
+> = {
+  gemini:    { listKey: 'nanobanana', configField: 'nanobananaModel' },
+  dalle:     { listKey: 'dalle',      configField: 'dalleModel' },
+  stability: { listKey: 'stability',  configField: 'stabilityModel' },
+  ideogram:  { listKey: 'ideogram',   configField: 'ideogramModel' },
+  replicate: { listKey: 'replicate',  configField: 'replicateModel' },
+  bfl:       { listKey: 'bfl',        configField: 'bflModel' },
+}
