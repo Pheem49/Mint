@@ -126,6 +126,7 @@ export interface MintPlatformApi {
   createWorkspaceFolder(path: string): Promise<void>
   deleteWorkspaceItem(path: string): Promise<void>
   selectWorkspaceDirectory(): Promise<string | null>
+  selectLinkedFolderPath(): Promise<string | null>
   submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void>
   proposeCodeEdits(root: string, edits: CodeEdit[]): Promise<CodeEditProposal>
   applyCodeEdits(root: string, edits: CodeEdit[], approvalToken: string): Promise<any>

@@ -11,6 +11,7 @@ import {
   listChatSessions,
   listSavedPictures,
   selectWorkspaceDirectory,
+  selectLinkedFolderPath,
   saveInteractionAgentActivity,
   streamChatMessage,
   cancelChatMessage,
@@ -1686,7 +1687,9 @@ export default function MintDashboard() {
               listLinkedFolders={listLinkedFolders}
               addLinkedFolder={addLinkedFolder}
               removeLinkedFolder={removeLinkedFolder}
-              selectFolder={selectWorkspaceDirectory}
+              // Desktop: native Tauri picker. Web: asks `mint web` (same
+              // machine) to open its own dialog via a loopback-gated route.
+              selectFolder={selectLinkedFolderPath}
             />
           </div>
         )}

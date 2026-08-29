@@ -1149,6 +1149,12 @@ export async function selectWorkspaceDirectory(): Promise<string | null> {
   return selected?.trim() || null
 }
 
+/** Folder picker for the Linked Folders "Browse…" button. On desktop this is
+ * the same native Tauri picker used for workspace selection. */
+export async function selectLinkedFolderPath(): Promise<string | null> {
+  return selectWorkspaceDirectory()
+}
+
 export async function submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
     const API_BASE = getLocalApiBase();
@@ -2134,6 +2140,7 @@ const _apiCheck: MintPlatformApi = {
   createWorkspaceFolder,
   deleteWorkspaceItem,
   selectWorkspaceDirectory,
+  selectLinkedFolderPath,
   submitToolApproval,
   proposeCodeEdits,
   applyCodeEdits,

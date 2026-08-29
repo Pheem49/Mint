@@ -1786,6 +1786,28 @@ export async function selectWorkspaceDirectory(): Promise<string | null> {
   return selected
 }
 
+/** Folder picker for the Linked Folders "Browse…" button. The browser can't
+ * hand back a real filesystem path, but `mint web` runs on this same machine,
+ * so ask the server to open its own native dialog (that route is gated to
+ * loopback callers server-side). Returns null on cancel or if no picker /
+ * display is available. */
+export async function selectLinkedFolderPath(): Promise<string | null> {
+  if (typeof window !== 'undefined' && isTauriRuntime()) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const selected = await invoke<string | null>('select_workspace_directory')
+    return selected?.trim() || null
+  }
+  try {
+    const res = await authFetch(`${getLocalApiBase()}/select-folder`, { method: 'POST' })
+    if (!res.ok) return null
+    const data = await res.json().catch(() => null)
+    const path = data && typeof data.path === 'string' ? data.path.trim() : ''
+    return path || null
+  } catch {
+    return null
+  }
+}
+
 export async function readClipboardImage(): Promise<string | null> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
 
@@ -2175,6 +2197,7 @@ const _apiCheck: MintPlatformApi = {
   createWorkspaceFolder,
   deleteWorkspaceItem,
   selectWorkspaceDirectory,
+  selectLinkedFolderPath,
   submitToolApproval,
   proposeCodeEdits,
   applyCodeEdits,
