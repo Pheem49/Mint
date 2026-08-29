@@ -18,6 +18,26 @@
 use crate::MintConfig;
 use std::path::{Path, PathBuf};
 
+/// The instruction `/init` hands to the code agent (via
+/// [`SlashResponse::ForwardToAgent`]). Mirrors Claude Code's `/init`, but
+/// targets `AGENTS.md` — the file every Mint surface already loads as
+/// workspace rules (see `skills::load_agent_rules_file`).
+pub const INIT_AGENTS_MD_PROMPT: &str = "\
+Analyze this codebase and create an AGENTS.md file at the workspace root (or update it if one already exists).
+
+AGENTS.md is loaded into every future Mint Agent session for this project, so it must give a fresh agent the context it needs without re-reading the whole tree.
+
+Include:
+- The exact build, run, lint, and test commands this repo uses.
+- The high-level architecture — the big picture that only becomes clear after reading several files: the main components/crates/packages and how they fit together, key data flows, and where the entry points are.
+- Project-specific conventions a contributor must follow (naming, layout, patterns) that aren't obvious from a single file.
+- Non-obvious gotchas, constraints, or \"don't do X\" rules.
+
+Rules:
+- If AGENTS.md, .cursorrules, .github/copilot-instructions.md, or a similar rules file already exists, fold its still-relevant content in rather than discarding it.
+- Be concise — bullet points over prose. Skip anything obvious from reading one file, and don't invent conventions that aren't actually in the code.
+- Write only the file, then briefly confirm what you wrote.";
+
 pub mod catalog;
 pub mod models;
 mod render;
@@ -162,6 +182,10 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
 
     match token.as_str() {
         "/help" => cmd_help(req.is_cli()),
+        "/init" => SlashResponse::ForwardToAgent {
+            prompt: INIT_AGENTS_MD_PROMPT.to_string(),
+            agent_mode: true,
+        },
         "/release-notes" => message(
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),

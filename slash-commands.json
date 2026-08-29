@@ -1,5 +1,6 @@
 [
   { "token": "/help", "usage": "", "description": "Show this help", "category": "system", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/init", "usage": "", "description": "Scan the codebase and write an AGENTS.md (build/test commands, architecture, conventions)", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/fast", "usage": "[on|off]", "description": "Toggle fast mode (hide thinking traces)", "category": "system", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/plan", "usage": "[on|off|list|show <name>]", "description": "Toggle plan mode, or list/show plans saved under .agents/plans/", "category": "system", "surfaces": ["cli"] },
   { "token": "/models", "usage": "[name]", "description": "List providers or switch provider", "category": "models", "surfaces": ["cli", "web", "desktop"] },

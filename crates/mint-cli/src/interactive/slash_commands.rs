@@ -201,6 +201,10 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/init" => Some(SlashResult::ForwardToAgent(
+            mint_core::slash::INIT_AGENTS_MD_PROMPT.to_string(),
+        )),
+
         "/fast" => {
             let choice = if rest.is_empty() {
                 let options = vec![
