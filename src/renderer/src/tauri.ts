@@ -1242,8 +1242,6 @@ export function installTauriAdapters() {
       quitApp: () => {},
       openExternal: () => {},
       openFolder: () => {},
-      openCustomWorkflows: () => {},
-      reloadCustomWorkflows: () => {},
     };
 
     (window as any).spotlightAPI = {
@@ -1491,18 +1489,6 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('open_folder', { path })
     },
-    openCustomWorkflows: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('open_workflows_file')
-    },
-    reloadCustomWorkflows: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('reload_custom_workflows')
-    },
-    saveCustomWorkflows: async (workflows) => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('save_custom_workflows', { workflows })
-    },
   }
 
   window.spotlightAPI = {
@@ -1628,10 +1614,6 @@ export function installTauriAdapters() {
     deleteSavedPicture,
     openSettings: async () => {
       window.location.hash = '#/settings'
-    },
-    openWorkflows: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('open_window', { kind: 'workflows' })
     },
     readClipboard: () => navigator.clipboard.readText(),
     writeClipboard: (text) => navigator.clipboard.writeText(text),

@@ -8,7 +8,6 @@ mod proactive;
 mod system;
 mod updater;
 mod webhooks;
-mod workflows;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use mint_core::browser::{
@@ -37,14 +36,14 @@ use mint_core::{
     SubagentDefinition, SubagentDraft, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport,
     apply_code_edits, classify_shell_command, config_path, delete_saved_picture,
     delete_subagent as core_delete_subagent, get_user, google_tts_urls, list_saved_pictures,
-    list_subagents as core_list_subagents, load_config, load_workflows, login_user,
+    list_subagents as core_list_subagents, load_config, login_user,
     orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
     propose_code_edits, reauth_mcp_server as core_reauth_mcp_server, register_user,
     save_avatar_file, save_chat_images, save_config, save_subagent as core_save_subagent,
-    save_workflows, start_channels, start_cron_scheduler,
+    start_channels, start_cron_scheduler,
     start_gemini_live_session as core_start_gemini_live_session,
     start_recording as core_start_mic_recording, stop_recording as core_stop_mic_recording,
-    transcribe_recording as core_transcribe_mic_recording, update_profile, weather, workflows_path,
+    transcribe_recording as core_transcribe_mic_recording, update_profile, weather,
 };
 use plugins::execute_plugin;
 
@@ -84,7 +83,6 @@ use updater::{
     status as updater_status,
 };
 use webhooks::start_webhooks;
-use workflows::start_monitor;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1587,39 +1585,6 @@ fn exit_app(app: AppHandle) {
     app.exit(0);
 }
 
-#[tauri::command]
-fn open_workflows_file() -> Result<ActionResult, String> {
-    load_workflows().map_err(|error| error.to_string())?;
-    let path = workflows_path().map_err(|error| error.to_string())?;
-    Command::new("xdg-open")
-        .arg(path)
-        .spawn()
-        .map_err(|error| error.to_string())?;
-    Ok(ActionResult {
-        success: true,
-        message: "opened workflows file".into(),
-    })
-}
-
-#[tauri::command]
-fn reload_custom_workflows() -> Result<Value, String> {
-    let workflows = load_workflows().map_err(|error| error.to_string())?;
-    Ok(serde_json::json!({
-        "success": true,
-        "count": workflows.len(),
-        "workflows": workflows
-    }))
-}
-
-#[tauri::command]
-fn save_custom_workflows(workflows: Vec<serde_json::Value>) -> Result<ActionResult, String> {
-    save_workflows(&workflows).map_err(|error| error.to_string())?;
-    Ok(ActionResult {
-        success: true,
-        message: "workflows saved successfully".into(),
-    })
-}
-
 /// WebKitGTK denies every `permission-request` (microphone, camera, geolocation, ...) by
 /// default unless something handles the signal — Tauri/wry doesn't wire this up on Linux,
 /// which is why `getUserMedia()` rejects with `NotAllowedError` even though the user never
@@ -1756,7 +1721,6 @@ pub fn run() {
             }
             install_tray(app.handle())?;
             install_shortcuts(app.handle())?;
-            start_monitor(app.handle().clone());
             start_system_events(app.handle().clone());
             start_headless_queue(app.handle().clone());
             start_proactive_loop(app.handle().clone());
@@ -1863,9 +1827,6 @@ pub fn run() {
             save_behavior_context,
             run_next_queued_task,
             exit_app,
-            open_workflows_file,
-            reload_custom_workflows,
-            save_custom_workflows,
             save_system_interaction
         ])
         .run(tauri::generate_context!())

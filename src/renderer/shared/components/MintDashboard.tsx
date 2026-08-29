@@ -35,7 +35,6 @@ import ModelPanel from '@/components/ModelPanel'
 import type { ModelInteraction } from '@/components/ModelPanel'
 import PicturesLibrary from '@/components/PicturesLibrary'
 import WorkspacePanel from '@/components/WorkspacePanel'
-import WorkflowBuilderPanel from '@/components/WorkflowBuilderPanel'
 import {
   errorMessage,
   readImage,
@@ -1492,7 +1491,6 @@ export default function MintDashboard() {
           isSearchOpen={isSearchOpen}
           onSetSearchOpen={setIsSearchOpen}
           showWorkspaceTab={isDesktopApp}
-          hasWorkflowsTab={isDesktopApp}
           promoteMediaStudios={!isDesktopApp}
         />
         <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspace' ? '' : 'model-hidden'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' || view === 'pictures' || view === 'imagine' || view === 'veo') ? { display: 'none' } : undefined}>
@@ -1561,7 +1559,7 @@ export default function MintDashboard() {
             expressionIndex={expressionIndex}
             accessoryIndex={accessoryIndex}
             isLocked={isLocked}
-            isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'workflows' && view !== 'imagine' && view !== 'veo' && view !== 'skills' && view !== 'mcp' && view !== 'plugins'}
+            isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'imagine' && view !== 'veo' && view !== 'skills' && view !== 'mcp' && view !== 'plugins'}
             layoutPreset={layoutPreset}
             sending={sending}
             interactionEnabled={interactionEnabled}
@@ -1710,10 +1708,6 @@ export default function MintDashboard() {
             setMessage(vidPrompt)
           }}
           onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-        />
-        <WorkflowBuilderPanel
-          view={view}
-          onShowToast={showToast}
         />
       </div>
       <div className={`startup-loading ${startupReady ? 'is-hidden' : ''}`} aria-live="polite" aria-busy={!startupReady}>

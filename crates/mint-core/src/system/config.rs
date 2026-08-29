@@ -843,7 +843,6 @@ fn runtime_extra_defaults() -> BTreeMap<String, Value> {
         "updaterEndpoint": "",
         "updaterPublicKey": "",
         "enableVoiceReply": true,
-        "enableCustomWorkflows": true,
         "ttsProvider": "google",
         "ttsVolume": 1.0,
         "ttsSpeed": 1.0,

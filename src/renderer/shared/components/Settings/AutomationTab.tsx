@@ -5,17 +5,11 @@ import ApiKeyInput from './ApiKeyInput'
 interface AutomationTabProps {
   config: typeof DEFAULT_CONFIG
   updateField: (field: keyof typeof DEFAULT_CONFIG, value: any) => void
-  handleOpenWorkflows: () => void
-  handleReloadWorkflows: () => void
-  isDesktopApp?: boolean
 }
 
 export default function AutomationTab({
   config,
-  updateField,
-  handleOpenWorkflows,
-  handleReloadWorkflows,
-  isDesktopApp = true
+  updateField
 }: AutomationTabProps) {
   return (
     <div className="tab-pane active">
@@ -455,34 +449,6 @@ export default function AutomationTab({
             </div>
           </div>
         </div>
-      </section>
-
-      <section className="setting-section">
-        <div className="section-heading">
-          <div>
-            <p className="section-kicker">Rules</p>
-            <h2 className="section-title">Custom Workflows</h2>
-          </div>
-        </div>
-        <div className="toggle-row">
-          <div>
-            <label>Enable Custom Workflows</label>
-            <p className="hint">Run "If This Then Mint" rules from the workflow JSON file.</p>
-          </div>
-          <label className="settings-toggle-switch">
-            <input 
-              type="checkbox" 
-              checked={config.enableCustomWorkflows} 
-              onChange={(e) => updateField('enableCustomWorkflows', e.target.checked)} 
-            />
-            <span className="settings-toggle-slider"></span>
-          </label>
-        </div>
-        <div className="button-row" style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-          <button className="btn btn-secondary" onClick={handleOpenWorkflows} disabled={!isDesktopApp}>Open workflows.json</button>
-          <button className="btn btn-primary" onClick={handleReloadWorkflows} disabled={!isDesktopApp}>Reload Rules</button>
-        </div>
-        {!isDesktopApp && <p className="hint">Opening and reloading local workflow files requires the desktop app.</p>}
       </section>
 
     </div>

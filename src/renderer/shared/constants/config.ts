@@ -25,7 +25,6 @@ export const DEFAULT_CONFIG = {
   proactiveInterval: 60,
   proactiveCooldown: 120,
   enableVoiceReply: true,
-  enableCustomWorkflows: true,
   enableAgentCollaboration: false,
   autoSkillWriting: false,
   ttsProvider: 'google',

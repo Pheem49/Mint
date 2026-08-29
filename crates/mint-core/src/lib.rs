@@ -47,7 +47,6 @@ pub use integrations::hooks;
 pub use integrations::mcp;
 pub use integrations::oauth;
 pub use integrations::plugins;
-pub use integrations::workflows;
 
 pub use search::files;
 pub use search::knowledge;
@@ -186,7 +185,6 @@ pub use video_edit::{
 };
 pub use video_gen::{VideoGenError, VideoGenRequest, VideoGenResponse, generate_video};
 pub use weather::{WeatherError, WeatherReport, weather};
-pub use workflows::{WorkflowError, load_workflows, save_workflows, workflows_path};
 pub mod api_server;
 pub use api_server::start_api_server;
 pub use channels::start_channels;

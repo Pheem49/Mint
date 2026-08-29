@@ -989,9 +989,6 @@ export function installTauriAdapters() {
         window.open(url, '_blank', 'noopener,noreferrer')
       },
       openFolder: async () => ({ success: false, message: 'Opening local folders is only available in the desktop app.' }),
-      openCustomWorkflows: async () => ({ success: false, message: 'Opening workflow files is only available in the desktop app.' }),
-      reloadCustomWorkflows: async () => ({ success: false, message: 'Reloading workflow files is only available in the desktop app.' }),
-      saveCustomWorkflows: async () => ({ success: false, message: 'Saving workflow files is only available in the desktop app.' }),
     };
 
     (window as any).spotlightAPI = {
@@ -1087,9 +1084,6 @@ export function installTauriAdapters() {
       deleteSavedPicture,
       openSettings: () => {
         window.location.hash = '#/settings';
-      },
-      openWorkflows: () => {
-        window.location.hash = '#/workflows';
       },
       readClipboard: async () => '',
       writeClipboard: async () => {},
@@ -1244,18 +1238,6 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('open_folder', { path })
     },
-    openCustomWorkflows: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('open_workflows_file')
-    },
-    reloadCustomWorkflows: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('reload_custom_workflows')
-    },
-    saveCustomWorkflows: async (workflows) => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('save_custom_workflows', { workflows })
-    },
   }
 
   window.spotlightAPI = {
@@ -1382,10 +1364,6 @@ export function installTauriAdapters() {
     openSettings: async () => {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('open_window', { kind: 'settings' })
-    },
-    openWorkflows: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('open_window', { kind: 'workflows' })
     },
     readClipboard: () => navigator.clipboard.readText(),
     writeClipboard: (text) => navigator.clipboard.writeText(text),

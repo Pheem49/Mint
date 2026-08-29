@@ -516,24 +516,6 @@ export default function SettingsWindow() {
     }
   }
 
-  const handleOpenWorkflows = () => {
-    if (!isDesktopApp) {
-      alert('Workflow files can only be opened from the desktop app. The web app can still save workflow settings through the Local API.')
-      return
-    }
-    window.settingsApi?.openCustomWorkflows()
-  }
-
-  const handleReloadWorkflows = async () => {
-    if (!isDesktopApp) {
-      alert('Reloading workflow files is only available in the desktop app.')
-      return
-    }
-    if (window.settingsApi) {
-      const res = await window.settingsApi.reloadCustomWorkflows()
-      alert(res?.success ? 'Workflows reloaded successfully!' : 'Workflow reload failed.')
-    }
-  }
 
   const handleAddMcpServer = () => {
     if (!mcpName.trim() || !mcpCmd.trim()) {
@@ -764,9 +746,6 @@ export default function SettingsWindow() {
             <AutomationTab
               config={config}
               updateField={updateField}
-              handleOpenWorkflows={handleOpenWorkflows}
-              handleReloadWorkflows={handleReloadWorkflows}
-              isDesktopApp={isDesktopApp}
             />
           )}
 

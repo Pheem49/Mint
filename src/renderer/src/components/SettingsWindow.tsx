@@ -502,17 +502,6 @@ export default function SettingsWindow() {
     }
   }
 
-  const handleOpenWorkflows = () => {
-    window.settingsApi?.openCustomWorkflows()
-  }
-
-  const handleReloadWorkflows = async () => {
-    if (window.settingsApi) {
-      const res = await window.settingsApi.reloadCustomWorkflows()
-      alert(res?.success ? 'Workflows reloaded successfully!' : 'Workflow reload failed.')
-    }
-  }
-
   const handleAddMcpServer = () => {
     if (!mcpName.trim() || !mcpCmd.trim()) {
       alert('Please provide at least a server name and command.')
@@ -722,8 +711,6 @@ export default function SettingsWindow() {
             <AutomationTab
               config={config}
               updateField={updateField}
-              handleOpenWorkflows={handleOpenWorkflows}
-              handleReloadWorkflows={handleReloadWorkflows}
             />
           )}
 
