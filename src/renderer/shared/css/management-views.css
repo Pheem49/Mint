@@ -232,6 +232,156 @@
   box-shadow: 0 2px 8px var(--accent-glow, rgba(59, 130, 246, 0.3));
 }
 
+/* Compact list rows — one line per item (Scheduled Tasks, Skills), same
+   direction as the plugin rows further down: scan by name, not by a tall
+   gradient card. Body / output / delete live in the click-through detail
+   modal. Shared so those views read as one system. */
+.mgmt-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+
+.mgmt-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 16px;
+  background: var(--surface-bg, rgba(30, 41, 59, 0.4));
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.mgmt-row:first-child {
+  border-top: none;
+}
+
+.mgmt-row:hover {
+  background: var(--surface-strong, rgba(30, 41, 59, 0.62));
+}
+
+.mgmt-row.is-disabled .mgmt-row-main {
+  opacity: 0.5;
+}
+
+.mgmt-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.mgmt-row-title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text-main, #f8fafc);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Chip row under the title (Scheduled Tasks: cron · next run · status). */
+.mgmt-row-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 3px;
+  font-size: 0.78rem;
+  color: var(--text-muted, #94a3b8);
+}
+
+.mgmt-row-meta code {
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-size: 0.74rem;
+}
+
+.mgmt-row-sep {
+  opacity: 0.4;
+}
+
+/* Single-line muted description under the title (Skills). */
+.mgmt-row-sub {
+  margin-top: 3px;
+  font-size: 0.8rem;
+  color: var(--text-muted, #94a3b8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mgmt-status {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.mgmt-status.ok {
+  color: #34d399;
+}
+
+.mgmt-status.failed {
+  color: #f87171;
+}
+
+.mgmt-status.running {
+  color: var(--accent, #60a5fa);
+}
+
+.mgmt-empty {
+  padding: 48px 20px;
+  text-align: center;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.88rem;
+  line-height: 1.7;
+}
+
+.mgmt-empty p {
+  margin: 0;
+}
+
+/* Single-column stack for the icon rows (MCP Servers, Plugins) — keeps
+   `.management-plugin-row`'s own card styling but drops the multi-column
+   grid tiling so those pages read as one vertical list like the others. */
+.mgmt-row-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Detail modal: label / value grid, plain text instead of pill badges. */
+.mgmt-detail-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  font-size: 0.85rem;
+  color: var(--text-muted, #94a3b8);
+}
+
+.mgmt-detail-grid > span:nth-child(odd) {
+  color: var(--text-muted, #64748b);
+}
+
+.mgmt-detail-grid code {
+  font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+  font-size: 0.8rem;
+  color: var(--text-main, #cbd5e1);
+  word-break: break-word;
+}
+
+/* Renders real markdown (headings, tables, stock cards, ...) rather than
+   dumping the raw text as a wall of monospace. */
+.mgmt-prose {
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 2px 14px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-lg);
+  background: var(--input-bg, rgba(15, 23, 42, 0.35));
+}
+
 /* Grid & Cards */
 .management-grid {
   display: grid;
@@ -684,7 +834,7 @@
   border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
   border-radius: var(--radius-2xl);
   width: 100%;
-  max-width: 540px;
+  max-width: 720px;
   box-shadow: var(--shadow-lg, 0 20px 40px rgba(0, 0, 0, 0.5));
   overflow: hidden;
 }

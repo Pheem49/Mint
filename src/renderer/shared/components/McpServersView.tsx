@@ -159,10 +159,10 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
             <span className="management-title-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
               {renderMcpHubSvgIcon(22, 'var(--accent)')}
             </span>
-            Model Context Protocol (MCP) Hub
+            MCP Servers
           </h1>
           <p className="management-subtitle">
-            Connect Mint Agent to external tool servers (GitHub, Brave Search, Filesystem, SQLite, Docker, etc.).
+            Connect external tool servers.
           </p>
         </div>
 
@@ -227,15 +227,12 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
       {/* MCP Server List */}
       <h2 className="management-section-title">All Servers</h2>
       {filteredMcpItems.length === 0 ? (
-        <div className="management-empty-state">
-          <div className="management-empty-icon">🔌</div>
-          <h3 className="management-empty-title">No MCP Servers Configured</h3>
-          <p className="management-empty-desc">
-            Click "Add MCP Server" to connect a new Model Context Protocol tool.
-          </p>
+        <div className="mgmt-empty">
+          <p>{searchQuery ? 'No MCP servers match your search.' : 'No MCP servers yet.'}</p>
+          {!searchQuery && <p>Add one above, or run <code>mint mcp add</code> in a terminal.</p>}
         </div>
       ) : (
-        <div className="management-grid">
+        <div className="mgmt-row-stack">
           {filteredMcpItems.map((item) => (
             <div
               key={item.name}
@@ -328,7 +325,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                     {item.isEnabled ? 'Enabled' : 'Disabled'}
                   </span>
                   {!item.isConfigured && (
-                    <span className="management-badge workspace" style={{ marginLeft: 'auto' }}>
+                    <span className="management-tag workspace" style={{ marginLeft: 'auto' }}>
                       Discovered
                     </span>
                   )}

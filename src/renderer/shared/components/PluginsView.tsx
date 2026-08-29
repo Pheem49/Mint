@@ -114,10 +114,10 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
             <span className="management-title-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
               {renderPluginsSvgIcon(22, 'var(--accent)')}
             </span>
-            Plugins & Integrations
+            Plugins
           </h1>
           <p className="management-subtitle">
-            Configure native credentials, OAuth logins, and external service connectors for Mint Agent.
+            Connect external services and accounts.
           </p>
         </div>
       </div>
@@ -169,7 +169,7 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
 
       {/* Plugin Grid */}
       <h2 className="management-section-title">Recommended</h2>
-      <div className="management-grid">
+      <div className="mgmt-row-stack">
         {filteredPlugins.map((p) => {
           const isEnabled = Boolean((config as any)[p.enabledField])
           const oauthMatch = p.isOAuth ? oauthStatuses.find((s) => s.provider === p.oauthProvider) : undefined
