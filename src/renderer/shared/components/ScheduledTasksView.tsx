@@ -382,6 +382,9 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
                     Schedule (UTC): <code>{detailJob.schedule}</code>
                   </div>
                   <div>Next run (local time): {formatTimestamp(detailJob.nextRun)}</div>
+                  {detailJob.runningSince && (
+                    <div>Running since (local time): {formatTimestamp(detailJob.runningSince)}</div>
+                  )}
                   <div>
                     Last run (local time): {formatTimestamp(detailJob.lastRunAt)}
                     {detailJob.lastStatus && (

@@ -171,6 +171,8 @@ export interface CronJob {
   lastRunAt: string | null
   lastStatus: string | null
   lastSummary: string | null
+  /** RFC3339 timestamp of when a run was claimed, or null when idle. */
+  runningSince?: string | null
 }
 
 export interface CronJobDraft {

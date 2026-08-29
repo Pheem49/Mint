@@ -508,12 +508,25 @@ sudo loginctl enable-linger "$(whoami)"
 | `mint gateway install --now` | Also start the service immediately after installing it |
 | `mint gateway install --memory-max <size>` | Cap the service's memory (systemd size syntax, e.g. `512M`, `1G`) — unset by default |
 
-Once installed:
+Once installed, `mint gateway install` has already written and enabled the
+unit — day-to-day you drive it with plain `systemctl` (drop `--user` and use
+`sudo` for a `--system` unit):
 
-```bash
-systemctl --user status mint.service      # or `systemctl status mint` with --system
-journalctl --user -u mint.service -f      # follow logs
-```
+| Task | Command |
+| --- | --- |
+| Start it now | `systemctl --user start mint.service` |
+| Stop it now | `systemctl --user stop mint.service` |
+| Restart it | `systemctl --user restart mint.service` |
+| Is it running? | `systemctl --user status mint.service` |
+| Follow logs | `journalctl --user -u mint.service -f` |
+| Start on boot | `systemctl --user enable mint.service` (`install` already did this) |
+| Don't start on boot | `systemctl --user disable mint.service` |
+| Uninstall | `systemctl --user disable --now mint.service`, then delete `~/.config/systemd/user/mint.service` |
+
+`start`/`stop` control it right now; `enable`/`disable` control whether it
+comes up on boot — the two are independent. Per-user units also need
+`sudo loginctl enable-linger "$(whoami)"` once to keep running with no login
+session (see the VPS quick start above).
 
 ### Checking on it remotely
 
