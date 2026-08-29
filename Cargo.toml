@@ -11,6 +11,16 @@ version = "1.13.1"
 edition = "2024"
 license = "AGPL-3.0-only"
 
+# Keep `target/debug` from ballooning. Our own crates keep enough debuginfo
+# for backtraces with line numbers; dependencies (which we don't step
+# through) carry none. `cargo check`/`test`/`clippy`/`tauri dev` all use
+# this profile — release builds are unaffected.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [workspace.dependencies]
 anyhow = "1"
 base64 = "0.22"
