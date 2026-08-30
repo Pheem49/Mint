@@ -678,6 +678,78 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/autorecall" => {
+            let apply = |session: &mut InteractiveSession, on: bool| {
+                session.config.memory_recall = on;
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => println!(
+                        "{DIM}Memory recall set to: {}{RESET}\n",
+                        if on { "Enabled" } else { "Disabled" }
+                    ),
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                }
+            };
+            if rest == "on" || rest == "off" {
+                apply(session, rest == "on");
+            } else if !rest.is_empty() {
+                println!("{WARN}Usage: /autorecall [on|off]{RESET}\n");
+            } else {
+                println!(
+                    "{DIM}When enabled, each turn full-text-searches this conversation's older messages and injects the few most relevant to what you just said.{RESET}"
+                );
+                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
+                let current = if session.config.memory_recall {
+                    &options[0]
+                } else {
+                    &options[1]
+                };
+                match prompt_interactive_select("Memory Recall", &options, current) {
+                    Ok(Some(sel)) => apply(session, sel.starts_with("on")),
+                    Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
+                    Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/remember" => {
+            let (first, tail) = rest
+                .split_once(char::is_whitespace)
+                .map(|(c, a)| (c, a.trim()))
+                .unwrap_or((rest, ""));
+            let (scope, project_path, body) = if first.eq_ignore_ascii_case("here") {
+                (
+                    "project",
+                    Some(session.current_dir.to_string_lossy().into_owned()),
+                    tail,
+                )
+            } else {
+                ("user", None, rest)
+            };
+            if body.is_empty() {
+                println!("{WARN}Usage: /remember [here] <text>{RESET}\n");
+                return Some(SlashResult::Handled);
+            }
+            match MemoryStore::open_default() {
+                Ok(memory) => {
+                    match memory.add_fact(scope, project_path.as_deref(), body, None, None) {
+                        Ok(Some(_)) => println!(
+                            "{DIM}Remembered{}.{RESET}\n",
+                            if scope == "project" {
+                                " (this project)"
+                            } else {
+                                ""
+                            }
+                        ),
+                        Ok(None) => println!("{DIM}Already remembered.{RESET}\n"),
+                        Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                    }
+                }
+                Err(e) => println!("{ERROR}Memory error:{RESET} {e}\n"),
+            }
+            Some(SlashResult::Handled)
+        }
+
         "/image-provider" => {
             let mut available = Vec::new();
             if !session.config.api_key.trim().is_empty() {
@@ -1520,8 +1592,40 @@ pub async fn handle_slash_command(
                     Ok(count) => println!("{DIM}Cleared {count} interactions.{RESET}\n"),
                     Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
+                "facts" => match memory.list_facts(50) {
+                    Ok(facts) => {
+                        if facts.is_empty() {
+                            println!(
+                                "{DIM}No stored facts yet. Add one with /remember <text>.{RESET}\n"
+                            );
+                        } else {
+                            println!("\n{BLUE}Stored facts:{RESET}");
+                            for f in &facts {
+                                let scope = if f.scope == "project" {
+                                    "project"
+                                } else {
+                                    "global"
+                                };
+                                println!("  {DIM}[{}] ({}){RESET} {}", f.id, scope, f.body);
+                            }
+                            println!();
+                        }
+                    }
+                    Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                },
+                "forget" => {
+                    if args.is_empty() {
+                        println!("{WARN}/memory forget <id-or-text>{RESET}\n");
+                    } else {
+                        match memory.forget_fact(args) {
+                            Ok(0) => println!("{DIM}Nothing matched {args}.{RESET}\n"),
+                            Ok(n) => println!("{DIM}Forgot {n} fact(s).{RESET}\n"),
+                            Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                        }
+                    }
+                }
                 _ => println!(
-                    "{WARN}/memory usage: list | clear | get <key> | set <key> <val> | skills{RESET}\n"
+                    "{WARN}/memory usage: list | facts | forget <id> | clear | get <key> | set <key> <val> | skills{RESET}\n"
                 ),
             }
             Some(SlashResult::Handled)

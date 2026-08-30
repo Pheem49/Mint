@@ -10,12 +10,81 @@ use super::*;
 /// asks the model to keep itself under this budget.
 const MAX_PREFERENCES_CHARS: usize = 2500;
 
+/// Combined budget for the `Remembered facts:` block. Like `MAX_PREFERENCES_CHARS`
+/// this rides on every turn, so overflow is dropped oldest-first rather than
+/// allowed to crowd out the actual task.
+const MAX_FACTS_CHARS: usize = 1500;
+
+/// Renders the live [`Fact`] rows relevant to `workspace` as a bulleted block,
+/// newest first, truncated to [`MAX_FACTS_CHARS`]. Returns `None` when there is
+/// nothing stored. Shared by [`append_memory_context`] and `enrich_request`.
+pub(crate) fn render_memory_facts(workspace: Option<&str>) -> Option<String> {
+    let memory = MemoryStore::open_default().ok()?;
+    let facts = memory.live_facts(workspace).ok()?;
+    if facts.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    for fact in &facts {
+        let tag = if fact.scope == "project" {
+            " (this project)"
+        } else {
+            ""
+        };
+        let line = format!("- {}{}\n", fact.body.trim(), tag);
+        if out.chars().count() + line.chars().count() > MAX_FACTS_CHARS {
+            break;
+        }
+        out.push_str(&line);
+    }
+    let out = out.trim_end();
+    (!out.is_empty()).then(|| out.to_string())
+}
+
+/// Combined budget for the recall block, matching [`MAX_FACTS_CHARS`]'s intent.
+const MAX_RECALL_CHARS: usize = 1500;
+
+/// Full-text-searches `chat_id`'s history for turns relevant to `query` and
+/// formats the top few as a labelled block, oldest first. The `CONTEXT_LIMIT`
+/// newest turns are skipped — they're already injected verbatim as "Recent
+/// conversation context". Returns `None` when nothing relevant turns up (or the
+/// query has no searchable token).
+pub(crate) fn render_recalled_messages(chat_id: &str, query: &str) -> Option<String> {
+    let memory = MemoryStore::open_default().ok()?;
+    let hits = memory
+        .recall_interactions(chat_id, query, CONTEXT_LIMIT, 5)
+        .ok()?;
+    if hits.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    for item in hits.iter().rev() {
+        let block = format!(
+            "User: {}\nAssistant: {}\n\n",
+            truncate_for_context(&item.user_text, MAX_CONTEXT_MESSAGE_CHARS),
+            truncate_for_context(&item.ai_text, MAX_CONTEXT_MESSAGE_CHARS)
+        );
+        if out.chars().count() + block.chars().count() > MAX_RECALL_CHARS {
+            break;
+        }
+        out.push_str(&block);
+    }
+    let out = out.trim_end();
+    (!out.is_empty()).then(|| {
+        format!("Possibly relevant earlier messages (from this conversation's history):\n{out}")
+    })
+}
+
 /// Appends saved cross-session memory — the user's profile/preferences (Settings
 /// → Memory) and this chat's recent interaction history — onto `system_prompt`.
 /// Shared by the typed-chat agent loop and the Gemini Live bridge so a Live
 /// session starts with the same "who is this user, what have we already
 /// discussed" context instead of starting blank every call.
-pub(crate) fn append_memory_context(system_prompt: &mut String, chat_id: &str) {
+pub(crate) fn append_memory_context(
+    system_prompt: &mut String,
+    chat_id: &str,
+    workspace: Option<&str>,
+) {
     let Ok(memory) = MemoryStore::open_default() else {
         return;
     };
@@ -40,6 +109,10 @@ pub(crate) fn append_memory_context(system_prompt: &mut String, chat_id: &str) {
             system_prompt.trim(),
             profile_instructions.trim()
         );
+    }
+
+    if let Some(facts) = render_memory_facts(workspace) {
+        *system_prompt = format!("{}\n\nRemembered facts:\n{}", system_prompt.trim(), facts);
     }
 
     if let Ok(mut interactions) = memory.recent_interactions_for_chat(chat_id, CONTEXT_LIMIT) {

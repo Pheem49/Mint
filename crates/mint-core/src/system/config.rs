@@ -105,6 +105,12 @@ pub struct MintConfig {
     /// self-improving-over-time behavior this exists for. See
     /// [`crate::orchestration::spawn_auto_skill_write`].
     pub auto_skill_writing: bool,
+    /// When true, each turn runs a full-text search over the current
+    /// conversation's older messages and injects the few most relevant to the
+    /// user's message into the prompt (on top of the always-included recent
+    /// window). On by default; `/autorecall off` or the Settings toggle disables
+    /// it. See [`crate::orchestration::render_recalled_messages`].
+    pub memory_recall: bool,
     /// User-defined OpenAI-compatible providers.
     pub custom_providers: Vec<CustomProvider>,
     /// Persistent "always allow"/"always deny" rules for agent-loop approvals,
@@ -343,6 +349,7 @@ impl Default for MintConfig {
             agents: default_agents(),
             enable_agent_collaboration: false,
             auto_skill_writing: true,
+            memory_recall: true,
             custom_providers: Vec::new(),
             permission_rules: Vec::new(),
             avatar_relay_url: "https://relay.projectavatar.io".into(),

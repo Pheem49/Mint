@@ -127,7 +127,7 @@ pub use mcp::{
     remove_mcp_server,
 };
 pub use memory::{
-    CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, InteractionMemory, LearnedSkill,
+    CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, Fact, InteractionMemory, LearnedSkill,
     MemoryError, MemoryStore, WorkspaceSession, memory_path, scoped_chat_id,
 };
 pub use mic_transcribe::{

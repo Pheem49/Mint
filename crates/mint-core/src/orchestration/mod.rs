@@ -287,6 +287,25 @@ fn enrich_request(
         .to_owned();
     }
 
+    if let Some(facts) = render_memory_facts(request.workspace_path.as_deref()) {
+        enriched.system_instruction = format!(
+            "{}\n\nRemembered facts:\n{}",
+            enriched.system_instruction.trim(),
+            facts
+        )
+        .trim()
+        .to_owned();
+    }
+
+    if config.memory_recall
+        && let Some(recall) = render_recalled_messages(&request_chat_id(request), &request.message)
+    {
+        enriched.system_instruction =
+            format!("{}\n\n{}", enriched.system_instruction.trim(), recall)
+                .trim()
+                .to_owned();
+    }
+
     // Inject active AI model/provider context to system instructions
     let active_model_info = format!(
         "\n\n[Active Environment Context]\n\
@@ -935,7 +954,16 @@ where
         );
         let hooks = crate::hooks::list_hooks(config);
 
-        append_memory_context(&mut system_prompt, chat_id);
+        append_memory_context(
+            &mut system_prompt,
+            chat_id,
+            Some(root.to_string_lossy().as_ref()),
+        );
+        if config.memory_recall
+            && let Some(recall) = render_recalled_messages(chat_id, &resolved_task)
+        {
+            system_prompt = format!("{}\n\n{}", system_prompt.trim(), recall);
+        }
         // Rough token estimate for the very first request going out — lets
         // the CLI seed its live counter before step 1's real response comes
         // back and there's nothing else to go on yet (~4 chars/token, a

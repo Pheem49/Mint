@@ -189,6 +189,204 @@ fn stores_workspace_session_summary() {
 }
 
 #[test]
+fn adds_and_reads_live_facts() {
+    let store = store("facts-roundtrip");
+    let id = store
+        .add_fact("user", None, "prefers TypeScript", None, None)
+        .unwrap();
+    assert!(id.is_some());
+
+    // Exact duplicate of a live fact is a no-op.
+    assert!(
+        store
+            .add_fact("user", None, "prefers TypeScript", None, None)
+            .unwrap()
+            .is_none()
+    );
+
+    let live = store.live_facts(None).unwrap();
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].body, "prefers TypeScript");
+    assert_eq!(live[0].scope, "user");
+}
+
+#[test]
+fn project_facts_are_scoped_to_their_workspace() {
+    let store = store("facts-project-scope");
+    store
+        .add_fact("user", None, "global fact", None, None)
+        .unwrap();
+    store
+        .add_fact("project", Some("/tmp/repo-a"), "uses pnpm", None, None)
+        .unwrap();
+    store
+        .add_fact("project", Some("/tmp/repo-b"), "uses cargo", None, None)
+        .unwrap();
+
+    let in_a = store.live_facts(Some("/tmp/repo-a")).unwrap();
+    let bodies: Vec<&str> = in_a.iter().map(|f| f.body.as_str()).collect();
+    assert!(bodies.contains(&"global fact"));
+    assert!(bodies.contains(&"uses pnpm"));
+    assert!(!bodies.contains(&"uses cargo"));
+
+    // No workspace → only global facts.
+    let global_only = store.live_facts(None).unwrap();
+    assert_eq!(global_only.len(), 1);
+    assert_eq!(global_only[0].body, "global fact");
+}
+
+#[test]
+fn superseding_a_fact_drops_it_from_live() {
+    let store = store("facts-supersede");
+    let old = store
+        .add_fact("user", None, "deploys on Fridays", None, None)
+        .unwrap()
+        .unwrap();
+    let new = store
+        .add_fact("user", None, "never deploys on Fridays", None, None)
+        .unwrap();
+    store.supersede_fact(old, new).unwrap();
+
+    let live = store.live_facts(None).unwrap();
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0].body, "never deploys on Fridays");
+
+    // The superseded body's dedup slot is freed, so it can be re-added.
+    assert!(
+        store
+            .add_fact("user", None, "deploys on Fridays", None, None)
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn forgets_facts_by_id_and_by_substring() {
+    let store = store("facts-forget");
+    let id = store
+        .add_fact("user", None, "keyboard is Dvorak", None, None)
+        .unwrap()
+        .unwrap();
+    store
+        .add_fact("user", None, "editor is Helix", None, None)
+        .unwrap();
+
+    assert_eq!(store.forget_fact(&id.to_string()).unwrap(), 1);
+    assert_eq!(store.forget_fact("Helix").unwrap(), 1);
+    assert!(store.live_facts(None).unwrap().is_empty());
+    assert_eq!(store.forget_fact("nothing matches this").unwrap(), 0);
+}
+
+#[test]
+fn fts5_recall_is_available_and_finds_an_old_turn() {
+    let store = store("recall-basic");
+    // Oldest turn holds the distinctive phrase.
+    store
+        .add_interaction_for_chat(
+            "conversation-recall",
+            "where do we keep the raspberry pantry inventory sheet",
+            "it's in the shared drive under ops/",
+            "gemini",
+            "test",
+        )
+        .unwrap();
+    for n in 0..7 {
+        store
+            .add_interaction_for_chat(
+                "conversation-recall",
+                &format!("unrelated question number {n}"),
+                &format!("unrelated answer {n}"),
+                "gemini",
+                "test",
+            )
+            .unwrap();
+    }
+
+    let hits = store
+        .recall_interactions("conversation-recall", "pantry inventory", 3, 5)
+        .unwrap();
+    assert_eq!(hits.len(), 1, "expected exactly the matching old turn");
+    assert!(hits[0].user_text.contains("raspberry pantry inventory"));
+}
+
+#[test]
+fn fts5_recall_excludes_the_recent_window_and_junk_queries() {
+    let store = store("recall-window");
+    for n in 0..5 {
+        store
+            .add_interaction_for_chat(
+                "c",
+                &format!("deploy checklist step {n}"),
+                &format!("done {n}"),
+                "gemini",
+                "test",
+            )
+            .unwrap();
+    }
+    // "deploy checklist" matches every row, but the 3 newest are excluded.
+    let hits = store
+        .recall_interactions("c", "deploy checklist", 3, 10)
+        .unwrap();
+    assert_eq!(hits.len(), 2);
+    for hit in &hits {
+        assert!(hit.user_text.ends_with("step 0") || hit.user_text.ends_with("step 1"));
+    }
+
+    // No token >= 3 chars -> empty, and crucially no error.
+    assert!(
+        store
+            .recall_interactions("c", "?? a b !!", 0, 10)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn fts5_recall_matches_substrings_and_stays_within_its_chat() {
+    let store = store("recall-substring");
+    store
+        .add_interaction_for_chat("chat-a", "the inventory count was off", "noted", "g", "t")
+        .unwrap();
+    store
+        .add_interaction_for_chat("chat-b", "inventory reconciliation passed", "ok", "g", "t")
+        .unwrap();
+
+    // trigram tokenizer: a partial word still matches.
+    let hits = store
+        .recall_interactions("chat-a", "ventor", 0, 10)
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].chat_id, "chat-a");
+    assert!(hits[0].user_text.contains("inventory"));
+}
+
+#[test]
+fn fts5_index_shrinks_when_a_chat_is_deleted() {
+    let path = test_path("recall-delete", "sqlite");
+    let _ = std::fs::remove_file(&path);
+    let store = MemoryStore::open(&path);
+    store
+        .add_interaction_for_chat("doomed", "sphinx of black quartz", "judge my vow", "g", "t")
+        .unwrap();
+    assert_eq!(
+        store
+            .recall_interactions("doomed", "quartz", 0, 10)
+            .unwrap()
+            .len(),
+        1
+    );
+    store.delete_chat_session("doomed").unwrap();
+    assert!(
+        store
+            .recall_interactions("doomed", "quartz", 0, 10)
+            .unwrap()
+            .is_empty(),
+        "delete trigger should have removed the row from interaction_fts",
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn stores_lists_and_deletes_learned_skills() {
     let store = store("skills");
     store

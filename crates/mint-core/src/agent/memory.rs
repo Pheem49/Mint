@@ -87,6 +87,20 @@ pub struct LearnedSkill {
     pub is_workspace: bool,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Fact {
+    pub id: i64,
+    /// `"user"` / `"preference"` are always injected; `"project"` only when the
+    /// active workspace matches `project_path`.
+    pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_path: Option<String>,
+    pub body: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSession {
@@ -208,6 +222,44 @@ impl MemoryStore {
              LIMIT ?2",
         )?;
         let rows = statement.query_map(params![chat_id, limit as i64], interaction_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Full-text search over `chat_id`'s past interactions for the turns most
+    /// relevant to `query` (BM25 ranked), skipping the `exclude_recent` newest
+    /// rows since those are already injected verbatim elsewhere. Returns
+    /// `Ok(vec![])` without touching the database when `query` yields no usable
+    /// search token.
+    pub fn recall_interactions(
+        &self,
+        chat_id: &str,
+        query: &str,
+        exclude_recent: usize,
+        limit: usize,
+    ) -> Result<Vec<InteractionMemory>, MemoryError> {
+        let Some(match_query) = fts_match_query(query) else {
+            return Ok(Vec::new());
+        };
+        let chat_id = normalized_chat_id(chat_id);
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT m.id, m.chat_id, m.user_text, m.ai_text, m.provider, m.model,
+                    m.fallback_provider, m.created_at, m.agent_activity_json
+             FROM interaction_fts
+             JOIN interaction_memories m ON m.id = interaction_fts.rowid
+             WHERE interaction_fts MATCH ?1
+               AND m.chat_id = ?2
+               AND m.id NOT IN (
+                 SELECT id FROM interaction_memories
+                 WHERE chat_id = ?2 ORDER BY id DESC LIMIT ?3
+               )
+             ORDER BY bm25(interaction_fts)
+             LIMIT ?4",
+        )?;
+        let rows = statement.query_map(
+            params![match_query, chat_id, exclude_recent as i64, limit as i64],
+            interaction_row,
+        )?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -436,6 +488,87 @@ impl MemoryStore {
         )?)
     }
 
+    /// Inserts one durable fact. `scope` is `"user"` / `"preference"` (global,
+    /// `project_path` must be `None`) or `"project"` (`project_path` set to the
+    /// workspace it applies to). Returns `Some(id)` of the new row, or `None`
+    /// when an identical live fact already exists (`idx_facts_dedup`).
+    pub fn add_fact(
+        &self,
+        scope: &str,
+        project_path: Option<&str>,
+        body: &str,
+        source_chat_id: Option<&str>,
+        source_interaction_id: Option<i64>,
+    ) -> Result<Option<i64>, MemoryError> {
+        let connection = self.connection()?;
+        let changed = connection.execute(
+            "INSERT INTO facts (scope, project_path, body, source_chat_id, source_interaction_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT DO NOTHING",
+            params![
+                scope,
+                project_path,
+                body,
+                source_chat_id,
+                source_interaction_id
+            ],
+        )?;
+        Ok((changed > 0).then(|| connection.last_insert_rowid()))
+    }
+
+    /// Live (non-superseded) facts relevant to `project_path`: all `user` /
+    /// `preference` facts, plus `project` facts whose `project_path` matches.
+    /// Newest first.
+    pub fn live_facts(&self, project_path: Option<&str>) -> Result<Vec<Fact>, MemoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, scope, project_path, body, created_at, updated_at
+             FROM facts
+             WHERE superseded_by IS NULL
+               AND (scope IN ('user', 'preference')
+                    OR (scope = 'project' AND project_path IS NOT NULL AND project_path = ?1))
+             ORDER BY updated_at DESC, id DESC",
+        )?;
+        let rows = statement.query_map(params![project_path], fact_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Most recent facts regardless of scope or workspace, for `/memory facts`.
+    pub fn list_facts(&self, limit: usize) -> Result<Vec<Fact>, MemoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, scope, project_path, body, created_at, updated_at
+             FROM facts WHERE superseded_by IS NULL
+             ORDER BY updated_at DESC, id DESC LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit as i64], fact_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Marks `old_id` as no longer live. `new_id` records which fact replaced it;
+    /// pass `None` for a plain retraction, stored as the sentinel `-1` so the row
+    /// still counts as superseded (a real `NULL` would leave it live).
+    pub fn supersede_fact(&self, old_id: i64, new_id: Option<i64>) -> Result<(), MemoryError> {
+        let connection = self.connection()?;
+        connection.execute(
+            "UPDATE facts SET superseded_by = ?2, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1 AND superseded_by IS NULL",
+            params![old_id, new_id.unwrap_or(-1)],
+        )?;
+        Ok(())
+    }
+
+    /// Hard-deletes facts matching `identifier` — an exact id, or a substring of
+    /// the body. Returns the number of rows removed.
+    pub fn forget_fact(&self, identifier: &str) -> Result<usize, MemoryError> {
+        let connection = self.connection()?;
+        Ok(connection.execute(
+            "DELETE FROM facts
+             WHERE CAST(id AS TEXT) = ?1 OR body LIKE '%' || ?1 || '%'",
+            params![identifier],
+        )?)
+    }
+
     fn connection(&self) -> Result<Connection, MemoryError> {
         if let Some(directory) = self.path.parent() {
             std::fs::create_dir_all(directory).map_err(|source| MemoryError::CreateDirectory {
@@ -648,7 +781,52 @@ fn initialize(
            summary TEXT NOT NULL,
            verification TEXT NOT NULL DEFAULT '',
            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-         );",
+         );
+         CREATE TABLE IF NOT EXISTS facts (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           scope TEXT NOT NULL DEFAULT 'user',
+           project_path TEXT DEFAULT NULL,
+           body TEXT NOT NULL,
+           source_chat_id TEXT DEFAULT NULL,
+           source_interaction_id INTEGER DEFAULT NULL,
+           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+           superseded_by INTEGER DEFAULT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_facts_live
+           ON facts(scope, project_path) WHERE superseded_by IS NULL;
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_facts_dedup
+           ON facts(scope, ifnull(project_path, ''), body) WHERE superseded_by IS NULL;
+         CREATE TRIGGER IF NOT EXISTS trg_facts_touch
+         AFTER UPDATE OF body, scope, project_path, superseded_by ON facts
+         FOR EACH ROW WHEN NEW.updated_at = OLD.updated_at
+         BEGIN
+           UPDATE facts SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+         END;
+         CREATE VIRTUAL TABLE IF NOT EXISTS interaction_fts USING fts5(
+           user_text,
+           ai_text,
+           content='interaction_memories',
+           content_rowid='id',
+           tokenize='trigram'
+         );
+         CREATE TRIGGER IF NOT EXISTS trg_interaction_fts_ai
+         AFTER INSERT ON interaction_memories BEGIN
+           INSERT INTO interaction_fts(rowid, user_text, ai_text)
+           VALUES (new.id, new.user_text, new.ai_text);
+         END;
+         CREATE TRIGGER IF NOT EXISTS trg_interaction_fts_ad
+         AFTER DELETE ON interaction_memories BEGIN
+           INSERT INTO interaction_fts(interaction_fts, rowid, user_text, ai_text)
+           VALUES ('delete', old.id, old.user_text, old.ai_text);
+         END;
+         CREATE TRIGGER IF NOT EXISTS trg_interaction_fts_au
+         AFTER UPDATE ON interaction_memories BEGIN
+           INSERT INTO interaction_fts(interaction_fts, rowid, user_text, ai_text)
+           VALUES ('delete', old.id, old.user_text, old.ai_text);
+           INSERT INTO interaction_fts(rowid, user_text, ai_text)
+           VALUES (new.id, new.user_text, new.ai_text);
+         END;",
     )?;
     ensure_column(
         connection,
@@ -704,8 +882,33 @@ fn initialize(
          ON interaction_memories(chat_id, id)",
         [],
     )?;
+    // `keywords` was declared years ago but never read or written by any code
+    // path — the FTS5 index below is what actually powers recall now. Drop it so
+    // the column doesn't mislead. Needs SQLite >= 3.35 (bundled is far newer).
+    drop_column_if_exists(connection, "interaction_memories", "keywords")?;
     if migrate_legacy_history {
         migrate_json_history(connection)?;
+    }
+    // One-time populate of `interaction_fts` for rows that predate it. The
+    // triggers above keep it current from here on; this only needs to run once
+    // per database, gated by a sentinel like `migrate_json_history` uses.
+    let fts_backfilled: bool = connection
+        .query_row(
+            "SELECT 1 FROM user_profile WHERE key = 'interaction_fts_backfilled'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !fts_backfilled {
+        connection.execute(
+            "INSERT INTO interaction_fts(interaction_fts) VALUES('rebuild')",
+            [],
+        )?;
+        connection.execute(
+            "INSERT OR REPLACE INTO user_profile (key, value, updated_at)
+             VALUES ('interaction_fts_backfilled', 'true', CURRENT_TIMESTAMP)",
+            [],
+        )?;
     }
     Ok(())
 }
@@ -730,6 +933,29 @@ fn ensure_column(
     Ok(())
 }
 
+/// Inverse of [`ensure_column`]: drops `column` from `table` if it is still
+/// there, and is a no-op once it's gone. `ALTER TABLE ... DROP COLUMN` needs
+/// SQLite >= 3.35.
+fn drop_column_if_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<(), rusqlite::Error> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let mut present = false;
+    for existing in columns {
+        if existing? == column {
+            present = true;
+            break;
+        }
+    }
+    if present {
+        connection.execute(&format!("ALTER TABLE {table} DROP COLUMN {column}"), [])?;
+    }
+    Ok(())
+}
+
 fn learned_skill_row(row: &rusqlite::Row<'_>) -> Result<LearnedSkill, rusqlite::Error> {
     let content: String = row.get(3)?;
     let description = crate::skills::parse_skill_description(&content);
@@ -741,6 +967,50 @@ fn learned_skill_row(row: &rusqlite::Row<'_>) -> Result<LearnedSkill, rusqlite::
         created_at: row.get(4)?,
         description,
         is_workspace: false,
+    })
+}
+
+/// Turns free-form user text into a safe FTS5 `MATCH` string for the `trigram`
+/// tokenizer: pulls out alphanumeric runs (Unicode-aware, so Thai counts) of at
+/// least 3 chars — the trigram minimum — lowercases and dedupes them, caps at
+/// 12, and quotes each so it is treated as a literal (a `"` can never appear in
+/// a token, so this can't inject FTS operators). `None` if nothing usable is
+/// left, so the caller can skip the query entirely.
+fn fts_match_query(query: &str) -> Option<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut tokens: Vec<String> = Vec::new();
+    for raw in query.split(|c: char| !c.is_alphanumeric()) {
+        if raw.chars().count() < 3 {
+            continue;
+        }
+        let token = raw.to_lowercase();
+        if seen.insert(token.clone()) {
+            tokens.push(token);
+            if tokens.len() == 12 {
+                break;
+            }
+        }
+    }
+    if tokens.is_empty() {
+        return None;
+    }
+    Some(
+        tokens
+            .iter()
+            .map(|t| format!("\"{t}\""))
+            .collect::<Vec<_>>()
+            .join(" OR "),
+    )
+}
+
+fn fact_row(row: &rusqlite::Row<'_>) -> Result<Fact, rusqlite::Error> {
+    Ok(Fact {
+        id: row.get(0)?,
+        scope: row.get(1)?,
+        project_path: row.get(2)?,
+        body: row.get(3)?,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
     })
 }
 

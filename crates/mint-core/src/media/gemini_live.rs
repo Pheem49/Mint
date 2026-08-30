@@ -209,7 +209,11 @@ where
     // Same cross-session context (saved profile/preferences + this chat's recent
     // history) the typed-chat agent loop gets, so a Live call isn't a blank slate
     // that's forgotten everything the user already told Mint.
-    crate::orchestration::append_memory_context(&mut system_instruction, chat_id);
+    crate::orchestration::append_memory_context(
+        &mut system_instruction,
+        chat_id,
+        Some(workspace_root.to_string_lossy().as_ref()),
+    );
     if let Ok(skills) = crate::skills::learned_skills_context(Some(workspace_root), Some(chat_id))
         && !skills.trim().is_empty()
     {

@@ -206,6 +206,14 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             |cfg, v| cfg.auto_skill_writing = v,
             config,
         ),
+        "/autorecall" => cmd_bool_toggle(
+            rest,
+            "/autorecall",
+            "Memory Recall",
+            config.memory_recall,
+            |cfg, v| cfg.memory_recall = v,
+            config,
+        ),
         "/multi-agent" => {
             let current = config.enable_agent_collaboration;
             match parse_on_off(rest) {
@@ -283,6 +291,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         "/cd" => cmd_cd(rest),
         "/stats" => cmd_stats(config, &req.workspace()),
         "/memory" => cmd_memory(rest),
+        "/remember" => cmd_remember(rest, &req.workspace()),
         "/plugins" => SlashResponse::Navigate {
             target: SlashNavTarget::Plugins,
             markdown: "🔌 Opened Plugins.".into(),
@@ -629,10 +638,70 @@ fn cmd_memory(rest: &str) -> SlashResponse {
             markdown: "🧠 Cleared stored interactions for this conversation.".into(),
             effects: vec![SlashEffect::HistoryCleared],
         },
+        "facts" => match store.list_facts(50) {
+            Ok(facts) if facts.is_empty() => {
+                message("🧠 No stored facts yet. Add one with `/remember <text>`.")
+            }
+            Ok(facts) => {
+                let rows = facts
+                    .iter()
+                    .map(|f| {
+                        vec![
+                            f.id.to_string(),
+                            if f.scope == "project" {
+                                "project".into()
+                            } else {
+                                "global".into()
+                            },
+                            f.body.clone(),
+                        ]
+                    })
+                    .collect::<Vec<_>>();
+                message(md_table(&["id", "scope", "fact"], &rows))
+            }
+            Err(e) => error(e),
+        },
+        "forget" if !args.is_empty() => match store.forget_fact(args) {
+            Ok(0) => message(format!("Nothing matched `{args}`.")),
+            Ok(n) => message(format!("🧠 Forgot {n} fact(s).")),
+            Err(e) => error(e),
+        },
+        "forget" => error("Usage: /memory forget <id-or-text>"),
         "" | "list" => message(
-            "🧠 **Long-term memory** — `/memory get <key>` · `/memory set <key> <value>` · `/memory clear`.\nRecent interactions are in the chat history.",
+            "🧠 **Long-term memory** — `/remember <text>` to add a fact · `/memory facts` to list · `/memory forget <id>` · `/memory get <key>` · `/memory set <key> <value>` · `/memory clear`.",
         ),
-        _ => error("Usage: /memory list | clear | get <key> | set <key> <value>"),
+        _ => error(
+            "Usage: /memory list | facts | forget <id> | clear | get <key> | set <key> <value>",
+        ),
+    }
+}
+
+fn cmd_remember(rest: &str, workspace: &Path) -> SlashResponse {
+    let (first, tail) = split_sub(rest);
+    let (scope, project_path, body) = if first == "here" {
+        (
+            "project",
+            Some(workspace.to_string_lossy().into_owned()),
+            tail,
+        )
+    } else {
+        ("user", None, rest.trim())
+    };
+    if body.is_empty() {
+        return error("Usage: /remember [here] <text>");
+    }
+    let store = match crate::MemoryStore::open_default() {
+        Ok(s) => s,
+        Err(e) => return error(e),
+    };
+    match store.add_fact(scope, project_path.as_deref(), body, None, None) {
+        Ok(Some(_)) => message(if scope == "project" {
+            "🧠 Remembered (this project).".to_string()
+        } else {
+            "🧠 Remembered.".to_string()
+        }),
+        Ok(None) => message("🧠 Already remembered."),
+        Err(e) => error(e),
     }
 }
 
@@ -915,6 +984,22 @@ mod tests {
             input: input.to_string(),
             cwd: None,
             surface: Some(surface.to_string()),
+        }
+    }
+
+    #[test]
+    fn remember_without_text_shows_usage() {
+        // The no-arg path returns before opening the memory store, so this
+        // stays in line with the "no slash test persists to disk" rule above.
+        let mut cfg = MintConfig::default();
+        match execute(&req("/remember"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("Usage: /remember"));
+            }
+            other => panic!(
+                "expected usage message, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
     }
 
