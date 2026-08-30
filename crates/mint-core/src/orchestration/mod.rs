@@ -359,18 +359,14 @@ use workspace_helpers::*;
 /// work, cutting it off mid-task — raised to 40 as a middle ground.
 const MAX_STEPS: usize = 40;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
-/// Compact `native_messages` once reported token usage crosses this fraction
-/// of the active model's context window. Every step resends the whole
-/// accumulated history (see `MAX_STEPS`'s doc comment above), so this is the
-/// main lever on real per-task token volume — not just cost, since provider
-/// prompt caching (automatic for OpenAI-compatible providers, explicit
-/// `cache_control` breakpoints for Anthropic) only discounts *price* on a
-/// resend, it doesn't shrink what's actually sent/counted. Lowered from 0.8,
-/// then from 0.6 to compact considerably earlier still — a task observed
-/// hitting 80,949/128,000 tokens on a single step at the 0.6 ratio (63% of
-/// window) was well past the point of real benefit from keeping that much
-/// verbatim.
-const COMPACTION_TRIGGER_RATIO: f64 = 0.4;
+/// Compact `native_messages` once a step's reported token usage crosses this
+/// fraction of `MintConfig::context_window_tokens`. Every step resends the whole
+/// accumulated history, so this is the main lever on real per-task token volume
+/// (prompt caching only discounts price, not what's counted). Compaction fires
+/// the moment the threshold is crossed and shrinks the history before the next
+/// request, so `0.75` keeps a generous verbatim window without letting the next
+/// request grow past the real limit.
+const COMPACTION_TRIGGER_RATIO: f64 = 0.75;
 /// Number of most-recent Assistant/Tool step-pairs kept verbatim (uncompacted)
 /// in `native_messages`.
 const COMPACTION_KEEP_RECENT_STEPS: usize = 3;
