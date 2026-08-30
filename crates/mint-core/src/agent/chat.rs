@@ -839,7 +839,7 @@ async fn call_ollama(
     let model = config.ollama_model.clone();
     let native = request.messages.is_some()
         && config.tool_calling_mode() == crate::config::ToolCallingMode::Native;
-    let body = if native {
+    let mut body = if native {
         let messages = request.messages.as_deref().unwrap_or(&[]);
         let mut payload = json!({
             "model": model,
@@ -876,6 +876,10 @@ async fn call_ollama(
             ]
         })
     };
+    // Force the context window Mint plans against (`context_window_tokens`)
+    // instead of leaving Ollama on its tiny ~4K default, which silently
+    // truncates anything longer.
+    body["options"] = json!({ "num_ctx": config.ollama_num_ctx });
     let response: Value = client
         .post(format!("{host}/api/chat"))
         .json(&body)
@@ -1363,7 +1367,9 @@ where
             "messages": [
                 { "role": "system", "content": request.system_instruction },
                 user_message
-            ]
+            ],
+            // See `call_ollama`: pin the window instead of Ollama's ~4K default.
+            "options": { "num_ctx": config.ollama_num_ctx }
         }))
         .send()
         .await?
