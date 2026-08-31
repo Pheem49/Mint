@@ -194,6 +194,24 @@ apps:
 
 ---
 
+## ⌨️ Rebuilt: the `/` `$` `@` Suggestion Menu (Web + Desktop)
+
+The command menu was reworked into one self-contained component with a
+single derived-visibility model (it had grown a tangle of open/reopen
+state that trapped keyboard focus in a few cases).
+
+- **Picking a command completes it into the composer and stops** — like
+  the CLI's Tab. A separate Enter runs it; ↑/↓ bring the menu back for
+  subcommands.
+- **Slash commands are grouped by category** (System / Models / Workspace /
+  Tools), and each row shows the command's argument template.
+- **Empty state** instead of a vanishing menu: "No command matches `/xyz`",
+  or the active command's usage once you're past its name.
+- Hover no longer fights arrow-key navigation; the header shows a stable
+  count.
+
+---
+
 ## ⚙️ Settings: Component Restyle Finished
 
 The pills/toggles pass from the settings redesign now covers the last tabs:
