@@ -436,6 +436,9 @@ export default function ChatPanel({
 
   const applyHistoryValue = (value: string) => {
     onSetMessage(value)
+    // Collapse any open slash/@ menu; the reopen effect brings it back once
+    // browsing ends (historyIndex null) if the text still warrants it.
+    setSlashMenuOpen(false)
     setTimeout(() => {
       const el = textareaRef.current
       if (!el) return
@@ -537,7 +540,9 @@ export default function ChatPanel({
     : filteredContexts.length
 
   useEffect(() => {
-    if (isSlashInput || isSkillInput || isAtInput) {
+    // Don't pop the suggestion menu while stepping through history — a recalled
+    // slash/@ command would otherwise reopen it on every ↑/↓.
+    if (historyIndex === null && (isSlashInput || isSkillInput || isAtInput)) {
       setSlashMenuOpen(true)
       setSlashSelectedIndex(0)
     }
@@ -595,6 +600,24 @@ export default function ChatPanel({
     event.currentTarget.form?.requestSubmit()
   }
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const isPlainArrowNav =
+      (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
+      !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey &&
+      !event.nativeEvent.isComposing
+
+    // Once history browsing has started, ↑/↓ keep stepping through history even
+    // if a recalled entry is a slash/@ command that reopened the suggestion
+    // menu — otherwise the menu would swallow the arrows and you'd be stuck.
+    if (
+      isPlainArrowNav && historyIndex !== null &&
+      event.currentTarget.selectionStart === event.currentTarget.selectionEnd
+    ) {
+      if (event.key === 'ArrowUp' ? navigateHistoryPrev() : navigateHistoryNext()) {
+        event.preventDefault()
+        return
+      }
+    }
+
     if (showSuggestionMenu) {
       if (event.key === 'ArrowDown') {
         event.preventDefault()
@@ -629,11 +652,7 @@ export default function ChatPanel({
       }
     }
 
-    if (
-      (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
-      !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey &&
-      !event.nativeEvent.isComposing
-    ) {
+    if (isPlainArrowNav) {
       const el = event.currentTarget
       if (el.selectionStart === el.selectionEnd) {
         if (event.key === 'ArrowUp') {
