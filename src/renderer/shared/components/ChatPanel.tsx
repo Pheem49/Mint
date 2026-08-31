@@ -460,6 +460,12 @@ export default function ChatPanel({
     }
     return true
   }
+  // "Edit" on a past user message: drop its text back into the composer so it
+  // can be tweaked and sent again as a new message (nothing is deleted).
+  const handleEditMessage = (text: string) => {
+    setHistoryIndex(null)
+    applyHistoryValue(text)
+  }
   const navigateHistoryNext = () => {
     if (historyIndex === null) return false
     if (historyIndex === 0) {
@@ -1152,6 +1158,7 @@ export default function ChatPanel({
             <ChatMessageItem
               interaction={interaction}
               copiedId={copiedId}
+              onEditMessage={handleEditMessage}
               speakingText={speakingText}
               agentActivitySnapshots={agentActivitySnapshots}
               thinkingExpanded={thinkingExpanded}
