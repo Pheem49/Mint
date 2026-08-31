@@ -539,7 +539,16 @@ export default function ChatPanel({
     ? filteredSkills.length
     : filteredContexts.length
 
+  // Set right before a menu pick rewrites `message`, so the effect below skips
+  // one auto-reopen — a completed `/cmd ` stays dismissed and the next Enter
+  // runs it (↑/↓ still bring the menu back for subcommands). CLI Tab parity.
+  const suppressSlashReopenRef = useRef(false)
+
   useEffect(() => {
+    if (suppressSlashReopenRef.current) {
+      suppressSlashReopenRef.current = false
+      return
+    }
     // Don't pop the suggestion menu while stepping through history — a recalled
     // slash/@ command would otherwise reopen it on every ↑/↓.
     if (historyIndex === null && (isSlashInput || isSkillInput || isAtInput)) {
@@ -573,6 +582,7 @@ export default function ChatPanel({
   }, [])
 
   const selectSlashCommand = (cmd: string) => {
+    suppressSlashReopenRef.current = true
     onSetMessage(cmd + ' ')
     setSlashMenuOpen(false)
     setSlashSelectedIndex(0)
@@ -580,6 +590,7 @@ export default function ChatPanel({
   }
 
   const selectSkillCommand = (name: string) => {
+    suppressSlashReopenRef.current = true
     onSetMessage('$' + name + ' ')
     setSlashMenuOpen(false)
     setSlashSelectedIndex(0)
@@ -587,6 +598,7 @@ export default function ChatPanel({
   }
 
   const selectAtCommand = (label: string) => {
+    suppressSlashReopenRef.current = true
     const nextMsg = message.replace(/@[\w\-\.\/]*$/, label + ' ')
     onSetMessage(nextMsg)
     setSlashMenuOpen(false)
@@ -650,6 +662,19 @@ export default function ChatPanel({
         setSlashMenuOpen(false)
         return
       }
+    }
+
+    // Menu dismissed (e.g. just after a completion) but the text is still a
+    // slash/$/@ prefix with matches — ↑/↓ bring it back rather than starting
+    // history browsing, so subcommands stay one keypress away.
+    if (
+      isPlainArrowNav && !slashMenuOpen && historyIndex === null &&
+      (isSlashInput || isSkillInput || isAtInput) && suggestionCount > 0
+    ) {
+      event.preventDefault()
+      setSlashMenuOpen(true)
+      setSlashSelectedIndex(0)
+      return
     }
 
     if (isPlainArrowNav) {
@@ -1521,7 +1546,9 @@ export default function ChatPanel({
             onChange={(event) => {
               resizeInput(event.currentTarget)
               onSetMessage(event.target.value)
-              // Manual edits drop out of history browsing but keep the recalled text.
+              // A real keystroke always re-enables the suggestion menu and drops
+              // out of history browsing (the recalled text is kept).
+              suppressSlashReopenRef.current = false
               if (historyIndex !== null) setHistoryIndex(null)
             }}
             onKeyDown={handleInputKeyDown}
