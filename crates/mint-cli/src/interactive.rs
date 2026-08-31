@@ -194,6 +194,55 @@ pub fn print_welcome_banner(config: &MintConfig) {
         );
     }
 }
+
+/// Prompts kept for the interactive box's Up/Down recall, persisted across
+/// sessions (the in-memory `InteractiveSession::history` used to start empty
+/// every launch). Oldest first, capped at the last `PROMPT_HISTORY_LIMIT`,
+/// stored as a JSON array next to the rest of Mint's config.
+const PROMPT_HISTORY_LIMIT: usize = 100;
+
+fn prompt_history_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("mint").join("prompt-history.json"))
+}
+
+fn trim_to_limit(list: &mut Vec<String>) {
+    if list.len() > PROMPT_HISTORY_LIMIT {
+        let overflow = list.len() - PROMPT_HISTORY_LIMIT;
+        list.drain(0..overflow);
+    }
+}
+
+fn load_prompt_history() -> Vec<String> {
+    let Some(path) = prompt_history_path() else {
+        return Vec::new();
+    };
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let mut list: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
+    trim_to_limit(&mut list);
+    list
+}
+
+/// Append `line` to `history` (skipping an immediate duplicate), cap it, and
+/// best-effort write the whole list back to disk.
+fn record_prompt(history: &mut Vec<String>, line: &str) {
+    if history.last().map(String::as_str) == Some(line) {
+        return;
+    }
+    history.push(line.to_owned());
+    trim_to_limit(history);
+
+    if let Some(path) = prompt_history_path()
+        && let Ok(json) = serde_json::to_string(history)
+    {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(&path, json);
+    }
+}
+
 pub async fn run_interactive_chat() -> Result<()> {
     let config = mint_core::load_config()?;
 
@@ -217,7 +266,7 @@ pub async fn run_interactive_chat() -> Result<()> {
         fast_mode: false,
         plan_mode: false,
         pending_image: None,
-        history: Vec::new(),
+        history: load_prompt_history(),
         jobs: BackgroundJobs::new(),
     };
 
@@ -303,9 +352,7 @@ pub async fn run_interactive_chat() -> Result<()> {
             break;
         };
 
-        if session.history.last().map(|s| s.as_str()) != Some(query_str.as_str()) {
-            session.history.push(query_str.clone());
-        }
+        record_prompt(&mut session.history, &query_str);
 
         // An `@servername` mention anywhere in the query (picked from the
         // composer's `@` suggestions, or hand-typed) restricts this turn's
