@@ -13,7 +13,7 @@ import {
 } from '../constants/models'
 import { badge, providerLabel, fallbackNotice } from '../utils/providers'
 import { activitiesFrom, parseWebSearchSources, type AgentActivity, type AgentActivityView } from '../utils/agentActivity'
-import { SLASH_COMMANDS } from '../constants/slashCommands'
+import SlashSuggestions, { type SlashSuggestionsHandle } from './SlashSuggestions'
 import { AgentActivityTable } from './AgentActivityTable'
 import { ChatCodeBlock } from './ChatCodeBlock'
 import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../utils/approval'
@@ -32,8 +32,6 @@ import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documen
 
 import {
   APP_ICON_PATH,
-  listLearnedSkills,
-  type LearnedSkill,
   type AgentProgress,
   type ChatResponse,
   type RuntimeStatus,
@@ -410,12 +408,8 @@ export default function ChatPanel({
   const workspaceName = workspacePath
     ? workspacePath.split(/[\\/]/).filter(Boolean).pop() || workspacePath
     : 'Select Project'
-  const [skillsList, setSkillsList] = useState<LearnedSkill[]>([])
-  const [slashMenuOpen, setSlashMenuOpen] = useState(true)
-  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
-  const slashMenuRef = useRef<HTMLDivElement>(null)
-  const slashListRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const slashRef = useRef<SlashSuggestionsHandle>(null)
 
   // Up/Down input history: recall previously submitted prompts (parity with the CLI).
   // `historyIndex` counts back from the newest entry — 0 is the most recent, null
@@ -436,9 +430,6 @@ export default function ChatPanel({
 
   const applyHistoryValue = (value: string) => {
     onSetMessage(value)
-    // Collapse any open slash/@ menu; the reopen effect brings it back once
-    // browsing ends (historyIndex null) if the text still warrants it.
-    setSlashMenuOpen(false)
     setTimeout(() => {
       const el = textareaRef.current
       if (!el) return
@@ -482,128 +473,17 @@ export default function ChatPanel({
     return true
   }
 
-  const isSlashInput = message.trimStart().startsWith('/')
-  const isSkillInput = message.trimStart().startsWith('$')
-  const atMatch = message.match(/@([\w\-\.\/]*)$/)
-  const isAtInput = Boolean(atMatch)
-  const atQuery = atMatch ? atMatch[1].toLowerCase() : ''
-
-  const CONTEXT_SUGGESTIONS = [
-    { label: '@workspace', desc: 'Include workspace path & context', type: 'context' as const },
-    { label: '@file', desc: 'Reference workspace file', type: 'context' as const },
-    { label: '@docs', desc: 'Include documentation context', type: 'context' as const },
-    { label: '@memory', desc: 'Include long-term memory store', type: 'context' as const },
-  ]
-
-  const mcpSuggestions = Object.entries(settingsConfig?.mcpServers || {})
-    .filter(([, srv]: [string, any]) => srv?.disabled !== true)
-    .map(([name]) => ({
-      label: `@${name}`,
-      desc: 'Restrict this message to this MCP server/plugin',
-      type: 'plugin' as const,
-    }))
-
-  const filteredContexts = isAtInput
-    ? [...CONTEXT_SUGGESTIONS, ...mcpSuggestions].filter((item) => item.label.toLowerCase().includes(atQuery))
-    : []
-
-  useEffect(() => {
-    let isMounted = true
-    listLearnedSkills(workspacePath)
-      .then((res) => {
-        if (isMounted && Array.isArray(res)) setSkillsList(res)
-      })
-      .catch(() => {})
-    return () => { isMounted = false }
-  }, [workspacePath, isSkillInput])
-
-  const slashQuery = isSlashInput ? message.trimStart().toLowerCase() : ''
-  const filteredSlashCommands = isSlashInput
-    ? SLASH_COMMANDS.filter((c) => c.command.toLowerCase().startsWith(slashQuery))
-    : []
-
-  const skillQuery = isSkillInput ? message.trimStart().slice(1).toLowerCase() : ''
-  const filteredSkills = isSkillInput
-    ? skillsList.filter((s) => s.name.toLowerCase().startsWith(skillQuery))
-    : []
-
-  const showSuggestionMenu = slashMenuOpen && (
-    (isSlashInput && filteredSlashCommands.length > 0) ||
-    (isSkillInput && filteredSkills.length > 0) ||
-    (isAtInput && filteredContexts.length > 0)
-  )
-
-  const suggestionCount = isSlashInput
-    ? filteredSlashCommands.length
-    : isSkillInput
-    ? filteredSkills.length
-    : filteredContexts.length
-
-  // Set right before a menu pick rewrites `message`, so the effect below skips
-  // one auto-reopen — a completed `/cmd ` stays dismissed and the next Enter
-  // runs it (↑/↓ still bring the menu back for subcommands). CLI Tab parity.
-  const suppressSlashReopenRef = useRef(false)
-
-  useEffect(() => {
-    if (suppressSlashReopenRef.current) {
-      suppressSlashReopenRef.current = false
-      return
-    }
-    // Don't pop the suggestion menu while stepping through history — a recalled
-    // slash/@ command would otherwise reopen it on every ↑/↓.
-    if (historyIndex === null && (isSlashInput || isSkillInput || isAtInput)) {
-      setSlashMenuOpen(true)
-      setSlashSelectedIndex(0)
-    }
-  }, [message])
-
-  useEffect(() => {
-    if (showSuggestionMenu && slashListRef.current) {
-      const activeItem = slashListRef.current.children[slashSelectedIndex] as HTMLElement
-      if (activeItem) {
-        activeItem.scrollIntoView({ block: 'nearest' })
-      }
-    }
-  }, [slashSelectedIndex, showSuggestionMenu])
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        slashMenuRef.current &&
-        !slashMenuRef.current.contains(event.target as Node) &&
-        textareaRef.current &&
-        !textareaRef.current.contains(event.target as Node)
-      ) {
-        setSlashMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  const selectSlashCommand = (cmd: string) => {
-    suppressSlashReopenRef.current = true
-    onSetMessage(cmd + ' ')
-    setSlashMenuOpen(false)
-    setSlashSelectedIndex(0)
-    setTimeout(() => textareaRef.current?.focus(), 0)
-  }
-
-  const selectSkillCommand = (name: string) => {
-    suppressSlashReopenRef.current = true
-    onSetMessage('$' + name + ' ')
-    setSlashMenuOpen(false)
-    setSlashSelectedIndex(0)
-    setTimeout(() => textareaRef.current?.focus(), 0)
-  }
-
-  const selectAtCommand = (label: string) => {
-    suppressSlashReopenRef.current = true
-    const nextMsg = message.replace(/@[\w\-\.\/]*$/, label + ' ')
-    onSetMessage(nextMsg)
-    setSlashMenuOpen(false)
-    setSlashSelectedIndex(0)
-    setTimeout(() => textareaRef.current?.focus(), 0)
+  // Fill a menu pick into the composer (never submits — a separate Enter runs
+  // it). The <SlashSuggestions> child owns all the menu state; this only writes
+  // the completed text back and refocuses.
+  const completeSuggestion = (text: string) => {
+    onSetMessage(text)
+    setTimeout(() => {
+      const el = textareaRef.current
+      if (!el) return
+      resizeInput(el)
+      el.focus()
+    }, 0)
   }
 
   const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -617,9 +497,9 @@ export default function ChatPanel({
       !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey &&
       !event.nativeEvent.isComposing
 
-    // Once history browsing has started, ↑/↓ keep stepping through history even
-    // if a recalled entry is a slash/@ command that reopened the suggestion
-    // menu — otherwise the menu would swallow the arrows and you'd be stuck.
+    // History browsing wins over the suggestion menu: once it's started, ↑/↓
+    // keep stepping through history even if a recalled slash/@ entry would
+    // otherwise open the menu (the menu is `suppressed` while browsing anyway).
     if (
       isPlainArrowNav && historyIndex !== null &&
       event.currentTarget.selectionStart === event.currentTarget.selectionEnd
@@ -630,52 +510,8 @@ export default function ChatPanel({
       }
     }
 
-    if (showSuggestionMenu) {
-      if (event.key === 'ArrowDown') {
-        event.preventDefault()
-        setSlashSelectedIndex((prev) => (prev + 1) % suggestionCount)
-        return
-      }
-      if (event.key === 'ArrowUp') {
-        event.preventDefault()
-        setSlashSelectedIndex((prev) => (prev - 1 + suggestionCount) % suggestionCount)
-        return
-      }
-      if (event.key === 'Enter' || event.key === 'Tab') {
-        if (!event.shiftKey && !event.nativeEvent.isComposing) {
-          event.preventDefault()
-          if (isSlashInput) {
-            const selected = filteredSlashCommands[slashSelectedIndex] || filteredSlashCommands[0]
-            if (selected) selectSlashCommand(selected.command)
-          } else if (isSkillInput) {
-            const selected = filteredSkills[slashSelectedIndex] || filteredSkills[0]
-            if (selected) selectSkillCommand(selected.name)
-          } else if (isAtInput) {
-            const selected = filteredContexts[slashSelectedIndex] || filteredContexts[0]
-            if (selected) selectAtCommand(selected.label)
-          }
-          return
-        }
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        setSlashMenuOpen(false)
-        return
-      }
-    }
-
-    // Menu dismissed (e.g. just after a completion) but the text is still a
-    // slash/$/@ prefix with matches — ↑/↓ bring it back rather than starting
-    // history browsing, so subcommands stay one keypress away.
-    if (
-      isPlainArrowNav && !slashMenuOpen && historyIndex === null &&
-      (isSlashInput || isSkillInput || isAtInput) && suggestionCount > 0
-    ) {
-      event.preventDefault()
-      setSlashMenuOpen(true)
-      setSlashSelectedIndex(0)
-      return
-    }
+    // Let the suggestion menu claim ↑/↓/Enter/Tab/Escape when it's showing.
+    if (slashRef.current?.handleKeyDown(event)) return
 
     if (isPlainArrowNav) {
       const el = event.currentTarget
@@ -1389,64 +1225,15 @@ export default function ChatPanel({
           </div>
         )}
 
-        {showSuggestionMenu && (
-          <div className="slash-suggestions-popup" ref={slashMenuRef}>
-            <div className="slash-suggestions-header">
-              {isSlashInput ? 'Slash Commands' : isSkillInput ? 'Learned Skills' : 'Context Mentions'} ({slashSelectedIndex + 1}/{suggestionCount})
-            </div>
-            <div className="slash-suggestions-list" ref={slashListRef}>
-              {isSlashInput
-                ? filteredSlashCommands.map((item, idx) => (
-                    <button
-                      key={item.command}
-                      type="button"
-                      className={`slash-suggestion-item ${idx === slashSelectedIndex ? 'active' : ''}`}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        selectSlashCommand(item.command)
-                      }}
-                      onMouseEnter={() => setSlashSelectedIndex(idx)}
-                    >
-                      <span className="slash-cmd-name">{item.command}</span>
-                      <span className="slash-cmd-desc">{item.description}</span>
-                    </button>
-                  ))
-                : isSkillInput
-                ? filteredSkills.map((item, idx) => (
-                    <button
-                      key={item.id || item.name}
-                      type="button"
-                      className={`slash-suggestion-item ${idx === slashSelectedIndex ? 'active' : ''}`}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        selectSkillCommand(item.name)
-                      }}
-                      onMouseEnter={() => setSlashSelectedIndex(idx)}
-                    >
-                      <span className="slash-cmd-name">${item.name}</span>
-                      <span className="skill-badge">[Skill]</span>
-                      <span className="slash-cmd-desc">{item.description || item.content?.slice(0, 60)}</span>
-                    </button>
-                  ))
-                : filteredContexts.map((item, idx) => (
-                    <button
-                      key={item.label}
-                      type="button"
-                      className={`slash-suggestion-item ${idx === slashSelectedIndex ? 'active' : ''}`}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        selectAtCommand(item.label)
-                      }}
-                      onMouseEnter={() => setSlashSelectedIndex(idx)}
-                    >
-                      <span className="slash-cmd-name">{item.label}</span>
-                      <span className="skill-badge">{item.type === 'plugin' ? '[Plugin]' : '[Context]'}</span>
-                      <span className="slash-cmd-desc">{item.desc}</span>
-                    </button>
-                  ))}
-            </div>
-          </div>
-        )}
+        <SlashSuggestions
+          ref={slashRef}
+          message={message}
+          onComplete={completeSuggestion}
+          workspacePath={workspacePath}
+          mcpServers={settingsConfig?.mcpServers}
+          anchorRef={textareaRef}
+          suppressed={historyIndex !== null}
+        />
 
         <form
           id="chat-form"
@@ -1546,9 +1333,7 @@ export default function ChatPanel({
             onChange={(event) => {
               resizeInput(event.currentTarget)
               onSetMessage(event.target.value)
-              // A real keystroke always re-enables the suggestion menu and drops
-              // out of history browsing (the recalled text is kept).
-              suppressSlashReopenRef.current = false
+              // A real keystroke drops out of history browsing (recalled text kept).
               if (historyIndex !== null) setHistoryIndex(null)
             }}
             onKeyDown={handleInputKeyDown}
