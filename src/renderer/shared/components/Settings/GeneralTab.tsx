@@ -690,11 +690,13 @@ export default function GeneralTab({
                 Brave Search API
               </div>
               <div className="provider-card-actions">
-                {config.searchProvider === 'brave' && <span className="provider-active-badge">Active</span>}
-                <label className="settings-toggle-switch">
-                  <input type="radio" name="searchProvider" checked={config.searchProvider === 'brave'} onChange={() => updateField('searchProvider', 'brave')} />
-                  <span className="settings-toggle-slider" onClick={() => updateField('searchProvider', 'brave')} />
-                </label>
+                {config.searchProvider === 'brave' ? (
+                  <span className="provider-active-badge">Active</span>
+                ) : (
+                  <button type="button" className="btn-secondary btn-small" onClick={() => updateField('searchProvider', 'brave')}>
+                    Set active
+                  </button>
+                )}
               </div>
             </div>
             <div className="provider-card-body">
@@ -720,11 +722,13 @@ export default function GeneralTab({
                 Google Search API
               </div>
               <div className="provider-card-actions">
-                {config.searchProvider === 'google' && <span className="provider-active-badge">Active</span>}
-                <label className="settings-toggle-switch">
-                  <input type="radio" name="searchProvider" checked={config.searchProvider === 'google'} onChange={() => updateField('searchProvider', 'google')} />
-                  <span className="settings-toggle-slider" onClick={() => updateField('searchProvider', 'google')} />
-                </label>
+                {config.searchProvider === 'google' ? (
+                  <span className="provider-active-badge">Active</span>
+                ) : (
+                  <button type="button" className="btn-secondary btn-small" onClick={() => updateField('searchProvider', 'google')}>
+                    Set active
+                  </button>
+                )}
               </div>
             </div>
             <div className="provider-card-body">
@@ -759,11 +763,13 @@ export default function GeneralTab({
                 SearXNG (self-hosted)
               </div>
               <div className="provider-card-actions">
-                {config.searchProvider === 'searxng' && <span className="provider-active-badge">Active</span>}
-                <label className="settings-toggle-switch">
-                  <input type="radio" name="searchProvider" checked={config.searchProvider === 'searxng'} onChange={() => updateField('searchProvider', 'searxng')} />
-                  <span className="settings-toggle-slider" onClick={() => updateField('searchProvider', 'searxng')} />
-                </label>
+                {config.searchProvider === 'searxng' ? (
+                  <span className="provider-active-badge">Active</span>
+                ) : (
+                  <button type="button" className="btn-secondary btn-small" onClick={() => updateField('searchProvider', 'searxng')}>
+                    Set active
+                  </button>
+                )}
               </div>
             </div>
             <div className="provider-card-body">
@@ -877,11 +883,13 @@ export default function GeneralTab({
                 Google Veo (Gemini Videos)
               </div>
               <div className="provider-card-actions">
-                {config.videoGenProvider === 'veo' && <span className="provider-active-badge">Active</span>}
-                <label className="settings-toggle-switch">
-                  <input type="radio" name="videoGenProvider" checked={config.videoGenProvider === 'veo'} onChange={() => updateField('videoGenProvider', 'veo')} />
-                  <span className="settings-toggle-slider" onClick={() => updateField('videoGenProvider', 'veo')} />
-                </label>
+                {config.videoGenProvider === 'veo' ? (
+                  <span className="provider-active-badge">Active</span>
+                ) : (
+                  <button type="button" className="btn-secondary btn-small" onClick={() => updateField('videoGenProvider', 'veo')}>
+                    Set active
+                  </button>
+                )}
               </div>
             </div>
             <div className="provider-card-body">
