@@ -67,6 +67,28 @@ import { DEFAULT_CONFIG } from '../constants/config'
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
 const ACTIVE_CONVERSATION_ID_KEY = 'mint:active-conversation-id'
 
+// Unsent composer text, stashed per conversation so switching chats or
+// reloading the page doesn't lose an in-progress message.
+const DRAFT_KEY_PREFIX = 'mint:draft:'
+const draftStorageKey = (id: string) => `${DRAFT_KEY_PREFIX}${id}`
+function readDraft(id: string | null | undefined): string {
+  if (!id) return ''
+  try {
+    return window.localStorage.getItem(draftStorageKey(id)) || ''
+  } catch {
+    return ''
+  }
+}
+function writeDraft(id: string | null | undefined, value: string) {
+  if (!id) return
+  try {
+    if (value) window.localStorage.setItem(draftStorageKey(id), value)
+    else window.localStorage.removeItem(draftStorageKey(id))
+  } catch {
+    /* private mode / quota — draft persistence is best-effort */
+  }
+}
+
 const SIDEBAR_DEFAULT_WIDTH = 264
 const SIDEBAR_MIN_WIDTH = 200
 const SIDEBAR_MAX_WIDTH = 420
@@ -281,7 +303,11 @@ export default function MintDashboard() {
   }, [conversationId, workspacePath])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState(() => readDraft(conversationId))
+  // When `conversationId` changes we swap `message` to that chat's saved draft;
+  // this ref tells the persist effect to skip the render right after that swap,
+  // so the outgoing chat's text is never written under the incoming chat's key.
+  const skipDraftPersistRef = useRef(false)
   const [interactions, setInteractions] = useState<any[]>([])
   const [pictures, setPictures] = useState<PictureEntry[]>([])
   const [sending, setSending] = useState(false)
@@ -445,6 +471,30 @@ export default function MintDashboard() {
   useEffect(() => {
     interactionsRef.current = interactions
   }, [interactions])
+
+  // Load the saved draft whenever the active conversation changes. Declared
+  // before the persist effect so it runs first within the same commit. The
+  // first run is a no-op: `message`'s initial value already came from the
+  // lazy `useState` initializer above.
+  const draftLoadedRef = useRef(false)
+  useEffect(() => {
+    if (!draftLoadedRef.current) {
+      draftLoadedRef.current = true
+      return
+    }
+    skipDraftPersistRef.current = true
+    setMessage(readDraft(conversationId))
+  }, [conversationId])
+
+  // Persist the composer text for the current conversation (debounced).
+  useEffect(() => {
+    if (skipDraftPersistRef.current) {
+      skipDraftPersistRef.current = false
+      return
+    }
+    const timer = window.setTimeout(() => writeDraft(conversationId, message), 300)
+    return () => window.clearTimeout(timer)
+  }, [message, conversationId])
 
   useEffect(() => {
     if (view !== 'chat' || !conversationId) return
