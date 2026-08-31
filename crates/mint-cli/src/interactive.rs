@@ -224,9 +224,13 @@ fn load_prompt_history() -> Vec<String> {
     list
 }
 
-/// Append `line` to `history` (skipping an immediate duplicate), cap it, and
-/// best-effort write the whole list back to disk.
+/// Append `line` to `history` (skipping an immediate duplicate and the
+/// pure control commands `/exit` / `/quit`), cap it, and best-effort write
+/// the whole list back to disk.
 fn record_prompt(history: &mut Vec<String>, line: &str) {
+    if matches!(line.trim(), "/exit" | "/quit") {
+        return;
+    }
     if history.last().map(String::as_str) == Some(line) {
         return;
     }
