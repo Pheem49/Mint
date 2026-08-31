@@ -9,6 +9,14 @@ and Plugins tabs were cleaned up (and image generation gained per-provider
 model pickers), the half-finished Custom Workflows feature was removed, and
 a new `/init` command writes an AGENTS.md for the project.
 
+This build also adds a local-first cross-session memory (a structured facts
+table plus full-text recall of older messages), corrects the per-provider
+context-window sizes and makes the local ones configurable, raises the
+context-compaction trigger so long tasks keep more verbatim history, brings
+the chat composer's up/down history, persistent per-conversation drafts, and
+edit-and-resend to Web and Desktop, and finishes the Settings component
+restyle (segmented pills / bordered toggle cards) across the remaining tabs.
+
 ---
 
 ## ⏰ Fixed: Scheduled Tasks Lost a Run When Mint Closed Mid-Execution
@@ -124,3 +132,78 @@ workspace root, the file every Mint surface already loads as workspace
 rules. It captures the build/test/lint commands, the high-level
 architecture, project conventions, and gotchas, folding in any existing
 rules file rather than replacing it.
+
+---
+
+## 🧠 New: Local-First Cross-Session Memory
+
+Mint now keeps a structured memory in `mint-knowledge.sqlite` and pulls the
+relevant parts into every turn — no external service.
+
+- **`facts` table** — typed `user` / `preference` / `project` entries with a
+  dedup index and supersede/retract semantics, injected live on each turn on
+  top of the existing recent-conversation window.
+- **`interaction_fts`** — an FTS5 index over past interactions; each turn
+  also injects the few older messages most relevant to what you just typed
+  (BM25 ranked, injection-safe `MATCH` builder).
+- **Slash commands** (shared engine + CLI): `/remember [here] <text>`,
+  `/memory facts`, `/memory forget <id>`, `/autorecall [on|off]`. Gated by
+  `config.memory_recall`.
+- The long-dead `interaction_memories.keywords` column was dropped.
+
+---
+
+## 📏 Fixed: Context-Window Sizes + Configurable Local `num_ctx`
+
+`context_window_tokens()` was reporting 1M for Anthropic and OpenAI — far
+above what the default models actually offer, so history was allowed to grow
+past the real limit before compaction stepped in.
+
+- **anthropic** — 200K for every model (1M is a tier-gated beta).
+- **openai** — keyed off the model string (gpt-4.1 ≈ 1M, gpt-5 400K,
+  o-series 200K, else 128K).
+- **deepseek** — explicit 128K.
+- **ollama / openrouter / local_openai** — read a configurable `*_num_ctx`
+  (defaults 8192 / 128K / 32768). Mint sends `num_ctx` on every Ollama
+  request so the window is enforced, not guessed.
+- **Context-compaction trigger raised 0.4 → 0.75** of the window. Compaction
+  fires as soon as a step crosses the threshold and shrinks history before
+  the next request, so 0.75 keeps far more verbatim context while still
+  staying under the real limit. 0.4 was compacting long tasks much earlier
+  than necessary.
+
+---
+
+## ⌨️ Chat Composer: History, Persistent Drafts, Edit & Resend (Web + Desktop)
+
+Three input conveniences the CLI already had now work in the Web and Desktop
+apps:
+
+- **Up / Down history** — with the caret on the first/last line and no
+  suggestion menu open, ↑/↓ step through your previously sent messages; the
+  in-progress draft is stashed and restored on the way back, and a small
+  `History n/N` badge shows while browsing.
+- **Persistent drafts** — unsent composer text is saved per conversation
+  (`localStorage`, debounced) and restored when you switch back or reload,
+  cleared on send.
+- **Edit & resend** — an edit button on each of your messages drops its text
+  back into the composer (caret at end, focused) to tweak and send again as
+  a new message. Nothing is deleted.
+
+---
+
+## ⚙️ Settings: Component Restyle Finished
+
+The pills/toggles pass from the settings redesign now covers the last tabs:
+
+- **Automation** — "Browser Engine" select → segmented pills.
+- **Multi-Agent** — "Enable Multi-Agent Collaboration" wrapped in a bordered
+  toggle card (it was a borderless floating row); the agent-form "Scope"
+  select → segmented pills, with the workspace option disabled when no
+  workspace is open.
+- **General** — the Web-Search (Brave / Google / SearXNG) and Video-Gen
+  (Veo) provider cards no longer use a radio dressed as an on/off switch;
+  each shows an "Active" badge or a "Set active" button.
+
+Model-picker dropdowns with long or dynamic lists are deliberately left as
+native `<select>`.
