@@ -11,14 +11,23 @@ version = "1.13.1"
 edition = "2024"
 license = "AGPL-3.0-only"
 
-# Keep `target/debug` from ballooning. Our own crates keep enough debuginfo
-# for backtraces with line numbers; dependencies (which we don't step
-# through) carry none. `cargo check`/`test`/`clippy`/`tauri dev` all use
-# this profile — release builds are unaffected.
+# Keep `target/debug` from ballooning and hold down peak linker memory
+# (important on low-RAM machines — a full-debuginfo link of the test binary
+# can OOM a 6 GB box). Our own crates keep enough debuginfo for backtraces
+# with line numbers; dependencies (which we don't step through) carry none.
+# `cargo check`/`clippy`/`tauri dev` use `dev`; `cargo test` uses `test`,
+# which is spelled out here so it gets the same lean debuginfo rather than
+# relying on profile inheritance. Release builds are unaffected.
 [profile.dev]
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
+debug = false
+
+[profile.test]
+debug = "line-tables-only"
+
+[profile.test.package."*"]
 debug = false
 
 [workspace.dependencies]
