@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
 import { hasAgentToolActivity, thoughtsFrom, parseFileChangesFromProgress } from '../agentProgress'
 import {
   GEMINI_MODELS,
@@ -417,6 +417,62 @@ export default function ChatPanel({
   const slashListRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Up/Down input history: recall previously submitted prompts (parity with the CLI).
+  // `historyIndex` counts back from the newest entry — 0 is the most recent, null
+  // means "editing the live draft". The draft is stashed the moment browsing starts.
+  const promptHistory = useMemo(() => {
+    const out: string[] = []
+    for (const it of interactions) {
+      if (it?.provider === 'system') continue
+      const text = typeof it?.userText === 'string' ? it.userText.trim() : ''
+      if (!text) continue
+      if (out[out.length - 1] === text) continue
+      out.push(text)
+    }
+    return out
+  }, [interactions])
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null)
+  const historyDraftRef = useRef('')
+
+  const applyHistoryValue = (value: string) => {
+    onSetMessage(value)
+    setTimeout(() => {
+      const el = textareaRef.current
+      if (!el) return
+      resizeInput(el)
+      const end = el.value.length
+      el.setSelectionRange(end, end)
+      el.focus()
+    }, 0)
+  }
+  const navigateHistoryPrev = () => {
+    if (promptHistory.length === 0) return false
+    if (historyIndex === null) {
+      historyDraftRef.current = message
+      setHistoryIndex(0)
+      applyHistoryValue(promptHistory[promptHistory.length - 1])
+      return true
+    }
+    if (historyIndex + 1 < promptHistory.length) {
+      const next = historyIndex + 1
+      setHistoryIndex(next)
+      applyHistoryValue(promptHistory[promptHistory.length - 1 - next])
+    }
+    return true
+  }
+  const navigateHistoryNext = () => {
+    if (historyIndex === null) return false
+    if (historyIndex === 0) {
+      setHistoryIndex(null)
+      applyHistoryValue(historyDraftRef.current)
+      return true
+    }
+    const next = historyIndex - 1
+    setHistoryIndex(next)
+    applyHistoryValue(promptHistory[promptHistory.length - 1 - next])
+    return true
+  }
+
   const isSlashInput = message.trimStart().startsWith('/')
   const isSkillInput = message.trimStart().startsWith('$')
   const atMatch = message.match(/@([\w\-\.\/]*)$/)
@@ -566,6 +622,30 @@ export default function ChatPanel({
         return
       }
     }
+
+    if (
+      (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
+      !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey &&
+      !event.nativeEvent.isComposing
+    ) {
+      const el = event.currentTarget
+      if (el.selectionStart === el.selectionEnd) {
+        if (event.key === 'ArrowUp') {
+          const onFirstLine = !el.value.slice(0, el.selectionStart).includes('\n')
+          if (onFirstLine && navigateHistoryPrev()) {
+            event.preventDefault()
+            return
+          }
+        } else {
+          const onLastLine = !el.value.slice(el.selectionEnd).includes('\n')
+          if (onLastLine && navigateHistoryNext()) {
+            event.preventDefault()
+            return
+          }
+        }
+      }
+    }
+
     submitOnEnter(event)
   }
 
@@ -1320,7 +1400,12 @@ export default function ChatPanel({
         <form
           id="chat-form"
           className={geminiLiveEnabled ? 'has-live-btn' : ''}
-          onSubmit={onSubmit}
+          style={{ position: 'relative' }}
+          onSubmit={(event) => {
+            setHistoryIndex(null)
+            historyDraftRef.current = ''
+            onSubmit(event)
+          }}
           onDragOver={(event) => {
             if (event.dataTransfer.types.includes('application/x-mint-workspace-path')) {
               event.preventDefault()
@@ -1380,6 +1465,29 @@ export default function ChatPanel({
               )}
             </div>
           )}
+          {historyIndex !== null && promptHistory.length > 0 && (
+            <div
+              className="chat-history-indicator"
+              aria-live="polite"
+              style={{
+                position: 'absolute',
+                top: '-9px',
+                right: '14px',
+                padding: '1px 8px',
+                fontSize: '0.68rem',
+                fontWeight: 600,
+                letterSpacing: '0.02em',
+                color: 'var(--text-soft, #94a3b8)',
+                background: 'var(--input-bg, #1e293b)',
+                border: '1px solid var(--border, rgba(148,163,184,0.25))',
+                borderRadius: '999px',
+                pointerEvents: 'none',
+                zIndex: 2,
+              }}
+            >
+              History {historyIndex + 1}/{promptHistory.length}
+            </div>
+          )}
           <textarea
             id="chat-input"
             ref={textareaRef}
@@ -1387,6 +1495,8 @@ export default function ChatPanel({
             onChange={(event) => {
               resizeInput(event.currentTarget)
               onSetMessage(event.target.value)
+              // Manual edits drop out of history browsing but keep the recalled text.
+              if (historyIndex !== null) setHistoryIndex(null)
             }}
             onKeyDown={handleInputKeyDown}
             onDrop={handleWorkspaceDrop}
