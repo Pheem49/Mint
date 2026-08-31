@@ -286,6 +286,39 @@ mod tests {
         })
     }
 
+    /// Force-remove any container still carrying this test's `mint-subagent`
+    /// label, and drop any stale in-memory session for it. A previous run
+    /// killed mid-test (machine reboot, `earlyoom` killing `cargo test`,
+    /// Ctrl-C) leaves a container behind that the fixed-label `docker ps -a`
+    /// assertions below would otherwise count. Run at the start of each
+    /// container test so the environment is known-clean regardless of how the
+    /// last run ended.
+    fn purge_test_containers(id: &str) {
+        stop_session(id);
+        let ids = Command::new("docker")
+            .args([
+                "ps",
+                "-aq",
+                "--filter",
+                &format!("label=mint-subagent={id}"),
+            ])
+            .output()
+            .map(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if !ids.is_empty() {
+            let _ = Command::new("docker")
+                .arg("rm")
+                .arg("-f")
+                .args(&ids)
+                .output();
+        }
+    }
+
     #[test]
     fn run_in_session_returns_none_for_unregistered_chat_id() {
         let config = MintConfig::default();
@@ -308,6 +341,7 @@ mod tests {
         let config = MintConfig::default();
         let cwd = std::env::temp_dir();
         let id = "docker-sandbox-test::subagent::probe";
+        purge_test_containers(id);
         start_session(id, &cwd, &config).expect("docker run should succeed");
         assert!(has_session(id));
 
@@ -346,6 +380,7 @@ mod tests {
         let config = MintConfig::default();
         let cwd = std::env::temp_dir();
         let id = "docker-sandbox-test::subagent::sibling-refcount";
+        purge_test_containers(id);
 
         start_session(id, &cwd, &config).expect("first caller's docker run should succeed");
         start_session(id, &cwd, &config)
