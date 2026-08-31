@@ -30,10 +30,24 @@ export default function AutomationTab({
         <div className="form-grid single">
           <div className="setting-row">
             <label>Browser Engine</label>
-            <select value={config.automationBrowser} onChange={(e) => updateField('automationBrowser', e.target.value)}>
-              <option value="chromium">Chromium (Bundled)</option>
-              <option value="/usr/bin/firefox">Firefox (System - Linux)</option>
-            </select>
+            <div className="pill-segmented" role="radiogroup" aria-label="Browser Engine">
+              {[
+                { id: 'chromium', label: 'Chromium' },
+                { id: '/usr/bin/firefox', label: 'Firefox' },
+              ].map(o => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={config.automationBrowser === o.id}
+                  className={`pill-segmented-btn ${config.automationBrowser === o.id ? 'active' : ''}`}
+                  onClick={() => updateField('automationBrowser', o.id)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <p className="hint">Chromium is bundled; Firefox uses your system install (Linux).</p>
           </div>
           <div className="setting-row">
             <label>Chromium DevTools Endpoint</label>
