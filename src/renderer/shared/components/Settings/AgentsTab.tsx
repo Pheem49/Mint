@@ -230,19 +230,21 @@ export default function AgentsTab({ config, updateField, dynamicOllamaModels = [
           )}
         </div>
 
-        <div className="toggle-row" style={{ margin: '16px 0 24px 0' }}>
-          <div>
-            <label>Enable Multi-Agent Collaboration</label>
-            <p className="hint">Allow multiple specialized agents to collaborate sequentially (Planner → Coder → Reviewer).</p>
+        <div className="toggle-card" style={{ margin: '4px 0 24px 0' }}>
+          <div className="toggle-row">
+            <div>
+              <label>Enable Multi-Agent Collaboration</label>
+              <p className="hint">Allow multiple specialized agents to collaborate sequentially (Planner → Coder → Reviewer).</p>
+            </div>
+            <label className="settings-toggle-switch">
+              <input
+                type="checkbox"
+                checked={config.enableAgentCollaboration}
+                onChange={(e) => updateField('enableAgentCollaboration', e.target.checked)}
+              />
+              <span className="settings-toggle-slider"></span>
+            </label>
           </div>
-          <label className="settings-toggle-switch">
-            <input 
-              type="checkbox" 
-              checked={config.enableAgentCollaboration} 
-              onChange={(e) => updateField('enableAgentCollaboration', e.target.checked)} 
-            />
-            <span className="settings-toggle-slider"></span>
-          </label>
         </div>
 
         {isEditing ? (
@@ -562,12 +564,28 @@ function SubagentsSection() {
 
           <div className="setting-row">
             <label>Scope</label>
-            <select value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value as 'workspace' | 'global' })}>
-              <option value="workspace" disabled={!workspacePath}>
-                This workspace only ({'.agents/subagents/'}){!workspacePath ? ' — no workspace open' : ''}
-              </option>
-              <option value="global">All workspaces (global)</option>
-            </select>
+            <div className="pill-segmented" role="radiogroup" aria-label="Scope">
+              {[
+                { id: 'workspace' as const, label: 'This workspace' },
+                { id: 'global' as const, label: 'Global' },
+              ].map(o => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={form.scope === o.id}
+                  disabled={o.id === 'workspace' && !workspacePath}
+                  className={`pill-segmented-btn ${form.scope === o.id ? 'active' : ''}`}
+                  onClick={() => setForm({ ...form, scope: o.id })}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <p className="hint">
+              Workspace agents live in <code>.agents/subagents/</code> and load only there; global agents are available everywhere.
+              {!workspacePath ? ' Open a workspace to use this option.' : ''}
+            </p>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', marginTop: '16px', justifyContent: 'flex-end' }}>
