@@ -261,6 +261,55 @@ fn superseding_a_fact_drops_it_from_live() {
 }
 
 #[test]
+fn agent_scoped_facts_are_quarantined_until_promoted() {
+    let store = store("facts-agent-scope");
+    store
+        .add_fact("user", None, "shared fact", None, None)
+        .unwrap();
+    let quarantined = store
+        .add_fact_for_agent(
+            "user",
+            None,
+            "researcher-only fact",
+            None,
+            None,
+            Some("researcher"),
+        )
+        .unwrap()
+        .unwrap();
+
+    // Main agent sees only the shared fact.
+    let shared = store.live_facts_for_agent(None, None).unwrap();
+    assert_eq!(shared.len(), 1);
+    assert_eq!(shared[0].body, "shared fact");
+
+    // The researcher subagent sees both; another subagent sees only shared.
+    assert_eq!(
+        store
+            .live_facts_for_agent(None, Some("researcher"))
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        store
+            .live_facts_for_agent(None, Some("planner"))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(store.quarantined_facts(None).unwrap().len(), 1);
+
+    // Promotion moves it into the shared pool; a second call is a no-op, and a
+    // never-quarantined fact cannot be promoted.
+    assert!(store.promote_fact(quarantined).unwrap());
+    assert!(!store.promote_fact(quarantined).unwrap());
+    assert_eq!(store.live_facts_for_agent(None, None).unwrap().len(), 2);
+    assert!(store.quarantined_facts(None).unwrap().is_empty());
+    assert!(!store.promote_fact(shared[0].id).unwrap());
+}
+
+#[test]
 fn forgets_facts_by_id_and_by_substring() {
     let store = store("facts-forget");
     let id = store

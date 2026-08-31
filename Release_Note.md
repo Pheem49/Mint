@@ -145,12 +145,27 @@ relevant parts into every turn — no external service.
 - **`facts` table** — typed `user` / `preference` / `project` entries with a
   dedup index and supersede/retract semantics, injected live on each turn on
   top of the existing recent-conversation window.
+- **Automatic fact extraction** — a turn that states a durable preference,
+  naming, or standing instruction now triggers a background LLM pass that
+  writes it into the `facts` table (with add/supersede ops), so long-term
+  memory grows on its own instead of only via `/remember`. Gated by a cheap
+  keyword pre-filter and `config.auto_fact_extraction` (`/autofacts [on|off]`).
+- **Semantic fact recall** — once stored facts overflow their per-turn prompt
+  budget, the overflow slot is filled with the facts most similar to your
+  message (an offline hash embedding stored alongside each fact, no network)
+  instead of just the next-newest; the newest few are always kept.
+  `config.semantic_fact_recall` / `/factrecall [on|off]`.
+- **Per-subagent fact scoping** — facts a subagent extracts are quarantined to
+  that subagent (`agent_id`) instead of polluting the shared pool. They're
+  injected only when that subagent runs again, shown as `via <name>` in
+  `/memory facts`, and promoted to shared either with `/memory promote <id>` or
+  automatically when the main agent restates the same thing.
 - **`interaction_fts`** — an FTS5 index over past interactions; each turn
   also injects the few older messages most relevant to what you just typed
   (BM25 ranked, injection-safe `MATCH` builder).
 - **Slash commands** (shared engine + CLI): `/remember [here] <text>`,
-  `/memory facts`, `/memory forget <id>`, `/autorecall [on|off]`. Gated by
-  `config.memory_recall`.
+  `/memory facts`, `/memory forget <id>`, `/memory promote <id>`,
+  `/autorecall [on|off]`, `/autofacts [on|off]`, `/factrecall [on|off]`.
 - The long-dead `interaction_memories.keywords` column was dropped.
 
 ---

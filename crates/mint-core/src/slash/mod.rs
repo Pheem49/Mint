@@ -214,6 +214,22 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             |cfg, v| cfg.memory_recall = v,
             config,
         ),
+        "/autofacts" => cmd_bool_toggle(
+            rest,
+            "/autofacts",
+            "Auto Fact Extraction",
+            config.auto_fact_extraction,
+            |cfg, v| cfg.auto_fact_extraction = v,
+            config,
+        ),
+        "/factrecall" => cmd_bool_toggle(
+            rest,
+            "/factrecall",
+            "Semantic Fact Recall",
+            config.semantic_fact_recall,
+            |cfg, v| cfg.semantic_fact_recall = v,
+            config,
+        ),
         "/multi-agent" => {
             let current = config.enable_agent_collaboration;
             match parse_on_off(rest) {
@@ -645,19 +661,9 @@ fn cmd_memory(rest: &str) -> SlashResponse {
             Ok(facts) => {
                 let rows = facts
                     .iter()
-                    .map(|f| {
-                        vec![
-                            f.id.to_string(),
-                            if f.scope == "project" {
-                                "project".into()
-                            } else {
-                                "global".into()
-                            },
-                            f.body.clone(),
-                        ]
-                    })
+                    .map(|f| vec![f.id.to_string(), fact_owner_label(f), f.body.clone()])
                     .collect::<Vec<_>>();
-                message(md_table(&["id", "scope", "fact"], &rows))
+                message(md_table(&["id", "owner", "fact"], &rows))
             }
             Err(e) => error(e),
         },
@@ -667,12 +673,33 @@ fn cmd_memory(rest: &str) -> SlashResponse {
             Err(e) => error(e),
         },
         "forget" => error("Usage: /memory forget <id-or-text>"),
+        "promote" if !args.is_empty() => match args.parse::<i64>() {
+            Ok(id) => match store.promote_fact(id) {
+                Ok(true) => message(format!("🧠 Promoted fact {id} to shared memory.")),
+                Ok(false) => message(format!(
+                    "Fact {id} is not a subagent-scoped fact (nothing to promote)."
+                )),
+                Err(e) => error(e),
+            },
+            Err(_) => error("Usage: /memory promote <id>"),
+        },
+        "promote" => error("Usage: /memory promote <id>"),
         "" | "list" => message(
-            "🧠 **Long-term memory** — `/remember <text>` to add a fact · `/memory facts` to list · `/memory forget <id>` · `/memory get <key>` · `/memory set <key> <value>` · `/memory clear`.",
+            "🧠 **Long-term memory** — `/remember <text>` to add a fact · `/memory facts` to list · `/memory forget <id>` · `/memory promote <id>` · `/memory get <key>` · `/memory set <key> <value>` · `/memory clear`.",
         ),
         _ => error(
-            "Usage: /memory list | facts | forget <id> | clear | get <key> | set <key> <value>",
+            "Usage: /memory list | facts | forget <id> | promote <id> | clear | get <key> | set <key> <value>",
         ),
+    }
+}
+
+/// Column shown by `/memory facts`: `via <subagent>` for a quarantined fact,
+/// else `project` / `global` by scope.
+fn fact_owner_label(fact: &crate::Fact) -> String {
+    match &fact.agent_id {
+        Some(name) => format!("via {name}"),
+        None if fact.scope == "project" => "project".into(),
+        None => "global".into(),
     }
 }
 
@@ -1027,6 +1054,32 @@ mod tests {
         match execute(&req("/autoskill on"), &mut cfg) {
             SlashResponse::Applied { effects, .. } => {
                 assert!(cfg.auto_skill_writing);
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+    }
+
+    #[test]
+    fn autofacts_off_flips_config() {
+        let mut cfg = MintConfig::default();
+        assert!(cfg.auto_fact_extraction);
+        match execute(&req("/autofacts off"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(!cfg.auto_fact_extraction);
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+    }
+
+    #[test]
+    fn factrecall_off_flips_config() {
+        let mut cfg = MintConfig::default();
+        assert!(cfg.semantic_fact_recall);
+        match execute(&req("/factrecall off"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(!cfg.semantic_fact_recall);
                 assert!(effects.contains(&SlashEffect::ConfigChanged));
             }
             other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),

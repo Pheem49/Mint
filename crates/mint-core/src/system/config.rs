@@ -130,6 +130,22 @@ pub struct MintConfig {
     /// window). On by default; `/autorecall off` or the Settings toggle disables
     /// it. See [`crate::orchestration::render_recalled_messages`].
     pub memory_recall: bool,
+    /// When true, a background LLM pass after each turn that looks like it
+    /// carries something worth remembering (`looks_fact_worthy`) extracts durable
+    /// facts/preferences the user stated and writes them into the long-term
+    /// `facts` table, so they ride every future turn. On by default (`/autofacts
+    /// off` disables it): like `auto_skill_writing` it costs an extra LLM call on
+    /// each qualifying turn, without interactive approval — that's the
+    /// self-evolving-memory behavior it exists for. See
+    /// [`crate::orchestration::spawn_auto_memory_update`].
+    pub auto_fact_extraction: bool,
+    /// When true and the stored facts overflow their per-turn prompt budget, the
+    /// overflow slot is filled with the facts most similar to the current
+    /// message (on-device embedding) instead of simply the next-newest ones; the
+    /// newest few are always kept regardless. On by default; `/factrecall off`
+    /// disables it (falls back to newest-first). Below the budget it has no
+    /// effect. See [`crate::orchestration::render_memory_facts`].
+    pub semantic_fact_recall: bool,
     /// User-defined OpenAI-compatible providers.
     pub custom_providers: Vec<CustomProvider>,
     /// Persistent "always allow"/"always deny" rules for agent-loop approvals,
@@ -372,6 +388,8 @@ impl Default for MintConfig {
             enable_agent_collaboration: false,
             auto_skill_writing: true,
             memory_recall: true,
+            auto_fact_extraction: true,
+            semantic_fact_recall: true,
             custom_providers: Vec::new(),
             permission_rules: Vec::new(),
             avatar_relay_url: "https://relay.projectavatar.io".into(),

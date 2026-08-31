@@ -6,4 +6,5 @@ pub mod knowledge;
 pub mod linked_folders;
 pub mod semantic;
 pub mod symbols;
+pub mod text_embedding;
 pub mod web_search;

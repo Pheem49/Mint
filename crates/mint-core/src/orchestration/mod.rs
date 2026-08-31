@@ -122,6 +122,8 @@ pub async fn orchestrate_chat(
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        request.workspace_path.clone(),
+        request_chat_id(request),
     );
     crate::linked_folders::spawn_linked_folder_note(
         config.clone(),
@@ -156,6 +158,8 @@ where
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        request.workspace_path.clone(),
+        request_chat_id(request),
     );
     crate::linked_folders::spawn_linked_folder_note(
         config.clone(),
@@ -186,6 +190,8 @@ pub async fn orchestrate_chat_with_fallback(
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        request.workspace_path.clone(),
+        request_chat_id(request),
     );
     crate::linked_folders::spawn_linked_folder_note(
         config.clone(),
@@ -220,6 +226,8 @@ where
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        request.workspace_path.clone(),
+        request_chat_id(request),
     );
     crate::linked_folders::spawn_linked_folder_note(
         config.clone(),
@@ -287,7 +295,13 @@ fn enrich_request(
         .to_owned();
     }
 
-    if let Some(facts) = render_memory_facts(request.workspace_path.as_deref()) {
+    if let Some(facts) = render_memory_facts(
+        memory,
+        request.workspace_path.as_deref(),
+        crate::subagent_name(&request_chat_id(request)),
+        Some(&request.message),
+        config.semantic_fact_recall,
+    ) {
         enriched.system_instruction = format!(
             "{}\n\nRemembered facts:\n{}",
             enriched.system_instruction.trim(),
@@ -954,6 +968,8 @@ where
             &mut system_prompt,
             chat_id,
             Some(root.to_string_lossy().as_ref()),
+            Some(&resolved_task),
+            config.semantic_fact_recall,
         );
         if config.memory_recall
             && let Some(recall) = render_recalled_messages(chat_id, &resolved_task)
@@ -1532,7 +1548,13 @@ where
                             &summary,
                             &verification,
                         )?;
-                        spawn_auto_memory_update(config.clone(), task.to_string(), summary.clone());
+                        spawn_auto_memory_update(
+                            config.clone(),
+                            task.to_string(),
+                            summary.clone(),
+                            Some(root.to_string_lossy().into_owned()),
+                            chat_id.to_string(),
+                        );
                         crate::linked_folders::spawn_linked_folder_note(
                             config.clone(),
                             task.to_string(),

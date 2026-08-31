@@ -11,6 +11,9 @@ use rusqlite::{Connection, params, types::Type};
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::search::text_embedding::{
+    cosine_similarity, decode_embedding, embedding, encode_embedding,
+};
 use crate::{Capability, MintConfig, SafetyError, assert_path_capability, memory_path};
 
 const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
@@ -410,70 +413,6 @@ fn content_hash(content: &str) -> String {
     let mut hasher = DefaultHasher::new();
     content.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
-}
-
-const EMBEDDING_DIMENSIONS: usize = 256;
-
-fn embedding(text: &str) -> Vec<f32> {
-    let mut vector = vec![0.0; EMBEDDING_DIMENSIONS];
-    for token in text
-        .split(|character: char| !character.is_alphanumeric())
-        .filter(|token| !token.is_empty())
-    {
-        let mut hasher = DefaultHasher::new();
-        let has_upper = token.chars().any(|c| c.is_uppercase());
-        if has_upper {
-            use std::cell::RefCell;
-            thread_local! {
-                static LOWERCASE_BUF: RefCell<String> = RefCell::new(String::with_capacity(64));
-            }
-            LOWERCASE_BUF.with(|buf| {
-                let mut buf = buf.borrow_mut();
-                buf.clear();
-                for c in token.chars() {
-                    for lc in c.to_lowercase() {
-                        buf.push(lc);
-                    }
-                }
-                use std::hash::Hash;
-                buf.hash(&mut hasher);
-            });
-        } else {
-            token.hash(&mut hasher);
-        }
-        let hash = hasher.finish();
-        let index = hash as usize % EMBEDDING_DIMENSIONS;
-        vector[index] += if hash & 1 == 0 { 1.0 } else { -1.0 };
-    }
-    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
-    if norm > 0.0 {
-        vector.iter_mut().for_each(|value| *value /= norm);
-    }
-    vector
-}
-
-fn encode_embedding(vector: &[f32]) -> Vec<u8> {
-    vector
-        .iter()
-        .flat_map(|value| value.to_le_bytes())
-        .collect()
-}
-
-fn decode_embedding(raw: &[u8]) -> Result<Vec<f32>, &'static str> {
-    if !raw.len().is_multiple_of(4) {
-        return Err("embedding blob length is invalid");
-    }
-    Ok(raw
-        .chunks_exact(4)
-        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
-        .collect())
-}
-
-fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
-    left.iter()
-        .zip(right)
-        .map(|(left, right)| left * right)
-        .sum()
 }
 
 #[cfg(test)]

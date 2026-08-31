@@ -712,6 +712,74 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/autofacts" => {
+            let apply = |session: &mut InteractiveSession, on: bool| {
+                session.config.auto_fact_extraction = on;
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => println!(
+                        "{DIM}Auto fact extraction set to: {}{RESET}\n",
+                        if on { "Enabled" } else { "Disabled" }
+                    ),
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                }
+            };
+            if rest == "on" || rest == "off" {
+                apply(session, rest == "on");
+            } else if !rest.is_empty() {
+                println!("{WARN}Usage: /autofacts [on|off]{RESET}\n");
+            } else {
+                println!(
+                    "{DIM}When enabled, a turn that states a durable preference, naming, or standing instruction triggers a background pass that saves it to long-term memory.{RESET}"
+                );
+                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
+                let current = if session.config.auto_fact_extraction {
+                    &options[0]
+                } else {
+                    &options[1]
+                };
+                match prompt_interactive_select("Auto Fact Extraction", &options, current) {
+                    Ok(Some(sel)) => apply(session, sel.starts_with("on")),
+                    Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
+                    Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/factrecall" => {
+            let apply = |session: &mut InteractiveSession, on: bool| {
+                session.config.semantic_fact_recall = on;
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => println!(
+                        "{DIM}Semantic fact recall set to: {}{RESET}\n",
+                        if on { "Enabled" } else { "Disabled" }
+                    ),
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                }
+            };
+            if rest == "on" || rest == "off" {
+                apply(session, rest == "on");
+            } else if !rest.is_empty() {
+                println!("{WARN}Usage: /factrecall [on|off]{RESET}\n");
+            } else {
+                println!(
+                    "{DIM}When your stored facts overflow their per-turn budget, this fills the overflow with the facts most relevant to your message instead of just the newest ones (the newest few are always kept).{RESET}"
+                );
+                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
+                let current = if session.config.semantic_fact_recall {
+                    &options[0]
+                } else {
+                    &options[1]
+                };
+                match prompt_interactive_select("Semantic Fact Recall", &options, current) {
+                    Ok(Some(sel)) => apply(session, sel.starts_with("on")),
+                    Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
+                    Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
         "/remember" => {
             let (first, tail) = rest
                 .split_once(char::is_whitespace)
@@ -1601,12 +1669,12 @@ pub async fn handle_slash_command(
                         } else {
                             println!("\n{BLUE}Stored facts:{RESET}");
                             for f in &facts {
-                                let scope = if f.scope == "project" {
-                                    "project"
-                                } else {
-                                    "global"
+                                let owner = match &f.agent_id {
+                                    Some(name) => format!("via {name}"),
+                                    None if f.scope == "project" => "project".to_string(),
+                                    None => "global".to_string(),
                                 };
-                                println!("  {DIM}[{}] ({}){RESET} {}", f.id, scope, f.body);
+                                println!("  {DIM}[{}] ({}){RESET} {}", f.id, owner, f.body);
                             }
                             println!();
                         }
@@ -1624,8 +1692,20 @@ pub async fn handle_slash_command(
                         }
                     }
                 }
+                "promote" => match args.parse::<i64>() {
+                    Ok(id) => match memory.promote_fact(id) {
+                        Ok(true) => {
+                            println!("{DIM}Promoted fact {id} to shared memory.{RESET}\n")
+                        }
+                        Ok(false) => println!(
+                            "{DIM}Fact {id} is not a subagent-scoped fact (nothing to promote).{RESET}\n"
+                        ),
+                        Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                    },
+                    Err(_) => println!("{WARN}/memory promote <id>{RESET}\n"),
+                },
                 _ => println!(
-                    "{WARN}/memory usage: list | facts | forget <id> | clear | get <key> | set <key> <val> | skills{RESET}\n"
+                    "{WARN}/memory usage: list | facts | forget <id> | promote <id> | clear | get <key> | set <key> <val> | skills{RESET}\n"
                 ),
             }
             Some(SlashResult::Handled)
