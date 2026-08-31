@@ -14,8 +14,10 @@ table plus full-text recall of older messages), corrects the per-provider
 context-window sizes and makes the local ones configurable, raises the
 context-compaction trigger so long tasks keep more verbatim history, brings
 the chat composer's up/down history, persistent per-conversation drafts, and
-edit-and-resend to Web and Desktop, and finishes the Settings component
-restyle (segmented pills / bordered toggle cards) across the remaining tabs.
+edit-and-resend to Web and Desktop, finishes the Settings component restyle
+(segmented pills / bordered toggle cards) across the remaining tabs, and
+gives the CLI's interactive prompt readline-style editing keys plus prompt
+history that survives a restart.
 
 ---
 
@@ -207,3 +209,17 @@ The pills/toggles pass from the settings redesign now covers the last tabs:
 
 Model-picker dropdowns with long or dynamic lists are deliberately left as
 native `<select>`.
+
+---
+
+## ⌨️ CLI: Readline-Style Editing + Persistent Prompt History
+
+The interactive prompt's input box only had character-wise Left/Right and
+Backspace, and its Up/Down recall started empty on every launch.
+
+- **Editing keys** every shell/REPL provides: Home / Ctrl+A, End / Ctrl+E,
+  Ctrl+←/→ and Alt+B/F (move by word), Ctrl+W (delete word), Ctrl+U / Ctrl+K
+  (delete to line start / end), and Delete (forward-delete).
+- **Prompt history now persists** to `~/.config/mint/prompt-history.json` —
+  loaded on start, each submitted line appended (immediate duplicates
+  skipped), capped at the last 100.
