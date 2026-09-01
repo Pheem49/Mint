@@ -450,10 +450,25 @@ mint mcp add filesystem npx \
   --args @modelcontextprotocol/server-filesystem \
   --args .
 
-mint mcp list
+mint mcp list                       # `[disabled]` marks turned-off servers
+mint mcp allow filesystem "*"       # let the agent call every tool
 mint mcp call filesystem list_directory \
   --arguments '{"path":"."}'
 ```
+
+| Command | Purpose |
+| --- | --- |
+| `mint mcp add <name> <cmd> [--args … --env K=V …]` | Add a server |
+| `mint mcp edit <name> [--command] [--args …] [--env K=V …] [--icon\|--no-icon]` | Change one or more fields in place |
+| `mint mcp disable <name>` / `mint mcp enable <name>` | Turn a server off/on without removing it |
+| `mint mcp allow <server> <tool>` / `mint mcp disallow <server> <tool>` | Grant/revoke a tool (`*` = all) |
+| `mint mcp reauth <server>` | Re-run a server's OAuth login |
+| `mint mcp remove <name>` / `mint mcp clear` | Remove one / all servers |
+
+The same operations are available interactively with `/mcp` (an arrow-key
+picker with an "＋ Add" row and a per-server action menu) and from the
+Desktop/Web **Settings → Plugins → MCP Servers** panel, including the per-server
+tool allowlist.
 
 ### Interactive Commands
 
@@ -470,12 +485,13 @@ mint mcp call filesystem list_directory \
 | `/learn <path>` | Import a local skill |
 | `/skill [list]` | List all skills Mint can see (global, workspace, taught) |
 | `/skill add <path\|github-repo\|url>` | Install a skill — local path, or a GitHub repo/URL via `npx skills` |
-| `/plugins [name]` | List or interact with available plugins/skills |
+| `/plugins` | Browse plugins — enable/disable, OAuth connect/disconnect, credentials |
+| `/plugin enable\|disable <name>` | Toggle a native plugin for the agent |
 | `/memory list` | List stored memories |
 | `/memory clear` | Clear stored memories |
 | `/memory get <key>` | Read one memory value |
 | `/memory set <key> <value>` | Store one memory value |
-| `/mcp [subcmd]` | Manage configured MCP servers (list, allow, disallow) |
+| `/mcp [subcmd]` | Manage MCP servers — add, edit, enable/disable, allow/disallow, reauth, remove |
 | `/stats` | Show session statistics |
 | `/code <task>` | Start a code-agent task |
 | `/avatar [web\|desktop\|status\|off]` | Connect agent activity to [Project Avatar](https://github.com/projectavatar/projectavatar) |

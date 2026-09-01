@@ -104,6 +104,42 @@ pub const BUILTIN_PLUGINS: &[BuiltinPluginInfo] = &[
         oauth_provider: "github",
         native_name: Some("github"),
     },
+    BuiltinPluginInfo {
+        key: "dev_tools",
+        name: "Dev Tools",
+        description: "Read git status, log, and branch info from the workspace",
+        config_field: "pluginDevToolsEnabled",
+        is_oauth: false,
+        oauth_provider: "",
+        native_name: Some("dev_tools"),
+    },
+    BuiltinPluginInfo {
+        key: "docker",
+        name: "Docker",
+        description: "List, start, stop, or restart local Docker containers",
+        config_field: "pluginDockerEnabled",
+        is_oauth: false,
+        oauth_provider: "",
+        native_name: Some("docker"),
+    },
+    BuiltinPluginInfo {
+        key: "obsidian",
+        name: "Local Notes",
+        description: "List, read, or append Markdown notes in your notes folder",
+        config_field: "pluginObsidianEnabled",
+        is_oauth: false,
+        oauth_provider: "",
+        native_name: Some("obsidian"),
+    },
+    BuiltinPluginInfo {
+        key: "system_metrics",
+        name: "System Metrics",
+        description: "Read native RAM, CPU, and uptime metrics",
+        config_field: "pluginSystemMetricsEnabled",
+        is_oauth: false,
+        oauth_provider: "",
+        native_name: Some("system_metrics"),
+    },
 ];
 
 pub async fn run_plugins_command(subcommand: Option<PluginsSubcommand>) -> Result<()> {
