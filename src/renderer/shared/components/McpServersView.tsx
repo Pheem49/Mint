@@ -47,6 +47,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
   const [detectedTools, setDetectedTools] = useState({ docker: false, git: false, gh: false, node: false })
   const [detailMcpName, setDetailMcpName] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showCatalogModal, setShowCatalogModal] = useState(false)
   const [addAllowAll, setAddAllowAll] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [reauthStatus, setReauthStatus] = useState<Record<string, 'idle' | 'running' | 'success' | 'error'>>({})
@@ -167,6 +168,9 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
     setMcpArgs([...(entry.args || []), ...argValues].join(' '))
     setMcpEnv(Object.keys(envSeed).length ? JSON.stringify(envSeed, null, 2) : '')
     if (setMcpIcon) setMcpIcon(entry.icon || '')
+    // Hand off to the manual form pre-filled, so the user reviews before adding.
+    setShowCatalogModal(false)
+    setShowAddModal(true)
   }
 
   return (
@@ -185,17 +189,30 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
           </p>
         </div>
 
-        <button
-          type="button"
-          className="management-primary-btn"
-          onClick={() => setShowAddModal(true)}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Add MCP Server
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            className="management-action-btn"
+            onClick={() => setShowCatalogModal(true)}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            MCP catalog
+          </button>
+          <button
+            type="button"
+            className="management-primary-btn"
+            onClick={() => setShowAddModal(true)}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Add MCP Server
+          </button>
+        </div>
       </div>
 
       {/* Search Input */}
@@ -464,10 +481,6 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
 
             <form onSubmit={onSubmitAddServer}>
               <div className="management-modal-body">
-                <McpRegistryPicker
-                  configuredNames={Object.keys(config.mcpServers || {})}
-                  onPick={applyRegistryPick}
-                />
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div className="management-form-group">
                     <label className="management-label">Server Name</label>
@@ -546,6 +559,40 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MCP Catalog Modal */}
+      {showCatalogModal && (
+        <div className="management-modal-overlay" onClick={() => setShowCatalogModal(false)}>
+          <div className="management-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="management-modal-header">
+              <h2 className="management-modal-title">MCP Catalog</h2>
+              <button type="button" className="management-modal-close" onClick={() => setShowCatalogModal(false)}>
+                ✕
+              </button>
+            </div>
+            <div className="management-modal-body">
+              <McpRegistryPicker
+                configuredNames={Object.keys(config.mcpServers || {})}
+                onPick={applyRegistryPick}
+                showManualHint={false}
+              />
+            </div>
+            <div className="management-modal-footer">
+              <span />
+              <button
+                type="button"
+                className="management-action-btn"
+                onClick={() => {
+                  setShowCatalogModal(false)
+                  setShowAddModal(true)
+                }}
+              >
+                Add manually instead
+              </button>
+            </div>
           </div>
         </div>
       )}

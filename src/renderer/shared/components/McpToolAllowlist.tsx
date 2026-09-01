@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import '../css/management-views.css'
 
 /**
  * Per-server view of `config.allowedMcpTools[serverName]` — the list the agent's
@@ -6,8 +7,7 @@ import React, { useState } from 'react'
  * `"*"` entry means "any tool", adding a specific tool when `*` is present is a
  * no-op, and an empty list means the agent cannot call the server at all.
  *
- * Self-contained styling (inline) so it drops cleanly into both the Settings
- * tab and the dashboard MCP view, which use different CSS vocabularies.
+ * Styled with the shared `management-*` classes so it matches the MCP view.
  */
 export interface McpToolAllowlistProps {
   serverName: string
@@ -20,15 +20,6 @@ export interface McpToolAllowlistProps {
 function currentTools(config: any, server: string): string[] {
   const value = config?.allowedMcpTools?.[server]
   return Array.isArray(value) ? value.filter((t: unknown): t is string => typeof t === 'string') : []
-}
-
-const chipStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  padding: '2px 8px',
-  border: '1px solid rgba(128,128,128,0.4)',
-  borderRadius: 6,
 }
 
 export const McpToolAllowlist: React.FC<McpToolAllowlistProps> = ({
@@ -75,33 +66,41 @@ export const McpToolAllowlist: React.FC<McpToolAllowlistProps> = ({
   }
 
   return (
-    <div style={{ marginTop: 16, fontSize: '0.85rem' }}>
+    <div style={{ marginTop: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <strong>Allowed tools</strong>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+        <span className="management-label" style={{ margin: 0 }}>
+          Allowed tools
+        </span>
+        <label
+          style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', fontSize: '0.85rem' }}
+        >
           <input type="checkbox" checked={wildcard} onChange={toggleWildcard} />
           Allow all (*)
         </label>
       </div>
 
       {wildcard ? (
-        <p style={{ opacity: 0.7, margin: '4px 0' }}>
+        <p className="management-plugin-desc" style={{ whiteSpace: 'normal', margin: '4px 0' }}>
           The agent may call every tool on <code>{serverName}</code>.
         </p>
       ) : tools.length === 0 ? (
-        <p style={{ opacity: 0.7, margin: '4px 0' }}>
+        <p className="management-plugin-desc" style={{ whiteSpace: 'normal', margin: '4px 0' }}>
           No tools allowed yet — the agent can’t call this server.
         </p>
       ) : (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
           {tools.map((t) => (
-            <span key={t} style={chipStyle}>
+            <span
+              key={t}
+              className="management-tag"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            >
               {t}
               <button
                 type="button"
                 onClick={() => disallow(t)}
                 aria-label={`Disallow ${t}`}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.7 }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.7, padding: 0, lineHeight: 1 }}
               >
                 ✕
               </button>
@@ -111,9 +110,10 @@ export const McpToolAllowlist: React.FC<McpToolAllowlistProps> = ({
       )}
 
       {!wildcard && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
           <input
             type="text"
+            className="management-input-field"
             placeholder="tool name"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -124,10 +124,11 @@ export const McpToolAllowlist: React.FC<McpToolAllowlistProps> = ({
                 setDraft('')
               }
             }}
-            style={{ flex: '1 1 140px', minWidth: 120 }}
+            style={{ flex: '1 1 160px', minWidth: 140 }}
           />
           <button
             type="button"
+            className="management-action-btn"
             onClick={() => {
               allow(draft)
               setDraft('')
@@ -136,19 +137,23 @@ export const McpToolAllowlist: React.FC<McpToolAllowlistProps> = ({
             Add
           </button>
           {listServerTools && (
-            <button type="button" onClick={discover} disabled={busy}>
+            <button type="button" className="management-action-btn" onClick={discover} disabled={busy}>
               {busy ? 'Discovering…' : 'Discover tools'}
             </button>
           )}
         </div>
       )}
 
-      {error && <p style={{ color: 'crimson', margin: '4px 0' }}>{error}</p>}
+      {error && (
+        <p className="management-plugin-desc" style={{ whiteSpace: 'normal', color: '#f87171', margin: '4px 0' }}>
+          {error}
+        </p>
+      )}
 
       {!wildcard && discovered && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {discovered.length === 0 && (
-            <span style={{ opacity: 0.7 }}>Server reported no tools.</span>
+            <span className="management-plugin-desc">Server reported no tools.</span>
           )}
           {discovered.map((t) => {
             const on = tools.includes(t)
@@ -156,8 +161,9 @@ export const McpToolAllowlist: React.FC<McpToolAllowlistProps> = ({
               <button
                 key={t}
                 type="button"
+                className="management-action-btn"
                 onClick={() => (on ? disallow(t) : allow(t))}
-                style={{ ...chipStyle, cursor: 'pointer', opacity: on ? 1 : 0.6 }}
+                style={{ opacity: on ? 1 : 0.65 }}
               >
                 {on ? '✓ ' : '+ '}
                 {t}

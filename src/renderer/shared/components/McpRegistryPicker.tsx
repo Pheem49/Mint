@@ -1,30 +1,29 @@
 import React, { useState } from 'react'
+import '../css/management-views.css'
 import { MCP_REGISTRY, type McpRegistryEntry } from '../constants/mcpRegistry'
+import { renderMcpSvgIcon } from '../constants/plugins'
 
 /**
- * The "pick a known MCP server" grid shown above the manual Add form. Selecting
- * an entry prompts for any `argInputs` it declares, then calls `onPick` with the
- * entry and those values; the host fills the form's command / args / env state.
- * Self-contained inline styling so it drops into both the dashboard Add modal
- * and the Settings › Plugins Add box.
+ * The "pick a known MCP server" list shown in the MCP Catalog modal (and inline
+ * above the Settings › Plugins Add form). Selecting an entry prompts for any
+ * `argInputs` it declares, then calls `onPick` with the entry and those values;
+ * the host fills the Add form's command / args / env state. Styled with the
+ * shared `management-*` classes so it matches the rest of the MCP view.
  */
 export interface McpRegistryPickerProps {
-  /** Names already in `config.mcpServers` — their cards show "Added". */
+  /** Names already in `config.mcpServers` — their rows show "Added". */
   configuredNames: string[]
   onPick: (entry: McpRegistryEntry, argValues: string[], envSeed: Record<string, string>) => void
+  /** Show the trailing "— or add manually —" divider. Off when the picker is
+   *  its own modal with no manual form beneath it. */
+  showManualHint?: boolean
 }
 
-const cardStyle: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '8px 10px',
-  border: '1px solid rgba(128,128,128,0.35)',
-  borderRadius: 8,
-  background: 'rgba(255,255,255,0.03)',
-  cursor: 'pointer',
-  fontSize: '0.85rem',
-}
-
-export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({ configuredNames, onPick }) => {
+export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({
+  configuredNames,
+  onPick,
+  showManualHint = true,
+}) => {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
   const [argValues, setArgValues] = useState<string[]>([])
@@ -56,27 +55,32 @@ export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({ configured
   const argsReady = !sel || (sel.argInputs || []).every((_, i) => argValues[i]?.trim())
 
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: '0.8rem', fontWeight: 600, opacity: 0.8, marginBottom: 8 }}>
-        From catalog
+    <div>
+      <div className="management-control-bar">
+        <div className="management-search-wrapper">
+          <input
+            type="text"
+            className="management-search-input"
+            placeholder="Search servers..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <svg
+            className="management-search-icon"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+        </div>
       </div>
-      <input
-        type="text"
-        placeholder="Search servers…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        style={{ width: '100%', marginBottom: 8 }}
-      />
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-          gap: 8,
-          maxHeight: 200,
-          overflowY: 'auto',
-        }}
-      >
+      <div className="mgmt-row-stack" style={{ maxHeight: 320, overflowY: 'auto' }}>
         {filtered.map((entry) => {
           const added = configured.has(entry.key)
           return (
@@ -85,22 +89,26 @@ export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({ configured
               type="button"
               disabled={added}
               onClick={() => open(entry)}
+              className="management-plugin-row"
               style={{
-                ...cardStyle,
-                opacity: added ? 0.5 : 1,
+                width: '100%',
+                textAlign: 'left',
+                opacity: added ? 0.55 : 1,
                 cursor: added ? 'default' : 'pointer',
-                borderColor: selected === entry.key ? 'var(--accent, #10b981)' : cardStyle.border as string,
+                borderColor: selected === entry.key ? 'var(--accent, #10b981)' : undefined,
               }}
             >
-              <div style={{ fontWeight: 600 }}>
-                {entry.icon ? `${entry.icon} ` : ''}
-                {entry.name}
-                {added && <span style={{ opacity: 0.7, fontWeight: 400 }}> · Added</span>}
+              <div className="management-card-icon">{renderMcpSvgIcon(entry.key, entry.icon)}</div>
+              <div className="management-plugin-info">
+                <div className="management-plugin-name">
+                  {entry.name}
+                  {added && <span className="management-tag">Added</span>}
+                  {(entry.requiredEnv?.length ?? 0) > 0 && !added && (
+                    <span className="management-tag">needs API key</span>
+                  )}
+                </div>
+                <div className="management-plugin-desc">{entry.desc}</div>
               </div>
-              <div style={{ opacity: 0.7, marginTop: 2 }}>{entry.desc}</div>
-              {(entry.requiredEnv?.length ?? 0) > 0 && (
-                <div style={{ opacity: 0.6, marginTop: 2, fontSize: '0.78rem' }}>needs an API key</div>
-              )}
             </button>
           )
         })}
@@ -109,32 +117,36 @@ export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({ configured
       {sel && (
         <div
           style={{
-            marginTop: 10,
-            padding: '10px 12px',
-            border: '1px solid rgba(128,128,128,0.35)',
-            borderRadius: 8,
+            marginTop: 12,
+            padding: '14px 16px',
+            border: '1px solid var(--border, rgba(255, 255, 255, 0.08))',
+            borderRadius: 'var(--radius-xl, 14px)',
+            background: 'var(--surface-bg, rgba(30, 41, 59, 0.45))',
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            {sel.icon ? `${sel.icon} ` : ''}
-            {sel.name}
-            {sel.docs && (
-              <a
-                href={sel.docs}
-                target="_blank"
-                rel="noreferrer"
-                style={{ marginLeft: 8, fontSize: '0.8rem', fontWeight: 400 }}
-              >
-                docs ↗
-              </a>
-            )}
+          <div className="management-card-title-group" style={{ marginBottom: 10 }}>
+            <div className="management-card-icon">{renderMcpSvgIcon(sel.key, sel.icon)}</div>
+            <h3 className="management-card-title" style={{ fontSize: '1rem' }}>
+              {sel.name}
+              {sel.docs && (
+                <a
+                  href={sel.docs}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ marginLeft: 8, fontSize: '0.8rem', fontWeight: 400 }}
+                >
+                  docs ↗
+                </a>
+              )}
+            </h3>
           </div>
 
           {(sel.argInputs || []).map((input, i) => (
-            <div key={input.label} style={{ marginBottom: 6 }}>
-              <label style={{ display: 'block', fontSize: '0.8rem', opacity: 0.8 }}>{input.label}</label>
+            <div key={input.label} className="management-form-group">
+              <label className="management-label">{input.label}</label>
               <input
                 type="text"
+                className="management-input-field"
                 placeholder={input.placeholder || ''}
                 value={argValues[i] || ''}
                 onChange={(e) => {
@@ -142,13 +154,12 @@ export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({ configured
                   next[i] = e.target.value
                   setArgValues(next)
                 }}
-                style={{ width: '100%' }}
               />
             </div>
           ))}
 
           {(sel.requiredEnv || []).length > 0 && (
-            <div style={{ fontSize: '0.8rem', opacity: 0.8, margin: '4px 0 8px' }}>
+            <p className="management-plugin-desc" style={{ whiteSpace: 'normal', marginTop: 4 }}>
               You’ll fill in{' '}
               {(sel.requiredEnv || []).map((v, i) => (
                 <React.Fragment key={v.key}>
@@ -162,23 +173,28 @@ export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({ configured
                 </React.Fragment>
               ))}{' '}
               below.
-            </div>
+            </p>
           )}
 
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" onClick={use} disabled={!argsReady}>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button type="button" className="management-primary-btn" onClick={use} disabled={!argsReady}>
               Use this server
             </button>
-            <button type="button" onClick={() => setSelected(null)}>
+            <button type="button" className="management-action-btn" onClick={() => setSelected(null)}>
               Cancel
             </button>
           </div>
         </div>
       )}
 
-      <div style={{ margin: '12px 0 4px', textAlign: 'center', opacity: 0.5, fontSize: '0.8rem' }}>
-        — or add manually —
-      </div>
+      {showManualHint && (
+        <div
+          className="management-section-title"
+          style={{ margin: '16px 0 4px', textAlign: 'center', opacity: 0.5, fontWeight: 400 }}
+        >
+          — or add manually —
+        </div>
+      )}
     </div>
   )
 }

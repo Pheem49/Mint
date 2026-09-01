@@ -142,6 +142,74 @@ export function renderMcpSvgIcon(name: string, customIcon?: string) {
       </svg>
     )
   }
+  if (cleanName === 'filesystem') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      </svg>
+    )
+  }
+  if (cleanName === 'slack') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e01e5a" strokeWidth="2.4" strokeLinecap="round">
+        <line x1="9" y1="3" x2="7" y2="21" />
+        <line x1="17" y1="3" x2="15" y2="21" />
+        <line x1="3" y1="9" x2="21" y2="7" />
+        <line x1="3" y1="17" x2="21" y2="15" />
+      </svg>
+    )
+  }
+  if (cleanName === 'postgres' || cleanName === 'sqlite' || cleanName === 'postgresql') {
+    const color = cleanName === 'postgres' || cleanName === 'postgresql' ? '#336791' : '#0f80cc'
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <ellipse cx="12" cy="5" rx="9" ry="3" />
+        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+      </svg>
+    )
+  }
+  if (cleanName === 'puppeteer' || cleanName === 'playwright' || cleanName === 'browser') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    )
+  }
+  if (cleanName === 'fetch' || cleanName === 'web') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    )
+  }
+  if (cleanName === 'time') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+    )
+  }
+  if (cleanName === 'memory') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f472b6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2z" />
+        <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2z" />
+      </svg>
+    )
+  }
+  if (cleanName === 'sequential-thinking' || cleanName === 'sequentialthinking') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 3v18M16 3v18M3 8h5M3 16h5M16 8h5M16 16h5" />
+      </svg>
+    )
+  }
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
