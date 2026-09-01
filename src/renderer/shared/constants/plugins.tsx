@@ -162,6 +162,14 @@ export interface BuiltinPluginDefinition {
   isOAuth?: boolean
   oauthProvider?: string
   fields?: Array<{ label: string; field: string; type: string; placeholder: string }>
+  /**
+   * The `mint_core::native_plugins()` name this maps to (the agent's
+   * `run_plugin` gate). `undefined` for entries with no agent-callable backend
+   * (Discord RPC). May differ from `key` — the UI calls it `calendar`, the agent
+   * `google_calendar`. Keep the enable logic in sync with
+   * `crates/mint-core/src/integrations/plugins.rs::native_plugin_enable_flag`.
+   */
+  nativeName?: string
 }
 
 export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
@@ -171,6 +179,7 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     desc: 'Control playback with AI. Requires playerctl locally or Spotify OAuth.',
     icon: '🎵',
     enabledField: 'pluginSpotifyEnabled',
+    nativeName: 'spotify',
     hasCredentials: true,
     isOAuth: true,
     oauthProvider: 'spotify',
@@ -193,6 +202,7 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     desc: 'Read, summarize, draft, and send emails via Google OAuth / API credentials.',
     icon: '📧',
     enabledField: 'pluginGmailEnabled',
+    nativeName: 'gmail',
     hasCredentials: true,
     isOAuth: true,
     oauthProvider: 'google',
@@ -208,6 +218,7 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     desc: 'Read schedule, check availability, and create calendar events.',
     icon: '📅',
     enabledField: 'pluginCalendarEnabled',
+    nativeName: 'google_calendar',
     hasCredentials: true,
     isOAuth: true,
     oauthProvider: 'google',
@@ -223,6 +234,7 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     desc: 'Search pages, query databases, and create notes in Notion.',
     icon: '📝',
     enabledField: 'pluginNotionEnabled',
+    nativeName: 'notion',
     hasCredentials: true,
     isOAuth: true,
     oauthProvider: 'notion',
@@ -237,6 +249,7 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     desc: 'Access repositories, pull requests, and issues via GitHub OAuth.',
     icon: '🐱',
     enabledField: 'pluginGithubEnabled',
+    nativeName: 'github',
     hasCredentials: true,
     isOAuth: true,
     oauthProvider: 'github',
@@ -245,6 +258,42 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
       { label: 'GitHub Client Secret', field: 'githubClientSecret', type: 'password', placeholder: 'your_github_client_secret' },
       { label: 'GitHub Personal Access Token (Optional)', field: 'githubToken', type: 'password', placeholder: 'ghp_...' },
     ]
+  },
+  {
+    key: 'dev_tools',
+    name: 'Dev Tools',
+    desc: 'Read git status, log, and branch info from the workspace.',
+    icon: '🛠️',
+    enabledField: 'pluginDevToolsEnabled',
+    hasCredentials: false,
+    nativeName: 'dev_tools',
+  },
+  {
+    key: 'docker',
+    name: 'Docker',
+    desc: 'List, start, stop, or restart local Docker containers.',
+    icon: '🐳',
+    enabledField: 'pluginDockerEnabled',
+    hasCredentials: false,
+    nativeName: 'docker',
+  },
+  {
+    key: 'obsidian',
+    name: 'Local Notes',
+    desc: 'List, read, or append Markdown notes in your notes folder.',
+    icon: '🗒️',
+    enabledField: 'pluginObsidianEnabled',
+    hasCredentials: false,
+    nativeName: 'obsidian',
+  },
+  {
+    key: 'system_metrics',
+    name: 'System Metrics',
+    desc: 'Read native RAM, CPU, and uptime metrics.',
+    icon: '📊',
+    enabledField: 'pluginSystemMetricsEnabled',
+    hasCredentials: false,
+    nativeName: 'system_metrics',
   },
 ]
 

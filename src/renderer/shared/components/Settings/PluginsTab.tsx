@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { DEFAULT_CONFIG } from '@/components/SettingsWindow'
-import { listLearnedSkills, addLearnedSkill, deleteLearnedSkill, LearnedSkill, detectSystemTools, DetectedTools } from '@/tauri'
+import { listLearnedSkills, addLearnedSkill, deleteLearnedSkill, LearnedSkill, detectSystemTools, DetectedTools, listMcpServerTools } from '@/tauri'
+import McpToolAllowlist from '../McpToolAllowlist'
 import {
   getOAuthStatuses,
   startOAuthFlow,
@@ -9,6 +10,7 @@ import {
   type OAuthStatus,
 } from '../../utils/oauthManager'
 import { renderMcpSvgIcon, BUILTIN_PLUGINS_LIST } from '../../constants/plugins'
+import { isNativePluginEnabled, applyNativePluginToggle } from '../../utils/nativePlugins'
 
 interface PluginsTabProps {
   config: typeof DEFAULT_CONFIG
@@ -340,6 +342,10 @@ export default function PluginsTab({
           <div>
             <p className="section-kicker">External tools</p>
             <h2 className="section-title">MCP Servers</h2>
+            <p className="section-desc" style={{ opacity: 0.7, fontSize: '0.85rem' }}>
+              Add, edit, enable/disable a server and choose which of its tools the agent may
+              call. The same manager opens full-screen with <code>/mcp</code> in chat.
+            </p>
           </div>
         </div>
 
@@ -463,6 +469,13 @@ export default function PluginsTab({
                           rows={3}
                         />
                       </div>
+
+                      <McpToolAllowlist
+                        serverName={item.name}
+                        config={config}
+                        updateField={updateField}
+                        listServerTools={listMcpServerTools}
+                      />
                     </div>
                   )}
                 </div>
@@ -534,7 +547,7 @@ export default function PluginsTab({
         </div>
         <div className="plugin-list">
           {pluginsList.map(p => {
-            const isEnabled = (config as any)[p.enabledField]
+            const isEnabled = isNativePluginEnabled(config, p)
             const isExpanded = expandedPlugin === p.key
 
             return (
@@ -602,7 +615,7 @@ export default function PluginsTab({
                         type="checkbox"
                         checked={isEnabled}
                         onChange={(e) => {
-                          updateField(p.enabledField as any, e.target.checked)
+                          applyNativePluginToggle(config, p, e.target.checked, updateField)
                         }}
                       />
                       <span className="settings-toggle-slider" />

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import '../css/management-views.css'
 import { renderMcpSvgIcon, renderMcpHubSvgIcon } from '../constants/plugins'
+import McpToolAllowlist from './McpToolAllowlist'
 
 export interface McpServersViewProps {
   config: any
@@ -19,6 +20,7 @@ export interface McpServersViewProps {
   handleRemoveMcpServer: (name: string) => void
   detectTools?: () => Promise<{ docker: boolean; git: boolean; gh: boolean; node: boolean }>
   onReauth?: (name: string) => Promise<boolean>
+  listServerTools?: (name: string) => Promise<string[]>
 }
 
 export const McpServersView: React.FC<McpServersViewProps> = React.memo(function McpServersView({
@@ -38,6 +40,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
   handleRemoveMcpServer,
   detectTools,
   onReauth,
+  listServerTools,
 }) {
   const [detectedTools, setDetectedTools] = useState({ docker: false, git: false, gh: false, node: false })
   const [detailMcpName, setDetailMcpName] = useState<string | null>(null)
@@ -382,6 +385,13 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                         />
                       </div>
                     </div>
+
+                    <McpToolAllowlist
+                      serverName={item.name}
+                      config={config}
+                      updateField={updateField}
+                      listServerTools={listServerTools}
+                    />
                   </div>
                 )}
               </div>
