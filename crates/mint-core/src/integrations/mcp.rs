@@ -644,6 +644,24 @@ pub fn list_server_tools(config: &MintConfig, server_name: &str) -> Result<Value
     })
 }
 
+/// Just the tool *names* a server exposes — for a UI "discover tools" picker
+/// that feeds the `allowedMcpTools` allowlist. Loads config itself so hosts can
+/// call it with only a name.
+pub fn mcp_server_tool_names(server_name: &str) -> Result<Vec<String>, McpError> {
+    let config = load_config()?;
+    let result = list_server_tools(&config, server_name)?;
+    Ok(result
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(|t| t.get("name").and_then(Value::as_str).map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 /// A persistent MCP stdio connection: the child process stays alive across
 /// calls instead of being spawned and killed for every single request, and a
 /// single background reader thread (spawned once, not once per call) routes

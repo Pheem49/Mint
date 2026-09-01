@@ -628,6 +628,22 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
+                                ("GET", r) if r.starts_with("/api/mcp/") && r.ends_with("/tools") => {
+                    routes::cron_mcp::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
                                 ("GET", "/api/cron") => {
                     routes::cron_mcp::execute(
                         routes::RequestCtx {

@@ -313,6 +313,23 @@ export async function reauthMcpServer(serverName: string): Promise<boolean> {
   return invoke<boolean>('reauth_mcp_server', { serverName })
 }
 
+/** Tool names a configured MCP server exposes — feeds the "Discover tools"
+ *  picker in the MCP tool-allowlist UI. Can be slow or fail if the server is
+ *  unreachable. */
+export async function listMcpServerTools(name: string): Promise<string[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase()
+    const res = await authFetch(`${API_BASE}/mcp/${encodeURIComponent(name)}/tools`)
+    const data = await res.json().catch(() => null)
+    if (!res.ok) {
+      throw new Error(data?.error || `Could not list tools: HTTP ${res.status}`)
+    }
+    return Array.isArray(data?.tools) ? data.tools : []
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('list_mcp_server_tools', { name })
+}
+
 export async function sendChatMessage(
   message: string,
   imageDataUri?: string | null,

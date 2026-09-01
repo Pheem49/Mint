@@ -58,6 +58,31 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             }
         }
 
+        ("GET", route) if route.starts_with("/api/mcp/") && route.ends_with("/tools") => {
+            let name = percent_decode(
+                route
+                    .trim_start_matches("/api/mcp/")
+                    .trim_end_matches("/tools"),
+            );
+            let result =
+                tokio::task::spawn_blocking(move || crate::mcp_server_tool_names(&name)).await;
+            match result {
+                Ok(Ok(tools)) => {
+                    send_json_response(socket, "200 OK", &json!({ "tools": tools }).to_string())
+                        .await;
+                }
+                Ok(Err(err)) => {
+                    let err_msg = json!({ "error": err.to_string() }).to_string();
+                    send_json_response(socket, "400 Bad Request", &err_msg).await;
+                }
+                Err(err) => {
+                    let err_msg =
+                        json!({ "error": format!("list-tools task failed: {err}") }).to_string();
+                    send_json_response(socket, "500 Internal Server Error", &err_msg).await;
+                }
+            }
+        }
+
         ("GET", "/api/cron") => {
             let jobs = crate::CronStore::open_default()
                 .and_then(|store| store.list())

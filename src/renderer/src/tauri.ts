@@ -289,6 +289,14 @@ export async function reauthMcpServer(serverName: string): Promise<boolean> {
   return invoke<boolean>('reauth_mcp_server', { serverName })
 }
 
+/** Tool names a configured MCP server exposes — feeds the "Discover tools"
+ *  picker in the MCP tool-allowlist UI. Spawns/uses the server's stdio
+ *  session, so it can be slow or fail if the server is unreachable. */
+export async function listMcpServerTools(name: string): Promise<string[]> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('list_mcp_server_tools', { name })
+}
+
 export async function uploadFile(file: File): Promise<string> {
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();
