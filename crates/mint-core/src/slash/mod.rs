@@ -308,10 +308,16 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         "/stats" => cmd_stats(config, &req.workspace()),
         "/memory" => cmd_memory(rest),
         "/remember" => cmd_remember(rest, &req.workspace()),
-        "/plugins" => SlashResponse::Navigate {
-            target: SlashNavTarget::Plugins,
-            markdown: "🔌 Opened Plugins.".into(),
-        },
+        "/plugins" | "/plugin" => {
+            if rest.is_empty() {
+                SlashResponse::Navigate {
+                    target: SlashNavTarget::Plugins,
+                    markdown: "🔌 Opened Plugins.".into(),
+                }
+            } else {
+                cmd_plugin(rest, config)
+            }
+        }
         "/skill" | "/learn" => SlashResponse::Navigate {
             target: SlashNavTarget::Skills,
             markdown: "📚 Opened Skills — import there or drop files in `.agents/skills/`.".into(),
@@ -919,33 +925,24 @@ fn cmd_subagent(rest: &str, workspace: &Path) -> SlashResponse {
     }
 }
 
+/// Wrap a config mutation the host must persist.
+fn applied(md: impl Into<String>) -> SlashResponse {
+    SlashResponse::Applied {
+        markdown: md.into(),
+        effects: vec![SlashEffect::ConfigChanged],
+    }
+}
+
+const MCP_USAGE: &str = "Usage: /mcp [list] | add <name> <cmd> [args…] | remove <name> | \
+    enable|disable <name> | edit <name> command|args|icon <value> | \
+    allow|disallow <server> <tool> | reauth <server> | clear";
+
 fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
     let (sub, args) = split_sub(rest);
     match sub.as_str() {
-        "allow" => {
-            let mut parts = args.split_whitespace();
-            match (parts.next(), parts.next()) {
-                (Some(server), Some(tool)) => {
-                    let added = allow_mcp_tool(config, server, tool);
-                    SlashResponse::Applied {
-                        markdown: if added {
-                            format!("🔌 Allowed MCP tool `{server}/{tool}`.")
-                        } else {
-                            format!("🔌 `{server}/{tool}` was already allowed.")
-                        },
-                        effects: vec![SlashEffect::ConfigChanged],
-                    }
-                }
-                _ => error("Usage: /mcp allow <server> <tool>"),
-            }
-        }
-        "reauth" if !args.is_empty() => match crate::reauth_mcp_server(args) {
-            Ok(_) => message(format!("🔌 Re-ran OAuth for `{args}`.")),
-            Err(e) => error(e),
-        },
         "" | "list" => match crate::list_mcp_servers() {
             Ok(servers) if servers.is_empty() => {
-                message("🔌 No MCP servers configured. Add one in Settings > Plugins.")
+                message("🔌 No MCP servers configured. Add one with `/mcp add`, or in Settings.")
             }
             Ok(servers) => {
                 let items = servers
@@ -964,34 +961,138 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
             }
             Err(e) => error(e),
         },
-        _ => error("Usage: /mcp [list] | allow <server> <tool> | reauth <server>"),
+
+        "add" => {
+            let mut parts = args.split_whitespace();
+            match (parts.next(), parts.next()) {
+                (Some(name), Some(command)) => {
+                    let server = crate::McpServer {
+                        command: command.to_string(),
+                        args: parts.map(str::to_string).collect(),
+                        env: Default::default(),
+                        icon: None,
+                        disabled: false,
+                    };
+                    match crate::upsert_server_in(config, name, server) {
+                        Ok(()) => applied(format!("🔌 Added MCP server `{name}`.")),
+                        Err(e) => error(e),
+                    }
+                }
+                _ => error("Usage: /mcp add <name> <command> [args…]"),
+            }
+        }
+
+        "remove" if !args.is_empty() => match crate::remove_server_in(config, args) {
+            Ok(true) => applied(format!("🔌 Removed MCP server `{args}`.")),
+            Ok(false) => error(format!("No MCP server named `{args}`.")),
+            Err(e) => error(e),
+        },
+
+        "clear" => match crate::clear_servers_in(config) {
+            Ok(()) => applied("🔌 Removed all MCP servers."),
+            Err(e) => error(e),
+        },
+
+        "enable" | "disable" if !args.is_empty() => {
+            let disable = sub == "disable";
+            match crate::set_server_disabled_in(config, args, disable) {
+                Ok(true) => applied(format!(
+                    "🔌 {} `{args}`.",
+                    if disable { "Disabled" } else { "Enabled" }
+                )),
+                Ok(false) => error(format!("No MCP server named `{args}`.")),
+                Err(e) => error(e),
+            }
+        }
+
+        "edit" => {
+            let mut parts = args.splitn(3, char::is_whitespace);
+            let (Some(name), Some(field)) = (parts.next(), parts.next()) else {
+                return error("Usage: /mcp edit <name> command|args|icon <value>");
+            };
+            let value = parts.next().unwrap_or("").trim();
+            let edit = match field.to_ascii_lowercase().as_str() {
+                "command" if !value.is_empty() => (Some(value.to_string()), None, None),
+                "command" => return error("`/mcp edit <name> command <value>` needs a value"),
+                "args" => (
+                    None,
+                    Some(value.split_whitespace().map(str::to_string).collect()),
+                    None,
+                ),
+                "icon" => (
+                    None,
+                    None,
+                    Some((!value.is_empty()).then(|| value.to_string())),
+                ),
+                _ => return error("Editable fields: command | args | icon"),
+            };
+            match crate::update_server_in(config, name, edit.0, edit.1, None, edit.2) {
+                Ok(true) => applied(format!("🔌 Updated `{name}`.")),
+                Ok(false) => error(format!("No MCP server named `{name}`.")),
+                Err(e) => error(e),
+            }
+        }
+
+        "allow" => {
+            let mut parts = args.split_whitespace();
+            match (parts.next(), parts.next()) {
+                (Some(server), Some(tool)) => {
+                    let added = crate::allow_tool_in(config, server, tool);
+                    applied(if added {
+                        format!("🔌 Allowed MCP tool `{server}/{tool}`.")
+                    } else {
+                        format!("🔌 `{server}/{tool}` was already allowed.")
+                    })
+                }
+                _ => error("Usage: /mcp allow <server> <tool>"),
+            }
+        }
+
+        "disallow" => {
+            let mut parts = args.split_whitespace();
+            match (parts.next(), parts.next()) {
+                (Some(server), Some(tool)) => {
+                    let removed = crate::disallow_tool_in(config, server, tool);
+                    applied(if removed {
+                        format!("🔌 Removed `{server}/{tool}` from the allowlist.")
+                    } else {
+                        format!("🔌 `{server}/{tool}` was not in the allowlist.")
+                    })
+                }
+                _ => error("Usage: /mcp disallow <server> <tool>  (tool `*` clears the list)"),
+            }
+        }
+
+        "reauth" if !args.is_empty() => match crate::reauth_mcp_server(args) {
+            Ok(_) => message(format!("🔌 Re-ran OAuth for `{args}`.")),
+            Err(e) => error(e),
+        },
+
+        _ => error(MCP_USAGE),
     }
 }
 
-/// Add `tool` to `config.extra["allowedMcpTools"][server]`. Returns `false` when
-/// it was already present. Ports `crates/mint-cli/src/mcp.rs::allow`.
-fn allow_mcp_tool(config: &mut MintConfig, server: &str, tool: &str) -> bool {
-    use serde_json::{Value, json};
-    let allowed = config
-        .extra
-        .entry("allowedMcpTools".into())
-        .or_insert_with(|| json!({}));
-    if !allowed.is_object() {
-        *allowed = json!({});
+fn cmd_plugin(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    let (sub, name) = split_sub(rest);
+    match sub.as_str() {
+        "enable" | "disable" if !name.is_empty() => {
+            if !crate::native_plugins().iter().any(|p| p.name == name) {
+                let known = crate::native_plugins()
+                    .iter()
+                    .map(|p| p.name)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return error(format!("Unknown native plugin `{name}`. Known: {known}"));
+            }
+            let enable = sub == "enable";
+            crate::set_native_plugin_enabled_in(config, &name, enable);
+            applied(format!(
+                "🔌 {} native plugin `{name}`.",
+                if enable { "Enabled" } else { "Disabled" }
+            ))
+        }
+        _ => error("Usage: /plugin enable|disable <name>"),
     }
-    let servers = allowed.as_object_mut().expect("normalized to object");
-    let tools = servers
-        .entry(server.to_owned())
-        .or_insert_with(|| json!([]));
-    if !tools.is_array() {
-        *tools = json!([]);
-    }
-    let list = tools.as_array_mut().expect("normalized to array");
-    if list.iter().any(|t| t.as_str() == Some(tool)) {
-        return false;
-    }
-    list.push(Value::String(tool.to_owned()));
-    true
 }
 
 #[cfg(test)]
@@ -1192,6 +1293,67 @@ mod tests {
         }
         let allowed = &cfg.extra["allowedMcpTools"]["srv"];
         assert_eq!(allowed[0], "toolA");
+    }
+
+    #[test]
+    fn mcp_add_disable_edit_remove_round_trip() {
+        let mut cfg = MintConfig::default();
+
+        assert!(matches!(
+            execute(&req("/mcp add demo sh -c cat"), &mut cfg),
+            SlashResponse::Applied { .. }
+        ));
+        assert_eq!(cfg.extra["mcpServers"]["demo"]["command"], "sh");
+        assert_eq!(cfg.extra["mcpServers"]["demo"]["args"][1], "cat");
+
+        execute(&req("/mcp disable demo"), &mut cfg);
+        assert_eq!(cfg.extra["mcpServers"]["demo"]["disabled"], true);
+        execute(&req("/mcp enable demo"), &mut cfg);
+        assert!(cfg.extra["mcpServers"]["demo"].get("disabled").is_none());
+
+        execute(&req("/mcp edit demo icon 🧪"), &mut cfg);
+        assert_eq!(cfg.extra["mcpServers"]["demo"]["icon"], "🧪");
+
+        execute(&req("/mcp remove demo"), &mut cfg);
+        assert!(
+            cfg.extra["mcpServers"]
+                .as_object()
+                .unwrap()
+                .get("demo")
+                .is_none()
+        );
+
+        // Unknown server → not persisted, friendly message.
+        assert!(matches!(
+            execute(&req("/mcp disable ghost"), &mut cfg),
+            SlashResponse::Message { .. }
+        ));
+    }
+
+    #[test]
+    fn plugin_enable_disable_flips_native_gate() {
+        let mut cfg = MintConfig::default();
+
+        match execute(&req("/plugin enable docker"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+        assert!(crate::native_plugin_enabled(&cfg, "docker"));
+        execute(&req("/plugin disable docker"), &mut cfg);
+        assert!(!crate::native_plugin_enabled(&cfg, "docker"));
+
+        // `/plugins` with no args still opens the GUI view.
+        assert!(matches!(
+            execute(&req("/plugins"), &mut cfg),
+            SlashResponse::Navigate { .. }
+        ));
+        // Unknown plugin name is rejected without touching config.
+        assert!(matches!(
+            execute(&req("/plugin enable nope"), &mut cfg),
+            SlashResponse::Message { .. }
+        ));
     }
 
     #[test]
