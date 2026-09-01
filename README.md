@@ -230,6 +230,35 @@ Pick one way to get the global `mint` command:
 
 No alias set up? Everything below still works via `npm run cli -- <command>` in place of `mint <command>`.
 
+---
+
+### First Run — "Unidentified Developer" / "Unknown Publisher"
+
+Prebuilt downloads from the [Releases page](https://github.com/Pheem49/Mint/releases) — the
+desktop `.dmg` / `.exe` and the standalone `mint-cli_*` binaries — are **not yet code-signed**,
+so macOS Gatekeeper and Windows SmartScreen flag them on first launch. The warnings are
+expected and safe to dismiss. Installing with `install.sh` / `install.ps1` / `npm` builds from
+source and avoids all of this.
+
+**macOS** — Gatekeeper blocks unsigned, un-notarized builds until you clear the quarantine flag:
+
+```bash
+# Desktop app
+xattr -dr com.apple.quarantine /Applications/Mint.app
+
+# Standalone CLI binary — use the file you actually downloaded
+xattr -d com.apple.quarantine ./mint-cli_macos_arm64 && chmod +x ./mint-cli_macos_arm64
+```
+
+For the app you can instead right-click `Mint.app` → **Open** → **Open** in the dialog (once).
+
+**Windows** — SmartScreen shows "Windows protected your PC":
+
+1. Click **More info**.
+2. Click **Run anyway**.
+
+This appears once per new version until the builds are signed.
+
 ## User Interface
 
 ### Desktop App

@@ -256,3 +256,23 @@ Backspace, and its Up/Down recall started empty on every launch.
 - **Prompt history now persists** to `~/.config/mint/prompt-history.json` —
   loaded on start, each submitted line appended (immediate duplicates
   skipped), capped at the last 100.
+
+---
+
+## 🔓 First Run — Unsigned Build Warnings
+
+The desktop installers (`mint-agent_windows_x64.exe`, `mint-agent_macos_arm64.dmg`)
+and the standalone `mint-cli_*` binaries are **not yet code-signed**, so the OS
+warns you the first time you open them. This is expected. Installing via
+`install.sh` / `install.ps1` / `npm` builds from source and is unaffected.
+
+**macOS** — clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Mint.app     # desktop app
+xattr -d com.apple.quarantine ./mint-cli_macos_arm64      # CLI binary
+```
+
+Or right-click the app → **Open** → **Open**.
+
+**Windows** — on the SmartScreen prompt: **More info** → **Run anyway**.
