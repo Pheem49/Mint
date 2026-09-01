@@ -17,7 +17,17 @@ use thiserror::Error;
 use crate::{ConfigError, MintConfig, load_config, save_config};
 
 const MCP_TIMEOUT: Duration = Duration::from_secs(30);
-static OAUTH_DETECTED: AtomicBool = AtomicBool::new(false);
+
+/// Extended per-request timeout used only while a session is mid-OAuth (its
+/// reader threads saw an auth URL) — the user needs time to finish the browser
+/// flow before the pending request gives up.
+const MCP_OAUTH_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Upper bound on un-drained server notifications a session buffers; the oldest
+/// are dropped past this. Nothing drains `notifications` yet (see
+/// `drain_mcp_notifications`), so this just caps memory on a long-lived session
+/// talking to a chatty server.
+const MAX_BUFFERED_NOTIFICATIONS: usize = 64;
 
 /// Live MCP server sessions, keyed by server name. Held as `Arc<Mutex<_>>` per
 /// session (rather than one lock guarding the whole map for a call's full
@@ -438,8 +448,14 @@ struct McpSession {
     pending: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>,
     /// Server-initiated messages (a `method` but no `id`), e.g.
     /// `notifications/tools/list_changed` — captured rather than dropped, even
-    /// though nothing consumes them yet (see `drain_mcp_notifications`).
+    /// though nothing consumes them yet (see `drain_mcp_notifications`). Bounded
+    /// to the last `MAX_BUFFERED_NOTIFICATIONS`.
     notifications: Arc<Mutex<VecDeque<Value>>>,
+    /// Set by *this session's* reader threads when they see an OAuth URL, so the
+    /// next `request()` waits `MCP_OAUTH_TIMEOUT` instead of `MCP_TIMEOUT`.
+    /// Per-session (not a process global) so one server's auth flow can't skew
+    /// another server's request timeouts.
+    oauth_pending: Arc<AtomicBool>,
 }
 
 impl Drop for McpSession {
@@ -471,6 +487,17 @@ fn classify_mcp_line(value: &Value) -> McpLine {
     McpLine::Other
 }
 
+/// Appends a server notification, evicting the oldest so the queue never grows
+/// past `MAX_BUFFERED_NOTIFICATIONS`. Free function so the eviction is testable
+/// without a live subprocess.
+fn buffer_notification(queue: &Mutex<VecDeque<Value>>, notification: Value) {
+    let mut queue = queue.lock().unwrap();
+    while queue.len() >= MAX_BUFFERED_NOTIFICATIONS {
+        queue.pop_front();
+    }
+    queue.push_back(notification);
+}
+
 impl McpSession {
     fn start(server: &McpServer) -> Result<Self, McpError> {
         let mut process = Command::new(&server.command)
@@ -485,7 +512,10 @@ impl McpSession {
                 source,
             })?;
 
+        let oauth_pending: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
         if let Some(stderr) = process.stderr.take() {
+            let stderr_oauth = Arc::clone(&oauth_pending);
             std::thread::spawn(move || {
                 let reader = BufReader::new(stderr);
                 for line in reader.lines().map_while(Result::ok) {
@@ -494,7 +524,7 @@ impl McpSession {
                             "\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n",
                             url
                         );
-                        OAUTH_DETECTED.store(true, Ordering::Relaxed);
+                        stderr_oauth.store(true, Ordering::Relaxed);
                         let _ = open_url_in_browser(&url);
                     }
                 }
@@ -510,6 +540,7 @@ impl McpSession {
 
         let reader_pending = Arc::clone(&pending);
         let reader_notifications = Arc::clone(&notifications);
+        let reader_oauth = Arc::clone(&oauth_pending);
         std::thread::spawn(move || {
             // Isolates a panic in the read loop (e.g. a poisoned `pending`/
             // `notifications` lock from some other unrelated failure) so it's
@@ -524,7 +555,7 @@ impl McpSession {
                             "\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n",
                             url
                         );
-                        OAUTH_DETECTED.store(true, Ordering::Relaxed);
+                        reader_oauth.store(true, Ordering::Relaxed);
                         let _ = open_url_in_browser(&url);
                     }
                     let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -537,7 +568,7 @@ impl McpSession {
                             }
                         }
                         McpLine::Notification(notification) => {
-                            reader_notifications.lock().unwrap().push_back(notification);
+                            buffer_notification(&reader_notifications, notification);
                         }
                         McpLine::Other => {}
                     }
@@ -555,6 +586,7 @@ impl McpSession {
             next_id: AtomicU64::new(2), // 1 is reserved for `initialize` below.
             pending,
             notifications,
+            oauth_pending,
         };
 
         // Some servers (e.g. `@pouyanafisi/gmail-mcp`) don't tolerate
@@ -609,8 +641,8 @@ impl McpSession {
             return Err(error);
         }
 
-        let timeout = if OAUTH_DETECTED.load(Ordering::Relaxed) {
-            Duration::from_secs(120)
+        let timeout = if self.oauth_pending.load(Ordering::Relaxed) {
+            MCP_OAUTH_TIMEOUT
         } else {
             MCP_TIMEOUT
         };
@@ -618,7 +650,7 @@ impl McpSession {
             self.pending.lock().unwrap().remove(&id);
             McpError::Timeout
         })?;
-        OAUTH_DETECTED.store(false, Ordering::Relaxed);
+        self.oauth_pending.store(false, Ordering::Relaxed);
         if let Some(error) = response.get("error") {
             return Err(McpError::Tool(error.clone()));
         }
@@ -845,6 +877,49 @@ mod tests {
         assert!(!SESSIONS.lock().unwrap().contains_key(name));
 
         close_mcp_session(name);
+    }
+
+    #[test]
+    fn buffer_notification_evicts_oldest_past_the_cap() {
+        let queue: Mutex<VecDeque<Value>> = Mutex::new(VecDeque::new());
+        for i in 0..(MAX_BUFFERED_NOTIFICATIONS as i64 + 10) {
+            buffer_notification(&queue, json!({ "seq": i }));
+        }
+        let queue = queue.lock().unwrap();
+        assert_eq!(queue.len(), MAX_BUFFERED_NOTIFICATIONS);
+        // The first 10 were dropped; the window is the most recent ones.
+        assert_eq!(queue.front().unwrap()["seq"], 10);
+        assert_eq!(
+            queue.back().unwrap()["seq"],
+            MAX_BUFFERED_NOTIFICATIONS as i64 + 9
+        );
+    }
+
+    #[test]
+    fn oauth_pending_is_per_session_not_global() {
+        let (a, b) = ("mock-echo-oauth-a", "mock-echo-oauth-b");
+        close_mcp_session(a);
+        close_mcp_session(b);
+        call_mcp_tool(&config_with_mock_echo_server(a), a, "x", json!({})).unwrap();
+        call_mcp_tool(&config_with_mock_echo_server(b), b, "x", json!({})).unwrap();
+
+        let sessions = SESSIONS.lock().unwrap();
+        let a_flag = Arc::clone(&sessions.get(a).unwrap().lock().unwrap().oauth_pending);
+        let b_flag = Arc::clone(&sessions.get(b).unwrap().lock().unwrap().oauth_pending);
+        drop(sessions);
+
+        assert!(
+            !Arc::ptr_eq(&a_flag, &b_flag),
+            "sessions must not share the flag"
+        );
+        assert!(!a_flag.load(Ordering::Relaxed));
+
+        // Marking server A mid-OAuth leaves server B's timeout untouched.
+        a_flag.store(true, Ordering::Relaxed);
+        assert!(!b_flag.load(Ordering::Relaxed));
+
+        close_mcp_session(a);
+        close_mcp_session(b);
     }
 
     #[test]
