@@ -349,6 +349,26 @@ pub async fn login_plugin_oauth_public(provider: &str) {
     }
 }
 
+/// Interactive `/plugins` entry points (`crate::interactive`).
+pub fn logout_plugin_oauth_public(provider: &str) -> Result<()> {
+    logout_plugin_oauth(provider)
+}
+
+/// Prompt for and persist a plugin's manual API credentials. `key` is the
+/// settings key (`gmail`, `calendar`, `notion`, `spotify`, `github`).
+pub fn configure_plugin_fields_public(key: &str) -> Result<()> {
+    prompt_manual_plugin_fields(key)
+}
+
+/// Enable/disable a native plugin by `native_plugins()` name, persisting both
+/// representations via `mint_core::set_native_plugin_enabled_in`.
+pub fn set_native_plugin_enabled(name: &str, enabled: bool) -> Result<()> {
+    let mut config = load_config()?;
+    mint_core::set_native_plugin_enabled_in(&mut config, name, enabled);
+    save_config(&config)?;
+    Ok(())
+}
+
 fn logout_plugin_oauth(provider: &str) -> Result<()> {
     revoke_oauth_tokens(provider).map_err(|e| anyhow!(e))?;
     println!(
