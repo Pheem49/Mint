@@ -107,6 +107,88 @@ pub fn list_mcp_servers() -> Result<BTreeMap<String, McpServer>, McpError> {
     configured_mcp_servers(&load_config()?)
 }
 
+// ── Server-config mutation ────────────────────────────────────────────────────
+//
+// Two layers so every surface can share the logic without double-saving:
+//   * `*_in(&mut MintConfig, …)` — pure, no persistence. Used by the shared
+//     slash engine (`crate::slash`), which reports `ConfigChanged` and lets the
+//     host `save_config`.
+//   * the `pub fn foo(…)` wrappers below — `load_config → *_in → save_config`,
+//     for the CLI (`mint mcp …`) and any caller that owns the whole round-trip.
+
+/// Insert or replace a server entry in `config.extra["mcpServers"]` (no save).
+pub fn upsert_server_in(
+    config: &mut MintConfig,
+    name: &str,
+    server: McpServer,
+) -> Result<(), McpError> {
+    let mut servers = configured_mcp_servers(config)?;
+    servers.insert(name.to_string(), server);
+    write_servers(config, servers)
+}
+
+/// Remove a server entry (no save). Returns whether it existed.
+pub fn remove_server_in(config: &mut MintConfig, name: &str) -> Result<bool, McpError> {
+    let mut servers = configured_mcp_servers(config)?;
+    let removed = servers.remove(name).is_some();
+    write_servers(config, servers)?;
+    Ok(removed)
+}
+
+/// Drop every configured server (no save).
+pub fn clear_servers_in(config: &mut MintConfig) -> Result<(), McpError> {
+    write_servers(config, BTreeMap::new())
+}
+
+/// Flip `mcpServers[name].disabled` (no save); kills a live session on disable.
+/// Returns whether the server existed.
+pub fn set_server_disabled_in(
+    config: &mut MintConfig,
+    name: &str,
+    disabled: bool,
+) -> Result<bool, McpError> {
+    let mut servers = configured_mcp_servers(config)?;
+    let Some(server) = servers.get_mut(name) else {
+        return Ok(false);
+    };
+    server.disabled = disabled;
+    write_servers(config, servers)?;
+    if disabled {
+        close_mcp_session(name);
+    }
+    Ok(true)
+}
+
+/// Partial edit of an existing server (no save); `None` fields are left as-is.
+/// Returns whether the server existed.
+pub fn update_server_in(
+    config: &mut MintConfig,
+    name: &str,
+    command: Option<String>,
+    args: Option<Vec<String>>,
+    env: Option<BTreeMap<String, String>>,
+    icon: Option<Option<String>>,
+) -> Result<bool, McpError> {
+    let mut servers = configured_mcp_servers(config)?;
+    let Some(server) = servers.get_mut(name) else {
+        return Ok(false);
+    };
+    if let Some(command) = command {
+        server.command = command;
+    }
+    if let Some(args) = args {
+        server.args = args;
+    }
+    if let Some(env) = env {
+        server.env = env;
+    }
+    if let Some(icon) = icon {
+        server.icon = icon;
+    }
+    write_servers(config, servers)?;
+    Ok(true)
+}
+
 pub fn add_mcp_server(
     name: &str,
     command: &str,
@@ -114,9 +196,9 @@ pub fn add_mcp_server(
     env: Vec<String>,
 ) -> Result<(), McpError> {
     let mut config = load_config()?;
-    let mut servers = configured_mcp_servers(&config)?;
-    servers.insert(
-        name.into(),
+    upsert_server_in(
+        &mut config,
+        name,
         McpServer {
             command: command.into(),
             args,
@@ -124,21 +206,50 @@ pub fn add_mcp_server(
             icon: None,
             disabled: false,
         },
-    );
-    save_mcp_servers(&mut config, servers)
+    )?;
+    Ok(save_config(&config)?)
 }
 
 pub fn remove_mcp_server(name: &str) -> Result<bool, McpError> {
     let mut config = load_config()?;
-    let mut servers = configured_mcp_servers(&config)?;
-    let removed = servers.remove(name).is_some();
-    save_mcp_servers(&mut config, servers)?;
+    let removed = remove_server_in(&mut config, name)?;
+    save_config(&config)?;
     Ok(removed)
 }
 
 pub fn clear_mcp_servers() -> Result<(), McpError> {
     let mut config = load_config()?;
-    save_mcp_servers(&mut config, BTreeMap::new())
+    clear_servers_in(&mut config)?;
+    Ok(save_config(&config)?)
+}
+
+/// `load_config → set_server_disabled_in → save_config`. Returns whether the
+/// server existed (a no-op, no save, if not).
+pub fn set_mcp_server_disabled(name: &str, disabled: bool) -> Result<bool, McpError> {
+    let mut config = load_config()?;
+    let existed = set_server_disabled_in(&mut config, name, disabled)?;
+    if existed {
+        save_config(&config)?;
+    }
+    Ok(existed)
+}
+
+/// `load_config → update_server_in → save_config`. `env` entries are `KEY=VALUE`
+/// strings, parsed here. Returns whether the server existed.
+pub fn update_mcp_server(
+    name: &str,
+    command: Option<String>,
+    args: Option<Vec<String>>,
+    env: Option<Vec<String>>,
+    icon: Option<Option<String>>,
+) -> Result<bool, McpError> {
+    let mut config = load_config()?;
+    let env = env.map(parse_env).transpose()?;
+    let existed = update_server_in(&mut config, name, command, args, env, icon)?;
+    if existed {
+        save_config(&config)?;
+    }
+    Ok(existed)
 }
 
 pub fn call_mcp_tool(
@@ -345,14 +456,110 @@ pub fn call_configured_mcp_tool(
     call_mcp_tool(&load_config()?, server_name, tool_name, arguments)
 }
 
-fn save_mcp_servers(
+/// Serialize `servers` back into `config.extra["mcpServers"]` (no save).
+fn write_servers(
     config: &mut MintConfig,
     servers: BTreeMap<String, McpServer>,
 ) -> Result<(), McpError> {
     config
         .extra
         .insert("mcpServers".into(), serde_json::to_value(servers)?);
-    Ok(save_config(config)?)
+    Ok(())
+}
+
+// ── Tool allowlist (`allowedMcpTools`) ────────────────────────────────────────
+
+/// Add `tool` (or `"*"`) to `config.extra["allowedMcpTools"][server]` (no save).
+/// Returns `false` when it was already covered — an exact match, or a `"*"`
+/// entry already present for that server. Ported from
+/// `crates/mint-cli/src/mcp.rs::allow` / `slash::allow_mcp_tool`.
+pub fn allow_tool_in(config: &mut MintConfig, server: &str, tool: &str) -> bool {
+    let allowed = config
+        .extra
+        .entry("allowedMcpTools".into())
+        .or_insert_with(|| json!({}));
+    if !allowed.is_object() {
+        *allowed = json!({});
+    }
+    let servers = allowed.as_object_mut().expect("normalized to object");
+    let list = servers
+        .entry(server.to_owned())
+        .or_insert_with(|| json!([]));
+    if !list.is_array() {
+        *list = json!([]);
+    }
+    let arr = list.as_array_mut().expect("normalized to array");
+    if arr
+        .iter()
+        .any(|t| t.as_str() == Some(tool) || t.as_str() == Some("*"))
+    {
+        return false;
+    }
+    arr.push(Value::String(tool.to_owned()));
+    true
+}
+
+/// Remove `tool` from `config.extra["allowedMcpTools"][server]` (no save).
+/// `tool == "*"` clears the server's list entirely. Returns whether anything
+/// changed.
+pub fn disallow_tool_in(config: &mut MintConfig, server: &str, tool: &str) -> bool {
+    let Some(arr) = config
+        .extra
+        .get_mut("allowedMcpTools")
+        .and_then(|v| v.as_object_mut())
+        .and_then(|m| m.get_mut(server))
+        .and_then(|v| v.as_array_mut())
+    else {
+        return false;
+    };
+    let before = arr.len();
+    if tool == "*" {
+        arr.clear();
+    } else {
+        arr.retain(|t| t.as_str() != Some(tool));
+    }
+    before != arr.len()
+}
+
+/// Read view of `allowedMcpTools`: `server -> [tool, …]` (may contain `"*"`).
+pub fn mcp_tool_allowlist(config: &MintConfig) -> BTreeMap<String, Vec<String>> {
+    config
+        .extra
+        .get("allowedMcpTools")
+        .and_then(|v| v.as_object())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(server, tools)| {
+                    let tools = tools
+                        .as_array()?
+                        .iter()
+                        .filter_map(|t| t.as_str().map(str::to_owned))
+                        .collect();
+                    Some((server.clone(), tools))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `load_config → allow_tool_in → save_config`. Returns whether it was added.
+pub fn allow_mcp_tool(server: &str, tool: &str) -> Result<bool, McpError> {
+    let mut config = load_config()?;
+    let added = allow_tool_in(&mut config, server, tool);
+    if added {
+        save_config(&config)?;
+    }
+    Ok(added)
+}
+
+/// `load_config → disallow_tool_in → save_config`. Returns whether it changed.
+pub fn disallow_mcp_tool(server: &str, tool: &str) -> Result<bool, McpError> {
+    let mut config = load_config()?;
+    let removed = disallow_tool_in(&mut config, server, tool);
+    if removed {
+        save_config(&config)?;
+    }
+    Ok(removed)
 }
 
 fn parse_env(values: Vec<String>) -> Result<BTreeMap<String, String>, McpError> {
@@ -935,5 +1142,73 @@ mod tests {
         // `disabled: false` is not written back out (keeps configs tidy).
         let reserialized = serde_json::to_value(&servers["plain"]).unwrap();
         assert!(reserialized.get("disabled").is_none());
+    }
+
+    fn config_with_one_server(name: &str, server: Value) -> MintConfig {
+        let mut config = MintConfig::default();
+        config
+            .extra
+            .insert("mcpServers".into(), json!({ name: server }));
+        config
+    }
+
+    #[test]
+    fn set_server_disabled_in_flips_flag_and_reports_existence() {
+        let mut config = config_with_one_server("srv", json!({ "command": "x" }));
+
+        assert!(set_server_disabled_in(&mut config, "srv", true).unwrap());
+        assert!(configured_mcp_servers(&config).unwrap()["srv"].disabled);
+        assert!(set_server_disabled_in(&mut config, "srv", false).unwrap());
+        assert!(!configured_mcp_servers(&config).unwrap()["srv"].disabled);
+
+        // Unknown server: reported as missing, config untouched.
+        assert!(!set_server_disabled_in(&mut config, "nope", true).unwrap());
+    }
+
+    #[test]
+    fn update_server_in_edits_only_the_given_fields() {
+        let mut config =
+            config_with_one_server("srv", json!({ "command": "old", "args": ["--keep"] }));
+
+        let existed = update_server_in(
+            &mut config,
+            "srv",
+            Some("new".into()),
+            None,
+            None,
+            Some(Some("🧪".into())),
+        )
+        .unwrap();
+        assert!(existed);
+
+        let srv = &configured_mcp_servers(&config).unwrap()["srv"];
+        assert_eq!(srv.command, "new");
+        assert_eq!(srv.args, vec!["--keep".to_string()]); // untouched
+        assert_eq!(srv.icon.as_deref(), Some("🧪"));
+
+        assert!(
+            !update_server_in(&mut config, "gone", Some("x".into()), None, None, None).unwrap()
+        );
+    }
+
+    #[test]
+    fn allow_and_disallow_tool_in_are_idempotent_and_honor_wildcard() {
+        let mut config = MintConfig::default();
+
+        assert!(allow_tool_in(&mut config, "srv", "read"));
+        assert!(!allow_tool_in(&mut config, "srv", "read")); // already there
+        assert!(allow_tool_in(&mut config, "srv", "write"));
+        assert_eq!(mcp_tool_allowlist(&config)["srv"], vec!["read", "write"]);
+
+        // A `*` already present covers any tool.
+        let mut wild = MintConfig::default();
+        allow_tool_in(&mut wild, "srv", "*");
+        assert!(!allow_tool_in(&mut wild, "srv", "anything"));
+
+        // `disallow "*"` clears the server's list.
+        assert!(disallow_tool_in(&mut config, "srv", "read"));
+        assert!(disallow_tool_in(&mut config, "srv", "*"));
+        assert!(mcp_tool_allowlist(&config)["srv"].is_empty());
+        assert!(!disallow_tool_in(&mut config, "srv", "read")); // nothing to remove
     }
 }

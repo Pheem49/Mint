@@ -124,6 +124,41 @@ pub async fn execute_native_plugin(
     }
 }
 
+/// Public read: is `name` enabled for the agent's `run_plugin`? True if it's in
+/// `allowedNativePlugins` (or `"*"`) **or** its per-plugin `plugin<Name>Enabled`
+/// flag is set. UIs use this to render toggle state.
+pub fn native_plugin_enabled(config: &MintConfig, name: &str) -> bool {
+    native_plugin_allowed(config, name)
+}
+
+/// Enable/disable a native plugin in `config` (no save). Writes both
+/// representations the surfaces read: the `plugin<Name>Enabled` boolean (only
+/// for plugins that have one — see [`native_plugin_enable_flag`]) and
+/// `allowedNativePlugins` array membership. A `"*"` wildcard in the array is
+/// left untouched. Mirror this in `src/renderer/shared/utils/nativePlugins.ts`.
+pub fn set_native_plugin_enabled_in(config: &mut MintConfig, name: &str, enabled: bool) {
+    if let Some(flag) = native_plugin_enable_flag(name) {
+        config.extra.insert(flag.to_string(), Value::Bool(enabled));
+    }
+
+    let list = config
+        .extra
+        .entry("allowedNativePlugins".to_string())
+        .or_insert_with(|| json!([]));
+    if !list.is_array() {
+        *list = json!([]);
+    }
+    let arr = list.as_array_mut().expect("normalized to array");
+    let has_wildcard = arr.iter().any(|v| v.as_str() == Some("*"));
+    if enabled {
+        if !has_wildcard && !arr.iter().any(|v| v.as_str() == Some(name)) {
+            arr.push(Value::String(name.to_string()));
+        }
+    } else {
+        arr.retain(|v| v.as_str() != Some(name));
+    }
+}
+
 fn native_plugin_allowed(config: &MintConfig, name: &str) -> bool {
     let in_allowlist = config
         .extra
@@ -824,5 +859,51 @@ mod tests {
             .extra
             .insert("pluginGmailEnabled".into(), json!(false));
         assert!(!native_plugin_allowed(&config, "gmail"));
+    }
+
+    #[test]
+    fn set_native_plugin_enabled_in_writes_both_representations() {
+        let mut config = MintConfig::default();
+
+        // Mapped plugin: writes the flag *and* the array; UI alias handled.
+        set_native_plugin_enabled_in(&mut config, "google_calendar", true);
+        assert_eq!(config.extra["pluginCalendarEnabled"], json!(true));
+        assert!(
+            config.extra["allowedNativePlugins"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == "google_calendar")
+        );
+        assert!(native_plugin_enabled(&config, "google_calendar"));
+
+        // Unmapped plugin (no flag key): array only.
+        set_native_plugin_enabled_in(&mut config, "docker", true);
+        assert!(config.extra.get("pluginDockerEnabled").is_none());
+        assert!(native_plugin_enabled(&config, "docker"));
+
+        // Disable removes from the array and clears the flag.
+        set_native_plugin_enabled_in(&mut config, "google_calendar", false);
+        assert_eq!(config.extra["pluginCalendarEnabled"], json!(false));
+        assert!(
+            !config.extra["allowedNativePlugins"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == "google_calendar")
+        );
+    }
+
+    #[test]
+    fn set_native_plugin_enabled_in_leaves_a_wildcard_intact() {
+        let mut config = MintConfig::default();
+        config
+            .extra
+            .insert("allowedNativePlugins".into(), json!(["*"]));
+
+        set_native_plugin_enabled_in(&mut config, "docker", true);
+        // Still just `["*"]` — no redundant explicit entry appended.
+        assert_eq!(config.extra["allowedNativePlugins"], json!(["*"]));
+        assert!(native_plugin_enabled(&config, "docker"));
     }
 }

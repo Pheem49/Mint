@@ -125,59 +125,38 @@ pub async fn run_plugins_command(subcommand: Option<PluginsSubcommand>) -> Resul
 }
 
 fn is_plugin_enabled(config: &MintConfig, plugin: &BuiltinPluginInfo) -> bool {
-    let flag = config
-        .extra
-        .get(plugin.config_field)
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    // A native-backed plugin also counts as enabled if it's in
-    // `allowedNativePlugins` (e.g. added by `mint setup`), so this listing and
-    // the agent's own `run_plugin` gate agree.
-    let in_allowlist = plugin.native_name.is_some_and(|native| {
-        config
+    match plugin.native_name {
+        // Native-backed: same gate the agent's `run_plugin` uses — the flag
+        // boolean *or* `allowedNativePlugins` membership — so this listing and
+        // the agent never disagree.
+        Some(native) => mint_core::native_plugin_enabled(config, native),
+        // Display-only (Discord RPC): just the boolean.
+        None => config
             .extra
-            .get("allowedNativePlugins")
-            .and_then(|v| v.as_array())
-            .is_some_and(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str())
-                    .any(|v| v == "*" || v == native)
-            })
-    });
-    flag || in_allowlist
+            .get(plugin.config_field)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    }
 }
 
-/// Persists a plugin's on/off state to both representations: the per-plugin
-/// `plugin<Name>Enabled` boolean (what this CLI and the settings UI read for
-/// display) and, for native-backed plugins, `allowedNativePlugins` (what the
-/// agent's `run_plugin` gate reads). Writing only one leaves the plugin looking
-/// enabled while the agent still refuses it, or vice versa.
+/// Persists a plugin's on/off state to both representations the surfaces read:
+/// the per-plugin `plugin<Name>Enabled` boolean (display) and, for native-backed
+/// plugins, `allowedNativePlugins` (the agent's `run_plugin` gate). Native
+/// plugins delegate to `mint_core::set_native_plugin_enabled_in`, which owns the
+/// canonical logic; non-native entries (Discord RPC) only get the display bool.
 fn set_plugin_enabled(plugin: &BuiltinPluginInfo, enabled: bool) -> Result<()> {
     let mut config = load_config()?;
-    config.extra.insert(
-        plugin.config_field.to_string(),
-        serde_json::Value::Bool(enabled),
-    );
-
-    if let Some(native) = plugin.native_name {
-        let list = config
-            .extra
-            .entry("allowedNativePlugins".to_string())
-            .or_insert_with(|| serde_json::json!([]));
-        if !list.is_array() {
-            *list = serde_json::json!([]);
+    match plugin.native_name {
+        Some(native) => {
+            mint_core::set_native_plugin_enabled_in(&mut config, native, enabled);
         }
-        let arr = list.as_array_mut().expect("normalized to an array");
-        let has_wildcard = arr.iter().any(|v| v.as_str() == Some("*"));
-        if enabled {
-            if !has_wildcard && !arr.iter().any(|v| v.as_str() == Some(native)) {
-                arr.push(serde_json::Value::String(native.to_string()));
-            }
-        } else {
-            arr.retain(|v| v.as_str() != Some(native));
+        None => {
+            config.extra.insert(
+                plugin.config_field.to_string(),
+                serde_json::Value::Bool(enabled),
+            );
         }
     }
-
     save_config(&config)?;
     Ok(())
 }

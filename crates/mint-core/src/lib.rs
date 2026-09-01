@@ -120,11 +120,13 @@ pub use linked_folders::{
     configured_linked_folders, list_linked_folders, remove_linked_folder, spawn_linked_folder_note,
 };
 pub use mcp::{
-    McpError, McpServer, add_mcp_server, call_configured_mcp_tool, call_mcp_tool,
-    clear_mcp_servers, close_all_mcp_sessions, close_mcp_session, configured_mcp_servers,
-    drain_mcp_notifications, get_server_prompt, list_mcp_servers, list_server_prompts,
-    list_server_resources, list_server_tools, read_server_resource, reauth_mcp_server,
-    remove_mcp_server,
+    McpError, McpServer, add_mcp_server, allow_mcp_tool, allow_tool_in, call_configured_mcp_tool,
+    call_mcp_tool, clear_mcp_servers, clear_servers_in, close_all_mcp_sessions, close_mcp_session,
+    configured_mcp_servers, disallow_mcp_tool, disallow_tool_in, drain_mcp_notifications,
+    get_server_prompt, list_mcp_servers, list_server_prompts, list_server_resources,
+    list_server_tools, mcp_tool_allowlist, read_server_resource, reauth_mcp_server,
+    remove_mcp_server, remove_server_in, set_mcp_server_disabled, set_server_disabled_in,
+    update_mcp_server, update_server_in, upsert_server_in,
 };
 pub use memory::{
     CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, Fact, InteractionMemory, LearnedSkill,
@@ -142,7 +144,10 @@ pub use pictures::{
     PictureEntry, PictureError, delete_saved_picture, list_saved_pictures, parse_data_uri,
     save_chat_images, save_sent_image,
 };
-pub use plugins::{NativePlugin, PluginError, execute_native_plugin, native_plugins};
+pub use plugins::{
+    NativePlugin, PluginError, execute_native_plugin, native_plugin_enabled, native_plugins,
+    set_native_plugin_enabled_in,
+};
 pub use safety::{
     Capability, SafetyError, SafetyTier, ShellClassification, ShellCommandMode,
     assert_path_capability, classify_shell_command, shell_mode_allowed,
