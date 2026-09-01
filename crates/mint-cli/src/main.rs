@@ -924,8 +924,13 @@ pub(crate) fn print_mcp_servers(
     }
     for (name, srv) in servers {
         let args_str = srv.args.join(" ");
+        let (dot, suffix) = if srv.disabled {
+            (DIM, format!(" {DIM}[disabled]{RESET}"))
+        } else {
+            (BLUE, String::new())
+        };
         println!(
-            "  {BLUE}●{RESET} {name} {DIM}({} {}){RESET}",
+            "  {dot}●{RESET} {name} {DIM}({} {}){RESET}{suffix}",
             srv.command, args_str
         );
     }

@@ -943,12 +943,13 @@ where
         let mut pending_video = video_data_uri;
 
         let mut plan_mode = plan_mode;
-        // A pin only means anything if it names a server that's actually configured —
-        // a stale/hand-typed `@name` (e.g. from a since-disabled server) is silently
-        // dropped rather than restricting the turn to a server that doesn't exist.
+        // A pin only means anything if it names a server that's actually configured
+        // and enabled — a stale/hand-typed `@name`, or one for a server since
+        // disabled in Settings, is silently dropped rather than restricting the
+        // turn to a server that can't be reached.
         let pinned_mcp_server = pinned_mcp_server.filter(|p| {
             crate::mcp::list_mcp_servers()
-                .map(|m| m.contains_key(*p))
+                .map(|m| m.get(*p).is_some_and(|server| !server.disabled))
                 .unwrap_or(false)
         });
         // Determined once from the base `config` (not the per-step `active_config`

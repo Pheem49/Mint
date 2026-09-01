@@ -295,7 +295,13 @@ pub fn build_system_prompt(
             pin.to_string()
         } else {
             crate::mcp::list_mcp_servers()
-                .map(|m| m.keys().cloned().collect::<Vec<String>>().join(", "))
+                .map(|m| {
+                    m.iter()
+                        .filter(|(_, server)| !server.disabled)
+                        .map(|(name, _)| name.clone())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                })
                 .unwrap_or_default()
         };
         mcp_str = format!(

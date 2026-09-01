@@ -36,6 +36,16 @@ pub struct McpServer {
     pub env: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Set by the Desktop/Web MCP settings toggle to keep a server configured
+    /// but temporarily off. A disabled server is hidden from the agent's server
+    /// list and every `tools/*`, `resources/*`, and `prompts/*` call against it
+    /// is refused before a process is spawned.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disabled: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Error)]
@@ -48,6 +58,8 @@ pub enum McpError {
     InvalidEnvironment,
     #[error("MCP server '{0}' is not configured")]
     MissingServer(String),
+    #[error("MCP server '{0}' is disabled. Re-enable it in Settings > Plugins to use it.")]
+    Disabled(String),
     #[error(
         "MCP tool '{server}/{tool}' is not allowed by policy. To allow it, please run: /mcp allow {server} {tool} (or /mcp allow {server} * to allow all tools on this server)"
     )]
@@ -100,6 +112,7 @@ pub fn add_mcp_server(
             args,
             env: parse_env(env)?,
             icon: None,
+            disabled: false,
         },
     );
     save_mcp_servers(&mut config, servers)
@@ -622,16 +635,27 @@ fn get_or_start_session(
     config: &MintConfig,
     server_name: &str,
 ) -> Result<Arc<Mutex<McpSession>>, McpError> {
+    let servers = configured_mcp_servers(config)?;
+    let server = servers
+        .get(server_name)
+        .ok_or_else(|| McpError::MissingServer(server_name.into()))?;
+
     let mut sessions = SESSIONS.lock().unwrap();
+
+    if server.disabled {
+        // Turned off in Settings after a session was already running — kill it
+        // so a stale process doesn't linger past the toggle.
+        if let Some(session) = sessions.remove(server_name) {
+            let _ = session.lock().unwrap().process.kill();
+        }
+        return Err(McpError::Disabled(server_name.into()));
+    }
+
     if let Some(session) = sessions.get(server_name) {
         if session.lock().unwrap().is_alive() {
             return Ok(Arc::clone(session));
         }
     }
-    let servers = configured_mcp_servers(config)?;
-    let server = servers
-        .get(server_name)
-        .ok_or_else(|| McpError::MissingServer(server_name.into()))?;
     let session = Arc::new(Mutex::new(McpSession::start(server)?));
     sessions.insert(server_name.to_string(), Arc::clone(&session));
     Ok(session)
@@ -717,6 +741,7 @@ mod tests {
             ],
             env: BTreeMap::new(),
             icon: None,
+            disabled: false,
         }
     }
 
@@ -791,5 +816,49 @@ mod tests {
         );
 
         close_mcp_session(name);
+    }
+
+    #[test]
+    fn disabled_server_is_refused_and_its_running_session_is_dropped() {
+        let name = "mock-echo-disabled-test";
+        close_mcp_session(name);
+        let mut config = config_with_mock_echo_server(name);
+
+        // Enabled: a call works and leaves a live session behind.
+        assert_eq!(
+            call_mcp_tool(&config, name, "anything", json!({})).unwrap()["echo"],
+            true
+        );
+        assert!(SESSIONS.lock().unwrap().contains_key(name));
+
+        // Flip the stored server to `disabled: true`, as the settings toggle does.
+        config.extra.insert(
+            "mcpServers".into(),
+            json!({ name: { "command": "sh", "disabled": true } }),
+        );
+
+        match call_mcp_tool(&config, name, "anything", json!({})) {
+            Err(McpError::Disabled(server)) => assert_eq!(server, name),
+            other => panic!("expected McpError::Disabled, got {other:?}"),
+        }
+        // The session that predated the toggle must be gone, not left running.
+        assert!(!SESSIONS.lock().unwrap().contains_key(name));
+
+        close_mcp_session(name);
+    }
+
+    #[test]
+    fn disabled_flag_defaults_false_and_round_trips_through_config() {
+        let servers: BTreeMap<String, McpServer> = serde_json::from_value(json!({
+            "plain": { "command": "x" },
+            "off": { "command": "y", "disabled": true }
+        }))
+        .unwrap();
+        assert!(!servers["plain"].disabled);
+        assert!(servers["off"].disabled);
+
+        // `disabled: false` is not written back out (keeps configs tidy).
+        let reserialized = serde_json::to_value(&servers["plain"]).unwrap();
+        assert!(reserialized.get("disabled").is_none());
     }
 }

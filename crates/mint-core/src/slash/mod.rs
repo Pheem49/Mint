@@ -948,7 +948,16 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
                 message("🔌 No MCP servers configured. Add one in Settings > Plugins.")
             }
             Ok(servers) => {
-                let items = servers.keys().map(|k| format!("`{k}`")).collect::<Vec<_>>();
+                let items = servers
+                    .iter()
+                    .map(|(name, server)| {
+                        if server.disabled {
+                            format!("`{name}` _(disabled)_")
+                        } else {
+                            format!("`{name}`")
+                        }
+                    })
+                    .collect::<Vec<_>>();
                 let mut md = md_heading("🔌 MCP Servers");
                 md.push_str(&md_list(&items));
                 message(md)
