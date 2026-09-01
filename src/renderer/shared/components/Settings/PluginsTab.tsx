@@ -25,7 +25,7 @@ interface PluginsTabProps {
   setMcpEnv: (val: string) => void
   mcpIcon?: string
   setMcpIcon?: (val: string) => void
-  handleAddMcpServer: () => void
+  handleAddMcpServer: (allowAll?: boolean) => void
   handleRemoveMcpServer: (name: string) => void
   handleConnectPlugin: (plugin: string) => void
 }
@@ -68,6 +68,7 @@ export default function PluginsTab({
   const [authenticatingProvider, setAuthenticatingProvider] = useState<string | null>(null)
   const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null)
   const [expandedMcp, setExpandedMcp] = useState<string | null>(null)
+  const [addMcpAllowAll, setAddMcpAllowAll] = useState(false)
 
   useEffect(() => {
     fetchSkills()
@@ -533,7 +534,24 @@ export default function PluginsTab({
               rows={3}
             />
           </div>
-          <button className="btn-primary btn-full" onClick={handleAddMcpServer}>Add MCP Server</button>
+          <label className="setting-row" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+            <input type="checkbox" checked={addMcpAllowAll} onChange={(e) => setAddMcpAllowAll(e.target.checked)} />
+            <span>
+              Allow the agent to call all of this server’s tools (*)
+              <span style={{ display: 'block', opacity: 0.6, fontSize: '0.8rem' }}>
+                Leave off to approve tools one by one afterwards.
+              </span>
+            </span>
+          </label>
+          <button
+            className="btn-primary btn-full"
+            onClick={() => {
+              handleAddMcpServer(addMcpAllowAll)
+              setAddMcpAllowAll(false)
+            }}
+          >
+            Add MCP Server
+          </button>
         </div>
       </section>
 

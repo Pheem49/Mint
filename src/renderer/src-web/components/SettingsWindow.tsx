@@ -517,7 +517,7 @@ export default function SettingsWindow() {
   }
 
 
-  const handleAddMcpServer = () => {
+  const handleAddMcpServer = (allowAll?: boolean) => {
     if (!mcpName.trim() || !mcpCmd.trim()) {
       alert('Please provide at least a server name and command.')
       return
@@ -533,11 +533,12 @@ export default function SettingsWindow() {
       }
     }
 
+    const name = mcpName.trim()
     const argList = mcpArgs.split(/\s+/).filter(Boolean)
 
     const updatedMcp = {
       ...config.mcpServers,
-      [mcpName.trim()]: {
+      [name]: {
         command: mcpCmd.trim(),
         args: argList,
         env: parsedEnv,
@@ -547,7 +548,10 @@ export default function SettingsWindow() {
 
     setConfig({
       ...config,
-      mcpServers: updatedMcp
+      mcpServers: updatedMcp,
+      ...(allowAll
+        ? { allowedMcpTools: { ...((config as any).allowedMcpTools || {}), [name]: ['*'] } }
+        : {}),
     })
 
     setMcpName('')

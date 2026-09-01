@@ -16,7 +16,7 @@ export interface McpServersViewProps {
   setMcpEnv: (val: string) => void
   mcpIcon?: string
   setMcpIcon?: (val: string) => void
-  handleAddMcpServer: () => void
+  handleAddMcpServer: (allowAll?: boolean) => void
   handleRemoveMcpServer: (name: string) => void
   detectTools?: () => Promise<{ docker: boolean; git: boolean; gh: boolean; node: boolean }>
   onReauth?: (name: string) => Promise<boolean>
@@ -45,6 +45,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
   const [detectedTools, setDetectedTools] = useState({ docker: false, git: false, gh: false, node: false })
   const [detailMcpName, setDetailMcpName] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [addAllowAll, setAddAllowAll] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [reauthStatus, setReauthStatus] = useState<Record<string, 'idle' | 'running' | 'success' | 'error'>>({})
 
@@ -149,7 +150,8 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
 
   const onSubmitAddServer = (e: React.FormEvent) => {
     e.preventDefault()
-    handleAddMcpServer()
+    handleAddMcpServer(addAllowAll)
+    setAddAllowAll(false)
     setShowAddModal(false)
   }
 
@@ -505,6 +507,16 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                     rows={3}
                   />
                 </div>
+
+                <label className="management-form-group" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={addAllowAll} onChange={(e) => setAddAllowAll(e.target.checked)} />
+                  <span>
+                    Allow the agent to call all of this server’s tools (*)
+                    <span style={{ display: 'block', opacity: 0.6, fontSize: '0.8rem' }}>
+                      Leave off to approve tools one by one afterwards.
+                    </span>
+                  </span>
+                </label>
               </div>
 
               <div className="management-modal-footer">

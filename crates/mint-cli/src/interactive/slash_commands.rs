@@ -2460,19 +2460,34 @@ fn handle_mcp_slash(session: &mut InteractiveSession, subcmd: &str, args: &str) 
         "list" | "" => mcp_interactive_picker(session),
 
         "add" => {
-            let mut parts = args.split_whitespace();
+            let mut tokens: Vec<&str> = args.split_whitespace().collect();
+            let allow_all = tokens.iter().any(|t| *t == "--allow-all");
+            tokens.retain(|t| *t != "--allow-all");
+            let mut parts = tokens.into_iter();
             match (parts.next(), parts.next()) {
                 (Some(name), Some(command)) => {
                     let arg_list: Vec<String> = parts.map(str::to_string).collect();
                     match crate::mcp::add(name, command, arg_list, vec![]) {
                         Ok(()) => {
-                            println!("{MINT}Added MCP server '{name}'.{RESET}\n");
+                            if allow_all {
+                                let _ = crate::mcp::allow(name, "*");
+                            }
+                            println!(
+                                "{MINT}Added MCP server '{name}'{}.{RESET}\n",
+                                if allow_all {
+                                    " (all tools allowed)"
+                                } else {
+                                    ""
+                                }
+                            );
                             reload_session_config(session);
                         }
                         Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
                     }
                 }
-                _ => println!("{WARN}/mcp add usage:{RESET} <name> <command> [args...]\n"),
+                _ => println!(
+                    "{WARN}/mcp add usage:{RESET} <name> <command> [args...] [--allow-all]\n"
+                ),
             }
         }
 
@@ -2703,7 +2718,21 @@ fn mcp_add_flow(session: &mut InteractiveSession) {
 
     match crate::mcp::add(&name, &command, args, env) {
         Ok(()) => {
-            println!("{MINT}Added MCP server '{name}'.{RESET}\n");
+            let allow_all = confirm(
+                "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+            )
+            .unwrap_or(false);
+            if allow_all {
+                let _ = crate::mcp::allow(&name, "*");
+            }
+            println!(
+                "{MINT}Added MCP server '{name}'{}.{RESET}\n",
+                if allow_all {
+                    " (all tools allowed)"
+                } else {
+                    ""
+                }
+            );
             reload_session_config(session);
         }
         Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),

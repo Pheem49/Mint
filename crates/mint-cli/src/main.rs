@@ -457,6 +457,10 @@ enum McpCommand {
         args: Vec<String>,
         #[arg(long, num_args = 1, allow_hyphen_values = true)]
         env: Vec<String>,
+        /// Immediately allow the agent to call every tool on the new server
+        /// (`allow <name> *`). Off by default — tools are opt-in per server.
+        #[arg(long)]
+        allow_all: bool,
     },
     List,
     Remove {
@@ -1349,9 +1353,14 @@ async fn main() -> Result<()> {
                     command,
                     args,
                     env,
+                    allow_all,
                 } => {
                     mcp::add(&name, &command, args, env)?;
                     println!("Added MCP server: {name}");
+                    if allow_all {
+                        mcp::allow(&name, "*")?;
+                        println!("Allowed all tools for {name}");
+                    }
                 }
                 McpCommand::List => {
                     println!("\n{BLUE}MCP servers:{RESET}");

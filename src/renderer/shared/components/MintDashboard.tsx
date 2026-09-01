@@ -390,7 +390,7 @@ export default function MintDashboard() {
     }
   }
 
-  const handleAddMcpServer = async () => {
+  const handleAddMcpServer = async (allowAll?: boolean) => {
     if (!mcpName.trim() || !mcpCmd.trim()) {
       alert('Please provide at least a server name and command.')
       return
@@ -406,19 +406,35 @@ export default function MintDashboard() {
       }
     }
 
+    const name = mcpName.trim()
     const argList = mcpArgs.split(/\s+/).filter(Boolean)
     const currentConfig = settingsConfig || DEFAULT_CONFIG
-    const updatedMcp = {
-      ...currentConfig?.mcpServers,
-      [mcpName.trim()]: {
-        command: mcpCmd.trim(),
-        args: argList,
-        env: parsedEnv,
-        icon: mcpIcon.trim() || undefined,
+    const updated: any = {
+      ...currentConfig,
+      mcpServers: {
+        ...currentConfig?.mcpServers,
+        [name]: {
+          command: mcpCmd.trim(),
+          args: argList,
+          env: parsedEnv,
+          icon: mcpIcon.trim() || undefined,
+        },
       },
     }
+    if (allowAll) {
+      updated.allowedMcpTools = { ...(currentConfig?.allowedMcpTools || {}), [name]: ['*'] }
+    }
 
-    await handleUpdateSettingsField('mcpServers', updatedMcp)
+    setSettingsConfig(updated)
+    if ((window as any).settingsApi) {
+      await (window as any).settingsApi.saveSettings(updated)
+    } else {
+      try {
+        await setProfileValue('user-settings', JSON.stringify(updated))
+      } catch (e) {
+        console.error('Failed to save settings field:', e)
+      }
+    }
     setMcpName('')
     setMcpCmd('')
     setMcpArgs('')

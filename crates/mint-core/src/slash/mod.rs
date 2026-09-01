@@ -963,7 +963,11 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
         },
 
         "add" => {
-            let mut parts = args.split_whitespace();
+            // A trailing `--allow-all` anywhere in the tail opts every tool in.
+            let mut tokens: Vec<&str> = args.split_whitespace().collect();
+            let allow_all = tokens.iter().any(|t| *t == "--allow-all");
+            tokens.retain(|t| *t != "--allow-all");
+            let mut parts = tokens.into_iter();
             match (parts.next(), parts.next()) {
                 (Some(name), Some(command)) => {
                     let server = crate::McpServer {
@@ -974,11 +978,23 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
                         disabled: false,
                     };
                     match crate::upsert_server_in(config, name, server) {
-                        Ok(()) => applied(format!("🔌 Added MCP server `{name}`.")),
+                        Ok(()) => {
+                            if allow_all {
+                                crate::allow_tool_in(config, name, "*");
+                            }
+                            applied(format!(
+                                "🔌 Added MCP server `{name}`{}.",
+                                if allow_all {
+                                    " (all tools allowed)"
+                                } else {
+                                    ""
+                                }
+                            ))
+                        }
                         Err(e) => error(e),
                     }
                 }
-                _ => error("Usage: /mcp add <name> <command> [args…]"),
+                _ => error("Usage: /mcp add <name> <command> [args…] [--allow-all]"),
             }
         }
 
@@ -1313,6 +1329,17 @@ mod tests {
 
         execute(&req("/mcp edit demo icon 🧪"), &mut cfg);
         assert_eq!(cfg.extra["mcpServers"]["demo"]["icon"], "🧪");
+
+        // `--allow-all` on add opts every tool in; plain add does not.
+        execute(&req("/mcp add wide sh -c cat --allow-all"), &mut cfg);
+        assert_eq!(cfg.extra["allowedMcpTools"]["wide"][0], "*");
+        assert_eq!(cfg.extra["mcpServers"]["wide"]["args"][1], "cat");
+        assert!(
+            cfg.extra
+                .get("allowedMcpTools")
+                .and_then(|m| m.get("demo"))
+                .is_none()
+        );
 
         execute(&req("/mcp remove demo"), &mut cfg);
         assert!(
