@@ -462,7 +462,37 @@ enum McpCommand {
     Remove {
         name: String,
     },
+    /// Keep a server configured but turn it off (hidden from the agent).
+    Disable {
+        name: String,
+    },
+    /// Re-enable a server turned off with `disable`.
+    Enable {
+        name: String,
+    },
+    /// Change a configured server in place — only the flags you pass are touched.
+    Edit {
+        name: String,
+        #[arg(long)]
+        command: Option<String>,
+        /// Repeatable; replaces the arg list. Passing none leaves args unchanged.
+        #[arg(long, num_args = 1, allow_hyphen_values = true)]
+        args: Vec<String>,
+        /// Repeatable `KEY=VALUE`; replaces the env map. None = unchanged.
+        #[arg(long, num_args = 1, allow_hyphen_values = true)]
+        env: Vec<String>,
+        #[arg(long)]
+        icon: Option<String>,
+        /// Clear the server's icon.
+        #[arg(long, conflicts_with = "icon")]
+        no_icon: bool,
+    },
     Allow {
+        server: String,
+        tool: String,
+    },
+    /// Remove a tool from a server's allowlist (`*` clears the whole list).
+    Disallow {
         server: String,
         tool: String,
     },
@@ -1337,11 +1367,54 @@ async fn main() -> Result<()> {
                         }
                     )
                 }
+                McpCommand::Disable { name } => {
+                    if mcp::set_disabled(&name, true)? {
+                        println!("disabled {name}");
+                    } else {
+                        println!("{ERROR}not found:{RESET} {name}");
+                    }
+                }
+                McpCommand::Enable { name } => {
+                    if mcp::set_disabled(&name, false)? {
+                        println!("enabled {name}");
+                    } else {
+                        println!("{ERROR}not found:{RESET} {name}");
+                    }
+                }
+                McpCommand::Edit {
+                    name,
+                    command,
+                    args,
+                    env,
+                    icon,
+                    no_icon,
+                } => {
+                    let icon = if no_icon { Some(None) } else { icon.map(Some) };
+                    let existed = mcp::edit(
+                        &name,
+                        command,
+                        (!args.is_empty()).then_some(args),
+                        (!env.is_empty()).then_some(env),
+                        icon,
+                    )?;
+                    if existed {
+                        println!("updated {name}");
+                    } else {
+                        println!("{ERROR}not found:{RESET} {name}");
+                    }
+                }
                 McpCommand::Allow { server, tool } => {
                     if mcp::allow(&server, &tool)? {
                         println!("allowed {server}/{tool}");
                     } else {
                         println!("already allowed {server}/{tool}");
+                    }
+                }
+                McpCommand::Disallow { server, tool } => {
+                    if mcp::disallow(&server, &tool)? {
+                        println!("disallowed {server}/{tool}");
+                    } else {
+                        println!("{server}/{tool} was not in the allowlist");
                     }
                 }
                 McpCommand::Reauth { server } => {

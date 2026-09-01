@@ -1,9 +1,10 @@
 use anyhow::Result;
 use mint_core::{
-    McpServer, add_mcp_server, call_configured_mcp_tool, clear_mcp_servers, list_mcp_servers,
-    load_config, reauth_mcp_server, remove_mcp_server, save_config,
+    McpServer, add_mcp_server, allow_mcp_tool, call_configured_mcp_tool, clear_mcp_servers,
+    disallow_mcp_tool, list_mcp_servers, reauth_mcp_server, remove_mcp_server,
+    set_mcp_server_disabled, update_mcp_server,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::BTreeMap;
 
 pub fn list() -> Result<BTreeMap<String, McpServer>> {
@@ -31,37 +32,26 @@ pub fn reauth(server_name: &str) -> Result<bool> {
 }
 
 pub fn allow(server_name: &str, tool_name: &str) -> Result<bool> {
-    let mut config = load_config()?;
-    let allowed = config
-        .extra
-        .entry("allowedMcpTools".into())
-        .or_insert_with(|| json!({}));
-    if !allowed.is_object() {
-        *allowed = json!({});
-    }
+    Ok(allow_mcp_tool(server_name, tool_name)?)
+}
 
-    let servers = allowed
-        .as_object_mut()
-        .expect("allowedMcpTools was normalized to an object");
-    let tools = servers
-        .entry(server_name.to_owned())
-        .or_insert_with(|| json!([]));
-    if !tools.is_array() {
-        *tools = json!([]);
-    }
+pub fn disallow(server_name: &str, tool_name: &str) -> Result<bool> {
+    Ok(disallow_mcp_tool(server_name, tool_name)?)
+}
 
-    let tools = tools
-        .as_array_mut()
-        .expect("server allowlist was normalized to an array");
-    let already_allowed = tools
-        .iter()
-        .filter_map(Value::as_str)
-        .any(|value| value == "*" || value == tool_name);
-    if already_allowed {
-        return Ok(false);
-    }
+/// `false` when the server isn't configured (no-op).
+pub fn set_disabled(name: &str, disabled: bool) -> Result<bool> {
+    Ok(set_mcp_server_disabled(name, disabled)?)
+}
 
-    tools.push(json!(tool_name));
-    save_config(&config)?;
-    Ok(true)
+/// Partial edit; `false` when the server isn't configured. `env` entries are
+/// `KEY=VALUE`; `icon: Some(None)` clears the icon.
+pub fn edit(
+    name: &str,
+    command: Option<String>,
+    args: Option<Vec<String>>,
+    env: Option<Vec<String>>,
+    icon: Option<Option<String>>,
+) -> Result<bool> {
+    Ok(update_mcp_server(name, command, args, env, icon)?)
 }
