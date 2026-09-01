@@ -2572,6 +2572,12 @@ async fn main() -> Result<()> {
             },
         },
     }
+    // Every subcommand that could have spawned a persistent stdio MCP child
+    // (interactive chat, `agent`/`code`, `chat`, `web`/`api`, `gateway` after
+    // its shutdown signal) funnels back here on a clean exit. `SESSIONS` is a
+    // `static`, so `McpSession::Drop` won't run at process teardown — do it
+    // explicitly so we don't leave orphaned MCP server processes behind.
+    mint_core::close_all_mcp_sessions();
     Ok(())
 }
 

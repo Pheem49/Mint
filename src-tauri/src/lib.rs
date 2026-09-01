@@ -1829,6 +1829,15 @@ pub fn run() {
             exit_app,
             save_system_interaction
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Mint desktop");
+        .build(tauri::generate_context!())
+        .expect("error while running Mint desktop")
+        .run(|_app_handle, event| {
+            // Kill any stdio MCP child processes we spawned before the process
+            // goes away — `SESSIONS` is a `static`, so `McpSession::Drop` never
+            // runs at exit on its own. Fires for tray "Quit", `exit_app`, and
+            // the last window closing.
+            if let tauri::RunEvent::Exit = event {
+                mint_core::close_all_mcp_sessions();
+            }
+        });
 }
