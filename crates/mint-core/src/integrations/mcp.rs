@@ -579,6 +579,90 @@ fn parse_env(values: Vec<String>) -> Result<BTreeMap<String, String>, McpError> 
         .collect()
 }
 
+// ── Server registry ──────────────────────────────────────────────────────────
+//
+// A curated catalog of well-known MCP servers, authored once in
+// `mcp-registry.json` at the repo root and read by every surface — the CLI
+// (`mint mcp registry`), the TUI `/mcp` add flow, and the renderer's Add form
+// (`import … from '../../../../mcp-registry.json'`). Purely a presets layer over
+// the normal add path; nothing here is required to add a server.
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpRegistryArgInput {
+    pub label: String,
+    #[serde(default)]
+    pub placeholder: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpRegistryEnvVar {
+    pub key: String,
+    pub label: String,
+    /// A URL where the user can obtain this credential, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpRegistryEntry {
+    /// Catalog id, and the default server name when added.
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub desc: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Extra positional args the user supplies (a path, a connection string).
+    /// Their values are appended to `args` in order.
+    #[serde(default, rename = "argInputs")]
+    pub arg_inputs: Vec<McpRegistryArgInput>,
+    #[serde(default, rename = "requiredEnv")]
+    pub required_env: Vec<McpRegistryEnvVar>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+}
+
+/// The catalog, parsed once from `mcp-registry.json` at the repo root. A parse
+/// failure is a build-time authoring bug, so panic rather than ship an empty
+/// list — same contract as `slash::catalog::SLASH_COMMANDS`.
+static MCP_REGISTRY: LazyLock<Vec<McpRegistryEntry>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../mcp-registry.json"
+    )))
+    .expect("mcp-registry.json is valid JSON matching Vec<McpRegistryEntry>")
+});
+
+pub fn mcp_registry() -> &'static [McpRegistryEntry] {
+    &MCP_REGISTRY
+}
+
+pub fn mcp_registry_entry(key: &str) -> Option<&'static McpRegistryEntry> {
+    MCP_REGISTRY.iter().find(|e| e.key == key)
+}
+
+/// Build an [`McpServer`] from a registry entry: its base `args` plus
+/// `extra_args` (the `arg_inputs` values, in order), the given `env`, and its
+/// icon.
+pub fn expand_registry_entry(
+    entry: &McpRegistryEntry,
+    extra_args: &[String],
+    env: BTreeMap<String, String>,
+) -> McpServer {
+    let mut args = entry.args.clone();
+    args.extend(extra_args.iter().cloned());
+    McpServer {
+        command: entry.command.clone(),
+        args,
+        env,
+        icon: entry.icon.clone(),
+        disabled: false,
+    }
+}
+
 fn find_url(line: &str) -> Option<String> {
     let start_idx = line.find("http://").or_else(|| line.find("https://"))?;
     let rest = &line[start_idx..];
@@ -1214,6 +1298,34 @@ mod tests {
         assert!(
             !update_server_in(&mut config, "gone", Some("x".into()), None, None, None).unwrap()
         );
+    }
+
+    #[test]
+    fn mcp_registry_json_is_well_formed() {
+        let entries = mcp_registry();
+        assert!(!entries.is_empty());
+
+        let mut seen = std::collections::HashSet::new();
+        for e in entries {
+            assert!(!e.key.is_empty() && !e.name.is_empty(), "{e:?}");
+            assert!(!e.command.is_empty(), "{}: empty command", e.key);
+            assert!(seen.insert(&e.key), "duplicate registry key: {}", e.key);
+        }
+        assert!(mcp_registry_entry("filesystem").is_some());
+        assert!(mcp_registry_entry("nope").is_none());
+    }
+
+    #[test]
+    fn expand_registry_entry_appends_extra_args() {
+        let entry = mcp_registry_entry("git").expect("git entry present");
+        let mut env = BTreeMap::new();
+        env.insert("X".into(), "1".into());
+        let server = expand_registry_entry(&entry.clone(), &["/repo".to_string()], env);
+        assert_eq!(server.command, entry.command);
+        assert_eq!(server.args.last().unwrap(), "/repo");
+        assert_eq!(server.args.len(), entry.args.len() + 1);
+        assert_eq!(server.env["X"], "1");
+        assert!(!server.disabled);
     }
 
     #[test]

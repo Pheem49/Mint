@@ -2688,6 +2688,100 @@ fn mcp_interactive_picker(session: &mut InteractiveSession) {
 }
 
 fn mcp_add_flow(session: &mut InteractiveSession) {
+    let choices = vec!["From catalog".to_string(), "Custom".to_string()];
+    match prompt_interactive_select("Add MCP server", &choices, &choices[0]) {
+        Ok(Some(c)) if c == "From catalog" => mcp_add_from_catalog(session),
+        Ok(Some(c)) if c == "Custom" => mcp_add_custom_flow(session),
+        _ => {}
+    }
+}
+
+fn mcp_add_from_catalog(session: &mut InteractiveSession) {
+    let entries = crate::mcp::registry();
+    let labels: Vec<String> = entries
+        .iter()
+        .map(|e| {
+            let needs = if e.required_env.is_empty() {
+                String::new()
+            } else {
+                format!(" {DIM}(needs a key){RESET}")
+            };
+            format!("{:<20} {}{needs}", e.name, e.desc)
+        })
+        .collect();
+    let Ok(Some(picked)) = prompt_interactive_select("MCP server catalog", &labels, &labels[0])
+    else {
+        return;
+    };
+    let Some(entry) = labels
+        .iter()
+        .position(|l| *l == picked)
+        .map(|i| &entries[i])
+    else {
+        return;
+    };
+
+    // One prompt per declared argInput (path / connection string / …).
+    let mut extra_args = Vec::new();
+    for input in &entry.arg_inputs {
+        let hint = if input.placeholder.is_empty() {
+            input.label.clone()
+        } else {
+            format!("{} (e.g. {})", input.label, input.placeholder)
+        };
+        let value = crate::onboard::prompt_input(&hint, None).unwrap_or_default();
+        let value = value.trim();
+        if value.is_empty() {
+            println!("{WARN}Cancelled ('{}' is required).{RESET}\n", input.label);
+            return;
+        }
+        extra_args.push(value.to_string());
+    }
+
+    // One prompt per required env var.
+    let mut env = Vec::new();
+    for var in &entry.required_env {
+        if let Some(help) = &var.help {
+            println!("{DIM}  {}: get one at {help}{RESET}", var.label);
+        }
+        let value = crate::onboard::prompt_input(&var.label, None).unwrap_or_default();
+        let value = value.trim();
+        if value.is_empty() {
+            println!("{WARN}Cancelled ('{}' is required).{RESET}\n", var.label);
+            return;
+        }
+        env.push(format!("{}={value}", var.key));
+    }
+
+    let name = crate::onboard::prompt_input("Server name", Some(&entry.key)).unwrap_or_default();
+    let name = if name.trim().is_empty() {
+        entry.key.clone()
+    } else {
+        name.trim().to_string()
+    };
+
+    let allow_all = confirm(
+        "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+    )
+    .unwrap_or(false);
+
+    match crate::mcp::registry_add(&entry.key, Some(&name), extra_args, env, allow_all) {
+        Ok(saved) => {
+            println!(
+                "{MINT}Added MCP server '{saved}'{}.{RESET}\n",
+                if allow_all {
+                    " (all tools allowed)"
+                } else {
+                    ""
+                }
+            );
+            reload_session_config(session);
+        }
+        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+    }
+}
+
+fn mcp_add_custom_flow(session: &mut InteractiveSession) {
     let name = crate::onboard::prompt_input("Server name", None).unwrap_or_default();
     let name = name.trim().to_string();
     if name.is_empty() {

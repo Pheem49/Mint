@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { DEFAULT_CONFIG } from '@/components/SettingsWindow'
 import { listLearnedSkills, addLearnedSkill, deleteLearnedSkill, LearnedSkill, detectSystemTools, DetectedTools, listMcpServerTools } from '@/tauri'
 import McpToolAllowlist from '../McpToolAllowlist'
+import McpRegistryPicker from '../McpRegistryPicker'
 import {
   getOAuthStatuses,
   startOAuthFlow,
@@ -487,6 +488,16 @@ export default function PluginsTab({
 
         <div className="add-mcp-box">
           <h3>Add MCP Server</h3>
+          <McpRegistryPicker
+            configuredNames={Object.keys(config.mcpServers || {})}
+            onPick={(entry, argValues, envSeed) => {
+              setMcpName(entry.key)
+              setMcpCmd(entry.command)
+              setMcpArgs([...(entry.args || []), ...argValues].join(' '))
+              setMcpEnv(Object.keys(envSeed).length ? JSON.stringify(envSeed, null, 2) : '')
+              if (setMcpIcon) setMcpIcon(entry.icon || '')
+            }}
+          />
           <div className="form-grid two-col">
             <div className="setting-row stacked">
               <label>Server Name</label>

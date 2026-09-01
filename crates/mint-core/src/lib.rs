@@ -120,14 +120,15 @@ pub use linked_folders::{
     configured_linked_folders, list_linked_folders, remove_linked_folder, spawn_linked_folder_note,
 };
 pub use mcp::{
-    McpError, McpServer, add_mcp_server, allow_mcp_tool, allow_tool_in, call_configured_mcp_tool,
-    call_mcp_tool, clear_mcp_servers, clear_servers_in, close_all_mcp_sessions, close_mcp_session,
-    configured_mcp_servers, disallow_mcp_tool, disallow_tool_in, drain_mcp_notifications,
+    McpError, McpRegistryArgInput, McpRegistryEntry, McpRegistryEnvVar, McpServer, add_mcp_server,
+    allow_mcp_tool, allow_tool_in, call_configured_mcp_tool, call_mcp_tool, clear_mcp_servers,
+    clear_servers_in, close_all_mcp_sessions, close_mcp_session, configured_mcp_servers,
+    disallow_mcp_tool, disallow_tool_in, drain_mcp_notifications, expand_registry_entry,
     get_server_prompt, is_mcp_tool_allowed, list_mcp_servers, list_server_prompts,
-    list_server_resources, list_server_tools, mcp_server_tool_names, mcp_tool_allowlist,
-    read_server_resource, reauth_mcp_server, remove_mcp_server, remove_server_in,
-    set_mcp_server_disabled, set_server_disabled_in, update_mcp_server, update_server_in,
-    upsert_server_in,
+    list_server_resources, list_server_tools, mcp_registry, mcp_registry_entry,
+    mcp_server_tool_names, mcp_tool_allowlist, read_server_resource, reauth_mcp_server,
+    remove_mcp_server, remove_server_in, set_mcp_server_disabled, set_server_disabled_in,
+    update_mcp_server, update_server_in, upsert_server_in,
 };
 pub use memory::{
     CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, Fact, InteractionMemory, LearnedSkill,

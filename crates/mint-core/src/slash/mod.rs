@@ -1084,6 +1084,33 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
             Err(e) => error(e),
         },
 
+        "registry" | "catalog" => {
+            let items: Vec<String> = crate::mcp_registry()
+                .iter()
+                .map(|e| {
+                    let needs = if e.required_env.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            " — needs `{}`",
+                            e.required_env
+                                .iter()
+                                .map(|v| v.key.as_str())
+                                .collect::<Vec<_>>()
+                                .join("`, `")
+                        )
+                    };
+                    format!("`{}` — {}{needs}", e.key, e.desc)
+                })
+                .collect();
+            let mut md = md_heading("🔌 MCP server catalog");
+            md.push_str(&md_list(&items));
+            md.push_str(
+                "\nAdd one from the Add MCP Server dialog, or `/mcp add <name> <cmd> [args…]`.",
+            );
+            message(md)
+        }
+
         _ => error(MCP_USAGE),
     }
 }
@@ -1355,6 +1382,18 @@ mod tests {
             execute(&req("/mcp disable ghost"), &mut cfg),
             SlashResponse::Message { .. }
         ));
+    }
+
+    #[test]
+    fn mcp_registry_lists_the_catalog() {
+        let mut cfg = MintConfig::default();
+        match execute(&req("/mcp registry"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("catalog"));
+                assert!(markdown.contains("filesystem"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
     }
 
     #[test]

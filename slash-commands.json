@@ -52,6 +52,7 @@
   { "token": "/mcp allow", "usage": "<server> <tool>", "description": "Allow an MCP tool", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp disallow", "usage": "<server> <tool>", "description": "Remove a tool from a server's allowlist (* clears it)", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp reauth", "usage": "<server>", "description": "Re-run a server's OAuth login (e.g. expired token)", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/mcp registry", "usage": "", "description": "Show the catalog of well-known MCP servers", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/mcp clear", "usage": "", "description": "Remove all configured MCP servers", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/subagent", "usage": "", "description": "List/create/remove subagents the agent can delegate to", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/subagent add", "usage": "", "description": "Create a subagent — walks through a wizard", "category": "tools", "surfaces": ["cli", "web", "desktop"] },

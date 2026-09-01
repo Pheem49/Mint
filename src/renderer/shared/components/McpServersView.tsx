@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react'
 import '../css/management-views.css'
 import { renderMcpSvgIcon, renderMcpHubSvgIcon } from '../constants/plugins'
 import McpToolAllowlist from './McpToolAllowlist'
+import McpRegistryPicker from './McpRegistryPicker'
+import type { McpRegistryEntry } from '../constants/mcpRegistry'
 
 export interface McpServersViewProps {
   config: any
@@ -153,6 +155,18 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
     handleAddMcpServer(addAllowAll)
     setAddAllowAll(false)
     setShowAddModal(false)
+  }
+
+  const applyRegistryPick = (
+    entry: McpRegistryEntry,
+    argValues: string[],
+    envSeed: Record<string, string>,
+  ) => {
+    setMcpName(entry.key)
+    setMcpCmd(entry.command)
+    setMcpArgs([...(entry.args || []), ...argValues].join(' '))
+    setMcpEnv(Object.keys(envSeed).length ? JSON.stringify(envSeed, null, 2) : '')
+    if (setMcpIcon) setMcpIcon(entry.icon || '')
   }
 
   return (
@@ -450,6 +464,10 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
 
             <form onSubmit={onSubmitAddServer}>
               <div className="management-modal-body">
+                <McpRegistryPicker
+                  configuredNames={Object.keys(config.mcpServers || {})}
+                  onPick={applyRegistryPick}
+                />
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div className="management-form-group">
                     <label className="management-label">Server Name</label>

@@ -514,6 +514,34 @@ enum McpCommand {
         #[arg(long, default_value = "{}")]
         arguments: String,
     },
+    /// The bundled catalog of well-known MCP servers.
+    Registry {
+        #[command(subcommand)]
+        command: Option<RegistryCommand>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RegistryCommand {
+    /// List the catalog (the default when no subcommand is given).
+    List,
+    /// Add a catalog entry as a configured server.
+    Add {
+        /// Catalog key, e.g. `filesystem` (see `mint mcp registry`).
+        key: String,
+        /// Server name to save it under. Defaults to the catalog key.
+        #[arg(long)]
+        name: Option<String>,
+        /// One value per `argInput` the entry declares, in order (e.g. a path).
+        #[arg(long = "arg", num_args = 1, allow_hyphen_values = true)]
+        args: Vec<String>,
+        /// `KEY=VALUE` for the entry's required env vars.
+        #[arg(long, num_args = 1, allow_hyphen_values = true)]
+        env: Vec<String>,
+        /// Immediately allow the agent to call every tool on it.
+        #[arg(long)]
+        allow_all: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1462,6 +1490,42 @@ async fn main() -> Result<()> {
                     spinner.finish_and_clear();
                     println!("{}", serde_json::to_string_pretty(&res?)?);
                 }
+                McpCommand::Registry { command } => match command {
+                    None | Some(RegistryCommand::List) => {
+                        println!("\n{BLUE}MCP server catalog:{RESET}");
+                        for e in mcp::registry() {
+                            let needs = if e.required_env.is_empty() {
+                                String::new()
+                            } else {
+                                format!(
+                                    " {WARN}(needs: {}){RESET}",
+                                    e.required_env
+                                        .iter()
+                                        .map(|v| v.key.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                )
+                            };
+                            println!("  {MINT}{:<20}{RESET} {}{needs}", e.key, e.desc);
+                        }
+                        println!(
+                            "\n{DIM}Add one: mint mcp registry add <key> [--arg <v>] [--env K=V] [--allow-all]{RESET}"
+                        );
+                    }
+                    Some(RegistryCommand::Add {
+                        key,
+                        name,
+                        args,
+                        env,
+                        allow_all,
+                    }) => {
+                        let saved = mcp::registry_add(&key, name.as_deref(), args, env, allow_all)?;
+                        println!("Added MCP server: {saved}");
+                        if allow_all {
+                            println!("Allowed all tools for {saved}");
+                        }
+                    }
+                },
             },
             Command::Link { command } => match command {
                 LinkCommand::Add {
