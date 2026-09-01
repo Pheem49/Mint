@@ -28,6 +28,10 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
   const applyPatch = pendingApproval.approval?.ApplyPatch
   const diffText = writeFile?.diff || applyPatch?.diff
   const isAskUser = !!pendingApproval.approval?.AskUser
+  const mcpTool = pendingApproval.approval?.McpTool
+  // Must match `mint_core::MCP_ALLOW_ALL_SENTINEL` — "run this and persist
+  // allowedMcpTools[server] = ['*']", travelled through the `answer` channel.
+  const MCP_ALLOW_ALL_SENTINEL = '__mcp_allow_all__'
   const askOptions: AskUserOption[] = Array.isArray(pendingApproval.approval?.AskUser?.options)
     ? pendingApproval.approval.AskUser.options
     : []
@@ -138,6 +142,18 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
               >
                 Decline
               </button>
+            </div>
+          ) : mcpTool ? (
+            <div className="approval-card-actions">
+              <button
+                type="button"
+                className="approval-btn approval-btn-approve"
+                title={`Let the agent call every tool on "${mcpTool.server}" from now on`}
+                onClick={() => onApproval(true, false, MCP_ALLOW_ALL_SENTINEL)}
+              >
+                Allow all (*)
+              </button>
+              <button type="button" className="approval-btn approval-btn-cancel" onClick={() => onApproval(false)}>No</button>
             </div>
           ) : (
             <div className="approval-card-actions">

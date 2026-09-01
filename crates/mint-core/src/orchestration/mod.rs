@@ -460,6 +460,14 @@ pub enum ApprovalOutcome {
     Intercepted(String),
 }
 
+/// The `answer` string a surface returns from an [`AgentApproval::McpTool`]
+/// prompt to mean "run this call **and** persist `allowedMcpTools[server] =
+/// ["*"]`, so this server never prompts again". Travels through the normal
+/// `Intercepted(answer)` channel. The CLI approval picker
+/// (`crates/mint-cli/src/agent.rs`) and the web/desktop `ApprovalCard`
+/// (`src/renderer/shared/components/ApprovalCard.tsx`) send this exact string.
+pub const MCP_ALLOW_ALL_SENTINEL: &str = "__mcp_allow_all__";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum AgentProgress {

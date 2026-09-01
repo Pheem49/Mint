@@ -420,6 +420,13 @@ pub fn close_all_mcp_sessions() {
     }
 }
 
+/// Whether `server_name/tool_name` is covered by `allowedMcpTools` (an exact
+/// tool entry, `"*"` for the server, or a `"*"` server key). The orchestration
+/// layer uses this to skip the approval prompt for an already-trusted server.
+pub fn is_mcp_tool_allowed(config: &MintConfig, server_name: &str, tool_name: &str) -> bool {
+    mcp_tool_allowed(config, server_name, tool_name)
+}
+
 fn mcp_tool_allowed(config: &MintConfig, server_name: &str, tool_name: &str) -> bool {
     config
         .extra

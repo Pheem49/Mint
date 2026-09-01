@@ -123,10 +123,11 @@ pub use mcp::{
     McpError, McpServer, add_mcp_server, allow_mcp_tool, allow_tool_in, call_configured_mcp_tool,
     call_mcp_tool, clear_mcp_servers, clear_servers_in, close_all_mcp_sessions, close_mcp_session,
     configured_mcp_servers, disallow_mcp_tool, disallow_tool_in, drain_mcp_notifications,
-    get_server_prompt, list_mcp_servers, list_server_prompts, list_server_resources,
-    list_server_tools, mcp_server_tool_names, mcp_tool_allowlist, read_server_resource,
-    reauth_mcp_server, remove_mcp_server, remove_server_in, set_mcp_server_disabled,
-    set_server_disabled_in, update_mcp_server, update_server_in, upsert_server_in,
+    get_server_prompt, is_mcp_tool_allowed, list_mcp_servers, list_server_prompts,
+    list_server_resources, list_server_tools, mcp_server_tool_names, mcp_tool_allowlist,
+    read_server_resource, reauth_mcp_server, remove_mcp_server, remove_server_in,
+    set_mcp_server_disabled, set_server_disabled_in, update_mcp_server, update_server_in,
+    upsert_server_in,
 };
 pub use memory::{
     CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, Fact, InteractionMemory, LearnedSkill,
@@ -136,9 +137,9 @@ pub use mic_transcribe::{
     MicRecordingHandle, MicTranscribeError, start_recording, stop_recording, transcribe_recording,
 };
 pub use orchestration::{
-    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption, OrchestrationError,
-    orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
-    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption,
+    MCP_ALLOW_ALL_SENTINEL, OrchestrationError, orchestrate_agent_loop, orchestrate_chat,
+    orchestrate_chat_stream, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
 };
 pub use pictures::{
     PictureEntry, PictureError, delete_saved_picture, list_saved_pictures, parse_data_uri,

@@ -425,28 +425,37 @@ pub async fn run_code_agent_with_options(
                 tool,
                 arguments,
             } => {
-                // Include the arguments in the persisted subject for the same
-                // reason as run_plugin above — a saved rule must not cover a
-                // future call to the same tool with different arguments.
-                let subject = format!("{server}:{tool}:{arguments}");
-                confirm_with_persistence(
-                    "mcp_tool",
-                    &subject,
-                    root,
-                    &mut permission_rules,
-                    &approve_approval_active,
-                    || {
-                        let mut fields = vec![("Server", server.as_str()), ("Tool", tool.as_str())];
-                        let formatted_args = arguments.to_string();
-                        if !formatted_args.is_empty()
-                            && formatted_args != "{}"
-                            && formatted_args != "null"
-                        {
-                            fields.push(("Arguments", &formatted_args));
-                        }
-                        print_approval_card("MCP Tool Call", &fields);
+                let formatted_args = arguments.to_string();
+                let mut fields = vec![("Server", server.as_str()), ("Tool", tool.as_str())];
+                if !formatted_args.is_empty() && formatted_args != "{}" && formatted_args != "null"
+                {
+                    fields.push(("Arguments", &formatted_args));
+                }
+                print_approval_card("MCP Tool Call", &fields);
+
+                // Two choices, per design: allow the whole server (persisted to
+                // `allowedMcpTools` — it never prompts again), or no. Free text
+                // still falls through to the agent as feedback.
+                let allow_label = format!("Allow all tools on \"{server}\" (*)");
+                let options = vec![
+                    AskUserOption {
+                        label: allow_label.clone(),
+                        description: Some(
+                            "Persist — future calls to this server run without asking".into(),
+                        ),
                     },
-                )
+                    AskUserOption {
+                        label: "No".into(),
+                        description: None,
+                    },
+                ];
+                match run_option_picker(&options)? {
+                    ApprovalOutcome::Intercepted(l) if l == allow_label => Ok(
+                        ApprovalOutcome::Intercepted(mint_core::MCP_ALLOW_ALL_SENTINEL.to_string()),
+                    ),
+                    ApprovalOutcome::Intercepted(l) if l == "No" => Ok(ApprovalOutcome::Denied),
+                    other => Ok(other),
+                }
             }
             AgentApproval::UserApproval { title, prompt } => {
                 print_approval_card(
