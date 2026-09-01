@@ -274,8 +274,20 @@ pub fn build_system_prompt(
         input_formats
             .push("- note_write: {\"path\":\"filename.md\",\"fileContent\":\"note content\"}");
     }
+    let run_plugin_str;
     if allowed_actions.contains(&"run_plugin") {
-        input_formats.push("- run_plugin: {\"name\":\"gmail|google_calendar|notion|docker|spotify|obsidian|system_metrics\",\"instruction\":\"instruction string\"}");
+        // Names come from `native_plugins()` — same source the native
+        // tool-calling schema (`prompts::tool_catalog`) uses — so the two
+        // prompt paths and the dispatch table stay in lockstep.
+        run_plugin_str = format!(
+            "- run_plugin: {{\"name\":\"{}\",\"instruction\":\"instruction string\"}}",
+            crate::native_plugins()
+                .iter()
+                .map(|p| p.name)
+                .collect::<Vec<_>>()
+                .join("|")
+        );
+        input_formats.push(&run_plugin_str);
     }
     let mcp_str;
     if allowed_actions.contains(&"mcp_tool") {

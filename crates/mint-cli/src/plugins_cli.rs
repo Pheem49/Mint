@@ -9,7 +9,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use mint_core::{
     MintConfig, load_config,
     oauth::{build_auth_url, get_oauth_tokens, list_oauth_statuses, revoke_oauth_tokens},
-    set_config_value,
+    save_config, set_config_value,
 };
 use std::io::{self, Write};
 
@@ -42,6 +42,11 @@ pub struct BuiltinPluginInfo {
     pub config_field: &'static str,
     pub is_oauth: bool,
     pub oauth_provider: &'static str,
+    /// The `mint_core::native_plugins()` name this maps to — the agent's
+    /// `run_plugin` gate keys off `allowedNativePlugins`, so enabling a plugin
+    /// here must also add that name to the list. `None` for plugins with no
+    /// agent-callable backend (e.g. Discord RPC).
+    pub native_name: Option<&'static str>,
 }
 
 pub const BUILTIN_PLUGINS: &[BuiltinPluginInfo] = &[
@@ -52,6 +57,7 @@ pub const BUILTIN_PLUGINS: &[BuiltinPluginInfo] = &[
         config_field: "pluginSpotifyEnabled",
         is_oauth: true,
         oauth_provider: "spotify",
+        native_name: Some("spotify"),
     },
     BuiltinPluginInfo {
         key: "discord",
@@ -60,6 +66,7 @@ pub const BUILTIN_PLUGINS: &[BuiltinPluginInfo] = &[
         config_field: "pluginDiscordEnabled",
         is_oauth: false,
         oauth_provider: "",
+        native_name: None,
     },
     BuiltinPluginInfo {
         key: "gmail",
@@ -68,6 +75,7 @@ pub const BUILTIN_PLUGINS: &[BuiltinPluginInfo] = &[
         config_field: "pluginGmailEnabled",
         is_oauth: true,
         oauth_provider: "google",
+        native_name: Some("gmail"),
     },
     BuiltinPluginInfo {
         key: "calendar",
@@ -76,6 +84,7 @@ pub const BUILTIN_PLUGINS: &[BuiltinPluginInfo] = &[
         config_field: "pluginCalendarEnabled",
         is_oauth: true,
         oauth_provider: "google",
+        native_name: Some("google_calendar"),
     },
     BuiltinPluginInfo {
         key: "notion",
@@ -84,22 +93,7 @@ pub const BUILTIN_PLUGINS: &[BuiltinPluginInfo] = &[
         config_field: "pluginNotionEnabled",
         is_oauth: true,
         oauth_provider: "notion",
-    },
-    BuiltinPluginInfo {
-        key: "youtube_music",
-        name: "YouTube Music",
-        description: "Access personal playlists and listening history via Google OAuth",
-        config_field: "pluginYoutubeMusicEnabled",
-        is_oauth: true,
-        oauth_provider: "google",
-    },
-    BuiltinPluginInfo {
-        key: "vercel",
-        name: "Vercel",
-        description: "Manage web app deployments and projects via Vercel OAuth",
-        config_field: "pluginVercelEnabled",
-        is_oauth: true,
-        oauth_provider: "vercel",
+        native_name: Some("notion"),
     },
     BuiltinPluginInfo {
         key: "github",
@@ -108,6 +102,7 @@ pub const BUILTIN_PLUGINS: &[BuiltinPluginInfo] = &[
         config_field: "pluginGithubEnabled",
         is_oauth: true,
         oauth_provider: "github",
+        native_name: Some("github"),
     },
 ];
 
@@ -129,12 +124,62 @@ pub async fn run_plugins_command(subcommand: Option<PluginsSubcommand>) -> Resul
     Ok(())
 }
 
-fn is_plugin_enabled(config: &MintConfig, field: &str) -> bool {
-    config
+fn is_plugin_enabled(config: &MintConfig, plugin: &BuiltinPluginInfo) -> bool {
+    let flag = config
         .extra
-        .get(field)
+        .get(plugin.config_field)
         .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+        .unwrap_or(false);
+    // A native-backed plugin also counts as enabled if it's in
+    // `allowedNativePlugins` (e.g. added by `mint setup`), so this listing and
+    // the agent's own `run_plugin` gate agree.
+    let in_allowlist = plugin.native_name.is_some_and(|native| {
+        config
+            .extra
+            .get("allowedNativePlugins")
+            .and_then(|v| v.as_array())
+            .is_some_and(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .any(|v| v == "*" || v == native)
+            })
+    });
+    flag || in_allowlist
+}
+
+/// Persists a plugin's on/off state to both representations: the per-plugin
+/// `plugin<Name>Enabled` boolean (what this CLI and the settings UI read for
+/// display) and, for native-backed plugins, `allowedNativePlugins` (what the
+/// agent's `run_plugin` gate reads). Writing only one leaves the plugin looking
+/// enabled while the agent still refuses it, or vice versa.
+fn set_plugin_enabled(plugin: &BuiltinPluginInfo, enabled: bool) -> Result<()> {
+    let mut config = load_config()?;
+    config.extra.insert(
+        plugin.config_field.to_string(),
+        serde_json::Value::Bool(enabled),
+    );
+
+    if let Some(native) = plugin.native_name {
+        let list = config
+            .extra
+            .entry("allowedNativePlugins".to_string())
+            .or_insert_with(|| serde_json::json!([]));
+        if !list.is_array() {
+            *list = serde_json::json!([]);
+        }
+        let arr = list.as_array_mut().expect("normalized to an array");
+        let has_wildcard = arr.iter().any(|v| v.as_str() == Some("*"));
+        if enabled {
+            if !has_wildcard && !arr.iter().any(|v| v.as_str() == Some(native)) {
+                arr.push(serde_json::Value::String(native.to_string()));
+            }
+        } else {
+            arr.retain(|v| v.as_str() != Some(native));
+        }
+    }
+
+    save_config(&config)?;
+    Ok(())
 }
 
 pub fn list_plugins(config: &MintConfig) -> Result<()> {
@@ -148,7 +193,7 @@ pub fn list_plugins(config: &MintConfig) -> Result<()> {
     let oauth_statuses = list_oauth_statuses();
 
     for p in BUILTIN_PLUGINS {
-        let enabled = is_plugin_enabled(config, p.config_field);
+        let enabled = is_plugin_enabled(config, p);
         let status_str = if enabled {
             "\x1b[32mEnabled 🟢\x1b[0m"
         } else {
@@ -195,7 +240,7 @@ fn enable_plugin(_config: &mut MintConfig, name: &str) -> Result<()> {
             anyhow!("Plugin '{name}' not found. Run 'mint plugins list' to see available plugins.")
         })?;
 
-    set_config_value(matched.config_field, serde_json::Value::Bool(true))?;
+    set_plugin_enabled(matched, true)?;
     println!(
         "\x1b[32m✔ Plugin '{}' enabled successfully.\x1b[0m",
         matched.name
@@ -209,7 +254,7 @@ fn disable_plugin(_config: &mut MintConfig, name: &str) -> Result<()> {
         .find(|p| p.key.eq_ignore_ascii_case(name) || p.name.eq_ignore_ascii_case(name))
         .ok_or_else(|| anyhow!("Plugin '{name}' not found."))?;
 
-    set_config_value(matched.config_field, serde_json::Value::Bool(false))?;
+    set_plugin_enabled(matched, false)?;
     println!("\x1b[33m✔ Plugin '{}' disabled.\x1b[0m", matched.name);
     Ok(())
 }
@@ -352,7 +397,7 @@ pub async fn run_interactive_plugins_wizard(config: &mut MintConfig) -> Result<(
 
     let mut items: Vec<(&'static BuiltinPluginInfo, bool)> = BUILTIN_PLUGINS
         .iter()
-        .map(|p| (p, is_plugin_enabled(config, p.config_field)))
+        .map(|p| (p, is_plugin_enabled(config, p)))
         .collect();
 
     let mut cursor = 0;
@@ -441,9 +486,10 @@ pub async fn run_interactive_plugins_wizard(config: &mut MintConfig) -> Result<(
         }
     }
 
-    // Save toggled states to config.json
+    // Save toggled states to config.json (both the display boolean and, for
+    // native-backed plugins, the `allowedNativePlugins` gate the agent reads).
     for (plugin, enabled) in &items {
-        set_config_value(plugin.config_field, serde_json::Value::Bool(*enabled))?;
+        set_plugin_enabled(plugin, *enabled)?;
     }
     println!("\x1b[32m✔ Plugin preferences saved to config.json!\x1b[0m\n");
 
@@ -577,16 +623,6 @@ fn prompt_manual_plugin_fields(key: &str) -> Result<()> {
             println!("\x1b[33m--- Spotify API Credentials --- \x1b[0m");
             print_and_set_key("spotifyClientId", "Spotify Client ID")?;
             print_and_set_key("spotifyClientSecret", "Spotify Client Secret")?;
-        }
-        "youtube_music" => {
-            println!("\x1b[33m--- YouTube Music API Credentials --- \x1b[0m");
-            print_and_set_key("gmailClientId", "Google Client ID")?;
-            print_and_set_key("gmailClientSecret", "Google Client Secret")?;
-        }
-        "vercel" => {
-            println!("\x1b[33m--- Vercel API Credentials --- \x1b[0m");
-            print_and_set_key("vercelClientId", "Vercel Client ID (optional for OAuth)")?;
-            print_and_set_key("vercelToken", "Vercel Access Token")?;
         }
         "github" => {
             println!("\x1b[33m--- GitHub API Credentials --- \x1b[0m");

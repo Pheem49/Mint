@@ -458,7 +458,15 @@ fn all_tools() -> Vec<ToolSpec> {
                 json!({
                     "name": {
                         "type": "string",
-                        "enum": ["gmail", "google_calendar", "notion", "docker", "spotify", "obsidian", "system_metrics"]
+                        // Derived from `native_plugins()` so the schema, the
+                        // legacy prompt hint, and the actual dispatch table can
+                        // never drift. Runtime still rejects any plugin the user
+                        // hasn't enabled (`allowedNativePlugins` / per-plugin
+                        // toggle), so listing all of them here is safe.
+                        "enum": crate::native_plugins()
+                            .iter()
+                            .map(|p| p.name)
+                            .collect::<Vec<_>>()
                     },
                     "instruction": { "type": "string" }
                 }),

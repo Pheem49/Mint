@@ -919,6 +919,8 @@ fn runtime_extra_defaults() -> BTreeMap<String, Value> {
         "pluginCalendarEnabled": false,
         "pluginGmailEnabled": false,
         "pluginNotionEnabled": false,
+        "pluginSpotifyEnabled": false,
+        "pluginGithubEnabled": false,
         "telegramBotToken": "",
         "enableTelegramBridge": false,
         "discordBotToken": "",

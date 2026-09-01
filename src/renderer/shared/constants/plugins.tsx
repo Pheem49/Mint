@@ -232,34 +232,6 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     ]
   },
   {
-    key: 'youtube_music',
-    name: 'YouTube Music',
-    desc: 'Access personal playlists and listening history via Google OAuth.',
-    icon: '🎬',
-    enabledField: 'pluginYoutubeMusicEnabled',
-    hasCredentials: true,
-    isOAuth: true,
-    oauthProvider: 'google',
-    fields: [
-      { label: 'Google Client ID', field: 'gmailClientId', type: 'text', placeholder: 'your_client_id.apps.googleusercontent.com' },
-      { label: 'Google Client Secret', field: 'gmailClientSecret', type: 'password', placeholder: 'your_client_secret' },
-    ]
-  },
-  {
-    key: 'vercel',
-    name: 'Vercel',
-    desc: 'Manage web app deployments and projects via Vercel OAuth.',
-    icon: '🌐',
-    enabledField: 'pluginVercelEnabled',
-    hasCredentials: true,
-    isOAuth: true,
-    oauthProvider: 'vercel',
-    fields: [
-      { label: 'Vercel Client ID', field: 'vercelClientId', type: 'text', placeholder: 'oai_...' },
-      { label: 'Vercel Access Token (Optional)', field: 'vercelToken', type: 'password', placeholder: 'your_vercel_token' },
-    ]
-  },
-  {
     key: 'github',
     name: 'GitHub',
     desc: 'Access repositories, pull requests, and issues via GitHub OAuth.',

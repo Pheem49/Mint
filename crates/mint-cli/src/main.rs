@@ -191,7 +191,7 @@ enum Command {
         #[command(subcommand)]
         command: FilesCommand,
     },
-    /// Manage built-in plugins & integrations (Gmail, Calendar, Notion, Spotify, Vercel, GitHub).
+    /// Manage built-in plugins & integrations (Gmail, Calendar, Notion, Spotify, GitHub, Discord).
     #[command(alias = "plugin")]
     Plugins {
         #[command(subcommand)]

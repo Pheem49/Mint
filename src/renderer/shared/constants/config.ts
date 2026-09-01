@@ -34,7 +34,7 @@ export const DEFAULT_CONFIG = {
   voiceMode: 'legacy',
   geminiLiveModel: 'gemini-2.5-flash-native-audio-preview-12-2025',
   geminiLiveVoice: 'Puck',
-  pluginSpotifyEnabled: true,
+  pluginSpotifyEnabled: false,
   pluginCalendarEnabled: false,
   pluginGmailEnabled: false,
   pluginNotionEnabled: false,

@@ -125,7 +125,7 @@ pub async fn execute_native_plugin(
 }
 
 fn native_plugin_allowed(config: &MintConfig, name: &str) -> bool {
-    config
+    let in_allowlist = config
         .extra
         .get("allowedNativePlugins")
         .and_then(|value| value.as_array())
@@ -135,7 +135,39 @@ fn native_plugin_allowed(config: &MintConfig, name: &str) -> bool {
                 .filter_map(|value| value.as_str())
                 .any(|value| value == "*" || value == name)
         })
-        .unwrap_or(false)
+        .unwrap_or(false);
+
+    // A plugin the user toggled on through `mint plugins enable`, the Plugins
+    // settings tab, or the setup wizard is also allowed. Those surfaces write a
+    // per-plugin `plugin<Name>Enabled` boolean; `allowedNativePlugins` is the
+    // other representation (what `mint setup`'s multi-select and this gate use).
+    // Honor both so "enabled" means enabled regardless of which one set it.
+    in_allowlist
+        || native_plugin_enable_flag(name).is_some_and(|key| {
+            config
+                .extra
+                .get(key)
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+}
+
+/// The per-plugin boolean config key that the CLI (`mint plugins enable`) and
+/// the Desktop/Web Plugins settings write when a plugin is toggled on. Kept in
+/// sync with `BUILTIN_PLUGINS` (`crates/mint-cli/src/plugins_cli.rs`) and
+/// `BUILTIN_PLUGINS_LIST` (`src/renderer/shared/constants/plugins.tsx`). Native
+/// plugins with no dedicated UI toggle (`dev_tools`, `docker`, `obsidian`,
+/// `system_metrics`) return `None` — they are gated solely by
+/// `allowedNativePlugins`, seeded with the safe read-only defaults.
+fn native_plugin_enable_flag(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "gmail" => "pluginGmailEnabled",
+        "google_calendar" => "pluginCalendarEnabled",
+        "notion" => "pluginNotionEnabled",
+        "spotify" => "pluginSpotifyEnabled",
+        "github" => "pluginGithubEnabled",
+        _ => return None,
+    })
 }
 
 fn dev_tools(instruction: &str) -> Result<String, PluginError> {
@@ -769,5 +801,28 @@ mod tests {
         let config = MintConfig::default();
         let result = execute_native_plugin(&config, "dev_tools", "status").await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn per_plugin_enable_flag_grants_access_without_the_allowlist() {
+        // What `mint plugins enable notion` / the Plugins settings toggle write.
+        let mut config = MintConfig::default();
+        assert!(!native_plugin_allowed(&config, "notion"));
+        config
+            .extra
+            .insert("pluginNotionEnabled".into(), json!(true));
+        assert!(native_plugin_allowed(&config, "notion"));
+
+        // `calendar` in the UI, `google_calendar` to the agent.
+        config
+            .extra
+            .insert("pluginCalendarEnabled".into(), json!(true));
+        assert!(native_plugin_allowed(&config, "google_calendar"));
+
+        // A flag left at its default `false` still denies.
+        config
+            .extra
+            .insert("pluginGmailEnabled".into(), json!(false));
+        assert!(!native_plugin_allowed(&config, "gmail"));
     }
 }
