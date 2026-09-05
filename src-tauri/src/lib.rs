@@ -8,7 +8,6 @@ mod proactive;
 mod system;
 mod updater;
 mod webhooks;
-mod workflows;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use mint_core::browser::{
@@ -37,14 +36,13 @@ use mint_core::{
     SubagentDefinition, SubagentDraft, TtsUrl, VideoGenRequest, VideoGenResponse, WeatherReport,
     apply_code_edits, classify_shell_command, config_path, delete_saved_picture,
     delete_subagent as core_delete_subagent, get_user, google_tts_urls, list_saved_pictures,
-    list_subagents as core_list_subagents, load_config, load_workflows, login_user,
-    orchestrate_agent_loop, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
-    propose_code_edits, reauth_mcp_server as core_reauth_mcp_server, register_user,
-    save_avatar_file, save_chat_images, save_config, save_subagent as core_save_subagent,
-    save_workflows, start_channels, start_cron_scheduler,
+    list_subagents as core_list_subagents, load_config, login_user, orchestrate_agent_loop,
+    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback, propose_code_edits,
+    reauth_mcp_server as core_reauth_mcp_server, register_user, save_avatar_file, save_chat_images,
+    save_config, save_subagent as core_save_subagent, start_channels, start_cron_scheduler,
     start_gemini_live_session as core_start_gemini_live_session,
     start_recording as core_start_mic_recording, stop_recording as core_stop_mic_recording,
-    transcribe_recording as core_transcribe_mic_recording, update_profile, weather, workflows_path,
+    transcribe_recording as core_transcribe_mic_recording, update_profile, weather,
 };
 use plugins::execute_plugin;
 
@@ -84,7 +82,6 @@ use updater::{
     status as updater_status,
 };
 use webhooks::start_webhooks;
-use workflows::start_monitor;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -162,6 +159,14 @@ async fn reauth_mcp_server(server_name: String) -> Result<bool, String> {
     tokio::task::spawn_blocking(move || core_reauth_mcp_server(&server_name))
         .await
         .map_err(|error| format!("reauth task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn list_mcp_server_tools(name: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || mint_core::mcp_server_tool_names(&name))
+        .await
+        .map_err(|error| format!("list-tools task failed: {error}"))?
         .map_err(|error| error.to_string())
 }
 
@@ -1437,6 +1442,26 @@ fn apply_desktop_code_edits(
 }
 
 #[tauri::command]
+fn list_git_checkpoints(chat_id: String) -> Result<Vec<mint_core::git::Checkpoint>, String> {
+    Ok(mint_core::git::list_checkpoints(&chat_id))
+}
+
+#[tauri::command]
+fn rollback_git_checkpoint(
+    chat_id: String,
+    step: usize,
+    workspace_path: Option<String>,
+) -> Result<String, String> {
+    let root = workspace_root(workspace_path.as_deref())?;
+    mint_core::git::rollback_to_step(&root, &chat_id, step)
+}
+
+#[tauri::command]
+fn read_workspace_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("failed to read file '{path}': {e}"))
+}
+
+#[tauri::command]
 fn open_window(app: AppHandle, kind: String) -> Result<(), String> {
     open_desktop_window(&app, &kind)?;
     if kind == "widget" {
@@ -1587,39 +1612,6 @@ fn exit_app(app: AppHandle) {
     app.exit(0);
 }
 
-#[tauri::command]
-fn open_workflows_file() -> Result<ActionResult, String> {
-    load_workflows().map_err(|error| error.to_string())?;
-    let path = workflows_path().map_err(|error| error.to_string())?;
-    Command::new("xdg-open")
-        .arg(path)
-        .spawn()
-        .map_err(|error| error.to_string())?;
-    Ok(ActionResult {
-        success: true,
-        message: "opened workflows file".into(),
-    })
-}
-
-#[tauri::command]
-fn reload_custom_workflows() -> Result<Value, String> {
-    let workflows = load_workflows().map_err(|error| error.to_string())?;
-    Ok(serde_json::json!({
-        "success": true,
-        "count": workflows.len(),
-        "workflows": workflows
-    }))
-}
-
-#[tauri::command]
-fn save_custom_workflows(workflows: Vec<serde_json::Value>) -> Result<ActionResult, String> {
-    save_workflows(&workflows).map_err(|error| error.to_string())?;
-    Ok(ActionResult {
-        success: true,
-        message: "workflows saved successfully".into(),
-    })
-}
-
 /// WebKitGTK denies every `permission-request` (microphone, camera, geolocation, ...) by
 /// default unless something handles the signal — Tauri/wry doesn't wire this up on Linux,
 /// which is why `getUserMedia()` rejects with `NotAllowedError` even though the user never
@@ -1756,7 +1748,6 @@ pub fn run() {
             }
             install_tray(app.handle())?;
             install_shortcuts(app.handle())?;
-            start_monitor(app.handle().clone());
             start_system_events(app.handle().clone());
             start_headless_queue(app.handle().clone());
             start_proactive_loop(app.handle().clone());
@@ -1779,6 +1770,7 @@ pub fn run() {
             get_runtime_status,
             detect_system_tools,
             reauth_mcp_server,
+            list_mcp_server_tools,
             get_workspace_tree,
             create_workspace_file,
             create_workspace_folder,
@@ -1839,6 +1831,9 @@ pub fn run() {
             get_weather,
             propose_desktop_code_edits,
             apply_desktop_code_edits,
+            list_git_checkpoints,
+            rollback_git_checkpoint,
+            read_workspace_file,
             open_window,
             hide_desktop_window,
             close_desktop_window,
@@ -1863,11 +1858,17 @@ pub fn run() {
             save_behavior_context,
             run_next_queued_task,
             exit_app,
-            open_workflows_file,
-            reload_custom_workflows,
-            save_custom_workflows,
             save_system_interaction
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Mint desktop");
+        .build(tauri::generate_context!())
+        .expect("error while running Mint desktop")
+        .run(|_app_handle, event| {
+            // Kill any stdio MCP child processes we spawned before the process
+            // goes away — `SESSIONS` is a `static`, so `McpSession::Drop` never
+            // runs at exit on its own. Fires for tray "Quit", `exit_app`, and
+            // the last window closing.
+            if let tauri::RunEvent::Exit = event {
+                mint_core::close_all_mcp_sessions();
+            }
+        });
 }

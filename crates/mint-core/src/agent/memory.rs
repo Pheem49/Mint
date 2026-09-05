@@ -4,6 +4,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::search::text_embedding::{encode_embedding, fact_embedding_backend};
+
 pub const CHAT_CLI_ID: &str = "cli";
 pub const DEFAULT_CONVERSATION_ID: &str = "conversation-default";
 
@@ -28,6 +30,17 @@ pub fn scoped_chat_id(chat_id: &str, _workspace_path: Option<&str>) -> String {
 fn is_cli_chat_id(chat_id: &str) -> bool {
     chat_id == CHAT_CLI_ID
         || (chat_id.starts_with(&format!("{CHAT_CLI_ID}::")) && !chat_id.contains("::subagent::"))
+}
+
+/// The subagent name embedded in a chat id of the form
+/// `"<parent>::subagent::<name>"` (see `dispatch_one_subagent`), or `None` for
+/// an ordinary conversation. Used to scope which agent a fact belongs to and
+/// which facts an agent sees.
+pub fn subagent_name(chat_id: &str) -> Option<&str> {
+    chat_id
+        .rsplit_once("::subagent::")
+        .map(|(_, name)| name)
+        .filter(|name| !name.is_empty())
 }
 
 #[derive(Debug, Error)]
@@ -85,6 +98,26 @@ pub struct LearnedSkill {
     pub description: Option<String>,
     #[serde(default, rename = "is_workspace")]
     pub is_workspace: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Fact {
+    pub id: i64,
+    /// `"user"` / `"preference"` are always injected; `"project"` only when the
+    /// active workspace matches `project_path`.
+    pub scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_path: Option<String>,
+    pub body: String,
+    /// The subagent that produced this fact, if any. `None` = shared / directly
+    /// user-authored, injected into every agent's context. `Some(name)` =
+    /// quarantined: only injected when that same subagent runs again, until it
+    /// is promoted (see [`MemoryStore::promote_fact`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -211,6 +244,44 @@ impl MemoryStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Full-text search over `chat_id`'s past interactions for the turns most
+    /// relevant to `query` (BM25 ranked), skipping the `exclude_recent` newest
+    /// rows since those are already injected verbatim elsewhere. Returns
+    /// `Ok(vec![])` without touching the database when `query` yields no usable
+    /// search token.
+    pub fn recall_interactions(
+        &self,
+        chat_id: &str,
+        query: &str,
+        exclude_recent: usize,
+        limit: usize,
+    ) -> Result<Vec<InteractionMemory>, MemoryError> {
+        let Some(match_query) = fts_match_query(query) else {
+            return Ok(Vec::new());
+        };
+        let chat_id = normalized_chat_id(chat_id);
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT m.id, m.chat_id, m.user_text, m.ai_text, m.provider, m.model,
+                    m.fallback_provider, m.created_at, m.agent_activity_json
+             FROM interaction_fts
+             JOIN interaction_memories m ON m.id = interaction_fts.rowid
+             WHERE interaction_fts MATCH ?1
+               AND m.chat_id = ?2
+               AND m.id NOT IN (
+                 SELECT id FROM interaction_memories
+                 WHERE chat_id = ?2 ORDER BY id DESC LIMIT ?3
+               )
+             ORDER BY bm25(interaction_fts)
+             LIMIT ?4",
+        )?;
+        let rows = statement.query_map(
+            params![match_query, chat_id, exclude_recent as i64, limit as i64],
+            interaction_row,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     pub fn list_chat_sessions(&self) -> Result<Vec<ChatSession>, MemoryError> {
         let connection = self.connection()?;
         ensure_builtin_chat_sessions(&connection)?;
@@ -220,12 +291,14 @@ impl MemoryStore {
              ORDER BY CASE WHEN id = ?1 THEN 0 ELSE 1 END, updated_at DESC",
         )?;
         let rows = statement.query_map(params![CHAT_CLI_ID], |row| {
+            let created_raw: String = row.get(3)?;
+            let updated_raw: String = row.get(4)?;
             Ok(ChatSession {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 kind: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
+                created_at: normalize_sqlite_utc_timestamp(&created_raw),
+                updated_at: normalize_sqlite_utc_timestamp(&updated_raw),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -432,6 +505,208 @@ impl MemoryStore {
         Ok(connection.execute(
             "DELETE FROM learned_skills
              WHERE CAST(id AS TEXT) = ?1 OR source_path = ?1 OR name = ?1",
+            params![identifier],
+        )?)
+    }
+
+    /// Inserts one durable fact. `scope` is `"user"` / `"preference"` (global,
+    /// `project_path` must be `None`) or `"project"` (`project_path` set to the
+    /// workspace it applies to). Returns `Some(id)` of the new row, or `None`
+    /// when an identical live fact already exists (`idx_facts_dedup`).
+    pub fn add_fact(
+        &self,
+        scope: &str,
+        project_path: Option<&str>,
+        body: &str,
+        source_chat_id: Option<&str>,
+        source_interaction_id: Option<i64>,
+    ) -> Result<Option<i64>, MemoryError> {
+        self.add_fact_for_agent(
+            scope,
+            project_path,
+            body,
+            source_chat_id,
+            source_interaction_id,
+            None,
+        )
+    }
+
+    /// [`add_fact`] plus an `agent_id`: `Some(name)` quarantines the fact to that
+    /// subagent (see [`Fact::agent_id`]); `None` is a shared fact. Also computes
+    /// and stores the similarity embedding for the body.
+    ///
+    /// [`add_fact`]: Self::add_fact
+    pub fn add_fact_for_agent(
+        &self,
+        scope: &str,
+        project_path: Option<&str>,
+        body: &str,
+        source_chat_id: Option<&str>,
+        source_interaction_id: Option<i64>,
+        agent_id: Option<&str>,
+    ) -> Result<Option<i64>, MemoryError> {
+        let connection = self.connection()?;
+        let embedding = encode_embedding(&fact_embedding_backend().embed(body));
+        let changed = connection.execute(
+            "INSERT INTO facts
+               (scope, project_path, body, source_chat_id, source_interaction_id, agent_id, embedding)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT DO NOTHING",
+            params![
+                scope,
+                project_path,
+                body,
+                source_chat_id,
+                source_interaction_id,
+                agent_id,
+                embedding,
+            ],
+        )?;
+        Ok((changed > 0).then(|| connection.last_insert_rowid()))
+    }
+
+    /// Live (non-superseded) facts relevant to `project_path`: all `user` /
+    /// `preference` facts, plus `project` facts whose `project_path` matches.
+    /// Shared facts only (`agent_id IS NULL`). Newest first.
+    pub fn live_facts(&self, project_path: Option<&str>) -> Result<Vec<Fact>, MemoryError> {
+        self.live_facts_for_agent(project_path, None)
+    }
+
+    /// [`live_facts`] scoped to a viewer: `agent_id = None` sees only shared
+    /// facts; `agent_id = Some(name)` sees shared facts plus that subagent's own
+    /// quarantined facts.
+    ///
+    /// [`live_facts`]: Self::live_facts
+    pub fn live_facts_for_agent(
+        &self,
+        project_path: Option<&str>,
+        agent_id: Option<&str>,
+    ) -> Result<Vec<Fact>, MemoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, scope, project_path, body, created_at, updated_at, agent_id
+             FROM facts
+             WHERE superseded_by IS NULL
+               AND (agent_id IS NULL OR agent_id = ?2)
+               AND (scope IN ('user', 'preference')
+                    OR (scope = 'project' AND project_path IS NOT NULL AND project_path = ?1))
+             ORDER BY updated_at DESC, id DESC",
+        )?;
+        let rows = statement.query_map(params![project_path, agent_id], fact_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Live quarantined facts (`agent_id IS NOT NULL`) relevant to `project_path`
+    /// — the candidates the parent agent's restatement can promote (see
+    /// [`MemoryStore::promote_fact`]) and what `/memory facts` shows as
+    /// `via <subagent>`.
+    pub fn quarantined_facts(&self, project_path: Option<&str>) -> Result<Vec<Fact>, MemoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, scope, project_path, body, created_at, updated_at, agent_id
+             FROM facts
+             WHERE superseded_by IS NULL
+               AND agent_id IS NOT NULL
+               AND (scope IN ('user', 'preference')
+                    OR (scope = 'project' AND project_path IS NOT NULL AND project_path = ?1))
+             ORDER BY updated_at DESC, id DESC",
+        )?;
+        let rows = statement.query_map(params![project_path], fact_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Same rows as [`live_facts_for_agent`], each paired with its similarity
+    /// vector — decoded from the stored blob, or recomputed from the body when
+    /// the blob is missing (row predates the column) or the wrong width (written
+    /// by a different embedding backend). One query, so ranking recall doesn't
+    /// fan out into per-fact lookups.
+    ///
+    /// [`live_facts_for_agent`]: Self::live_facts_for_agent
+    pub fn live_facts_with_embedding(
+        &self,
+        project_path: Option<&str>,
+        agent_id: Option<&str>,
+    ) -> Result<Vec<(Fact, Vec<f32>)>, MemoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, scope, project_path, body, created_at, updated_at, agent_id, embedding
+             FROM facts
+             WHERE superseded_by IS NULL
+               AND (agent_id IS NULL OR agent_id = ?2)
+               AND (scope IN ('user', 'preference')
+                    OR (scope = 'project' AND project_path IS NOT NULL AND project_path = ?1))
+             ORDER BY updated_at DESC, id DESC",
+        )?;
+        let rows = statement.query_map(params![project_path, agent_id], fact_with_embedding_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// [`quarantined_facts`] each paired with its similarity vector, resolved the
+    /// same way as [`live_facts_with_embedding`].
+    ///
+    /// [`quarantined_facts`]: Self::quarantined_facts
+    pub fn quarantined_facts_with_embedding(
+        &self,
+        project_path: Option<&str>,
+    ) -> Result<Vec<(Fact, Vec<f32>)>, MemoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, scope, project_path, body, created_at, updated_at, agent_id, embedding
+             FROM facts
+             WHERE superseded_by IS NULL
+               AND agent_id IS NOT NULL
+               AND (scope IN ('user', 'preference')
+                    OR (scope = 'project' AND project_path IS NOT NULL AND project_path = ?1))
+             ORDER BY updated_at DESC, id DESC",
+        )?;
+        let rows = statement.query_map(params![project_path], fact_with_embedding_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Lifts a quarantined fact into the shared pool. Returns `true` if a row was
+    /// actually promoted (it existed and had a non-NULL `agent_id`).
+    pub fn promote_fact(&self, id: i64) -> Result<bool, MemoryError> {
+        let connection = self.connection()?;
+        let changed = connection.execute(
+            "UPDATE facts SET agent_id = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1 AND agent_id IS NOT NULL AND superseded_by IS NULL",
+            params![id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Most recent facts regardless of scope or workspace, for `/memory facts`.
+    pub fn list_facts(&self, limit: usize) -> Result<Vec<Fact>, MemoryError> {
+        let connection = self.connection()?;
+        let mut statement = connection.prepare(
+            "SELECT id, scope, project_path, body, created_at, updated_at, agent_id
+             FROM facts WHERE superseded_by IS NULL
+             ORDER BY updated_at DESC, id DESC LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit as i64], fact_row)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Marks `old_id` as no longer live. `new_id` records which fact replaced it;
+    /// pass `None` for a plain retraction, stored as the sentinel `-1` so the row
+    /// still counts as superseded (a real `NULL` would leave it live).
+    pub fn supersede_fact(&self, old_id: i64, new_id: Option<i64>) -> Result<(), MemoryError> {
+        let connection = self.connection()?;
+        connection.execute(
+            "UPDATE facts SET superseded_by = ?2, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1 AND superseded_by IS NULL",
+            params![old_id, new_id.unwrap_or(-1)],
+        )?;
+        Ok(())
+    }
+
+    /// Hard-deletes facts matching `identifier` — an exact id, or a substring of
+    /// the body. Returns the number of rows removed.
+    pub fn forget_fact(&self, identifier: &str) -> Result<usize, MemoryError> {
+        let connection = self.connection()?;
+        Ok(connection.execute(
+            "DELETE FROM facts
+             WHERE CAST(id AS TEXT) = ?1 OR body LIKE '%' || ?1 || '%'",
             params![identifier],
         )?)
     }
@@ -648,7 +923,52 @@ fn initialize(
            summary TEXT NOT NULL,
            verification TEXT NOT NULL DEFAULT '',
            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-         );",
+         );
+         CREATE TABLE IF NOT EXISTS facts (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           scope TEXT NOT NULL DEFAULT 'user',
+           project_path TEXT DEFAULT NULL,
+           body TEXT NOT NULL,
+           source_chat_id TEXT DEFAULT NULL,
+           source_interaction_id INTEGER DEFAULT NULL,
+           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+           superseded_by INTEGER DEFAULT NULL,
+           agent_id TEXT DEFAULT NULL,
+           embedding BLOB
+         );
+         CREATE INDEX IF NOT EXISTS idx_facts_live
+           ON facts(scope, project_path) WHERE superseded_by IS NULL;
+         CREATE TRIGGER IF NOT EXISTS trg_facts_touch
+         AFTER UPDATE OF body, scope, project_path, superseded_by ON facts
+         FOR EACH ROW WHEN NEW.updated_at = OLD.updated_at
+         BEGIN
+           UPDATE facts SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+         END;
+         CREATE VIRTUAL TABLE IF NOT EXISTS interaction_fts USING fts5(
+           user_text,
+           ai_text,
+           content='interaction_memories',
+           content_rowid='id',
+           tokenize='trigram'
+         );
+         CREATE TRIGGER IF NOT EXISTS trg_interaction_fts_ai
+         AFTER INSERT ON interaction_memories BEGIN
+           INSERT INTO interaction_fts(rowid, user_text, ai_text)
+           VALUES (new.id, new.user_text, new.ai_text);
+         END;
+         CREATE TRIGGER IF NOT EXISTS trg_interaction_fts_ad
+         AFTER DELETE ON interaction_memories BEGIN
+           INSERT INTO interaction_fts(interaction_fts, rowid, user_text, ai_text)
+           VALUES ('delete', old.id, old.user_text, old.ai_text);
+         END;
+         CREATE TRIGGER IF NOT EXISTS trg_interaction_fts_au
+         AFTER UPDATE ON interaction_memories BEGIN
+           INSERT INTO interaction_fts(interaction_fts, rowid, user_text, ai_text)
+           VALUES ('delete', old.id, old.user_text, old.ai_text);
+           INSERT INTO interaction_fts(rowid, user_text, ai_text)
+           VALUES (new.id, new.user_text, new.ai_text);
+         END;",
     )?;
     ensure_column(
         connection,
@@ -686,6 +1006,23 @@ fn initialize(
         "kind",
         "TEXT NOT NULL DEFAULT 'conversation'",
     )?;
+    // `agent_id` scopes a fact to the subagent that produced it (NULL = shared /
+    // user-authored); `embedding` is the on-device similarity vector used for
+    // relevance-ranked recall. Both are additive for databases created before
+    // they existed.
+    ensure_column(connection, "facts", "agent_id", "TEXT DEFAULT NULL")?;
+    ensure_column(connection, "facts", "embedding", "BLOB")?;
+    // The dedup uniqueness now keys on `agent_id` too, so a subagent's
+    // quarantined fact and an identical shared one can coexist. Drop/recreate
+    // rather than `IF NOT EXISTS` since the column set changed; it is a pure
+    // derived index so rebuilding it is safe.
+    connection.execute("DROP INDEX IF EXISTS idx_facts_dedup", [])?;
+    connection.execute(
+        "CREATE UNIQUE INDEX idx_facts_dedup
+           ON facts(scope, ifnull(project_path, ''), ifnull(agent_id, ''), body)
+           WHERE superseded_by IS NULL",
+        [],
+    )?;
     connection.execute(
         "UPDATE interaction_memories
          SET chat_id = ?1
@@ -704,8 +1041,33 @@ fn initialize(
          ON interaction_memories(chat_id, id)",
         [],
     )?;
+    // `keywords` was declared years ago but never read or written by any code
+    // path — the FTS5 index below is what actually powers recall now. Drop it so
+    // the column doesn't mislead. Needs SQLite >= 3.35 (bundled is far newer).
+    drop_column_if_exists(connection, "interaction_memories", "keywords")?;
     if migrate_legacy_history {
         migrate_json_history(connection)?;
+    }
+    // One-time populate of `interaction_fts` for rows that predate it. The
+    // triggers above keep it current from here on; this only needs to run once
+    // per database, gated by a sentinel like `migrate_json_history` uses.
+    let fts_backfilled: bool = connection
+        .query_row(
+            "SELECT 1 FROM user_profile WHERE key = 'interaction_fts_backfilled'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !fts_backfilled {
+        connection.execute(
+            "INSERT INTO interaction_fts(interaction_fts) VALUES('rebuild')",
+            [],
+        )?;
+        connection.execute(
+            "INSERT OR REPLACE INTO user_profile (key, value, updated_at)
+             VALUES ('interaction_fts_backfilled', 'true', CURRENT_TIMESTAMP)",
+            [],
+        )?;
     }
     Ok(())
 }
@@ -730,6 +1092,29 @@ fn ensure_column(
     Ok(())
 }
 
+/// Inverse of [`ensure_column`]: drops `column` from `table` if it is still
+/// there, and is a no-op once it's gone. `ALTER TABLE ... DROP COLUMN` needs
+/// SQLite >= 3.35.
+fn drop_column_if_exists(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+) -> Result<(), rusqlite::Error> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    let mut present = false;
+    for existing in columns {
+        if existing? == column {
+            present = true;
+            break;
+        }
+    }
+    if present {
+        connection.execute(&format!("ALTER TABLE {table} DROP COLUMN {column}"), [])?;
+    }
+    Ok(())
+}
+
 fn learned_skill_row(row: &rusqlite::Row<'_>) -> Result<LearnedSkill, rusqlite::Error> {
     let content: String = row.get(3)?;
     let description = crate::skills::parse_skill_description(&content);
@@ -744,10 +1129,94 @@ fn learned_skill_row(row: &rusqlite::Row<'_>) -> Result<LearnedSkill, rusqlite::
     })
 }
 
+/// Turns free-form user text into a safe FTS5 `MATCH` string for the `trigram`
+/// tokenizer: pulls out alphanumeric runs (Unicode-aware, so Thai counts) of at
+/// least 3 chars — the trigram minimum — lowercases and dedupes them, caps at
+/// 12, and quotes each so it is treated as a literal (a `"` can never appear in
+/// a token, so this can't inject FTS operators). `None` if nothing usable is
+/// left, so the caller can skip the query entirely.
+fn fts_match_query(query: &str) -> Option<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut tokens: Vec<String> = Vec::new();
+    for raw in query.split(|c: char| !c.is_alphanumeric()) {
+        if raw.chars().count() < 3 {
+            continue;
+        }
+        let token = raw.to_lowercase();
+        if seen.insert(token.clone()) {
+            tokens.push(token);
+            if tokens.len() == 12 {
+                break;
+            }
+        }
+    }
+    if tokens.is_empty() {
+        return None;
+    }
+    Some(
+        tokens
+            .iter()
+            .map(|t| format!("\"{t}\""))
+            .collect::<Vec<_>>()
+            .join(" OR "),
+    )
+}
+
+fn fact_row(row: &rusqlite::Row<'_>) -> Result<Fact, rusqlite::Error> {
+    Ok(Fact {
+        id: row.get(0)?,
+        scope: row.get(1)?,
+        project_path: row.get(2)?,
+        body: row.get(3)?,
+        created_at: row.get(4)?,
+        updated_at: row.get(5)?,
+        agent_id: row.get(6)?,
+    })
+}
+
+/// Row mapper for the `SELECT … , embedding` fact queries: the [`Fact`] plus a
+/// usable similarity vector, recomputing from the body when the stored blob is
+/// absent or the wrong width for the current backend.
+fn fact_with_embedding_row(row: &rusqlite::Row<'_>) -> Result<(Fact, Vec<f32>), rusqlite::Error> {
+    let fact = fact_row(row)?;
+    let backend = fact_embedding_backend();
+    let vector = row
+        .get::<_, Option<Vec<u8>>>(7)?
+        .and_then(|bytes| crate::search::text_embedding::decode_embedding(&bytes).ok())
+        .filter(|v| v.len() == backend.dim())
+        .unwrap_or_else(|| backend.embed(&fact.body));
+    Ok((fact, vector))
+}
+
+pub fn normalize_sqlite_utc_timestamp(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.ends_with('Z') || trimmed.contains('+') {
+        return trimmed.to_string();
+    }
+    if trimmed.len() >= 19 && trimmed.chars().nth(10) == Some(' ') {
+        let mut s = trimmed.to_string();
+        s.replace_range(10..11, "T");
+        if !s.ends_with('Z') {
+            s.push('Z');
+        }
+        return s;
+    }
+    if trimmed.len() >= 19 && trimmed.chars().nth(10) == Some('T') && !trimmed.ends_with('Z') {
+        let mut s = trimmed.to_string();
+        s.push('Z');
+        return s;
+    }
+    trimmed.to_string()
+}
+
 fn interaction_row(row: &rusqlite::Row<'_>) -> Result<InteractionMemory, rusqlite::Error> {
     let agent_activity = row
         .get::<_, Option<String>>(8)?
         .and_then(|raw| serde_json::from_str(&raw).ok());
+    let raw_created: String = row.get(7)?;
     Ok(InteractionMemory {
         id: row.get(0)?,
         chat_id: row.get(1)?,
@@ -756,7 +1225,7 @@ fn interaction_row(row: &rusqlite::Row<'_>) -> Result<InteractionMemory, rusqlit
         provider: row.get(4)?,
         model: row.get(5)?,
         fallback_provider: row.get(6)?,
-        created_at: row.get(7)?,
+        created_at: normalize_sqlite_utc_timestamp(&raw_created),
         agent_activity,
     })
 }
@@ -850,5 +1319,26 @@ mod scoped_chat_id_tests {
         assert!(!is_cli_chat_id("cli::subagent::search"));
         assert!(!is_cli_chat_id("cli::abc123456789::subagent::search"));
         assert!(!is_cli_chat_id("conversation-default"));
+    }
+
+    #[test]
+    fn test_normalize_sqlite_utc_timestamp() {
+        assert_eq!(
+            normalize_sqlite_utc_timestamp("2026-09-05 14:39:15"),
+            "2026-09-05T14:39:15Z"
+        );
+        assert_eq!(
+            normalize_sqlite_utc_timestamp("2026-09-05T14:39:15"),
+            "2026-09-05T14:39:15Z"
+        );
+        assert_eq!(
+            normalize_sqlite_utc_timestamp("2026-09-05T14:39:15Z"),
+            "2026-09-05T14:39:15Z"
+        );
+        assert_eq!(
+            normalize_sqlite_utc_timestamp("2026-09-05T14:39:15+07:00"),
+            "2026-09-05T14:39:15+07:00"
+        );
+        assert_eq!(normalize_sqlite_utc_timestamp(""), "");
     }
 }

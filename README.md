@@ -230,6 +230,35 @@ Pick one way to get the global `mint` command:
 
 No alias set up? Everything below still works via `npm run cli -- <command>` in place of `mint <command>`.
 
+---
+
+### First Run — "Unidentified Developer" / "Unknown Publisher"
+
+Prebuilt downloads from the [Releases page](https://github.com/Pheem49/Mint/releases) — the
+desktop `.dmg` / `.exe` and the standalone `mint-cli_*` binaries — are **not yet code-signed**,
+so macOS Gatekeeper and Windows SmartScreen flag them on first launch. The warnings are
+expected and safe to dismiss. Installing with `install.sh` / `install.ps1` / `npm` builds from
+source and avoids all of this.
+
+**macOS** — Gatekeeper blocks unsigned, un-notarized builds until you clear the quarantine flag:
+
+```bash
+# Desktop app
+xattr -dr com.apple.quarantine /Applications/Mint.app
+
+# Standalone CLI binary — use the file you actually downloaded
+xattr -d com.apple.quarantine ./mint-cli_macos_arm64 && chmod +x ./mint-cli_macos_arm64
+```
+
+For the app you can instead right-click `Mint.app` → **Open** → **Open** in the dialog (once).
+
+**Windows** — SmartScreen shows "Windows protected your PC":
+
+1. Click **More info**.
+2. Click **Run anyway**.
+
+This appears once per new version until the builds are signed.
+
 ## User Interface
 
 ### Desktop App
@@ -421,10 +450,25 @@ mint mcp add filesystem npx \
   --args @modelcontextprotocol/server-filesystem \
   --args .
 
-mint mcp list
+mint mcp list                       # `[disabled]` marks turned-off servers
+mint mcp allow filesystem "*"       # let the agent call every tool
 mint mcp call filesystem list_directory \
   --arguments '{"path":"."}'
 ```
+
+| Command | Purpose |
+| --- | --- |
+| `mint mcp add <name> <cmd> [--args … --env K=V …]` | Add a server |
+| `mint mcp edit <name> [--command] [--args …] [--env K=V …] [--icon\|--no-icon]` | Change one or more fields in place |
+| `mint mcp disable <name>` / `mint mcp enable <name>` | Turn a server off/on without removing it |
+| `mint mcp allow <server> <tool>` / `mint mcp disallow <server> <tool>` | Grant/revoke a tool (`*` = all) |
+| `mint mcp reauth <server>` | Re-run a server's OAuth login |
+| `mint mcp remove <name>` / `mint mcp clear` | Remove one / all servers |
+
+The same operations are available interactively with `/mcp` (an arrow-key
+picker with an "＋ Add" row and a per-server action menu) and from the
+Desktop/Web **Settings → Plugins → MCP Servers** panel, including the per-server
+tool allowlist.
 
 ### Interactive Commands
 
@@ -441,12 +485,13 @@ mint mcp call filesystem list_directory \
 | `/learn <path>` | Import a local skill |
 | `/skill [list]` | List all skills Mint can see (global, workspace, taught) |
 | `/skill add <path\|github-repo\|url>` | Install a skill — local path, or a GitHub repo/URL via `npx skills` |
-| `/plugins [name]` | List or interact with available plugins/skills |
+| `/plugins` | Browse plugins — enable/disable, OAuth connect/disconnect, credentials |
+| `/plugin enable\|disable <name>` | Toggle a native plugin for the agent |
 | `/memory list` | List stored memories |
 | `/memory clear` | Clear stored memories |
 | `/memory get <key>` | Read one memory value |
 | `/memory set <key> <value>` | Store one memory value |
-| `/mcp [subcmd]` | Manage configured MCP servers (list, allow, disallow) |
+| `/mcp [subcmd]` | Manage MCP servers — add, edit, enable/disable, allow/disallow, reauth, remove |
 | `/stats` | Show session statistics |
 | `/code <task>` | Start a code-agent task |
 | `/avatar [web\|desktop\|status\|off]` | Connect agent activity to [Project Avatar](https://github.com/projectavatar/projectavatar) |
@@ -508,12 +553,25 @@ sudo loginctl enable-linger "$(whoami)"
 | `mint gateway install --now` | Also start the service immediately after installing it |
 | `mint gateway install --memory-max <size>` | Cap the service's memory (systemd size syntax, e.g. `512M`, `1G`) — unset by default |
 
-Once installed:
+Once installed, `mint gateway install` has already written and enabled the
+unit — day-to-day you drive it with plain `systemctl` (drop `--user` and use
+`sudo` for a `--system` unit):
 
-```bash
-systemctl --user status mint.service      # or `systemctl status mint` with --system
-journalctl --user -u mint.service -f      # follow logs
-```
+| Task | Command |
+| --- | --- |
+| Start it now | `systemctl --user start mint.service` |
+| Stop it now | `systemctl --user stop mint.service` |
+| Restart it | `systemctl --user restart mint.service` |
+| Is it running? | `systemctl --user status mint.service` |
+| Follow logs | `journalctl --user -u mint.service -f` |
+| Start on boot | `systemctl --user enable mint.service` (`install` already did this) |
+| Don't start on boot | `systemctl --user disable mint.service` |
+| Uninstall | `systemctl --user disable --now mint.service`, then delete `~/.config/systemd/user/mint.service` |
+
+`start`/`stop` control it right now; `enable`/`disable` control whether it
+comes up on boot — the two are independent. Per-user units also need
+`sudo loginctl enable-linger "$(whoami)"` once to keep running with no login
+session (see the VPS quick start above).
 
 ### Checking on it remotely
 

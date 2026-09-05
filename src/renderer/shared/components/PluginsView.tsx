@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import '../css/management-views.css'
 import { renderMcpSvgIcon, BUILTIN_PLUGINS_LIST, renderPluginsSvgIcon, type BuiltinPluginDefinition } from '../constants/plugins'
+import { isNativePluginEnabled, applyNativePluginToggle } from '../utils/nativePlugins'
 import {
   getOAuthStatuses,
   startOAuthFlow,
@@ -103,7 +104,7 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
       p.desc.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const installedPlugins = pluginsList.filter((p) => Boolean((config as any)[p.enabledField]))
+  const installedPlugins = pluginsList.filter((p) => isNativePluginEnabled(config, p))
 
   return (
     <div className="management-container">
@@ -114,10 +115,10 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
             <span className="management-title-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
               {renderPluginsSvgIcon(22, 'var(--accent)')}
             </span>
-            Plugins & Integrations
+            Plugins
           </h1>
           <p className="management-subtitle">
-            Configure native credentials, OAuth logins, and external service connectors for Mint Agent.
+            Connect external services and accounts.
           </p>
         </div>
       </div>
@@ -169,9 +170,9 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
 
       {/* Plugin Grid */}
       <h2 className="management-section-title">Recommended</h2>
-      <div className="management-grid">
+      <div className="mgmt-row-stack">
         {filteredPlugins.map((p) => {
-          const isEnabled = Boolean((config as any)[p.enabledField])
+          const isEnabled = isNativePluginEnabled(config, p)
           const oauthMatch = p.isOAuth ? oauthStatuses.find((s) => s.provider === p.oauthProvider) : undefined
           const isConn = Boolean(oauthMatch?.connected)
 
@@ -215,7 +216,7 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
                   title="Enable"
                   onClick={(e) => {
                     e.stopPropagation()
-                    updateField(p.enabledField as any, true)
+                    applyNativePluginToggle(config, p, true, updateField)
                     setDetailPlugin(p)
                   }}
                 >
@@ -233,7 +234,7 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
       {/* Plugin Detail */}
       {detailPlugin && (() => {
         const p = detailPlugin
-        const isEnabled = Boolean((config as any)[p.enabledField])
+        const isEnabled = isNativePluginEnabled(config, p)
         const oauthMatch = p.isOAuth ? oauthStatuses.find((s) => s.provider === p.oauthProvider) : undefined
         const isConn = Boolean(oauthMatch?.connected)
 
@@ -260,7 +261,7 @@ export const PluginsView: React.FC<PluginsViewProps> = React.memo(function Plugi
                     <input
                       type="checkbox"
                       checked={isEnabled}
-                      onChange={(e) => updateField(p.enabledField as any, e.target.checked)}
+                      onChange={(e) => applyNativePluginToggle(config, p, e.target.checked, updateField)}
                     />
                     <span className="settings-toggle-slider" />
                   </label>

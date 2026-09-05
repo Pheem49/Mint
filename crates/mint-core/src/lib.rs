@@ -11,6 +11,7 @@ pub mod agent;
 pub mod avatar_bridge;
 pub mod browser;
 pub mod cron;
+pub mod git;
 pub mod integrations;
 pub mod live_sync;
 pub mod media;
@@ -47,11 +48,12 @@ pub use integrations::hooks;
 pub use integrations::mcp;
 pub use integrations::oauth;
 pub use integrations::plugins;
-pub use integrations::workflows;
 
 pub use search::files;
 pub use search::knowledge;
 pub use search::linked_folders;
+pub use search::local_embedding;
+pub use search::repo_map;
 pub use search::semantic;
 pub use search::symbols;
 pub use search::web_search;
@@ -105,6 +107,10 @@ pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_pat
 pub use gemini_live::{
     GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session,
 };
+pub use git::{
+    Checkpoint, create_checkpoint, get_head_hash, is_git_repo, list_checkpoints, record_checkpoint,
+    rollback_checkpoint, rollback_to_step,
+};
 pub use hooks::{
     HookEntry, HookError, HookEvent, PreHookOutcome, add_hook, clear_hooks, list_hooks,
     remove_hook, run_post_tool_hooks, run_pre_tool_hooks,
@@ -121,29 +127,37 @@ pub use linked_folders::{
     configured_linked_folders, list_linked_folders, remove_linked_folder, spawn_linked_folder_note,
 };
 pub use mcp::{
-    McpError, McpServer, add_mcp_server, call_configured_mcp_tool, call_mcp_tool,
-    clear_mcp_servers, close_all_mcp_sessions, close_mcp_session, configured_mcp_servers,
-    drain_mcp_notifications, get_server_prompt, list_mcp_servers, list_server_prompts,
-    list_server_resources, list_server_tools, read_server_resource, reauth_mcp_server,
-    remove_mcp_server,
+    McpError, McpRegistryArgInput, McpRegistryEntry, McpRegistryEnvVar, McpServer, add_mcp_server,
+    allow_mcp_tool, allow_tool_in, call_configured_mcp_tool, call_mcp_tool, clear_mcp_servers,
+    clear_servers_in, close_all_mcp_sessions, close_mcp_session, configured_mcp_servers,
+    disallow_mcp_tool, disallow_tool_in, drain_mcp_notifications, expand_registry_entry,
+    get_server_prompt, is_mcp_tool_allowed, list_mcp_servers, list_server_prompts,
+    list_server_resources, list_server_tools, mcp_registry, mcp_registry_entry,
+    mcp_server_tool_names, mcp_tool_allowlist, read_server_resource, reauth_mcp_server,
+    remove_mcp_server, remove_server_in, set_mcp_server_disabled, set_server_disabled_in,
+    update_mcp_server, update_server_in, upsert_server_in,
 };
 pub use memory::{
-    CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, InteractionMemory, LearnedSkill,
-    MemoryError, MemoryStore, WorkspaceSession, memory_path, scoped_chat_id,
+    CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, Fact, InteractionMemory, LearnedSkill,
+    MemoryError, MemoryStore, WorkspaceSession, memory_path, scoped_chat_id, subagent_name,
 };
 pub use mic_transcribe::{
     MicRecordingHandle, MicTranscribeError, start_recording, stop_recording, transcribe_recording,
 };
 pub use orchestration::{
-    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption, OrchestrationError,
-    orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
-    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption,
+    MCP_ALLOW_ALL_SENTINEL, OrchestrationError, orchestrate_agent_loop, orchestrate_chat,
+    orchestrate_chat_stream, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
 };
 pub use pictures::{
     PictureEntry, PictureError, delete_saved_picture, list_saved_pictures, parse_data_uri,
     save_chat_images, save_sent_image,
 };
-pub use plugins::{NativePlugin, PluginError, execute_native_plugin, native_plugins};
+pub use plugins::{
+    NativePlugin, PluginError, execute_native_plugin, native_plugin_enabled, native_plugins,
+    set_native_plugin_enabled_in,
+};
+pub use repo_map::{RepoMapSummary, generate_repo_map};
 pub use safety::{
     Capability, SafetyError, SafetyTier, ShellClassification, ShellCommandMode,
     assert_path_capability, classify_shell_command, shell_mode_allowed,
@@ -186,7 +200,6 @@ pub use video_edit::{
 };
 pub use video_gen::{VideoGenError, VideoGenRequest, VideoGenResponse, generate_video};
 pub use weather::{WeatherError, WeatherReport, weather};
-pub use workflows::{WorkflowError, load_workflows, save_workflows, workflows_path};
 pub mod api_server;
 pub use api_server::start_api_server;
 pub use channels::start_channels;

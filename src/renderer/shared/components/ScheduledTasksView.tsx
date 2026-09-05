@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { DateTime } from 'luxon'
 import { renderScheduledTasksSvgIcon, renderTaskLogoIcon } from '../constants/plugins'
+import { renderFormattedMessage } from '../utils/markdown'
 import '../css/management-views.css'
 import type { CronJob, CronJobDraft } from '../types'
 
@@ -58,6 +59,24 @@ function formatTimestamp(value: string | null): string {
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
   return parsed.toLocaleString()
+}
+
+/** "in 5 hours" / "3 days ago" (in the runtime locale) — falls back to the
+ * absolute local time. */
+function formatRelative(value: string | null): string {
+  if (!value) return '—'
+  const dt = DateTime.fromISO(value)
+  if (!dt.isValid) return formatTimestamp(value)
+  return dt.toRelative() ?? formatTimestamp(value)
+}
+
+/** The status word shown on a task row: a live run, or the outcome of the
+ * last one. `null` for a task that has never run. */
+function runState(job: CronJob): 'running' | 'ok' | 'failed' | null {
+  if (job.runningSince) return 'running'
+  if (job.lastStatus === 'success') return 'ok'
+  if (job.lastStatus === 'failed') return 'failed'
+  return null
 }
 
 export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
@@ -260,8 +279,7 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
               Scheduled Tasks
             </h1>
             <p className="management-subtitle">
-              Recurring agent tasks that fire automatically on a cron schedule while Mint is running (interactive
-              chat, `mint api`/`mint web`, or the desktop app).
+              Tasks that run on a schedule in the background.
             </p>
           </div>
           <button type="button" className="management-primary-btn" onClick={() => setShowAddModal(true)}>
@@ -300,45 +318,40 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
         {error && <div className="management-error-banner">{error}</div>}
 
         {loading ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted, #94a3b8)' }}>
-            Loading scheduled tasks...
-          </div>
+          <div className="mgmt-empty">Loading…</div>
         ) : filteredJobs.length === 0 ? (
-          <div className="management-empty-state">
-            <div className="management-empty-icon">⏰</div>
-            <h3 className="management-empty-title">No scheduled tasks yet</h3>
-            <p className="management-empty-desc">
-              Create one above, or use <code>mint cron add</code> / <code>/cron add</code> in chat.
-            </p>
+          <div className="mgmt-empty">
+            <p>{searchQuery ? 'No scheduled tasks match your search.' : 'No scheduled tasks.'}</p>
+            {!searchQuery && (
+              <p>
+                Add one above, or run <code>mint cron add</code> in chat.
+              </p>
+            )}
           </div>
         ) : (
-          <div className="management-grid">
-            {filteredJobs.map((job) => (
-              <div
-                key={job.id}
-                className="management-card"
-                onClick={() => setDetailJob(job)}
-                style={{ cursor: 'pointer' }}
-              >
-                <div>
-                  <div className="management-card-header">
-                    <div className="management-card-title-group">
-                      {renderTaskLogoIcon()}
-                      <h3 className="management-card-title">{job.name}</h3>
+          <div className="mgmt-list">
+            {filteredJobs.map((job) => {
+              const state = runState(job)
+              return (
+                <div
+                  key={job.id}
+                  className={`mgmt-row${job.enabled ? '' : ' is-disabled'}`}
+                  onClick={() => setDetailJob(job)}
+                >
+                  <div className="mgmt-row-main">
+                    <div className="mgmt-row-title">{job.name}</div>
+                    <div className="mgmt-row-meta">
+                      <code>{job.schedule}</code>
+                      <span className="mgmt-row-sep">·</span>
+                      <span>next {formatRelative(job.nextRun)}</span>
+                      {state && (
+                        <>
+                          <span className="mgmt-row-sep">·</span>
+                          <span className={`mgmt-status ${state}`}>{state}</span>
+                        </>
+                      )}
                     </div>
-                    <span className={`management-badge ${job.enabled ? 'active' : 'inactive'}`}>
-                      <span className="management-dot" />
-                      {job.enabled ? 'Enabled' : 'Disabled'}
-                    </span>
                   </div>
-
-                  <p className="management-card-desc">{job.task}</p>
-                </div>
-
-                <div className="management-card-footer">
-                  <code style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)' }}>
-                    {job.schedule}
-                  </code>
                   <label className="settings-toggle-switch" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
@@ -348,8 +361,8 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
                     <span className="settings-toggle-slider"></span>
                   </label>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
 
@@ -368,44 +381,38 @@ export const ScheduledTasksView: React.FC<ScheduledTasksViewProps> = React.memo(
               </div>
 
               <div className="management-modal-body">
-                <span className={`management-badge ${detailJob.enabled ? 'active' : 'inactive'}`}>
-                  <span className="management-dot" />
-                  {detailJob.enabled ? 'Enabled' : 'Disabled'}
-                </span>
-
-                <p style={{ color: 'var(--text-soft, #d1d1d4)', lineHeight: 1.55, marginTop: '14px' }}>
+                <p style={{ color: 'var(--text-soft, #d1d1d4)', lineHeight: 1.55, margin: 0 }}>
                   {detailJob.task}
                 </p>
 
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted, #94a3b8)', marginTop: '14px', display: 'grid', gap: '6px' }}>
-                  <div>
-                    Schedule (UTC): <code>{detailJob.schedule}</code>
-                  </div>
-                  <div>Next run (local time): {formatTimestamp(detailJob.nextRun)}</div>
-                  <div>
-                    Last run (local time): {formatTimestamp(detailJob.lastRunAt)}
-                    {detailJob.lastStatus && (
-                      <span
-                        className={`management-badge ${detailJob.lastStatus === 'success' ? 'active' : 'inactive'}`}
-                        style={{ marginLeft: '6px' }}
-                      >
-                        {detailJob.lastStatus}
+                <div className="mgmt-detail-grid">
+                  <span>Schedule</span>
+                  <code>{detailJob.schedule} <span style={{ opacity: 0.55 }}>UTC</span></code>
+                  <span>Next run</span>
+                  <span>{formatTimestamp(detailJob.nextRun)}</span>
+                  {detailJob.runningSince && (
+                    <>
+                      <span>Running since</span>
+                      <span>{formatTimestamp(detailJob.runningSince)}</span>
+                    </>
+                  )}
+                  <span>Last run</span>
+                  <span>
+                    {formatTimestamp(detailJob.lastRunAt)}
+                    {runState(detailJob) && (
+                      <span className={`mgmt-status ${runState(detailJob)}`} style={{ marginLeft: '8px' }}>
+                        {runState(detailJob)}
                       </span>
                     )}
-                  </div>
+                  </span>
                 </div>
 
                 {detailJob.lastSummary && (
-                  <div style={{ marginTop: '16px' }}>
-                    <label className="management-label" style={{ display: 'block', marginBottom: '6px' }}>
+                  <div>
+                    <label className="management-label" style={{ display: 'block', marginBottom: '8px' }}>
                       Last response
                     </label>
-                    <div
-                      className="management-code-snippet"
-                      style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', maxHeight: '260px', overflowY: 'auto' }}
-                    >
-                      {detailJob.lastSummary}
-                    </div>
+                    <div className="mgmt-prose">{renderFormattedMessage(detailJob.lastSummary)}</div>
                   </div>
                 )}
               </div>

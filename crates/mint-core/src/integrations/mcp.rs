@@ -17,7 +17,17 @@ use thiserror::Error;
 use crate::{ConfigError, MintConfig, load_config, save_config};
 
 const MCP_TIMEOUT: Duration = Duration::from_secs(30);
-static OAUTH_DETECTED: AtomicBool = AtomicBool::new(false);
+
+/// Extended per-request timeout used only while a session is mid-OAuth (its
+/// reader threads saw an auth URL) — the user needs time to finish the browser
+/// flow before the pending request gives up.
+const MCP_OAUTH_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Upper bound on un-drained server notifications a session buffers; the oldest
+/// are dropped past this. Nothing drains `notifications` yet (see
+/// `drain_mcp_notifications`), so this just caps memory on a long-lived session
+/// talking to a chatty server.
+const MAX_BUFFERED_NOTIFICATIONS: usize = 64;
 
 /// Live MCP server sessions, keyed by server name. Held as `Arc<Mutex<_>>` per
 /// session (rather than one lock guarding the whole map for a call's full
@@ -36,6 +46,16 @@ pub struct McpServer {
     pub env: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Set by the Desktop/Web MCP settings toggle to keep a server configured
+    /// but temporarily off. A disabled server is hidden from the agent's server
+    /// list and every `tools/*`, `resources/*`, and `prompts/*` call against it
+    /// is refused before a process is spawned.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disabled: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Error)]
@@ -48,6 +68,8 @@ pub enum McpError {
     InvalidEnvironment,
     #[error("MCP server '{0}' is not configured")]
     MissingServer(String),
+    #[error("MCP server '{0}' is disabled. Re-enable it in Settings > Plugins to use it.")]
+    Disabled(String),
     #[error(
         "MCP tool '{server}/{tool}' is not allowed by policy. To allow it, please run: /mcp allow {server} {tool} (or /mcp allow {server} * to allow all tools on this server)"
     )]
@@ -85,6 +107,88 @@ pub fn list_mcp_servers() -> Result<BTreeMap<String, McpServer>, McpError> {
     configured_mcp_servers(&load_config()?)
 }
 
+// ── Server-config mutation ────────────────────────────────────────────────────
+//
+// Two layers so every surface can share the logic without double-saving:
+//   * `*_in(&mut MintConfig, …)` — pure, no persistence. Used by the shared
+//     slash engine (`crate::slash`), which reports `ConfigChanged` and lets the
+//     host `save_config`.
+//   * the `pub fn foo(…)` wrappers below — `load_config → *_in → save_config`,
+//     for the CLI (`mint mcp …`) and any caller that owns the whole round-trip.
+
+/// Insert or replace a server entry in `config.extra["mcpServers"]` (no save).
+pub fn upsert_server_in(
+    config: &mut MintConfig,
+    name: &str,
+    server: McpServer,
+) -> Result<(), McpError> {
+    let mut servers = configured_mcp_servers(config)?;
+    servers.insert(name.to_string(), server);
+    write_servers(config, servers)
+}
+
+/// Remove a server entry (no save). Returns whether it existed.
+pub fn remove_server_in(config: &mut MintConfig, name: &str) -> Result<bool, McpError> {
+    let mut servers = configured_mcp_servers(config)?;
+    let removed = servers.remove(name).is_some();
+    write_servers(config, servers)?;
+    Ok(removed)
+}
+
+/// Drop every configured server (no save).
+pub fn clear_servers_in(config: &mut MintConfig) -> Result<(), McpError> {
+    write_servers(config, BTreeMap::new())
+}
+
+/// Flip `mcpServers[name].disabled` (no save); kills a live session on disable.
+/// Returns whether the server existed.
+pub fn set_server_disabled_in(
+    config: &mut MintConfig,
+    name: &str,
+    disabled: bool,
+) -> Result<bool, McpError> {
+    let mut servers = configured_mcp_servers(config)?;
+    let Some(server) = servers.get_mut(name) else {
+        return Ok(false);
+    };
+    server.disabled = disabled;
+    write_servers(config, servers)?;
+    if disabled {
+        close_mcp_session(name);
+    }
+    Ok(true)
+}
+
+/// Partial edit of an existing server (no save); `None` fields are left as-is.
+/// Returns whether the server existed.
+pub fn update_server_in(
+    config: &mut MintConfig,
+    name: &str,
+    command: Option<String>,
+    args: Option<Vec<String>>,
+    env: Option<BTreeMap<String, String>>,
+    icon: Option<Option<String>>,
+) -> Result<bool, McpError> {
+    let mut servers = configured_mcp_servers(config)?;
+    let Some(server) = servers.get_mut(name) else {
+        return Ok(false);
+    };
+    if let Some(command) = command {
+        server.command = command;
+    }
+    if let Some(args) = args {
+        server.args = args;
+    }
+    if let Some(env) = env {
+        server.env = env;
+    }
+    if let Some(icon) = icon {
+        server.icon = icon;
+    }
+    write_servers(config, servers)?;
+    Ok(true)
+}
+
 pub fn add_mcp_server(
     name: &str,
     command: &str,
@@ -92,30 +196,60 @@ pub fn add_mcp_server(
     env: Vec<String>,
 ) -> Result<(), McpError> {
     let mut config = load_config()?;
-    let mut servers = configured_mcp_servers(&config)?;
-    servers.insert(
-        name.into(),
+    upsert_server_in(
+        &mut config,
+        name,
         McpServer {
             command: command.into(),
             args,
             env: parse_env(env)?,
             icon: None,
+            disabled: false,
         },
-    );
-    save_mcp_servers(&mut config, servers)
+    )?;
+    Ok(save_config(&config)?)
 }
 
 pub fn remove_mcp_server(name: &str) -> Result<bool, McpError> {
     let mut config = load_config()?;
-    let mut servers = configured_mcp_servers(&config)?;
-    let removed = servers.remove(name).is_some();
-    save_mcp_servers(&mut config, servers)?;
+    let removed = remove_server_in(&mut config, name)?;
+    save_config(&config)?;
     Ok(removed)
 }
 
 pub fn clear_mcp_servers() -> Result<(), McpError> {
     let mut config = load_config()?;
-    save_mcp_servers(&mut config, BTreeMap::new())
+    clear_servers_in(&mut config)?;
+    Ok(save_config(&config)?)
+}
+
+/// `load_config → set_server_disabled_in → save_config`. Returns whether the
+/// server existed (a no-op, no save, if not).
+pub fn set_mcp_server_disabled(name: &str, disabled: bool) -> Result<bool, McpError> {
+    let mut config = load_config()?;
+    let existed = set_server_disabled_in(&mut config, name, disabled)?;
+    if existed {
+        save_config(&config)?;
+    }
+    Ok(existed)
+}
+
+/// `load_config → update_server_in → save_config`. `env` entries are `KEY=VALUE`
+/// strings, parsed here. Returns whether the server existed.
+pub fn update_mcp_server(
+    name: &str,
+    command: Option<String>,
+    args: Option<Vec<String>>,
+    env: Option<Vec<String>>,
+    icon: Option<Option<String>>,
+) -> Result<bool, McpError> {
+    let mut config = load_config()?;
+    let env = env.map(parse_env).transpose()?;
+    let existed = update_server_in(&mut config, name, command, args, env, icon)?;
+    if existed {
+        save_config(&config)?;
+    }
+    Ok(existed)
 }
 
 pub fn call_mcp_tool(
@@ -286,6 +420,13 @@ pub fn close_all_mcp_sessions() {
     }
 }
 
+/// Whether `server_name/tool_name` is covered by `allowedMcpTools` (an exact
+/// tool entry, `"*"` for the server, or a `"*"` server key). The orchestration
+/// layer uses this to skip the approval prompt for an already-trusted server.
+pub fn is_mcp_tool_allowed(config: &MintConfig, server_name: &str, tool_name: &str) -> bool {
+    mcp_tool_allowed(config, server_name, tool_name)
+}
+
 fn mcp_tool_allowed(config: &MintConfig, server_name: &str, tool_name: &str) -> bool {
     config
         .extra
@@ -322,14 +463,110 @@ pub fn call_configured_mcp_tool(
     call_mcp_tool(&load_config()?, server_name, tool_name, arguments)
 }
 
-fn save_mcp_servers(
+/// Serialize `servers` back into `config.extra["mcpServers"]` (no save).
+fn write_servers(
     config: &mut MintConfig,
     servers: BTreeMap<String, McpServer>,
 ) -> Result<(), McpError> {
     config
         .extra
         .insert("mcpServers".into(), serde_json::to_value(servers)?);
-    Ok(save_config(config)?)
+    Ok(())
+}
+
+// ── Tool allowlist (`allowedMcpTools`) ────────────────────────────────────────
+
+/// Add `tool` (or `"*"`) to `config.extra["allowedMcpTools"][server]` (no save).
+/// Returns `false` when it was already covered — an exact match, or a `"*"`
+/// entry already present for that server. Ported from
+/// `crates/mint-cli/src/mcp.rs::allow` / `slash::allow_mcp_tool`.
+pub fn allow_tool_in(config: &mut MintConfig, server: &str, tool: &str) -> bool {
+    let allowed = config
+        .extra
+        .entry("allowedMcpTools".into())
+        .or_insert_with(|| json!({}));
+    if !allowed.is_object() {
+        *allowed = json!({});
+    }
+    let servers = allowed.as_object_mut().expect("normalized to object");
+    let list = servers
+        .entry(server.to_owned())
+        .or_insert_with(|| json!([]));
+    if !list.is_array() {
+        *list = json!([]);
+    }
+    let arr = list.as_array_mut().expect("normalized to array");
+    if arr
+        .iter()
+        .any(|t| t.as_str() == Some(tool) || t.as_str() == Some("*"))
+    {
+        return false;
+    }
+    arr.push(Value::String(tool.to_owned()));
+    true
+}
+
+/// Remove `tool` from `config.extra["allowedMcpTools"][server]` (no save).
+/// `tool == "*"` clears the server's list entirely. Returns whether anything
+/// changed.
+pub fn disallow_tool_in(config: &mut MintConfig, server: &str, tool: &str) -> bool {
+    let Some(arr) = config
+        .extra
+        .get_mut("allowedMcpTools")
+        .and_then(|v| v.as_object_mut())
+        .and_then(|m| m.get_mut(server))
+        .and_then(|v| v.as_array_mut())
+    else {
+        return false;
+    };
+    let before = arr.len();
+    if tool == "*" {
+        arr.clear();
+    } else {
+        arr.retain(|t| t.as_str() != Some(tool));
+    }
+    before != arr.len()
+}
+
+/// Read view of `allowedMcpTools`: `server -> [tool, …]` (may contain `"*"`).
+pub fn mcp_tool_allowlist(config: &MintConfig) -> BTreeMap<String, Vec<String>> {
+    config
+        .extra
+        .get("allowedMcpTools")
+        .and_then(|v| v.as_object())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(server, tools)| {
+                    let tools = tools
+                        .as_array()?
+                        .iter()
+                        .filter_map(|t| t.as_str().map(str::to_owned))
+                        .collect();
+                    Some((server.clone(), tools))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `load_config → allow_tool_in → save_config`. Returns whether it was added.
+pub fn allow_mcp_tool(server: &str, tool: &str) -> Result<bool, McpError> {
+    let mut config = load_config()?;
+    let added = allow_tool_in(&mut config, server, tool);
+    if added {
+        save_config(&config)?;
+    }
+    Ok(added)
+}
+
+/// `load_config → disallow_tool_in → save_config`. Returns whether it changed.
+pub fn disallow_mcp_tool(server: &str, tool: &str) -> Result<bool, McpError> {
+    let mut config = load_config()?;
+    let removed = disallow_tool_in(&mut config, server, tool);
+    if removed {
+        save_config(&config)?;
+    }
+    Ok(removed)
 }
 
 fn parse_env(values: Vec<String>) -> Result<BTreeMap<String, String>, McpError> {
@@ -340,6 +577,90 @@ fn parse_env(values: Vec<String>) -> Result<BTreeMap<String, String>, McpError> 
             Ok((key.into(), value.into()))
         })
         .collect()
+}
+
+// ── Server registry ──────────────────────────────────────────────────────────
+//
+// A curated catalog of well-known MCP servers, authored once in
+// `mcp-registry.json` at the repo root and read by every surface — the CLI
+// (`mint mcp registry`), the TUI `/mcp` add flow, and the renderer's Add form
+// (`import … from '../../../../mcp-registry.json'`). Purely a presets layer over
+// the normal add path; nothing here is required to add a server.
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpRegistryArgInput {
+    pub label: String,
+    #[serde(default)]
+    pub placeholder: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpRegistryEnvVar {
+    pub key: String,
+    pub label: String,
+    /// A URL where the user can obtain this credential, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpRegistryEntry {
+    /// Catalog id, and the default server name when added.
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub desc: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Extra positional args the user supplies (a path, a connection string).
+    /// Their values are appended to `args` in order.
+    #[serde(default, rename = "argInputs")]
+    pub arg_inputs: Vec<McpRegistryArgInput>,
+    #[serde(default, rename = "requiredEnv")]
+    pub required_env: Vec<McpRegistryEnvVar>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs: Option<String>,
+}
+
+/// The catalog, parsed once from `mcp-registry.json` at the repo root. A parse
+/// failure is a build-time authoring bug, so panic rather than ship an empty
+/// list — same contract as `slash::catalog::SLASH_COMMANDS`.
+static MCP_REGISTRY: LazyLock<Vec<McpRegistryEntry>> = LazyLock::new(|| {
+    serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../mcp-registry.json"
+    )))
+    .expect("mcp-registry.json is valid JSON matching Vec<McpRegistryEntry>")
+});
+
+pub fn mcp_registry() -> &'static [McpRegistryEntry] {
+    &MCP_REGISTRY
+}
+
+pub fn mcp_registry_entry(key: &str) -> Option<&'static McpRegistryEntry> {
+    MCP_REGISTRY.iter().find(|e| e.key == key)
+}
+
+/// Build an [`McpServer`] from a registry entry: its base `args` plus
+/// `extra_args` (the `arg_inputs` values, in order), the given `env`, and its
+/// icon.
+pub fn expand_registry_entry(
+    entry: &McpRegistryEntry,
+    extra_args: &[String],
+    env: BTreeMap<String, String>,
+) -> McpServer {
+    let mut args = entry.args.clone();
+    args.extend(extra_args.iter().cloned());
+    McpServer {
+        command: entry.command.clone(),
+        args,
+        env,
+        icon: entry.icon.clone(),
+        disabled: false,
+    }
 }
 
 fn find_url(line: &str) -> Option<String> {
@@ -414,6 +735,24 @@ pub fn list_server_tools(config: &MintConfig, server_name: &str) -> Result<Value
     })
 }
 
+/// Just the tool *names* a server exposes — for a UI "discover tools" picker
+/// that feeds the `allowedMcpTools` allowlist. Loads config itself so hosts can
+/// call it with only a name.
+pub fn mcp_server_tool_names(server_name: &str) -> Result<Vec<String>, McpError> {
+    let config = load_config()?;
+    let result = list_server_tools(&config, server_name)?;
+    Ok(result
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|tools| {
+            tools
+                .iter()
+                .filter_map(|t| t.get("name").and_then(Value::as_str).map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
 /// A persistent MCP stdio connection: the child process stays alive across
 /// calls instead of being spawned and killed for every single request, and a
 /// single background reader thread (spawned once, not once per call) routes
@@ -425,8 +764,14 @@ struct McpSession {
     pending: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>,
     /// Server-initiated messages (a `method` but no `id`), e.g.
     /// `notifications/tools/list_changed` — captured rather than dropped, even
-    /// though nothing consumes them yet (see `drain_mcp_notifications`).
+    /// though nothing consumes them yet (see `drain_mcp_notifications`). Bounded
+    /// to the last `MAX_BUFFERED_NOTIFICATIONS`.
     notifications: Arc<Mutex<VecDeque<Value>>>,
+    /// Set by *this session's* reader threads when they see an OAuth URL, so the
+    /// next `request()` waits `MCP_OAUTH_TIMEOUT` instead of `MCP_TIMEOUT`.
+    /// Per-session (not a process global) so one server's auth flow can't skew
+    /// another server's request timeouts.
+    oauth_pending: Arc<AtomicBool>,
 }
 
 impl Drop for McpSession {
@@ -458,6 +803,17 @@ fn classify_mcp_line(value: &Value) -> McpLine {
     McpLine::Other
 }
 
+/// Appends a server notification, evicting the oldest so the queue never grows
+/// past `MAX_BUFFERED_NOTIFICATIONS`. Free function so the eviction is testable
+/// without a live subprocess.
+fn buffer_notification(queue: &Mutex<VecDeque<Value>>, notification: Value) {
+    let mut queue = queue.lock().unwrap();
+    while queue.len() >= MAX_BUFFERED_NOTIFICATIONS {
+        queue.pop_front();
+    }
+    queue.push_back(notification);
+}
+
 impl McpSession {
     fn start(server: &McpServer) -> Result<Self, McpError> {
         let mut process = Command::new(&server.command)
@@ -472,7 +828,10 @@ impl McpSession {
                 source,
             })?;
 
+        let oauth_pending: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
         if let Some(stderr) = process.stderr.take() {
+            let stderr_oauth = Arc::clone(&oauth_pending);
             std::thread::spawn(move || {
                 let reader = BufReader::new(stderr);
                 for line in reader.lines().map_while(Result::ok) {
@@ -481,7 +840,7 @@ impl McpSession {
                             "\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n",
                             url
                         );
-                        OAUTH_DETECTED.store(true, Ordering::Relaxed);
+                        stderr_oauth.store(true, Ordering::Relaxed);
                         let _ = open_url_in_browser(&url);
                     }
                 }
@@ -497,6 +856,7 @@ impl McpSession {
 
         let reader_pending = Arc::clone(&pending);
         let reader_notifications = Arc::clone(&notifications);
+        let reader_oauth = Arc::clone(&oauth_pending);
         std::thread::spawn(move || {
             // Isolates a panic in the read loop (e.g. a poisoned `pending`/
             // `notifications` lock from some other unrelated failure) so it's
@@ -511,7 +871,7 @@ impl McpSession {
                             "\n\x1b[1;33m[MCP Authorization Needed]\x1b[0m Opening browser to authenticate: {}\n",
                             url
                         );
-                        OAUTH_DETECTED.store(true, Ordering::Relaxed);
+                        reader_oauth.store(true, Ordering::Relaxed);
                         let _ = open_url_in_browser(&url);
                     }
                     let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -524,7 +884,7 @@ impl McpSession {
                             }
                         }
                         McpLine::Notification(notification) => {
-                            reader_notifications.lock().unwrap().push_back(notification);
+                            buffer_notification(&reader_notifications, notification);
                         }
                         McpLine::Other => {}
                     }
@@ -542,6 +902,7 @@ impl McpSession {
             next_id: AtomicU64::new(2), // 1 is reserved for `initialize` below.
             pending,
             notifications,
+            oauth_pending,
         };
 
         // Some servers (e.g. `@pouyanafisi/gmail-mcp`) don't tolerate
@@ -596,8 +957,8 @@ impl McpSession {
             return Err(error);
         }
 
-        let timeout = if OAUTH_DETECTED.load(Ordering::Relaxed) {
-            Duration::from_secs(120)
+        let timeout = if self.oauth_pending.load(Ordering::Relaxed) {
+            MCP_OAUTH_TIMEOUT
         } else {
             MCP_TIMEOUT
         };
@@ -605,7 +966,7 @@ impl McpSession {
             self.pending.lock().unwrap().remove(&id);
             McpError::Timeout
         })?;
-        OAUTH_DETECTED.store(false, Ordering::Relaxed);
+        self.oauth_pending.store(false, Ordering::Relaxed);
         if let Some(error) = response.get("error") {
             return Err(McpError::Tool(error.clone()));
         }
@@ -622,16 +983,27 @@ fn get_or_start_session(
     config: &MintConfig,
     server_name: &str,
 ) -> Result<Arc<Mutex<McpSession>>, McpError> {
+    let servers = configured_mcp_servers(config)?;
+    let server = servers
+        .get(server_name)
+        .ok_or_else(|| McpError::MissingServer(server_name.into()))?;
+
     let mut sessions = SESSIONS.lock().unwrap();
+
+    if server.disabled {
+        // Turned off in Settings after a session was already running — kill it
+        // so a stale process doesn't linger past the toggle.
+        if let Some(session) = sessions.remove(server_name) {
+            let _ = session.lock().unwrap().process.kill();
+        }
+        return Err(McpError::Disabled(server_name.into()));
+    }
+
     if let Some(session) = sessions.get(server_name) {
         if session.lock().unwrap().is_alive() {
             return Ok(Arc::clone(session));
         }
     }
-    let servers = configured_mcp_servers(config)?;
-    let server = servers
-        .get(server_name)
-        .ok_or_else(|| McpError::MissingServer(server_name.into()))?;
     let session = Arc::new(Mutex::new(McpSession::start(server)?));
     sessions.insert(server_name.to_string(), Arc::clone(&session));
     Ok(session)
@@ -717,6 +1089,7 @@ mod tests {
             ],
             env: BTreeMap::new(),
             icon: None,
+            disabled: false,
         }
     }
 
@@ -791,5 +1164,188 @@ mod tests {
         );
 
         close_mcp_session(name);
+    }
+
+    #[test]
+    fn disabled_server_is_refused_and_its_running_session_is_dropped() {
+        let name = "mock-echo-disabled-test";
+        close_mcp_session(name);
+        let mut config = config_with_mock_echo_server(name);
+
+        // Enabled: a call works and leaves a live session behind.
+        assert_eq!(
+            call_mcp_tool(&config, name, "anything", json!({})).unwrap()["echo"],
+            true
+        );
+        assert!(SESSIONS.lock().unwrap().contains_key(name));
+
+        // Flip the stored server to `disabled: true`, as the settings toggle does.
+        config.extra.insert(
+            "mcpServers".into(),
+            json!({ name: { "command": "sh", "disabled": true } }),
+        );
+
+        match call_mcp_tool(&config, name, "anything", json!({})) {
+            Err(McpError::Disabled(server)) => assert_eq!(server, name),
+            other => panic!("expected McpError::Disabled, got {other:?}"),
+        }
+        // The session that predated the toggle must be gone, not left running.
+        assert!(!SESSIONS.lock().unwrap().contains_key(name));
+
+        close_mcp_session(name);
+    }
+
+    #[test]
+    fn buffer_notification_evicts_oldest_past_the_cap() {
+        let queue: Mutex<VecDeque<Value>> = Mutex::new(VecDeque::new());
+        for i in 0..(MAX_BUFFERED_NOTIFICATIONS as i64 + 10) {
+            buffer_notification(&queue, json!({ "seq": i }));
+        }
+        let queue = queue.lock().unwrap();
+        assert_eq!(queue.len(), MAX_BUFFERED_NOTIFICATIONS);
+        // The first 10 were dropped; the window is the most recent ones.
+        assert_eq!(queue.front().unwrap()["seq"], 10);
+        assert_eq!(
+            queue.back().unwrap()["seq"],
+            MAX_BUFFERED_NOTIFICATIONS as i64 + 9
+        );
+    }
+
+    #[test]
+    fn oauth_pending_is_per_session_not_global() {
+        let (a, b) = ("mock-echo-oauth-a", "mock-echo-oauth-b");
+        close_mcp_session(a);
+        close_mcp_session(b);
+        call_mcp_tool(&config_with_mock_echo_server(a), a, "x", json!({})).unwrap();
+        call_mcp_tool(&config_with_mock_echo_server(b), b, "x", json!({})).unwrap();
+
+        let sessions = SESSIONS.lock().unwrap();
+        let a_flag = Arc::clone(&sessions.get(a).unwrap().lock().unwrap().oauth_pending);
+        let b_flag = Arc::clone(&sessions.get(b).unwrap().lock().unwrap().oauth_pending);
+        drop(sessions);
+
+        assert!(
+            !Arc::ptr_eq(&a_flag, &b_flag),
+            "sessions must not share the flag"
+        );
+        assert!(!a_flag.load(Ordering::Relaxed));
+
+        // Marking server A mid-OAuth leaves server B's timeout untouched.
+        a_flag.store(true, Ordering::Relaxed);
+        assert!(!b_flag.load(Ordering::Relaxed));
+
+        close_mcp_session(a);
+        close_mcp_session(b);
+    }
+
+    #[test]
+    fn disabled_flag_defaults_false_and_round_trips_through_config() {
+        let servers: BTreeMap<String, McpServer> = serde_json::from_value(json!({
+            "plain": { "command": "x" },
+            "off": { "command": "y", "disabled": true }
+        }))
+        .unwrap();
+        assert!(!servers["plain"].disabled);
+        assert!(servers["off"].disabled);
+
+        // `disabled: false` is not written back out (keeps configs tidy).
+        let reserialized = serde_json::to_value(&servers["plain"]).unwrap();
+        assert!(reserialized.get("disabled").is_none());
+    }
+
+    fn config_with_one_server(name: &str, server: Value) -> MintConfig {
+        let mut config = MintConfig::default();
+        config
+            .extra
+            .insert("mcpServers".into(), json!({ name: server }));
+        config
+    }
+
+    #[test]
+    fn set_server_disabled_in_flips_flag_and_reports_existence() {
+        let mut config = config_with_one_server("srv", json!({ "command": "x" }));
+
+        assert!(set_server_disabled_in(&mut config, "srv", true).unwrap());
+        assert!(configured_mcp_servers(&config).unwrap()["srv"].disabled);
+        assert!(set_server_disabled_in(&mut config, "srv", false).unwrap());
+        assert!(!configured_mcp_servers(&config).unwrap()["srv"].disabled);
+
+        // Unknown server: reported as missing, config untouched.
+        assert!(!set_server_disabled_in(&mut config, "nope", true).unwrap());
+    }
+
+    #[test]
+    fn update_server_in_edits_only_the_given_fields() {
+        let mut config =
+            config_with_one_server("srv", json!({ "command": "old", "args": ["--keep"] }));
+
+        let existed = update_server_in(
+            &mut config,
+            "srv",
+            Some("new".into()),
+            None,
+            None,
+            Some(Some("🧪".into())),
+        )
+        .unwrap();
+        assert!(existed);
+
+        let srv = &configured_mcp_servers(&config).unwrap()["srv"];
+        assert_eq!(srv.command, "new");
+        assert_eq!(srv.args, vec!["--keep".to_string()]); // untouched
+        assert_eq!(srv.icon.as_deref(), Some("🧪"));
+
+        assert!(
+            !update_server_in(&mut config, "gone", Some("x".into()), None, None, None).unwrap()
+        );
+    }
+
+    #[test]
+    fn mcp_registry_json_is_well_formed() {
+        let entries = mcp_registry();
+        assert!(!entries.is_empty());
+
+        let mut seen = std::collections::HashSet::new();
+        for e in entries {
+            assert!(!e.key.is_empty() && !e.name.is_empty(), "{e:?}");
+            assert!(!e.command.is_empty(), "{}: empty command", e.key);
+            assert!(seen.insert(&e.key), "duplicate registry key: {}", e.key);
+        }
+        assert!(mcp_registry_entry("filesystem").is_some());
+        assert!(mcp_registry_entry("nope").is_none());
+    }
+
+    #[test]
+    fn expand_registry_entry_appends_extra_args() {
+        let entry = mcp_registry_entry("git").expect("git entry present");
+        let mut env = BTreeMap::new();
+        env.insert("X".into(), "1".into());
+        let server = expand_registry_entry(&entry.clone(), &["/repo".to_string()], env);
+        assert_eq!(server.command, entry.command);
+        assert_eq!(server.args.last().unwrap(), "/repo");
+        assert_eq!(server.args.len(), entry.args.len() + 1);
+        assert_eq!(server.env["X"], "1");
+        assert!(!server.disabled);
+    }
+
+    #[test]
+    fn allow_and_disallow_tool_in_are_idempotent_and_honor_wildcard() {
+        let mut config = MintConfig::default();
+
+        assert!(allow_tool_in(&mut config, "srv", "read"));
+        assert!(!allow_tool_in(&mut config, "srv", "read")); // already there
+        assert!(allow_tool_in(&mut config, "srv", "write"));
+        assert_eq!(mcp_tool_allowlist(&config)["srv"], vec!["read", "write"]);
+
+        // A `*` already present covers any tool.
+        let mut wild = MintConfig::default();
+        allow_tool_in(&mut wild, "srv", "*");
+        assert!(!allow_tool_in(&mut wild, "srv", "anything"));
+
+        // `disallow "*"` clears the server's list.
+        assert!(disallow_tool_in(&mut config, "srv", "read"));
+        assert!(disallow_tool_in(&mut config, "srv", "*"));
+        assert!(mcp_tool_allowlist(&config)["srv"].is_empty());
+        assert!(!disallow_tool_in(&mut config, "srv", "read")); // nothing to remove
     }
 }

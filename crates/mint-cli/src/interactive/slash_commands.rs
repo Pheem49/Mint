@@ -201,6 +201,10 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/init" => Some(SlashResult::ForwardToAgent(
+            mint_core::slash::INIT_AGENTS_MD_PROMPT.to_string(),
+        )),
+
         "/fast" => {
             let choice = if rest.is_empty() {
                 let options = vec![
@@ -246,6 +250,108 @@ pub async fn handle_slash_command(
                 }
             }
             Some(SlashResult::Handled)
+        }
+
+        "/rewind" => {
+            let checkpoints = mint_core::git::list_checkpoints(mint_core::CHAT_CLI_ID);
+            if rest.is_empty() {
+                if checkpoints.is_empty() {
+                    println!("\n{DIM}No git checkpoints recorded for this CLI session yet.{RESET}");
+                    println!(
+                        "{DIM}Checkpoints are created automatically before mutating file actions (write_file, apply_patch).{RESET}\n"
+                    );
+                } else {
+                    println!("\n{BLUE}────────────────────────────────────────────{RESET}");
+                    println!("{MINT}  ↺ Available Git Checkpoints (Time Machine){RESET}");
+                    println!("{BLUE}────────────────────────────────────────────{RESET}");
+                    for cp in checkpoints.iter().rev() {
+                        let hash_short = if cp.commit_hash.len() >= 7 {
+                            &cp.commit_hash[..7]
+                        } else {
+                            &cp.commit_hash
+                        };
+                        let target = cp.target_path.as_deref().unwrap_or("-");
+                        println!(
+                            "  {MINT}Step {:<3}{RESET} {DIM}[{}]{RESET} {:<20} {DIM}({}){RESET}",
+                            cp.step, hash_short, cp.action, target
+                        );
+                    }
+                    println!(
+                        "\n{DIM}Use {RESET}{MINT}/rewind <step>{RESET}{DIM} to restore workspace to before that step.{RESET}\n"
+                    );
+                }
+                Some(SlashResult::Handled)
+            } else {
+                match rest.parse::<usize>() {
+                    Ok(step) => {
+                        match mint_core::git::rollback_to_step(
+                            &session.current_dir,
+                            mint_core::CHAT_CLI_ID,
+                            step,
+                        ) {
+                            Ok(msg) => {
+                                println!("\n{MINT}{msg}{RESET}\n");
+                            }
+                            Err(err) => {
+                                println!("\n{ERROR}Failed to rollback:{RESET} {err}\n");
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        println!(
+                            "\n{ERROR}Invalid step number:{RESET} \"{rest}\". Usage: /rewind <step>\n"
+                        );
+                    }
+                }
+                Some(SlashResult::Handled)
+            }
+        }
+
+        "/palette" => {
+            let options = vec![
+                "Quick Actions Menu".to_string(),
+                "Switch AI Model (/models)".to_string(),
+                "Toggle Plan Mode (/plan)".to_string(),
+                "Toggle Fast Mode (/fast)".to_string(),
+                "Git Checkpoint Rollback (/rewind)".to_string(),
+                "Manage MCP Servers (/mcp)".to_string(),
+                "Manage Memory & Facts (/memory)".to_string(),
+                "Change Directory (/cd)".to_string(),
+                "Clear Conversation (/clear)".to_string(),
+                "Help & Documentation (/help)".to_string(),
+            ];
+            match prompt_interactive_select("Universal Command Palette", &options, &options[0]) {
+                Ok(Some(sel)) => {
+                    let next_cmd = if sel.contains("/models") {
+                        "/models"
+                    } else if sel.contains("/plan") {
+                        "/plan"
+                    } else if sel.contains("/fast") {
+                        "/fast"
+                    } else if sel.contains("/rewind") {
+                        "/rewind"
+                    } else if sel.contains("/mcp") {
+                        "/mcp"
+                    } else if sel.contains("/memory") {
+                        "/memory"
+                    } else if sel.contains("/clear") {
+                        "/clear"
+                    } else if sel.contains("/help") {
+                        "/help"
+                    } else {
+                        println!(
+                            "{MINT}Tip:{RESET} Type {BLUE}/<command>{RESET} or press {MINT}Tab{RESET} to autocomplete commands anytime.\n"
+                        );
+                        return Some(SlashResult::Handled);
+                    };
+                    Box::pin(handle_slash_command(session, next_cmd)).await
+                }
+                Ok(None) => Some(SlashResult::Handled),
+                Err(e) => {
+                    println!("{ERROR}Palette error:{RESET} {e}\n");
+                    Some(SlashResult::Handled)
+                }
+            }
         }
 
         "/plan" if rest == "list" => {
@@ -670,6 +776,146 @@ pub async fn handle_slash_command(
                     Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
                     Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
                 }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/autorecall" => {
+            let apply = |session: &mut InteractiveSession, on: bool| {
+                session.config.memory_recall = on;
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => println!(
+                        "{DIM}Memory recall set to: {}{RESET}\n",
+                        if on { "Enabled" } else { "Disabled" }
+                    ),
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                }
+            };
+            if rest == "on" || rest == "off" {
+                apply(session, rest == "on");
+            } else if !rest.is_empty() {
+                println!("{WARN}Usage: /autorecall [on|off]{RESET}\n");
+            } else {
+                println!(
+                    "{DIM}When enabled, each turn full-text-searches this conversation's older messages and injects the few most relevant to what you just said.{RESET}"
+                );
+                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
+                let current = if session.config.memory_recall {
+                    &options[0]
+                } else {
+                    &options[1]
+                };
+                match prompt_interactive_select("Memory Recall", &options, current) {
+                    Ok(Some(sel)) => apply(session, sel.starts_with("on")),
+                    Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
+                    Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/autofacts" => {
+            let apply = |session: &mut InteractiveSession, on: bool| {
+                session.config.auto_fact_extraction = on;
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => println!(
+                        "{DIM}Auto fact extraction set to: {}{RESET}\n",
+                        if on { "Enabled" } else { "Disabled" }
+                    ),
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                }
+            };
+            if rest == "on" || rest == "off" {
+                apply(session, rest == "on");
+            } else if !rest.is_empty() {
+                println!("{WARN}Usage: /autofacts [on|off]{RESET}\n");
+            } else {
+                println!(
+                    "{DIM}When enabled, a turn that states a durable preference, naming, or standing instruction triggers a background pass that saves it to long-term memory.{RESET}"
+                );
+                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
+                let current = if session.config.auto_fact_extraction {
+                    &options[0]
+                } else {
+                    &options[1]
+                };
+                match prompt_interactive_select("Auto Fact Extraction", &options, current) {
+                    Ok(Some(sel)) => apply(session, sel.starts_with("on")),
+                    Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
+                    Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/factrecall" => {
+            let apply = |session: &mut InteractiveSession, on: bool| {
+                session.config.semantic_fact_recall = on;
+                match mint_core::save_config(&session.config) {
+                    Ok(()) => println!(
+                        "{DIM}Semantic fact recall set to: {}{RESET}\n",
+                        if on { "Enabled" } else { "Disabled" }
+                    ),
+                    Err(error) => println!("{ERROR}Config error:{RESET} {error}\n"),
+                }
+            };
+            if rest == "on" || rest == "off" {
+                apply(session, rest == "on");
+            } else if !rest.is_empty() {
+                println!("{WARN}Usage: /factrecall [on|off]{RESET}\n");
+            } else {
+                println!(
+                    "{DIM}When your stored facts overflow their per-turn budget, this fills the overflow with the facts most relevant to your message instead of just the newest ones (the newest few are always kept).{RESET}"
+                );
+                let options = vec!["on (enable)".to_string(), "off (disable)".to_string()];
+                let current = if session.config.semantic_fact_recall {
+                    &options[0]
+                } else {
+                    &options[1]
+                };
+                match prompt_interactive_select("Semantic Fact Recall", &options, current) {
+                    Ok(Some(sel)) => apply(session, sel.starts_with("on")),
+                    Ok(None) => println!("{DIM}Cancelled.{RESET}\n"),
+                    Err(e) => println!("{ERROR}Error selecting option:{RESET} {e}\n"),
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+
+        "/remember" => {
+            let (first, tail) = rest
+                .split_once(char::is_whitespace)
+                .map(|(c, a)| (c, a.trim()))
+                .unwrap_or((rest, ""));
+            let (scope, project_path, body) = if first.eq_ignore_ascii_case("here") {
+                (
+                    "project",
+                    Some(session.current_dir.to_string_lossy().into_owned()),
+                    tail,
+                )
+            } else {
+                ("user", None, rest)
+            };
+            if body.is_empty() {
+                println!("{WARN}Usage: /remember [here] <text>{RESET}\n");
+                return Some(SlashResult::Handled);
+            }
+            match MemoryStore::open_default() {
+                Ok(memory) => {
+                    match memory.add_fact(scope, project_path.as_deref(), body, None, None) {
+                        Ok(Some(_)) => println!(
+                            "{DIM}Remembered{}.{RESET}\n",
+                            if scope == "project" {
+                                " (this project)"
+                            } else {
+                                ""
+                            }
+                        ),
+                        Ok(None) => println!("{DIM}Already remembered.{RESET}\n"),
+                        Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                    }
+                }
+                Err(e) => println!("{ERROR}Memory error:{RESET} {e}\n"),
             }
             Some(SlashResult::Handled)
         }
@@ -1453,9 +1699,20 @@ pub async fn handle_slash_command(
                         } else {
                             println!("\n{BLUE}Recent interactions:{RESET}");
                             for item in items.iter().rev() {
+                                let local_time =
+                                    chrono::DateTime::parse_from_rfc3339(&item.created_at)
+                                        .map(|dt| {
+                                            dt.with_timezone(&chrono::Local)
+                                                .format("%Y-%m-%d %H:%M")
+                                                .to_string()
+                                        })
+                                        .unwrap_or_else(|_| {
+                                            item.created_at[..16.min(item.created_at.len())]
+                                                .to_string()
+                                        });
                                 println!(
                                     "  {DIM}[{}]{RESET} {BLUE}You:{RESET} {}",
-                                    &item.created_at[..16.min(item.created_at.len())],
+                                    local_time,
                                     if item.user_text.chars().count() > 80 {
                                         let short: String =
                                             item.user_text.chars().take(80).collect();
@@ -1516,8 +1773,52 @@ pub async fn handle_slash_command(
                     Ok(count) => println!("{DIM}Cleared {count} interactions.{RESET}\n"),
                     Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
                 },
+                "facts" => match memory.list_facts(50) {
+                    Ok(facts) => {
+                        if facts.is_empty() {
+                            println!(
+                                "{DIM}No stored facts yet. Add one with /remember <text>.{RESET}\n"
+                            );
+                        } else {
+                            println!("\n{BLUE}Stored facts:{RESET}");
+                            for f in &facts {
+                                let owner = match &f.agent_id {
+                                    Some(name) => format!("via {name}"),
+                                    None if f.scope == "project" => "project".to_string(),
+                                    None => "global".to_string(),
+                                };
+                                println!("  {DIM}[{}] ({}){RESET} {}", f.id, owner, f.body);
+                            }
+                            println!();
+                        }
+                    }
+                    Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                },
+                "forget" => {
+                    if args.is_empty() {
+                        println!("{WARN}/memory forget <id-or-text>{RESET}\n");
+                    } else {
+                        match memory.forget_fact(args) {
+                            Ok(0) => println!("{DIM}Nothing matched {args}.{RESET}\n"),
+                            Ok(n) => println!("{DIM}Forgot {n} fact(s).{RESET}\n"),
+                            Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                        }
+                    }
+                }
+                "promote" => match args.parse::<i64>() {
+                    Ok(id) => match memory.promote_fact(id) {
+                        Ok(true) => {
+                            println!("{DIM}Promoted fact {id} to shared memory.{RESET}\n")
+                        }
+                        Ok(false) => println!(
+                            "{DIM}Fact {id} is not a subagent-scoped fact (nothing to promote).{RESET}\n"
+                        ),
+                        Err(e) => println!("{ERROR}Error:{RESET} {e}\n"),
+                    },
+                    Err(_) => println!("{WARN}/memory promote <id>{RESET}\n"),
+                },
                 _ => println!(
-                    "{WARN}/memory usage: list | clear | get <key> | set <key> <val> | skills{RESET}\n"
+                    "{WARN}/memory usage: list | facts | forget <id> | promote <id> | clear | get <key> | set <key> <val> | skills{RESET}\n"
                 ),
             }
             Some(SlashResult::Handled)
@@ -1770,196 +2071,7 @@ pub async fn handle_slash_command(
                 .split_once(char::is_whitespace)
                 .map(|(c, a)| (c, a.trim()))
                 .unwrap_or((rest, ""));
-            match subcmd {
-                "list" | "" => match crate::mcp::list() {
-                    Ok(servers) => {
-                        if servers.is_empty() {
-                            println!("{DIM}(No MCP servers configured.){RESET}\n");
-                        } else {
-                            let allowed_mcp = session
-                                .config
-                                .extra
-                                .get("allowedMcpTools")
-                                .and_then(|v| v.as_object());
-
-                            let mut choices = vec!["Cancel / Keep current settings".to_string()];
-                            let mut server_names = vec![];
-
-                            let max_name_len = servers.keys().map(|k| k.len()).max().unwrap_or(10);
-
-                            for (name, srv) in &servers {
-                                let args_str = srv.args.join(" ");
-                                let status_label = if let Some(allowed) =
-                                    allowed_mcp.and_then(|m| m.get(name))
-                                {
-                                    if let Some(arr) = allowed.as_array() {
-                                        let tools: Vec<&str> =
-                                            arr.iter().filter_map(|v| v.as_str()).collect();
-                                        if tools.contains(&"*") {
-                                            format!("{MINT}[Allowed: *]{RESET}")
-                                        } else if tools.is_empty() {
-                                            format!("{DIM}[No tools allowed]{RESET}")
-                                        } else {
-                                            format!("{MINT}[Allowed: {}]{RESET}", tools.join(", "))
-                                        }
-                                    } else {
-                                        format!("{DIM}[No tools allowed]{RESET}")
-                                    }
-                                } else {
-                                    format!("{DIM}[No tools allowed]{RESET}")
-                                };
-
-                                let padded_name =
-                                    format!("{:<width$}", name, width = max_name_len + 2);
-                                choices.push(format!(
-                                    "{}{} ({} {})",
-                                    padded_name, status_label, srv.command, args_str
-                                ));
-                                server_names.push(name.clone());
-                            }
-
-                            match prompt_interactive_select(
-                                "Select MCP Server",
-                                &choices,
-                                &choices[0],
-                            ) {
-                                Ok(Some(selected_choice)) => {
-                                    if selected_choice != choices[0] {
-                                        if let Some(pos) =
-                                            choices.iter().position(|c| c == &selected_choice)
-                                        {
-                                            let server_name = &server_names[pos - 1];
-
-                                            println!(
-                                                "{DIM}Checking connection to '{server_name}'...{RESET}"
-                                            );
-                                            let is_connected = mint_core::list_server_tools(
-                                                &session.config,
-                                                server_name,
-                                            )
-                                            .is_ok();
-                                            if is_connected {
-                                                println!("{MINT}● Connected{RESET}\n");
-                                            } else {
-                                                println!(
-                                                    "{ERROR}● Not connected{RESET} {DIM}(token may be expired, or the server is unreachable){RESET}\n"
-                                                );
-                                            }
-
-                                            let auth_options = vec![
-                                                "Keep current settings".to_string(),
-                                                "Allow all tools (*)".to_string(),
-                                                "Re-authenticate (re-run OAuth login)".to_string(),
-                                            ];
-                                            let default_choice = if is_connected {
-                                                &auth_options[0]
-                                            } else {
-                                                &auth_options[2]
-                                            };
-
-                                            let title =
-                                                format!("Authorize MCP Server '{}'?", server_name);
-                                            match prompt_interactive_select(
-                                                &title,
-                                                &auth_options,
-                                                default_choice,
-                                            ) {
-                                                Ok(Some(auth_choice)) => {
-                                                    if auth_choice == auth_options[1] {
-                                                        match crate::mcp::allow(server_name, "*") {
-                                                            Ok(true) => {
-                                                                println!(
-                                                                    "{DIM}Allowed MCP tool: {server_name}/*{RESET}"
-                                                                );
-                                                                if let Ok(updated_config) =
-                                                                    mint_core::load_config()
-                                                                {
-                                                                    session.config = updated_config;
-                                                                }
-                                                                println!(
-                                                                    "{MINT}Successfully authorized all tools for: {server_name}{RESET}\n"
-                                                                );
-                                                            }
-                                                            Ok(false) => {
-                                                                println!(
-                                                                    "{DIM}MCP tools already allowed for {server_name}{RESET}\n"
-                                                                );
-                                                            }
-                                                            Err(e) => println!(
-                                                                "{ERROR}MCP error:{RESET} {e}\n"
-                                                            ),
-                                                        }
-                                                    } else if auth_choice == auth_options[2] {
-                                                        println!(
-                                                            "{DIM}Re-authenticating MCP server '{server_name}'... (a browser tab may open){RESET}\n"
-                                                        );
-                                                        match crate::mcp::reauth(server_name) {
-                                                            Ok(true) => println!(
-                                                                "{MINT}Re-authentication succeeded for '{server_name}'.{RESET}\n"
-                                                            ),
-                                                            Ok(false) => println!(
-                                                                "{ERROR}Re-authentication failed for '{server_name}' (see output above).{RESET}\n"
-                                                            ),
-                                                            Err(e) => println!(
-                                                                "{ERROR}MCP error:{RESET} {e}\n"
-                                                            ),
-                                                        }
-                                                    }
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
-                },
-                "allow" => {
-                    let mut parts = args.split_whitespace();
-                    let server = parts.next();
-                    let tool = parts.next();
-                    if let (Some(server), Some(tool)) = (server, tool) {
-                        match crate::mcp::allow(server, tool) {
-                            Ok(true) => {
-                                println!("{DIM}Allowed MCP tool: {server}/{tool}{RESET}\n");
-                                if let Ok(updated_config) = mint_core::load_config() {
-                                    session.config = updated_config;
-                                }
-                            }
-                            Ok(false) => {
-                                println!("{DIM}MCP tool already allowed: {server}/{tool}{RESET}\n")
-                            }
-                            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
-                        }
-                    } else {
-                        println!("{WARN}/mcp allow usage: <server> <tool>{RESET}\n");
-                    }
-                }
-                "reauth" => {
-                    if args.is_empty() {
-                        println!("{WARN}/mcp reauth usage: <server>{RESET}\n");
-                    } else {
-                        println!(
-                            "{DIM}Re-authenticating MCP server '{args}'... (a browser tab may open){RESET}\n"
-                        );
-                        match crate::mcp::reauth(args) {
-                            Ok(true) => {
-                                println!("{MINT}Re-authentication succeeded for '{args}'.{RESET}\n")
-                            }
-                            Ok(false) => println!(
-                                "{ERROR}Re-authentication failed for '{args}' (see output above).{RESET}\n"
-                            ),
-                            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
-                        }
-                    }
-                }
-                _ => println!(
-                    "{WARN}/mcp usage: list | allow <server> <tool> | reauth <server> | remove <name> | clear{RESET}\n"
-                ),
-            }
+            handle_mcp_slash(session, subcmd, args);
             Some(SlashResult::Handled)
         }
 
@@ -2249,39 +2361,106 @@ pub async fn handle_slash_command(
                 if let Some(idx) = selected_idx {
                     let selected = &display[idx];
                     println!();
-                    if selected.is_oauth {
-                        if selected.connected {
-                            println!(
-                                "\x1b[32m🟢 {} is already connected!\x1b[0m  Account: {}",
-                                selected.name,
-                                selected.account.as_deref().unwrap_or("yes")
-                            );
-                            println!(
-                                "{DIM}  To disconnect, run: mint plugins logout {}{RESET}",
-                                selected.oauth_provider
-                            );
-                        } else {
-                            println!(
-                                "\x1b[1;36m🔑 Sign In to {} via OAuth...\x1b[0m",
-                                selected.name
-                            );
-                            println!("{DIM}  Opening browser for authorization...{RESET}\n");
-                            crate::plugins_cli::login_plugin_oauth_public(&selected.oauth_provider)
-                                .await;
-                        }
-                    } else if selected.is_custom {
+                    if selected.is_custom {
                         println!("{BLUE}📄 Custom Skill: {}\x1b[0m", selected.name);
                         println!("{DIM}  Source: {}{RESET}", selected.desc);
                     } else {
-                        println!(
-                            "{BLUE}⚙️ {} is a native plugin (always available).\x1b[0m",
-                            selected.name
-                        );
-                        println!("{DIM}  {}{RESET}", selected.desc);
+                        println!("{DIM}  {}{RESET}\n", selected.desc);
+                        let enabled =
+                            mint_core::native_plugin_enabled(&session.config, &selected.name);
+                        let toggle = if enabled {
+                            "Disable plugin"
+                        } else {
+                            "Enable plugin"
+                        };
+                        let mut actions = vec![toggle.to_string()];
+                        if selected.is_oauth {
+                            actions.push(if selected.connected {
+                                "Disconnect (OAuth)".to_string()
+                            } else {
+                                "Sign in (OAuth)".to_string()
+                            });
+                            actions.push("Configure credentials".to_string());
+                        }
+                        actions.push("Back".to_string());
+
+                        match prompt_interactive_select(
+                            &format!("Plugin: {}", selected.name),
+                            &actions,
+                            &actions[0],
+                        ) {
+                            Ok(Some(choice)) if choice.as_str() == toggle => {
+                                match crate::plugins_cli::set_native_plugin_enabled(
+                                    &selected.name,
+                                    !enabled,
+                                ) {
+                                    Ok(()) => {
+                                        println!(
+                                            "{MINT}{} '{}'.{RESET}",
+                                            if enabled { "Disabled" } else { "Enabled" },
+                                            selected.name
+                                        );
+                                        reload_session_config(session);
+                                    }
+                                    Err(e) => println!("{ERROR}Plugin error:{RESET} {e}"),
+                                }
+                            }
+                            Ok(Some(choice)) if choice.starts_with("Sign in") => {
+                                println!("{DIM}  Opening browser for authorization...{RESET}\n");
+                                crate::plugins_cli::login_plugin_oauth_public(
+                                    &selected.oauth_provider,
+                                )
+                                .await;
+                            }
+                            Ok(Some(choice)) if choice.starts_with("Disconnect") => {
+                                if let Err(e) = crate::plugins_cli::logout_plugin_oauth_public(
+                                    &selected.oauth_provider,
+                                ) {
+                                    println!("{ERROR}{e}{RESET}");
+                                }
+                            }
+                            Ok(Some(choice)) if choice == "Configure credentials" => {
+                                let key = if selected.name == "google_calendar" {
+                                    "calendar"
+                                } else {
+                                    selected.name.as_str()
+                                };
+                                let _ = crate::plugins_cli::configure_plugin_fields_public(key);
+                                reload_session_config(session);
+                            }
+                            _ => {}
+                        }
                     }
                     println!();
                 }
 
+                Some(SlashResult::Handled)
+            } else if matches!(plugin_name, "enable" | "disable") {
+                let target = prompt.trim();
+                if target.is_empty() {
+                    println!("{WARN}/plugin {plugin_name} usage:{RESET} <name>\n");
+                } else if !mint_core::native_plugins().iter().any(|p| p.name == target) {
+                    println!(
+                        "{WARN}Unknown native plugin '{target}'.{RESET} Known: {}\n",
+                        mint_core::native_plugins()
+                            .iter()
+                            .map(|p| p.name)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                } else {
+                    let enable = plugin_name == "enable";
+                    match crate::plugins_cli::set_native_plugin_enabled(target, enable) {
+                        Ok(()) => {
+                            println!(
+                                "{MINT}{} native plugin '{target}'.{RESET}\n",
+                                if enable { "Enabled" } else { "Disabled" }
+                            );
+                            reload_session_config(session);
+                        }
+                        Err(e) => println!("{ERROR}Plugin error:{RESET} {e}\n"),
+                    }
+                }
                 Some(SlashResult::Handled)
             } else {
                 let agent_prompt = if prompt.is_empty() {
@@ -2376,6 +2555,557 @@ pub async fn handle_slash_command(
             // Unknown slash command — treat as normal message to the agent
             None
         }
+    }
+}
+
+// ── /mcp interactive handling ────────────────────────────────────────────────
+
+/// Pull the just-persisted config back into the session so subsequent turns
+/// (and the picker's own status labels) see the change.
+fn reload_session_config(session: &mut InteractiveSession) {
+    if let Ok(config) = mint_core::load_config() {
+        session.config = config;
+    }
+}
+
+fn handle_mcp_slash(session: &mut InteractiveSession, subcmd: &str, args: &str) {
+    match subcmd {
+        "list" | "" => mcp_interactive_picker(session),
+
+        "add" => {
+            let mut tokens: Vec<&str> = args.split_whitespace().collect();
+            let allow_all = tokens.iter().any(|t| *t == "--allow-all");
+            tokens.retain(|t| *t != "--allow-all");
+            let mut parts = tokens.into_iter();
+            match (parts.next(), parts.next()) {
+                (Some(name), Some(command)) => {
+                    let arg_list: Vec<String> = parts.map(str::to_string).collect();
+                    match crate::mcp::add(name, command, arg_list, vec![]) {
+                        Ok(()) => {
+                            if allow_all {
+                                let _ = crate::mcp::allow(name, "*");
+                            }
+                            println!(
+                                "{MINT}Added MCP server '{name}'{}.{RESET}\n",
+                                if allow_all {
+                                    " (all tools allowed)"
+                                } else {
+                                    ""
+                                }
+                            );
+                            reload_session_config(session);
+                        }
+                        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                    }
+                }
+                _ => println!(
+                    "{WARN}/mcp add usage:{RESET} <name> <command> [args...] [--allow-all]\n"
+                ),
+            }
+        }
+
+        "remove" if !args.is_empty() => match crate::mcp::remove(args) {
+            Ok(true) => {
+                println!("{MINT}Removed '{args}'.{RESET}\n");
+                reload_session_config(session);
+            }
+            Ok(false) => println!("{WARN}No MCP server named '{args}'.{RESET}\n"),
+            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+        },
+
+        "clear" => match crate::mcp::clear() {
+            Ok(()) => {
+                println!("{MINT}Removed all MCP servers.{RESET}\n");
+                reload_session_config(session);
+            }
+            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+        },
+
+        "enable" | "disable" if !args.is_empty() => {
+            let disable = subcmd == "disable";
+            match crate::mcp::set_disabled(args, disable) {
+                Ok(true) => {
+                    println!(
+                        "{MINT}{} '{args}'.{RESET}\n",
+                        if disable { "Disabled" } else { "Enabled" }
+                    );
+                    reload_session_config(session);
+                }
+                Ok(false) => println!("{WARN}No MCP server named '{args}'.{RESET}\n"),
+                Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+            }
+        }
+
+        "edit" => {
+            let mut parts = args.splitn(3, char::is_whitespace);
+            match (parts.next(), parts.next()) {
+                (Some(name), Some(field)) => {
+                    let value = parts.next().unwrap_or("").trim();
+                    let result = match field.to_ascii_lowercase().as_str() {
+                        "command" if !value.is_empty() => {
+                            crate::mcp::edit(name, Some(value.to_string()), None, None, None)
+                        }
+                        "command" => {
+                            println!(
+                                "{WARN}/mcp edit <name> command <value> needs a value{RESET}\n"
+                            );
+                            return;
+                        }
+                        "args" => crate::mcp::edit(
+                            name,
+                            None,
+                            Some(value.split_whitespace().map(str::to_string).collect()),
+                            None,
+                            None,
+                        ),
+                        "icon" => crate::mcp::edit(
+                            name,
+                            None,
+                            None,
+                            None,
+                            Some((!value.is_empty()).then(|| value.to_string())),
+                        ),
+                        _ => {
+                            println!("{WARN}Editable fields:{RESET} command | args | icon\n");
+                            return;
+                        }
+                    };
+                    match result {
+                        Ok(true) => {
+                            println!("{MINT}Updated '{name}'.{RESET}\n");
+                            reload_session_config(session);
+                        }
+                        Ok(false) => println!("{WARN}No MCP server named '{name}'.{RESET}\n"),
+                        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                    }
+                }
+                _ => println!("{WARN}/mcp edit usage:{RESET} <name> command|args|icon <value>\n"),
+            }
+        }
+
+        "allow" | "disallow" => {
+            let mut parts = args.split_whitespace();
+            match (parts.next(), parts.next()) {
+                (Some(server), Some(tool)) => {
+                    let (verb, result) = if subcmd == "allow" {
+                        ("Allowed", crate::mcp::allow(server, tool))
+                    } else {
+                        ("Removed", crate::mcp::disallow(server, tool))
+                    };
+                    match result {
+                        Ok(true) => {
+                            println!("{MINT}{verb} {server}/{tool}.{RESET}\n");
+                            reload_session_config(session);
+                        }
+                        Ok(false) => println!("{DIM}No change for {server}/{tool}.{RESET}\n"),
+                        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                    }
+                }
+                _ => println!("{WARN}/mcp {subcmd} usage:{RESET} <server> <tool>\n"),
+            }
+        }
+
+        "reauth" if !args.is_empty() => {
+            println!(
+                "{DIM}Re-authenticating MCP server '{args}'... (a browser tab may open){RESET}\n"
+            );
+            match crate::mcp::reauth(args) {
+                Ok(true) => println!("{MINT}Re-authentication succeeded for '{args}'.{RESET}\n"),
+                Ok(false) => println!(
+                    "{ERROR}Re-authentication failed for '{args}' (see output above).{RESET}\n"
+                ),
+                Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+            }
+        }
+
+        _ => println!(
+            "{WARN}/mcp usage:{RESET} list | add <name> <cmd> [args...] | remove <name> | \
+             enable|disable <name> | edit <name> command|args|icon <value> | \
+             allow|disallow <server> <tool> | reauth <server> | clear\n"
+        ),
+    }
+}
+
+/// The arrow-key `/mcp` flow: an "add" row plus every configured server; picking
+/// a server opens a per-server action menu.
+fn mcp_interactive_picker(session: &mut InteractiveSession) {
+    let servers = match crate::mcp::list() {
+        Ok(servers) => servers,
+        Err(e) => {
+            println!("{ERROR}MCP error:{RESET} {e}\n");
+            return;
+        }
+    };
+
+    const ADD_ROW: &str = "＋ Add MCP server";
+    const CANCEL: &str = "Cancel";
+
+    let allowed = session
+        .config
+        .extra
+        .get("allowedMcpTools")
+        .and_then(|v| v.as_object())
+        .cloned();
+
+    let mut choices = vec![ADD_ROW.to_string()];
+    let mut names = Vec::new();
+    let width = servers.keys().map(|k| k.len()).max().unwrap_or(6) + 2;
+    for (name, srv) in &servers {
+        let tools = allowed
+            .as_ref()
+            .and_then(|m| m.get(name))
+            .and_then(|v| v.as_array());
+        let label = match tools {
+            Some(a) if a.iter().any(|t| t.as_str() == Some("*")) => {
+                format!("{MINT}[tools: *]{RESET}")
+            }
+            Some(a) if !a.is_empty() => format!(
+                "{MINT}[tools: {}]{RESET}",
+                a.iter()
+                    .filter_map(|t| t.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            _ => format!("{DIM}[no tools allowed]{RESET}"),
+        };
+        let disabled = if srv.disabled {
+            format!(" {DIM}(disabled){RESET}")
+        } else {
+            String::new()
+        };
+        choices.push(format!(
+            "{name:<width$}{label}{disabled} {DIM}({} {}){RESET}",
+            srv.command,
+            srv.args.join(" ")
+        ));
+        names.push(name.clone());
+    }
+    choices.push(CANCEL.to_string());
+
+    let Ok(Some(pick)) = prompt_interactive_select("MCP Servers", &choices, ADD_ROW) else {
+        return;
+    };
+    if pick == CANCEL {
+        return;
+    }
+    if pick == ADD_ROW {
+        mcp_add_flow(session);
+        return;
+    }
+    let Some(pos) = choices.iter().position(|c| *c == pick) else {
+        return;
+    };
+    let name = names[pos - 1].clone();
+    let disabled = servers.get(&name).map(|s| s.disabled).unwrap_or(false);
+    mcp_server_actions(session, &name, disabled);
+}
+
+fn mcp_add_flow(session: &mut InteractiveSession) {
+    let choices = vec!["From catalog".to_string(), "Custom".to_string()];
+    match prompt_interactive_select("Add MCP server", &choices, &choices[0]) {
+        Ok(Some(c)) if c == "From catalog" => mcp_add_from_catalog(session),
+        Ok(Some(c)) if c == "Custom" => mcp_add_custom_flow(session),
+        _ => {}
+    }
+}
+
+fn mcp_add_from_catalog(session: &mut InteractiveSession) {
+    let entries = crate::mcp::registry();
+    let labels: Vec<String> = entries
+        .iter()
+        .map(|e| {
+            let needs = if e.required_env.is_empty() {
+                String::new()
+            } else {
+                format!(" {DIM}(needs a key){RESET}")
+            };
+            format!("{:<20} {}{needs}", e.name, e.desc)
+        })
+        .collect();
+    let Ok(Some(picked)) = prompt_interactive_select("MCP server catalog", &labels, &labels[0])
+    else {
+        return;
+    };
+    let Some(entry) = labels
+        .iter()
+        .position(|l| *l == picked)
+        .map(|i| &entries[i])
+    else {
+        return;
+    };
+
+    // One prompt per declared argInput (path / connection string / …).
+    let mut extra_args = Vec::new();
+    for input in &entry.arg_inputs {
+        let hint = if input.placeholder.is_empty() {
+            input.label.clone()
+        } else {
+            format!("{} (e.g. {})", input.label, input.placeholder)
+        };
+        let value = crate::onboard::prompt_input(&hint, None).unwrap_or_default();
+        let value = value.trim();
+        if value.is_empty() {
+            println!("{WARN}Cancelled ('{}' is required).{RESET}\n", input.label);
+            return;
+        }
+        extra_args.push(value.to_string());
+    }
+
+    // One prompt per required env var.
+    let mut env = Vec::new();
+    for var in &entry.required_env {
+        if let Some(help) = &var.help {
+            println!("{DIM}  {}: get one at {help}{RESET}", var.label);
+        }
+        let value = crate::onboard::prompt_input(&var.label, None).unwrap_or_default();
+        let value = value.trim();
+        if value.is_empty() {
+            println!("{WARN}Cancelled ('{}' is required).{RESET}\n", var.label);
+            return;
+        }
+        env.push(format!("{}={value}", var.key));
+    }
+
+    let name = crate::onboard::prompt_input("Server name", Some(&entry.key)).unwrap_or_default();
+    let name = if name.trim().is_empty() {
+        entry.key.clone()
+    } else {
+        name.trim().to_string()
+    };
+
+    let allow_all = confirm(
+        "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+    )
+    .unwrap_or(false);
+
+    match crate::mcp::registry_add(&entry.key, Some(&name), extra_args, env, allow_all) {
+        Ok(saved) => {
+            println!(
+                "{MINT}Added MCP server '{saved}'{}.{RESET}\n",
+                if allow_all {
+                    " (all tools allowed)"
+                } else {
+                    ""
+                }
+            );
+            reload_session_config(session);
+        }
+        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+    }
+}
+
+fn mcp_add_custom_flow(session: &mut InteractiveSession) {
+    let name = crate::onboard::prompt_input("Server name", None).unwrap_or_default();
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        println!("{WARN}Cancelled (no name).{RESET}\n");
+        return;
+    }
+    let command = crate::onboard::prompt_input("Command (e.g. npx)", None).unwrap_or_default();
+    let command = command.trim().to_string();
+    if command.is_empty() {
+        println!("{WARN}Cancelled (no command).{RESET}\n");
+        return;
+    }
+    let args = crate::onboard::prompt_input("Arguments (space-separated, blank for none)", None)
+        .unwrap_or_default();
+    let env_raw = crate::onboard::prompt_input(
+        "Env vars (KEY=VALUE, comma-separated, blank for none)",
+        None,
+    )
+    .unwrap_or_default();
+
+    let args: Vec<String> = args.split_whitespace().map(str::to_string).collect();
+    let env: Vec<String> = env_raw
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+
+    match crate::mcp::add(&name, &command, args, env) {
+        Ok(()) => {
+            let allow_all = confirm(
+                "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+            )
+            .unwrap_or(false);
+            if allow_all {
+                let _ = crate::mcp::allow(&name, "*");
+            }
+            println!(
+                "{MINT}Added MCP server '{name}'{}.{RESET}\n",
+                if allow_all {
+                    " (all tools allowed)"
+                } else {
+                    ""
+                }
+            );
+            reload_session_config(session);
+        }
+        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+    }
+}
+
+fn mcp_server_actions(session: &mut InteractiveSession, name: &str, disabled: bool) {
+    let toggle_label = if disabled {
+        "Enable server"
+    } else {
+        "Disable server"
+    };
+    let actions = vec![
+        "Check connection".to_string(),
+        "Allow all tools (*)".to_string(),
+        "Allow a specific tool".to_string(),
+        "Disallow a tool".to_string(),
+        "Re-authenticate (OAuth)".to_string(),
+        toggle_label.to_string(),
+        "Edit (command / args / icon)".to_string(),
+        "Remove server".to_string(),
+        "Back".to_string(),
+    ];
+    let Ok(Some(choice)) =
+        prompt_interactive_select(&format!("MCP: {name}"), &actions, &actions[0])
+    else {
+        return;
+    };
+
+    match choice.as_str() {
+        "Check connection" => match mint_core::list_server_tools(&session.config, name) {
+            Ok(_) => println!("{MINT}● Connected{RESET}\n"),
+            Err(e) => println!("{ERROR}● Not connected:{RESET} {e}\n"),
+        },
+        "Allow all tools (*)" => match crate::mcp::allow(name, "*") {
+            Ok(_) => {
+                println!("{MINT}Allowed all tools for '{name}'.{RESET}\n");
+                reload_session_config(session);
+            }
+            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+        },
+        "Allow a specific tool" => {
+            let tool = crate::onboard::prompt_input("Tool name", None).unwrap_or_default();
+            let tool = tool.trim();
+            if tool.is_empty() {
+                return;
+            }
+            match crate::mcp::allow(name, tool) {
+                Ok(true) => {
+                    println!("{MINT}Allowed {name}/{tool}.{RESET}\n");
+                    reload_session_config(session);
+                }
+                Ok(false) => println!("{DIM}{name}/{tool} was already allowed.{RESET}\n"),
+                Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+            }
+        }
+        "Disallow a tool" => {
+            let tool = crate::onboard::prompt_input("Tool to remove (* to clear all)", None)
+                .unwrap_or_default();
+            let tool = tool.trim();
+            if tool.is_empty() {
+                return;
+            }
+            match crate::mcp::disallow(name, tool) {
+                Ok(true) => {
+                    println!("{MINT}Removed {name}/{tool} from the allowlist.{RESET}\n");
+                    reload_session_config(session);
+                }
+                Ok(false) => println!("{DIM}{name}/{tool} was not in the allowlist.{RESET}\n"),
+                Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+            }
+        }
+        "Re-authenticate (OAuth)" => {
+            println!("{DIM}Re-authenticating '{name}'... (a browser tab may open){RESET}\n");
+            match crate::mcp::reauth(name) {
+                Ok(true) => println!("{MINT}Re-authentication succeeded.{RESET}\n"),
+                Ok(false) => {
+                    println!("{ERROR}Re-authentication failed (see output above).{RESET}\n")
+                }
+                Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+            }
+        }
+        other if other == toggle_label => match crate::mcp::set_disabled(name, !disabled) {
+            Ok(_) => {
+                println!(
+                    "{MINT}{} '{name}'.{RESET}\n",
+                    if disabled { "Enabled" } else { "Disabled" }
+                );
+                reload_session_config(session);
+            }
+            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+        },
+        "Edit (command / args / icon)" => mcp_edit_flow(session, name),
+        "Remove server" => {
+            if confirm(&format!("Remove MCP server '{name}'?")).unwrap_or(false) {
+                match crate::mcp::remove(name) {
+                    Ok(_) => {
+                        println!("{MINT}Removed '{name}'.{RESET}\n");
+                        reload_session_config(session);
+                    }
+                    Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn mcp_edit_flow(session: &mut InteractiveSession, name: &str) {
+    let Some(srv) = crate::mcp::list().ok().and_then(|m| m.get(name).cloned()) else {
+        println!("{WARN}No MCP server named '{name}'.{RESET}\n");
+        return;
+    };
+    let fields = vec![
+        "command".to_string(),
+        "args".to_string(),
+        "icon".to_string(),
+        "Back".to_string(),
+    ];
+    let Ok(Some(field)) = prompt_interactive_select(&format!("Edit {name}"), &fields, &fields[0])
+    else {
+        return;
+    };
+    let result = match field.as_str() {
+        "command" => {
+            let value =
+                crate::onboard::prompt_input("Command", Some(&srv.command)).unwrap_or_default();
+            let value = value.trim();
+            if value.is_empty() {
+                return;
+            }
+            crate::mcp::edit(name, Some(value.to_string()), None, None, None)
+        }
+        "args" => {
+            let current = srv.args.join(" ");
+            let value = crate::onboard::prompt_input("Arguments (space-separated)", Some(&current))
+                .unwrap_or_default();
+            crate::mcp::edit(
+                name,
+                None,
+                Some(value.split_whitespace().map(str::to_string).collect()),
+                None,
+                None,
+            )
+        }
+        "icon" => {
+            let current = srv.icon.clone().unwrap_or_default();
+            let value = crate::onboard::prompt_input("Icon (blank to clear)", Some(&current))
+                .unwrap_or_default();
+            let value = value.trim();
+            crate::mcp::edit(
+                name,
+                None,
+                None,
+                None,
+                Some((!value.is_empty()).then(|| value.to_string())),
+            )
+        }
+        _ => return,
+    };
+    match result {
+        Ok(_) => {
+            println!("{MINT}Updated '{name}'.{RESET}\n");
+            reload_session_config(session);
+        }
+        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
     }
 }
 

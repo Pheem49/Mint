@@ -7,6 +7,7 @@ node_modules/
 .antigravitycli
 .antigravitycli/
 .cargo_home/
+.cargo/
 .rustup/
 .rustup_copy/
 .rustup_home/ฃ

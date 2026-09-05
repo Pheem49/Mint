@@ -21,7 +21,6 @@ interface Window {
     listSavedPictures: () => Promise<any>;
     deleteSavedPicture: (id: string) => Promise<any>;
     openSettings: () => Promise<any>;
-    openWorkflows: () => Promise<any>;
     readClipboard: () => Promise<string>;
     writeClipboard: (text: string) => Promise<void>;
     getSystemInfo: () => Promise<any>;
@@ -55,9 +54,6 @@ interface Window {
     quitApp: () => void;
     openExternal: (url: string) => Promise<void>;
     openFolder: (path: string) => Promise<void>;
-    openCustomWorkflows: () => Promise<any>;
-    reloadCustomWorkflows: () => Promise<any>;
-    saveCustomWorkflows: (workflows: any[]) => Promise<any>;
   };
   spotlightAPI: {
     submit: (query: string) => void;

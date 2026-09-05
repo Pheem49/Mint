@@ -3,7 +3,7 @@ import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon, renderS
 import { useAuthUser } from './AuthGate'
 import { APP_ICON_PATH } from '@/tauri'
 
-export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'workflows' | 'veo' | 'skills' | 'mcp' | 'plugins' | 'cron' | 'link'
+export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'veo' | 'skills' | 'mcp' | 'plugins' | 'cron' | 'link'
 
 interface ChatSessionItem {
   id: string
@@ -33,8 +33,6 @@ interface DashboardSidebarProps {
   onSetSearchOpen: (open: boolean) => void
   /** Desktop only — web has no local workspace-folder concept to browse. */
   showWorkspaceTab?: boolean
-  /** Desktop only — the n8n/webhook workflow feature isn't available on web. */
-  hasWorkflowsTab?: boolean
   /**
    * Web only — web surfaces Image Studio/Veo Studio as top-level sidebar
    * buttons; desktop tucks them inside the "More" popover instead. Real UX
@@ -87,7 +85,6 @@ export default function DashboardSidebar({
   isSearchOpen,
   onSetSearchOpen,
   showWorkspaceTab,
-  hasWorkflowsTab,
   promoteMediaStudios,
 }: DashboardSidebarProps) {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
@@ -297,7 +294,7 @@ export default function DashboardSidebar({
       )}
 
       <div className="sidebar-more-container" ref={moreContainerRef}>
-        <button className={`sidebar-top-action ${isMoreOpen || (!promoteMediaStudios && (view === 'imagine' || view === 'veo')) || (hasWorkflowsTab && view === 'workflows') || view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)}>
+        <button className={`sidebar-top-action ${isMoreOpen || (!promoteMediaStudios && (view === 'imagine' || view === 'veo')) || view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' ? 'is-active' : ''}`} onClick={() => setIsMoreOpen(!isMoreOpen)}>
           <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="1.5"></circle>
@@ -337,21 +334,6 @@ export default function DashboardSidebar({
                   </svg>
                 </span>
                 <span>Image Studio</span>
-              </button>
-            )}
-            {hasWorkflowsTab && (
-              <button className={`popover-item ${view === 'workflows' ? 'active' : ''}`} onClick={() => { onSetView('workflows'); setIsMoreOpen(false); }}>
-                <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 12h16"></path>
-                    <path d="M12 4v16"></path>
-                    <rect x="2" y="9" width="4" height="6" rx="1"></rect>
-                    <rect x="18" y="9" width="4" height="6" rx="1"></rect>
-                    <rect x="10" y="2" width="4" height="4" rx="1"></rect>
-                    <rect x="10" y="18" width="4" height="4" rx="1"></rect>
-                  </svg>
-                </span>
-                <span>Workflow (Beta)</span>
               </button>
             )}
             {!promoteMediaStudios && (

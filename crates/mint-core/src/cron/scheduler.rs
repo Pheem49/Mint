@@ -10,6 +10,13 @@ use super::store::{CronJob, CronStore};
 
 const TICK_INTERVAL: Duration = Duration::from_secs(60);
 
+/// How long a job's `running_since` claim (see [`CronStore::claim_run`]) is
+/// trusted before the scheduler assumes the process that took it died mid-run
+/// — the app was closed, the machine restarted — and re-runs the occurrence
+/// rather than leaving it lost. Comfortably longer than any realistic agent
+/// run, short enough that a genuinely interrupted run isn't stuck for a day.
+const STALE_CLAIM_SECS: i64 = 60 * 60;
+
 /// Starts the cron scheduler as a self-healing background loop, mirroring
 /// [`crate::channels::start_channels`]'s runtime-detection dance: if a Tokio
 /// runtime is already driving the calling process, ride along on it;
@@ -57,18 +64,32 @@ async fn tick() {
             continue;
         }
 
-        // Advance `next_run` before running: if this job's execution outlasts
-        // the tick interval, the next tick will see a future `next_run` and
-        // skip it, instead of firing it a second time while it's still busy.
-        // If there's no further occurrence (e.g. a one-time job whose fixed
-        // year has arrived), this due run is its last one ever — disable it
-        // so it stops being "due" every tick from here on, but still run it
-        // below instead of silently dropping its only/final firing.
-        if store.advance_next_run(&job.id).is_err() {
-            let _ = store.set_enabled(&job.id, false);
+        // Another scheduler (a second open Mint process) may already be
+        // running this occurrence. Skip it while that claim is fresh; once
+        // the claim is stale the claimer has almost certainly died mid-run
+        // (the app was closed, the machine restarted), so fall through and
+        // run it — the whole point of claiming *and* advancing `next_run`
+        // only after the run finishes is that an interrupted run is retried
+        // instead of skipped for good.
+        if let Some(claimed_at) = job
+            .running_since
+            .as_deref()
+            .and_then(|raw| DateTime::parse_from_rfc3339(raw).ok())
+        {
+            let age = now.signed_duration_since(claimed_at.with_timezone(&Utc));
+            if age.num_seconds() < STALE_CLAIM_SECS {
+                continue;
+            }
         }
 
+        // Claim, run, then release + advance. If there's no further
+        // occurrence (a one-time job whose time has passed), `finish_run`
+        // disables the job so it stops being "due" every tick from here on.
+        if store.claim_run(&job.id, now).is_err() {
+            continue;
+        }
         run_job(&config, &store, &job).await;
+        let _ = store.finish_run(&job.id);
     }
 }
 

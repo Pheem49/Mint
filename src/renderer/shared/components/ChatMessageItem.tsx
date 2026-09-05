@@ -8,10 +8,12 @@ import StockCard from './StockCard'
 import CalculationCard from './CalculationCard'
 import ImageSearchCard from './ImageSearchCard'
 import ImageGenCard from './ImageGenCard'
+import { parseUtcDate } from '../utils/ui'
 
 export interface ChatMessageItemProps {
   interaction: any
   copiedId: string | number | null
+  onEditMessage?: (text: string) => void
   speakingText: string | null
   agentActivitySnapshots: Record<string, any[]>
   thinkingExpanded: Record<string, boolean>
@@ -31,6 +33,7 @@ const ChatMessageItem = React.memo(
     const {
       interaction,
       copiedId,
+      onEditMessage,
       speakingText,
       agentActivitySnapshots,
       thinkingExpanded,
@@ -179,7 +182,7 @@ const ChatMessageItem = React.memo(
             <div className="bubble-wrapper">
               <div className="message-bubble">{memoizedUserContent}</div>
               <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span>{parseUtcDate(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 <button
                   type="button"
                   className={`msg-action-btn copy-btn ${isUserCopied ? 'is-copied' : ''}`}
@@ -188,6 +191,19 @@ const ChatMessageItem = React.memo(
                 >
                   {renderCopyIcon(isUserCopied)}
                 </button>
+                {onEditMessage && interaction.provider !== 'system' && (
+                  <button
+                    type="button"
+                    className="msg-action-btn edit-btn"
+                    onClick={() => onEditMessage(interaction.userText)}
+                    title="แก้ไขและส่งใหม่ (Edit & resend)"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 20h9"></path>
+                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                    </svg>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -215,7 +231,7 @@ const ChatMessageItem = React.memo(
             <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
               {fallbackNotice(interaction) && <span className="provider-fallback-notice">{fallbackNotice(interaction)}</span>}
-              <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              <span>{parseUtcDate(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
                 <button
                   type="button"

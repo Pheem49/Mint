@@ -108,6 +108,15 @@
     color: var(--text-main);
 }
 
+.pill-segmented-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.pill-segmented-btn:disabled:hover {
+    color: var(--text-muted);
+}
+
 .pill-segmented-btn.active {
     background: var(--surface-strong);
     border-color: color-mix(in srgb, var(--accent) 55%, transparent);

@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import { renderSkillsSvgIcon, renderSkillLogoIcon } from '../constants/plugins'
+import { renderFormattedMessage } from '../utils/markdown'
 import '../css/management-views.css'
 import type { LearnedSkill } from '../types'
+
+/** First non-empty line of a skill's content, for the one-line row preview. */
+function firstLine(text: string): string {
+  return text.split('\n').map((l) => l.replace(/^#+\s*/, '').trim()).find(Boolean) || ''
+}
 
 export type { LearnedSkill }
 
@@ -101,10 +107,10 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
             <span className="management-title-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
               {renderSkillsSvgIcon(22, 'var(--accent)')}
             </span>
-            Agent Skills Studio
+            Skills
           </h1>
           <p className="management-subtitle">
-            Skills are guidelines and instructions taught to Mint Agent. Active skills are automatically reviewed before executing prompts.
+            Instructions Mint follows automatically, reviewed before every prompt.
           </p>
         </div>
         <button
@@ -165,41 +171,29 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
         </div>
       )}
 
-      {/* Skills Grid */}
+      {/* Skills list */}
       {loading ? (
-        <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted, #94a3b8)' }}>Loading skills...</div>
+        <div className="mgmt-empty">Loading…</div>
       ) : filteredSkills.length === 0 ? (
-        <div className="management-empty-state">
-          <div className="management-empty-icon">🎓</div>
-          <h3 className="management-empty-title">No skills found</h3>
-          <p className="management-empty-desc">
-            Teach Mint Agent a skill above or use the <code>/learn</code> slash command in chat.
-          </p>
+        <div className="mgmt-empty">
+          <p>{searchQuery || scopeFilter !== 'all' ? 'No skills match.' : 'No skills yet.'}</p>
+          {!searchQuery && scopeFilter === 'all' && (
+            <p>
+              Teach one above, or run <code>/learn</code> in chat.
+            </p>
+          )}
         </div>
       ) : (
-        <div className="management-grid">
+        <div className="mgmt-list">
           {filteredSkills.map((s) => (
-            <div
-              key={s.name}
-              className="management-card"
-              onClick={() => setDetailSkill(s)}
-              style={{ cursor: 'pointer' }}
-            >
-              <div>
-                <div className="management-card-header">
-                  <div className="management-card-title-group">
-                    {renderSkillLogoIcon()}
-                    <h3 className="management-card-title">{s.name}</h3>
-                  </div>
-                  <span className={`management-tag ${s.is_workspace ? 'workspace' : 'global'}`}>
-                    {s.is_workspace ? 'Workspace' : 'Global'}
-                  </span>
-                </div>
-
-                <p className="management-card-desc">
-                  {s.description || s.content}
-                </p>
+            <div key={s.name} className="mgmt-row" onClick={() => setDetailSkill(s)}>
+              <div className="mgmt-row-main">
+                <div className="mgmt-row-title">{s.name}</div>
+                <div className="mgmt-row-sub">{s.description || firstLine(s.content)}</div>
               </div>
+              <span className={`management-tag ${s.is_workspace ? 'workspace' : 'global'}`}>
+                {s.is_workspace ? 'Workspace' : 'Global'}
+              </span>
             </div>
           ))}
         </div>
@@ -229,17 +223,12 @@ export const SkillsView: React.FC<SkillsViewProps> = React.memo(function SkillsV
               </span>
 
               {detailSkill.description && (
-                <p style={{ color: 'var(--text-soft, #d1d1d4)', lineHeight: 1.55, marginTop: '14px' }}>
+                <p style={{ color: 'var(--text-soft, #d1d1d4)', lineHeight: 1.55, margin: 0 }}>
                   {detailSkill.description}
                 </p>
               )}
 
-              <div
-                className="management-code-snippet"
-                style={{ whiteSpace: 'pre-wrap', marginTop: '14px', maxHeight: '320px', overflowY: 'auto' }}
-              >
-                {detailSkill.content}
-              </div>
+              <div className="mgmt-prose">{renderFormattedMessage(detailSkill.content)}</div>
             </div>
 
             <div className="management-modal-footer">

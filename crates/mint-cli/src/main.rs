@@ -191,7 +191,7 @@ enum Command {
         #[command(subcommand)]
         command: FilesCommand,
     },
-    /// Manage built-in plugins & integrations (Gmail, Calendar, Notion, Spotify, Vercel, GitHub).
+    /// Manage built-in plugins & integrations (Gmail, Calendar, Notion, Spotify, GitHub, Discord).
     #[command(alias = "plugin")]
     Plugins {
         #[command(subcommand)]
@@ -214,6 +214,14 @@ enum Command {
     },
     /// Run one queued or supplied task through the native CLI agent.
     Agent { task: Option<String> },
+    /// Rewind workspace to a previous git checkpoint snapshot.
+    Rewind {
+        /// Step number to restore (omitting lists available checkpoints).
+        step: Option<usize>,
+        /// Chat ID (defaults to "cli").
+        #[arg(long, default_value = "cli")]
+        chat_id: String,
+    },
     /// Start the browser automation environment and enable browser actions.
     Auto,
     /// Launch the web UI and local API server.
@@ -297,6 +305,8 @@ enum Command {
     Open { target: String },
     /// Launch a desktop program.
     OpenApp { name: String },
+    /// Live preview an artifact file (HTML, SVG, Markdown) in browser or terminal.
+    Preview { path: PathBuf },
     /// Read the contents of a text file.
     ReadFile { path: PathBuf },
     /// List the contents of a directory.
@@ -457,12 +467,46 @@ enum McpCommand {
         args: Vec<String>,
         #[arg(long, num_args = 1, allow_hyphen_values = true)]
         env: Vec<String>,
+        /// Immediately allow the agent to call every tool on the new server
+        /// (`allow <name> *`). Off by default — tools are opt-in per server.
+        #[arg(long)]
+        allow_all: bool,
     },
     List,
     Remove {
         name: String,
     },
+    /// Keep a server configured but turn it off (hidden from the agent).
+    Disable {
+        name: String,
+    },
+    /// Re-enable a server turned off with `disable`.
+    Enable {
+        name: String,
+    },
+    /// Change a configured server in place — only the flags you pass are touched.
+    Edit {
+        name: String,
+        #[arg(long)]
+        command: Option<String>,
+        /// Repeatable; replaces the arg list. Passing none leaves args unchanged.
+        #[arg(long, num_args = 1, allow_hyphen_values = true)]
+        args: Vec<String>,
+        /// Repeatable `KEY=VALUE`; replaces the env map. None = unchanged.
+        #[arg(long, num_args = 1, allow_hyphen_values = true)]
+        env: Vec<String>,
+        #[arg(long)]
+        icon: Option<String>,
+        /// Clear the server's icon.
+        #[arg(long, conflicts_with = "icon")]
+        no_icon: bool,
+    },
     Allow {
+        server: String,
+        tool: String,
+    },
+    /// Remove a tool from a server's allowlist (`*` clears the whole list).
+    Disallow {
         server: String,
         tool: String,
     },
@@ -479,6 +523,34 @@ enum McpCommand {
         tool: String,
         #[arg(long, default_value = "{}")]
         arguments: String,
+    },
+    /// The bundled catalog of well-known MCP servers.
+    Registry {
+        #[command(subcommand)]
+        command: Option<RegistryCommand>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RegistryCommand {
+    /// List the catalog (the default when no subcommand is given).
+    List,
+    /// Add a catalog entry as a configured server.
+    Add {
+        /// Catalog key, e.g. `filesystem` (see `mint mcp registry`).
+        key: String,
+        /// Server name to save it under. Defaults to the catalog key.
+        #[arg(long)]
+        name: Option<String>,
+        /// One value per `argInput` the entry declares, in order (e.g. a path).
+        #[arg(long = "arg", num_args = 1, allow_hyphen_values = true)]
+        args: Vec<String>,
+        /// `KEY=VALUE` for the entry's required env vars.
+        #[arg(long, num_args = 1, allow_hyphen_values = true)]
+        env: Vec<String>,
+        /// Immediately allow the agent to call every tool on it.
+        #[arg(long)]
+        allow_all: bool,
     },
 }
 
@@ -673,6 +745,13 @@ enum CodeCommand {
         start: usize,
         #[arg(long, default_value_t = 200)]
         end: usize,
+    },
+    /// Generate an AST-based repo map with token budgeting.
+    Repomap {
+        #[arg(default_value = ".")]
+        root: PathBuf,
+        #[arg(long, default_value_t = 2000)]
+        limit: usize,
     },
     /// Search source text without invoking a shell command.
     Search {
@@ -924,8 +1003,13 @@ pub(crate) fn print_mcp_servers(
     }
     for (name, srv) in servers {
         let args_str = srv.args.join(" ");
+        let (dot, suffix) = if srv.disabled {
+            (DIM, format!(" {DIM}[disabled]{RESET}"))
+        } else {
+            (BLUE, String::new())
+        };
         println!(
-            "  {BLUE}●{RESET} {name} {DIM}({} {}){RESET}",
+            "  {dot}●{RESET} {name} {DIM}({} {}){RESET}{suffix}",
             srv.command, args_str
         );
     }
@@ -1080,6 +1164,34 @@ async fn main() -> Result<()> {
             }
             Command::Agent { task } => {
                 run_cli_agent_task(task).await?;
+            }
+            Command::Rewind { step, chat_id } => {
+                let cwd = std::env::current_dir()?;
+                if let Some(step_num) = step {
+                    let msg = mint_core::git::rollback_to_step(&cwd, &chat_id, step_num)
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                    println!("{msg}");
+                } else {
+                    let checkpoints = mint_core::git::list_checkpoints(&chat_id);
+                    if checkpoints.is_empty() {
+                        println!("No checkpoints recorded for chat '{chat_id}'");
+                    } else {
+                        println!("Checkpoints for chat '{chat_id}':");
+                        for cp in checkpoints.iter().rev() {
+                            let hash = if cp.commit_hash.len() >= 7 {
+                                &cp.commit_hash[..7]
+                            } else {
+                                &cp.commit_hash
+                            };
+                            let target = cp.target_path.as_deref().unwrap_or("-");
+                            println!(
+                                "  Step {:<3} [{}] {:<18} ({})",
+                                cp.step, hash, cp.action, target
+                            );
+                        }
+                        println!("\nRun 'mint rewind <step> --chat-id {chat_id}' to restore.");
+                    }
+                }
             }
             Command::Auto => {
                 let config = load_config()?;
@@ -1314,9 +1426,14 @@ async fn main() -> Result<()> {
                     command,
                     args,
                     env,
+                    allow_all,
                 } => {
                     mcp::add(&name, &command, args, env)?;
                     println!("Added MCP server: {name}");
+                    if allow_all {
+                        mcp::allow(&name, "*")?;
+                        println!("Allowed all tools for {name}");
+                    }
                 }
                 McpCommand::List => {
                     println!("\n{BLUE}MCP servers:{RESET}");
@@ -1332,11 +1449,54 @@ async fn main() -> Result<()> {
                         }
                     )
                 }
+                McpCommand::Disable { name } => {
+                    if mcp::set_disabled(&name, true)? {
+                        println!("disabled {name}");
+                    } else {
+                        println!("{ERROR}not found:{RESET} {name}");
+                    }
+                }
+                McpCommand::Enable { name } => {
+                    if mcp::set_disabled(&name, false)? {
+                        println!("enabled {name}");
+                    } else {
+                        println!("{ERROR}not found:{RESET} {name}");
+                    }
+                }
+                McpCommand::Edit {
+                    name,
+                    command,
+                    args,
+                    env,
+                    icon,
+                    no_icon,
+                } => {
+                    let icon = if no_icon { Some(None) } else { icon.map(Some) };
+                    let existed = mcp::edit(
+                        &name,
+                        command,
+                        (!args.is_empty()).then_some(args),
+                        (!env.is_empty()).then_some(env),
+                        icon,
+                    )?;
+                    if existed {
+                        println!("updated {name}");
+                    } else {
+                        println!("{ERROR}not found:{RESET} {name}");
+                    }
+                }
                 McpCommand::Allow { server, tool } => {
                     if mcp::allow(&server, &tool)? {
                         println!("allowed {server}/{tool}");
                     } else {
                         println!("already allowed {server}/{tool}");
+                    }
+                }
+                McpCommand::Disallow { server, tool } => {
+                    if mcp::disallow(&server, &tool)? {
+                        println!("disallowed {server}/{tool}");
+                    } else {
+                        println!("{server}/{tool} was not in the allowlist");
                     }
                 }
                 McpCommand::Reauth { server } => {
@@ -1375,6 +1535,42 @@ async fn main() -> Result<()> {
                     spinner.finish_and_clear();
                     println!("{}", serde_json::to_string_pretty(&res?)?);
                 }
+                McpCommand::Registry { command } => match command {
+                    None | Some(RegistryCommand::List) => {
+                        println!("\n{BLUE}MCP server catalog:{RESET}");
+                        for e in mcp::registry() {
+                            let needs = if e.required_env.is_empty() {
+                                String::new()
+                            } else {
+                                format!(
+                                    " {WARN}(needs: {}){RESET}",
+                                    e.required_env
+                                        .iter()
+                                        .map(|v| v.key.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                )
+                            };
+                            println!("  {MINT}{:<20}{RESET} {}{needs}", e.key, e.desc);
+                        }
+                        println!(
+                            "\n{DIM}Add one: mint mcp registry add <key> [--arg <v>] [--env K=V] [--allow-all]{RESET}"
+                        );
+                    }
+                    Some(RegistryCommand::Add {
+                        key,
+                        name,
+                        args,
+                        env,
+                        allow_all,
+                    }) => {
+                        let saved = mcp::registry_add(&key, name.as_deref(), args, env, allow_all)?;
+                        println!("Added MCP server: {saved}");
+                        if allow_all {
+                            println!("Allowed all tools for {saved}");
+                        }
+                    }
+                },
             },
             Command::Link { command } => match command {
                 LinkCommand::Add {
@@ -1906,6 +2102,10 @@ async fn main() -> Result<()> {
                         "{}",
                         serde_json::to_string_pretty(&search_code(&root, &query, limit, &config)?)?
                     ),
+                    CodeCommand::Repomap { root, limit } => {
+                        let summary = mint_core::generate_repo_map(&root, limit, &config)?;
+                        println!("{}", summary.map);
+                    }
                     CodeCommand::Plan { task, root, file } => println!(
                         "{}",
                         serde_json::to_string_pretty(&inspect_code_plan(
@@ -2023,6 +2223,9 @@ async fn main() -> Result<()> {
             }
             Command::OpenApp { name } => {
                 actions::launch_desktop_app(&name)?;
+            }
+            Command::Preview { path } => {
+                actions::preview_file(&path)?;
             }
             Command::ReadFile { path } => {
                 actions::read_file_content(&path)?;
@@ -2567,6 +2770,12 @@ async fn main() -> Result<()> {
             },
         },
     }
+    // Every subcommand that could have spawned a persistent stdio MCP child
+    // (interactive chat, `agent`/`code`, `chat`, `web`/`api`, `gateway` after
+    // its shutdown signal) funnels back here on a clean exit. `SESSIONS` is a
+    // `static`, so `McpSession::Drop` won't run at process teardown — do it
+    // explicitly so we don't leave orphaned MCP server processes behind.
+    mint_core::close_all_mcp_sessions();
     Ok(())
 }
 

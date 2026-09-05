@@ -516,26 +516,8 @@ export default function SettingsWindow() {
     }
   }
 
-  const handleOpenWorkflows = () => {
-    if (!isDesktopApp) {
-      alert('Workflow files can only be opened from the desktop app. The web app can still save workflow settings through the Local API.')
-      return
-    }
-    window.settingsApi?.openCustomWorkflows()
-  }
 
-  const handleReloadWorkflows = async () => {
-    if (!isDesktopApp) {
-      alert('Reloading workflow files is only available in the desktop app.')
-      return
-    }
-    if (window.settingsApi) {
-      const res = await window.settingsApi.reloadCustomWorkflows()
-      alert(res?.success ? 'Workflows reloaded successfully!' : 'Workflow reload failed.')
-    }
-  }
-
-  const handleAddMcpServer = () => {
+  const handleAddMcpServer = (allowAll?: boolean) => {
     if (!mcpName.trim() || !mcpCmd.trim()) {
       alert('Please provide at least a server name and command.')
       return
@@ -551,11 +533,12 @@ export default function SettingsWindow() {
       }
     }
 
+    const name = mcpName.trim()
     const argList = mcpArgs.split(/\s+/).filter(Boolean)
 
     const updatedMcp = {
       ...config.mcpServers,
-      [mcpName.trim()]: {
+      [name]: {
         command: mcpCmd.trim(),
         args: argList,
         env: parsedEnv,
@@ -565,7 +548,10 @@ export default function SettingsWindow() {
 
     setConfig({
       ...config,
-      mcpServers: updatedMcp
+      mcpServers: updatedMcp,
+      ...(allowAll
+        ? { allowedMcpTools: { ...((config as any).allowedMcpTools || {}), [name]: ['*'] } }
+        : {}),
     })
 
     setMcpName('')
@@ -764,9 +750,6 @@ export default function SettingsWindow() {
             <AutomationTab
               config={config}
               updateField={updateField}
-              handleOpenWorkflows={handleOpenWorkflows}
-              handleReloadWorkflows={handleReloadWorkflows}
-              isDesktopApp={isDesktopApp}
             />
           )}
 

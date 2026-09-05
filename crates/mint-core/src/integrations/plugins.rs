@@ -124,8 +124,43 @@ pub async fn execute_native_plugin(
     }
 }
 
+/// Public read: is `name` enabled for the agent's `run_plugin`? True if it's in
+/// `allowedNativePlugins` (or `"*"`) **or** its per-plugin `plugin<Name>Enabled`
+/// flag is set. UIs use this to render toggle state.
+pub fn native_plugin_enabled(config: &MintConfig, name: &str) -> bool {
+    native_plugin_allowed(config, name)
+}
+
+/// Enable/disable a native plugin in `config` (no save). Writes both
+/// representations the surfaces read: the `plugin<Name>Enabled` boolean (only
+/// for plugins that have one — see [`native_plugin_enable_flag`]) and
+/// `allowedNativePlugins` array membership. A `"*"` wildcard in the array is
+/// left untouched. Mirror this in `src/renderer/shared/utils/nativePlugins.ts`.
+pub fn set_native_plugin_enabled_in(config: &mut MintConfig, name: &str, enabled: bool) {
+    if let Some(flag) = native_plugin_enable_flag(name) {
+        config.extra.insert(flag.to_string(), Value::Bool(enabled));
+    }
+
+    let list = config
+        .extra
+        .entry("allowedNativePlugins".to_string())
+        .or_insert_with(|| json!([]));
+    if !list.is_array() {
+        *list = json!([]);
+    }
+    let arr = list.as_array_mut().expect("normalized to array");
+    let has_wildcard = arr.iter().any(|v| v.as_str() == Some("*"));
+    if enabled {
+        if !has_wildcard && !arr.iter().any(|v| v.as_str() == Some(name)) {
+            arr.push(Value::String(name.to_string()));
+        }
+    } else {
+        arr.retain(|v| v.as_str() != Some(name));
+    }
+}
+
 fn native_plugin_allowed(config: &MintConfig, name: &str) -> bool {
-    config
+    let in_allowlist = config
         .extra
         .get("allowedNativePlugins")
         .and_then(|value| value.as_array())
@@ -135,7 +170,39 @@ fn native_plugin_allowed(config: &MintConfig, name: &str) -> bool {
                 .filter_map(|value| value.as_str())
                 .any(|value| value == "*" || value == name)
         })
-        .unwrap_or(false)
+        .unwrap_or(false);
+
+    // A plugin the user toggled on through `mint plugins enable`, the Plugins
+    // settings tab, or the setup wizard is also allowed. Those surfaces write a
+    // per-plugin `plugin<Name>Enabled` boolean; `allowedNativePlugins` is the
+    // other representation (what `mint setup`'s multi-select and this gate use).
+    // Honor both so "enabled" means enabled regardless of which one set it.
+    in_allowlist
+        || native_plugin_enable_flag(name).is_some_and(|key| {
+            config
+                .extra
+                .get(key)
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+}
+
+/// The per-plugin boolean config key that the CLI (`mint plugins enable`) and
+/// the Desktop/Web Plugins settings write when a plugin is toggled on. Kept in
+/// sync with `BUILTIN_PLUGINS` (`crates/mint-cli/src/plugins_cli.rs`) and
+/// `BUILTIN_PLUGINS_LIST` (`src/renderer/shared/constants/plugins.tsx`). Native
+/// plugins with no dedicated UI toggle (`dev_tools`, `docker`, `obsidian`,
+/// `system_metrics`) return `None` — they are gated solely by
+/// `allowedNativePlugins`, seeded with the safe read-only defaults.
+fn native_plugin_enable_flag(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "gmail" => "pluginGmailEnabled",
+        "google_calendar" => "pluginCalendarEnabled",
+        "notion" => "pluginNotionEnabled",
+        "spotify" => "pluginSpotifyEnabled",
+        "github" => "pluginGithubEnabled",
+        _ => return None,
+    })
 }
 
 fn dev_tools(instruction: &str) -> Result<String, PluginError> {
@@ -769,5 +836,74 @@ mod tests {
         let config = MintConfig::default();
         let result = execute_native_plugin(&config, "dev_tools", "status").await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn per_plugin_enable_flag_grants_access_without_the_allowlist() {
+        // What `mint plugins enable notion` / the Plugins settings toggle write.
+        let mut config = MintConfig::default();
+        assert!(!native_plugin_allowed(&config, "notion"));
+        config
+            .extra
+            .insert("pluginNotionEnabled".into(), json!(true));
+        assert!(native_plugin_allowed(&config, "notion"));
+
+        // `calendar` in the UI, `google_calendar` to the agent.
+        config
+            .extra
+            .insert("pluginCalendarEnabled".into(), json!(true));
+        assert!(native_plugin_allowed(&config, "google_calendar"));
+
+        // A flag left at its default `false` still denies.
+        config
+            .extra
+            .insert("pluginGmailEnabled".into(), json!(false));
+        assert!(!native_plugin_allowed(&config, "gmail"));
+    }
+
+    #[test]
+    fn set_native_plugin_enabled_in_writes_both_representations() {
+        let mut config = MintConfig::default();
+
+        // Mapped plugin: writes the flag *and* the array; UI alias handled.
+        set_native_plugin_enabled_in(&mut config, "google_calendar", true);
+        assert_eq!(config.extra["pluginCalendarEnabled"], json!(true));
+        assert!(
+            config.extra["allowedNativePlugins"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == "google_calendar")
+        );
+        assert!(native_plugin_enabled(&config, "google_calendar"));
+
+        // Unmapped plugin (no flag key): array only.
+        set_native_plugin_enabled_in(&mut config, "docker", true);
+        assert!(config.extra.get("pluginDockerEnabled").is_none());
+        assert!(native_plugin_enabled(&config, "docker"));
+
+        // Disable removes from the array and clears the flag.
+        set_native_plugin_enabled_in(&mut config, "google_calendar", false);
+        assert_eq!(config.extra["pluginCalendarEnabled"], json!(false));
+        assert!(
+            !config.extra["allowedNativePlugins"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == "google_calendar")
+        );
+    }
+
+    #[test]
+    fn set_native_plugin_enabled_in_leaves_a_wildcard_intact() {
+        let mut config = MintConfig::default();
+        config
+            .extra
+            .insert("allowedNativePlugins".into(), json!(["*"]));
+
+        set_native_plugin_enabled_in(&mut config, "docker", true);
+        // Still just `["*"]` — no redundant explicit entry appended.
+        assert_eq!(config.extra["allowedNativePlugins"], json!(["*"]));
+        assert!(native_plugin_enabled(&config, "docker"));
     }
 }

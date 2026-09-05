@@ -7,6 +7,7 @@ pub mod bg_shell;
 pub mod calculation;
 pub mod config;
 pub mod docker_sandbox;
+pub mod folder_picker;
 pub mod shell;
 pub mod stock;
 pub mod weather;

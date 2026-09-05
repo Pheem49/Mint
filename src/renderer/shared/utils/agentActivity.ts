@@ -49,8 +49,18 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
   // Append line range for read_file when startLine / endLine are available
   let target = rawTarget
   if (action === 'read_file' && path) {
-    const startLine = typeof input.startLine === 'number' ? input.startLine : undefined
-    const endLine = typeof input.endLine === 'number' ? input.endLine : undefined
+    const startLine =
+      typeof input.startLine === 'number'
+        ? input.startLine
+        : typeof input.start_line === 'number'
+          ? input.start_line
+          : undefined
+    const endLine =
+      typeof input.endLine === 'number'
+        ? input.endLine
+        : typeof input.end_line === 'number'
+          ? input.end_line
+          : undefined
     if (startLine !== undefined && endLine !== undefined) {
       target = `${rawTarget} #L${startLine}-${endLine}`
     } else if (startLine !== undefined) {

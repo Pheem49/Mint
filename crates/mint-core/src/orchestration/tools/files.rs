@@ -22,13 +22,10 @@ pub(in crate::orchestration) async fn execute(
         }
         "read_file" => {
             let path = workspace_path(root, required(&input.path, "path")?)?;
-            Ok(read_code_file(
-                &path,
-                input.start_line.unwrap_or(1),
-                input.end_line.unwrap_or(240),
-                config,
-            )
-            .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+            let start = input.start_line.unwrap_or(1);
+            let end = input.end_line.unwrap_or_else(|| start.saturating_add(239));
+            Ok(read_code_file(&path, start, end, config)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
         }
         "note_write" => {
             let file_name = if !input.note_path.is_empty() {

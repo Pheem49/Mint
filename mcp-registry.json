@@ -1,0 +1,166 @@
+[
+  {
+    "key": "filesystem",
+    "name": "Filesystem",
+    "desc": "Read and write files under a chosen directory.",
+    "icon": "📁",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+    "argInputs": [{ "label": "Directory", "placeholder": "/home/me/project" }],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
+  },
+  {
+    "key": "memory",
+    "name": "Memory",
+    "desc": "A local knowledge-graph the agent can store and recall facts in.",
+    "icon": "🧠",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-memory"],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory"
+  },
+  {
+    "key": "sequential-thinking",
+    "name": "Sequential Thinking",
+    "desc": "A scratchpad tool for step-by-step reasoning on hard problems.",
+    "icon": "🪜",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking"
+  },
+  {
+    "key": "everything",
+    "name": "Everything (demo)",
+    "desc": "The reference server — exercises every MCP feature. Good for testing.",
+    "icon": "🧪",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-everything"],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/everything"
+  },
+  {
+    "key": "fetch",
+    "name": "Fetch",
+    "desc": "Fetch a URL and return its content as Markdown.",
+    "icon": "🌐",
+    "command": "uvx",
+    "args": ["mcp-server-fetch"],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch"
+  },
+  {
+    "key": "git",
+    "name": "Git",
+    "desc": "Inspect and operate on a local git repository.",
+    "icon": "🌿",
+    "command": "uvx",
+    "args": ["mcp-server-git", "--repository"],
+    "argInputs": [{ "label": "Repository path", "placeholder": "/home/me/project" }],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/git"
+  },
+  {
+    "key": "time",
+    "name": "Time",
+    "desc": "Current time and timezone conversions.",
+    "icon": "🕐",
+    "command": "uvx",
+    "args": ["mcp-server-time"],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/time"
+  },
+  {
+    "key": "sqlite",
+    "name": "SQLite",
+    "desc": "Query and explore a local SQLite database.",
+    "icon": "🗄️",
+    "command": "uvx",
+    "args": ["mcp-server-sqlite", "--db-path"],
+    "argInputs": [{ "label": "Database file", "placeholder": "/home/me/data.db" }],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite"
+  },
+  {
+    "key": "github",
+    "name": "GitHub",
+    "desc": "Repositories, issues, pull requests, and code search.",
+    "icon": "🐙",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "requiredEnv": [
+      {
+        "key": "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "label": "GitHub personal access token",
+        "help": "https://github.com/settings/tokens"
+      }
+    ],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/github"
+  },
+  {
+    "key": "gitlab",
+    "name": "GitLab",
+    "desc": "Projects, issues, and merge requests.",
+    "icon": "🦊",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-gitlab"],
+    "requiredEnv": [
+      {
+        "key": "GITLAB_PERSONAL_ACCESS_TOKEN",
+        "label": "GitLab personal access token",
+        "help": "https://gitlab.com/-/user_settings/personal_access_tokens"
+      }
+    ],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/gitlab"
+  },
+  {
+    "key": "slack",
+    "name": "Slack",
+    "desc": "Read channels and post messages in a Slack workspace.",
+    "icon": "💬",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-slack"],
+    "requiredEnv": [
+      {
+        "key": "SLACK_BOT_TOKEN",
+        "label": "Slack bot token (xoxb-…)",
+        "help": "https://api.slack.com/apps"
+      },
+      { "key": "SLACK_TEAM_ID", "label": "Slack team ID (T…)" }
+    ],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/slack"
+  },
+  {
+    "key": "brave-search",
+    "name": "Brave Search",
+    "desc": "Web and local search via the Brave Search API.",
+    "icon": "🔍",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+    "requiredEnv": [
+      {
+        "key": "BRAVE_API_KEY",
+        "label": "Brave Search API key",
+        "help": "https://brave.com/search/api/"
+      }
+    ],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search"
+  },
+  {
+    "key": "postgres",
+    "name": "PostgreSQL",
+    "desc": "Read-only SQL queries against a Postgres database.",
+    "icon": "🐘",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-postgres"],
+    "argInputs": [
+      {
+        "label": "Connection string",
+        "placeholder": "postgresql://user:pass@localhost:5432/db"
+      }
+    ],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres"
+  },
+  {
+    "key": "puppeteer",
+    "name": "Puppeteer",
+    "desc": "Drive a headless Chrome — navigate, click, screenshot, scrape.",
+    "icon": "🎭",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+    "docs": "https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer"
+  }
+]

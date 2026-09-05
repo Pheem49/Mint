@@ -3,8 +3,13 @@ use super::*;
 pub(super) fn action_fingerprint(decision: &AgentDecision) -> String {
     let input = &decision.input;
     match decision.action.as_str() {
-        "list_files" | "read_file" | "symbols" => {
+        "list_files" | "symbols" | "repo_map" => {
             format!("{}:{}", decision.action, input.path.trim())
+        }
+        "read_file" => {
+            let start = input.start_line.unwrap_or(1);
+            let end = input.end_line.unwrap_or_else(|| start.saturating_add(239));
+            format!("read_file:{}:{}:{}", input.path.trim(), start, end)
         }
         "search_code" | "semantic_search" | "web_search" | "knowledge_search" | "memory_recall" => {
             format!(
@@ -147,4 +152,83 @@ pub(super) fn decisions_are_parallel_subagent_batch(decisions: &[(String, AgentD
         && decisions
             .iter()
             .all(|(_, d)| d.action == "dispatch_subagent")
+}
+
+/// Maximum number of read-only tools run concurrently when a single model turn
+/// requests several of them at once.
+pub(super) const PARALLEL_READ_ONLY_LIMIT: usize = 6;
+
+/// Whether an action is a pure read-only tool that is safe to run concurrently
+/// with other read-only tools in the same step.
+pub(super) fn is_parallelizable_read_only_tool(action: &str) -> bool {
+    matches!(
+        action,
+        "read_file"
+            | "list_files"
+            | "search_code"
+            | "symbols"
+            | "repo_map"
+            | "semantic_search"
+            | "knowledge_search"
+            | "web_search"
+            | "fetch_web_page"
+            | "weather"
+            | "stock"
+            | "calculation"
+            | "memory_recall"
+            | "git_status"
+            | "git_diff"
+            | "git_log"
+            | "git_branch"
+            | "detect_project"
+            | "list_tests"
+            | "read_diagnostics"
+            | "view_image"
+            | "video_filmstrip"
+            | "video_waveform"
+            | "mcp_list_tools"
+    )
+}
+
+/// Whether this step's decisions should run as a concurrency-limited batch of
+/// read-only tool calls instead of the normal sequential loop: 2 or more decisions,
+/// every one of them a safe read-only tool with no mutating actions mixed in.
+pub(super) fn decisions_are_parallel_read_only_batch(
+    decisions: &[(String, AgentDecision)],
+) -> bool {
+    decisions.len() >= 2
+        && decisions
+            .iter()
+            .all(|(_, d)| is_parallelizable_read_only_tool(&d.action))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_fingerprint_differentiates_read_file_slices() {
+        let d1: AgentDecision = parse_agent_json(r#"{"action":"read_file","thought":"","input":{"path":"README.md","startLine":1,"endLine":240}}"#).unwrap();
+        let d2: AgentDecision = parse_agent_json(r#"{"action":"read_file","thought":"","input":{"path":"README.md","startLine":241,"endLine":480}}"#).unwrap();
+        let d3: AgentDecision = parse_agent_json(
+            r#"{"action":"read_file","thought":"","input":{"path":"README.md","start_line":241}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(action_fingerprint(&d1), "read_file:README.md:1:240");
+        assert_eq!(action_fingerprint(&d2), "read_file:README.md:241:480");
+        assert_eq!(action_fingerprint(&d3), "read_file:README.md:241:480");
+        assert_ne!(action_fingerprint(&d1), action_fingerprint(&d2));
+    }
+
+    #[test]
+    fn agent_input_deserializes_snake_case_and_camel_case() {
+        let camel: AgentDecision = parse_agent_json(r#"{"action":"read_file","thought":"","input":{"path":"README.md","startLine":10,"endLine":50}}"#).unwrap();
+        let snake: AgentDecision = parse_agent_json(r#"{"action":"read_file","thought":"","input":{"path":"README.md","start_line":10,"end_line":50}}"#).unwrap();
+
+        assert_eq!(camel.input.start_line, Some(10));
+        assert_eq!(camel.input.end_line, Some(50));
+        assert_eq!(snake.input.start_line, Some(10));
+        assert_eq!(snake.input.end_line, Some(50));
+    }
 }

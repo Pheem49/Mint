@@ -19,6 +19,11 @@ Tauri writes platform bundles under `target/release/bundle/`.
 
 ## 🚀 ข้อ 3 Automated GitHub Release
 
+The release body is `Release_Note.md`, published verbatim by the workflow. Before
+tagging, rewrite its top sections for the new version and keep the "First Run —
+Unsigned Build Warnings" footer — see [`.github/RELEASE_TEMPLATE.md`](.github/RELEASE_TEMPLATE.md).
+That footer stays until Windows/macOS code signing lands.
+
 Pushing a semver tag starts the release workflow:
 
 ```bash

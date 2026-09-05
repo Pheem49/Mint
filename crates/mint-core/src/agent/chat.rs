@@ -839,7 +839,7 @@ async fn call_ollama(
     let model = config.ollama_model.clone();
     let native = request.messages.is_some()
         && config.tool_calling_mode() == crate::config::ToolCallingMode::Native;
-    let body = if native {
+    let mut body = if native {
         let messages = request.messages.as_deref().unwrap_or(&[]);
         let mut payload = json!({
             "model": model,
@@ -876,6 +876,10 @@ async fn call_ollama(
             ]
         })
     };
+    // Force the context window Mint plans against (`context_window_tokens`)
+    // instead of leaving Ollama on its tiny ~4K default, which silently
+    // truncates anything longer.
+    body["options"] = json!({ "num_ctx": config.ollama_num_ctx });
     let response: Value = client
         .post(format!("{host}/api/chat"))
         .json(&body)
@@ -1025,6 +1029,7 @@ async fn call_anthropic(
         .post("https://api.anthropic.com/v1/messages")
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
+        .header("anthropic-beta", "prompt-caching-2024-07-31")
         .json(&payload)
         .send()
         .await?
@@ -1111,19 +1116,43 @@ fn anthropic_system_blocks(system_instruction: &str) -> Value {
 }
 
 fn anthropic_messages(messages: &[ChatMessage]) -> Result<Vec<Value>, ChatError> {
-    messages
+    let non_system: Vec<&ChatMessage> = messages
         .iter()
         .filter(|message| message.role != ChatRole::System)
-        .map(|message| {
+        .collect();
+
+    // Anthropic allows up to 4 cache breakpoints. Breakpoints 1 and 2 are system
+    // instruction and the last tool definition. For multi-turn agent runs, marking
+    // the penultimate turn allows the entire preceding conversation history (steps 1..N-1)
+    // to be served from prompt cache with zero reprocessing tokens.
+    let cache_idx = if non_system.len() >= 2 {
+        Some(non_system.len() - 2)
+    } else {
+        None
+    };
+
+    non_system
+        .into_iter()
+        .enumerate()
+        .map(|(i, message)| {
             let role = match message.role {
                 ChatRole::Assistant => "assistant",
                 _ => "user",
             };
-            let content = message
+            let mut content = message
                 .content
                 .iter()
                 .map(anthropic_content_block)
                 .collect::<Result<Vec<_>, _>>()?;
+
+            if Some(i) == cache_idx
+                && let Some(last_block) = content.last_mut()
+            {
+                if let Some(obj) = last_block.as_object_mut() {
+                    obj.insert("cache_control".to_string(), json!({ "type": "ephemeral" }));
+                }
+            }
+
             Ok(json!({ "role": role, "content": content }))
         })
         .collect()
@@ -1363,7 +1392,9 @@ where
             "messages": [
                 { "role": "system", "content": request.system_instruction },
                 user_message
-            ]
+            ],
+            // See `call_ollama`: pin the window instead of Ollama's ~4K default.
+            "options": { "num_ctx": config.ollama_num_ctx }
         }))
         .send()
         .await?
@@ -1389,6 +1420,7 @@ where
         .post("https://api.anthropic.com/v1/messages")
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
+        .header("anthropic-beta", "prompt-caching-2024-07-31")
         .json(&json!({
             "model": model,
             "max_tokens": 8192,
@@ -1764,7 +1796,7 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
                         "title": { "type": "STRING", "description": "Short approval or plan title" },
                         "status": { "type": "STRING", "description": "Plan item status or project status" },
                         "startLine": { "type": "INTEGER", "description": "First line to read (1-indexed, for read_file)" },
-                        "endLine": { "type": "INTEGER", "description": "Last line to read (for read_file)" },
+                        "endLine": { "type": "INTEGER", "description": "Last line to read. Defaults to startLine + 239 (for read_file)" },
                         "limit": { "type": "INTEGER", "description": "Max number of items/lines/files to return" },
                         "server": { "type": "STRING", "description": "MCP server name (for mcp_tool)" },
                         "tool": { "type": "STRING", "description": "MCP tool name (for mcp_tool)" },
@@ -2277,6 +2309,27 @@ mod tests {
         assert_eq!(tools.len(), 2);
         assert!(tools[0].get("cache_control").is_none());
         assert_eq!(tools[1]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn anthropic_attaches_cache_control_to_penultimate_turn() {
+        let request = native_request(
+            vec![
+                ChatMessage::text(ChatRole::User, "step 1 user"),
+                ChatMessage::text(ChatRole::Assistant, "step 1 assistant"),
+                ChatMessage::text(ChatRole::User, "step 2 user"),
+            ],
+            None,
+        );
+        let payload = anthropic_chat_payload("claude-x", &request, false).unwrap();
+        let messages = payload["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert!(messages[0]["content"][0].get("cache_control").is_none());
+        assert_eq!(
+            messages[1]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        assert!(messages[2]["content"][0].get("cache_control").is_none());
     }
 
     #[test]

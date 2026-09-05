@@ -161,10 +161,26 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
             (false, format!("[run_plugin] Running plugin: {}...", name))
         }
         "dispatch_subagent" => {
-            let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let name = input
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("subagent");
+            let instruction = input
+                .get("instruction")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let summary = if instruction.len() > 60 {
+                format!("{}...", &instruction[..57])
+            } else {
+                instruction.to_string()
+            };
             (
                 false,
-                format!("[dispatch_subagent] Dispatching to subagent: {}...", name),
+                if summary.is_empty() {
+                    format!("├── [{CYAN}{name}{RESET}] Subagent dispatched")
+                } else {
+                    format!("├── [{CYAN}{name}{RESET}] Subagent dispatched: {DIM}{summary}{RESET}")
+                },
             )
         }
         "mcp_tool" => {
@@ -425,28 +441,37 @@ pub async fn run_code_agent_with_options(
                 tool,
                 arguments,
             } => {
-                // Include the arguments in the persisted subject for the same
-                // reason as run_plugin above — a saved rule must not cover a
-                // future call to the same tool with different arguments.
-                let subject = format!("{server}:{tool}:{arguments}");
-                confirm_with_persistence(
-                    "mcp_tool",
-                    &subject,
-                    root,
-                    &mut permission_rules,
-                    &approve_approval_active,
-                    || {
-                        let mut fields = vec![("Server", server.as_str()), ("Tool", tool.as_str())];
-                        let formatted_args = arguments.to_string();
-                        if !formatted_args.is_empty()
-                            && formatted_args != "{}"
-                            && formatted_args != "null"
-                        {
-                            fields.push(("Arguments", &formatted_args));
-                        }
-                        print_approval_card("MCP Tool Call", &fields);
+                let formatted_args = arguments.to_string();
+                let mut fields = vec![("Server", server.as_str()), ("Tool", tool.as_str())];
+                if !formatted_args.is_empty() && formatted_args != "{}" && formatted_args != "null"
+                {
+                    fields.push(("Arguments", &formatted_args));
+                }
+                print_approval_card("MCP Tool Call", &fields);
+
+                // Two choices, per design: allow the whole server (persisted to
+                // `allowedMcpTools` — it never prompts again), or no. Free text
+                // still falls through to the agent as feedback.
+                let allow_label = format!("Allow all tools on \"{server}\" (*)");
+                let options = vec![
+                    AskUserOption {
+                        label: allow_label.clone(),
+                        description: Some(
+                            "Persist — future calls to this server run without asking".into(),
+                        ),
                     },
-                )
+                    AskUserOption {
+                        label: "No".into(),
+                        description: None,
+                    },
+                ];
+                match run_option_picker(&options)? {
+                    ApprovalOutcome::Intercepted(l) if l == allow_label => Ok(
+                        ApprovalOutcome::Intercepted(mint_core::MCP_ALLOW_ALL_SENTINEL.to_string()),
+                    ),
+                    ApprovalOutcome::Intercepted(l) if l == "No" => Ok(ApprovalOutcome::Denied),
+                    other => Ok(other),
+                }
             }
             AgentApproval::UserApproval { title, prompt } => {
                 print_approval_card(
@@ -678,7 +703,7 @@ pub async fn run_code_agent_with_options(
                             status.thinking = None;
                             status.waiting_for_network = None;
                             status.tasks.push(TaskEntry {
-                                label: format!("{DIM}{subagent_name}{RESET} \u{2192} {inner}"),
+                                label: format!("│   ├── [{CYAN}{subagent_name}{RESET}] {inner}"),
                                 output: Vec::new(),
                             });
                             render_live_status(&mut status);
@@ -755,7 +780,7 @@ pub async fn run_code_agent_with_options(
                             for (index, cmd) in commands.into_iter().enumerate() {
                                 status.tasks.push(TaskEntry {
                                     label: format!(
-                                        "{DIM}{prefix}{RESET} \u{2192} Finished command: `{}`",
+                                        "│   └── [{CYAN}{prefix}{RESET}] Finished command: `{}`",
                                         cmd
                                     ),
                                     output: if index == last_index {

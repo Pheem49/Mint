@@ -64,11 +64,15 @@ pub fn add_linked_folder(
     path: &Path,
     description: Option<String>,
 ) -> Result<(), LinkedFolderError> {
-    if !path.is_dir() {
-        return Err(LinkedFolderError::NotADirectory(path.to_path_buf()));
-    }
     let mut config = load_config()?;
+    // Resolve first (`assert_path_capability` expands `~/` and makes a
+    // relative path absolute), then check it's a real directory — the
+    // reverse order rejected `~/notes/food` (exactly what the UI's
+    // placeholder suggests) because `Path::is_dir()` never expands `~`.
     let resolved = assert_path_capability(path, Capability::Write, &config)?;
+    if !resolved.is_dir() {
+        return Err(LinkedFolderError::NotADirectory(resolved));
+    }
     let mut folders = configured_linked_folders(&config)?;
     folders.insert(
         name.into(),

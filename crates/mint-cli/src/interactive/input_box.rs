@@ -346,6 +346,35 @@ pub(crate) fn compose_input_box(
 
     (lines, cursor_x, cursor_y)
 }
+
+/// Start index of the word at or before `pos` — skips a run of whitespace
+/// immediately left of the cursor first, then the word itself. Matches
+/// readline's `backward-word` / `unix-word-rubout`.
+fn prev_word_boundary(chars: &[char], pos: usize) -> usize {
+    let mut i = pos.min(chars.len());
+    while i > 0 && chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    while i > 0 && !chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    i
+}
+
+/// Index just past the end of the word at or after `pos` — skips whitespace
+/// then the word. Matches readline's `forward-word`.
+fn next_word_boundary(chars: &[char], pos: usize) -> usize {
+    let len = chars.len();
+    let mut i = pos.min(len);
+    while i < len && chars[i].is_whitespace() {
+        i += 1;
+    }
+    while i < len && !chars[i].is_whitespace() {
+        i += 1;
+    }
+    i
+}
+
 pub fn read_line_interactive(
     _provider: &str,
     model: &str,
@@ -484,6 +513,28 @@ pub fn read_line_interactive(
     };
 
     let mut cursor_row: usize = 0;
+
+    // Repaint after an edit: drop to cooked mode, redraw the box, re-arm raw
+    // mode — the same three lines every key arm below would otherwise repeat.
+    // Reads the surrounding `input_chars` / `cursor_pos` / … locals directly.
+    macro_rules! redraw {
+        () => {{
+            disable_raw_mode()?;
+            redraw_input_box(
+                &input_chars,
+                cursor_pos,
+                placeholder,
+                model,
+                path_str,
+                None,
+                None,
+                current_dir,
+                &mut cursor_row,
+            );
+            enable_raw_mode()?;
+        }};
+    }
+
     redraw_input_box(
         &input_chars,
         cursor_pos,
@@ -542,10 +593,14 @@ pub fn read_line_interactive(
             if let Event::Key(key_event) = ev
                 && key_event.kind == event::KeyEventKind::Press
             {
-                let is_ctrl_d = matches!(key_event.code, KeyCode::Char('d'))
-                    && key_event
-                        .modifiers
-                        .contains(crossterm::event::KeyModifiers::CONTROL);
+                let ctrl = key_event
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL);
+                let alt = key_event
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::ALT);
+
+                let is_ctrl_d = matches!(key_event.code, KeyCode::Char('d')) && ctrl;
 
                 if !is_ctrl_d {
                     ctrl_d_pressed = false;
@@ -643,6 +698,64 @@ pub fn read_line_interactive(
                             );
                             enable_raw_mode()?;
                         }
+                    }
+                    // ── Line editing: jump to start / end ──
+                    KeyCode::Home => {
+                        cursor_pos = 0;
+                        redraw!();
+                    }
+                    KeyCode::Char('a') if ctrl => {
+                        cursor_pos = 0;
+                        redraw!();
+                    }
+                    KeyCode::End => {
+                        cursor_pos = input_chars.len();
+                        redraw!();
+                    }
+                    KeyCode::Char('e') if ctrl => {
+                        cursor_pos = input_chars.len();
+                        redraw!();
+                    }
+                    // ── Word-wise cursor movement ──
+                    KeyCode::Left if ctrl || alt => {
+                        cursor_pos = prev_word_boundary(&input_chars, cursor_pos);
+                        redraw!();
+                    }
+                    KeyCode::Right if ctrl || alt => {
+                        cursor_pos = next_word_boundary(&input_chars, cursor_pos);
+                        redraw!();
+                    }
+                    KeyCode::Char('b') if alt => {
+                        cursor_pos = prev_word_boundary(&input_chars, cursor_pos);
+                        redraw!();
+                    }
+                    KeyCode::Char('f') if alt => {
+                        cursor_pos = next_word_boundary(&input_chars, cursor_pos);
+                        redraw!();
+                    }
+                    // ── Forward-delete one character ──
+                    KeyCode::Delete if cursor_pos < input_chars.len() => {
+                        input_chars.remove(cursor_pos);
+                        redraw!();
+                    }
+                    // ── Kill: word before cursor / to line start / to line end.
+                    // Guard on the modifier only (never the range) so a no-op
+                    // Ctrl+key is still swallowed rather than typed as a letter;
+                    // an empty drain/truncate is harmless. ──
+                    KeyCode::Char('w') if ctrl => {
+                        let start = prev_word_boundary(&input_chars, cursor_pos);
+                        input_chars.drain(start..cursor_pos);
+                        cursor_pos = start;
+                        redraw!();
+                    }
+                    KeyCode::Char('u') if ctrl => {
+                        input_chars.drain(0..cursor_pos);
+                        cursor_pos = 0;
+                        redraw!();
+                    }
+                    KeyCode::Char('k') if ctrl => {
+                        input_chars.truncate(cursor_pos);
+                        redraw!();
                     }
                     KeyCode::Char(c) if input_chars.len() < 10000 => {
                         input_chars.insert(cursor_pos, c);

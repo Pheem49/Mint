@@ -16,6 +16,7 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "read_file",
     "search_code",
     "symbols",
+    "repo_map",
     "semantic_index",
     "semantic_search",
     "knowledge_search",
@@ -64,6 +65,7 @@ pub(crate) fn base_allowed_actions() -> Vec<&'static str> {
         "read_file",
         "search_code",
         "symbols",
+        "repo_map",
         "semantic_index",
         "semantic_search",
         "knowledge_search",
@@ -175,6 +177,9 @@ pub fn build_system_prompt(
     if allowed_actions.contains(&"symbols") {
         input_formats.push("- symbols: {\"path\":\".\",\"limit\":100}");
     }
+    if allowed_actions.contains(&"repo_map") {
+        input_formats.push("- repo_map: {\"path\":\".\",\"limit\":2000} (generate compact AST-based outline of files and signatures with token budgeting)");
+    }
     if allowed_actions.contains(&"semantic_index") {
         input_formats.push("- semantic_index: {\"path\":\".\"}");
     }
@@ -274,8 +279,20 @@ pub fn build_system_prompt(
         input_formats
             .push("- note_write: {\"path\":\"filename.md\",\"fileContent\":\"note content\"}");
     }
+    let run_plugin_str;
     if allowed_actions.contains(&"run_plugin") {
-        input_formats.push("- run_plugin: {\"name\":\"gmail|google_calendar|notion|docker|spotify|obsidian|system_metrics\",\"instruction\":\"instruction string\"}");
+        // Names come from `native_plugins()` — same source the native
+        // tool-calling schema (`prompts::tool_catalog`) uses — so the two
+        // prompt paths and the dispatch table stay in lockstep.
+        run_plugin_str = format!(
+            "- run_plugin: {{\"name\":\"{}\",\"instruction\":\"instruction string\"}}",
+            crate::native_plugins()
+                .iter()
+                .map(|p| p.name)
+                .collect::<Vec<_>>()
+                .join("|")
+        );
+        input_formats.push(&run_plugin_str);
     }
     let mcp_str;
     if allowed_actions.contains(&"mcp_tool") {
@@ -283,7 +300,13 @@ pub fn build_system_prompt(
             pin.to_string()
         } else {
             crate::mcp::list_mcp_servers()
-                .map(|m| m.keys().cloned().collect::<Vec<String>>().join(", "))
+                .map(|m| {
+                    m.iter()
+                        .filter(|(_, server)| !server.disabled)
+                        .map(|(name, _)| name.clone())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                })
                 .unwrap_or_default()
         };
         mcp_str = format!(

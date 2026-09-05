@@ -142,6 +142,74 @@ export function renderMcpSvgIcon(name: string, customIcon?: string) {
       </svg>
     )
   }
+  if (cleanName === 'filesystem') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      </svg>
+    )
+  }
+  if (cleanName === 'slack') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e01e5a" strokeWidth="2.4" strokeLinecap="round">
+        <line x1="9" y1="3" x2="7" y2="21" />
+        <line x1="17" y1="3" x2="15" y2="21" />
+        <line x1="3" y1="9" x2="21" y2="7" />
+        <line x1="3" y1="17" x2="21" y2="15" />
+      </svg>
+    )
+  }
+  if (cleanName === 'postgres' || cleanName === 'sqlite' || cleanName === 'postgresql') {
+    const color = cleanName === 'postgres' || cleanName === 'postgresql' ? '#336791' : '#0f80cc'
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <ellipse cx="12" cy="5" rx="9" ry="3" />
+        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+      </svg>
+    )
+  }
+  if (cleanName === 'puppeteer' || cleanName === 'playwright' || cleanName === 'browser') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    )
+  }
+  if (cleanName === 'fetch' || cleanName === 'web') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    )
+  }
+  if (cleanName === 'time') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+    )
+  }
+  if (cleanName === 'memory') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f472b6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2z" />
+        <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2z" />
+      </svg>
+    )
+  }
+  if (cleanName === 'sequential-thinking' || cleanName === 'sequentialthinking') {
+    return (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 3v18M16 3v18M3 8h5M3 16h5M16 8h5M16 16h5" />
+      </svg>
+    )
+  }
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
@@ -162,6 +230,14 @@ export interface BuiltinPluginDefinition {
   isOAuth?: boolean
   oauthProvider?: string
   fields?: Array<{ label: string; field: string; type: string; placeholder: string }>
+  /**
+   * The `mint_core::native_plugins()` name this maps to (the agent's
+   * `run_plugin` gate). `undefined` for entries with no agent-callable backend
+   * (Discord RPC). May differ from `key` — the UI calls it `calendar`, the agent
+   * `google_calendar`. Keep the enable logic in sync with
+   * `crates/mint-core/src/integrations/plugins.rs::native_plugin_enable_flag`.
+   */
+  nativeName?: string
 }
 
 export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
@@ -171,6 +247,7 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     desc: 'Control playback with AI. Requires playerctl locally or Spotify OAuth.',
     icon: '🎵',
     enabledField: 'pluginSpotifyEnabled',
+    nativeName: 'spotify',
     hasCredentials: true,
     isOAuth: true,
     oauthProvider: 'spotify',
@@ -193,6 +270,7 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     desc: 'Read, summarize, draft, and send emails via Google OAuth / API credentials.',
     icon: '📧',
     enabledField: 'pluginGmailEnabled',
+    nativeName: 'gmail',
     hasCredentials: true,
     isOAuth: true,
     oauthProvider: 'google',
@@ -208,6 +286,7 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     desc: 'Read schedule, check availability, and create calendar events.',
     icon: '📅',
     enabledField: 'pluginCalendarEnabled',
+    nativeName: 'google_calendar',
     hasCredentials: true,
     isOAuth: true,
     oauthProvider: 'google',
@@ -223,6 +302,7 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     desc: 'Search pages, query databases, and create notes in Notion.',
     icon: '📝',
     enabledField: 'pluginNotionEnabled',
+    nativeName: 'notion',
     hasCredentials: true,
     isOAuth: true,
     oauthProvider: 'notion',
@@ -232,39 +312,12 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
     ]
   },
   {
-    key: 'youtube_music',
-    name: 'YouTube Music',
-    desc: 'Access personal playlists and listening history via Google OAuth.',
-    icon: '🎬',
-    enabledField: 'pluginYoutubeMusicEnabled',
-    hasCredentials: true,
-    isOAuth: true,
-    oauthProvider: 'google',
-    fields: [
-      { label: 'Google Client ID', field: 'gmailClientId', type: 'text', placeholder: 'your_client_id.apps.googleusercontent.com' },
-      { label: 'Google Client Secret', field: 'gmailClientSecret', type: 'password', placeholder: 'your_client_secret' },
-    ]
-  },
-  {
-    key: 'vercel',
-    name: 'Vercel',
-    desc: 'Manage web app deployments and projects via Vercel OAuth.',
-    icon: '🌐',
-    enabledField: 'pluginVercelEnabled',
-    hasCredentials: true,
-    isOAuth: true,
-    oauthProvider: 'vercel',
-    fields: [
-      { label: 'Vercel Client ID', field: 'vercelClientId', type: 'text', placeholder: 'oai_...' },
-      { label: 'Vercel Access Token (Optional)', field: 'vercelToken', type: 'password', placeholder: 'your_vercel_token' },
-    ]
-  },
-  {
     key: 'github',
     name: 'GitHub',
     desc: 'Access repositories, pull requests, and issues via GitHub OAuth.',
     icon: '🐱',
     enabledField: 'pluginGithubEnabled',
+    nativeName: 'github',
     hasCredentials: true,
     isOAuth: true,
     oauthProvider: 'github',
@@ -273,6 +326,42 @@ export const BUILTIN_PLUGINS_LIST: BuiltinPluginDefinition[] = [
       { label: 'GitHub Client Secret', field: 'githubClientSecret', type: 'password', placeholder: 'your_github_client_secret' },
       { label: 'GitHub Personal Access Token (Optional)', field: 'githubToken', type: 'password', placeholder: 'ghp_...' },
     ]
+  },
+  {
+    key: 'dev_tools',
+    name: 'Dev Tools',
+    desc: 'Read git status, log, and branch info from the workspace.',
+    icon: '🛠️',
+    enabledField: 'pluginDevToolsEnabled',
+    hasCredentials: false,
+    nativeName: 'dev_tools',
+  },
+  {
+    key: 'docker',
+    name: 'Docker',
+    desc: 'List, start, stop, or restart local Docker containers.',
+    icon: '🐳',
+    enabledField: 'pluginDockerEnabled',
+    hasCredentials: false,
+    nativeName: 'docker',
+  },
+  {
+    key: 'obsidian',
+    name: 'Local Notes',
+    desc: 'List, read, or append Markdown notes in your notes folder.',
+    icon: '🗒️',
+    enabledField: 'pluginObsidianEnabled',
+    hasCredentials: false,
+    nativeName: 'obsidian',
+  },
+  {
+    key: 'system_metrics',
+    name: 'System Metrics',
+    desc: 'Read native RAM, CPU, and uptime metrics.',
+    icon: '📊',
+    enabledField: 'pluginSystemMetricsEnabled',
+    hasCredentials: false,
+    nativeName: 'system_metrics',
   },
 ]
 

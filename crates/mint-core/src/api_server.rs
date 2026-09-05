@@ -135,10 +135,14 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
     crate::start_cron_scheduler();
 
     loop {
-        let (mut socket, _) = match listener.accept().await {
+        let (mut socket, peer_addr) = match listener.accept().await {
             Ok(val) => val,
             Err(_) => continue,
         };
+        // Some routes (the native folder picker) only make sense for, and are
+        // only safe for, a browser on this same machine — capture that now
+        // while we still have the peer address.
+        let from_loopback = peer_addr.ip().is_loopback();
 
         tokio::spawn(async move {
             // Isolates a panic anywhere in this connection's handling (a malformed
@@ -247,6 +251,31 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                 Some(user_id) => format!("auth:{}", &user_id[..user_id.len().min(8)]),
                 None => "auth:anonymous".to_string(),
             };
+
+            // Native folder picker for the web UI's "Browse…" button. Handled
+            // inline (not via a `routes::` module) so the peer-address check
+            // stays right here — it opens a GUI dialog on the *server* host,
+            // which is only ever the intent when that host is also the
+            // machine running the browser.
+            if method == "POST" && route == "/api/select-folder" {
+                if !from_loopback {
+                    send_json_response(
+                        socket,
+                        "403 Forbidden",
+                        "{\"error\":\"The folder picker is only available to a browser on the same machine as the server.\"}",
+                    )
+                    .await;
+                    return;
+                }
+                let picked = tokio::task::spawn_blocking(
+                    crate::system::folder_picker::pick_directory_blocking,
+                )
+                .await
+                .ok()
+                .flatten();
+                send_json_response(socket, "200 OK", &json!({ "path": picked }).to_string()).await;
+                return;
+            }
 
             if route.starts_with("/api/")
                 && !route.starts_with("/api/pictures/")
@@ -584,6 +613,22 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     .await;
                 }
                                 ("POST", "/api/mcp/reauth") => {
+                    routes::cron_mcp::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                                ("GET", r) if r.starts_with("/api/mcp/") && r.ends_with("/tools") => {
                     routes::cron_mcp::execute(
                         routes::RequestCtx {
                             method,
@@ -1034,6 +1079,24 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     .await;
                 }
                                 ("POST", "/api/uploads") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
+                ("GET", "/api/checkpoints")
+                | ("POST", "/api/checkpoints/rollback")
+                | ("GET", "/api/file/read") => {
                     routes::misc::execute(
                         routes::RequestCtx {
                             method,

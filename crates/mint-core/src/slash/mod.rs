@@ -18,6 +18,26 @@
 use crate::MintConfig;
 use std::path::{Path, PathBuf};
 
+/// The instruction `/init` hands to the code agent (via
+/// [`SlashResponse::ForwardToAgent`]). Mirrors Claude Code's `/init`, but
+/// targets `AGENTS.md` — the file every Mint surface already loads as
+/// workspace rules (see `skills::load_agent_rules_file`).
+pub const INIT_AGENTS_MD_PROMPT: &str = "\
+Analyze this codebase and create an AGENTS.md file at the workspace root (or update it if one already exists).
+
+AGENTS.md is loaded into every future Mint Agent session for this project, so it must give a fresh agent the context it needs without re-reading the whole tree.
+
+Include:
+- The exact build, run, lint, and test commands this repo uses.
+- The high-level architecture — the big picture that only becomes clear after reading several files: the main components/crates/packages and how they fit together, key data flows, and where the entry points are.
+- Project-specific conventions a contributor must follow (naming, layout, patterns) that aren't obvious from a single file.
+- Non-obvious gotchas, constraints, or \"don't do X\" rules.
+
+Rules:
+- If AGENTS.md, .cursorrules, .github/copilot-instructions.md, or a similar rules file already exists, fold its still-relevant content in rather than discarding it.
+- Be concise — bullet points over prose. Skip anything obvious from reading one file, and don't invent conventions that aren't actually in the code.
+- Write only the file, then briefly confirm what you wrote.";
+
 pub mod catalog;
 pub mod models;
 mod render;
@@ -162,6 +182,10 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
 
     match token.as_str() {
         "/help" => cmd_help(req.is_cli()),
+        "/init" => SlashResponse::ForwardToAgent {
+            prompt: INIT_AGENTS_MD_PROMPT.to_string(),
+            agent_mode: true,
+        },
         "/release-notes" => message(
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -180,6 +204,30 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             "Auto Skill Writing",
             config.auto_skill_writing,
             |cfg, v| cfg.auto_skill_writing = v,
+            config,
+        ),
+        "/autorecall" => cmd_bool_toggle(
+            rest,
+            "/autorecall",
+            "Memory Recall",
+            config.memory_recall,
+            |cfg, v| cfg.memory_recall = v,
+            config,
+        ),
+        "/autofacts" => cmd_bool_toggle(
+            rest,
+            "/autofacts",
+            "Auto Fact Extraction",
+            config.auto_fact_extraction,
+            |cfg, v| cfg.auto_fact_extraction = v,
+            config,
+        ),
+        "/factrecall" => cmd_bool_toggle(
+            rest,
+            "/factrecall",
+            "Semantic Fact Recall",
+            config.semantic_fact_recall,
+            |cfg, v| cfg.semantic_fact_recall = v,
             config,
         ),
         "/multi-agent" => {
@@ -203,6 +251,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
                 }
             }
         }
+        "/rewind" => cmd_rewind(req, rest),
         "/fast" => match parse_on_off(rest) {
             None if rest.is_empty() => needs_on_off("/fast", "Fast Mode (hide thinking)"),
             None => error("Usage: /fast [on|off]"),
@@ -259,10 +308,17 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         "/cd" => cmd_cd(rest),
         "/stats" => cmd_stats(config, &req.workspace()),
         "/memory" => cmd_memory(rest),
-        "/plugins" => SlashResponse::Navigate {
-            target: SlashNavTarget::Plugins,
-            markdown: "🔌 Opened Plugins.".into(),
-        },
+        "/remember" => cmd_remember(rest, &req.workspace()),
+        "/plugins" | "/plugin" => {
+            if rest.is_empty() {
+                SlashResponse::Navigate {
+                    target: SlashNavTarget::Plugins,
+                    markdown: "🔌 Opened Plugins.".into(),
+                }
+            } else {
+                cmd_plugin(rest, config)
+            }
+        }
         "/skill" | "/learn" => SlashResponse::Navigate {
             target: SlashNavTarget::Skills,
             markdown: "📚 Opened Skills — import there or drop files in `.agents/skills/`.".into(),
@@ -376,6 +432,47 @@ fn cmd_bool_toggle(
                 ),
                 effects: vec![SlashEffect::ConfigChanged],
             }
+        }
+    }
+}
+
+fn cmd_rewind(req: &SlashRequest, rest: &str) -> SlashResponse {
+    let chat_id = crate::CHAT_CLI_ID;
+    let root = req.workspace();
+    let checkpoints = crate::git::list_checkpoints(chat_id);
+
+    if rest.trim().is_empty() {
+        if checkpoints.is_empty() {
+            return message(
+                "No git checkpoints recorded yet.\n\nCheckpoints are created automatically before mutating file actions (`write_file`, `apply_patch`).",
+            );
+        }
+        let mut md = String::from("### ↺ Available Git Checkpoints (Time Machine)\n\n");
+        md.push_str("| Step | Commit | Action | Target File |\n");
+        md.push_str("| --- | --- | --- | --- |\n");
+        for cp in checkpoints.iter().rev() {
+            let hash_short = if cp.commit_hash.len() >= 7 {
+                &cp.commit_hash[..7]
+            } else {
+                &cp.commit_hash
+            };
+            let target = cp.target_path.as_deref().unwrap_or("-");
+            md.push_str(&format!(
+                "| **Step {}** | `{}` | `{}` | `{}` |\n",
+                cp.step, hash_short, cp.action, target
+            ));
+        }
+        md.push_str("\nUse `/rewind <step>` to restore your workspace to before that step.");
+        message(md)
+    } else {
+        match rest.trim().parse::<usize>() {
+            Ok(step) => match crate::git::rollback_to_step(&root, chat_id, step) {
+                Ok(msg) => message(msg),
+                Err(err) => error(format!("Failed to rollback: {err}")),
+            },
+            Err(_) => error(format!(
+                "Invalid step number: \"{rest}\". Usage: /rewind <step>"
+            )),
         }
     }
 }
@@ -605,10 +702,81 @@ fn cmd_memory(rest: &str) -> SlashResponse {
             markdown: "🧠 Cleared stored interactions for this conversation.".into(),
             effects: vec![SlashEffect::HistoryCleared],
         },
+        "facts" => match store.list_facts(50) {
+            Ok(facts) if facts.is_empty() => {
+                message("🧠 No stored facts yet. Add one with `/remember <text>`.")
+            }
+            Ok(facts) => {
+                let rows = facts
+                    .iter()
+                    .map(|f| vec![f.id.to_string(), fact_owner_label(f), f.body.clone()])
+                    .collect::<Vec<_>>();
+                message(md_table(&["id", "owner", "fact"], &rows))
+            }
+            Err(e) => error(e),
+        },
+        "forget" if !args.is_empty() => match store.forget_fact(args) {
+            Ok(0) => message(format!("Nothing matched `{args}`.")),
+            Ok(n) => message(format!("🧠 Forgot {n} fact(s).")),
+            Err(e) => error(e),
+        },
+        "forget" => error("Usage: /memory forget <id-or-text>"),
+        "promote" if !args.is_empty() => match args.parse::<i64>() {
+            Ok(id) => match store.promote_fact(id) {
+                Ok(true) => message(format!("🧠 Promoted fact {id} to shared memory.")),
+                Ok(false) => message(format!(
+                    "Fact {id} is not a subagent-scoped fact (nothing to promote)."
+                )),
+                Err(e) => error(e),
+            },
+            Err(_) => error("Usage: /memory promote <id>"),
+        },
+        "promote" => error("Usage: /memory promote <id>"),
         "" | "list" => message(
-            "🧠 **Long-term memory** — `/memory get <key>` · `/memory set <key> <value>` · `/memory clear`.\nRecent interactions are in the chat history.",
+            "🧠 **Long-term memory** — `/remember <text>` to add a fact · `/memory facts` to list · `/memory forget <id>` · `/memory promote <id>` · `/memory get <key>` · `/memory set <key> <value>` · `/memory clear`.",
         ),
-        _ => error("Usage: /memory list | clear | get <key> | set <key> <value>"),
+        _ => error(
+            "Usage: /memory list | facts | forget <id> | promote <id> | clear | get <key> | set <key> <value>",
+        ),
+    }
+}
+
+/// Column shown by `/memory facts`: `via <subagent>` for a quarantined fact,
+/// else `project` / `global` by scope.
+fn fact_owner_label(fact: &crate::Fact) -> String {
+    match &fact.agent_id {
+        Some(name) => format!("via {name}"),
+        None if fact.scope == "project" => "project".into(),
+        None => "global".into(),
+    }
+}
+
+fn cmd_remember(rest: &str, workspace: &Path) -> SlashResponse {
+    let (first, tail) = split_sub(rest);
+    let (scope, project_path, body) = if first == "here" {
+        (
+            "project",
+            Some(workspace.to_string_lossy().into_owned()),
+            tail,
+        )
+    } else {
+        ("user", None, rest.trim())
+    };
+    if body.is_empty() {
+        return error("Usage: /remember [here] <text>");
+    }
+    let store = match crate::MemoryStore::open_default() {
+        Ok(s) => s,
+        Err(e) => return error(e),
+    };
+    match store.add_fact(scope, project_path.as_deref(), body, None, None) {
+        Ok(Some(_)) => message(if scope == "project" {
+            "🧠 Remembered (this project).".to_string()
+        } else {
+            "🧠 Remembered.".to_string()
+        }),
+        Ok(None) => message("🧠 Already remembered."),
+        Err(e) => error(e),
     }
 }
 
@@ -799,70 +967,217 @@ fn cmd_subagent(rest: &str, workspace: &Path) -> SlashResponse {
     }
 }
 
+/// Wrap a config mutation the host must persist.
+fn applied(md: impl Into<String>) -> SlashResponse {
+    SlashResponse::Applied {
+        markdown: md.into(),
+        effects: vec![SlashEffect::ConfigChanged],
+    }
+}
+
+const MCP_USAGE: &str = "Usage: /mcp [list] | add <name> <cmd> [args…] | remove <name> | \
+    enable|disable <name> | edit <name> command|args|icon <value> | \
+    allow|disallow <server> <tool> | reauth <server> | clear";
+
 fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
     let (sub, args) = split_sub(rest);
     match sub.as_str() {
-        "allow" => {
-            let mut parts = args.split_whitespace();
-            match (parts.next(), parts.next()) {
-                (Some(server), Some(tool)) => {
-                    let added = allow_mcp_tool(config, server, tool);
-                    SlashResponse::Applied {
-                        markdown: if added {
-                            format!("🔌 Allowed MCP tool `{server}/{tool}`.")
-                        } else {
-                            format!("🔌 `{server}/{tool}` was already allowed.")
-                        },
-                        effects: vec![SlashEffect::ConfigChanged],
-                    }
-                }
-                _ => error("Usage: /mcp allow <server> <tool>"),
-            }
-        }
-        "reauth" if !args.is_empty() => match crate::reauth_mcp_server(args) {
-            Ok(_) => message(format!("🔌 Re-ran OAuth for `{args}`.")),
-            Err(e) => error(e),
-        },
         "" | "list" => match crate::list_mcp_servers() {
             Ok(servers) if servers.is_empty() => {
-                message("🔌 No MCP servers configured. Add one in Settings > Plugins.")
+                message("🔌 No MCP servers configured. Add one with `/mcp add`, or in Settings.")
             }
             Ok(servers) => {
-                let items = servers.keys().map(|k| format!("`{k}`")).collect::<Vec<_>>();
+                let items = servers
+                    .iter()
+                    .map(|(name, server)| {
+                        if server.disabled {
+                            format!("`{name}` _(disabled)_")
+                        } else {
+                            format!("`{name}`")
+                        }
+                    })
+                    .collect::<Vec<_>>();
                 let mut md = md_heading("🔌 MCP Servers");
                 md.push_str(&md_list(&items));
                 message(md)
             }
             Err(e) => error(e),
         },
-        _ => error("Usage: /mcp [list] | allow <server> <tool> | reauth <server>"),
+
+        "add" => {
+            // A trailing `--allow-all` anywhere in the tail opts every tool in.
+            let mut tokens: Vec<&str> = args.split_whitespace().collect();
+            let allow_all = tokens.iter().any(|t| *t == "--allow-all");
+            tokens.retain(|t| *t != "--allow-all");
+            let mut parts = tokens.into_iter();
+            match (parts.next(), parts.next()) {
+                (Some(name), Some(command)) => {
+                    let server = crate::McpServer {
+                        command: command.to_string(),
+                        args: parts.map(str::to_string).collect(),
+                        env: Default::default(),
+                        icon: None,
+                        disabled: false,
+                    };
+                    match crate::upsert_server_in(config, name, server) {
+                        Ok(()) => {
+                            if allow_all {
+                                crate::allow_tool_in(config, name, "*");
+                            }
+                            applied(format!(
+                                "🔌 Added MCP server `{name}`{}.",
+                                if allow_all {
+                                    " (all tools allowed)"
+                                } else {
+                                    ""
+                                }
+                            ))
+                        }
+                        Err(e) => error(e),
+                    }
+                }
+                _ => error("Usage: /mcp add <name> <command> [args…] [--allow-all]"),
+            }
+        }
+
+        "remove" if !args.is_empty() => match crate::remove_server_in(config, args) {
+            Ok(true) => applied(format!("🔌 Removed MCP server `{args}`.")),
+            Ok(false) => error(format!("No MCP server named `{args}`.")),
+            Err(e) => error(e),
+        },
+
+        "clear" => match crate::clear_servers_in(config) {
+            Ok(()) => applied("🔌 Removed all MCP servers."),
+            Err(e) => error(e),
+        },
+
+        "enable" | "disable" if !args.is_empty() => {
+            let disable = sub == "disable";
+            match crate::set_server_disabled_in(config, args, disable) {
+                Ok(true) => applied(format!(
+                    "🔌 {} `{args}`.",
+                    if disable { "Disabled" } else { "Enabled" }
+                )),
+                Ok(false) => error(format!("No MCP server named `{args}`.")),
+                Err(e) => error(e),
+            }
+        }
+
+        "edit" => {
+            let mut parts = args.splitn(3, char::is_whitespace);
+            let (Some(name), Some(field)) = (parts.next(), parts.next()) else {
+                return error("Usage: /mcp edit <name> command|args|icon <value>");
+            };
+            let value = parts.next().unwrap_or("").trim();
+            let edit = match field.to_ascii_lowercase().as_str() {
+                "command" if !value.is_empty() => (Some(value.to_string()), None, None),
+                "command" => return error("`/mcp edit <name> command <value>` needs a value"),
+                "args" => (
+                    None,
+                    Some(value.split_whitespace().map(str::to_string).collect()),
+                    None,
+                ),
+                "icon" => (
+                    None,
+                    None,
+                    Some((!value.is_empty()).then(|| value.to_string())),
+                ),
+                _ => return error("Editable fields: command | args | icon"),
+            };
+            match crate::update_server_in(config, name, edit.0, edit.1, None, edit.2) {
+                Ok(true) => applied(format!("🔌 Updated `{name}`.")),
+                Ok(false) => error(format!("No MCP server named `{name}`.")),
+                Err(e) => error(e),
+            }
+        }
+
+        "allow" => {
+            let mut parts = args.split_whitespace();
+            match (parts.next(), parts.next()) {
+                (Some(server), Some(tool)) => {
+                    let added = crate::allow_tool_in(config, server, tool);
+                    applied(if added {
+                        format!("🔌 Allowed MCP tool `{server}/{tool}`.")
+                    } else {
+                        format!("🔌 `{server}/{tool}` was already allowed.")
+                    })
+                }
+                _ => error("Usage: /mcp allow <server> <tool>"),
+            }
+        }
+
+        "disallow" => {
+            let mut parts = args.split_whitespace();
+            match (parts.next(), parts.next()) {
+                (Some(server), Some(tool)) => {
+                    let removed = crate::disallow_tool_in(config, server, tool);
+                    applied(if removed {
+                        format!("🔌 Removed `{server}/{tool}` from the allowlist.")
+                    } else {
+                        format!("🔌 `{server}/{tool}` was not in the allowlist.")
+                    })
+                }
+                _ => error("Usage: /mcp disallow <server> <tool>  (tool `*` clears the list)"),
+            }
+        }
+
+        "reauth" if !args.is_empty() => match crate::reauth_mcp_server(args) {
+            Ok(_) => message(format!("🔌 Re-ran OAuth for `{args}`.")),
+            Err(e) => error(e),
+        },
+
+        "registry" | "catalog" => {
+            let items: Vec<String> = crate::mcp_registry()
+                .iter()
+                .map(|e| {
+                    let needs = if e.required_env.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            " — needs `{}`",
+                            e.required_env
+                                .iter()
+                                .map(|v| v.key.as_str())
+                                .collect::<Vec<_>>()
+                                .join("`, `")
+                        )
+                    };
+                    format!("`{}` — {}{needs}", e.key, e.desc)
+                })
+                .collect();
+            let mut md = md_heading("🔌 MCP server catalog");
+            md.push_str(&md_list(&items));
+            md.push_str(
+                "\nAdd one from the Add MCP Server dialog, or `/mcp add <name> <cmd> [args…]`.",
+            );
+            message(md)
+        }
+
+        _ => error(MCP_USAGE),
     }
 }
 
-/// Add `tool` to `config.extra["allowedMcpTools"][server]`. Returns `false` when
-/// it was already present. Ports `crates/mint-cli/src/mcp.rs::allow`.
-fn allow_mcp_tool(config: &mut MintConfig, server: &str, tool: &str) -> bool {
-    use serde_json::{Value, json};
-    let allowed = config
-        .extra
-        .entry("allowedMcpTools".into())
-        .or_insert_with(|| json!({}));
-    if !allowed.is_object() {
-        *allowed = json!({});
+fn cmd_plugin(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    let (sub, name) = split_sub(rest);
+    match sub.as_str() {
+        "enable" | "disable" if !name.is_empty() => {
+            if !crate::native_plugins().iter().any(|p| p.name == name) {
+                let known = crate::native_plugins()
+                    .iter()
+                    .map(|p| p.name)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return error(format!("Unknown native plugin `{name}`. Known: {known}"));
+            }
+            let enable = sub == "enable";
+            crate::set_native_plugin_enabled_in(config, &name, enable);
+            applied(format!(
+                "🔌 {} native plugin `{name}`.",
+                if enable { "Enabled" } else { "Disabled" }
+            ))
+        }
+        _ => error("Usage: /plugin enable|disable <name>"),
     }
-    let servers = allowed.as_object_mut().expect("normalized to object");
-    let tools = servers
-        .entry(server.to_owned())
-        .or_insert_with(|| json!([]));
-    if !tools.is_array() {
-        *tools = json!([]);
-    }
-    let list = tools.as_array_mut().expect("normalized to array");
-    if list.iter().any(|t| t.as_str() == Some(tool)) {
-        return false;
-    }
-    list.push(Value::String(tool.to_owned()));
-    true
 }
 
 #[cfg(test)]
@@ -895,6 +1210,22 @@ mod tests {
     }
 
     #[test]
+    fn remember_without_text_shows_usage() {
+        // The no-arg path returns before opening the memory store, so this
+        // stays in line with the "no slash test persists to disk" rule above.
+        let mut cfg = MintConfig::default();
+        match execute(&req("/remember"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("Usage: /remember"));
+            }
+            other => panic!(
+                "expected usage message, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+    }
+
+    #[test]
     fn unknown_and_cli_only_are_not_handled() {
         let mut cfg = MintConfig::default();
         assert!(matches!(
@@ -918,6 +1249,32 @@ mod tests {
         match execute(&req("/autoskill on"), &mut cfg) {
             SlashResponse::Applied { effects, .. } => {
                 assert!(cfg.auto_skill_writing);
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+    }
+
+    #[test]
+    fn autofacts_off_flips_config() {
+        let mut cfg = MintConfig::default();
+        assert!(cfg.auto_fact_extraction);
+        match execute(&req("/autofacts off"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(!cfg.auto_fact_extraction);
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+    }
+
+    #[test]
+    fn factrecall_off_flips_config() {
+        let mut cfg = MintConfig::default();
+        assert!(cfg.semantic_fact_recall);
+        match execute(&req("/factrecall off"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(!cfg.semantic_fact_recall);
                 assert!(effects.contains(&SlashEffect::ConfigChanged));
             }
             other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
@@ -1021,6 +1378,90 @@ mod tests {
         }
         let allowed = &cfg.extra["allowedMcpTools"]["srv"];
         assert_eq!(allowed[0], "toolA");
+    }
+
+    #[test]
+    fn mcp_add_disable_edit_remove_round_trip() {
+        let mut cfg = MintConfig::default();
+
+        assert!(matches!(
+            execute(&req("/mcp add demo sh -c cat"), &mut cfg),
+            SlashResponse::Applied { .. }
+        ));
+        assert_eq!(cfg.extra["mcpServers"]["demo"]["command"], "sh");
+        assert_eq!(cfg.extra["mcpServers"]["demo"]["args"][1], "cat");
+
+        execute(&req("/mcp disable demo"), &mut cfg);
+        assert_eq!(cfg.extra["mcpServers"]["demo"]["disabled"], true);
+        execute(&req("/mcp enable demo"), &mut cfg);
+        assert!(cfg.extra["mcpServers"]["demo"].get("disabled").is_none());
+
+        execute(&req("/mcp edit demo icon 🧪"), &mut cfg);
+        assert_eq!(cfg.extra["mcpServers"]["demo"]["icon"], "🧪");
+
+        // `--allow-all` on add opts every tool in; plain add does not.
+        execute(&req("/mcp add wide sh -c cat --allow-all"), &mut cfg);
+        assert_eq!(cfg.extra["allowedMcpTools"]["wide"][0], "*");
+        assert_eq!(cfg.extra["mcpServers"]["wide"]["args"][1], "cat");
+        assert!(
+            cfg.extra
+                .get("allowedMcpTools")
+                .and_then(|m| m.get("demo"))
+                .is_none()
+        );
+
+        execute(&req("/mcp remove demo"), &mut cfg);
+        assert!(
+            cfg.extra["mcpServers"]
+                .as_object()
+                .unwrap()
+                .get("demo")
+                .is_none()
+        );
+
+        // Unknown server → not persisted, friendly message.
+        assert!(matches!(
+            execute(&req("/mcp disable ghost"), &mut cfg),
+            SlashResponse::Message { .. }
+        ));
+    }
+
+    #[test]
+    fn mcp_registry_lists_the_catalog() {
+        let mut cfg = MintConfig::default();
+        match execute(&req("/mcp registry"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("catalog"));
+                assert!(markdown.contains("filesystem"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+    }
+
+    #[test]
+    fn plugin_enable_disable_flips_native_gate() {
+        let mut cfg = MintConfig::default();
+
+        match execute(&req("/plugin enable docker"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+        assert!(crate::native_plugin_enabled(&cfg, "docker"));
+        execute(&req("/plugin disable docker"), &mut cfg);
+        assert!(!crate::native_plugin_enabled(&cfg, "docker"));
+
+        // `/plugins` with no args still opens the GUI view.
+        assert!(matches!(
+            execute(&req("/plugins"), &mut cfg),
+            SlashResponse::Navigate { .. }
+        ));
+        // Unknown plugin name is rejected without touching config.
+        assert!(matches!(
+            execute(&req("/plugin enable nope"), &mut cfg),
+            SlashResponse::Message { .. }
+        ));
     }
 
     #[test]

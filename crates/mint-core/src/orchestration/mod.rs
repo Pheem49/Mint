@@ -122,6 +122,8 @@ pub async fn orchestrate_chat(
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        request.workspace_path.clone(),
+        request_chat_id(request),
     );
     crate::linked_folders::spawn_linked_folder_note(
         config.clone(),
@@ -156,6 +158,8 @@ where
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        request.workspace_path.clone(),
+        request_chat_id(request),
     );
     crate::linked_folders::spawn_linked_folder_note(
         config.clone(),
@@ -186,6 +190,8 @@ pub async fn orchestrate_chat_with_fallback(
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        request.workspace_path.clone(),
+        request_chat_id(request),
     );
     crate::linked_folders::spawn_linked_folder_note(
         config.clone(),
@@ -220,6 +226,8 @@ where
         config.clone(),
         request.message.clone(),
         response.text.clone(),
+        request.workspace_path.clone(),
+        request_chat_id(request),
     );
     crate::linked_folders::spawn_linked_folder_note(
         config.clone(),
@@ -287,6 +295,31 @@ fn enrich_request(
         .to_owned();
     }
 
+    if let Some(facts) = render_memory_facts(
+        memory,
+        request.workspace_path.as_deref(),
+        crate::subagent_name(&request_chat_id(request)),
+        Some(&request.message),
+        config.semantic_fact_recall,
+    ) {
+        enriched.system_instruction = format!(
+            "{}\n\nRemembered facts:\n{}",
+            enriched.system_instruction.trim(),
+            facts
+        )
+        .trim()
+        .to_owned();
+    }
+
+    if config.memory_recall
+        && let Some(recall) = render_recalled_messages(&request_chat_id(request), &request.message)
+    {
+        enriched.system_instruction =
+            format!("{}\n\n{}", enriched.system_instruction.trim(), recall)
+                .trim()
+                .to_owned();
+    }
+
     // Inject active AI model/provider context to system instructions
     let active_model_info = format!(
         "\n\n[Active Environment Context]\n\
@@ -340,18 +373,14 @@ use workspace_helpers::*;
 /// work, cutting it off mid-task — raised to 40 as a middle ground.
 const MAX_STEPS: usize = 40;
 const MAX_OBSERVATION_BYTES: usize = 16_000;
-/// Compact `native_messages` once reported token usage crosses this fraction
-/// of the active model's context window. Every step resends the whole
-/// accumulated history (see `MAX_STEPS`'s doc comment above), so this is the
-/// main lever on real per-task token volume — not just cost, since provider
-/// prompt caching (automatic for OpenAI-compatible providers, explicit
-/// `cache_control` breakpoints for Anthropic) only discounts *price* on a
-/// resend, it doesn't shrink what's actually sent/counted. Lowered from 0.8,
-/// then from 0.6 to compact considerably earlier still — a task observed
-/// hitting 80,949/128,000 tokens on a single step at the 0.6 ratio (63% of
-/// window) was well past the point of real benefit from keeping that much
-/// verbatim.
-const COMPACTION_TRIGGER_RATIO: f64 = 0.4;
+/// Compact `native_messages` once a step's reported token usage crosses this
+/// fraction of `MintConfig::context_window_tokens`. Every step resends the whole
+/// accumulated history, so this is the main lever on real per-task token volume
+/// (prompt caching only discounts price, not what's counted). Compaction fires
+/// the moment the threshold is crossed and shrinks the history before the next
+/// request, so `0.75` keeps a generous verbatim window without letting the next
+/// request grow past the real limit.
+const COMPACTION_TRIGGER_RATIO: f64 = 0.75;
 /// Number of most-recent Assistant/Tool step-pairs kept verbatim (uncompacted)
 /// in `native_messages`.
 const COMPACTION_KEEP_RECENT_STEPS: usize = 3;
@@ -430,6 +459,14 @@ pub enum ApprovalOutcome {
     Denied,
     Intercepted(String),
 }
+
+/// The `answer` string a surface returns from an [`AgentApproval::McpTool`]
+/// prompt to mean "run this call **and** persist `allowedMcpTools[server] =
+/// ["*"]`, so this server never prompts again". Travels through the normal
+/// `Intercepted(answer)` channel. The CLI approval picker
+/// (`crates/mint-cli/src/agent.rs`) and the web/desktop `ApprovalCard`
+/// (`src/renderer/shared/components/ApprovalCard.tsx`) send this exact string.
+pub const MCP_ALLOW_ALL_SENTINEL: &str = "__mcp_allow_all__";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
@@ -557,7 +594,7 @@ struct AgentInput {
     options: Vec<AskUserOptionInput>,
     #[serde(default)]
     header: String,
-    #[serde(default)]
+    #[serde(default, alias = "multi_select")]
     multi_select: bool,
     #[serde(default)]
     city: String,
@@ -567,13 +604,13 @@ struct AgentInput {
     command: String,
     #[serde(default)]
     background: bool,
-    #[serde(default)]
+    #[serde(default, alias = "job_id")]
     job_id: String,
     #[serde(default)]
     commands: Vec<String>,
     #[serde(default)]
     steps: Vec<String>,
-    #[serde(default)]
+    #[serde(default, alias = "file_content")]
     file_content: String,
     #[serde(default)]
     summary: String,
@@ -583,9 +620,9 @@ struct AgentInput {
     plan: String,
     #[serde(default)]
     reason: String,
-    #[serde(default)]
+    #[serde(default, alias = "start_line")]
     start_line: Option<usize>,
-    #[serde(default)]
+    #[serde(default, alias = "end_line")]
     end_line: Option<usize>,
     #[serde(default)]
     limit: Option<usize>,
@@ -597,7 +634,7 @@ struct AgentInput {
     tool: String,
     #[serde(default)]
     arguments: Value,
-    #[serde(default)]
+    #[serde(default, alias = "note_path")]
     note_path: String,
     #[serde(default)]
     name: String,
@@ -914,12 +951,13 @@ where
         let mut pending_video = video_data_uri;
 
         let mut plan_mode = plan_mode;
-        // A pin only means anything if it names a server that's actually configured —
-        // a stale/hand-typed `@name` (e.g. from a since-disabled server) is silently
-        // dropped rather than restricting the turn to a server that doesn't exist.
+        // A pin only means anything if it names a server that's actually configured
+        // and enabled — a stale/hand-typed `@name`, or one for a server since
+        // disabled in Settings, is silently dropped rather than restricting the
+        // turn to a server that can't be reached.
         let pinned_mcp_server = pinned_mcp_server.filter(|p| {
             crate::mcp::list_mcp_servers()
-                .map(|m| m.contains_key(*p))
+                .map(|m| m.get(*p).is_some_and(|server| !server.disabled))
                 .unwrap_or(false)
         });
         // Determined once from the base `config` (not the per-step `active_config`
@@ -935,7 +973,18 @@ where
         );
         let hooks = crate::hooks::list_hooks(config);
 
-        append_memory_context(&mut system_prompt, chat_id);
+        append_memory_context(
+            &mut system_prompt,
+            chat_id,
+            Some(root.to_string_lossy().as_ref()),
+            Some(&resolved_task),
+            config.semantic_fact_recall,
+        );
+        if config.memory_recall
+            && let Some(recall) = render_recalled_messages(chat_id, &resolved_task)
+        {
+            system_prompt = format!("{}\n\n{}", system_prompt.trim(), recall);
+        }
         // Rough token estimate for the very first request going out — lets
         // the CLI seed its live counter before step 1's real response comes
         // back and there's nothing else to go on yet (~4 chars/token, a
@@ -1291,6 +1340,23 @@ where
                     &mut trajectory,
                 )
                 .await;
+            } else if decisions_are_parallel_read_only_batch(&decisions) {
+                step_tool_results = run_parallel_read_only_batch(
+                    &decisions,
+                    step,
+                    &root,
+                    config,
+                    chat_id,
+                    &mut approve,
+                    &mut progress,
+                    &mut action_counts,
+                    &mut trajectory,
+                    &mut step_images,
+                    &hooks,
+                    pinned_mcp_server,
+                    fast_mode,
+                )
+                .await;
             } else {
                 for (call_id, decision) in decisions {
                     if !fast_mode
@@ -1358,18 +1424,13 @@ where
                                 let err_msg = "Error: Your finish action summary was empty. \
                                        You MUST provide a final answer, explanation, or response to the user's query \
                                        in the 'summary' field of the 'finish' action input. Do not leave it empty.";
-                                trajectory.push(format!(
-                                    "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
-                                    decision.thought.trim(),
-                                    decision.action,
-                                    err_msg
+                                trajectory.push(format_trajectory_step(
+                                    step,
+                                    &decision.thought,
+                                    &decision.action,
+                                    err_msg,
                                 ));
-                                let history_str = trajectory.join("\n\n");
-                                observation = format!(
-                                    "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
-                                    root.display(),
-                                    history_str
-                                );
+                                rebuild_observation(task, &root, &trajectory, &mut observation);
                                 reject_native_finish(
                                     tool_mode,
                                     &mut native_messages,
@@ -1389,18 +1450,13 @@ where
                                        before finishing. If no check genuinely applies (e.g. no test \
                                        suite, documentation-only change), say so explicitly in the \
                                        finish action's 'verification' field and finish again.";
-                                trajectory.push(format!(
-                                    "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
-                                    decision.thought.trim(),
-                                    decision.action,
-                                    err_msg
+                                trajectory.push(format_trajectory_step(
+                                    step,
+                                    &decision.thought,
+                                    &decision.action,
+                                    err_msg,
                                 ));
-                                let history_str = trajectory.join("\n\n");
-                                observation = format!(
-                                    "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
-                                    root.display(),
-                                    history_str
-                                );
+                                rebuild_observation(task, &root, &trajectory, &mut observation);
                                 reject_native_finish(
                                     tool_mode,
                                     &mut native_messages,
@@ -1422,18 +1478,13 @@ where
                                        unrelated to your change (e.g. pre-existing), say so \
                                        explicitly in the finish action's 'verification' field and \
                                        finish again.";
-                                trajectory.push(format!(
-                                    "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
-                                    decision.thought.trim(),
-                                    decision.action,
-                                    err_msg
+                                trajectory.push(format_trajectory_step(
+                                    step,
+                                    &decision.thought,
+                                    &decision.action,
+                                    err_msg,
                                 ));
-                                let history_str = trajectory.join("\n\n");
-                                observation = format!(
-                                    "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
-                                    root.display(),
-                                    history_str
-                                );
+                                rebuild_observation(task, &root, &trajectory, &mut observation);
                                 reject_native_finish(
                                     tool_mode,
                                     &mut native_messages,
@@ -1508,7 +1559,13 @@ where
                             &summary,
                             &verification,
                         )?;
-                        spawn_auto_memory_update(config.clone(), task.to_string(), summary.clone());
+                        spawn_auto_memory_update(
+                            config.clone(),
+                            task.to_string(),
+                            summary.clone(),
+                            Some(root.to_string_lossy().into_owned()),
+                            chat_id.to_string(),
+                        );
                         crate::linked_folders::spawn_linked_folder_note(
                             config.clone(),
                             task.to_string(),
@@ -1645,6 +1702,23 @@ where
                                 )
                             }
                             crate::hooks::PreHookOutcome::Allowed => {
+                                if matches!(decision.action.as_str(), "write_file" | "apply_patch")
+                                {
+                                    let target_path = if !decision.input.path.is_empty() {
+                                        Some(decision.input.path.as_str())
+                                    } else {
+                                        None
+                                    };
+                                    let _ = crate::git::create_checkpoint(
+                                        &root,
+                                        chat_id,
+                                        step,
+                                        &decision.action,
+                                        target_path,
+                                        &format!("Before Step {step}: {}", decision.action),
+                                    );
+                                }
+
                                 let (tool_result, success) = match execute_tool(
                                     &root,
                                     config,
@@ -1757,11 +1831,11 @@ where
                 );
                     }
 
-                    trajectory.push(format!(
-                        "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
-                        decision.thought.trim(),
-                        decision.action,
-                        final_result
+                    trajectory.push(format_trajectory_step(
+                        step,
+                        &decision.thought,
+                        &decision.action,
+                        &final_result,
                     ));
 
                     step_tool_results.push((
@@ -1856,12 +1930,7 @@ where
                 }
             }
 
-            let history_str = trajectory.join("\n\n");
-            observation = format!(
-                "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
-                root.display(),
-                history_str
-            );
+            rebuild_observation(task, &root, &trajectory, &mut observation);
         }
 
         Err(OrchestrationError::Agent(format!(
@@ -2183,14 +2252,199 @@ async fn run_parallel_subagent_batch(
             );
         }
 
-        trajectory.push(format!(
-            "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
-            thought.trim(),
-            action,
-            final_result
+        trajectory.push(format_trajectory_step(
+            step,
+            &thought,
+            &action,
+            &final_result,
         ));
         step_tool_results.push((call_id, action, input_val, final_result));
     }
+    step_tool_results
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_parallel_read_only_batch(
+    decisions: &[(String, AgentDecision)],
+    step: usize,
+    root: &Path,
+    config: &MintConfig,
+    chat_id: &str,
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+    action_counts: &mut BTreeMap<String, usize>,
+    trajectory: &mut Vec<String>,
+    step_images: &mut std::collections::HashMap<String, String>,
+    hooks: &[crate::hooks::HookEntry],
+    pinned_mcp_server: Option<&str>,
+    fast_mode: bool,
+) -> Vec<(String, String, Value, String)> {
+    let approve_mutex = std::sync::Mutex::new(approve);
+    let progress_mutex = std::sync::Mutex::new(progress);
+
+    let mut tasks = Vec::with_capacity(decisions.len());
+    for (index, (call_id, decision)) in decisions.iter().enumerate() {
+        let call_id = call_id.clone();
+        let thought = decision.thought.clone();
+        let action = decision.action.clone();
+        let input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+        let action_key = action_fingerprint(decision);
+        let approve_mutex = &approve_mutex;
+        let progress_mutex = &progress_mutex;
+        let decision = decision;
+
+        tasks.push(async move {
+            if !fast_mode && !thought.trim().is_empty() {
+                let mut guard = progress_mutex.lock().unwrap();
+                (*guard)(AgentProgress::Thought {
+                    thought: thought.trim().to_owned(),
+                });
+            }
+
+            {
+                let mut guard = progress_mutex.lock().unwrap();
+                (*guard)(AgentProgress::ToolStart {
+                    action: action.clone(),
+                    input: input_val.clone(),
+                    subagent: None,
+                });
+            }
+
+            let result: String = if pinned_mcp_server.is_some_and(|p| {
+                (action == "mcp_tool" || action == "mcp_list_tools") && decision.input.server != p
+            }) {
+                let p = pinned_mcp_server.unwrap();
+                format!(
+                    "Blocked: this turn is pinned to the \"{p}\" MCP server only (selected via @{p} in the composer). Retry with \"server\":\"{p}\", or use a different (non-MCP) tool."
+                )
+            } else {
+                match crate::hooks::run_pre_tool_hooks(hooks, &action, &input_val, root) {
+                    crate::hooks::PreHookOutcome::Blocked(reason) => {
+                        format!(
+                            "Blocked by hook: {}\n\n[System Tip: A configured PreToolUse hook rejected this action. Adjust your approach or ask the user for guidance.]",
+                            reason
+                        )
+                    }
+                    crate::hooks::PreHookOutcome::Allowed => {
+                        let mut approve_adapter =
+                            |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+                                let mut guard = approve_mutex.lock().unwrap();
+                                (*guard)(approval)
+                            };
+                        let mut progress_adapter = |event: AgentProgress| {
+                            let mut guard = progress_mutex.lock().unwrap();
+                            (*guard)(event);
+                        };
+
+                        let (tool_result, success) = match execute_tool(
+                            root,
+                            config,
+                            &decision,
+                            chat_id,
+                            &mut approve_adapter,
+                            &mut progress_adapter,
+                        )
+                        .await
+                        {
+                            Ok(res) => (res, true),
+                            Err(err) => (format!("Error: {}", err), false),
+                        };
+
+                        let hook_messages = crate::hooks::run_post_tool_hooks(
+                            hooks,
+                            &action,
+                            &input_val,
+                            &tool_result,
+                            success,
+                            root,
+                        );
+
+                        if hook_messages.is_empty() {
+                            tool_result
+                        } else {
+                            format!(
+                                "{}\n\n{}",
+                                tool_result,
+                                hook_messages
+                                    .iter()
+                                    .map(|msg| format!("[Hook] {}", msg))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
+                        }
+                    }
+                }
+            };
+
+            {
+                let mut guard = progress_mutex.lock().unwrap();
+                (*guard)(AgentProgress::ToolEnd {
+                    action: action.clone(),
+                    input: input_val.clone(),
+                    result: result.clone(),
+                    subagent: None,
+                });
+            }
+
+            (
+                index, call_id, thought, action, input_val, action_key, result,
+            )
+        });
+    }
+
+    let mut results = futures_util::stream::iter(tasks)
+        .buffer_unordered(PARALLEL_READ_ONLY_LIMIT)
+        .collect::<Vec<_>>()
+        .await;
+
+    results.sort_by_key(|(index, ..)| *index);
+
+    let mut step_tool_results = Vec::with_capacity(results.len());
+    for (_, call_id, thought, action, input_val, action_key, result) in results {
+        let action_count = {
+            let count = action_counts.entry(action_key).or_insert(0);
+            *count += 1;
+            *count
+        };
+
+        let mut final_result = if result.starts_with("data:image/")
+            && matches!(
+                action.as_str(),
+                "browser_screenshot" | "video_filmstrip" | "video_waveform" | "view_image"
+            ) {
+            step_images.insert(call_id.clone(), result.clone());
+            match action.as_str() {
+                "video_filmstrip" => {
+                    "[Filmstrip generated — see attached image: sampled frames across the video timeline]".to_string()
+                }
+                "video_waveform" => {
+                    "[Waveform generated — see attached image: audio amplitude over time]".to_string()
+                }
+                "view_image" => "[Image loaded — see attached image]".to_string(),
+                _ => "[Screenshot captured — see attached image]".to_string(),
+            }
+        } else {
+            truncate(&result)
+        };
+
+        if action_count >= 3 {
+            final_result.push_str(
+                "\n\n[System Tip: You repeated the same tool action three or more times. \
+                 Stop repeating it. If you already have enough information or the requested edit is done, \
+                 use the finish action now. Otherwise choose a different necessary action.]",
+            );
+        }
+
+        trajectory.push(format_trajectory_step(
+            step,
+            &thought,
+            &action,
+            &final_result,
+        ));
+
+        step_tool_results.push((call_id, action, input_val, final_result));
+    }
+
     step_tool_results
 }
 
@@ -2226,7 +2480,7 @@ async fn execute_tool(
             )
             .await
         }
-        "search_code" | "symbols" | "semantic_index" | "semantic_search" => {
+        "search_code" | "symbols" | "repo_map" | "semantic_index" | "semantic_search" => {
             tools::code_search::execute(
                 decision.action.as_str(),
                 input,
@@ -2925,5 +3179,71 @@ mod tests {
     #[test]
     fn empty_decisions_never_qualify_for_the_parallel_batch() {
         assert!(!decisions_are_parallel_subagent_batch(&[]));
+        assert!(!decisions_are_parallel_read_only_batch(&[]));
+    }
+
+    #[test]
+    fn two_or_more_read_only_decisions_qualify_for_the_parallel_batch() {
+        let decisions = vec![
+            decision_with_action("read_file"),
+            decision_with_action("search_code"),
+        ];
+        assert!(decisions_are_parallel_read_only_batch(&decisions));
+
+        let decisions = vec![
+            decision_with_action("read_file"),
+            decision_with_action("web_search"),
+            decision_with_action("git_diff"),
+        ];
+        assert!(decisions_are_parallel_read_only_batch(&decisions));
+    }
+
+    #[test]
+    fn a_lone_read_only_decision_stays_sequential() {
+        let decisions = vec![decision_with_action("read_file")];
+        assert!(!decisions_are_parallel_read_only_batch(&decisions));
+    }
+
+    #[test]
+    fn read_only_mixed_with_mutating_action_stays_sequential() {
+        let decisions = vec![
+            decision_with_action("read_file"),
+            decision_with_action("write_file"),
+        ];
+        assert!(!decisions_are_parallel_read_only_batch(&decisions));
+
+        let decisions = vec![
+            decision_with_action("read_file"),
+            decision_with_action("run_shell"),
+        ];
+        assert!(!decisions_are_parallel_read_only_batch(&decisions));
+    }
+
+    #[test]
+    fn rebuild_observation_reuses_buffer_and_formats_history() {
+        let root = Path::new("/workspace/test-project");
+        let task = "Fix the login bug";
+        let step1 = format_trajectory_step(1, "Inspecting files", "list_files", "src/main.rs");
+        let step2 = format_trajectory_step(2, "Reading code", "read_file", "fn main() {}");
+        let trajectory = vec![step1, step2];
+
+        let mut buffer = String::new();
+        rebuild_observation(task, root, &trajectory, &mut buffer);
+
+        assert!(buffer.contains("Task: Fix the login bug"));
+        assert!(buffer.contains("Workspace: /workspace/test-project"));
+        assert!(buffer.contains("Step 1:\n- Thought: Inspecting files"));
+        assert!(buffer.contains("Step 2:\n- Thought: Reading code"));
+        assert!(buffer.ends_with(
+            "Proceed to the next step. If you have completed the task, use the 'finish' action."
+        ));
+
+        // Ensure buffer can be reused cleanly for subsequent steps
+        let step3 = format_trajectory_step(3, "All done", "finish", "Fixed");
+        let mut extended_trajectory = trajectory;
+        extended_trajectory.push(step3);
+        rebuild_observation(task, root, &extended_trajectory, &mut buffer);
+
+        assert!(buffer.contains("Step 3:\n- Thought: All done"));
     }
 }

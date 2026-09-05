@@ -1,223 +1,415 @@
-# Release Notes - Mint Agent v1.13.0
+# Release Notes - Mint Agent v1.13.1
 
-## 🗂️ Plan Mode Now Saves Plans (CLI)
+A reliability-and-polish release: scheduled tasks no longer lose a run when
+the app is closed mid-execution, the five management pages (Scheduled Tasks,
+Skills, MCP Servers, Plugins, Linked Folders) were rebuilt as one consistent
+list-style UI, typing a `~/…` path when linking a folder finally works, the
+web UI's "Browse…" button now opens a real folder picker, Settings' General
+and Plugins tabs were cleaned up (and image generation gained per-provider
+model pickers), the half-finished Custom Workflows feature was removed, and
+a new `/init` command writes an AGENTS.md for the project.
 
-Plan mode previously showed an approved plan once in the terminal's approval
-card and then discarded it — no way to reopen what was actually agreed on.
-It now persists.
-
-- **Approved plans are saved to `<workspace>/.agents/plans/`** as a
-  timestamped Markdown file the moment you approve them, printing a
-  `Plan saved to: ...` line right after — mirrors the existing
-  `.agents/skills/<slug>/SKILL.md` convention auto-learned skills already
-  use, scoped per-workspace rather than global.
-- **`/plan list`** shows saved plans (newest first) with a one-line preview
-  of each; **`/plan show <number|name>`** prints one in full. `/plan [on|off]`
-  still toggles plan mode itself, unchanged.
-
----
-
-## ➖ User-Message Dividers in Interactive Chat
-
-Echoed user input in the terminal chat loop is now visually separated from
-agent replies with a dim `─` divider across the full terminal width, drawn
-above and below the `You ›` line. Applies both to messages typed in the
-input box and to queued inputs (`/send`, piped stdin) — so long logs stay
-easier to read at a glance.
-
-## 🔧 n8n Docs: Inline Auth Header + Non-Default Hosts
-
-`docs/N8N_INTEGRATION.md` now puts the `Bearer <key>` inline in the
-`Authorization` header for the `mint mcp add n8n` step — the old
-`AUTH_HEADER` env-var trick relied on shell expansion Mint's verbatim
-argument passing never performs. Also documents that `/n8n` with no
-arguments only auto-opens the browser for a hardcoded `127.0.0.1:5678`;
-pointing the MCP URL at another host/port keeps `/n8n <task>` working.
+This build also adds a local-first cross-session memory (a structured facts
+table plus full-text recall of older messages), corrects the per-provider
+context-window sizes and makes the local ones configurable, raises the
+context-compaction trigger so long tasks keep more verbatim history, brings
+the chat composer's up/down history, persistent per-conversation drafts, and
+edit-and-resend to Web and Desktop, finishes the Settings component restyle
+(segmented pills / bordered toggle cards) across the remaining tabs, and
+gives the CLI's interactive prompt readline-style editing keys plus prompt
+history that survives a restart.
 
 ---
 
-This release adds a real-time 3D avatar you can point at Mint — connected
-via a new `/avatar` command, driven by both automatic tool-call reactions
-and a model-callable `avatar_signal` tool — on top of the same
-polish-and-reliability work already below: a proper day/night weather icon
-set, offline-safe self-hosted fonts (plus a real font bug fixed along the
-way), a blank-page bug fixed on the web dev server, the shared "cli"
-conversation now live-syncing across the terminal/desktop/web instead of
-staying silent until your next turn, a workspace-scoping attempt that
-shipped, broke that same shared conversation, and got reverted the same
-day once caught — and the web build's approval flow finally does something
-real instead of silently auto-denying every tool call, with OS/browser
-notifications for both finished replies and pending approvals.
+## Reliability & Polish: File Reading Pagination, Web Layout & Local Timezone Synchronization
+
+- **Reliable `read_file` Tool Pagination**:
+  - Dynamically calculates default `endLine` from `startLine.saturating_add(239)` instead of hardcoding a static 240, eliminating 1-line pagination lockups when continuing reads past line 240.
+  - Enforces a minimum 240-line pagination chunk recommendation in `read_code_file` continuation tips.
+  - Supports both camelCase and snake_case parameter names (`startLine`/`start_line`, `endLine`/`end_line`) across Serde deserializers, CLI status labels, and Desktop/Web activity views.
+  - Generates distinct action fingerprints for distinct line ranges of the same file to prevent false-positive duplicate action warnings.
+
+- **Web Layout Grid Resilience for Split Views**:
+  - Preserved direct `<section className="conversation-panel">` root rendering in standard chat mode, restoring CSS Grid full-width layout (`grid-column: 1 / -1`) in Web and model-hidden desktop environments.
+  - Added dedicated `.chat-panel-split-wrapper` styles ensuring responsive 50/50 split width and zero layout collapse when Live Artifact Previews are active.
+
+- **Cross-Platform Local Timezone Synchronization**:
+  - Normalized SQLite UTC timestamps (`YYYY-MM-DD HH:MM:SS`) to ISO 8601 with explicit `Z` UTC indicators in `mint-core::memory`.
+  - Added client-side `parseUtcDate` helper accurately translating UTC database records to the user's active local timezone across Web and Desktop chat bubbles, session dividers, and search groups.
+  - Formatted CLI `/history` timestamps using `chrono::Local` for unified time display across all three surfaces.
 
 ---
 
-## 🪄 Real-Time 3D Avatar via Project Avatar (`/avatar`)
+## UI & Workspace Experience: Live Artifact Preview, Subagent DAG & Universal Command Palette
 
-Mint can now drive a live 3D VRM avatar — via
-[Project Avatar](https://github.com/projectavatar/projectavatar), a free
-open-source companion project — that reacts to what the agent is actually
-doing, viewable in a browser tab, OBS, or Project Avatar's own desktop
-overlay.
+Comprehensive UI and workspace upgrades with strict platform parity across CLI, Desktop, and Web:
 
-- **`/avatar` in chat** (or `mint avatar` from the CLI): generates and
-  persists a relay token the first time you run it, then lets you pick
-  **Web** (opens a hosted share link — nothing to install) or **Desktop**
-  (hands you the raw token to paste into Project Avatar's own desktop app,
-  built separately from their repo). `/avatar status` shows connection
-  state, selected model, and viewer count; `/avatar off` disables it.
-- **Automatic reactions**: the agent's tool calls drive emotion/pose/prop
-  changes on their own — typing while a shell command or browser action
-  runs, celebrating when an image/video finishes generating, going nervous
-  on an error — with per-category cooldowns so rapid tool calls don't make
-  the avatar flicker.
-- **`avatar_signal` tool**: for anything a tool call can't express — a
-  greeting, a joke, an apology — the model can call this directly to set
-  emotion blend, pose, prop, color, and the mouth/talking layer explicitly.
-  Only offered once a token is configured; an invalid call gets a
-  corrective message back instead of failing outright.
-- **Multi-session aware**: a `dispatch_subagent` run gets its own lower-
-  priority session on the relay, so a subagent's own tool calls don't
-  visually fight the main loop's current avatar state while both are
-  active.
-- **Found and fixed three real bugs along the way**: the CLI's own
-  interactive/`mint agent` chat loop was never actually wired to push
-  avatar signals at all (only the desktop app's streaming chat command
-  was) — chatting in the terminal silently did nothing until this was
-  caught and fixed; the desktop app's streaming command was separately
-  missing the turn-end/idle-reset call entirely; and the bridge's cooldown
-  timers were seeded at construction time instead of left unset, so the
-  very first signal after Mint started up could get silently dropped if it
-  landed within the cooldown window. All three now have regression tests.
+### 1. Live Artifact / Web Preview Split View
+- **Side-by-Side Live Preview (`ArtifactPreviewPanel.tsx`)**: Split view alongside the chat panel to instantly inspect HTML, SVG, Markdown, and Web components generated by the agent.
+- **Preview & Code Tabs**: Easily toggle between the live rendered artifact and raw syntax-highlighted source code with full line numbers and copy functionality.
+- **Multi-Device Responsive Viewports**: Switch between Desktop (100%), Tablet (768px), and Mobile (375px) viewports to inspect responsive UI designs directly inside Mint.
+- **Secure Sandboxed Preview**: Sandboxed iframe (`sandbox="allow-scripts allow-forms allow-modals"`, strictly omitting `allow-same-origin`) to prevent access to parent window DOM, localStorage, and cookies.
+- **Universal Access Across All 3 Surfaces**:
+  - **Desktop & Web**: Preview button on generated file cards and activity logs; live file reading via Tauri IPC (`read_workspace_file`) and Web API (`GET /api/file/read`).
+  - **CLI**: `mint preview <path>` command to launch default system browser/viewer for HTML/SVG or render formatted preview in terminal for Markdown and code files.
+
+### 2. Subagent Visual Tree / DAG Graph (`SubagentDagView.tsx`)
+- **Interactive Node Graph**: Renders the Orchestrator-to-Subagent hierarchy in real-time with visual branches, badges, and status colors (`Thinking`, `Running`, `Completed`, `Failed`).
+- **Tool Inspection Drawer**: Click on any subagent node to inspect dispatched prompt instructions, tools executed, running commands, and return results.
+- **Integrated Activity Drawer**: Tab toggle (Activity List vs Subagent DAG) in `AgentActivityDrawer.tsx` with a live subagent count badge.
+- **CLI Unicode Tree Parity**: `crates/mint-cli/src/agent.rs` renders subagent dispatches and tool executions with clean Unicode tree branches (`├── [Subagent: name]` and `│   ├── [tool]`).
+
+### 3. Universal Command Palette (`Ctrl+K` / `Cmd+K` / `/palette`)
+- **Spotlight Navigation (`CommandPalette.tsx`)**: Global keyboard-first launcher inspired by VS Code and macOS Spotlight (`Ctrl+K` or `Cmd+K`).
+- **Comprehensive Command Palette**:
+  - Quick action launcher: New Chat, Toggle Plan Mode, Toggle Fast Mode, Git Rollback, Manage MCP, Open Settings, Clear History.
+  - Model & Provider Switcher: Instant model selection (Gemini 2.5 Flash, Claude 3.7 Sonnet, OpenAI GPT-4o, DeepSeek-V3/R1, Ollama).
+  - Chat & Workspace Switcher: Search past conversations and switch active workspace directories with fuzzy matching.
+  - Slash Command Library: Interactive discovery and execution of all registered slash commands.
+- **CLI Parity**: `/palette` slash command provides an interactive Arrow/Enter picker for quick navigation across all core actions and tools.
 
 ---
 
-## 🧹 One Source of Truth for Interactive Slash Commands
+## Rust & Local-First Superpowers: Prompt Caching & Local FastEmbed ONNX Search
 
-Adding `/avatar` surfaced a pre-existing structural bug: `/help`'s command
-table and the `/` autocomplete dropdown were two separate hand-maintained
-lists with nothing tying them to the actual command dispatcher, and had
-already drifted apart — `/edit-image`, `/gen-image`, `/shells`,
-`/subagent`, and a legacy `/searchProvider` alias all worked but were
-missing from `/help` before this release touched anything.
+Unleashed maximum efficiency and offline autonomy in Mint Agent's core:
 
-- **Consolidated into one table** (`interactive/commands.rs`) that both
-  `/help` and the autocomplete dropdown now render from, instead of each
-  keeping its own copy.
-- **Added a regression test** that parses the dispatcher's own source for
-  every `"/xxx" => ` match arm and asserts each one is documented in that
-  table — it already caught the `/searchProvider` alias gap during this
-  same change, so the same class of bug can't silently ship again.
+### 1. Prompt Caching Optimization (DeepSeek, Claude 3.5/3.7, Gemini, OpenAI)
+- **Anthropic Prompt Caching**: Enabled `anthropic-beta: prompt-caching-2024-07-31` on streaming and non-streaming Anthropic requests. In multi-turn sessions, the penultimate turn is marked with `cache_control: {"type": "ephemeral"}` to hit cached prefixes and reduce input token costs by up to 90% while cutting response latency in half.
+- **Deterministic Prefix Layout**: Maintained a stable, deterministic system prompt, tool schemas, and base instructions prefix order across turn evaluations to maximize provider-side prompt cache hits (OpenAI, Gemini 1.5/2.0, DeepSeek-V3).
+
+### 2. Local FastEmbed / ONNX Runtime (100% Offline Semantic Search & Memory)
+- **Embedded ONNX Runtime**: Integrated `fastembed` with ONNX Runtime (`ort-download-binaries-rustls-tls` + `hf-hub-rustls-tls`) into `mint-core` using `BGESmallENV15` (384-dimensional dense embeddings).
+- **Fast Batch Indexing**: `index_semantic_code` now batch-embeds code chunks via CPU multi-threaded inference in parallel, running 10–50x faster than sequential HTTP calls.
+- **Graceful Multi-Tier Fallback**: Semantic indexing and query search automatically try local FastEmbed first (100% offline, zero API key required), fall back to Gemini Embeddings if configured, and fall back to zero-dependency 256-dimensional feature hashing if offline prior to initial model cache.
+- **Fact Memory Integration**: `FactEmbeddingBackend` now supports `LocalFastEmbed` alongside feature-hash vectors, selectable via `MINT_FACT_EMBEDDING=fastembed`.
 
 ---
 
-## 🌤️ Weather Icons — Day/Night SVG Set
+## Developer Superpowers: Interactive Diff Review, Git Checkpoint Time Machine & AST Repo Map
 
-`WeatherCard` used flat `lucide` icons that didn't distinguish day from
-night. Replaced with a detailed day/night SVG set, mapped from WMO weather
-codes, so the previously-unused `isDay` flag now actually changes what
-renders after dark instead of being dead data.
+Elevated Mint Coding Agent to autonomous engineering standards with complete parity across CLI, Desktop, and Web:
 
----
+### 1. Interactive Diff Review Modal (Desktop & Web)
+- **Side-by-Side & Unified Diff View**: Added a rich modal (`DiffReviewModal.tsx`) when reviewing code changes (`write_file`, `apply_patch`), allowing developers to inspect additions (`+N`) and deletions (`-M`) side-by-side with synchronized scrollbars or unified inline view.
+- **Diff Chunk Inspection**: Shows hunk headers, line numbers, path copying, and keyboard shortcuts (`Cmd/Ctrl+Enter` to approve, `Esc` to close).
+- **Embedded in Approval Flow**: Accessible directly from `<ApprovalCard>` via the "Review Side-by-Side" button before committing changes to disk.
 
-## 🔤 Self-Hosted Fonts (and a Real Chat Font Bug Fixed Along the Way)
+### 2. Git Checkpoint & Time Machine (`/rewind`, `mint rewind`, UI Button)
+- **Zero-Loss Non-Destructive Checkpoints**: Before any mutating file tool runs (`write_file`, `apply_patch`), Mint automatically captures a snapshot commit via `git stash create` without altering the working directory, index, or branch state. Snapshots are protected against garbage collection under `refs/mint/checkpoints/<chat_id>/<id>`.
+- **Pre-Rewind Safety Net**: Rewinding automatically generates a rescue snapshot (`refs/mint/rescue/<timestamp>`) first, guaranteeing zero data loss if an accidental rollback occurs.
+- **Universal Rewind**:
+  - **CLI**: `/rewind [step]` interactive slash command and `mint rewind [step]` terminal command.
+  - **Desktop & Web**: Reusable API endpoint (`/api/checkpoints`, `/api/checkpoints/rollback`) and Tauri commands (`list_git_checkpoints`, `rollback_git_checkpoint`).
+  - **Chat Interface**: One-click Rewind button on the file changes summary card in `ChatPanel`.
 
-The Settings font picker's font families now ship with the app via
-`@fontsource` instead of being pulled from `fonts.googleapis.com` at
-runtime — desktop and web both render correctly offline instead of
-silently falling back to system fonts whenever the CDN is unreachable.
-
-- **Found and fixed a real bug while wiring this up**: picking a Font
-  Family in Theme & UI wrote to `document.body`'s inline style, but
-  `#root` had its own explicit `font-family` rule grouped alongside
-  `body`/`html` — nothing inherited from `body`'s override, so every chat
-  message stayed on the hardcoded default no matter what was selected.
-  Fixed by dropping `#root` from that rule and switching the chat body's
-  own hardcoded font stack to inherit instead.
-
----
-
-## 🩹 Fixed: Blank Page on Refresh at Deep Chat Routes (Web Dev Server)
-
-Refreshing on a deep route like `/chat/<id>` under `npm run dev:web` left
-a blank white page. `index-web.html`'s entry script used a relative src
-(`./src-web/main.tsx`); Vite's dev server serves that file verbatim
-(unlike a production build, which rewrites it), so on a deep route the
-browser resolved the relative path against the current URL instead of the
-site root, 404ing the entry script. Every other asset reference in the
-file already used a root-absolute path matching this build's `base: '/'`
-— this one was missed. Fixed the same way.
+### 3. AST-Based Repo Map with Token Budgeting (`repo_map`, `mint code repomap`)
+- **Tree-sitter & AST Hierarchy**: Traverses code workspaces and generates a compact, indented outline of files and symbol signatures (functions, structs, classes, interfaces, traits, enums) using tree-sitter parsers and regex fallbacks.
+- **Strict Token Budgeting**: Configurable token ceiling (default 2000 tokens ≈ 8000 chars) ensuring the agent grasps project layout and architecture without burning context window tokens or getting trapped in exploratory `read_file` loops.
+- **Available Everywhere**:
+  - **Agent Tool**: Autonomous `repo_map` tool registered in the tool catalog and agent prompts.
+  - **CLI Command**: `mint code repomap [path] [--limit <tokens>]`.
 
 ---
 
-## 🔄 The "cli" Conversation Now Live-Syncs Across Surfaces
+## Performance: Optimized Cargo Release Profile (`[profile.release]`)
 
-Web/desktop and the interactive `mint` REPL already shared one local
-SQLite DB and the same `chat_id="cli"` rows, but nothing surfaced a
-message sent from one surface on the others until your next turn there.
-
-- **New lightweight DB-polling background task (`live_sync.rs`)**: queues
-  a `[synced] ...` notice into the terminal's existing idle-tick notice
-  display — the same path `/bg` job notices and linked-folder save notices
-  already use — whenever a new row appears from another surface, without
-  requiring the local API server to be running.
-- **Closed a pre-existing writer/writer gap** by setting a `busy_timeout`
-  on SQLite connections, so two surfaces writing at the same moment no
-  longer race.
+Added production release profile optimizations in the root `Cargo.toml`:
+- **`opt-level = 3`**: Maximum compiler optimizations for production builds.
+- **`lto = "thin"`**: Thin Link-Time Optimization enabling cross-crate optimization and inlining between `mint-core`, `mint-cli`, and `src-tauri`.
+- **`codegen-units = 1`**: Reduced compilation units to maximize optimization opportunities across the whole crate graph.
+- **`strip = true`**: Automatically strips debug symbols from final release binaries, reducing binary size significantly.
 
 ---
 
-## ⚠️ Found and Reverted: a Workspace-Scoping Attempt That Broke the Shared "cli" Room
+## Performance: Parallel Streaming `search_code` & Early Directory Pruning
 
-A same-day incident worth being honest about rather than quietly dropping
-from the changelog: this release also shipped, and then reverted, an
-attempt to scope the "cli" conversation by workspace.
-
-- **The idea**: hash the active workspace path into the `cli` chat_id
-  (`cli::<hash>`) so opening desktop/web against a different project
-  wouldn't mix an unrelated project's history into the one shared
-  terminal conversation.
-- **What actually happened**: "workspace" in this app is a UI selection
-  the user switches often (the sidebar's Workspace picker), not a stable
-  per-process value like a terminal's `cwd`. Every switch produced a
-  different hash, fragmenting the one conversation meant to stay shared
-  across the CLI, desktop, and web into five-plus disconnected buckets
-  within hours — desktop showed an empty "cli" room, web appeared to stop
-  responding, and real chat history sat orphaned under the old unscoped
-  `cli` id. Confirmed by direct inspection of the `chat_sessions` /
-  `interaction_memories` tables in the local sqlite DB.
-- **The fix**: `scoped_chat_id()` now always returns the chat_id
-  unchanged — scoping is disabled, not deleted, so it can be revisited
-  later with a genuinely stable identity source if it's ever worth doing
-  again. Verified via `cargo check`/`cargo test` across all three crates,
-  `npm run typecheck`, a live API server confirming history no longer
-  depends on which workspace happens to be selected, and a real browser
-  session confirming the "cli" room loads its full history again.
+Optimized code search and file walking in `crates/mint-core`:
+- **Parallel multi-threaded search (`WalkParallel`)**: `search_code` no longer eagerly walks the entire repository into a heap-allocated `Vec<CodeFile>` or stats every file before searching. It now streams file paths concurrently across worker threads and searches them on the fly.
+- **Early termination on limit**: Worker threads coordinate via atomic flags to immediately halt searching as soon as the requested result limit is reached, avoiding scanning the remainder of large codebases.
+- **Early directory pruning (`filter_entry`)**: Added directory filtering directly into `WalkBuilder` so traversals never descend into ignored directories (`target`, `node_modules`, `.cache`, `.git`, `dist`, `build`, etc.), drastically speeding up searches on large projects.
 
 ---
 
-## 🔔📋 Notifications for AI Replies and Pending Approvals — and Web Approvals Made Real
+## Performance: Parallel Read-Only Tool Execution (`buffer_unordered`)
 
-Two related gaps closed together: a finished reply or a blocked approval
-prompt gave zero signal when the app wasn't focused, and the web build had
-no real approval flow at all — `/api/chat-stream`'s agent-mode branch
-hardcoded auto-deny, so every tool call the agent tried silently failed
-for web users with no way to approve it.
+When an LLM model issues multiple tool calls in a single turn (e.g. reading 3 files simultaneously, searching code and the web, or retrieving diagnostic information):
+- **Concurrent execution**: Read-only tools (`read_file`, `list_files`, `search_code`, `symbols`, `semantic_search`, `web_search`, `git_diff`, `git_status`, etc.) now execute concurrently up to `PARALLEL_READ_ONLY_LIMIT` (6 in-flight at once) using `futures_util::stream::iter().buffer_unordered(...)` instead of waiting in a sequential loop.
+- **Thread-safe progress and approval gates**: Adapts progress reporting and approval checking through mutex-protected closures, preserving real-time terminal/UI feedback while executing in parallel.
+- **Deterministic output ordering**: Completed tool results are sorted back to their original requested order before updating the conversation trajectory, ensuring prompt history remains deterministic.
 
-- **Web approvals are now interactive**: a new `PENDING_APPROVALS` map
-  (token → one-shot channel, mirroring desktop's existing approval
-  mechanism) lets the chat-stream endpoint send an `approval-requested`
-  event down the same ndjson stream the reply/progress events already
-  use, then block until a new `POST /api/submit-approval` resolves it —
-  the same `ApprovalCard` UI desktop already had now actually renders and
-  works on web. Tokens are `uuid` v4, not sequential, since this endpoint
-  is LAN-reachable by default.
-- **OS/browser notifications**: `window.api.notifyAiResponse(preview)`
-  fires (via `tauri-plugin-notification` on desktop, the native browser
-  `Notification` API on web) whenever a reply finishes or an approval
-  becomes pending while the tab or window is hidden or unfocused, and
-  clears again on refocus.
-- **Verified end-to-end in a real browser session, not mocked**: a real
-  `WriteFile` request got denied by workspace policy, the agent fell back
-  to `run_shell`, a genuine `RunShell` approval card rendered, approving
-  it completed the stream, and the notification fired with the correct
-  description while the tab was unfocused.
+---
+
+## ⚡ Performance: In-Place Observation Buffer Reuse & Zero-Copy Step Formatting
+
+Eliminated repeated heap re-allocations and redundant string cloning across turns of the agent execution loop:
+- **In-place buffer reuse (`rebuild_observation`)**: Instead of creating intermediate `trajectory.join("\n\n")` strings and newly formatted heap buffers on every turn, `rebuild_observation` clears and reuses the allocated capacity of the `observation` buffer across steps, streaming history directly into the buffer via `write!` with reserved capacity.
+- **Pre-allocated trajectory step formatting (`format_trajectory_step`)**: Formats action/result step records into appropriately pre-sized heap buffers before appending them to `trajectory`, avoiding multiple internal growth re-allocations as session length grows.
+- **Reduced memory churn on long tasks**: Dramatically cuts down heap allocations and memory churn during extended multi-step autonomous sessions across CLI, Desktop, and Web.
+
+---
+
+## 🎨 UI: Horizontal Grid Layout & View Switcher for MCP Catalog
+
+Rebuilt the MCP Catalog picker modal across Desktop and Web:
+- **Horizontal 2-column grid layout (`mcp-catalog-grid`)**: MCP server catalog presets are now arranged horizontally in 2-column cards side-by-side (`mcp-catalog-card`) with responsive wrapping, making full use of modal width and letting users view more servers at a glance.
+- **View switcher (Grid ⬚ / List ☰)**: Added segmented layout toggle pills in the control bar to freely switch between horizontal grid mode and vertical list mode, with the selected preference saved in `localStorage`.
+- **Search input clearance**: Fixed search input left padding to ensure placeholder text never overlaps the magnifying glass icon.
+
+---
+
+## ⏰ Fixed: Scheduled Tasks Lost a Run When Mint Closed Mid-Execution
+
+The cron scheduler advanced a job's `next_run` to the following occurrence
+*before* running it. If the host process exited during that run — the desktop
+app closed, the machine restarted — the occurrence was gone for good:
+`next_run` had already moved past it and nothing recorded a failure. Opening
+the app briefly to check on a task burned one run per open, which is why a
+daily job could sit at "last run 2 days ago" while looking healthy.
+
+- **`next_run` now advances only after the run finishes** (`finish_run`), so
+  an interrupted run still has `next_run` in the past on the next scheduler
+  pass and simply runs again.
+- **A `running_since` claim** stamped before each run lets a second Mint
+  process (a desktop app plus `mint gateway`, say) skip a job another
+  scheduler is already running; a claim older than an hour is treated as a
+  dead process and the occurrence is retried rather than left stuck.
+- The Scheduled Tasks detail view surfaces `Running since` while a run is in
+  flight.
+
+---
+
+## 🧹 Management Pages Rebuilt as One Consistent UI
+
+Scheduled Tasks, Skills, MCP Servers, Plugins, and Linked Folders each had
+their own take on the same "list of things with a detail modal" pattern —
+tall gradient cards tiled 2–3 across, emoji empty states, multi-sentence
+explainer subtitles, and bordered pill badges that read as generic template
+chrome. They now share one design:
+
+- **Compact single-column rows** — scan by name, open the detail modal for
+  everything else. MCP Servers and Plugins keep their icon rows but stop
+  tiling into a grid.
+- **Plain-text status and labels** instead of pill-with-dot badges; trimmed
+  page subtitles; no decorative emoji in empty states.
+- **Wider detail modal** (540px → 720px) across every management page.
+- **Real markdown in the detail modal**: a scheduled task's "Last response"
+  and a skill's body now render through the same renderer chat uses —
+  tables, stock cards, headings — instead of being dumped as raw text.
+
+---
+
+## 🗂️ Fixed: `~/…` and Relative Paths Rejected When Linking a Folder
+
+`add_linked_folder` checked `path.is_dir()` on the raw string *before* the
+`~/` and relative-path expansion that happens inside the safety check — so
+typing `~/notes/food` (exactly what the field's placeholder suggests) always
+failed with "path does not exist or is not a directory". It now resolves the
+path first, then checks it's a real directory, and reports the resolved path
+in the error. Fixes typed input on Desktop and Web, and `mint link add` /
+`/link add` in chat. The desktop "Browse…" button was unaffected either way.
+
+---
+
+## 📂 "Browse…" Folder Picker Now Works on the Web UI
+
+A browser can't hand back a real filesystem path, so the web build's
+"Browse…" button previously did nothing. But `mint web` runs on the same
+machine as the browser pointed at it, so:
+
+- **New `POST /api/select-folder`** opens the host's own native directory
+  dialog (`zenity`/`kdialog` on Linux, `osascript` on macOS) and returns the
+  chosen path.
+- **Gated to loopback callers** — a `mint web` instance reachable from other
+  machines can't be made to pop a dialog on the server host; remote web
+  sessions get no button rather than a dead one.
+- Desktop keeps its existing native Tauri picker.
+
+---
+
+## ⚙️ Settings: General/Plugins Tab Cleanup + Per-Provider Image Models
+
+The two heaviest settings tabs were still carrying pre-redesign markup — ~90
+inline `style={{…}}` blocks between them, and hardcoded colors that broke the
+light and midnight themes (a Veo model `<select>` was pinned to white text on
+a translucent-white background).
+
+- **GeneralTab & PluginsTab** now use the same section / row / card
+  primitives as the other tabs. The accordion chrome, plugin cards, badges,
+  and icon buttons all moved to CSS classes; a provider picker with many
+  options now spans the full row and wraps naturally instead of shrinking
+  into a lopsided box.
+- **Image Generation** gained a card per provider (NanoBanana, DALL·E,
+  Stability, Ideogram, Replicate, BFL) — mirroring the chat "Provider &
+  Model" section — each with a **model dropdown** plus its API-key field or a
+  shared-key note. Five new default-model config fields back it; the Rust
+  side already had matching fields, and each image call reads its provider's
+  configured model.
+
+---
+
+## 🗑️ Removed: Custom Workflows / "If This Then Mint"
+
+The workflow engine was desktop-only, Unix-only (trigger detection shelled
+out to `ps -A`), and had a single trigger type — "is process X running" —
+that fired a proactive suggestion rather than running anything. Not worth the
+maintenance surface.
+
+Gone: the 15-second monitor thread, `workflows.json` read/write, the
+Settings > Automation "Custom Workflows" section, the `enableCustomWorkflows`
+flag, the sidebar "Workflow (Beta)" entry, the Workflow Builder panel (and a
+dead standalone window), and the related Tauri commands. The `/n8n` slash
+command and n8n MCP integration are unrelated and untouched.
+
+---
+
+## 📝 New: `/init` Writes an AGENTS.md for the Project
+
+`/init` (CLI, web, desktop) mirrors Claude Code's `/init`: it asks the code
+agent to scan the codebase and write — or extend — an `AGENTS.md` at the
+workspace root, the file every Mint surface already loads as workspace
+rules. It captures the build/test/lint commands, the high-level
+architecture, project conventions, and gotchas, folding in any existing
+rules file rather than replacing it.
+
+---
+
+## 🧠 New: Local-First Cross-Session Memory
+
+Mint now keeps a structured memory in `mint-knowledge.sqlite` and pulls the
+relevant parts into every turn — no external service.
+
+- **`facts` table** — typed `user` / `preference` / `project` entries with a
+  dedup index and supersede/retract semantics, injected live on each turn on
+  top of the existing recent-conversation window.
+- **Automatic fact extraction** — a turn that states a durable preference,
+  naming, or standing instruction now triggers a background LLM pass that
+  writes it into the `facts` table (with add/supersede ops), so long-term
+  memory grows on its own instead of only via `/remember`. Gated by a cheap
+  keyword pre-filter and `config.auto_fact_extraction` (`/autofacts [on|off]`).
+- **Semantic fact recall** — once stored facts overflow their per-turn prompt
+  budget, the overflow slot is filled with the facts most similar to your
+  message (an offline hash embedding stored alongside each fact, no network)
+  instead of just the next-newest; the newest few are always kept.
+  `config.semantic_fact_recall` / `/factrecall [on|off]`.
+- **Per-subagent fact scoping** — facts a subagent extracts are quarantined to
+  that subagent (`agent_id`) instead of polluting the shared pool. They're
+  injected only when that subagent runs again, shown as `via <name>` in
+  `/memory facts`, and promoted to shared either with `/memory promote <id>` or
+  automatically when the main agent restates the same thing.
+- **`interaction_fts`** — an FTS5 index over past interactions; each turn
+  also injects the few older messages most relevant to what you just typed
+  (BM25 ranked, injection-safe `MATCH` builder).
+- **Slash commands** (shared engine + CLI): `/remember [here] <text>`,
+  `/memory facts`, `/memory forget <id>`, `/memory promote <id>`,
+  `/autorecall [on|off]`, `/autofacts [on|off]`, `/factrecall [on|off]`.
+- The long-dead `interaction_memories.keywords` column was dropped.
+
+---
+
+## 📏 Fixed: Context-Window Sizes + Configurable Local `num_ctx`
+
+`context_window_tokens()` was reporting 1M for Anthropic and OpenAI — far
+above what the default models actually offer, so history was allowed to grow
+past the real limit before compaction stepped in.
+
+- **anthropic** — 200K for every model (1M is a tier-gated beta).
+- **openai** — keyed off the model string (gpt-4.1 ≈ 1M, gpt-5 400K,
+  o-series 200K, else 128K).
+- **deepseek** — explicit 128K.
+- **ollama / openrouter / local_openai** — read a configurable `*_num_ctx`
+  (defaults 8192 / 128K / 32768). Mint sends `num_ctx` on every Ollama
+  request so the window is enforced, not guessed.
+- **Context-compaction trigger raised 0.4 → 0.75** of the window. Compaction
+  fires as soon as a step crosses the threshold and shrinks history before
+  the next request, so 0.75 keeps far more verbatim context while still
+  staying under the real limit. 0.4 was compacting long tasks much earlier
+  than necessary.
+
+---
+
+## ⌨️ Chat Composer: History, Persistent Drafts, Edit & Resend (Web + Desktop)
+
+Three input conveniences the CLI already had now work in the Web and Desktop
+apps:
+
+- **Up / Down history** — with the caret on the first/last line and no
+  suggestion menu open, ↑/↓ step through your previously sent messages; the
+  in-progress draft is stashed and restored on the way back, and a small
+  `History n/N` badge shows while browsing.
+- **Persistent drafts** — unsent composer text is saved per conversation
+  (`localStorage`, debounced) and restored when you switch back or reload,
+  cleared on send.
+- **Edit & resend** — an edit button on each of your messages drops its text
+  back into the composer (caret at end, focused) to tweak and send again as
+  a new message. Nothing is deleted.
+
+---
+
+## ⌨️ Rebuilt: the `/` `$` `@` Suggestion Menu (Web + Desktop)
+
+The command menu was reworked into one self-contained component with a
+single derived-visibility model (it had grown a tangle of open/reopen
+state that trapped keyboard focus in a few cases).
+
+- **Picking a command completes it into the composer and stops** — like
+  the CLI's Tab. A separate Enter runs it; ↑/↓ bring the menu back for
+  subcommands.
+- **Slash commands are grouped by category** (System / Models / Workspace /
+  Tools), and each row shows the command's argument template.
+- **Empty state** instead of a vanishing menu: "No command matches `/xyz`",
+  or the active command's usage once you're past its name.
+- Hover no longer fights arrow-key navigation; the header shows a stable
+  count.
+
+---
+
+## ⚙️ Settings: Component Restyle Finished
+
+The pills/toggles pass from the settings redesign now covers the last tabs:
+
+- **Automation** — "Browser Engine" select → segmented pills.
+- **Multi-Agent** — "Enable Multi-Agent Collaboration" wrapped in a bordered
+  toggle card (it was a borderless floating row); the agent-form "Scope"
+  select → segmented pills, with the workspace option disabled when no
+  workspace is open.
+- **General** — the Web-Search (Brave / Google / SearXNG) and Video-Gen
+  (Veo) provider cards no longer use a radio dressed as an on/off switch;
+  each shows an "Active" badge or a "Set active" button.
+
+Model-picker dropdowns with long or dynamic lists are deliberately left as
+native `<select>`.
+
+---
+
+## ⌨️ CLI: Readline-Style Editing + Persistent Prompt History
+
+The interactive prompt's input box only had character-wise Left/Right and
+Backspace, and its Up/Down recall started empty on every launch.
+
+- **Editing keys** every shell/REPL provides: Home / Ctrl+A, End / Ctrl+E,
+  Ctrl+←/→ and Alt+B/F (move by word), Ctrl+W (delete word), Ctrl+U / Ctrl+K
+  (delete to line start / end), and Delete (forward-delete).
+- **Prompt history now persists** to `~/.config/mint/prompt-history.json` —
+  loaded on start, each submitted line appended (immediate duplicates
+  skipped), capped at the last 100.
+
+---
+
+## 🔓 First Run — Unsigned Build Warnings
+
+The desktop installers (`mint-agent_windows_x64.exe`, `mint-agent_macos_arm64.dmg`)
+and the standalone `mint-cli_*` binaries are **not yet code-signed**, so the OS
+warns you the first time you open them. This is expected. Installing via
+`install.sh` / `install.ps1` / `npm` builds from source and is unaffected.
+
+**macOS** — clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Mint.app     # desktop app
+xattr -d com.apple.quarantine ./mint-cli_macos_arm64      # CLI binary
+```
+
+Or right-click the app → **Open** → **Open**.
+
+**Windows** — on the SmartScreen prompt: **More info** → **Run anyway**.

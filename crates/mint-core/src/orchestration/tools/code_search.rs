@@ -35,6 +35,12 @@ pub(in crate::orchestration) async fn execute(
             )
             .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
         }
+        "repo_map" => {
+            let path = workspace_path(root, &input.path)?;
+            let summary = crate::generate_repo_map(&path, input.limit.unwrap_or(2000), config)
+                .map_err(|e| OrchestrationError::Agent(e.to_string()))?;
+            Ok(summary.map)
+        }
         "semantic_index" => {
             let path = workspace_path(root, &input.path)?;
             Ok(serde_json::to_string_pretty(

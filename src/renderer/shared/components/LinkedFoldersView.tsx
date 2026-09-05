@@ -113,8 +113,7 @@ export const LinkedFoldersView: React.FC<LinkedFoldersViewProps> = React.memo(
               Linked Folders
             </h1>
             <p className="management-subtitle">
-              Folders you've linked to Mint. When chat touches on a linked folder's topic, the agent may write a
-              short note into its <code>mint-notes/</code> subfolder automatically.
+              Mint drops a note into <code>mint-notes/</code> when a chat matches a linked folder's topic.
             </p>
           </div>
           <button type="button" className="management-primary-btn" onClick={() => setShowAddModal(true)}>
@@ -153,48 +152,23 @@ export const LinkedFoldersView: React.FC<LinkedFoldersViewProps> = React.memo(
         {error && <div className="management-error-banner">{error}</div>}
 
         {loading ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted, #94a3b8)' }}>
-            Loading linked folders...
-          </div>
+          <div className="mgmt-empty">Loading…</div>
         ) : filteredFolders.length === 0 ? (
-          <div className="management-empty-state">
-            <div className="management-empty-icon">📁</div>
-            <h3 className="management-empty-title">No linked folders yet</h3>
-            <p className="management-empty-desc">
-              Link one above, or use <code>mint link add</code> / <code>/link add</code> in chat.
-            </p>
+          <div className="mgmt-empty">
+            <p>{searchQuery ? 'No linked folders match your search.' : 'No linked folders yet.'}</p>
+            {!searchQuery && <p>Link one above, or run <code>mint link add</code> in chat.</p>}
           </div>
         ) : (
-          <div className="management-grid">
+          <div className="mgmt-list">
             {filteredFolders.map((folder) => (
               <div
                 key={folder.name}
-                className="management-card"
+                className="mgmt-row"
                 onClick={() => setDetailFolder(folder)}
-                style={{ cursor: 'pointer' }}
               >
-                <div>
-                  <div className="management-card-header">
-                    <div className="management-card-title-group">
-                      {renderFolderIcon()}
-                      <h3 className="management-card-title">{folder.name}</h3>
-                    </div>
-                  </div>
-
-                  <p className="management-card-desc">{folder.description || 'No description'}</p>
-
-                  <div
-                    style={{
-                      fontSize: '0.8rem',
-                      color: 'var(--text-muted, #94a3b8)',
-                      marginTop: '8px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {folder.path}
-                  </div>
+                <div className="mgmt-row-main">
+                  <div className="mgmt-row-title">{folder.name}</div>
+                  <div className="mgmt-row-sub">{folder.path}</div>
                 </div>
               </div>
             ))}
@@ -220,11 +194,14 @@ export const LinkedFoldersView: React.FC<LinkedFoldersViewProps> = React.memo(
               </div>
 
               <div className="management-modal-body">
-                <p style={{ color: 'var(--text-soft, #d1d1d4)', lineHeight: 1.55 }}>
+                <p style={{ color: 'var(--text-soft, #d1d1d4)', lineHeight: 1.55, margin: 0 }}>
                   {detailFolder.description || 'No description'}
                 </p>
-                <div className="management-code-snippet" style={{ marginTop: '14px' }}>
-                  {detailFolder.path}
+                <div className="mgmt-detail-grid">
+                  <span>Path</span>
+                  <code>{detailFolder.path}</code>
+                  <span>Notes</span>
+                  <code>{detailFolder.path.replace(/\/$/, '')}/mint-notes/</code>
                 </div>
               </div>
 

@@ -53,14 +53,33 @@ pub struct MintConfig {
     pub openai_model: String,
     pub openrouter_api_key: String,
     pub openrouter_model: String,
+    /// Context window of the selected OpenRouter model, in tokens. OpenRouter
+    /// proxies models from ~4K to ~2M and the OpenAI chat API has no per-request
+    /// window parameter, so this is a planning value only (used by
+    /// `context_window_tokens` to time compaction) — set it to match the model
+    /// you picked. Overshooting OpenRouter's real limit is a visible request
+    /// error, not silent truncation.
+    pub openrouter_num_ctx: usize,
     pub deepseek_api_key: String,
     pub deepseek_model: String,
     pub hf_api_key: String,
     pub hf_model: String,
     pub local_api_base_url: String,
     pub local_model_name: String,
+    /// Context window your local OpenAI-compatible server (LM Studio, llama.cpp,
+    /// vLLM, …) loaded the model with, in tokens. The OpenAI chat API can't set
+    /// this per request, so Mint only uses it to time compaction — match it to
+    /// the value you loaded, since some servers (e.g. LM Studio's default
+    /// rolling-window policy) silently drop older tokens past it.
+    pub local_openai_num_ctx: usize,
     pub ollama_host: String,
     pub ollama_model: String,
+    /// Context window (`num_ctx`) Mint asks Ollama to allocate for its requests.
+    /// Ollama's own default is tiny (~4K) and it silently truncates anything
+    /// longer, so Mint sends this explicitly on every call and treats it as the
+    /// real window (`context_window_tokens`). Raise it to match your model and
+    /// hardware — the KV cache for a large window costs real RAM/VRAM.
+    pub ollama_num_ctx: usize,
     pub nanobanana_model: String,
     /// Active image-generation provider: "nanobanana" | "dalle" | "stability" | "ideogram" | "replicate"
     pub image_gen_provider: String,
@@ -105,6 +124,28 @@ pub struct MintConfig {
     /// self-improving-over-time behavior this exists for. See
     /// [`crate::orchestration::spawn_auto_skill_write`].
     pub auto_skill_writing: bool,
+    /// When true, each turn runs a full-text search over the current
+    /// conversation's older messages and injects the few most relevant to the
+    /// user's message into the prompt (on top of the always-included recent
+    /// window). On by default; `/autorecall off` or the Settings toggle disables
+    /// it. See [`crate::orchestration::render_recalled_messages`].
+    pub memory_recall: bool,
+    /// When true, a background LLM pass after each turn that looks like it
+    /// carries something worth remembering (`looks_fact_worthy`) extracts durable
+    /// facts/preferences the user stated and writes them into the long-term
+    /// `facts` table, so they ride every future turn. On by default (`/autofacts
+    /// off` disables it): like `auto_skill_writing` it costs an extra LLM call on
+    /// each qualifying turn, without interactive approval — that's the
+    /// self-evolving-memory behavior it exists for. See
+    /// [`crate::orchestration::spawn_auto_memory_update`].
+    pub auto_fact_extraction: bool,
+    /// When true and the stored facts overflow their per-turn prompt budget, the
+    /// overflow slot is filled with the facts most similar to the current
+    /// message (on-device embedding) instead of simply the next-newest ones; the
+    /// newest few are always kept regardless. On by default; `/factrecall off`
+    /// disables it (falls back to newest-first). Below the budget it has no
+    /// effect. See [`crate::orchestration::render_memory_facts`].
+    pub semantic_fact_recall: bool,
     /// User-defined OpenAI-compatible providers.
     pub custom_providers: Vec<CustomProvider>,
     /// Persistent "always allow"/"always deny" rules for agent-loop approvals,
@@ -305,14 +346,17 @@ impl Default for MintConfig {
             openai_model: "gpt-5.6-luna".into(),
             openrouter_api_key: String::new(),
             openrouter_model: "openai/gpt-5.6-terra".into(),
+            openrouter_num_ctx: 128_000,
             deepseek_api_key: String::new(),
             deepseek_model: "deepseek-v4-flash".into(),
             hf_api_key: String::new(),
             hf_model: "Qwen/Qwen3.6-27B".into(),
             local_api_base_url: String::new(),
             local_model_name: "local-model".into(),
+            local_openai_num_ctx: 32_768,
             ollama_host: String::new(),
             ollama_model: "llama3:latest".into(),
+            ollama_num_ctx: 8192,
             nanobanana_model: "gemini-3.1-flash-image".into(),
             image_gen_provider: "nanobanana".into(),
             dalle_model: "gpt-image-1".into(),
@@ -343,6 +387,9 @@ impl Default for MintConfig {
             agents: default_agents(),
             enable_agent_collaboration: false,
             auto_skill_writing: true,
+            memory_recall: true,
+            auto_fact_extraction: true,
+            semantic_fact_recall: true,
             custom_providers: Vec::new(),
             permission_rules: Vec::new(),
             avatar_relay_url: "https://relay.projectavatar.io".into(),
@@ -487,26 +534,46 @@ impl MintConfig {
     }
 
     /// A conservative estimate of the active provider's context window, in
-    /// tokens. Provider-level rather than tracking every exact model string,
-    /// except where two tiers within a provider differ enough to matter
-    /// (Anthropic's Haiku line vs. Opus/Sonnet/Fable). Erring smaller just
-    /// triggers context compaction earlier (safe); erring larger risks an
-    /// actual context-length error from the provider (not safe).
+    /// tokens. Provider-level, dropping to model-string checks only where one
+    /// provider's tiers differ enough to matter (OpenAI spans 128K–1M). Erring
+    /// smaller just triggers context compaction earlier (safe); erring larger
+    /// risks an actual context-length error from the provider (not safe).
     pub fn context_window_tokens(&self) -> usize {
         match self.ai_provider.as_str() {
-            "anthropic" => {
-                if self.anthropic_model.to_ascii_lowercase().contains("haiku") {
+            // Every current Claude model (Opus/Sonnet/Fable 5, Haiku 4.5) ships
+            // a 200K window by default. The 1M window is a tier-gated beta Mint
+            // does not opt into, so 200K is the figure to plan against.
+            "anthropic" => 200_000,
+            // Gemini 2.x / 3 Pro and Flash are all >= 1M.
+            "gemini" => 1_000_000,
+            // OpenAI spans a wide range — the GPT-4.1 family is ~1M, the GPT-5
+            // family 400K, the reasoning o-series 200K, GPT-4o and earlier
+            // 128K — so key off the model string and fall back to the smallest.
+            "openai" => {
+                let model = self.openai_model.to_ascii_lowercase();
+                if model.contains("gpt-4.1") {
+                    1_000_000
+                } else if model.contains("gpt-5") {
+                    400_000
+                } else if model.contains("o1") || model.contains("o3") || model.contains("o4") {
                     200_000
                 } else {
-                    1_000_000
+                    128_000
                 }
             }
-            "gemini" => 1_000_000,
-            "openai" => 1_000_000,
-            "ollama" => 8_000,
-            // Huggingface/OpenRouter/DeepSeek/local/custom endpoints proxy many
-            // different backing models with widely varying context windows —
-            // 128k is a conservative floor rather than a real measurement.
+            // DeepSeek V3 / R1 are documented at 128K.
+            "deepseek" => 128_000,
+            // Mint sends this exact `num_ctx` on every Ollama request (see
+            // `call_ollama`), so it *is* the window rather than a guess.
+            "ollama" => self.ollama_num_ctx,
+            // OpenRouter and local OpenAI-compatible servers (LM Studio,
+            // llama.cpp, vLLM, …) both span a huge range and expose no
+            // per-request window param, so each carries its own configurable
+            // planning value — see `openrouter_num_ctx` / `local_openai_num_ctx`.
+            "openrouter" => self.openrouter_num_ctx,
+            "local_openai" => self.local_openai_num_ctx,
+            // Huggingface's router proxies many backing models; 128K is a middle
+            // guess, not a measurement (likewise for an unknown custom endpoint).
             "huggingface" => 128_000,
             _ => 128_000,
         }
@@ -843,7 +910,6 @@ fn runtime_extra_defaults() -> BTreeMap<String, Value> {
         "updaterEndpoint": "",
         "updaterPublicKey": "",
         "enableVoiceReply": true,
-        "enableCustomWorkflows": true,
         "ttsProvider": "google",
         "ttsVolume": 1.0,
         "ttsSpeed": 1.0,
@@ -853,6 +919,8 @@ fn runtime_extra_defaults() -> BTreeMap<String, Value> {
         "pluginCalendarEnabled": false,
         "pluginGmailEnabled": false,
         "pluginNotionEnabled": false,
+        "pluginSpotifyEnabled": false,
+        "pluginGithubEnabled": false,
         "telegramBotToken": "",
         "enableTelegramBridge": false,
         "discordBotToken": "",
@@ -1013,24 +1081,76 @@ mod tests {
             }
             .context_window_tokens()
         };
-        // Default anthropic_model is claude-sonnet-5 (non-Haiku).
-        assert_eq!(window_for("anthropic"), 1_000_000);
+        assert_eq!(window_for("anthropic"), 200_000);
         assert_eq!(window_for("gemini"), 1_000_000);
-        assert_eq!(window_for("openai"), 1_000_000);
-        assert_eq!(window_for("ollama"), 8_000);
+        // Default openai_model is a GPT-5 family model.
+        assert_eq!(window_for("openai"), 400_000);
+        assert_eq!(window_for("deepseek"), 128_000);
+        assert_eq!(window_for("ollama"), 8_192); // default ollama_num_ctx
+        assert_eq!(window_for("local_openai"), 32_768); // default local_openai_num_ctx
         assert_eq!(window_for("huggingface"), 128_000);
-        assert_eq!(window_for("openrouter"), 128_000);
+        assert_eq!(window_for("openrouter"), 128_000); // default openrouter_num_ctx
         assert_eq!(window_for("custom:some-endpoint"), 128_000);
     }
 
     #[test]
-    fn context_window_tokens_uses_smaller_window_for_anthropic_haiku() {
-        let config = MintConfig {
-            ai_provider: "anthropic".into(),
-            anthropic_model: "claude-haiku-4-5".into(),
-            ..MintConfig::default()
+    fn context_window_tokens_is_200k_for_every_anthropic_model() {
+        for model in ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"] {
+            let config = MintConfig {
+                ai_provider: "anthropic".into(),
+                anthropic_model: model.into(),
+                ..MintConfig::default()
+            };
+            assert_eq!(config.context_window_tokens(), 200_000, "for {model}");
+        }
+    }
+
+    #[test]
+    fn context_window_tokens_tracks_configured_local_windows() {
+        assert_eq!(
+            MintConfig {
+                ai_provider: "ollama".into(),
+                ollama_num_ctx: 131_072,
+                ..MintConfig::default()
+            }
+            .context_window_tokens(),
+            131_072
+        );
+        assert_eq!(
+            MintConfig {
+                ai_provider: "openrouter".into(),
+                openrouter_num_ctx: 1_000_000,
+                ..MintConfig::default()
+            }
+            .context_window_tokens(),
+            1_000_000
+        );
+        assert_eq!(
+            MintConfig {
+                ai_provider: "local_openai".into(),
+                local_openai_num_ctx: 8_192,
+                ..MintConfig::default()
+            }
+            .context_window_tokens(),
+            8_192
+        );
+    }
+
+    #[test]
+    fn context_window_tokens_keys_off_the_openai_model_string() {
+        let window_for = |model: &str| {
+            MintConfig {
+                ai_provider: "openai".into(),
+                openai_model: model.into(),
+                ..MintConfig::default()
+            }
+            .context_window_tokens()
         };
-        assert_eq!(config.context_window_tokens(), 200_000);
+        assert_eq!(window_for("gpt-4.1-mini"), 1_000_000);
+        assert_eq!(window_for("gpt-5.6-luna"), 400_000);
+        assert_eq!(window_for("o3-pro"), 200_000);
+        assert_eq!(window_for("o4-mini"), 200_000);
+        assert_eq!(window_for("gpt-4o"), 128_000);
     }
 
     #[test]

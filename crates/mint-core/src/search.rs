@@ -4,6 +4,9 @@
 pub mod files;
 pub mod knowledge;
 pub mod linked_folders;
+pub mod local_embedding;
+pub mod repo_map;
 pub mod semantic;
 pub mod symbols;
+pub mod text_embedding;
 pub mod web_search;

@@ -25,7 +25,6 @@ export const DEFAULT_CONFIG = {
   proactiveInterval: 60,
   proactiveCooldown: 120,
   enableVoiceReply: true,
-  enableCustomWorkflows: true,
   enableAgentCollaboration: false,
   autoSkillWriting: false,
   ttsProvider: 'google',
@@ -35,7 +34,7 @@ export const DEFAULT_CONFIG = {
   voiceMode: 'legacy',
   geminiLiveModel: 'gemini-2.5-flash-native-audio-preview-12-2025',
   geminiLiveVoice: 'Puck',
-  pluginSpotifyEnabled: true,
+  pluginSpotifyEnabled: false,
   pluginCalendarEnabled: false,
   pluginGmailEnabled: false,
   pluginNotionEnabled: false,
@@ -103,6 +102,13 @@ export const DEFAULT_CONFIG = {
   stabilityApiKey: '',
   ideogramApiKey: '',
   replicateApiKey: '',
+  // Default model per image provider (used when a generation request doesn't
+  // override it). `bflModel` lives with the other bfl* fields above.
+  nanobananaModel: 'gemini-3.1-flash-image',
+  dalleModel: 'gpt-image-1',
+  stabilityModel: 'ultra',
+  ideogramModel: 'V_3',
+  replicateModel: 'black-forest-labs/flux-1.1-pro',
 
   // Video Generation Settings
   videoGenProvider: 'veo' as 'veo',

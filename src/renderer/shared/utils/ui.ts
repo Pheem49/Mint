@@ -14,15 +14,29 @@ export function numericSetting(value: unknown, fallback: number): number {
  * rather than back-and-forth replies in the same one. */
 const SESSION_GAP_MS = 30 * 60 * 1000
 
+export function parseUtcDate(value: unknown): Date {
+  if (!value) return new Date()
+  if (value instanceof Date) return value
+  if (typeof value !== 'string') return new Date(value as any)
+  let s = value.trim()
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
+    s = s.replace(' ', 'T') + 'Z'
+  } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(s)) {
+    s = s + 'Z'
+  }
+  const date = new Date(s)
+  return Number.isNaN(date.getTime()) ? new Date() : date
+}
+
 export function shouldShowSessionDivider(prevCreatedAt: unknown, createdAt: unknown): boolean {
-  const prev = new Date(prevCreatedAt as string).getTime()
-  const curr = new Date(createdAt as string).getTime()
+  const prev = parseUtcDate(prevCreatedAt).getTime()
+  const curr = parseUtcDate(createdAt).getTime()
   if (!Number.isFinite(prev) || !Number.isFinite(curr)) return false
   return Math.abs(curr - prev) > SESSION_GAP_MS
 }
 
 export function formatSessionDividerLabel(createdAt: unknown): string {
-  const date = new Date(createdAt as string)
+  const date = parseUtcDate(createdAt)
   if (Number.isNaN(date.getTime())) return ''
   const now = new Date()
   const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

@@ -11,6 +11,7 @@ import {
   listChatSessions,
   listSavedPictures,
   selectWorkspaceDirectory,
+  selectLinkedFolderPath,
   saveInteractionAgentActivity,
   streamChatMessage,
   cancelChatMessage,
@@ -34,7 +35,7 @@ import ModelPanel from '@/components/ModelPanel'
 import type { ModelInteraction } from '@/components/ModelPanel'
 import PicturesLibrary from '@/components/PicturesLibrary'
 import WorkspacePanel from '@/components/WorkspacePanel'
-import WorkflowBuilderPanel from '@/components/WorkflowBuilderPanel'
+import { CommandPalette } from './CommandPalette'
 import {
   errorMessage,
   readImage,
@@ -42,6 +43,7 @@ import {
   createTrimmedImagePreview,
   createObjectUrlPreview,
   applyThemeStyles,
+  parseUtcDate,
 } from '../utils/ui'
 import { executeSlashCommand } from '../utils/slashCommandProcessor'
 
@@ -66,6 +68,28 @@ import { DEFAULT_CONFIG } from '../constants/config'
 
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
 const ACTIVE_CONVERSATION_ID_KEY = 'mint:active-conversation-id'
+
+// Unsent composer text, stashed per conversation so switching chats or
+// reloading the page doesn't lose an in-progress message.
+const DRAFT_KEY_PREFIX = 'mint:draft:'
+const draftStorageKey = (id: string) => `${DRAFT_KEY_PREFIX}${id}`
+function readDraft(id: string | null | undefined): string {
+  if (!id) return ''
+  try {
+    return window.localStorage.getItem(draftStorageKey(id)) || ''
+  } catch {
+    return ''
+  }
+}
+function writeDraft(id: string | null | undefined, value: string) {
+  if (!id) return
+  try {
+    if (value) window.localStorage.setItem(draftStorageKey(id), value)
+    else window.localStorage.removeItem(draftStorageKey(id))
+  } catch {
+    /* private mode / quota — draft persistence is best-effort */
+  }
+}
 
 const SIDEBAR_DEFAULT_WIDTH = 264
 const SIDEBAR_MIN_WIDTH = 200
@@ -136,6 +160,7 @@ import {
   deleteLearnedSkill,
   detectSystemTools,
   reauthMcpServer,
+  listMcpServerTools,
   setProfileValue,
   listCronJobs,
   addCronJob,
@@ -281,7 +306,11 @@ export default function MintDashboard() {
   }, [conversationId, workspacePath])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState(() => readDraft(conversationId))
+  // When `conversationId` changes we swap `message` to that chat's saved draft;
+  // this ref tells the persist effect to skip the render right after that swap,
+  // so the outgoing chat's text is never written under the incoming chat's key.
+  const skipDraftPersistRef = useRef(false)
   const [interactions, setInteractions] = useState<any[]>([])
   const [pictures, setPictures] = useState<PictureEntry[]>([])
   const [sending, setSending] = useState(false)
@@ -363,7 +392,7 @@ export default function MintDashboard() {
     }
   }
 
-  const handleAddMcpServer = async () => {
+  const handleAddMcpServer = async (allowAll?: boolean) => {
     if (!mcpName.trim() || !mcpCmd.trim()) {
       alert('Please provide at least a server name and command.')
       return
@@ -379,19 +408,35 @@ export default function MintDashboard() {
       }
     }
 
+    const name = mcpName.trim()
     const argList = mcpArgs.split(/\s+/).filter(Boolean)
     const currentConfig = settingsConfig || DEFAULT_CONFIG
-    const updatedMcp = {
-      ...currentConfig?.mcpServers,
-      [mcpName.trim()]: {
-        command: mcpCmd.trim(),
-        args: argList,
-        env: parsedEnv,
-        icon: mcpIcon.trim() || undefined,
+    const updated: any = {
+      ...currentConfig,
+      mcpServers: {
+        ...currentConfig?.mcpServers,
+        [name]: {
+          command: mcpCmd.trim(),
+          args: argList,
+          env: parsedEnv,
+          icon: mcpIcon.trim() || undefined,
+        },
       },
     }
+    if (allowAll) {
+      updated.allowedMcpTools = { ...(currentConfig?.allowedMcpTools || {}), [name]: ['*'] }
+    }
 
-    await handleUpdateSettingsField('mcpServers', updatedMcp)
+    setSettingsConfig(updated)
+    if ((window as any).settingsApi) {
+      await (window as any).settingsApi.saveSettings(updated)
+    } else {
+      try {
+        await setProfileValue('user-settings', JSON.stringify(updated))
+      } catch (e) {
+        console.error('Failed to save settings field:', e)
+      }
+    }
     setMcpName('')
     setMcpCmd('')
     setMcpArgs('')
@@ -446,6 +491,30 @@ export default function MintDashboard() {
     interactionsRef.current = interactions
   }, [interactions])
 
+  // Load the saved draft whenever the active conversation changes. Declared
+  // before the persist effect so it runs first within the same commit. The
+  // first run is a no-op: `message`'s initial value already came from the
+  // lazy `useState` initializer above.
+  const draftLoadedRef = useRef(false)
+  useEffect(() => {
+    if (!draftLoadedRef.current) {
+      draftLoadedRef.current = true
+      return
+    }
+    skipDraftPersistRef.current = true
+    setMessage(readDraft(conversationId))
+  }, [conversationId])
+
+  // Persist the composer text for the current conversation (debounced).
+  useEffect(() => {
+    if (skipDraftPersistRef.current) {
+      skipDraftPersistRef.current = false
+      return
+    }
+    const timer = window.setTimeout(() => writeDraft(conversationId, message), 300)
+    return () => window.clearTimeout(timer)
+  }, [message, conversationId])
+
   useEffect(() => {
     if (view !== 'chat' || !conversationId) return
     const interval = window.setInterval(async () => {
@@ -485,7 +554,7 @@ export default function MintDashboard() {
         return
       }
 
-      const date = new Date(dateStr)
+      const date = parseUtcDate(dateStr)
       const today = new Date()
       const yesterday = new Date()
       yesterday.setDate(today.getDate() - 1)
@@ -1491,7 +1560,6 @@ export default function MintDashboard() {
           isSearchOpen={isSearchOpen}
           onSetSearchOpen={setIsSearchOpen}
           showWorkspaceTab={isDesktopApp}
-          hasWorkflowsTab={isDesktopApp}
           promoteMediaStudios={!isDesktopApp}
         />
         <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspace' ? '' : 'model-hidden'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' || view === 'pictures' || view === 'imagine' || view === 'veo') ? { display: 'none' } : undefined}>
@@ -1560,7 +1628,7 @@ export default function MintDashboard() {
             expressionIndex={expressionIndex}
             accessoryIndex={accessoryIndex}
             isLocked={isLocked}
-            isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'workflows' && view !== 'imagine' && view !== 'veo' && view !== 'skills' && view !== 'mcp' && view !== 'plugins'}
+            isActive={modelVisible && view !== 'pictures' && view !== 'workspace' && view !== 'imagine' && view !== 'veo' && view !== 'skills' && view !== 'mcp' && view !== 'plugins'}
             layoutPreset={layoutPreset}
             sending={sending}
             interactionEnabled={interactionEnabled}
@@ -1657,6 +1725,7 @@ export default function MintDashboard() {
               handleRemoveMcpServer={handleRemoveMcpServer}
               detectTools={detectSystemTools}
               onReauth={reauthMcpServer}
+              listServerTools={listMcpServerTools}
             />
           </div>
         )}
@@ -1686,7 +1755,9 @@ export default function MintDashboard() {
               listLinkedFolders={listLinkedFolders}
               addLinkedFolder={addLinkedFolder}
               removeLinkedFolder={removeLinkedFolder}
-              selectFolder={selectWorkspaceDirectory}
+              // Desktop: native Tauri picker. Web: asks `mint web` (same
+              // machine) to open its own dialog via a loopback-gated route.
+              selectFolder={selectLinkedFolderPath}
             />
           </div>
         )}
@@ -1708,10 +1779,6 @@ export default function MintDashboard() {
           }}
           onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
         />
-        <WorkflowBuilderPanel
-          view={view}
-          onShowToast={showToast}
-        />
       </div>
       <div className={`startup-loading ${startupReady ? 'is-hidden' : ''}`} aria-live="polite" aria-busy={!startupReady}>
         <div className="startup-loading-content">
@@ -1731,76 +1798,42 @@ export default function MintDashboard() {
         </div>
       )}
 
-      {isSearchOpen && (
-        <div className="sidebar-search-modal-backdrop" onClick={() => setIsSearchOpen(false)}>
-          <div className="sidebar-search-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="search-modal-header">
-              <span className="search-icon-wrapper">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                </svg>
-              </span>
-              <input
-                type="text"
-                placeholder="Search chats..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                autoFocus
-              />
-              <button className="search-modal-close" onClick={() => setIsSearchOpen(false)}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
-            </div>
-            
-            <div className="search-modal-body">
-              <button
-                className="search-new-chat-btn"
-                onClick={() => {
-                  clearHistory('New chat')
-                  setIsSearchOpen(false)
-                }}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                <span>New Chat</span>
-              </button>
-
-              <div className="search-modal-results">
-                {Object.keys(groupedSearchSessions).length > 0 ? (
-                  Object.entries(groupedSearchSessions).map(([groupName, sessions]) => (
-                    <div key={groupName} className="search-results-group">
-                      <div className="search-group-title">{groupName}</div>
-                      {sessions.map((session) => (
-                        <button
-                          key={session.id}
-                          className={`search-result-item ${session.id === conversationId ? 'active' : ''}`}
-                          onClick={() => {
-                            selectConversation(session.id)
-                            setIsSearchOpen(false)
-                          }}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                          </svg>
-                          <span className="search-result-title">{session.title || 'New chat'}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ))
-                ) : (
-                  <div className="search-no-results">No matching chats found</div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <CommandPalette
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        onSelectChat={(chatId) => {
+          selectConversation(chatId)
+          setIsSearchOpen(false)
+        }}
+        onNewChat={() => {
+          clearHistory('New chat')
+          setIsSearchOpen(false)
+        }}
+        onSelectWorkspace={isDesktopApp ? selectWorkspace : undefined}
+        onOpenSettings={() => {
+          changeView('settings')
+          setIsSearchOpen(false)
+        }}
+        onChangeView={(targetView) => {
+          changeView(targetView)
+          setIsSearchOpen(false)
+        }}
+        onChangeModel={(model) => {
+          handleUpdateSettingsField('model', model)
+          setToastMessage(`Switched model to ${model}`)
+        }}
+        onChangeProvider={(provider) => {
+          handleUpdateSettingsField('provider', provider)
+          setToastMessage(`Switched provider to ${provider}`)
+        }}
+        onExecuteSlash={(cmd) => {
+          setMessage(cmd + ' ')
+          setIsSearchOpen(false)
+        }}
+        chatSessions={chatSessions}
+        currentChatId={conversationId}
+        workspacePath={workspacePath}
+      />
     </div>
   )
 }

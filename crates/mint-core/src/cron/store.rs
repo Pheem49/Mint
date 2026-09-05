@@ -4,7 +4,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -54,6 +54,15 @@ pub struct CronJob {
     pub last_run_at: Option<String>,
     pub last_status: Option<String>,
     pub last_summary: Option<String>,
+    /// RFC3339 timestamp of when a scheduler claimed the current occurrence,
+    /// or `None` when the job is idle. Set by [`CronStore::claim_run`] right
+    /// before a run starts and cleared by [`CronStore::finish_run`] once it
+    /// finishes. A second Mint process's scheduler skips a job whose claim is
+    /// still fresh; a stale claim (see `scheduler::tick`) means the claimer
+    /// died mid-run, so the occurrence is retried rather than lost. Defaults
+    /// to `None` for job files written before this field existed.
+    #[serde(default)]
+    pub running_since: Option<String>,
 }
 
 /// Request body shape for creating a job from the GUI/API layer (Tauri
@@ -123,6 +132,7 @@ impl CronStore {
             last_run_at: None,
             last_status: None,
             last_summary: None,
+            running_since: None,
         };
         let mut jobs = self.list()?;
         jobs.push(job.clone());
@@ -185,18 +195,34 @@ impl CronStore {
         self.mutate(id, |job| job.enabled = enabled)
     }
 
-    /// Moves `next_run` forward to the next occurrence after now, *before*
-    /// the job actually runs — so a job whose execution outlasts the
-    /// scheduler's tick interval can't be picked up and re-fired a second
-    /// time on the following tick.
-    pub fn advance_next_run(&self, id: &str) -> Result<Option<CronJob>, CronError> {
+    /// Marks `id` as running *now* by stamping `running_since`, so a second
+    /// Mint process's scheduler leaves this occurrence alone while the claim
+    /// is fresh (see [`crate::cron::scheduler`]). Paired with
+    /// [`CronStore::finish_run`], which clears the stamp and advances the
+    /// schedule once the run has actually completed.
+    pub fn claim_run(&self, id: &str, now: DateTime<Utc>) -> Result<Option<CronJob>, CronError> {
+        self.mutate(id, |job| {
+            job.running_since = Some(now.to_rfc3339());
+        })
+    }
+
+    /// Releases the claim taken by [`CronStore::claim_run`] and moves
+    /// `next_run` forward to the next occurrence after now. Advancing *after*
+    /// the run (rather than before) means a run interrupted by the process
+    /// exiting still has `next_run` in the past on the next scheduler pass, so
+    /// it runs again instead of being skipped for good. If the schedule has no
+    /// further occurrence (a one-time job whose time has passed), the job is
+    /// disabled so it stops being "due" on every tick.
+    pub fn finish_run(&self, id: &str) -> Result<Option<CronJob>, CronError> {
         let mut jobs = self.list()?;
         let Some(job) = jobs.iter_mut().find(|job| job.id == id) else {
             return Ok(None);
         };
-        let next = next_run_after(&job.schedule, Utc::now())
-            .map_err(|message| CronError::InvalidSchedule(job.schedule.clone(), message))?;
-        job.next_run = next.to_rfc3339();
+        job.running_since = None;
+        match next_run_after(&job.schedule, Utc::now()) {
+            Ok(next) => job.next_run = next.to_rfc3339(),
+            Err(_) => job.enabled = false,
+        }
         let updated = job.clone();
         self.write(&jobs)?;
         Ok(Some(updated))
@@ -319,6 +345,47 @@ mod tests {
         assert!(store.remove(&job.id).unwrap());
         assert!(store.get(&job.id).unwrap().is_none());
         assert!(!store.remove(&job.id).unwrap());
+    }
+
+    #[test]
+    fn claim_run_stamps_and_finish_run_clears_and_advances() {
+        let store = temp_store();
+        let job = store
+            .add("job", "0 8 * * *", "task", PathBuf::from("/tmp"))
+            .unwrap();
+        assert!(job.running_since.is_none());
+
+        let claimed = store.claim_run(&job.id, Utc::now()).unwrap().unwrap();
+        assert!(claimed.running_since.is_some());
+        // A fresh claim is what makes a concurrent scheduler skip the job.
+        assert!(store.get(&job.id).unwrap().unwrap().running_since.is_some());
+
+        let finished = store.finish_run(&job.id).unwrap().unwrap();
+        assert!(finished.running_since.is_none());
+        // A recurring job stays enabled with a valid future `next_run`.
+        assert!(finished.enabled);
+        let next = DateTime::parse_from_rfc3339(&finished.next_run).unwrap();
+        assert!(next.with_timezone(&Utc) > Utc::now());
+    }
+
+    #[test]
+    fn finish_run_disables_a_job_with_no_upcoming_occurrence() {
+        let store = temp_store();
+        // `add` computes the first `next_run`, so it rejects a fully-past
+        // one-time schedule outright — create a recurring job, then rewrite
+        // its schedule to a 7-field form pinned to a year in the past.
+        let job = store
+            .add("once", "0 12 * * *", "task", PathBuf::from("/tmp"))
+            .unwrap();
+        store
+            .mutate(&job.id, |job| {
+                job.schedule = "0 0 12 1 1 * 2000".to_string();
+            })
+            .unwrap();
+
+        let finished = store.finish_run(&job.id).unwrap().unwrap();
+        assert!(!finished.enabled);
+        assert!(finished.running_since.is_none());
     }
 
     #[test]

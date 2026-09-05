@@ -48,6 +48,7 @@ import type {
   CronJobDraft,
   LinkedFolder,
   LinkedFolderDraft,
+  GitCheckpoint,
 } from '../shared/types'
 
 
@@ -287,6 +288,14 @@ export async function detectSystemTools(): Promise<DetectedTools> {
 export async function reauthMcpServer(serverName: string): Promise<boolean> {
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<boolean>('reauth_mcp_server', { serverName })
+}
+
+/** Tool names a configured MCP server exposes — feeds the "Discover tools"
+ *  picker in the MCP tool-allowlist UI. Spawns/uses the server's stdio
+ *  session, so it can be slow or fail if the server is unreachable. */
+export async function listMcpServerTools(name: string): Promise<string[]> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('list_mcp_server_tools', { name })
 }
 
 export async function uploadFile(file: File): Promise<string> {
@@ -1149,6 +1158,12 @@ export async function selectWorkspaceDirectory(): Promise<string | null> {
   return selected?.trim() || null
 }
 
+/** Folder picker for the Linked Folders "Browse…" button. On desktop this is
+ * the same native Tauri picker used for workspace selection. */
+export async function selectLinkedFolderPath(): Promise<string | null> {
+  return selectWorkspaceDirectory()
+}
+
 export async function submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void> {
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
     const API_BASE = getLocalApiBase();
@@ -1236,8 +1251,6 @@ export function installTauriAdapters() {
       quitApp: () => {},
       openExternal: () => {},
       openFolder: () => {},
-      openCustomWorkflows: () => {},
-      reloadCustomWorkflows: () => {},
     };
 
     (window as any).spotlightAPI = {
@@ -1485,18 +1498,6 @@ export function installTauriAdapters() {
       const { invoke } = await import('@tauri-apps/api/core')
       return invoke('open_folder', { path })
     },
-    openCustomWorkflows: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('open_workflows_file')
-    },
-    reloadCustomWorkflows: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('reload_custom_workflows')
-    },
-    saveCustomWorkflows: async (workflows) => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('save_custom_workflows', { workflows })
-    },
   }
 
   window.spotlightAPI = {
@@ -1622,10 +1623,6 @@ export function installTauriAdapters() {
     deleteSavedPicture,
     openSettings: async () => {
       window.location.hash = '#/settings'
-    },
-    openWorkflows: async () => {
-      const { invoke } = await import('@tauri-apps/api/core')
-      return invoke('open_window', { kind: 'workflows' })
     },
     readClipboard: () => navigator.clipboard.readText(),
     writeClipboard: (text) => navigator.clipboard.writeText(text),
@@ -2091,8 +2088,58 @@ export async function videoAiEdit(req: VideoAiEditRequest): Promise<AiEditVideoR
   return videoEditPost<AiEditVideoResult>('/video/ai-edit', req)
 }
 
+export async function listGitCheckpoints(chatId: string): Promise<GitCheckpoint[]> {
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase()
+    try {
+      const res = await authFetch(`${API_BASE}/checkpoints?chatId=${encodeURIComponent(chatId)}`)
+      if (!res.ok) return []
+      return await res.json()
+    } catch (e) {
+      console.error('Failed to list git checkpoints:', e)
+      return []
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('list_git_checkpoints', { chatId })
+}
 
+export async function rollbackGitCheckpoint(
+  chatId: string,
+  step: number,
+  workspacePath?: string,
+): Promise<{ status: string; message: string }> {
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase()
+    try {
+      const res = await authFetch(`${API_BASE}/checkpoints/rollback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, step, workspacePath }),
+      })
+      return await res.json()
+    } catch (e: any) {
+      console.error('Failed to rollback git checkpoint:', e)
+      return { status: 'error', message: e?.message || String(e) }
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  try {
+    const message = await invoke<string>('rollback_git_checkpoint', {
+      chatId,
+      step,
+      workspacePath,
+    })
+    return { status: 'ok', message }
+  } catch (e: any) {
+    return { status: 'error', message: e?.message || String(e) }
+  }
+}
 
+export const readWorkspaceFile = async (path: string): Promise<string> => {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('read_workspace_file', { path })
+}
 
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
@@ -2134,10 +2181,13 @@ const _apiCheck: MintPlatformApi = {
   createWorkspaceFolder,
   deleteWorkspaceItem,
   selectWorkspaceDirectory,
+  selectLinkedFolderPath,
   submitToolApproval,
   proposeCodeEdits,
   applyCodeEdits,
   listen,
   readClipboardImage,
+  listGitCheckpoints,
+  rollbackGitCheckpoint,
+  readWorkspaceFile,
 }
-

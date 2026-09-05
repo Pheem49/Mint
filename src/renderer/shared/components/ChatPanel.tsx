@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback, Fragment, type ChangeEvent, type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type RefObject } from 'react'
 import { hasAgentToolActivity, thoughtsFrom, parseFileChangesFromProgress } from '../agentProgress'
 import {
   GEMINI_MODELS,
@@ -13,7 +13,7 @@ import {
 } from '../constants/models'
 import { badge, providerLabel, fallbackNotice } from '../utils/providers'
 import { activitiesFrom, parseWebSearchSources, type AgentActivity, type AgentActivityView } from '../utils/agentActivity'
-import { SLASH_COMMANDS } from '../constants/slashCommands'
+import SlashSuggestions, { type SlashSuggestionsHandle } from './SlashSuggestions'
 import { AgentActivityTable } from './AgentActivityTable'
 import { ChatCodeBlock } from './ChatCodeBlock'
 import { renderApprovalDetails, renderDiff, type ApprovalDetails } from '../utils/approval'
@@ -23,6 +23,7 @@ import { ThinkingBlock } from './ThinkingBlock'
 import SourcesBlock from './SourcesBlock'
 import ChatMessageItem from './ChatMessageItem'
 import { AgentActivityDrawer } from './AgentActivityDrawer'
+import { ArtifactPreviewPanel, type ArtifactFile } from './ArtifactPreviewPanel'
 import type { DiffHunk, FileChange } from '../types'
 import { numericSetting, shouldShowSessionDivider, formatSessionDividerLabel } from '../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
@@ -32,8 +33,6 @@ import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documen
 
 import {
   APP_ICON_PATH,
-  listLearnedSkills,
-  type LearnedSkill,
   type AgentProgress,
   type ChatResponse,
   type RuntimeStatus,
@@ -41,6 +40,8 @@ import {
   startGeminiLiveSession,
   sendGeminiLiveAudioChunk,
   stopGeminiLiveSession,
+  listGitCheckpoints,
+  rollbackGitCheckpoint,
 } from '@/tauri'
 
 
@@ -161,6 +162,7 @@ export default function ChatPanel({
   const [openActivityIds, setOpenActivityIds] = useState<Record<string, boolean>>({})
   const [openReviewIds, setOpenReviewIds] = useState<Record<string, boolean>>({})
   const [openFileDiffs, setOpenFileDiffs] = useState<Record<string, boolean>>({})
+  const [activeArtifact, setActiveArtifact] = useState<ArtifactFile | null>(null)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
@@ -410,121 +412,82 @@ export default function ChatPanel({
   const workspaceName = workspacePath
     ? workspacePath.split(/[\\/]/).filter(Boolean).pop() || workspacePath
     : 'Select Project'
-  const [skillsList, setSkillsList] = useState<LearnedSkill[]>([])
-  const [slashMenuOpen, setSlashMenuOpen] = useState(true)
-  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
-  const slashMenuRef = useRef<HTMLDivElement>(null)
-  const slashListRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const slashRef = useRef<SlashSuggestionsHandle>(null)
 
-  const isSlashInput = message.trimStart().startsWith('/')
-  const isSkillInput = message.trimStart().startsWith('$')
-  const atMatch = message.match(/@([\w\-\.\/]*)$/)
-  const isAtInput = Boolean(atMatch)
-  const atQuery = atMatch ? atMatch[1].toLowerCase() : ''
-
-  const CONTEXT_SUGGESTIONS = [
-    { label: '@workspace', desc: 'Include workspace path & context', type: 'context' as const },
-    { label: '@file', desc: 'Reference workspace file', type: 'context' as const },
-    { label: '@docs', desc: 'Include documentation context', type: 'context' as const },
-    { label: '@memory', desc: 'Include long-term memory store', type: 'context' as const },
-  ]
-
-  const mcpSuggestions = Object.entries(settingsConfig?.mcpServers || {})
-    .filter(([, srv]: [string, any]) => srv?.disabled !== true)
-    .map(([name]) => ({
-      label: `@${name}`,
-      desc: 'Restrict this message to this MCP server/plugin',
-      type: 'plugin' as const,
-    }))
-
-  const filteredContexts = isAtInput
-    ? [...CONTEXT_SUGGESTIONS, ...mcpSuggestions].filter((item) => item.label.toLowerCase().includes(atQuery))
-    : []
-
-  useEffect(() => {
-    let isMounted = true
-    listLearnedSkills(workspacePath)
-      .then((res) => {
-        if (isMounted && Array.isArray(res)) setSkillsList(res)
-      })
-      .catch(() => {})
-    return () => { isMounted = false }
-  }, [workspacePath, isSkillInput])
-
-  const slashQuery = isSlashInput ? message.trimStart().toLowerCase() : ''
-  const filteredSlashCommands = isSlashInput
-    ? SLASH_COMMANDS.filter((c) => c.command.toLowerCase().startsWith(slashQuery))
-    : []
-
-  const skillQuery = isSkillInput ? message.trimStart().slice(1).toLowerCase() : ''
-  const filteredSkills = isSkillInput
-    ? skillsList.filter((s) => s.name.toLowerCase().startsWith(skillQuery))
-    : []
-
-  const showSuggestionMenu = slashMenuOpen && (
-    (isSlashInput && filteredSlashCommands.length > 0) ||
-    (isSkillInput && filteredSkills.length > 0) ||
-    (isAtInput && filteredContexts.length > 0)
-  )
-
-  const suggestionCount = isSlashInput
-    ? filteredSlashCommands.length
-    : isSkillInput
-    ? filteredSkills.length
-    : filteredContexts.length
-
-  useEffect(() => {
-    if (isSlashInput || isSkillInput || isAtInput) {
-      setSlashMenuOpen(true)
-      setSlashSelectedIndex(0)
+  // Up/Down input history: recall previously submitted prompts (parity with the CLI).
+  // `historyIndex` counts back from the newest entry — 0 is the most recent, null
+  // means "editing the live draft". The draft is stashed the moment browsing starts.
+  const promptHistory = useMemo(() => {
+    const out: string[] = []
+    for (const it of interactions) {
+      if (it?.provider === 'system') continue
+      const text = typeof it?.userText === 'string' ? it.userText.trim() : ''
+      if (!text) continue
+      if (out[out.length - 1] === text) continue
+      out.push(text)
     }
-  }, [message])
+    return out
+  }, [interactions])
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null)
+  const historyDraftRef = useRef('')
 
-  useEffect(() => {
-    if (showSuggestionMenu && slashListRef.current) {
-      const activeItem = slashListRef.current.children[slashSelectedIndex] as HTMLElement
-      if (activeItem) {
-        activeItem.scrollIntoView({ block: 'nearest' })
-      }
+  const applyHistoryValue = (value: string) => {
+    onSetMessage(value)
+    setTimeout(() => {
+      const el = textareaRef.current
+      if (!el) return
+      resizeInput(el)
+      const end = el.value.length
+      el.setSelectionRange(end, end)
+      el.focus()
+    }, 0)
+  }
+  const navigateHistoryPrev = () => {
+    if (promptHistory.length === 0) return false
+    if (historyIndex === null) {
+      historyDraftRef.current = message
+      setHistoryIndex(0)
+      applyHistoryValue(promptHistory[promptHistory.length - 1])
+      return true
     }
-  }, [slashSelectedIndex, showSuggestionMenu])
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        slashMenuRef.current &&
-        !slashMenuRef.current.contains(event.target as Node) &&
-        textareaRef.current &&
-        !textareaRef.current.contains(event.target as Node)
-      ) {
-        setSlashMenuOpen(false)
-      }
+    if (historyIndex + 1 < promptHistory.length) {
+      const next = historyIndex + 1
+      setHistoryIndex(next)
+      applyHistoryValue(promptHistory[promptHistory.length - 1 - next])
     }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  const selectSlashCommand = (cmd: string) => {
-    onSetMessage(cmd + ' ')
-    setSlashMenuOpen(false)
-    setSlashSelectedIndex(0)
-    setTimeout(() => textareaRef.current?.focus(), 0)
+    return true
+  }
+  // "Edit" on a past user message: drop its text back into the composer so it
+  // can be tweaked and sent again as a new message (nothing is deleted).
+  const handleEditMessage = (text: string) => {
+    setHistoryIndex(null)
+    applyHistoryValue(text)
+  }
+  const navigateHistoryNext = () => {
+    if (historyIndex === null) return false
+    if (historyIndex === 0) {
+      setHistoryIndex(null)
+      applyHistoryValue(historyDraftRef.current)
+      return true
+    }
+    const next = historyIndex - 1
+    setHistoryIndex(next)
+    applyHistoryValue(promptHistory[promptHistory.length - 1 - next])
+    return true
   }
 
-  const selectSkillCommand = (name: string) => {
-    onSetMessage('$' + name + ' ')
-    setSlashMenuOpen(false)
-    setSlashSelectedIndex(0)
-    setTimeout(() => textareaRef.current?.focus(), 0)
-  }
-
-  const selectAtCommand = (label: string) => {
-    const nextMsg = message.replace(/@[\w\-\.\/]*$/, label + ' ')
-    onSetMessage(nextMsg)
-    setSlashMenuOpen(false)
-    setSlashSelectedIndex(0)
-    setTimeout(() => textareaRef.current?.focus(), 0)
+  // Fill a menu pick into the composer (never submits — a separate Enter runs
+  // it). The <SlashSuggestions> child owns all the menu state; this only writes
+  // the completed text back and refocuses.
+  const completeSuggestion = (text: string) => {
+    onSetMessage(text)
+    setTimeout(() => {
+      const el = textareaRef.current
+      if (!el) return
+      resizeInput(el)
+      el.focus()
+    }, 0)
   }
 
   const submitOnEnter = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -533,39 +496,46 @@ export default function ChatPanel({
     event.currentTarget.form?.requestSubmit()
   }
   const handleInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (showSuggestionMenu) {
-      if (event.key === 'ArrowDown') {
+    const isPlainArrowNav =
+      (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
+      !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey &&
+      !event.nativeEvent.isComposing
+
+    // History browsing wins over the suggestion menu: once it's started, ↑/↓
+    // keep stepping through history even if a recalled slash/@ entry would
+    // otherwise open the menu (the menu is `suppressed` while browsing anyway).
+    if (
+      isPlainArrowNav && historyIndex !== null &&
+      event.currentTarget.selectionStart === event.currentTarget.selectionEnd
+    ) {
+      if (event.key === 'ArrowUp' ? navigateHistoryPrev() : navigateHistoryNext()) {
         event.preventDefault()
-        setSlashSelectedIndex((prev) => (prev + 1) % suggestionCount)
-        return
-      }
-      if (event.key === 'ArrowUp') {
-        event.preventDefault()
-        setSlashSelectedIndex((prev) => (prev - 1 + suggestionCount) % suggestionCount)
-        return
-      }
-      if (event.key === 'Enter' || event.key === 'Tab') {
-        if (!event.shiftKey && !event.nativeEvent.isComposing) {
-          event.preventDefault()
-          if (isSlashInput) {
-            const selected = filteredSlashCommands[slashSelectedIndex] || filteredSlashCommands[0]
-            if (selected) selectSlashCommand(selected.command)
-          } else if (isSkillInput) {
-            const selected = filteredSkills[slashSelectedIndex] || filteredSkills[0]
-            if (selected) selectSkillCommand(selected.name)
-          } else if (isAtInput) {
-            const selected = filteredContexts[slashSelectedIndex] || filteredContexts[0]
-            if (selected) selectAtCommand(selected.label)
-          }
-          return
-        }
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        setSlashMenuOpen(false)
         return
       }
     }
+
+    // Let the suggestion menu claim ↑/↓/Enter/Tab/Escape when it's showing.
+    if (slashRef.current?.handleKeyDown(event)) return
+
+    if (isPlainArrowNav) {
+      const el = event.currentTarget
+      if (el.selectionStart === el.selectionEnd) {
+        if (event.key === 'ArrowUp') {
+          const onFirstLine = !el.value.slice(0, el.selectionStart).includes('\n')
+          if (onFirstLine && navigateHistoryPrev()) {
+            event.preventDefault()
+            return
+          }
+        } else {
+          const onLastLine = !el.value.slice(el.selectionEnd).includes('\n')
+          if (onLastLine && navigateHistoryNext()) {
+            event.preventDefault()
+            return
+          }
+        }
+      }
+    }
+
     submitOnEnter(event)
   }
 
@@ -777,7 +747,8 @@ export default function ChatPanel({
   const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
   const renderCompletedActivity = useCallback((interaction: any) => {
     const interactionId = String(interaction.id)
-    const activityView = activitiesFrom(agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? [])
+    const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
+    const activityView = activitiesFrom(progress)
     const isOpen = Boolean(openActivityIds[interactionId])
     return (
       <AgentActivityDrawer
@@ -785,6 +756,7 @@ export default function ChatPanel({
         isOpen={isOpen}
         onToggle={() => setOpenActivityIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
         isHistorical={true}
+        rawProgress={progress}
       />
     )
   }, [agentActivitySnapshots, openActivityIds])
@@ -808,26 +780,79 @@ export default function ChatPanel({
     const totalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0)
     const isOpen = Boolean(openReviewIds[interactionId])
 
+    const handleRewind = async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      const chatId = interaction.chatId || 'cli'
+      const confirmed = window.confirm(
+        'Are you sure you want to rewind your workspace files to the checkpoint before these changes? A rescue snapshot will be preserved automatically.'
+      )
+      if (!confirmed) return
+      try {
+        const checkpoints = await listGitCheckpoints(chatId)
+        if (checkpoints.length === 0) {
+          alert('No git checkpoints recorded for this session.')
+          return
+        }
+        const targetCp = checkpoints[checkpoints.length - 1]
+        const res = await rollbackGitCheckpoint(chatId, targetCp.step, workspacePath)
+        if (res.status === 'ok') {
+          alert(res.message)
+        } else {
+          alert(`Failed to rewind: ${res.message}`)
+        }
+      } catch (err: any) {
+        alert(`Error: ${err.message || String(err)}`)
+      }
+    }
+
     return (
       <div className="file-changes-summary-container" style={{ marginBottom: '8px' }}>
-        <button
-          type="button"
-          className="agent-activity-toggle"
-          aria-expanded={isOpen}
-          onClick={() => setOpenReviewIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 500 }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-            <polyline points="22 4 12 14.01 9 11.01" />
-          </svg>
-          <span>
-            {changes.length} {changes.length === 1 ? 'file' : 'files'} changed
-            {totalAdditions > 0 && <span style={{ color: '#10b981', marginLeft: '6px' }}>+{totalAdditions}</span>}
-            {totalDeletions > 0 && <span style={{ color: '#ef4444', marginLeft: '4px' }}>-{totalDeletions}</span>}
-          </span>
-          <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <button
+            type="button"
+            className="agent-activity-toggle"
+            aria-expanded={isOpen}
+            onClick={() => setOpenReviewIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 500 }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
+            </svg>
+            <span>
+              {changes.length} {changes.length === 1 ? 'file' : 'files'} changed
+              {totalAdditions > 0 && <span style={{ color: '#10b981', marginLeft: '6px' }}>+{totalAdditions}</span>}
+              {totalDeletions > 0 && <span style={{ color: '#ef4444', marginLeft: '4px' }}>-{totalDeletions}</span>}
+            </span>
+            <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRewind}
+            title="Rewind workspace to before these file edits (Git Checkpoint)"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '2px 8px',
+              fontSize: '0.72rem',
+              borderRadius: '4px',
+              background: 'rgba(239, 68, 68, 0.1)',
+              color: '#f87171',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              cursor: 'pointer',
+              fontWeight: 500,
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="1 4 1 10 7 10" />
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+            </svg>
+            Rewind
+          </button>
+        </div>
 
         {isOpen && (
           <div className="agent-activity-card" style={{ border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '8px', padding: '10px', background: 'rgba(15, 23, 42, 0.6)', marginTop: '4px' }}>
@@ -858,6 +883,29 @@ export default function ChatPanel({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem' }}>
                         {change.additions > 0 && <span style={{ color: '#10b981' }}>+{change.additions}</span>}
                         {change.deletions > 0 && <span style={{ color: '#ef4444' }}>-{change.deletions}</span>}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setActiveArtifact({ path: change.path })
+                          }}
+                          title="Open Live Preview Split View"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            padding: '1px 6px',
+                            fontSize: '0.68rem',
+                            borderRadius: '4px',
+                            background: 'rgba(16, 185, 129, 0.15)',
+                            color: '#10b981',
+                            border: '1px solid rgba(16, 185, 129, 0.3)',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                          }}
+                        >
+                          Preview
+                        </button>
                         <span style={{ color: '#64748b', transform: isDiffOpen ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform 0.15s' }}>&gt;</span>
                       </div>
                     </div>
@@ -952,6 +1000,29 @@ export default function ChatPanel({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem' }}>
                         {change.additions > 0 && <span style={{ color: '#10b981' }}>+{change.additions}</span>}
                         {change.deletions > 0 && <span style={{ color: '#ef4444' }}>-{change.deletions}</span>}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setActiveArtifact({ path: change.path })
+                          }}
+                          title="Open Live Preview Split View"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            padding: '1px 6px',
+                            fontSize: '0.68rem',
+                            borderRadius: '4px',
+                            background: 'rgba(16, 185, 129, 0.15)',
+                            color: '#10b981',
+                            border: '1px solid rgba(16, 185, 129, 0.3)',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                          }}
+                        >
+                          Preview
+                        </button>
                         <span style={{ color: '#64748b', transform: isDiffOpen ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform 0.15s' }}>&gt;</span>
                       </div>
                     </div>
@@ -988,71 +1059,106 @@ export default function ChatPanel({
     )
   }
 
-  return (
+  const sectionContent = (
     <section
       className={`conversation-panel ${isEmptyChat ? 'is-empty' : ''}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      style={{ position: 'relative' }}
+      style={activeArtifact ? { flex: '1 1 50%', minWidth: '340px', width: 'auto', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
     >
-      {isDragging && (
-        <div
-          className="drag-drop-overlay"
-          onDragEnter={handleDragEnter}
-          onDragLeave={handleDragLeave}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(15, 23, 42, 0.82)',
-            backdropFilter: 'blur(8px)',
-            border: '2px dashed var(--accent)',
-            borderRadius: '16px',
-            margin: '12px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'white',
-            zIndex: 1000,
-            pointerEvents: 'auto',
-          }}
-        >
-          <div style={{ fontSize: '3.5rem', marginBottom: '16px' }}>🖼️</div>
-          <div style={{ fontSize: '1.25rem', fontWeight: 'bold', letterSpacing: '0.5px' }}>Drag files to attach data</div>
-          <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '8px' }}>Supports images (PNG, JPEG, WebP, GIF), videos (MP4, WebM, MOV, MKV), and PDF files</div>
-        </div>
-      )}
-      <div className="chat-header">
-        {onToggleMobileSidebar && (
-          <button
-            className="mobile-menu-btn"
-            type="button"
-            onClick={onToggleMobileSidebar}
-            aria-label="Toggle menu"
+        {isDragging && (
+          <div
+            className="drag-drop-overlay"
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(15, 23, 42, 0.82)',
+              backdropFilter: 'blur(8px)',
+              border: '2px dashed var(--accent)',
+              borderRadius: '16px',
+              margin: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'white',
+              zIndex: 1000,
+              pointerEvents: 'auto',
+            }}
           >
-            ☰
-          </button>
+            <div style={{ marginBottom: '16px', color: '#10b981' }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', letterSpacing: '0.5px' }}>Drag files to attach data</div>
+            <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '8px' }}>Supports images (PNG, JPEG, WebP, GIF), videos (MP4, WebM, MOV, MKV), and PDF files</div>
+          </div>
         )}
-        <div className="chat-header-title">
-          <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
-          <span>Mint Agent</span>
+        <div className="chat-header">
+          {onToggleMobileSidebar && (
+            <button
+              className="mobile-menu-btn"
+              type="button"
+              onClick={onToggleMobileSidebar}
+              aria-label="Toggle menu"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+          )}
+          <div className="chat-header-title">
+            <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
+            <span>Mint Agent</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {activeArtifact && (
+              <button
+                type="button"
+                className="chat-header-clear-btn"
+                title="Close Live Preview"
+                onClick={() => setActiveArtifact(null)}
+                style={{
+                  color: '#10b981',
+                  background: 'rgba(16, 185, 129, 0.1)',
+                  border: '1px solid rgba(16, 185, 129, 0.25)',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                <span>Close Live Preview</span>
+              </button>
+            )}
+            <button className="chat-header-clear-btn" title="Clear Messages" onClick={onClearMessages}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>
+            </button>
+          </div>
         </div>
-        <button className="chat-header-clear-btn" title="Clear Messages" onClick={onClearMessages}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            <line x1="10" y1="11" x2="10" y2="17"></line>
-            <line x1="14" y1="11" x2="14" y2="17"></line>
-          </svg>
-        </button>
-      </div>
       <div className="chat-container" ref={chatContainerRef} onScroll={handleChatScroll}>
         {interactions.map((interaction, index) => (
           <Fragment key={interaction.id}>
@@ -1072,6 +1178,7 @@ export default function ChatPanel({
             <ChatMessageItem
               interaction={interaction}
               copiedId={copiedId}
+              onEditMessage={handleEditMessage}
               speakingText={speakingText}
               agentActivitySnapshots={agentActivitySnapshots}
               thinkingExpanded={thinkingExpanded}
@@ -1097,6 +1204,7 @@ export default function ChatPanel({
                 isOpen={openActivityIds['live'] ?? true}
                 onToggle={() => setOpenActivityIds((current) => ({ ...current, live: !(current['live'] ?? true) }))}
                 pendingApproval={!!pendingApproval}
+                rawProgress={agentProgress}
               />
             )}
             {renderActiveFileChanges()}
@@ -1258,69 +1366,25 @@ export default function ChatPanel({
           </div>
         )}
 
-        {showSuggestionMenu && (
-          <div className="slash-suggestions-popup" ref={slashMenuRef}>
-            <div className="slash-suggestions-header">
-              {isSlashInput ? 'Slash Commands' : isSkillInput ? 'Learned Skills' : 'Context Mentions'} ({slashSelectedIndex + 1}/{suggestionCount})
-            </div>
-            <div className="slash-suggestions-list" ref={slashListRef}>
-              {isSlashInput
-                ? filteredSlashCommands.map((item, idx) => (
-                    <button
-                      key={item.command}
-                      type="button"
-                      className={`slash-suggestion-item ${idx === slashSelectedIndex ? 'active' : ''}`}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        selectSlashCommand(item.command)
-                      }}
-                      onMouseEnter={() => setSlashSelectedIndex(idx)}
-                    >
-                      <span className="slash-cmd-name">{item.command}</span>
-                      <span className="slash-cmd-desc">{item.description}</span>
-                    </button>
-                  ))
-                : isSkillInput
-                ? filteredSkills.map((item, idx) => (
-                    <button
-                      key={item.id || item.name}
-                      type="button"
-                      className={`slash-suggestion-item ${idx === slashSelectedIndex ? 'active' : ''}`}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        selectSkillCommand(item.name)
-                      }}
-                      onMouseEnter={() => setSlashSelectedIndex(idx)}
-                    >
-                      <span className="slash-cmd-name">${item.name}</span>
-                      <span className="skill-badge">[Skill]</span>
-                      <span className="slash-cmd-desc">{item.description || item.content?.slice(0, 60)}</span>
-                    </button>
-                  ))
-                : filteredContexts.map((item, idx) => (
-                    <button
-                      key={item.label}
-                      type="button"
-                      className={`slash-suggestion-item ${idx === slashSelectedIndex ? 'active' : ''}`}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        selectAtCommand(item.label)
-                      }}
-                      onMouseEnter={() => setSlashSelectedIndex(idx)}
-                    >
-                      <span className="slash-cmd-name">{item.label}</span>
-                      <span className="skill-badge">{item.type === 'plugin' ? '[Plugin]' : '[Context]'}</span>
-                      <span className="slash-cmd-desc">{item.desc}</span>
-                    </button>
-                  ))}
-            </div>
-          </div>
-        )}
+        <SlashSuggestions
+          ref={slashRef}
+          message={message}
+          onComplete={completeSuggestion}
+          workspacePath={workspacePath}
+          mcpServers={settingsConfig?.mcpServers}
+          anchorRef={textareaRef}
+          suppressed={historyIndex !== null}
+        />
 
         <form
           id="chat-form"
           className={geminiLiveEnabled ? 'has-live-btn' : ''}
-          onSubmit={onSubmit}
+          style={{ position: 'relative' }}
+          onSubmit={(event) => {
+            setHistoryIndex(null)
+            historyDraftRef.current = ''
+            onSubmit(event)
+          }}
           onDragOver={(event) => {
             if (event.dataTransfer.types.includes('application/x-mint-workspace-path')) {
               event.preventDefault()
@@ -1380,6 +1444,29 @@ export default function ChatPanel({
               )}
             </div>
           )}
+          {historyIndex !== null && promptHistory.length > 0 && (
+            <div
+              className="chat-history-indicator"
+              aria-live="polite"
+              style={{
+                position: 'absolute',
+                top: '-9px',
+                right: '14px',
+                padding: '1px 8px',
+                fontSize: '0.68rem',
+                fontWeight: 600,
+                letterSpacing: '0.02em',
+                color: 'var(--text-soft, #94a3b8)',
+                background: 'var(--input-bg, #1e293b)',
+                border: '1px solid var(--border, rgba(148,163,184,0.25))',
+                borderRadius: '999px',
+                pointerEvents: 'none',
+                zIndex: 2,
+              }}
+            >
+              History {historyIndex + 1}/{promptHistory.length}
+            </div>
+          )}
           <textarea
             id="chat-input"
             ref={textareaRef}
@@ -1387,6 +1474,8 @@ export default function ChatPanel({
             onChange={(event) => {
               resizeInput(event.currentTarget)
               onSetMessage(event.target.value)
+              // A real keystroke drops out of history browsing (recalled text kept).
+              if (historyIndex !== null) setHistoryIndex(null)
             }}
             onKeyDown={handleInputKeyDown}
             onDrop={handleWorkspaceDrop}
@@ -1621,5 +1710,31 @@ export default function ChatPanel({
         />
       )}
     </section>
+  )
+
+  if (!activeArtifact) {
+    return sectionContent
+  }
+
+  return (
+    <div
+      className="chat-panel-split-wrapper"
+      style={{
+        display: 'flex',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        position: 'relative',
+        gridColumn: '1 / -1',
+        zIndex: 1,
+      }}
+    >
+      {sectionContent}
+      <ArtifactPreviewPanel
+        artifact={activeArtifact}
+        onClose={() => setActiveArtifact(null)}
+        workspacePath={workspacePath}
+      />
+    </div>
   )
 }

@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import '../css/management-views.css'
 import { renderMcpSvgIcon, renderMcpHubSvgIcon } from '../constants/plugins'
+import McpToolAllowlist from './McpToolAllowlist'
+import McpRegistryPicker from './McpRegistryPicker'
+import type { McpRegistryEntry } from '../constants/mcpRegistry'
 
 export interface McpServersViewProps {
   config: any
@@ -15,10 +18,11 @@ export interface McpServersViewProps {
   setMcpEnv: (val: string) => void
   mcpIcon?: string
   setMcpIcon?: (val: string) => void
-  handleAddMcpServer: () => void
+  handleAddMcpServer: (allowAll?: boolean) => void
   handleRemoveMcpServer: (name: string) => void
   detectTools?: () => Promise<{ docker: boolean; git: boolean; gh: boolean; node: boolean }>
   onReauth?: (name: string) => Promise<boolean>
+  listServerTools?: (name: string) => Promise<string[]>
 }
 
 export const McpServersView: React.FC<McpServersViewProps> = React.memo(function McpServersView({
@@ -38,10 +42,13 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
   handleRemoveMcpServer,
   detectTools,
   onReauth,
+  listServerTools,
 }) {
   const [detectedTools, setDetectedTools] = useState({ docker: false, git: false, gh: false, node: false })
   const [detailMcpName, setDetailMcpName] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showCatalogModal, setShowCatalogModal] = useState(false)
+  const [addAllowAll, setAddAllowAll] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [reauthStatus, setReauthStatus] = useState<Record<string, 'idle' | 'running' | 'success' | 'error'>>({})
 
@@ -146,8 +153,24 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
 
   const onSubmitAddServer = (e: React.FormEvent) => {
     e.preventDefault()
-    handleAddMcpServer()
+    handleAddMcpServer(addAllowAll)
+    setAddAllowAll(false)
     setShowAddModal(false)
+  }
+
+  const applyRegistryPick = (
+    entry: McpRegistryEntry,
+    argValues: string[],
+    envSeed: Record<string, string>,
+  ) => {
+    setMcpName(entry.key)
+    setMcpCmd(entry.command)
+    setMcpArgs([...(entry.args || []), ...argValues].join(' '))
+    setMcpEnv(Object.keys(envSeed).length ? JSON.stringify(envSeed, null, 2) : '')
+    if (setMcpIcon) setMcpIcon(entry.icon || '')
+    // Hand off to the manual form pre-filled, so the user reviews before adding.
+    setShowCatalogModal(false)
+    setShowAddModal(true)
   }
 
   return (
@@ -159,24 +182,37 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
             <span className="management-title-icon" style={{ display: 'inline-flex', alignItems: 'center' }}>
               {renderMcpHubSvgIcon(22, 'var(--accent)')}
             </span>
-            Model Context Protocol (MCP) Hub
+            MCP Servers
           </h1>
           <p className="management-subtitle">
-            Connect Mint Agent to external tool servers (GitHub, Brave Search, Filesystem, SQLite, Docker, etc.).
+            Connect external tool servers.
           </p>
         </div>
 
-        <button
-          type="button"
-          className="management-primary-btn"
-          onClick={() => setShowAddModal(true)}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Add MCP Server
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            className="management-action-btn"
+            onClick={() => setShowCatalogModal(true)}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            MCP catalog
+          </button>
+          <button
+            type="button"
+            className="management-primary-btn"
+            onClick={() => setShowAddModal(true)}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Add MCP Server
+          </button>
+        </div>
       </div>
 
       {/* Search Input */}
@@ -227,15 +263,12 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
       {/* MCP Server List */}
       <h2 className="management-section-title">All Servers</h2>
       {filteredMcpItems.length === 0 ? (
-        <div className="management-empty-state">
-          <div className="management-empty-icon">🔌</div>
-          <h3 className="management-empty-title">No MCP Servers Configured</h3>
-          <p className="management-empty-desc">
-            Click "Add MCP Server" to connect a new Model Context Protocol tool.
-          </p>
+        <div className="mgmt-empty">
+          <p>{searchQuery ? 'No MCP servers match your search.' : 'No MCP servers yet.'}</p>
+          {!searchQuery && <p>Add one above, or run <code>mint mcp add</code> in a terminal.</p>}
         </div>
       ) : (
-        <div className="management-grid">
+        <div className="mgmt-row-stack">
           {filteredMcpItems.map((item) => (
             <div
               key={item.name}
@@ -328,7 +361,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                     {item.isEnabled ? 'Enabled' : 'Disabled'}
                   </span>
                   {!item.isConfigured && (
-                    <span className="management-badge workspace" style={{ marginLeft: 'auto' }}>
+                    <span className="management-tag workspace" style={{ marginLeft: 'auto' }}>
                       Discovered
                     </span>
                   )}
@@ -385,6 +418,13 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                         />
                       </div>
                     </div>
+
+                    <McpToolAllowlist
+                      serverName={item.name}
+                      config={config}
+                      updateField={updateField}
+                      listServerTools={listServerTools}
+                    />
                   </div>
                 )}
               </div>
@@ -498,6 +538,16 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                     rows={3}
                   />
                 </div>
+
+                <label className="management-form-group" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={addAllowAll} onChange={(e) => setAddAllowAll(e.target.checked)} />
+                  <span>
+                    Allow the agent to call all of this server’s tools (*)
+                    <span style={{ display: 'block', opacity: 0.6, fontSize: '0.8rem' }}>
+                      Leave off to approve tools one by one afterwards.
+                    </span>
+                  </span>
+                </label>
               </div>
 
               <div className="management-modal-footer">
@@ -509,6 +559,40 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MCP Catalog Modal */}
+      {showCatalogModal && (
+        <div className="management-modal-overlay" onClick={() => setShowCatalogModal(false)}>
+          <div className="management-modal mcp-catalog-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="management-modal-header">
+              <h2 className="management-modal-title">MCP Catalog</h2>
+              <button type="button" className="management-modal-close" onClick={() => setShowCatalogModal(false)}>
+                ✕
+              </button>
+            </div>
+            <div className="management-modal-body">
+              <McpRegistryPicker
+                configuredNames={Object.keys(config.mcpServers || {})}
+                onPick={applyRegistryPick}
+                showManualHint={false}
+              />
+            </div>
+            <div className="management-modal-footer">
+              <span />
+              <button
+                type="button"
+                className="management-action-btn"
+                onClick={() => {
+                  setShowCatalogModal(false)
+                  setShowAddModal(true)
+                }}
+              >
+                Add manually instead
+              </button>
+            </div>
           </div>
         </div>
       )}

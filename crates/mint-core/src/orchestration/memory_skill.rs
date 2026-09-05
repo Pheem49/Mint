@@ -10,12 +10,141 @@ use super::*;
 /// asks the model to keep itself under this budget.
 const MAX_PREFERENCES_CHARS: usize = 2500;
 
+/// Combined budget for the `Remembered facts:` block. Like `MAX_PREFERENCES_CHARS`
+/// this rides on every turn, so overflow is dropped oldest-first rather than
+/// allowed to crowd out the actual task.
+const MAX_FACTS_CHARS: usize = 1500;
+
+/// How many of the newest facts are always kept when the list overflows the
+/// budget, before relevance ranking fills the rest — so a fact the user stated
+/// moments ago can never be bumped out by an older, more on-topic one.
+const FACT_RECENCY_KEEP: usize = 5;
+
+/// Renders the live [`Fact`] rows visible to `agent_id` (shared facts, plus that
+/// subagent's own — see [`MemoryStore::live_facts_for_agent`]) and relevant to
+/// `workspace`, as a bulleted block truncated to [`MAX_FACTS_CHARS`]. Returns
+/// `None` when there is nothing stored.
+///
+/// Below the budget the output is every fact, newest first (unchanged). When it
+/// overflows and `semantic` is set with a non-empty `query`, the overflow slot
+/// is filled by the facts most similar to `query` rather than simply the next
+/// newest ones. Shared by [`append_memory_context`] and `enrich_request`.
+pub(crate) fn render_memory_facts(
+    memory: &MemoryStore,
+    workspace: Option<&str>,
+    agent_id: Option<&str>,
+    query: Option<&str>,
+    semantic: bool,
+) -> Option<String> {
+    let facts = memory.live_facts_for_agent(workspace, agent_id).ok()?;
+    if facts.is_empty() {
+        return None;
+    }
+
+    let render_line = |fact: &crate::Fact| {
+        let tag = if fact.scope == "project" {
+            " (this project)"
+        } else {
+            ""
+        };
+        format!("- {}{}\n", fact.body.trim(), tag)
+    };
+
+    // Fast path: everything fits, emit as-is.
+    let total: usize = facts.iter().map(|f| render_line(f).chars().count()).sum();
+    if total <= MAX_FACTS_CHARS {
+        let out = facts.iter().map(render_line).collect::<String>();
+        let out = out.trim_end();
+        return (!out.is_empty()).then(|| out.to_string());
+    }
+
+    // Overflow: keep the newest few, then fill the remaining budget — by
+    // relevance to `query` when asked, otherwise by recency (the old behavior).
+    let keep = FACT_RECENCY_KEEP.min(facts.len());
+    let mut chosen: Vec<&crate::Fact> = facts[..keep].iter().collect();
+    let mut used: usize = chosen.iter().map(|f| render_line(f).chars().count()).sum();
+
+    let query_tokens = query.map(str::trim).filter(|q| !q.is_empty());
+    let mut rest: Vec<&crate::Fact> = facts[keep..].iter().collect();
+    if semantic
+        && let Some(q) = query_tokens
+        && let Ok(scored) = memory.live_facts_with_embedding(workspace, agent_id)
+    {
+        let qv = crate::search::text_embedding::fact_embedding_backend().embed(q);
+        let score_of = |id: i64| {
+            scored
+                .iter()
+                .find(|(f, _)| f.id == id)
+                .map(|(_, v)| crate::search::text_embedding::cosine_similarity(&qv, v))
+                .unwrap_or(f32::MIN)
+        };
+        rest.sort_by(|a, b| {
+            score_of(b.id)
+                .partial_cmp(&score_of(a.id))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    for fact in rest {
+        let line_len = render_line(fact).chars().count();
+        if used + line_len > MAX_FACTS_CHARS {
+            continue;
+        }
+        used += line_len;
+        chosen.push(fact);
+    }
+
+    let out = chosen.iter().map(|f| render_line(f)).collect::<String>();
+    let out = out.trim_end();
+    (!out.is_empty()).then(|| out.to_string())
+}
+
+/// Combined budget for the recall block, matching [`MAX_FACTS_CHARS`]'s intent.
+const MAX_RECALL_CHARS: usize = 1500;
+
+/// Full-text-searches `chat_id`'s history for turns relevant to `query` and
+/// formats the top few as a labelled block, oldest first. The `CONTEXT_LIMIT`
+/// newest turns are skipped — they're already injected verbatim as "Recent
+/// conversation context". Returns `None` when nothing relevant turns up (or the
+/// query has no searchable token).
+pub(crate) fn render_recalled_messages(chat_id: &str, query: &str) -> Option<String> {
+    let memory = MemoryStore::open_default().ok()?;
+    let hits = memory
+        .recall_interactions(chat_id, query, CONTEXT_LIMIT, 5)
+        .ok()?;
+    if hits.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    for item in hits.iter().rev() {
+        let block = format!(
+            "User: {}\nAssistant: {}\n\n",
+            truncate_for_context(&item.user_text, MAX_CONTEXT_MESSAGE_CHARS),
+            truncate_for_context(&item.ai_text, MAX_CONTEXT_MESSAGE_CHARS)
+        );
+        if out.chars().count() + block.chars().count() > MAX_RECALL_CHARS {
+            break;
+        }
+        out.push_str(&block);
+    }
+    let out = out.trim_end();
+    (!out.is_empty()).then(|| {
+        format!("Possibly relevant earlier messages (from this conversation's history):\n{out}")
+    })
+}
+
 /// Appends saved cross-session memory — the user's profile/preferences (Settings
 /// → Memory) and this chat's recent interaction history — onto `system_prompt`.
 /// Shared by the typed-chat agent loop and the Gemini Live bridge so a Live
 /// session starts with the same "who is this user, what have we already
 /// discussed" context instead of starting blank every call.
-pub(crate) fn append_memory_context(system_prompt: &mut String, chat_id: &str) {
+pub(crate) fn append_memory_context(
+    system_prompt: &mut String,
+    chat_id: &str,
+    workspace: Option<&str>,
+    query: Option<&str>,
+    semantic_fact_recall: bool,
+) {
     let Ok(memory) = MemoryStore::open_default() else {
         return;
     };
@@ -42,6 +171,16 @@ pub(crate) fn append_memory_context(system_prompt: &mut String, chat_id: &str) {
         );
     }
 
+    if let Some(facts) = render_memory_facts(
+        &memory,
+        workspace,
+        crate::subagent_name(chat_id),
+        query,
+        semantic_fact_recall,
+    ) {
+        *system_prompt = format!("{}\n\nRemembered facts:\n{}", system_prompt.trim(), facts);
+    }
+
     if let Ok(mut interactions) = memory.recent_interactions_for_chat(chat_id, CONTEXT_LIMIT) {
         interactions.reverse();
         let transcript = interactions
@@ -65,10 +204,36 @@ pub(crate) fn append_memory_context(system_prompt: &mut String, chat_id: &str) {
     }
 }
 
-pub fn spawn_auto_memory_update(config: MintConfig, user_text: String, ai_text: String) {
+pub fn spawn_auto_memory_update(
+    config: MintConfig,
+    user_text: String,
+    ai_text: String,
+    workspace: Option<String>,
+    chat_id: String,
+) {
     tokio::spawn(async move {
         if let Err(e) = auto_extract_and_update_memory(&config, &user_text, &ai_text).await {
             eprintln!("Auto memory update failed: {:?}", e);
+        }
+        // Second, independent background pass: pull any durable fact/preference/
+        // decision the user just stated into the structured `facts` table so it
+        // rides every future turn via `render_memory_facts`. Gated by both a
+        // config toggle and a cheap keyword pre-filter so it doesn't add an LLM
+        // call to every single turn — only ones that look like they carry
+        // something worth remembering. See `looks_fact_worthy`.
+        if !config.auto_fact_extraction || !looks_fact_worthy(&user_text) {
+            return;
+        }
+        if let Err(e) = auto_extract_facts(
+            &config,
+            &user_text,
+            &ai_text,
+            workspace.as_deref(),
+            &chat_id,
+        )
+        .await
+        {
+            eprintln!("Auto fact extraction failed: {:?}", e);
         }
     });
 }
@@ -423,4 +588,609 @@ Example response:
     }
 
     Ok(())
+}
+
+/// Ceiling on how many fact ops a single turn's extraction is allowed to apply.
+/// A background LLM pass occasionally over-reads a chatty turn as five separate
+/// "facts"; capping keeps one turn from flooding the always-injected
+/// `Remembered facts:` block.
+const MAX_FACT_OPS_PER_TURN: usize = 3;
+
+/// Once the live-fact count reaches this, the extraction prompt switches to
+/// asking the model to prefer merging/superseding over adding — the read side
+/// (`render_memory_facts`) already hard-truncates at `MAX_FACTS_CHARS`, so past
+/// this point new adds mostly just push older facts out of the injected window.
+const FACTS_CONSOLIDATE_THRESHOLD: usize = 40;
+
+/// Cosine (over the on-device hash embedding) at or above which a fact the main
+/// agent is about to add is treated as "the same thing" a quarantined subagent
+/// fact already says — the subagent's fact is promoted to shared instead of a
+/// near-duplicate being inserted. Hash embedding is bag-of-token, so this is a
+/// deliberately high bar that really only fires on heavy lexical overlap.
+const FACT_PROMOTE_SIMILARITY: f32 = 0.82;
+
+/// Cheap, no-LLM pre-filter for [`auto_extract_facts`]: only turns whose user
+/// message carries a durable-information signal (a stated preference, a naming,
+/// a standing instruction, a project convention) are worth spending a second
+/// background model call on. Mirrors [`super::looks_skill_worthy`]'s role as a
+/// gate in front of a costlier reflection call. Matches English and Thai
+/// markers, case-insensitively, and skips very short messages outright.
+pub(super) fn looks_fact_worthy(user_text: &str) -> bool {
+    let trimmed = user_text.trim();
+    if trimmed.chars().count() < 15 {
+        return false;
+    }
+    let lowered = trimmed.to_lowercase();
+    const MARKERS: &[&str] = &[
+        // English
+        "prefer",
+        "always",
+        "never",
+        "i use",
+        "we use",
+        "my ",
+        "i'm ",
+        "i am ",
+        "call me",
+        "remember",
+        "from now on",
+        "i like",
+        "i hate",
+        "i don't",
+        "i do not",
+        "the project uses",
+        "this project uses",
+        "make sure to",
+        "don't ever",
+        // Thai
+        "ชอบ",
+        "ไม่ชอบ",
+        "ของฉัน",
+        "เรียกฉันว่า",
+        "จำไว้",
+        "ต่อจากนี้",
+        "ตั้งแต่นี้",
+        "อย่า",
+        "ทุกครั้ง",
+        "เสมอ",
+    ];
+    MARKERS.iter().any(|marker| lowered.contains(marker))
+}
+
+/// Applies the `{"ops":[...]}` document produced by [`auto_extract_facts`] to
+/// `store`. Pure and side-effect-contained (takes an explicit `store` so it is
+/// unit-testable against a temp database) — never panics, silently drops any
+/// malformed or disallowed op, and returns how many were actually applied.
+///
+/// `known_ids` is the set of fact ids that were shown to the model; a
+/// `supersede` naming anything outside it is rejected as a hallucinated id.
+///
+/// `source_chat_id` decides ownership: a `"…::subagent::<name>"` id quarantines
+/// every added fact to `<name>` ([`Fact::agent_id`]); an ordinary id adds shared
+/// facts and, before each `add`, may instead *promote* a near-identical
+/// quarantined fact (see [`FACT_PROMOTE_SIMILARITY`]).
+pub(super) fn apply_fact_ops(
+    store: &MemoryStore,
+    ops_json: &str,
+    workspace: Option<&str>,
+    source_chat_id: &str,
+    known_ids: &std::collections::HashSet<i64>,
+) -> usize {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(ops_json) else {
+        return 0;
+    };
+    let Some(ops) = value.get("ops").and_then(|v| v.as_array()) else {
+        return 0;
+    };
+
+    let agent_id = crate::subagent_name(source_chat_id);
+
+    let mut applied = 0usize;
+    for op in ops.iter().take(MAX_FACT_OPS_PER_TURN) {
+        let kind = op.get("op").and_then(|v| v.as_str()).unwrap_or_default();
+        match kind {
+            "add" => {
+                let body = op
+                    .get("body")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .trim();
+                if body.is_empty() {
+                    continue;
+                }
+                let scope = op.get("scope").and_then(|v| v.as_str()).unwrap_or("user");
+                if !matches!(scope, "user" | "preference" | "project") {
+                    continue;
+                }
+                // A `project` fact is meaningless without a workspace to pin it
+                // to — skip rather than silently reclassify it as global.
+                let project_path = if scope == "project" {
+                    match workspace {
+                        Some(path) if !path.trim().is_empty() => Some(path),
+                        _ => continue,
+                    }
+                } else {
+                    None
+                };
+
+                // Main agent restating something a subagent already found:
+                // promote the subagent's fact (keeps its provenance) instead of
+                // inserting a near-duplicate into the shared pool.
+                if agent_id.is_none()
+                    && let Some(promoted_id) = best_promotion_candidate(store, workspace, body)
+                    && store.promote_fact(promoted_id).unwrap_or(false)
+                {
+                    applied += 1;
+                    continue;
+                }
+
+                if let Ok(Some(_)) = store.add_fact_for_agent(
+                    scope,
+                    project_path,
+                    body,
+                    Some(source_chat_id),
+                    None,
+                    agent_id,
+                ) {
+                    applied += 1;
+                }
+            }
+            "supersede" => {
+                let Some(old_id) = op.get("id").and_then(|v| v.as_i64()) else {
+                    continue;
+                };
+                if !known_ids.contains(&old_id) {
+                    continue;
+                }
+                let replacement = op
+                    .get("replacement")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty());
+                // Re-file the replacement under the same scope/workspace/owner as
+                // the fact it supersedes, so an updated project (or subagent)
+                // fact keeps that classification.
+                let (old_scope, old_project, old_agent) = store
+                    .live_facts_for_agent(workspace, agent_id)
+                    .ok()
+                    .and_then(|facts| facts.into_iter().find(|f| f.id == old_id))
+                    .map(|f| (f.scope, f.project_path, f.agent_id))
+                    .unwrap_or_else(|| ("user".to_string(), None, agent_id.map(str::to_owned)));
+                let new_id = match replacement {
+                    Some(text) => store
+                        .add_fact_for_agent(
+                            &old_scope,
+                            old_project.as_deref(),
+                            text,
+                            Some(source_chat_id),
+                            None,
+                            old_agent.as_deref(),
+                        )
+                        .ok()
+                        .flatten(),
+                    None => None,
+                };
+                if store.supersede_fact(old_id, new_id).is_ok() {
+                    applied += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    applied
+}
+
+/// Id of the live quarantined fact whose stored embedding is closest to `body`,
+/// if that similarity clears [`FACT_PROMOTE_SIMILARITY`]. Used by
+/// [`apply_fact_ops`] to fold a main-agent restatement into an existing
+/// subagent fact.
+fn best_promotion_candidate(
+    store: &MemoryStore,
+    workspace: Option<&str>,
+    body: &str,
+) -> Option<i64> {
+    let candidates = store.quarantined_facts_with_embedding(workspace).ok()?;
+    let bv = crate::search::text_embedding::fact_embedding_backend().embed(body);
+    candidates
+        .iter()
+        .map(|(fact, vec)| {
+            (
+                fact.id,
+                crate::search::text_embedding::cosine_similarity(&bv, vec),
+            )
+        })
+        .filter(|(_, score)| *score >= FACT_PROMOTE_SIMILARITY)
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(id, _)| id)
+}
+
+/// Fire-and-forget: after a turn that [`looks_fact_worthy`], ask the model (in a
+/// second, separate call) whether the user stated anything durable enough to
+/// keep in long-term memory, and if so apply the resulting add/supersede ops to
+/// the `facts` table. Mirrors [`auto_write_skill`] / [`spawn_auto_memory_update`]
+/// — never blocks or fails the already-returned response.
+pub(super) async fn auto_extract_facts(
+    config: &MintConfig,
+    user_text: &str,
+    ai_text: &str,
+    workspace: Option<&str>,
+    chat_id: &str,
+) -> Result<(), OrchestrationError> {
+    let memory = MemoryStore::open_default()?;
+    // Scope the "already stored" list to what this agent can actually see, so a
+    // subagent's extraction reasons over (and supersedes) its own quarantined
+    // facts plus the shared pool — not another subagent's.
+    let existing = memory
+        .live_facts_for_agent(workspace, crate::subagent_name(chat_id))
+        .unwrap_or_default();
+    let known_ids: std::collections::HashSet<i64> = existing.iter().map(|f| f.id).collect();
+
+    let existing_block = if existing.is_empty() {
+        "(none yet)".to_string()
+    } else {
+        existing
+            .iter()
+            .map(|f| {
+                let scope = if f.scope == "project" {
+                    "project"
+                } else {
+                    "user"
+                };
+                format!("- [id {}] ({}) {}", f.id, scope, f.body.trim())
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let consolidate_hint = if existing.len() >= FACTS_CONSOLIDATE_THRESHOLD {
+        "\n\nThe stored list is already long: strongly prefer `supersede` (merging or updating an \
+         existing fact) over adding new ones, and only add something genuinely not covered above."
+    } else {
+        ""
+    };
+
+    let workspace_line = match workspace {
+        Some(path) if !path.trim().is_empty() => {
+            format!("Current project workspace: {path}\n")
+        }
+        _ => "There is no active project workspace, so do NOT emit any \"project\"-scope ops.\n"
+            .to_string(),
+    };
+
+    let system_instruction = format!(
+        r#"You are a background agent that maintains a user's long-term memory of durable facts.
+Look at the latest conversation turn and decide whether the USER stated anything worth
+remembering permanently: a personal detail, a standing preference, a naming ("call me X"),
+a lasting instruction on how the assistant should behave, or a stable convention of the
+current project.
+
+Do NOT save:
+- Task-specific or one-off details (a filename in this task, a value being debugged).
+- Anything already covered by the stored facts below — unless the turn changes or contradicts it,
+  in which case emit a "supersede" op for that fact's exact id.
+- Vague or speculative statements. Only save something you would be confident restating later.
+
+Scope rules:
+- "user": something about the person or how they always want the assistant to behave (global).
+- "project": a stable fact about the current project/codebase. Only valid when a workspace is given.
+{workspace_line}
+Stored facts (use the exact id for "supersede"; never invent an id):
+{existing_block}{consolidate_hint}
+
+Return STRICTLY valid JSON, no prose, no markdown, no ```json fences. Shape:
+{{"ops": [
+  {{"op": "add", "scope": "user", "body": "one concise sentence"}},
+  {{"op": "supersede", "id": 12, "replacement": "one concise sentence"}}
+]}}
+"replacement" may be omitted for a pure retraction. Emit {{"ops": []}} when nothing qualifies.
+Emit at most {MAX_FACT_OPS_PER_TURN} ops."#
+    );
+
+    let message = format!("User: {user_text}\nAssistant: {ai_text}");
+
+    let request = ChatRequest {
+        message,
+        system_instruction,
+        chat_id: None,
+        image_data_uri: None,
+        audio_data_uri: None,
+        video_data_uri: None,
+        document_attachment: None,
+        workspace_path: None,
+        agent_id: None,
+        plan_mode: false,
+        pinned_mcp_server: None,
+        messages: None,
+        tools: None,
+    };
+
+    let response = send_chat(config, &request).await?;
+    let text_reply = response.text.trim();
+
+    let clean_json = if text_reply.starts_with("```") {
+        let lines: Vec<&str> = text_reply.lines().collect();
+        let mut filtered = Vec::new();
+        for line in lines {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("```") {
+                filtered.push(trimmed);
+            }
+        }
+        filtered.join("\n")
+    } else {
+        text_reply.to_string()
+    };
+
+    apply_fact_ops(&memory, &clean_json, workspace, chat_id, &known_ids);
+    Ok(())
+}
+
+#[cfg(test)]
+mod fact_extraction_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn temp_store(name: &str) -> MemoryStore {
+        let path = std::env::temp_dir().join(format!(
+            "mint-fact-ops-{name}-{}.sqlite",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        MemoryStore::open(path)
+    }
+
+    fn ids_of(store: &MemoryStore) -> HashSet<i64> {
+        store
+            .live_facts(None)
+            .unwrap()
+            .into_iter()
+            .map(|f| f.id)
+            .collect()
+    }
+
+    #[test]
+    fn looks_fact_worthy_gates_on_signal_and_length() {
+        assert!(looks_fact_worthy(
+            "I prefer tabs over spaces in every language"
+        ));
+        assert!(looks_fact_worthy("From now on, answer me in Thai please"));
+        assert!(looks_fact_worthy("เรียกฉันว่าฟีมนะ ต่อจากนี้ตอบสั้น ๆ พอ"));
+        assert!(!looks_fact_worthy("fix this failing test for me"));
+        assert!(!looks_fact_worthy("run the build"));
+        assert!(!looks_fact_worthy("prefer")); // too short even with a marker
+    }
+
+    #[test]
+    fn apply_adds_user_facts_and_dedups_exact_bodies() {
+        let store = temp_store("add");
+        let json = r#"{"ops":[{"op":"add","scope":"user","body":"prefers Helix editor"}]}"#;
+        assert_eq!(
+            apply_fact_ops(&store, json, None, "cli", &HashSet::new()),
+            1
+        );
+        // Re-applying the identical body is a silent no-op (dedup unique index).
+        assert_eq!(
+            apply_fact_ops(&store, json, None, "cli", &HashSet::new()),
+            0
+        );
+        let live = store.live_facts(None).unwrap();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].body, "prefers Helix editor");
+    }
+
+    #[test]
+    fn supersede_requires_a_known_id() {
+        let store = temp_store("supersede");
+        store
+            .add_fact("user", None, "deploys on Fridays", None, None)
+            .unwrap();
+        let known = ids_of(&store);
+        let old_id = *known.iter().next().unwrap();
+
+        // Unknown id is rejected outright.
+        let bogus = format!(
+            r#"{{"ops":[{{"op":"supersede","id":{},"replacement":"x"}}]}}"#,
+            old_id + 999
+        );
+        assert_eq!(apply_fact_ops(&store, &bogus, None, "cli", &known), 0);
+        assert_eq!(store.live_facts(None).unwrap().len(), 1);
+
+        // Known id supersedes and files the replacement.
+        let good = format!(
+            r#"{{"ops":[{{"op":"supersede","id":{old_id},"replacement":"never deploys on Fridays"}}]}}"#
+        );
+        assert_eq!(apply_fact_ops(&store, &good, None, "cli", &known), 1);
+        let live = store.live_facts(None).unwrap();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].body, "never deploys on Fridays");
+    }
+
+    #[test]
+    fn caps_at_three_ops_per_turn() {
+        let store = temp_store("cap");
+        let json = r#"{"ops":[
+            {"op":"add","scope":"user","body":"fact one"},
+            {"op":"add","scope":"user","body":"fact two"},
+            {"op":"add","scope":"user","body":"fact three"},
+            {"op":"add","scope":"user","body":"fact four"},
+            {"op":"add","scope":"user","body":"fact five"}
+        ]}"#;
+        assert_eq!(
+            apply_fact_ops(&store, json, None, "cli", &HashSet::new()),
+            3
+        );
+        assert_eq!(store.live_facts(None).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn project_op_without_workspace_is_skipped() {
+        let store = temp_store("project");
+        let json = r#"{"ops":[{"op":"add","scope":"project","body":"uses pnpm"}]}"#;
+        assert_eq!(
+            apply_fact_ops(&store, json, None, "cli", &HashSet::new()),
+            0
+        );
+        assert!(store.live_facts(None).unwrap().is_empty());
+
+        // With a workspace it lands and is scoped to that path.
+        assert_eq!(
+            apply_fact_ops(&store, json, Some("/tmp/repo-a"), "cli", &HashSet::new()),
+            1
+        );
+        assert!(
+            store
+                .live_facts(Some("/tmp/repo-a"))
+                .unwrap()
+                .iter()
+                .any(|f| f.body == "uses pnpm")
+        );
+        assert!(store.live_facts(Some("/tmp/repo-b")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn malformed_json_applies_nothing() {
+        let store = temp_store("malformed");
+        assert_eq!(
+            apply_fact_ops(&store, "not json", None, "cli", &HashSet::new()),
+            0
+        );
+        assert_eq!(
+            apply_fact_ops(&store, "{}", None, "cli", &HashSet::new()),
+            0
+        );
+    }
+
+    // --- Part A: semantic fact recall --------------------------------------
+
+    #[test]
+    fn semantic_recall_keeps_the_on_topic_buried_fact() {
+        let store = temp_store("recall");
+        // Needle first, so it is the oldest (last by `updated_at DESC, id DESC`)
+        // and well outside the recency-kept window.
+        store
+            .add_fact(
+                "user",
+                None,
+                "obscure note about flyctl deploys zqxj",
+                None,
+                None,
+            )
+            .unwrap();
+        // Then plenty of distinct filler to blow past MAX_FACTS_CHARS.
+        let filler = "the quick brown fox jumps over the lazy dog thoroughly and repeatedly";
+        for i in 0..40 {
+            store
+                .add_fact("user", None, &format!("{filler} number {i}"), None, None)
+                .unwrap();
+        }
+        assert!(store.live_facts(None).unwrap().len() > FACT_RECENCY_KEEP + 5);
+
+        let query = "how do I deploy with flyctl on this machine";
+
+        let with = render_memory_facts(&store, None, None, Some(query), true).unwrap();
+        assert!(
+            with.contains("flyctl deploys zqxj"),
+            "semantic recall should surface the buried on-topic fact:\n{with}"
+        );
+
+        let without = render_memory_facts(&store, None, None, Some(query), false).unwrap();
+        assert!(
+            !without.contains("flyctl deploys zqxj"),
+            "newest-first fill should have dropped the oldest fact:\n{without}"
+        );
+    }
+
+    // --- Part B: per-agent scoping + promotion ----------------------------
+
+    #[test]
+    fn subagent_add_is_quarantined_then_visible_only_to_that_agent() {
+        let store = temp_store("quarantine");
+        let json = r#"{"ops":[{"op":"add","scope":"user","body":"the researcher trusts arxiv over blogs"}]}"#;
+        assert_eq!(
+            apply_fact_ops(
+                &store,
+                json,
+                None,
+                "cli::subagent::researcher",
+                &HashSet::new()
+            ),
+            1
+        );
+        assert!(
+            store.live_facts_for_agent(None, None).unwrap().is_empty(),
+            "a subagent fact must not enter the shared pool"
+        );
+        let own = store
+            .live_facts_for_agent(None, Some("researcher"))
+            .unwrap();
+        assert_eq!(own.len(), 1);
+        assert_eq!(own[0].agent_id.as_deref(), Some("researcher"));
+        assert!(
+            store
+                .live_facts_for_agent(None, Some("other"))
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn main_agent_restatement_promotes_instead_of_duplicating() {
+        let store = temp_store("promote-auto");
+        // Quarantined subagent fact.
+        apply_fact_ops(
+            &store,
+            r#"{"ops":[{"op":"add","scope":"user","body":"user deploys the app using flyctl and fly io"}]}"#,
+            None,
+            "cli::subagent::explorer",
+            &HashSet::new(),
+        );
+        let quarantined_id = store.quarantined_facts(None).unwrap()[0].id;
+
+        // Main agent says essentially the same thing (heavy token overlap so the
+        // hash embedding clears FACT_PROMOTE_SIMILARITY).
+        let n = apply_fact_ops(
+            &store,
+            r#"{"ops":[{"op":"add","scope":"user","body":"user deploys the app using flyctl and fly io CLI"}]}"#,
+            None,
+            "cli",
+            &HashSet::new(),
+        );
+        assert_eq!(n, 1);
+        assert!(store.quarantined_facts(None).unwrap().is_empty());
+        let shared = store.live_facts_for_agent(None, None).unwrap();
+        assert_eq!(shared.len(), 1, "promoted, not duplicated");
+        assert_eq!(shared[0].id, quarantined_id, "same row, provenance kept");
+
+        // A clearly unrelated main-agent add still inserts a fresh row.
+        apply_fact_ops(
+            &store,
+            r#"{"ops":[{"op":"add","scope":"user","body":"user keyboard layout is Dvorak"}]}"#,
+            None,
+            "cli",
+            &HashSet::new(),
+        );
+        assert_eq!(store.live_facts_for_agent(None, None).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn promote_fact_only_touches_quarantined_rows() {
+        let store = temp_store("promote-manual");
+        let shared_id = store
+            .add_fact("user", None, "shared already", None, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(store.promote_fact(shared_id).unwrap(), false);
+
+        apply_fact_ops(
+            &store,
+            r#"{"ops":[{"op":"add","scope":"user","body":"quarantined thing"}]}"#,
+            None,
+            "cli::subagent::plan",
+            &HashSet::new(),
+        );
+        let qid = store.quarantined_facts(None).unwrap()[0].id;
+        assert_eq!(store.promote_fact(qid).unwrap(), true);
+        assert!(store.quarantined_facts(None).unwrap().is_empty());
+        assert_eq!(store.live_facts_for_agent(None, None).unwrap().len(), 2);
+    }
 }

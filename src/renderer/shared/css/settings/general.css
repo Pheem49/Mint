@@ -112,3 +112,94 @@
     gap: 8px;
     margin-bottom: 6px;
 }
+
+.provider-sublist-row input {
+    flex: 1;
+}
+
+.sublist-add {
+    margin-top: 4px;
+}
+
+/* A provider picker has more options than a compact segmented control can
+   hold on one line — in a stacked row let it use the full width and wrap
+   left-to-right instead of shrink-wrapping into a lopsided box on the
+   right. */
+.setting-row.stacked .pill-segmented {
+    width: 100%;
+    justify-self: stretch;
+}
+
+/* ── Collapsible section (accordion) chrome for the General tab ───────── */
+
+.accordion-controls {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.accordion-controls button {
+    padding: 4px 10px;
+    font-size: 0.76rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface-strong);
+    color: var(--text-main);
+    cursor: pointer;
+}
+
+.accordion-controls button:hover {
+    border-color: var(--border-strong);
+}
+
+.section-heading-collapsible {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 18px 0 14px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.collapsible-section.is-collapsed .section-heading-collapsible {
+    border-bottom: 0;
+    padding-bottom: 18px;
+}
+
+.section-heading-collapsible .section-kicker {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.section-heading-collapsible .section-title {
+    margin-top: 2px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.section-chevron {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    transition: transform 0.25s ease;
+}
+
+.collapsible-section.is-open .section-chevron {
+    transform: rotate(180deg);
+}
+
+.section-collapsible-body {
+    margin-top: 12px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.provider-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}

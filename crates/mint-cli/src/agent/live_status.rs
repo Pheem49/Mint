@@ -482,8 +482,14 @@ pub(super) fn explored_action_label(
             }),
         "read_file" => {
             let path = input.get("path").and_then(|v| v.as_str())?;
-            let start = input.get("startLine").and_then(|v| v.as_u64());
-            let end = input.get("endLine").and_then(|v| v.as_u64());
+            let start = input
+                .get("startLine")
+                .or_else(|| input.get("start_line"))
+                .and_then(|v| v.as_u64());
+            let end = input
+                .get("endLine")
+                .or_else(|| input.get("end_line"))
+                .and_then(|v| v.as_u64());
             let file_name = display_tool_target(path);
             let target = match (start, end) {
                 (Some(s), Some(e)) => format!("{} #L{}-{}", file_name, s, e),

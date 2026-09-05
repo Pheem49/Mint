@@ -22,6 +22,7 @@ import type {
   SubagentDraft,
   AgentProgress,
   AuthUser,
+  GitCheckpoint,
 } from './types'
 
 export function getLocalApiBase(): string {
@@ -126,9 +127,13 @@ export interface MintPlatformApi {
   createWorkspaceFolder(path: string): Promise<void>
   deleteWorkspaceItem(path: string): Promise<void>
   selectWorkspaceDirectory(): Promise<string | null>
+  selectLinkedFolderPath(): Promise<string | null>
   submitToolApproval(token: string, approved: boolean, answer?: string): Promise<void>
   proposeCodeEdits(root: string, edits: CodeEdit[]): Promise<CodeEditProposal>
   applyCodeEdits(root: string, edits: CodeEdit[], approvalToken: string): Promise<any>
   listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void>
   readClipboardImage(): Promise<string | null>
+  listGitCheckpoints(chatId: string): Promise<GitCheckpoint[]>
+  rollbackGitCheckpoint(chatId: string, step: number, workspacePath?: string): Promise<{ status: string; message: string }>
+  readWorkspaceFile(path: string): Promise<string>
 }
