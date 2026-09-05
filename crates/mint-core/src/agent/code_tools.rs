@@ -3,6 +3,10 @@ use std::{
     fs,
     io::Write as _,
     path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
 };
 
 use grep_regex::RegexMatcherBuilder;
@@ -145,11 +149,13 @@ pub fn list_code_files(
     config: &MintConfig,
 ) -> Result<Vec<CodeFile>, CodeInspectionError> {
     let root = assert_path_capability(root, Capability::Read, config)?;
+    let root_buf = root.clone();
     let mut files = Vec::new();
     let walker = ignore::WalkBuilder::new(&root)
         .hidden(false)
         .git_ignore(true)
         .ignore(true)
+        .filter_entry(move |entry| !contains_ignored_directory(entry.path(), &root_buf))
         .build();
 
     for result in walker {
@@ -162,9 +168,6 @@ pub fn list_code_files(
         };
         let path = entry.path();
         if path.is_file() {
-            if contains_ignored_directory(path, &root) {
-                continue;
-            }
             if let Ok(metadata) = path.metadata() {
                 files.push(CodeFile {
                     path: path.to_path_buf(),
@@ -251,10 +254,9 @@ pub fn search_code(
     limit: usize,
     config: &MintConfig,
 ) -> Result<Vec<CodeSearchHit>, CodeInspectionError> {
-    let files = list_code_files(root, usize::MAX, config)?;
-    let mut hits = Vec::new();
-    if query.trim().is_empty() {
-        return Ok(hits);
+    let root = assert_path_capability(root, Capability::Read, config)?;
+    if query.trim().is_empty() || limit == 0 {
+        return Ok(Vec::new());
     }
     let escaped = regex::escape(query);
     let matcher = match RegexMatcherBuilder::new()
@@ -262,21 +264,83 @@ pub fn search_code(
         .build(&escaped)
     {
         Ok(m) => m,
-        Err(_) => return Ok(hits),
+        Err(_) => return Ok(Vec::new()),
     };
-    let mut searcher = SearcherBuilder::new().build();
-    for file in files {
-        let mut sink = SearchHitSink {
-            path: &file.path,
-            hits: &mut hits,
-            limit,
-        };
-        let _ = searcher.search_path(&matcher, &file.path, &mut sink);
-        if hits.len() >= limit.max(1) {
-            break;
-        }
-    }
-    Ok(hits)
+
+    let root_buf = root.clone();
+    let mut builder = ignore::WalkBuilder::new(&root);
+    builder
+        .hidden(false)
+        .git_ignore(true)
+        .ignore(true)
+        .filter_entry(move |entry| !contains_ignored_directory(entry.path(), &root_buf));
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let hit_count = Arc::new(AtomicUsize::new(0));
+    let hits = Arc::new(Mutex::new(Vec::new()));
+
+    builder.build_parallel().run(|| {
+        let stop = Arc::clone(&stop);
+        let hit_count = Arc::clone(&hit_count);
+        let hits = Arc::clone(&hits);
+        let matcher = matcher.clone();
+        let mut searcher = SearcherBuilder::new().build();
+
+        Box::new(move |entry_result| {
+            if stop.load(Ordering::Relaxed) {
+                return ignore::WalkState::Quit;
+            }
+
+            let entry = match entry_result {
+                Ok(e) => e,
+                Err(_) => return ignore::WalkState::Continue,
+            };
+
+            if entry.file_type().map_or(false, |ft| ft.is_file()) {
+                let path = entry.path();
+                let current = hit_count.load(Ordering::Relaxed);
+                if current >= limit {
+                    stop.store(true, Ordering::Relaxed);
+                    return ignore::WalkState::Quit;
+                }
+
+                let mut file_hits = Vec::new();
+                let remaining = limit.saturating_sub(current);
+                let mut sink = SearchHitSink {
+                    path,
+                    hits: &mut file_hits,
+                    limit: remaining,
+                };
+
+                let _ = searcher.search_path(&matcher, path, &mut sink);
+
+                if !file_hits.is_empty() {
+                    let mut guard = hits.lock().unwrap();
+                    for hit in file_hits {
+                        if guard.len() < limit {
+                            guard.push(hit);
+                        }
+                    }
+                    let total = guard.len();
+                    hit_count.store(total, Ordering::Relaxed);
+                    if total >= limit {
+                        stop.store(true, Ordering::Relaxed);
+                        return ignore::WalkState::Quit;
+                    }
+                }
+            }
+
+            ignore::WalkState::Continue
+        })
+    });
+
+    let mut final_hits = match Arc::try_unwrap(hits) {
+        Ok(mutex) => mutex.into_inner().unwrap(),
+        Err(arc) => arc.lock().unwrap().clone(),
+    };
+    final_hits.truncate(limit);
+    final_hits.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.line.cmp(&b.line)));
+    Ok(final_hits)
 }
 
 pub fn repository_summary(
@@ -918,6 +982,23 @@ mod tests {
             result,
             Err(CodeInspectionError::OutsideWorkspace(_))
         ));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn search_code_respects_limit_and_finds_across_files() {
+        let root = std::env::temp_dir().join("mint-code-tools-search-multi");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/a.rs"), "let keyword = 1;\nlet keyword = 2;\n").unwrap();
+        fs::write(root.join("src/b.rs"), "let keyword = 3;\nlet keyword = 4;\n").unwrap();
+
+        let config = config_for(&root);
+        let hits = search_code(&root, "keyword", 3, &config).unwrap();
+        assert_eq!(hits.len(), 3);
+
+        let hits_all = search_code(&root, "keyword", 10, &config).unwrap();
+        assert_eq!(hits_all.len(), 4);
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -21,6 +21,25 @@ history that survives a restart.
 
 ---
 
+## ⚡ Performance: Optimized Cargo Release Profile (`[profile.release]`)
+
+Added production release profile optimizations in the root `Cargo.toml`:
+- **`opt-level = 3`**: Maximum compiler optimizations for production builds.
+- **`lto = "thin"`**: Thin Link-Time Optimization enabling cross-crate optimization and inlining between `mint-core`, `mint-cli`, and `src-tauri`.
+- **`codegen-units = 1`**: Reduced compilation units to maximize optimization opportunities across the whole crate graph.
+- **`strip = true`**: Automatically strips debug symbols from final release binaries, reducing binary size significantly.
+
+---
+
+## ⚡ Performance: Parallel Streaming `search_code` & Early Directory Pruning
+
+Optimized code search and file walking in `crates/mint-core`:
+- **Parallel multi-threaded search (`WalkParallel`)**: `search_code` no longer eagerly walks the entire repository into a heap-allocated `Vec<CodeFile>` or stats every file before searching. It now streams file paths concurrently across worker threads and searches them on the fly.
+- **Early termination on limit**: Worker threads coordinate via atomic flags to immediately halt searching as soon as the requested result limit is reached, avoiding scanning the remainder of large codebases.
+- **Early directory pruning (`filter_entry`)**: Added directory filtering directly into `WalkBuilder` so traversals never descend into ignored directories (`target`, `node_modules`, `.cache`, `.git`, `dist`, `build`, etc.), drastically speeding up searches on large projects.
+
+---
+
 ## ⏰ Fixed: Scheduled Tasks Lost a Run When Mint Closed Mid-Execution
 
 The cron scheduler advanced a job's `next_run` to the following occurrence
