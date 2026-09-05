@@ -1007,8 +1007,16 @@ mod tests {
         let root = std::env::temp_dir().join("mint-code-tools-search-multi");
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(root.join("src/a.rs"), "let keyword = 1;\nlet keyword = 2;\n").unwrap();
-        fs::write(root.join("src/b.rs"), "let keyword = 3;\nlet keyword = 4;\n").unwrap();
+        fs::write(
+            root.join("src/a.rs"),
+            "let keyword = 1;\nlet keyword = 2;\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("src/b.rs"),
+            "let keyword = 3;\nlet keyword = 4;\n",
+        )
+        .unwrap();
 
         let config = config_for(&root);
         let hits = search_code(&root, "keyword", 3, &config).unwrap();

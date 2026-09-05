@@ -161,8 +161,14 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
             (false, format!("[run_plugin] Running plugin: {}...", name))
         }
         "dispatch_subagent" => {
-            let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("subagent");
-            let instruction = input.get("instruction").and_then(|v| v.as_str()).unwrap_or("");
+            let name = input
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("subagent");
+            let instruction = input
+                .get("instruction")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let summary = if instruction.len() > 60 {
                 format!("{}...", &instruction[..57])
             } else {

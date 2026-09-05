@@ -52,10 +52,10 @@ pub use integrations::plugins;
 pub use search::files;
 pub use search::knowledge;
 pub use search::linked_folders;
+pub use search::local_embedding;
+pub use search::repo_map;
 pub use search::semantic;
 pub use search::symbols;
-pub use search::repo_map;
-pub use search::local_embedding;
 pub use search::web_search;
 
 pub use system::auth;
@@ -104,12 +104,12 @@ pub use cron::{
 };
 pub use docker_sandbox::{docker_available, has_session, start_session, stop_session};
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
-pub use git::{
-    Checkpoint, create_checkpoint, get_head_hash, is_git_repo, list_checkpoints,
-    record_checkpoint, rollback_checkpoint, rollback_to_step,
-};
 pub use gemini_live::{
     GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session,
+};
+pub use git::{
+    Checkpoint, create_checkpoint, get_head_hash, is_git_repo, list_checkpoints, record_checkpoint,
+    rollback_checkpoint, rollback_to_step,
 };
 pub use hooks::{
     HookEntry, HookError, HookEvent, PreHookOutcome, add_hook, clear_hooks, list_hooks,
@@ -157,6 +157,7 @@ pub use plugins::{
     NativePlugin, PluginError, execute_native_plugin, native_plugin_enabled, native_plugins,
     set_native_plugin_enabled_in,
 };
+pub use repo_map::{RepoMapSummary, generate_repo_map};
 pub use safety::{
     Capability, SafetyError, SafetyTier, ShellClassification, ShellCommandMode,
     assert_path_capability, classify_shell_command, shell_mode_allowed,
@@ -183,7 +184,6 @@ pub use subtitle::{
     generate_srt, secs_to_srt_timestamp, translate_subtitles,
 };
 pub use symbols::{CodeSymbol, SymbolError, SymbolIndex, build_symbol_index};
-pub use repo_map::{RepoMapSummary, generate_repo_map};
 pub use tasks::{Task, TaskError, TaskStore, tasks_path};
 pub use timeline::{
     RenderTimelineRequest, RenderTimelineResult, Timeline, TimelineAudio, TimelineClip,

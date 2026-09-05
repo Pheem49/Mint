@@ -1702,7 +1702,8 @@ where
                                 )
                             }
                             crate::hooks::PreHookOutcome::Allowed => {
-                                if matches!(decision.action.as_str(), "write_file" | "apply_patch") {
+                                if matches!(decision.action.as_str(), "write_file" | "apply_patch")
+                                {
                                     let target_path = if !decision.input.path.is_empty() {
                                         Some(decision.input.path.as_str())
                                     } else {

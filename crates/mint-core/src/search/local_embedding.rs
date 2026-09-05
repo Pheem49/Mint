@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex, RwLock};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use std::sync::{Arc, Mutex, RwLock};
 
 pub const LOCAL_EMBEDDING_DIM: usize = 384;
 

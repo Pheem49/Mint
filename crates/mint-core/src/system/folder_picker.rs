@@ -34,7 +34,11 @@ pub fn pick_directory_blocking() -> Option<String> {
             return None;
         }
         let picked = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return if picked.is_empty() { None } else { Some(picked) };
+        return if picked.is_empty() {
+            None
+        } else {
+            Some(picked)
+        };
     }
     None
 }

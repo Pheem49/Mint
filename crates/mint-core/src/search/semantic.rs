@@ -198,9 +198,7 @@ async fn generate_embeddings(
         }
         Ok(_) => {}
         Err(err) => {
-            eprintln!(
-                "FastEmbed local embedding unavailable ({err}), checking fallback providers"
-            );
+            eprintln!("FastEmbed local embedding unavailable ({err}), checking fallback providers");
         }
     }
 

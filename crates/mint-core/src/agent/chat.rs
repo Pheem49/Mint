@@ -1145,7 +1145,9 @@ fn anthropic_messages(messages: &[ChatMessage]) -> Result<Vec<Value>, ChatError>
                 .map(anthropic_content_block)
                 .collect::<Result<Vec<_>, _>>()?;
 
-            if Some(i) == cache_idx && let Some(last_block) = content.last_mut() {
+            if Some(i) == cache_idx
+                && let Some(last_block) = content.last_mut()
+            {
                 if let Some(obj) = last_block.as_object_mut() {
                     obj.insert("cache_control".to_string(), json!({ "type": "ephemeral" }));
                 }
@@ -2323,7 +2325,10 @@ mod tests {
         let messages = payload["messages"].as_array().unwrap();
         assert_eq!(messages.len(), 3);
         assert!(messages[0]["content"][0].get("cache_control").is_none());
-        assert_eq!(messages[1]["content"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(
+            messages[1]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
         assert!(messages[2]["content"][0].get("cache_control").is_none());
     }
 

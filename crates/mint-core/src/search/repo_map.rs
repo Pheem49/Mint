@@ -1,7 +1,7 @@
+use crate::{MintConfig, SymbolError, build_symbol_index};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
-use crate::{MintConfig, build_symbol_index, SymbolError};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -28,7 +28,11 @@ pub fn generate_repo_map(
     // Group symbols by relative file path
     let mut files_map: BTreeMap<PathBuf, Vec<&crate::symbols::CodeSymbol>> = BTreeMap::new();
     for sym in &index.symbols {
-        let rel_path = sym.file.strip_prefix(root).unwrap_or(&sym.file).to_path_buf();
+        let rel_path = sym
+            .file
+            .strip_prefix(root)
+            .unwrap_or(&sym.file)
+            .to_path_buf();
         files_map.entry(rel_path).or_default().push(sym);
     }
 

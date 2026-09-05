@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -22,7 +22,13 @@ fn checkpoints_dir() -> Option<PathBuf> {
 fn checkpoint_file_for_chat(chat_id: &str) -> Option<PathBuf> {
     let safe_id: String = chat_id
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     checkpoints_dir().map(|dir| dir.join(format!("{safe_id}.json")))
 }
@@ -102,7 +108,9 @@ pub fn create_checkpoint(
         .output()
         .map_err(|e| format!("failed to run git stash create: {e}"))?;
 
-    let stash_hash = String::from_utf8_lossy(&stash_out.stdout).trim().to_string();
+    let stash_hash = String::from_utf8_lossy(&stash_out.stdout)
+        .trim()
+        .to_string();
     let commit_hash = if !stash_hash.is_empty() {
         stash_hash
     } else {
@@ -154,10 +162,16 @@ pub fn rollback_checkpoint(root: &Path, checkpoint: &Checkpoint) -> Result<Strin
         .current_dir(root)
         .output()
     {
-        let rescue_hash = String::from_utf8_lossy(&rescue_out.stdout).trim().to_string();
+        let rescue_hash = String::from_utf8_lossy(&rescue_out.stdout)
+            .trim()
+            .to_string();
         if !rescue_hash.is_empty() {
             let _ = Command::new("git")
-                .args(["update-ref", &format!("refs/mint/rescue/{timestamp}"), &rescue_hash])
+                .args([
+                    "update-ref",
+                    &format!("refs/mint/rescue/{timestamp}"),
+                    &rescue_hash,
+                ])
                 .current_dir(root)
                 .output();
         }

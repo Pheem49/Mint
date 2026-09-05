@@ -210,4 +210,3 @@ pub(super) fn format_trajectory_step(
     );
     s
 }
-

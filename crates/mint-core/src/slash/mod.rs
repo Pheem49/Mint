@@ -443,7 +443,9 @@ fn cmd_rewind(req: &SlashRequest, rest: &str) -> SlashResponse {
 
     if rest.trim().is_empty() {
         if checkpoints.is_empty() {
-            return message("No git checkpoints recorded yet.\n\nCheckpoints are created automatically before mutating file actions (`write_file`, `apply_patch`).");
+            return message(
+                "No git checkpoints recorded yet.\n\nCheckpoints are created automatically before mutating file actions (`write_file`, `apply_patch`).",
+            );
         }
         let mut md = String::from("### ↺ Available Git Checkpoints (Time Machine)\n\n");
         md.push_str("| Step | Commit | Action | Target File |\n");
@@ -455,7 +457,10 @@ fn cmd_rewind(req: &SlashRequest, rest: &str) -> SlashResponse {
                 &cp.commit_hash
             };
             let target = cp.target_path.as_deref().unwrap_or("-");
-            md.push_str(&format!("| **Step {}** | `{}` | `{}` | `{}` |\n", cp.step, hash_short, cp.action, target));
+            md.push_str(&format!(
+                "| **Step {}** | `{}` | `{}` | `{}` |\n",
+                cp.step, hash_short, cp.action, target
+            ));
         }
         md.push_str("\nUse `/rewind <step>` to restore your workspace to before that step.");
         message(md)
@@ -465,7 +470,9 @@ fn cmd_rewind(req: &SlashRequest, rest: &str) -> SlashResponse {
                 Ok(msg) => message(msg),
                 Err(err) => error(format!("Failed to rollback: {err}")),
             },
-            Err(_) => error(format!("Invalid step number: \"{rest}\". Usage: /rewind <step>")),
+            Err(_) => error(format!(
+                "Invalid step number: \"{rest}\". Usage: /rewind <step>"
+            )),
         }
     }
 }

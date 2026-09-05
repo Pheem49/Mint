@@ -193,7 +193,9 @@ pub(super) fn is_parallelizable_read_only_tool(action: &str) -> bool {
 /// Whether this step's decisions should run as a concurrency-limited batch of
 /// read-only tool calls instead of the normal sequential loop: 2 or more decisions,
 /// every one of them a safe read-only tool with no mutating actions mixed in.
-pub(super) fn decisions_are_parallel_read_only_batch(decisions: &[(String, AgentDecision)]) -> bool {
+pub(super) fn decisions_are_parallel_read_only_batch(
+    decisions: &[(String, AgentDecision)],
+) -> bool {
     decisions.len() >= 2
         && decisions
             .iter()
@@ -208,7 +210,10 @@ mod tests {
     fn action_fingerprint_differentiates_read_file_slices() {
         let d1: AgentDecision = parse_agent_json(r#"{"action":"read_file","thought":"","input":{"path":"README.md","startLine":1,"endLine":240}}"#).unwrap();
         let d2: AgentDecision = parse_agent_json(r#"{"action":"read_file","thought":"","input":{"path":"README.md","startLine":241,"endLine":480}}"#).unwrap();
-        let d3: AgentDecision = parse_agent_json(r#"{"action":"read_file","thought":"","input":{"path":"README.md","start_line":241}}"#).unwrap();
+        let d3: AgentDecision = parse_agent_json(
+            r#"{"action":"read_file","thought":"","input":{"path":"README.md","start_line":241}}"#,
+        )
+        .unwrap();
 
         assert_eq!(action_fingerprint(&d1), "read_file:README.md:1:240");
         assert_eq!(action_fingerprint(&d2), "read_file:README.md:241:480");
@@ -227,5 +232,3 @@ mod tests {
         assert_eq!(snake.input.end_line, Some(50));
     }
 }
-
-

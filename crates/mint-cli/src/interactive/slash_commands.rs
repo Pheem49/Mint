@@ -257,7 +257,9 @@ pub async fn handle_slash_command(
             if rest.is_empty() {
                 if checkpoints.is_empty() {
                     println!("\n{DIM}No git checkpoints recorded for this CLI session yet.{RESET}");
-                    println!("{DIM}Checkpoints are created automatically before mutating file actions (write_file, apply_patch).{RESET}\n");
+                    println!(
+                        "{DIM}Checkpoints are created automatically before mutating file actions (write_file, apply_patch).{RESET}\n"
+                    );
                 } else {
                     println!("\n{BLUE}────────────────────────────────────────────{RESET}");
                     println!("{MINT}  ↺ Available Git Checkpoints (Time Machine){RESET}");
@@ -274,13 +276,19 @@ pub async fn handle_slash_command(
                             cp.step, hash_short, cp.action, target
                         );
                     }
-                    println!("\n{DIM}Use {RESET}{MINT}/rewind <step>{RESET}{DIM} to restore workspace to before that step.{RESET}\n");
+                    println!(
+                        "\n{DIM}Use {RESET}{MINT}/rewind <step>{RESET}{DIM} to restore workspace to before that step.{RESET}\n"
+                    );
                 }
                 Some(SlashResult::Handled)
             } else {
                 match rest.parse::<usize>() {
                     Ok(step) => {
-                        match mint_core::git::rollback_to_step(&session.current_dir, mint_core::CHAT_CLI_ID, step) {
+                        match mint_core::git::rollback_to_step(
+                            &session.current_dir,
+                            mint_core::CHAT_CLI_ID,
+                            step,
+                        ) {
                             Ok(msg) => {
                                 println!("\n{MINT}{msg}{RESET}\n");
                             }
@@ -290,7 +298,9 @@ pub async fn handle_slash_command(
                         }
                     }
                     Err(_) => {
-                        println!("\n{ERROR}Invalid step number:{RESET} \"{rest}\". Usage: /rewind <step>\n");
+                        println!(
+                            "\n{ERROR}Invalid step number:{RESET} \"{rest}\". Usage: /rewind <step>\n"
+                        );
                     }
                 }
                 Some(SlashResult::Handled)
@@ -329,7 +339,9 @@ pub async fn handle_slash_command(
                     } else if sel.contains("/help") {
                         "/help"
                     } else {
-                        println!("{MINT}Tip:{RESET} Type {BLUE}/<command>{RESET} or press {MINT}Tab{RESET} to autocomplete commands anytime.\n");
+                        println!(
+                            "{MINT}Tip:{RESET} Type {BLUE}/<command>{RESET} or press {MINT}Tab{RESET} to autocomplete commands anytime.\n"
+                        );
                         return Some(SlashResult::Handled);
                     };
                     Box::pin(handle_slash_command(session, next_cmd)).await
@@ -1687,9 +1699,17 @@ pub async fn handle_slash_command(
                         } else {
                             println!("\n{BLUE}Recent interactions:{RESET}");
                             for item in items.iter().rev() {
-                                let local_time = chrono::DateTime::parse_from_rfc3339(&item.created_at)
-                                    .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
-                                    .unwrap_or_else(|_| item.created_at[..16.min(item.created_at.len())].to_string());
+                                let local_time =
+                                    chrono::DateTime::parse_from_rfc3339(&item.created_at)
+                                        .map(|dt| {
+                                            dt.with_timezone(&chrono::Local)
+                                                .format("%Y-%m-%d %H:%M")
+                                                .to_string()
+                                        })
+                                        .unwrap_or_else(|_| {
+                                            item.created_at[..16.min(item.created_at.len())]
+                                                .to_string()
+                                        });
                                 println!(
                                     "  {DIM}[{}]{RESET} {BLUE}You:{RESET} {}",
                                     local_time,
