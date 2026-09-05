@@ -159,3 +159,55 @@ pub(super) fn initial_observation(task: &str, root: &Path, skills: &str) -> Stri
     observation.push_str("Choose the first action. Finish immediately for casual conversation.");
     observation
 }
+
+/// Rebuilds the `observation` string buffer from the current trajectory in-place,
+/// reusing the underlying allocation across agent-loop steps to avoid repeated
+/// heap re-allocations and redundant copies.
+pub(super) fn rebuild_observation(
+    task: &str,
+    root: &Path,
+    trajectory: &[String],
+    target: &mut String,
+) {
+    target.clear();
+    let trajectory_len: usize = trajectory.iter().map(|s| s.len() + 2).sum();
+    let root_display = root.display();
+    let estimated = task.len() + 250 + trajectory_len;
+    target.reserve(estimated.saturating_sub(target.capacity()));
+
+    use std::fmt::Write as _;
+    let _ = write!(
+        target,
+        "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n",
+        root_display
+    );
+    for (i, step) in trajectory.iter().enumerate() {
+        if i > 0 {
+            target.push_str("\n\n");
+        }
+        target.push_str(step);
+    }
+    target.push_str(
+        "\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
+    );
+}
+
+/// Formats a single trajectory step entry with a pre-allocated capacity buffer,
+/// avoiding re-allocations when recording actions into the trajectory.
+pub(super) fn format_trajectory_step(
+    step: usize,
+    thought: &str,
+    action: &str,
+    observation: &str,
+) -> String {
+    let thought = thought.trim();
+    let cap = 35 + thought.len() + action.len() + observation.len();
+    let mut s = String::with_capacity(cap);
+    use std::fmt::Write as _;
+    let _ = write!(
+        s,
+        "Step {step}:\n- Thought: {thought}\n- Action: {action}\n- Observation: {observation}"
+    );
+    s
+}
+

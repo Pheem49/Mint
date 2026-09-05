@@ -1340,6 +1340,23 @@ where
                     &mut trajectory,
                 )
                 .await;
+            } else if decisions_are_parallel_read_only_batch(&decisions) {
+                step_tool_results = run_parallel_read_only_batch(
+                    &decisions,
+                    step,
+                    &root,
+                    config,
+                    chat_id,
+                    &mut approve,
+                    &mut progress,
+                    &mut action_counts,
+                    &mut trajectory,
+                    &mut step_images,
+                    &hooks,
+                    pinned_mcp_server,
+                    fast_mode,
+                )
+                .await;
             } else {
                 for (call_id, decision) in decisions {
                     if !fast_mode
@@ -1407,18 +1424,13 @@ where
                                 let err_msg = "Error: Your finish action summary was empty. \
                                        You MUST provide a final answer, explanation, or response to the user's query \
                                        in the 'summary' field of the 'finish' action input. Do not leave it empty.";
-                                trajectory.push(format!(
-                                    "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
-                                    decision.thought.trim(),
-                                    decision.action,
-                                    err_msg
+                                trajectory.push(format_trajectory_step(
+                                    step,
+                                    &decision.thought,
+                                    &decision.action,
+                                    err_msg,
                                 ));
-                                let history_str = trajectory.join("\n\n");
-                                observation = format!(
-                                    "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
-                                    root.display(),
-                                    history_str
-                                );
+                                rebuild_observation(task, &root, &trajectory, &mut observation);
                                 reject_native_finish(
                                     tool_mode,
                                     &mut native_messages,
@@ -1438,18 +1450,13 @@ where
                                        before finishing. If no check genuinely applies (e.g. no test \
                                        suite, documentation-only change), say so explicitly in the \
                                        finish action's 'verification' field and finish again.";
-                                trajectory.push(format!(
-                                    "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
-                                    decision.thought.trim(),
-                                    decision.action,
-                                    err_msg
+                                trajectory.push(format_trajectory_step(
+                                    step,
+                                    &decision.thought,
+                                    &decision.action,
+                                    err_msg,
                                 ));
-                                let history_str = trajectory.join("\n\n");
-                                observation = format!(
-                                    "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
-                                    root.display(),
-                                    history_str
-                                );
+                                rebuild_observation(task, &root, &trajectory, &mut observation);
                                 reject_native_finish(
                                     tool_mode,
                                     &mut native_messages,
@@ -1471,18 +1478,13 @@ where
                                        unrelated to your change (e.g. pre-existing), say so \
                                        explicitly in the finish action's 'verification' field and \
                                        finish again.";
-                                trajectory.push(format!(
-                                    "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
-                                    decision.thought.trim(),
-                                    decision.action,
-                                    err_msg
+                                trajectory.push(format_trajectory_step(
+                                    step,
+                                    &decision.thought,
+                                    &decision.action,
+                                    err_msg,
                                 ));
-                                let history_str = trajectory.join("\n\n");
-                                observation = format!(
-                                    "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
-                                    root.display(),
-                                    history_str
-                                );
+                                rebuild_observation(task, &root, &trajectory, &mut observation);
                                 reject_native_finish(
                                     tool_mode,
                                     &mut native_messages,
@@ -1812,11 +1814,11 @@ where
                 );
                     }
 
-                    trajectory.push(format!(
-                        "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
-                        decision.thought.trim(),
-                        decision.action,
-                        final_result
+                    trajectory.push(format_trajectory_step(
+                        step,
+                        &decision.thought,
+                        &decision.action,
+                        &final_result,
                     ));
 
                     step_tool_results.push((
@@ -1911,12 +1913,7 @@ where
                 }
             }
 
-            let history_str = trajectory.join("\n\n");
-            observation = format!(
-                "Task: {task}\nWorkspace: {}\n\nHere is the history of what you have done so far in this agent loop:\n\n{}\n\nProceed to the next step. If you have completed the task, use the 'finish' action.",
-                root.display(),
-                history_str
-            );
+            rebuild_observation(task, &root, &trajectory, &mut observation);
         }
 
         Err(OrchestrationError::Agent(format!(
@@ -2238,14 +2235,199 @@ async fn run_parallel_subagent_batch(
             );
         }
 
-        trajectory.push(format!(
-            "Step {step}:\n- Thought: {}\n- Action: {}\n- Observation: {}",
-            thought.trim(),
-            action,
-            final_result
+        trajectory.push(format_trajectory_step(
+            step,
+            &thought,
+            &action,
+            &final_result,
         ));
         step_tool_results.push((call_id, action, input_val, final_result));
     }
+    step_tool_results
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_parallel_read_only_batch(
+    decisions: &[(String, AgentDecision)],
+    step: usize,
+    root: &Path,
+    config: &MintConfig,
+    chat_id: &str,
+    approve: &mut (dyn FnMut(&AgentApproval) -> Result<ApprovalOutcome, String> + Send),
+    progress: &mut (dyn FnMut(AgentProgress) + Send),
+    action_counts: &mut BTreeMap<String, usize>,
+    trajectory: &mut Vec<String>,
+    step_images: &mut std::collections::HashMap<String, String>,
+    hooks: &[crate::hooks::HookEntry],
+    pinned_mcp_server: Option<&str>,
+    fast_mode: bool,
+) -> Vec<(String, String, Value, String)> {
+    let approve_mutex = std::sync::Mutex::new(approve);
+    let progress_mutex = std::sync::Mutex::new(progress);
+
+    let mut tasks = Vec::with_capacity(decisions.len());
+    for (index, (call_id, decision)) in decisions.iter().enumerate() {
+        let call_id = call_id.clone();
+        let thought = decision.thought.clone();
+        let action = decision.action.clone();
+        let input_val = serde_json::to_value(&decision.input).unwrap_or(Value::Null);
+        let action_key = action_fingerprint(decision);
+        let approve_mutex = &approve_mutex;
+        let progress_mutex = &progress_mutex;
+        let decision = decision;
+
+        tasks.push(async move {
+            if !fast_mode && !thought.trim().is_empty() {
+                let mut guard = progress_mutex.lock().unwrap();
+                (*guard)(AgentProgress::Thought {
+                    thought: thought.trim().to_owned(),
+                });
+            }
+
+            {
+                let mut guard = progress_mutex.lock().unwrap();
+                (*guard)(AgentProgress::ToolStart {
+                    action: action.clone(),
+                    input: input_val.clone(),
+                    subagent: None,
+                });
+            }
+
+            let result: String = if pinned_mcp_server.is_some_and(|p| {
+                (action == "mcp_tool" || action == "mcp_list_tools") && decision.input.server != p
+            }) {
+                let p = pinned_mcp_server.unwrap();
+                format!(
+                    "Blocked: this turn is pinned to the \"{p}\" MCP server only (selected via @{p} in the composer). Retry with \"server\":\"{p}\", or use a different (non-MCP) tool."
+                )
+            } else {
+                match crate::hooks::run_pre_tool_hooks(hooks, &action, &input_val, root) {
+                    crate::hooks::PreHookOutcome::Blocked(reason) => {
+                        format!(
+                            "Blocked by hook: {}\n\n[System Tip: A configured PreToolUse hook rejected this action. Adjust your approach or ask the user for guidance.]",
+                            reason
+                        )
+                    }
+                    crate::hooks::PreHookOutcome::Allowed => {
+                        let mut approve_adapter =
+                            |approval: &AgentApproval| -> Result<ApprovalOutcome, String> {
+                                let mut guard = approve_mutex.lock().unwrap();
+                                (*guard)(approval)
+                            };
+                        let mut progress_adapter = |event: AgentProgress| {
+                            let mut guard = progress_mutex.lock().unwrap();
+                            (*guard)(event);
+                        };
+
+                        let (tool_result, success) = match execute_tool(
+                            root,
+                            config,
+                            &decision,
+                            chat_id,
+                            &mut approve_adapter,
+                            &mut progress_adapter,
+                        )
+                        .await
+                        {
+                            Ok(res) => (res, true),
+                            Err(err) => (format!("Error: {}", err), false),
+                        };
+
+                        let hook_messages = crate::hooks::run_post_tool_hooks(
+                            hooks,
+                            &action,
+                            &input_val,
+                            &tool_result,
+                            success,
+                            root,
+                        );
+
+                        if hook_messages.is_empty() {
+                            tool_result
+                        } else {
+                            format!(
+                                "{}\n\n{}",
+                                tool_result,
+                                hook_messages
+                                    .iter()
+                                    .map(|msg| format!("[Hook] {}", msg))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
+                        }
+                    }
+                }
+            };
+
+            {
+                let mut guard = progress_mutex.lock().unwrap();
+                (*guard)(AgentProgress::ToolEnd {
+                    action: action.clone(),
+                    input: input_val.clone(),
+                    result: result.clone(),
+                    subagent: None,
+                });
+            }
+
+            (
+                index, call_id, thought, action, input_val, action_key, result,
+            )
+        });
+    }
+
+    let mut results = futures_util::stream::iter(tasks)
+        .buffer_unordered(PARALLEL_READ_ONLY_LIMIT)
+        .collect::<Vec<_>>()
+        .await;
+
+    results.sort_by_key(|(index, ..)| *index);
+
+    let mut step_tool_results = Vec::with_capacity(results.len());
+    for (_, call_id, thought, action, input_val, action_key, result) in results {
+        let action_count = {
+            let count = action_counts.entry(action_key).or_insert(0);
+            *count += 1;
+            *count
+        };
+
+        let mut final_result = if result.starts_with("data:image/")
+            && matches!(
+                action.as_str(),
+                "browser_screenshot" | "video_filmstrip" | "video_waveform" | "view_image"
+            ) {
+            step_images.insert(call_id.clone(), result.clone());
+            match action.as_str() {
+                "video_filmstrip" => {
+                    "[Filmstrip generated — see attached image: sampled frames across the video timeline]".to_string()
+                }
+                "video_waveform" => {
+                    "[Waveform generated — see attached image: audio amplitude over time]".to_string()
+                }
+                "view_image" => "[Image loaded — see attached image]".to_string(),
+                _ => "[Screenshot captured — see attached image]".to_string(),
+            }
+        } else {
+            truncate(&result)
+        };
+
+        if action_count >= 3 {
+            final_result.push_str(
+                "\n\n[System Tip: You repeated the same tool action three or more times. \
+                 Stop repeating it. If you already have enough information or the requested edit is done, \
+                 use the finish action now. Otherwise choose a different necessary action.]",
+            );
+        }
+
+        trajectory.push(format_trajectory_step(
+            step,
+            &thought,
+            &action,
+            &final_result,
+        ));
+
+        step_tool_results.push((call_id, action, input_val, final_result));
+    }
+
     step_tool_results
 }
 
@@ -2980,5 +3162,71 @@ mod tests {
     #[test]
     fn empty_decisions_never_qualify_for_the_parallel_batch() {
         assert!(!decisions_are_parallel_subagent_batch(&[]));
+        assert!(!decisions_are_parallel_read_only_batch(&[]));
+    }
+
+    #[test]
+    fn two_or_more_read_only_decisions_qualify_for_the_parallel_batch() {
+        let decisions = vec![
+            decision_with_action("read_file"),
+            decision_with_action("search_code"),
+        ];
+        assert!(decisions_are_parallel_read_only_batch(&decisions));
+
+        let decisions = vec![
+            decision_with_action("read_file"),
+            decision_with_action("web_search"),
+            decision_with_action("git_diff"),
+        ];
+        assert!(decisions_are_parallel_read_only_batch(&decisions));
+    }
+
+    #[test]
+    fn a_lone_read_only_decision_stays_sequential() {
+        let decisions = vec![decision_with_action("read_file")];
+        assert!(!decisions_are_parallel_read_only_batch(&decisions));
+    }
+
+    #[test]
+    fn read_only_mixed_with_mutating_action_stays_sequential() {
+        let decisions = vec![
+            decision_with_action("read_file"),
+            decision_with_action("write_file"),
+        ];
+        assert!(!decisions_are_parallel_read_only_batch(&decisions));
+
+        let decisions = vec![
+            decision_with_action("read_file"),
+            decision_with_action("run_shell"),
+        ];
+        assert!(!decisions_are_parallel_read_only_batch(&decisions));
+    }
+
+    #[test]
+    fn rebuild_observation_reuses_buffer_and_formats_history() {
+        let root = Path::new("/workspace/test-project");
+        let task = "Fix the login bug";
+        let step1 = format_trajectory_step(1, "Inspecting files", "list_files", "src/main.rs");
+        let step2 = format_trajectory_step(2, "Reading code", "read_file", "fn main() {}");
+        let trajectory = vec![step1, step2];
+
+        let mut buffer = String::new();
+        rebuild_observation(task, root, &trajectory, &mut buffer);
+
+        assert!(buffer.contains("Task: Fix the login bug"));
+        assert!(buffer.contains("Workspace: /workspace/test-project"));
+        assert!(buffer.contains("Step 1:\n- Thought: Inspecting files"));
+        assert!(buffer.contains("Step 2:\n- Thought: Reading code"));
+        assert!(buffer.ends_with(
+            "Proceed to the next step. If you have completed the task, use the 'finish' action."
+        ));
+
+        // Ensure buffer can be reused cleanly for subsequent steps
+        let step3 = format_trajectory_step(3, "All done", "finish", "Fixed");
+        let mut extended_trajectory = trajectory;
+        extended_trajectory.push(step3);
+        rebuild_observation(task, root, &extended_trajectory, &mut buffer);
+
+        assert!(buffer.contains("Step 3:\n- Thought: All done"));
     }
 }
