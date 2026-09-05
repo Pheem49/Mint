@@ -105,3 +105,52 @@ pub fn print_shell_output(output: &mint_core::ShellOutput) {
     }
     println!();
 }
+
+pub fn preview_file(path: &Path) -> Result<()> {
+    if !path.exists() {
+        anyhow::bail!("File not found: {}", path.display());
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let metadata = fs::metadata(path)?;
+    let size = metadata.len();
+
+    println!(
+        "{MINT}Mint Live Preview{RESET}: {} {DIM}({} bytes){RESET}",
+        path.display(),
+        size
+    );
+
+    match ext.as_str() {
+        "html" | "htm" | "svg" => {
+            let canonical = path.canonicalize()?;
+            let url = format!("file://{}", canonical.display());
+            println!("{DIM}Opening in default browser/viewer: {RESET}{url}");
+            open_system_handler(&url)?;
+        }
+        "md" | "markdown" => {
+            let content = fs::read_to_string(path)?;
+            println!("\n{DIM}--- Markdown Preview ---{RESET}\n");
+            println!("{}", content);
+            println!("\n{DIM}--- End Preview ---{RESET}");
+        }
+        _ => {
+            let content = fs::read_to_string(path)?;
+            let lines: Vec<&str> = content.lines().take(50).collect();
+            println!("\n{DIM}--- File Preview (first 50 lines) ---{RESET}\n");
+            for (idx, line) in lines.iter().enumerate() {
+                println!("{DIM}{:4} |{RESET} {}", idx + 1, line);
+            }
+            if content.lines().count() > 50 {
+                println!(
+                    "{DIM}... and {} more lines{RESET}",
+                    content.lines().count() - 50
+                );
+            }
+        }
+    }
+    Ok(())
+}

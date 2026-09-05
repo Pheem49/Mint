@@ -168,6 +168,17 @@ fn all_tools() -> Vec<ToolSpec> {
             ),
         ),
         tool(
+            "repo_map",
+            "Generate a compact AST-based outline of the codebase showing files and signatures with token budgeting. Ideal for understanding project architecture and file layouts.",
+            schema(
+                json!({
+                    "path": { "type": "string", "description": "Root path to map. Defaults to \".\"." },
+                    "limit": { "type": "integer", "description": "Token budget limit for the map. Defaults to 2000." }
+                }),
+                &[],
+            ),
+        ),
+        tool(
             "semantic_index",
             "Build or refresh the semantic (embedding-based) code index for a path.",
             schema(json!({ "path": { "type": "string" } }), &["path"]),

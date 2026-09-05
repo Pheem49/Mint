@@ -214,6 +214,14 @@ enum Command {
     },
     /// Run one queued or supplied task through the native CLI agent.
     Agent { task: Option<String> },
+    /// Rewind workspace to a previous git checkpoint snapshot.
+    Rewind {
+        /// Step number to restore (omitting lists available checkpoints).
+        step: Option<usize>,
+        /// Chat ID (defaults to "cli").
+        #[arg(long, default_value = "cli")]
+        chat_id: String,
+    },
     /// Start the browser automation environment and enable browser actions.
     Auto,
     /// Launch the web UI and local API server.
@@ -297,6 +305,8 @@ enum Command {
     Open { target: String },
     /// Launch a desktop program.
     OpenApp { name: String },
+    /// Live preview an artifact file (HTML, SVG, Markdown) in browser or terminal.
+    Preview { path: PathBuf },
     /// Read the contents of a text file.
     ReadFile { path: PathBuf },
     /// List the contents of a directory.
@@ -736,6 +746,13 @@ enum CodeCommand {
         #[arg(long, default_value_t = 200)]
         end: usize,
     },
+    /// Generate an AST-based repo map with token budgeting.
+    Repomap {
+        #[arg(default_value = ".")]
+        root: PathBuf,
+        #[arg(long, default_value_t = 2000)]
+        limit: usize,
+    },
     /// Search source text without invoking a shell command.
     Search {
         query: String,
@@ -1147,6 +1164,34 @@ async fn main() -> Result<()> {
             }
             Command::Agent { task } => {
                 run_cli_agent_task(task).await?;
+            }
+            Command::Rewind { step, chat_id } => {
+                let cwd = std::env::current_dir()?;
+                if let Some(step_num) = step {
+                    let msg = mint_core::git::rollback_to_step(&cwd, &chat_id, step_num)
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                    println!("{msg}");
+                } else {
+                    let checkpoints = mint_core::git::list_checkpoints(&chat_id);
+                    if checkpoints.is_empty() {
+                        println!("No checkpoints recorded for chat '{chat_id}'");
+                    } else {
+                        println!("Checkpoints for chat '{chat_id}':");
+                        for cp in checkpoints.iter().rev() {
+                            let hash = if cp.commit_hash.len() >= 7 {
+                                &cp.commit_hash[..7]
+                            } else {
+                                &cp.commit_hash
+                            };
+                            let target = cp.target_path.as_deref().unwrap_or("-");
+                            println!(
+                                "  Step {:<3} [{}] {:<18} ({})",
+                                cp.step, hash, cp.action, target
+                            );
+                        }
+                        println!("\nRun 'mint rewind <step> --chat-id {chat_id}' to restore.");
+                    }
+                }
             }
             Command::Auto => {
                 let config = load_config()?;
@@ -2057,6 +2102,10 @@ async fn main() -> Result<()> {
                         "{}",
                         serde_json::to_string_pretty(&search_code(&root, &query, limit, &config)?)?
                     ),
+                    CodeCommand::Repomap { root, limit } => {
+                        let summary = mint_core::generate_repo_map(&root, limit, &config)?;
+                        println!("{}", summary.map);
+                    }
                     CodeCommand::Plan { task, root, file } => println!(
                         "{}",
                         serde_json::to_string_pretty(&inspect_code_plan(
@@ -2174,6 +2223,9 @@ async fn main() -> Result<()> {
             }
             Command::OpenApp { name } => {
                 actions::launch_desktop_app(&name)?;
+            }
+            Command::Preview { path } => {
+                actions::preview_file(&path)?;
             }
             Command::ReadFile { path } => {
                 actions::read_file_content(&path)?;

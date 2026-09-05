@@ -16,6 +16,7 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "read_file",
     "search_code",
     "symbols",
+    "repo_map",
     "semantic_index",
     "semantic_search",
     "knowledge_search",
@@ -64,6 +65,7 @@ pub(crate) fn base_allowed_actions() -> Vec<&'static str> {
         "read_file",
         "search_code",
         "symbols",
+        "repo_map",
         "semantic_index",
         "semantic_search",
         "knowledge_search",
@@ -174,6 +176,9 @@ pub fn build_system_prompt(
     }
     if allowed_actions.contains(&"symbols") {
         input_formats.push("- symbols: {\"path\":\".\",\"limit\":100}");
+    }
+    if allowed_actions.contains(&"repo_map") {
+        input_formats.push("- repo_map: {\"path\":\".\",\"limit\":2000} (generate compact AST-based outline of files and signatures with token budgeting)");
     }
     if allowed_actions.contains(&"semantic_index") {
         input_formats.push("- semantic_index: {\"path\":\".\"}");

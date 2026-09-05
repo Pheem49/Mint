@@ -594,7 +594,7 @@ struct AgentInput {
     options: Vec<AskUserOptionInput>,
     #[serde(default)]
     header: String,
-    #[serde(default)]
+    #[serde(default, alias = "multi_select")]
     multi_select: bool,
     #[serde(default)]
     city: String,
@@ -604,13 +604,13 @@ struct AgentInput {
     command: String,
     #[serde(default)]
     background: bool,
-    #[serde(default)]
+    #[serde(default, alias = "job_id")]
     job_id: String,
     #[serde(default)]
     commands: Vec<String>,
     #[serde(default)]
     steps: Vec<String>,
-    #[serde(default)]
+    #[serde(default, alias = "file_content")]
     file_content: String,
     #[serde(default)]
     summary: String,
@@ -620,9 +620,9 @@ struct AgentInput {
     plan: String,
     #[serde(default)]
     reason: String,
-    #[serde(default)]
+    #[serde(default, alias = "start_line")]
     start_line: Option<usize>,
-    #[serde(default)]
+    #[serde(default, alias = "end_line")]
     end_line: Option<usize>,
     #[serde(default)]
     limit: Option<usize>,
@@ -634,7 +634,7 @@ struct AgentInput {
     tool: String,
     #[serde(default)]
     arguments: Value,
-    #[serde(default)]
+    #[serde(default, alias = "note_path")]
     note_path: String,
     #[serde(default)]
     name: String,
@@ -1702,6 +1702,22 @@ where
                                 )
                             }
                             crate::hooks::PreHookOutcome::Allowed => {
+                                if matches!(decision.action.as_str(), "write_file" | "apply_patch") {
+                                    let target_path = if !decision.input.path.is_empty() {
+                                        Some(decision.input.path.as_str())
+                                    } else {
+                                        None
+                                    };
+                                    let _ = crate::git::create_checkpoint(
+                                        &root,
+                                        chat_id,
+                                        step,
+                                        &decision.action,
+                                        target_path,
+                                        &format!("Before Step {step}: {}", decision.action),
+                                    );
+                                }
+
                                 let (tool_result, success) = match execute_tool(
                                     &root,
                                     config,
@@ -2463,7 +2479,7 @@ async fn execute_tool(
             )
             .await
         }
-        "search_code" | "symbols" | "semantic_index" | "semantic_search" => {
+        "search_code" | "symbols" | "repo_map" | "semantic_index" | "semantic_search" => {
             tools::code_search::execute(
                 decision.action.as_str(),
                 input,

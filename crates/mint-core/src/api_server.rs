@@ -1094,6 +1094,24 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
+                ("GET", "/api/checkpoints")
+                | ("POST", "/api/checkpoints/rollback")
+                | ("GET", "/api/file/read") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
                                 ("POST", "/api/chat") => {
                     routes::chat::execute(
                         routes::RequestCtx {

@@ -5,6 +5,7 @@
  */
 import React, { useState } from 'react'
 import { renderApprovalDetails, renderDiff } from '../utils/approval'
+import { DiffReviewModal } from './DiffReviewModal'
 
 interface Props {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,10 +23,12 @@ interface AskUserOption {
 export function ApprovalCard({ pendingApproval, onApproval }: Props) {
   const [askAnswer, setAskAnswer] = useState('')
   const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set())
+  const [showDiffModal, setShowDiffModal] = useState(false)
 
   const details = renderApprovalDetails(pendingApproval.approval)
   const writeFile = pendingApproval.approval?.WriteFile
   const applyPatch = pendingApproval.approval?.ApplyPatch
+  const targetFilePath = writeFile?.path || applyPatch?.path || 'Code Change'
   const diffText = writeFile?.diff || applyPatch?.diff
   const isAskUser = !!pendingApproval.approval?.AskUser
   const mcpTool = pendingApproval.approval?.McpTool
@@ -70,7 +73,26 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
             <div className="approval-card-body" style={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>{details.body}</div>
             {diffText ? (
               <div className="approval-card-diff-container" style={{ marginTop: '8px', width: '100%' }}>
-                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-soft, #94a3b8)', marginBottom: '4px' }}>Diff:</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-soft, #94a3b8)' }}>Diff:</div>
+                  <button
+                    type="button"
+                    className="management-action-btn"
+                    onClick={() => setShowDiffModal(true)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '3px 8px',
+                      fontSize: '0.75rem',
+                      background: 'rgba(56, 189, 248, 0.12)',
+                      borderColor: 'rgba(56, 189, 248, 0.3)',
+                      color: '#38bdf8',
+                    }}
+                  >
+                    Review Side-by-Side
+                  </button>
+                </div>
                 {renderDiff(diffText)}
               </div>
             ) : (
@@ -164,6 +186,24 @@ export function ApprovalCard({ pendingApproval, onApproval }: Props) {
           )}
         </div>
       </div>
+
+      {showDiffModal && diffText && (
+        <DiffReviewModal
+          isOpen={showDiffModal}
+          onClose={() => setShowDiffModal(false)}
+          filePath={targetFilePath}
+          diffText={diffText}
+          isDangerous={details.isDangerous}
+          onApprove={() => {
+            setShowDiffModal(false)
+            onApproval(true)
+          }}
+          onReject={() => {
+            setShowDiffModal(false)
+            onApproval(false)
+          }}
+        />
+      )}
     </div>
   )
 }

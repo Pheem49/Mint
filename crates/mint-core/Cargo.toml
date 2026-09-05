@@ -12,6 +12,7 @@ chrono-tz.workspace = true
 cpal = "0.15"
 cron = "0.17.0"
 dirs.workspace = true
+fastembed.workspace = true
 futures-util.workspace = true
 grep-matcher.workspace = true
 grep-regex.workspace = true

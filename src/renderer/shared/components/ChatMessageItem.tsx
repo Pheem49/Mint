@@ -8,6 +8,7 @@ import StockCard from './StockCard'
 import CalculationCard from './CalculationCard'
 import ImageSearchCard from './ImageSearchCard'
 import ImageGenCard from './ImageGenCard'
+import { parseUtcDate } from '../utils/ui'
 
 export interface ChatMessageItemProps {
   interaction: any
@@ -181,7 +182,7 @@ const ChatMessageItem = React.memo(
             <div className="bubble-wrapper">
               <div className="message-bubble">{memoizedUserContent}</div>
               <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span>{parseUtcDate(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 <button
                   type="button"
                   className={`msg-action-btn copy-btn ${isUserCopied ? 'is-copied' : ''}`}
@@ -230,7 +231,7 @@ const ChatMessageItem = React.memo(
             <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
               {fallbackNotice(interaction) && <span className="provider-fallback-notice">{fallbackNotice(interaction)}</span>}
-              <span>{new Date(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              <span>{parseUtcDate(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
                 <button
                   type="button"

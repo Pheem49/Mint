@@ -44,6 +44,7 @@ clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 chrono-tz = "0.10"
 dirs = "6"
+fastembed = { version = "6.0", default-features = false, features = ["ort-download-binaries-rustls-tls", "hf-hub-rustls-tls"] }
 futures-util = "0.3"
 grep-matcher = "0.1"
 grep-regex = "0.1"

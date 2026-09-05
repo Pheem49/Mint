@@ -35,6 +35,7 @@ import ModelPanel from '@/components/ModelPanel'
 import type { ModelInteraction } from '@/components/ModelPanel'
 import PicturesLibrary from '@/components/PicturesLibrary'
 import WorkspacePanel from '@/components/WorkspacePanel'
+import { CommandPalette } from './CommandPalette'
 import {
   errorMessage,
   readImage,
@@ -42,6 +43,7 @@ import {
   createTrimmedImagePreview,
   createObjectUrlPreview,
   applyThemeStyles,
+  parseUtcDate,
 } from '../utils/ui'
 import { executeSlashCommand } from '../utils/slashCommandProcessor'
 
@@ -552,7 +554,7 @@ export default function MintDashboard() {
         return
       }
 
-      const date = new Date(dateStr)
+      const date = parseUtcDate(dateStr)
       const today = new Date()
       const yesterday = new Date()
       yesterday.setDate(today.getDate() - 1)
@@ -1796,76 +1798,42 @@ export default function MintDashboard() {
         </div>
       )}
 
-      {isSearchOpen && (
-        <div className="sidebar-search-modal-backdrop" onClick={() => setIsSearchOpen(false)}>
-          <div className="sidebar-search-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="search-modal-header">
-              <span className="search-icon-wrapper">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                </svg>
-              </span>
-              <input
-                type="text"
-                placeholder="Search chats..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                autoFocus
-              />
-              <button className="search-modal-close" onClick={() => setIsSearchOpen(false)}>
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
-            </div>
-            
-            <div className="search-modal-body">
-              <button
-                className="search-new-chat-btn"
-                onClick={() => {
-                  clearHistory('New chat')
-                  setIsSearchOpen(false)
-                }}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                <span>New Chat</span>
-              </button>
-
-              <div className="search-modal-results">
-                {Object.keys(groupedSearchSessions).length > 0 ? (
-                  Object.entries(groupedSearchSessions).map(([groupName, sessions]) => (
-                    <div key={groupName} className="search-results-group">
-                      <div className="search-group-title">{groupName}</div>
-                      {sessions.map((session) => (
-                        <button
-                          key={session.id}
-                          className={`search-result-item ${session.id === conversationId ? 'active' : ''}`}
-                          onClick={() => {
-                            selectConversation(session.id)
-                            setIsSearchOpen(false)
-                          }}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                          </svg>
-                          <span className="search-result-title">{session.title || 'New chat'}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ))
-                ) : (
-                  <div className="search-no-results">No matching chats found</div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <CommandPalette
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        onSelectChat={(chatId) => {
+          selectConversation(chatId)
+          setIsSearchOpen(false)
+        }}
+        onNewChat={() => {
+          clearHistory('New chat')
+          setIsSearchOpen(false)
+        }}
+        onSelectWorkspace={isDesktopApp ? selectWorkspace : undefined}
+        onOpenSettings={() => {
+          changeView('settings')
+          setIsSearchOpen(false)
+        }}
+        onChangeView={(targetView) => {
+          changeView(targetView)
+          setIsSearchOpen(false)
+        }}
+        onChangeModel={(model) => {
+          handleUpdateSettingsField('model', model)
+          setToastMessage(`Switched model to ${model}`)
+        }}
+        onChangeProvider={(provider) => {
+          handleUpdateSettingsField('provider', provider)
+          setToastMessage(`Switched provider to ${provider}`)
+        }}
+        onExecuteSlash={(cmd) => {
+          setMessage(cmd + ' ')
+          setIsSearchOpen(false)
+        }}
+        chatSessions={chatSessions}
+        currentChatId={conversationId}
+        workspacePath={workspacePath}
+      />
     </div>
   )
 }

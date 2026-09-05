@@ -22,10 +22,12 @@ pub(in crate::orchestration) async fn execute(
         }
         "read_file" => {
             let path = workspace_path(root, required(&input.path, "path")?)?;
+            let start = input.start_line.unwrap_or(1);
+            let end = input.end_line.unwrap_or_else(|| start.saturating_add(239));
             Ok(read_code_file(
                 &path,
-                input.start_line.unwrap_or(1),
-                input.end_line.unwrap_or(240),
+                start,
+                end,
                 config,
             )
             .map_err(|e| OrchestrationError::Agent(e.to_string()))?)

@@ -11,7 +11,9 @@ use thiserror::Error;
 
 use crate::{CodeInspectionError, MintConfig, list_code_files};
 
-const EMBEDDING_MODEL: &str = "gemini-embedding-001";
+const GEMINI_EMBEDDING_MODEL: &str = "gemini-embedding-001";
+pub const FASTEMBED_MODEL: &str = "fastembed-bge-small-en-v1.5";
+pub const FEATURE_HASH_MODEL: &str = "feature-hash-256";
 const MAX_CHARS: usize = 1800;
 
 #[derive(Debug, Error)]
@@ -81,7 +83,7 @@ pub async fn index_semantic_code(
         source,
     })?;
     let files = list_code_files(&root, usize::MAX, config)?;
-    let mut chunks = Vec::new();
+    let mut raw_chunks = Vec::new();
     for file in &files {
         if file.size > 512 * 1024 || !is_source_file(&file.path) {
             continue;
@@ -90,19 +92,28 @@ pub async fn index_semantic_code(
             continue;
         };
         for (start_line, end_line, text) in chunk_text(&content) {
-            chunks.push(SemanticChunk {
-                file: file.path.clone(),
-                start_line,
-                end_line,
-                embedding: embed_text(config, &text).await?,
-                text,
-            });
+            raw_chunks.push((file.path.clone(), start_line, end_line, text));
         }
     }
+
+    let texts: Vec<&str> = raw_chunks.iter().map(|(_, _, _, t)| t.as_str()).collect();
+    let (embeddings, model_name) = generate_embeddings(config, &texts).await?;
+
+    let mut chunks = Vec::with_capacity(raw_chunks.len());
+    for ((file, start_line, end_line, text), embedding) in raw_chunks.into_iter().zip(embeddings) {
+        chunks.push(SemanticChunk {
+            file,
+            start_line,
+            end_line,
+            text,
+            embedding,
+        });
+    }
+
     let store_path = semantic_store_path(&root)?;
     let index = SemanticIndex {
         root,
-        model: EMBEDDING_MODEL.into(),
+        model: model_name,
         file_count: files.len(),
         chunk_count: chunks.len(),
         chunks,
@@ -140,12 +151,18 @@ pub async fn search_semantic_code(
     })?;
     let index: SemanticIndex =
         serde_json::from_str(&raw).map_err(|source| SemanticError::Parse { path, source })?;
-    let query = embed_text(config, query).await?;
+
+    if index.chunks.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let query_embedding = embed_query_for_index(&index, config, query).await?;
     let mut hits = index
         .chunks
         .into_iter()
+        .filter(|chunk| chunk.embedding.len() == query_embedding.len())
         .map(|chunk| SemanticHit {
-            score: cosine_similarity(&query, &chunk.embedding),
+            score: cosine_similarity(&query_embedding, &chunk.embedding),
             file: chunk.file,
             start_line: chunk.start_line,
             end_line: chunk.end_line,
@@ -160,6 +177,161 @@ pub async fn search_semantic_code(
     });
     hits.truncate(limit.max(1));
     Ok(hits)
+}
+
+async fn generate_embeddings(
+    config: &MintConfig,
+    texts: &[&str],
+) -> Result<(Vec<Vec<f64>>, String), SemanticError> {
+    if texts.is_empty() {
+        return Ok((Vec::new(), FASTEMBED_MODEL.to_string()));
+    }
+
+    // 1. Try local FastEmbed first (fast, multi-threaded CPU ONNX, offline)
+    match crate::search::local_embedding::embed_texts(texts) {
+        Ok(vectors) if !vectors.is_empty() => {
+            let f64_vectors = vectors
+                .into_iter()
+                .map(|v| v.into_iter().map(|x| x as f64).collect())
+                .collect();
+            return Ok((f64_vectors, FASTEMBED_MODEL.to_string()));
+        }
+        Ok(_) => {}
+        Err(err) => {
+            eprintln!(
+                "FastEmbed local embedding unavailable ({err}), checking fallback providers"
+            );
+        }
+    }
+
+    // 2. Fallback to Gemini API if key is available
+    let key = if config.api_key.trim().is_empty() {
+        std::env::var("GEMINI_API_KEY").unwrap_or_default()
+    } else {
+        config.api_key.clone()
+    };
+    if !key.trim().is_empty() {
+        let mut gemini_vectors = Vec::with_capacity(texts.len());
+        let mut success = true;
+        for text in texts {
+            match embed_text_gemini(&key, text).await {
+                Ok(v) => gemini_vectors.push(v),
+                Err(e) => {
+                    eprintln!("Gemini embedding fallback failed: {e}");
+                    success = false;
+                    break;
+                }
+            }
+        }
+        if success && gemini_vectors.len() == texts.len() {
+            return Ok((gemini_vectors, GEMINI_EMBEDDING_MODEL.to_string()));
+        }
+    }
+
+    // 3. Fallback to 100% offline feature-hash vectorizer
+    let hash_vectors = texts
+        .iter()
+        .map(|t| {
+            crate::search::text_embedding::embedding(t)
+                .into_iter()
+                .map(|x| x as f64)
+                .collect()
+        })
+        .collect();
+    Ok((hash_vectors, FEATURE_HASH_MODEL.to_string()))
+}
+
+async fn embed_query_for_index(
+    index: &SemanticIndex,
+    config: &MintConfig,
+    query: &str,
+) -> Result<Vec<f64>, SemanticError> {
+    let chunk_dim = index.chunks.first().map(|c| c.embedding.len()).unwrap_or(0);
+
+    // If index was built with FastEmbed or has 384 dims:
+    if index.model.contains("fastembed")
+        || chunk_dim == crate::search::local_embedding::LOCAL_EMBEDDING_DIM
+    {
+        if let Ok(vec) = crate::search::local_embedding::embed_query(query) {
+            return Ok(vec.into_iter().map(|x| x as f64).collect());
+        }
+    }
+
+    // If index was built with Gemini embedding:
+    if index.model.contains("gemini") {
+        let key = if config.api_key.trim().is_empty() {
+            std::env::var("GEMINI_API_KEY").unwrap_or_default()
+        } else {
+            config.api_key.clone()
+        };
+        if !key.trim().is_empty() {
+            if let Ok(vec) = embed_text_gemini(&key, query).await {
+                return Ok(vec);
+            }
+        }
+    }
+
+    // If index was built with feature hashing or has 256 dims (or fallback):
+    if index.model.contains("feature-hash")
+        || chunk_dim == crate::search::text_embedding::EMBEDDING_DIMENSIONS
+    {
+        return Ok(crate::search::text_embedding::embedding(query)
+            .into_iter()
+            .map(|x| x as f64)
+            .collect());
+    }
+
+    // Fallback try:
+    if let Ok(vec) = crate::search::local_embedding::embed_query(query) {
+        return Ok(vec.into_iter().map(|x| x as f64).collect());
+    }
+
+    Ok(crate::search::text_embedding::embedding(query)
+        .into_iter()
+        .map(|x| x as f64)
+        .collect())
+}
+
+pub async fn embed_text(config: &MintConfig, text: &str) -> Result<Vec<f64>, SemanticError> {
+    if let Ok(vec) = crate::search::local_embedding::embed_query(text) {
+        return Ok(vec.into_iter().map(|x| x as f64).collect());
+    }
+    let key = if config.api_key.trim().is_empty() {
+        std::env::var("GEMINI_API_KEY").unwrap_or_default()
+    } else {
+        config.api_key.clone()
+    };
+    if !key.trim().is_empty() {
+        if let Ok(vec) = embed_text_gemini(&key, text).await {
+            return Ok(vec);
+        }
+    }
+    Ok(crate::search::text_embedding::embedding(text)
+        .into_iter()
+        .map(|x| x as f64)
+        .collect())
+}
+
+async fn embed_text_gemini(key: &str, text: &str) -> Result<Vec<f64>, SemanticError> {
+    if key.trim().is_empty() {
+        return Err(SemanticError::MissingApiKey);
+    }
+    let value: Value = crate::HTTP_CLIENT
+        .clone()
+        .post(format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_EMBEDDING_MODEL}:embedContent?key={key}"
+        ))
+        .json(&json!({ "content": { "parts": [{ "text": text }] } }))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    value["embedding"]["values"]
+        .as_array()
+        .map(|values| values.iter().filter_map(Value::as_f64).collect())
+        .filter(|values: &Vec<f64>| !values.is_empty())
+        .ok_or(SemanticError::MissingEmbedding)
 }
 
 fn chunk_text(content: &str) -> Vec<(usize, usize, String)> {
@@ -221,32 +393,6 @@ fn chunk_text(content: &str) -> Vec<(usize, usize, String)> {
         start = actual_end;
     }
     chunks
-}
-
-async fn embed_text(config: &MintConfig, text: &str) -> Result<Vec<f64>, SemanticError> {
-    let key = if config.api_key.trim().is_empty() {
-        std::env::var("GEMINI_API_KEY").unwrap_or_default()
-    } else {
-        config.api_key.clone()
-    };
-    if key.trim().is_empty() {
-        return Err(SemanticError::MissingApiKey);
-    }
-    let value: Value = crate::HTTP_CLIENT.clone()
-        .post(format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{EMBEDDING_MODEL}:embedContent?key={key}"
-        ))
-        .json(&json!({ "content": { "parts": [{ "text": text }] } }))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-    value["embedding"]["values"]
-        .as_array()
-        .map(|values| values.iter().filter_map(Value::as_f64).collect())
-        .filter(|values: &Vec<f64>| !values.is_empty())
-        .ok_or(SemanticError::MissingEmbedding)
 }
 
 fn semantic_store_path(root: &Path) -> Result<PathBuf, SemanticError> {

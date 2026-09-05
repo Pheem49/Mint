@@ -41,8 +41,8 @@ export interface DocumentAttachment {
 export type AgentProgress =
   | { type: 'Thinking'; data: { elapsed_secs: number; agent_name?: string; model_name?: string } }
   | { type: 'Thought'; data: { thought: string } }
-  | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown> } }
-  | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string } }
+  | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown>; subagent?: string } }
+  | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string; subagent?: string } }
 
 export interface InteractionMemory {
   id: number
@@ -205,5 +205,16 @@ export interface FileChange {
   additions: number
   deletions: number
   hunks: DiffHunk[]
+}
+
+export interface GitCheckpoint {
+  id: string
+  chatId: string
+  step: number
+  commitHash: string
+  timestamp: number
+  description: string
+  action: string
+  targetPath?: string | null
 }
 

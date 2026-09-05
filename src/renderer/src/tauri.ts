@@ -48,6 +48,7 @@ import type {
   CronJobDraft,
   LinkedFolder,
   LinkedFolderDraft,
+  GitCheckpoint,
 } from '../shared/types'
 
 
@@ -2087,8 +2088,58 @@ export async function videoAiEdit(req: VideoAiEditRequest): Promise<AiEditVideoR
   return videoEditPost<AiEditVideoResult>('/video/ai-edit', req)
 }
 
+export async function listGitCheckpoints(chatId: string): Promise<GitCheckpoint[]> {
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase()
+    try {
+      const res = await authFetch(`${API_BASE}/checkpoints?chatId=${encodeURIComponent(chatId)}`)
+      if (!res.ok) return []
+      return await res.json()
+    } catch (e) {
+      console.error('Failed to list git checkpoints:', e)
+      return []
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('list_git_checkpoints', { chatId })
+}
 
+export async function rollbackGitCheckpoint(
+  chatId: string,
+  step: number,
+  workspacePath?: string,
+): Promise<{ status: string; message: string }> {
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase()
+    try {
+      const res = await authFetch(`${API_BASE}/checkpoints/rollback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatId, step, workspacePath }),
+      })
+      return await res.json()
+    } catch (e: any) {
+      console.error('Failed to rollback git checkpoint:', e)
+      return { status: 'error', message: e?.message || String(e) }
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  try {
+    const message = await invoke<string>('rollback_git_checkpoint', {
+      chatId,
+      step,
+      workspacePath,
+    })
+    return { status: 'ok', message }
+  } catch (e: any) {
+    return { status: 'error', message: e?.message || String(e) }
+  }
+}
 
+export const readWorkspaceFile = async (path: string): Promise<string> => {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('read_workspace_file', { path })
+}
 
 // Enforce compile-time check against the shared platform interface
 const _apiCheck: MintPlatformApi = {
@@ -2136,5 +2187,7 @@ const _apiCheck: MintPlatformApi = {
   applyCodeEdits,
   listen,
   readClipboardImage,
+  listGitCheckpoints,
+  rollbackGitCheckpoint,
+  readWorkspaceFile,
 }
-

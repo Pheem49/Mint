@@ -86,22 +86,28 @@ pub(crate) fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
         .sum()
 }
 
-/// Which embedding implementation fact recall uses. Only [`Hash`] exists today;
-/// a learned backend (e.g. `gemini-embedding-001`, like the semantic *code*
-/// index) would be a new variant here plus one branch in
-/// [`fact_embedding_backend`] — the recall logic in `memory_skill.rs` and the
-/// on-disk blob format stay untouched.
+/// Which embedding implementation fact recall uses. [`Hash`] is the offline
+/// feature-hash default; [`LocalFastEmbed`] uses local ONNX Runtime via
+/// FastEmbed (BGESmallENV15, 384 dimensions).
 ///
 /// [`Hash`]: FactEmbeddingBackend::Hash
+/// [`LocalFastEmbed`]: FactEmbeddingBackend::LocalFastEmbed
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FactEmbeddingBackend {
     /// The offline feature-hash [`embedding`].
     Hash,
+    /// The local FastEmbed ONNX model (BGESmallENV15, 384 dimensions).
+    LocalFastEmbed,
 }
 
 impl FactEmbeddingBackend {
     pub(crate) fn embed(&self, text: &str) -> Vec<f32> {
         match self {
             FactEmbeddingBackend::Hash => embedding(text),
+            FactEmbeddingBackend::LocalFastEmbed => {
+                crate::search::local_embedding::embed_query(text)
+                    .unwrap_or_else(|_| embedding(text))
+            }
         }
     }
 
@@ -110,15 +116,24 @@ impl FactEmbeddingBackend {
     pub(crate) fn dim(&self) -> usize {
         match self {
             FactEmbeddingBackend::Hash => EMBEDDING_DIMENSIONS,
+            FactEmbeddingBackend::LocalFastEmbed => {
+                crate::search::local_embedding::LOCAL_EMBEDDING_DIM
+            }
         }
     }
 }
 
-/// The backend fact recall currently uses. Always [`FactEmbeddingBackend::Hash`]
-/// for now; when an opt-in learned backend is added this grows a `&MintConfig`
-/// argument and one branch, and callers that then need to `.await` become async.
+/// The backend fact recall currently uses. Checks `MINT_FACT_EMBEDDING` env var
+/// or falls back to `FactEmbeddingBackend::Hash`.
 pub(crate) fn fact_embedding_backend() -> FactEmbeddingBackend {
-    FactEmbeddingBackend::Hash
+    if std::env::var("MINT_FACT_EMBEDDING")
+        .map(|v| v.eq_ignore_ascii_case("fastembed") || v.eq_ignore_ascii_case("local"))
+        .unwrap_or(false)
+    {
+        FactEmbeddingBackend::LocalFastEmbed
+    } else {
+        FactEmbeddingBackend::Hash
+    }
 }
 
 #[cfg(test)]
@@ -133,6 +148,15 @@ mod tests {
         {
             assert_eq!(backend.embed(sample), embedding(sample));
         }
+    }
+
+    #[test]
+    fn local_fastembed_backend_dim() {
+        let backend = FactEmbeddingBackend::LocalFastEmbed;
+        assert_eq!(
+            backend.dim(),
+            crate::search::local_embedding::LOCAL_EMBEDDING_DIM
+        );
     }
 
     #[test]

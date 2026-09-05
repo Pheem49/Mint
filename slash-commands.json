@@ -63,5 +63,7 @@
   { "token": "/n8n", "usage": "[task]", "description": "Open n8n in your browser, or trigger a workflow via the n8n MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/notebook", "usage": "[task]", "description": "Open SurfSense in your browser, or run a task via the surfsense MCP server", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/multi-agent", "usage": "[on|off]", "description": "Show or toggle Multi-Agent Collaboration system", "category": "system", "surfaces": ["cli", "web", "desktop"] },
-  { "token": "/avatar", "usage": "[web|desktop|status|off]", "description": "Connect agent activity to Project Avatar (real-time 3D avatar)", "category": "tools", "surfaces": ["cli", "web", "desktop"] }
+  { "token": "/avatar", "usage": "[web|desktop|status|off]", "description": "Connect agent activity to Project Avatar (real-time 3D avatar)", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/rewind", "usage": "[step]", "description": "Rewind workspace to a previous git checkpoint snapshot", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/palette", "usage": "", "description": "Open interactive command palette and action menu", "category": "system", "surfaces": ["cli", "web", "desktop"] }
 ]

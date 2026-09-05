@@ -1442,6 +1442,26 @@ fn apply_desktop_code_edits(
 }
 
 #[tauri::command]
+fn list_git_checkpoints(chat_id: String) -> Result<Vec<mint_core::git::Checkpoint>, String> {
+    Ok(mint_core::git::list_checkpoints(&chat_id))
+}
+
+#[tauri::command]
+fn rollback_git_checkpoint(
+    chat_id: String,
+    step: usize,
+    workspace_path: Option<String>,
+) -> Result<String, String> {
+    let root = workspace_root(workspace_path.as_deref())?;
+    mint_core::git::rollback_to_step(&root, &chat_id, step)
+}
+
+#[tauri::command]
+fn read_workspace_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("failed to read file '{path}': {e}"))
+}
+
+#[tauri::command]
 fn open_window(app: AppHandle, kind: String) -> Result<(), String> {
     open_desktop_window(&app, &kind)?;
     if kind == "widget" {
@@ -1811,6 +1831,9 @@ pub fn run() {
             get_weather,
             propose_desktop_code_edits,
             apply_desktop_code_edits,
+            list_git_checkpoints,
+            rollback_git_checkpoint,
+            read_workspace_file,
             open_window,
             hide_desktop_window,
             close_desktop_window,

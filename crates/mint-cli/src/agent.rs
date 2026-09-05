@@ -161,10 +161,20 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
             (false, format!("[run_plugin] Running plugin: {}...", name))
         }
         "dispatch_subagent" => {
-            let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("subagent");
+            let instruction = input.get("instruction").and_then(|v| v.as_str()).unwrap_or("");
+            let summary = if instruction.len() > 60 {
+                format!("{}...", &instruction[..57])
+            } else {
+                instruction.to_string()
+            };
             (
                 false,
-                format!("[dispatch_subagent] Dispatching to subagent: {}...", name),
+                if summary.is_empty() {
+                    format!("├── [{CYAN}{name}{RESET}] Subagent dispatched")
+                } else {
+                    format!("├── [{CYAN}{name}{RESET}] Subagent dispatched: {DIM}{summary}{RESET}")
+                },
             )
         }
         "mcp_tool" => {
@@ -687,7 +697,7 @@ pub async fn run_code_agent_with_options(
                             status.thinking = None;
                             status.waiting_for_network = None;
                             status.tasks.push(TaskEntry {
-                                label: format!("{DIM}{subagent_name}{RESET} \u{2192} {inner}"),
+                                label: format!("│   ├── [{CYAN}{subagent_name}{RESET}] {inner}"),
                                 output: Vec::new(),
                             });
                             render_live_status(&mut status);
@@ -764,7 +774,7 @@ pub async fn run_code_agent_with_options(
                             for (index, cmd) in commands.into_iter().enumerate() {
                                 status.tasks.push(TaskEntry {
                                     label: format!(
-                                        "{DIM}{prefix}{RESET} \u{2192} Finished command: `{}`",
+                                        "│   └── [{CYAN}{prefix}{RESET}] Finished command: `{}`",
                                         cmd
                                     ),
                                     output: if index == last_index {

@@ -224,6 +224,79 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             .await;
         }
 
+        ("GET", "/api/checkpoints") => {
+            let chat_id = query_param(query, "chatId").unwrap_or_default();
+            let checkpoints = crate::git::list_checkpoints(&chat_id);
+            if let Ok(json_str) = serde_json::to_string(&checkpoints) {
+                send_json_response(socket, "200 OK", &json_str).await;
+            } else {
+                send_json_response(socket, "500 Internal Server Error", "[]").await;
+            }
+        }
+
+        ("POST", "/api/checkpoints/rollback") => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct RollbackReq {
+                chat_id: String,
+                step: usize,
+                workspace_path: Option<String>,
+            }
+            if let Ok(req) = serde_json::from_str::<RollbackReq>(body) {
+                let root = req
+                    .workspace_path
+                    .as_deref()
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                match crate::git::rollback_to_step(&root, &req.chat_id, req.step) {
+                    Ok(msg) => {
+                        let res = json!({ "status": "ok", "message": msg });
+                        send_json_response(socket, "200 OK", &res.to_string()).await;
+                        return;
+                    }
+                    Err(err) => {
+                        let res = json!({ "status": "error", "message": err });
+                        send_json_response(socket, "400 Bad Request", &res.to_string()).await;
+                        return;
+                    }
+                }
+            }
+            send_json_response(
+                socket,
+                "400 Bad Request",
+                "{\"status\":\"error\",\"message\":\"invalid request body\"}",
+            )
+            .await;
+        }
+
+        ("GET", "/api/file/read") => {
+            let file_path = query_param(query, "path").unwrap_or_default();
+            if file_path.is_empty() {
+                send_json_response(
+                    socket,
+                    "400 Bad Request",
+                    "{\"error\":\"missing file path query parameter\"}",
+                )
+                .await;
+                return;
+            }
+            match std::fs::read_to_string(&file_path) {
+                Ok(content) => {
+                    let res = json!({
+                        "path": file_path,
+                        "content": content
+                    });
+                    send_json_response(socket, "200 OK", &res.to_string()).await;
+                }
+                Err(err) => {
+                    let res = json!({
+                        "error": format!("unable to read file: {err}")
+                    });
+                    send_json_response(socket, "404 Not Found", &res.to_string()).await;
+                }
+            }
+        }
+
         _ => unreachable!(
             "api_server routed an unhandled route into routes::misc::execute: {method} {route}"
         ),

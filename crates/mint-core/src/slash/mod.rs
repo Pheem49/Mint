@@ -251,6 +251,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
                 }
             }
         }
+        "/rewind" => cmd_rewind(req, rest),
         "/fast" => match parse_on_off(rest) {
             None if rest.is_empty() => needs_on_off("/fast", "Fast Mode (hide thinking)"),
             None => error("Usage: /fast [on|off]"),
@@ -431,6 +432,40 @@ fn cmd_bool_toggle(
                 ),
                 effects: vec![SlashEffect::ConfigChanged],
             }
+        }
+    }
+}
+
+fn cmd_rewind(req: &SlashRequest, rest: &str) -> SlashResponse {
+    let chat_id = crate::CHAT_CLI_ID;
+    let root = req.workspace();
+    let checkpoints = crate::git::list_checkpoints(chat_id);
+
+    if rest.trim().is_empty() {
+        if checkpoints.is_empty() {
+            return message("No git checkpoints recorded yet.\n\nCheckpoints are created automatically before mutating file actions (`write_file`, `apply_patch`).");
+        }
+        let mut md = String::from("### ↺ Available Git Checkpoints (Time Machine)\n\n");
+        md.push_str("| Step | Commit | Action | Target File |\n");
+        md.push_str("| --- | --- | --- | --- |\n");
+        for cp in checkpoints.iter().rev() {
+            let hash_short = if cp.commit_hash.len() >= 7 {
+                &cp.commit_hash[..7]
+            } else {
+                &cp.commit_hash
+            };
+            let target = cp.target_path.as_deref().unwrap_or("-");
+            md.push_str(&format!("| **Step {}** | `{}` | `{}` | `{}` |\n", cp.step, hash_short, cp.action, target));
+        }
+        md.push_str("\nUse `/rewind <step>` to restore your workspace to before that step.");
+        message(md)
+    } else {
+        match rest.trim().parse::<usize>() {
+            Ok(step) => match crate::git::rollback_to_step(&root, chat_id, step) {
+                Ok(msg) => message(msg),
+                Err(err) => error(format!("Failed to rollback: {err}")),
+            },
+            Err(_) => error(format!("Invalid step number: \"{rest}\". Usage: /rewind <step>")),
         }
     }
 }

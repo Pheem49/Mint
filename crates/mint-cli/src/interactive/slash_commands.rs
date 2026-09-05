@@ -252,6 +252,96 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/rewind" => {
+            let checkpoints = mint_core::git::list_checkpoints(mint_core::CHAT_CLI_ID);
+            if rest.is_empty() {
+                if checkpoints.is_empty() {
+                    println!("\n{DIM}No git checkpoints recorded for this CLI session yet.{RESET}");
+                    println!("{DIM}Checkpoints are created automatically before mutating file actions (write_file, apply_patch).{RESET}\n");
+                } else {
+                    println!("\n{BLUE}────────────────────────────────────────────{RESET}");
+                    println!("{MINT}  ↺ Available Git Checkpoints (Time Machine){RESET}");
+                    println!("{BLUE}────────────────────────────────────────────{RESET}");
+                    for cp in checkpoints.iter().rev() {
+                        let hash_short = if cp.commit_hash.len() >= 7 {
+                            &cp.commit_hash[..7]
+                        } else {
+                            &cp.commit_hash
+                        };
+                        let target = cp.target_path.as_deref().unwrap_or("-");
+                        println!(
+                            "  {MINT}Step {:<3}{RESET} {DIM}[{}]{RESET} {:<20} {DIM}({}){RESET}",
+                            cp.step, hash_short, cp.action, target
+                        );
+                    }
+                    println!("\n{DIM}Use {RESET}{MINT}/rewind <step>{RESET}{DIM} to restore workspace to before that step.{RESET}\n");
+                }
+                Some(SlashResult::Handled)
+            } else {
+                match rest.parse::<usize>() {
+                    Ok(step) => {
+                        match mint_core::git::rollback_to_step(&session.current_dir, mint_core::CHAT_CLI_ID, step) {
+                            Ok(msg) => {
+                                println!("\n{MINT}{msg}{RESET}\n");
+                            }
+                            Err(err) => {
+                                println!("\n{ERROR}Failed to rollback:{RESET} {err}\n");
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        println!("\n{ERROR}Invalid step number:{RESET} \"{rest}\". Usage: /rewind <step>\n");
+                    }
+                }
+                Some(SlashResult::Handled)
+            }
+        }
+
+        "/palette" => {
+            let options = vec![
+                "Quick Actions Menu".to_string(),
+                "Switch AI Model (/models)".to_string(),
+                "Toggle Plan Mode (/plan)".to_string(),
+                "Toggle Fast Mode (/fast)".to_string(),
+                "Git Checkpoint Rollback (/rewind)".to_string(),
+                "Manage MCP Servers (/mcp)".to_string(),
+                "Manage Memory & Facts (/memory)".to_string(),
+                "Change Directory (/cd)".to_string(),
+                "Clear Conversation (/clear)".to_string(),
+                "Help & Documentation (/help)".to_string(),
+            ];
+            match prompt_interactive_select("Universal Command Palette", &options, &options[0]) {
+                Ok(Some(sel)) => {
+                    let next_cmd = if sel.contains("/models") {
+                        "/models"
+                    } else if sel.contains("/plan") {
+                        "/plan"
+                    } else if sel.contains("/fast") {
+                        "/fast"
+                    } else if sel.contains("/rewind") {
+                        "/rewind"
+                    } else if sel.contains("/mcp") {
+                        "/mcp"
+                    } else if sel.contains("/memory") {
+                        "/memory"
+                    } else if sel.contains("/clear") {
+                        "/clear"
+                    } else if sel.contains("/help") {
+                        "/help"
+                    } else {
+                        println!("{MINT}Tip:{RESET} Type {BLUE}/<command>{RESET} or press {MINT}Tab{RESET} to autocomplete commands anytime.\n");
+                        return Some(SlashResult::Handled);
+                    };
+                    Box::pin(handle_slash_command(session, next_cmd)).await
+                }
+                Ok(None) => Some(SlashResult::Handled),
+                Err(e) => {
+                    println!("{ERROR}Palette error:{RESET} {e}\n");
+                    Some(SlashResult::Handled)
+                }
+            }
+        }
+
         "/plan" if rest == "list" => {
             let files = list_plan_files(&session.current_dir);
             if files.is_empty() {
@@ -1597,9 +1687,12 @@ pub async fn handle_slash_command(
                         } else {
                             println!("\n{BLUE}Recent interactions:{RESET}");
                             for item in items.iter().rev() {
+                                let local_time = chrono::DateTime::parse_from_rfc3339(&item.created_at)
+                                    .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+                                    .unwrap_or_else(|_| item.created_at[..16.min(item.created_at.len())].to_string());
                                 println!(
                                     "  {DIM}[{}]{RESET} {BLUE}You:{RESET} {}",
-                                    &item.created_at[..16.min(item.created_at.len())],
+                                    local_time,
                                     if item.user_text.chars().count() > 80 {
                                         let short: String =
                                             item.user_text.chars().take(80).collect();

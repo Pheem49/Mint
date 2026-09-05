@@ -291,12 +291,14 @@ impl MemoryStore {
              ORDER BY CASE WHEN id = ?1 THEN 0 ELSE 1 END, updated_at DESC",
         )?;
         let rows = statement.query_map(params![CHAT_CLI_ID], |row| {
+            let created_raw: String = row.get(3)?;
+            let updated_raw: String = row.get(4)?;
             Ok(ChatSession {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 kind: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
+                created_at: normalize_sqlite_utc_timestamp(&created_raw),
+                updated_at: normalize_sqlite_utc_timestamp(&updated_raw),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -1186,10 +1188,35 @@ fn fact_with_embedding_row(row: &rusqlite::Row<'_>) -> Result<(Fact, Vec<f32>), 
     Ok((fact, vector))
 }
 
+pub fn normalize_sqlite_utc_timestamp(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.ends_with('Z') || trimmed.contains('+') {
+        return trimmed.to_string();
+    }
+    if trimmed.len() >= 19 && trimmed.chars().nth(10) == Some(' ') {
+        let mut s = trimmed.to_string();
+        s.replace_range(10..11, "T");
+        if !s.ends_with('Z') {
+            s.push('Z');
+        }
+        return s;
+    }
+    if trimmed.len() >= 19 && trimmed.chars().nth(10) == Some('T') && !trimmed.ends_with('Z') {
+        let mut s = trimmed.to_string();
+        s.push('Z');
+        return s;
+    }
+    trimmed.to_string()
+}
+
 fn interaction_row(row: &rusqlite::Row<'_>) -> Result<InteractionMemory, rusqlite::Error> {
     let agent_activity = row
         .get::<_, Option<String>>(8)?
         .and_then(|raw| serde_json::from_str(&raw).ok());
+    let raw_created: String = row.get(7)?;
     Ok(InteractionMemory {
         id: row.get(0)?,
         chat_id: row.get(1)?,
@@ -1198,7 +1225,7 @@ fn interaction_row(row: &rusqlite::Row<'_>) -> Result<InteractionMemory, rusqlit
         provider: row.get(4)?,
         model: row.get(5)?,
         fallback_provider: row.get(6)?,
-        created_at: row.get(7)?,
+        created_at: normalize_sqlite_utc_timestamp(&raw_created),
         agent_activity,
     })
 }
@@ -1292,5 +1319,26 @@ mod scoped_chat_id_tests {
         assert!(!is_cli_chat_id("cli::subagent::search"));
         assert!(!is_cli_chat_id("cli::abc123456789::subagent::search"));
         assert!(!is_cli_chat_id("conversation-default"));
+    }
+
+    #[test]
+    fn test_normalize_sqlite_utc_timestamp() {
+        assert_eq!(
+            normalize_sqlite_utc_timestamp("2026-09-05 14:39:15"),
+            "2026-09-05T14:39:15Z"
+        );
+        assert_eq!(
+            normalize_sqlite_utc_timestamp("2026-09-05T14:39:15"),
+            "2026-09-05T14:39:15Z"
+        );
+        assert_eq!(
+            normalize_sqlite_utc_timestamp("2026-09-05T14:39:15Z"),
+            "2026-09-05T14:39:15Z"
+        );
+        assert_eq!(
+            normalize_sqlite_utc_timestamp("2026-09-05T14:39:15+07:00"),
+            "2026-09-05T14:39:15+07:00"
+        );
+        assert_eq!(normalize_sqlite_utc_timestamp(""), "");
     }
 }

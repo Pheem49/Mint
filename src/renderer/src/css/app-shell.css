@@ -756,6 +756,27 @@ h1 {
   z-index: 1;
 }
 
+.chat-panel-split-wrapper {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+
+.chat-panel-split-wrapper .conversation-panel {
+  flex: 1 1 50%;
+  min-width: 340px;
+  max-width: none;
+  width: auto;
+  margin: 0;
+  height: 100%;
+  grid-column: auto;
+}
+
 .assistant-workspace.model-hidden .chat-container {
   padding: 0 8px 18px;
   overflow-y: auto;

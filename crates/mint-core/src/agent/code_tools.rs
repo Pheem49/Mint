@@ -211,7 +211,8 @@ pub fn read_code_file(
     // file" — the caller (model or human) has no signal that more content
     // exists, or what range to ask for next.
     if last < total_lines {
-        let next_end = (last + (last - first + 1)).min(total_lines);
+        let chunk_size = (last - first + 1).max(240);
+        let next_end = (last + chunk_size).min(total_lines);
         Ok(format!(
             "{body}\n\n[Showing lines {first}-{last} of {total_lines} total lines — the rest of \
              the file was NOT included. To continue reading, call read_file again with \
@@ -799,6 +800,22 @@ mod tests {
             read_code_file(&root.join("big.txt"), 481, 500, &config_for(&root)).unwrap();
         assert!(final_chunk.contains("line500"));
         assert!(!final_chunk.contains("Showing lines"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_code_file_single_line_request_still_suggests_healthy_chunk() {
+        let root = std::env::temp_dir().join("mint-code-tools-read-single-line");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let lines: Vec<String> = (1..=500).map(|n| format!("line{n}")).collect();
+        fs::write(root.join("big.txt"), lines.join("\n") + "\n").unwrap();
+
+        // If a caller requests just 1 line, the guidance should still offer a healthy chunk (240 lines)
+        let content = read_code_file(&root.join("big.txt"), 241, 241, &config_for(&root)).unwrap();
+        assert!(content.contains("Showing lines 241-241 of 500 total lines"));
+        assert!(content.contains("startLine=242, endLine=481"));
 
         let _ = fs::remove_dir_all(root);
     }

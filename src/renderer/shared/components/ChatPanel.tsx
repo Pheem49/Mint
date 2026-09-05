@@ -23,6 +23,7 @@ import { ThinkingBlock } from './ThinkingBlock'
 import SourcesBlock from './SourcesBlock'
 import ChatMessageItem from './ChatMessageItem'
 import { AgentActivityDrawer } from './AgentActivityDrawer'
+import { ArtifactPreviewPanel, type ArtifactFile } from './ArtifactPreviewPanel'
 import type { DiffHunk, FileChange } from '../types'
 import { numericSetting, shouldShowSessionDivider, formatSessionDividerLabel } from '../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
@@ -39,6 +40,8 @@ import {
   startGeminiLiveSession,
   sendGeminiLiveAudioChunk,
   stopGeminiLiveSession,
+  listGitCheckpoints,
+  rollbackGitCheckpoint,
 } from '@/tauri'
 
 
@@ -159,6 +162,7 @@ export default function ChatPanel({
   const [openActivityIds, setOpenActivityIds] = useState<Record<string, boolean>>({})
   const [openReviewIds, setOpenReviewIds] = useState<Record<string, boolean>>({})
   const [openFileDiffs, setOpenFileDiffs] = useState<Record<string, boolean>>({})
+  const [activeArtifact, setActiveArtifact] = useState<ArtifactFile | null>(null)
   const [toolMenuOpen, setToolMenuOpen] = useState(false)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
@@ -743,7 +747,8 @@ export default function ChatPanel({
   const isEmptyChat = interactions.length === 0 && !sending && !pendingApproval
   const renderCompletedActivity = useCallback((interaction: any) => {
     const interactionId = String(interaction.id)
-    const activityView = activitiesFrom(agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? [])
+    const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
+    const activityView = activitiesFrom(progress)
     const isOpen = Boolean(openActivityIds[interactionId])
     return (
       <AgentActivityDrawer
@@ -751,6 +756,7 @@ export default function ChatPanel({
         isOpen={isOpen}
         onToggle={() => setOpenActivityIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
         isHistorical={true}
+        rawProgress={progress}
       />
     )
   }, [agentActivitySnapshots, openActivityIds])
@@ -774,26 +780,79 @@ export default function ChatPanel({
     const totalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0)
     const isOpen = Boolean(openReviewIds[interactionId])
 
+    const handleRewind = async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      const chatId = interaction.chatId || 'cli'
+      const confirmed = window.confirm(
+        'Are you sure you want to rewind your workspace files to the checkpoint before these changes? A rescue snapshot will be preserved automatically.'
+      )
+      if (!confirmed) return
+      try {
+        const checkpoints = await listGitCheckpoints(chatId)
+        if (checkpoints.length === 0) {
+          alert('No git checkpoints recorded for this session.')
+          return
+        }
+        const targetCp = checkpoints[checkpoints.length - 1]
+        const res = await rollbackGitCheckpoint(chatId, targetCp.step, workspacePath)
+        if (res.status === 'ok') {
+          alert(res.message)
+        } else {
+          alert(`Failed to rewind: ${res.message}`)
+        }
+      } catch (err: any) {
+        alert(`Error: ${err.message || String(err)}`)
+      }
+    }
+
     return (
       <div className="file-changes-summary-container" style={{ marginBottom: '8px' }}>
-        <button
-          type="button"
-          className="agent-activity-toggle"
-          aria-expanded={isOpen}
-          onClick={() => setOpenReviewIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 500 }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-            <polyline points="22 4 12 14.01 9 11.01" />
-          </svg>
-          <span>
-            {changes.length} {changes.length === 1 ? 'file' : 'files'} changed
-            {totalAdditions > 0 && <span style={{ color: '#10b981', marginLeft: '6px' }}>+{totalAdditions}</span>}
-            {totalDeletions > 0 && <span style={{ color: '#ef4444', marginLeft: '4px' }}>-{totalDeletions}</span>}
-          </span>
-          <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <button
+            type="button"
+            className="agent-activity-toggle"
+            aria-expanded={isOpen}
+            onClick={() => setOpenReviewIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 500 }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
+            </svg>
+            <span>
+              {changes.length} {changes.length === 1 ? 'file' : 'files'} changed
+              {totalAdditions > 0 && <span style={{ color: '#10b981', marginLeft: '6px' }}>+{totalAdditions}</span>}
+              {totalDeletions > 0 && <span style={{ color: '#ef4444', marginLeft: '4px' }}>-{totalDeletions}</span>}
+            </span>
+            <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleRewind}
+            title="Rewind workspace to before these file edits (Git Checkpoint)"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '2px 8px',
+              fontSize: '0.72rem',
+              borderRadius: '4px',
+              background: 'rgba(239, 68, 68, 0.1)',
+              color: '#f87171',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              cursor: 'pointer',
+              fontWeight: 500,
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="1 4 1 10 7 10" />
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+            </svg>
+            Rewind
+          </button>
+        </div>
 
         {isOpen && (
           <div className="agent-activity-card" style={{ border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '8px', padding: '10px', background: 'rgba(15, 23, 42, 0.6)', marginTop: '4px' }}>
@@ -824,6 +883,29 @@ export default function ChatPanel({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem' }}>
                         {change.additions > 0 && <span style={{ color: '#10b981' }}>+{change.additions}</span>}
                         {change.deletions > 0 && <span style={{ color: '#ef4444' }}>-{change.deletions}</span>}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setActiveArtifact({ path: change.path })
+                          }}
+                          title="Open Live Preview Split View"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            padding: '1px 6px',
+                            fontSize: '0.68rem',
+                            borderRadius: '4px',
+                            background: 'rgba(16, 185, 129, 0.15)',
+                            color: '#10b981',
+                            border: '1px solid rgba(16, 185, 129, 0.3)',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                          }}
+                        >
+                          Preview
+                        </button>
                         <span style={{ color: '#64748b', transform: isDiffOpen ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform 0.15s' }}>&gt;</span>
                       </div>
                     </div>
@@ -918,6 +1000,29 @@ export default function ChatPanel({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem' }}>
                         {change.additions > 0 && <span style={{ color: '#10b981' }}>+{change.additions}</span>}
                         {change.deletions > 0 && <span style={{ color: '#ef4444' }}>-{change.deletions}</span>}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setActiveArtifact({ path: change.path })
+                          }}
+                          title="Open Live Preview Split View"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            padding: '1px 6px',
+                            fontSize: '0.68rem',
+                            borderRadius: '4px',
+                            background: 'rgba(16, 185, 129, 0.15)',
+                            color: '#10b981',
+                            border: '1px solid rgba(16, 185, 129, 0.3)',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                          }}
+                        >
+                          Preview
+                        </button>
                         <span style={{ color: '#64748b', transform: isDiffOpen ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform 0.15s' }}>&gt;</span>
                       </div>
                     </div>
@@ -954,71 +1059,106 @@ export default function ChatPanel({
     )
   }
 
-  return (
+  const sectionContent = (
     <section
       className={`conversation-panel ${isEmptyChat ? 'is-empty' : ''}`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      style={{ position: 'relative' }}
+      style={activeArtifact ? { flex: '1 1 50%', minWidth: '340px', width: 'auto', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
     >
-      {isDragging && (
-        <div
-          className="drag-drop-overlay"
-          onDragEnter={handleDragEnter}
-          onDragLeave={handleDragLeave}
-          onDragOver={handleDragOver}
-          onDrop={handleDrop}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(15, 23, 42, 0.82)',
-            backdropFilter: 'blur(8px)',
-            border: '2px dashed var(--accent)',
-            borderRadius: '16px',
-            margin: '12px',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'white',
-            zIndex: 1000,
-            pointerEvents: 'auto',
-          }}
-        >
-          <div style={{ fontSize: '3.5rem', marginBottom: '16px' }}>🖼️</div>
-          <div style={{ fontSize: '1.25rem', fontWeight: 'bold', letterSpacing: '0.5px' }}>Drag files to attach data</div>
-          <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '8px' }}>Supports images (PNG, JPEG, WebP, GIF), videos (MP4, WebM, MOV, MKV), and PDF files</div>
-        </div>
-      )}
-      <div className="chat-header">
-        {onToggleMobileSidebar && (
-          <button
-            className="mobile-menu-btn"
-            type="button"
-            onClick={onToggleMobileSidebar}
-            aria-label="Toggle menu"
+        {isDragging && (
+          <div
+            className="drag-drop-overlay"
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(15, 23, 42, 0.82)',
+              backdropFilter: 'blur(8px)',
+              border: '2px dashed var(--accent)',
+              borderRadius: '16px',
+              margin: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'white',
+              zIndex: 1000,
+              pointerEvents: 'auto',
+            }}
           >
-            ☰
-          </button>
+            <div style={{ marginBottom: '16px', color: '#10b981' }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', letterSpacing: '0.5px' }}>Drag files to attach data</div>
+            <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '8px' }}>Supports images (PNG, JPEG, WebP, GIF), videos (MP4, WebM, MOV, MKV), and PDF files</div>
+          </div>
         )}
-        <div className="chat-header-title">
-          <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
-          <span>Mint Agent</span>
+        <div className="chat-header">
+          {onToggleMobileSidebar && (
+            <button
+              className="mobile-menu-btn"
+              type="button"
+              onClick={onToggleMobileSidebar}
+              aria-label="Toggle menu"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+          )}
+          <div className="chat-header-title">
+            <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
+            <span>Mint Agent</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {activeArtifact && (
+              <button
+                type="button"
+                className="chat-header-clear-btn"
+                title="Close Live Preview"
+                onClick={() => setActiveArtifact(null)}
+                style={{
+                  color: '#10b981',
+                  background: 'rgba(16, 185, 129, 0.1)',
+                  border: '1px solid rgba(16, 185, 129, 0.25)',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                <span>Close Live Preview</span>
+              </button>
+            )}
+            <button className="chat-header-clear-btn" title="Clear Messages" onClick={onClearMessages}>
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>
+            </button>
+          </div>
         </div>
-        <button className="chat-header-clear-btn" title="Clear Messages" onClick={onClearMessages}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            <line x1="10" y1="11" x2="10" y2="17"></line>
-            <line x1="14" y1="11" x2="14" y2="17"></line>
-          </svg>
-        </button>
-      </div>
       <div className="chat-container" ref={chatContainerRef} onScroll={handleChatScroll}>
         {interactions.map((interaction, index) => (
           <Fragment key={interaction.id}>
@@ -1064,6 +1204,7 @@ export default function ChatPanel({
                 isOpen={openActivityIds['live'] ?? true}
                 onToggle={() => setOpenActivityIds((current) => ({ ...current, live: !(current['live'] ?? true) }))}
                 pendingApproval={!!pendingApproval}
+                rawProgress={agentProgress}
               />
             )}
             {renderActiveFileChanges()}
@@ -1569,5 +1710,31 @@ export default function ChatPanel({
         />
       )}
     </section>
+  )
+
+  if (!activeArtifact) {
+    return sectionContent
+  }
+
+  return (
+    <div
+      className="chat-panel-split-wrapper"
+      style={{
+        display: 'flex',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        position: 'relative',
+        gridColumn: '1 / -1',
+        zIndex: 1,
+      }}
+    >
+      {sectionContent}
+      <ArtifactPreviewPanel
+        artifact={activeArtifact}
+        onClose={() => setActiveArtifact(null)}
+        workspacePath={workspacePath}
+      />
+    </div>
   )
 }
