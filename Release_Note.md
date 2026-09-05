@@ -40,6 +40,33 @@ Optimized code search and file walking in `crates/mint-core`:
 
 ---
 
+## ⚡ Performance: Parallel Read-Only Tool Execution (`buffer_unordered`)
+
+When an LLM model issues multiple tool calls in a single turn (e.g. reading 3 files simultaneously, searching code and the web, or retrieving diagnostic information):
+- **Concurrent execution**: Read-only tools (`read_file`, `list_files`, `search_code`, `symbols`, `semantic_search`, `web_search`, `git_diff`, `git_status`, etc.) now execute concurrently up to `PARALLEL_READ_ONLY_LIMIT` (6 in-flight at once) using `futures_util::stream::iter().buffer_unordered(...)` instead of waiting in a sequential loop.
+- **Thread-safe progress and approval gates**: Adapts progress reporting and approval checking through mutex-protected closures, preserving real-time terminal/UI feedback while executing in parallel.
+- **Deterministic output ordering**: Completed tool results are sorted back to their original requested order before updating the conversation trajectory, ensuring prompt history remains deterministic.
+
+---
+
+## ⚡ Performance: In-Place Observation Buffer Reuse & Zero-Copy Step Formatting
+
+Eliminated repeated heap re-allocations and redundant string cloning across turns of the agent execution loop:
+- **In-place buffer reuse (`rebuild_observation`)**: Instead of creating intermediate `trajectory.join("\n\n")` strings and newly formatted heap buffers on every turn, `rebuild_observation` clears and reuses the allocated capacity of the `observation` buffer across steps, streaming history directly into the buffer via `write!` with reserved capacity.
+- **Pre-allocated trajectory step formatting (`format_trajectory_step`)**: Formats action/result step records into appropriately pre-sized heap buffers before appending them to `trajectory`, avoiding multiple internal growth re-allocations as session length grows.
+- **Reduced memory churn on long tasks**: Dramatically cuts down heap allocations and memory churn during extended multi-step autonomous sessions across CLI, Desktop, and Web.
+
+---
+
+## 🎨 UI: Horizontal Grid Layout & View Switcher for MCP Catalog
+
+Rebuilt the MCP Catalog picker modal across Desktop and Web:
+- **Horizontal 2-column grid layout (`mcp-catalog-grid`)**: MCP server catalog presets are now arranged horizontally in 2-column cards side-by-side (`mcp-catalog-card`) with responsive wrapping, making full use of modal width and letting users view more servers at a glance.
+- **View switcher (Grid ⬚ / List ☰)**: Added segmented layout toggle pills in the control bar to freely switch between horizontal grid mode and vertical list mode, with the selected preference saved in `localStorage`.
+- **Search input clearance**: Fixed search input left padding to ensure placeholder text never overlaps the magnifying glass icon.
+
+---
+
 ## ⏰ Fixed: Scheduled Tasks Lost a Run When Mint Closed Mid-Execution
 
 The cron scheduler advanced a job's `next_run` to the following occurrence

@@ -566,7 +566,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
       {/* MCP Catalog Modal */}
       {showCatalogModal && (
         <div className="management-modal-overlay" onClick={() => setShowCatalogModal(false)}>
-          <div className="management-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="management-modal mcp-catalog-modal" onClick={(e) => e.stopPropagation()}>
             <div className="management-modal-header">
               <h2 className="management-modal-title">MCP Catalog</h2>
               <button type="button" className="management-modal-close" onClick={() => setShowCatalogModal(false)}>

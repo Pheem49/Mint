@@ -17,16 +17,38 @@ export interface McpRegistryPickerProps {
   /** Show the trailing "— or add manually —" divider. Off when the picker is
    *  its own modal with no manual form beneath it. */
   showManualHint?: boolean
+  /** Initial view mode ('grid' for horizontal 2-column cards, 'list' for vertical rows). Defaults to 'grid'. */
+  defaultViewMode?: 'grid' | 'list'
 }
 
 export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({
   configuredNames,
   onPick,
   showManualHint = true,
+  defaultViewMode,
 }) => {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
   const [argValues, setArgValues] = useState<string[]>([])
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    if (defaultViewMode) return defaultViewMode
+    try {
+      const saved = localStorage.getItem('mint:mcp-catalog-view')
+      if (saved === 'list' || saved === 'grid') return saved
+    } catch {
+      // ignore
+    }
+    return 'grid'
+  })
+
+  const handleSetViewMode = (mode: 'grid' | 'list') => {
+    setViewMode(mode)
+    try {
+      localStorage.setItem('mint:mcp-catalog-view', mode)
+    } catch {
+      // ignore
+    }
+  }
 
   const configured = new Set(configuredNames)
   const filtered = MCP_REGISTRY.filter(
@@ -56,7 +78,7 @@ export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({
 
   return (
     <div>
-      <div className="management-control-bar">
+      <div className="management-control-bar" style={{ marginBottom: 14 }}>
         <div className="management-search-wrapper">
           <input
             type="text"
@@ -78,11 +100,83 @@ export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
         </div>
+
+        {/* View mode switcher: Grid (แนวนอน) vs List (แนวตั้ง) */}
+        <div className="management-filter-pills" style={{ display: 'inline-flex', gap: 2, padding: 3, flexShrink: 0 }}>
+          <button
+            type="button"
+            className={`management-pill-btn ${viewMode === 'grid' ? 'active' : ''}`}
+            onClick={() => handleSetViewMode('grid')}
+            title="Grid view (แนวนอน)"
+            style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+            </svg>
+            <span style={{ fontSize: '0.78rem' }}>Grid</span>
+          </button>
+          <button
+            type="button"
+            className={`management-pill-btn ${viewMode === 'list' ? 'active' : ''}`}
+            onClick={() => handleSetViewMode('list')}
+            title="List view (แนวตั้ง)"
+            style={{ padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="8" y1="6" x2="21" y2="6" />
+              <line x1="8" y1="12" x2="21" y2="12" />
+              <line x1="8" y1="18" x2="21" y2="18" />
+              <line x1="3" y1="6" x2="3.01" y2="6" strokeWidth="3" />
+              <line x1="3" y1="12" x2="3.01" y2="12" strokeWidth="3" />
+              <line x1="3" y1="18" x2="3.01" y2="18" strokeWidth="3" />
+            </svg>
+            <span style={{ fontSize: '0.78rem' }}>List</span>
+          </button>
+        </div>
       </div>
 
-      <div className="mgmt-row-stack" style={{ maxHeight: 320, overflowY: 'auto' }}>
+      <div
+        className={viewMode === 'grid' ? 'mcp-catalog-grid' : 'mgmt-row-stack'}
+        style={{ maxHeight: 380, overflowY: 'auto' }}
+      >
         {filtered.map((entry) => {
           const added = configured.has(entry.key)
+          const isSelected = selected === entry.key
+
+          if (viewMode === 'grid') {
+            return (
+              <button
+                key={entry.key}
+                type="button"
+                disabled={added}
+                onClick={() => open(entry)}
+                className={`mcp-catalog-card ${isSelected ? 'selected' : ''}`}
+                style={{
+                  opacity: added ? 0.55 : 1,
+                  cursor: added ? 'default' : 'pointer',
+                  borderColor: isSelected ? 'var(--accent, #10b981)' : undefined,
+                }}
+              >
+                <div className="mcp-catalog-card-header">
+                  <div className="management-card-icon" style={{ width: 34, height: 34, fontSize: '1.1rem' }}>
+                    {renderMcpSvgIcon(entry.key, entry.icon)}
+                  </div>
+                  <div className="mcp-catalog-card-title">
+                    <span className="name-text">{entry.name}</span>
+                    {added && <span className="management-tag">Added</span>}
+                    {(entry.requiredEnv?.length ?? 0) > 0 && !added && (
+                      <span className="management-tag" style={{ fontSize: '0.65rem' }}>needs key</span>
+                    )}
+                  </div>
+                </div>
+                <div className="mcp-catalog-card-desc">{entry.desc}</div>
+              </button>
+            )
+          }
+
           return (
             <button
               key={entry.key}
@@ -95,7 +189,7 @@ export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({
                 textAlign: 'left',
                 opacity: added ? 0.55 : 1,
                 cursor: added ? 'default' : 'pointer',
-                borderColor: selected === entry.key ? 'var(--accent, #10b981)' : undefined,
+                borderColor: isSelected ? 'var(--accent, #10b981)' : undefined,
               }}
             >
               <div className="management-card-icon">{renderMcpSvgIcon(entry.key, entry.icon)}</div>
@@ -112,6 +206,12 @@ export const McpRegistryPicker: React.FC<McpRegistryPickerProps> = ({
             </button>
           )
         })}
+
+        {filtered.length === 0 && (
+          <div className="mgmt-empty" style={{ gridColumn: '1 / -1', padding: '32px 16px' }}>
+            <p>No matching MCP servers found.</p>
+          </div>
+        )}
       </div>
 
       {sel && (
