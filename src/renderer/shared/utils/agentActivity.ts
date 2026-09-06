@@ -9,7 +9,7 @@ export interface AgentActivity {
   label: string
   target: string
   kind: 'file' | 'folder' | 'search' | 'terminal' | 'tool'
-  state: 'active' | 'done' | 'error'
+  state: 'active' | 'done' | 'error' | 'retry'
   action?: string
   /** Raw ToolEnd output text, shown when the row is expanded in the UI. */
   result?: string
@@ -44,7 +44,15 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
   const command = activityDetail(input, 'command')
   const name = activityDetail(input, 'name')
   const tool = activityDetail(input, 'tool')
-  const rawTarget = path || query || command || name || tool || action.replaceAll('_', ' ')
+  const fallbackTarget =
+    action === 'web_search' || action === 'search_code' || action === 'knowledge_search'
+      ? '(empty query)'
+      : action === 'read_file' || action === 'write_file'
+        ? '(empty path)'
+        : action === 'run_shell'
+          ? '(empty command)'
+          : action.replaceAll('_', ' ')
+  const rawTarget = path || query || command || name || tool || fallbackTarget
 
   // Append line range for read_file when startLine / endLine are available
   let target = rawTarget
@@ -102,9 +110,6 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
         if (activities[index].state !== 'active') continue
         activities[index].state = event.data.result.startsWith('Error:') ? 'error' : 'done'
         activities[index].result = event.data.result
-        if (activities[index].state === 'error') {
-          activities[index].label = 'Failed'
-        }
         if (activities[index].action === 'ask_user' && event.data.result.startsWith('User answered:')) {
           const answer = event.data.result.replace('User answered:', '').trim()
           activities[index].target = `(Answered: "${answer}") ${activities[index].target}`
@@ -113,6 +118,19 @@ export function activitiesFrom(progress: AgentProgress[]): AgentActivityView {
       }
     }
   }
+
+  // Mark intermediate errors as 'retry' if the agent continued running or succeeded later
+  for (let i = 0; i < activities.length; i++) {
+    if (activities[i].state === 'error') {
+      const hasSubsequentSuccessOrActive = activities.slice(i + 1).some(
+        (a) => a.state === 'done' || a.state === 'active'
+      )
+      if (hasSubsequentSuccessOrActive) {
+        activities[i].state = 'retry'
+      }
+    }
+  }
+
   const items = activities.slice(-12)
   return { summary: activitySummary(activities), items }
 }

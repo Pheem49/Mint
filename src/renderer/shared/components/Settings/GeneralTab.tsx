@@ -1,6 +1,6 @@
 import React from 'react'
+import { DEFAULT_CONFIG } from '../../constants/config'
 import { 
-  DEFAULT_CONFIG,
   GEMINI_MODELS,
   OPENAI_MODELS,
   OPENROUTER_MODELS,
@@ -8,13 +8,16 @@ import {
   ANTHROPIC_MODELS,
   HF_MODELS,
   LOCAL_MODELS,
+  IMAGE_STUDIO_MODELS,
+  IMAGE_GEN_PROVIDER_MODELS,
+} from '../../constants/models'
+import type {
   CustomProviderConfig,
   CustomProviderModel,
   CustomProviderHeader,
-} from '@/components/SettingsWindow'
+} from '../../types'
 import { setActiveModel } from '../../utils/modelManager'
 import { providerLabel as aiProviderLabel } from '../../utils/providers'
-import { IMAGE_STUDIO_MODELS, IMAGE_GEN_PROVIDER_MODELS } from '../../constants/models'
 import ApiKeyInput from './ApiKeyInput'
 
 // One card per image-gen provider (mirrors the chat "Provider & Model"

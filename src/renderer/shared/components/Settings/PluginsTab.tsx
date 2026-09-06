@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { DEFAULT_CONFIG } from '@/components/SettingsWindow'
+import { DEFAULT_CONFIG } from '../../constants/config'
 import { listLearnedSkills, addLearnedSkill, deleteLearnedSkill, LearnedSkill, detectSystemTools, DetectedTools, listMcpServerTools } from '@/tauri'
 import McpToolAllowlist from '../McpToolAllowlist'
 import McpRegistryPicker from '../McpRegistryPicker'

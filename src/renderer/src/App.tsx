@@ -1,17 +1,19 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react'
 import AuthGate from '../shared/components/AuthGate'
 import ChunkErrorBoundary from '../shared/components/ChunkErrorBoundary'
+import ModalErrorBoundary from '../shared/components/ModalErrorBoundary'
+import { lazyWithRetry } from '../shared/utils/lazyWithRetry'
 import { listen } from './tauri'
 
-const SettingsWindow = lazy(() => import('./components/SettingsWindow'))
+const SettingsWindow = lazyWithRetry(() => import('./components/SettingsWindow'))
 const SpotlightWindow = lazy(() => import('./components/SpotlightWindow'))
 const WidgetWindow = lazy(() => import('./components/WidgetWindow'))
 const ProactiveGlow = lazy(() => import('./components/ProactiveGlow'))
 const ScreenPicker = lazy(() => import('./components/ScreenPicker'))
-const MintDashboard = lazy(() => import('./components/MintDashboard'))
+const MintDashboard = lazyWithRetry(() => import('./components/MintDashboard'))
 function getCurrentRoute(): string {
   if (typeof window === 'undefined') return '/'
-  const hash = window.location.hash.replace(/^#/, '')
+  const hash = window.location.hash.replace(/^#![/]*/, '/').replace(/^#[/]*/, '/')
   const pathname = window.location.pathname
   return hash || pathname || '/'
 }
@@ -37,6 +39,14 @@ export default function App() {
       window.removeEventListener('hashchange', handleUrlChange)
       unlistenPromise.then((unlisten) => unlisten())
     }
+  }, [])
+
+  useEffect(() => {
+    // Preload SettingsWindow chunk in background so opening settings is instantaneous
+    const timer = setTimeout(() => {
+      import('./components/SettingsWindow').catch(() => {})
+    }, 1200)
+    return () => clearTimeout(timer)
   }, [])
 
   // Auxiliary overlay windows (spotlight/widget/proactive-glow/screen-picker)
@@ -76,9 +86,11 @@ export default function App() {
       <MintDashboard />
       <div className="settings-modal-overlay" onClick={() => { window.location.hash = '#/' }}>
         <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
-          <Suspense fallback={null}>
-            <SettingsWindow />
-          </Suspense>
+          <ModalErrorBoundary onClose={() => { window.location.hash = '#/' }}>
+            <Suspense fallback={<div className="auth-gate-loading" style={{ minHeight: 240 }}>Loading Settings…</div>}>
+              <SettingsWindow />
+            </Suspense>
+          </ModalErrorBoundary>
         </div>
       </div>
     </>

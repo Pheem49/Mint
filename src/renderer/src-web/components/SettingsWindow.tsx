@@ -22,24 +22,11 @@ import {
 
 // ─── Custom Provider Types ────────────────────────────────────────────────────
 
-export interface CustomProviderModel {
-  modelId: string
-  displayName: string
-}
-
-export interface CustomProviderHeader {
-  name: string
-  value: string
-}
-
-export interface CustomProviderConfig {
-  id: string
-  displayName: string
-  baseUrl: string
-  apiKey: string
-  models: CustomProviderModel[]
-  headers: CustomProviderHeader[]
-}
+export type {
+  CustomProviderModel,
+  CustomProviderHeader,
+  CustomProviderConfig,
+} from '../../shared/types'
 
 import { DEFAULT_CONFIG } from '../../shared/constants/config'
 export { DEFAULT_CONFIG }

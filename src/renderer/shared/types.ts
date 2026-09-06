@@ -218,3 +218,22 @@ export interface GitCheckpoint {
   targetPath?: string | null
 }
 
+export interface CustomProviderModel {
+  modelId: string
+  displayName: string
+}
+
+export interface CustomProviderHeader {
+  name: string
+  value: string
+}
+
+export interface CustomProviderConfig {
+  id: string
+  displayName: string
+  baseUrl: string
+  apiKey: string
+  models: CustomProviderModel[]
+  headers: CustomProviderHeader[]
+}
+

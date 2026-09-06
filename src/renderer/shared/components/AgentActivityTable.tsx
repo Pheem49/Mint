@@ -57,7 +57,19 @@ export function AgentActivityTable({ activityView }: Props) {
               style={{ cursor: 'pointer' }}
               onClick={() => toggleExpand(index)}
             >
-              <span className="agent-activity-label">{activity.label}</span>
+              <span className="agent-activity-label">
+                <span className="agent-activity-tool-name">{activity.label || activity.action}</span>
+                {activity.state === 'retry' && (
+                  <span className="agent-activity-badge retry" title="Step encountered an error but agent retried and recovered">
+                    Retried
+                  </span>
+                )}
+                {activity.state === 'error' && (
+                  <span className="agent-activity-badge error" title="Step failed">
+                    Failed
+                  </span>
+                )}
+              </span>
               <span className="agent-activity-icon" aria-hidden="true" data-has-img={!!icon}>
                 {icon && <img src={icon} alt="" draggable={false} />}
               </span>

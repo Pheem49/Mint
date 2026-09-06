@@ -11,15 +11,48 @@
   [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 </div>
 
-Mint is a local-first AI assistant that runs on your own machine and follows you
-wherever you already are: message it from Telegram, Discord, Slack, LINE, or
-WhatsApp like you'd message a person, no desktop window required. It's also a
-native desktop app with a Live2D companion, and a full terminal agent for
-coding tasks — all backed by the same Tauri v2 + Rust + React/TypeScript core,
-so chat, memory, knowledge, tools, and safety policies behave identically no
-matter which door you walk in through.
+Mint is a local-first AI assistant and autonomous coding agent that runs on your own machine. Powered by a high-performance Rust **Agent Execution Harness** (`mint-core`), Mint wraps foundation models (Claude, GPT-4o, Gemini, Ollama, DeepSeek) with deterministic tool execution, verification gates, subagent DAG orchestration, memory compaction, and human-in-the-loop safety guardrails.
 
-See [Release Notes](Release_Note.md) for what's new.
+It follows you wherever you already are: message it from Telegram, Discord, Slack, LINE, or WhatsApp like you'd message a person, no desktop window required. It's also a native desktop app with a Live2D companion, a web application, and a full terminal agent for coding tasks — all backed by the exact same execution harness and safety policies, so chat, memory, knowledge, tools, and safety behave identically no matter which door you walk in through.
+
+See [Release Notes](Release_Note.md) for what's new, and read the [Agent Harness Architecture Guide](docs/AGENT_HARNESS.md) for deep technical details.
+
+## 🏛️ Architecture: The Mint Agent Harness
+
+In modern AI engineering, **Harness Engineering** bridges the gap between foundation models (reasoning engines) and real-world execution. Mint implements a complete, deterministic agent harness in Rust:
+
+```text
+                     ┌────────────────────────────────────────────────────────┐
+                     │                   Foundation Models                    │
+                     │          (Claude, GPT-4o, Gemini, Ollama, DeepSeek)    │
+                     └───────────────────────────▲────────────────────────────┘
+                                                 │ (Reasoning / Tool Invocations)
+┌────────────────────────────────────────────────▼────────────────────────────────────────────────┐
+│                                   MINT AGENT HARNESS (mint-core)                                │
+│                                                                                                 │
+│  ┌──────────────────────────┐  ┌──────────────────────────┐  ┌───────────────────────────────┐  │
+│  │   Orchestration Loop     │  │   Safety & Verification  │  │   Memory & Context Engine     │  │
+│  │  • ReAct / OODA Cycle    │  │  • Human-in-the-Loop Gate│  │  • Context Compaction         │  │
+│  │  • Self-Correction Loop  │  │  • Verification Gating   │  │  • Two-Tier Memory Recall     │  │
+│  │  • Read-Only Concurrency │  │  • Process Sandbox/Docker│  │  • Fact Quarantine & Promote  │  │
+│  └──────────────────────────┘  └──────────────────────────┘  └───────────────────────────────┘  │
+│  ┌──────────────────────────┐  ┌──────────────────────────┐  ┌───────────────────────────────┐  │
+│  │   Tool Actuator System   │  │   Subagent DAG Engine    │  │   Protocol & Plugin Bridge    │  │
+│  │  • File I/O & Git Diff   │  │  • Parallel Subagents    │  │  • Model Context Protocol     │  │
+│  │  • Terminal / Shell Exec │  │  • Scoped Tool Isolation │  │  • Ecosystem Plugins (7+)     │  │
+│  │  • Search (Web/Code/KB)  │  │  • DAG State Tracking    │  │  • Messaging Bridges (7+)     │  │
+│  └──────────────────────────┘  └──────────────────────────┘  └───────────────────────────────┘  │
+└────────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                 │ Unified Telemetry & State Stream
+                     ┌───────────────────────────┼────────────────────────────┐
+                     │                           │                            │
+        ┌────────────▼────────────┐ ┌────────────▼────────────┐ ┌─────────────▼────────────┐
+        │        Mint CLI         │ │       Desktop App       │ │     Web UI & Messaging    │
+        │   (Terminal TUI / ANSI) │ │      (Tauri v2 + React) │ │     (Vite + Bot Bridges)  │
+        └─────────────────────────┘ └─────────────────────────┘ └───────────────────────────┘
+```
+
+> 📖 **Deep Dive:** Read the complete architecture guide in [docs/AGENT_HARNESS.md](docs/AGENT_HARNESS.md) to learn how Mint achieves autonomous self-correction, verification gating, token budgeting, and subagent DAG workflows.
 
 ## <img src="assets/features.svg" width="24" height="24" valign="middle" /> What Mint Can Do
 

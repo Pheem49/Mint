@@ -1,5 +1,29 @@
 # Release Notes - Mint Agent v1.14.0
 
+## Agent Activity Retry & Self-Correction UX Refinement
+
+- **Soft Recovered / Retry State for Intermediate Tool Errors**:
+  - When an intermediate tool step encounters an error (e.g. missing arguments or transient failures) but the Agent subsequently retries, self-corrects, or finishes the task, the activity table now marks the step as `'retry'` with an amber badge (`[Retried]`) instead of a harsh red `Failed` label.
+  - The tool/action name (e.g., `web_search`) is preserved in the "Tool" column rather than being wiped out by the word "Failed".
+  - Terminal red `[Failed]` badges are reserved strictly for unrecovered errors where the agent halted without subsequent success.
+  - Added descriptive fallback targets (e.g. `(empty query)`, `(empty path)`) when a tool was invoked without required arguments so users immediately understand why a step required a retry.
+  - Implemented across both Desktop (`src/renderer/src`) and Web (`src/renderer/src-web`) interfaces with consistent theme styling.
+
+## Settings First-Load Reliability & Route Resilience
+
+- **Eliminated Circular Dependency Cycle in Settings Tabs**:
+  - Moved `CustomProviderConfig`, `CustomProviderModel`, and `CustomProviderHeader` to `shared/types.ts` as the canonical source of truth.
+  - Updated all settings tab components (`GeneralTab`, `AgentsTab`, `PluginsTab`, `ThemeTab`, `AutomationTab`, `AudioTab`) to import config, models, and types directly from `@shared/constants` and `@shared/types` instead of `@/components/SettingsWindow`.
+  - Fixes uninitialized `undefined` exports during initial module evaluation in Vite ESM, which caused first-load crashes (`ChunkErrorBoundary`) in Web and Desktop.
+
+- **Hashbang Route Normalization (`#!/settings` & `#/settings`)**:
+  - `getCurrentRoute()` in both `src-web/App.tsx` and `src/App.tsx` now normalizes both `#/` and `#!/` prefixes cleanly to prevent route mismatch on direct navigation or hashbang links.
+
+- **Resilient Lazy Chunk Loading & Preload**:
+  - Implemented `lazyWithRetry` with automatic backoff retry to prevent transient chunk fetch failures from unmounting the app.
+  - Added background idle preloading for the Settings bundle so opening Settings is instant and reliable.
+  - Added a localized `ModalErrorBoundary` inside the settings modal container to prevent any modal rendering exception from bubbling up and unmounting the main dashboard and chat.
+
 ## UI Stylesheet Cleanup & Theme Token Consistency
 
 - **Removed the legacy `mint-*` layout CSS** (~330 lines per copy) from `src/renderer/src/index.css` and `src/renderer/src-web/index.css`:

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { DEFAULT_CONFIG } from '@/components/SettingsWindow'
+import { DEFAULT_CONFIG } from '../../constants/config'
 import { GEMINI_LIVE_MODELS, GEMINI_LIVE_VOICES } from '../../constants/models'
 
 interface AudioTabProps {

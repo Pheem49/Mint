@@ -1,5 +1,5 @@
 import React from 'react'
-import { DEFAULT_CONFIG } from '@/components/SettingsWindow'
+import { DEFAULT_CONFIG } from '../../constants/config'
 
 interface ThemeTabProps {
   config: typeof DEFAULT_CONFIG

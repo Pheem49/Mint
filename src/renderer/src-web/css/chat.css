@@ -1054,7 +1054,7 @@
   font-size: 0.68rem;
   font-weight: 650;
   gap: 10px;
-  grid-template-columns: minmax(132px, 160px) 16px minmax(0, 1fr) 14px;
+  grid-template-columns: minmax(140px, 190px) 16px minmax(0, 1fr) 14px;
   min-height: 28px;
   padding: 5px 12px;
   text-transform: uppercase;
@@ -1067,7 +1067,7 @@
   display: grid;
   font-size: 0.86rem;
   gap: 10px;
-  grid-template-columns: minmax(132px, 160px) 16px minmax(0, 1fr) 14px;
+  grid-template-columns: minmax(140px, 190px) 16px minmax(0, 1fr) 14px;
   min-height: 34px;
   padding: 7px 12px;
   transition: background 0.2s ease, color 0.2s ease;
@@ -1083,12 +1083,45 @@
 }
 
 .agent-activity-label {
+  align-items: center;
   color: var(--text-muted);
+  display: flex;
   font-size: 0.8rem;
+  gap: 6px;
   line-height: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.agent-activity-tool-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agent-activity-badge {
+  align-items: center;
+  border-radius: 4px;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 1.5px 5px;
+  user-select: none;
+}
+
+.agent-activity-badge.retry {
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+}
+
+.agent-activity-badge.error {
+  background: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #f87171;
 }
 
 .agent-activity-icon {
@@ -1197,6 +1230,10 @@
 
 .agent-activity-item[data-state="active"] .agent-activity-label {
   color: var(--text-soft);
+}
+
+.agent-activity-item[data-state="retry"] .agent-activity-label {
+  color: #fbbf24;
 }
 
 .agent-activity-item[data-state="error"] .agent-activity-label {
