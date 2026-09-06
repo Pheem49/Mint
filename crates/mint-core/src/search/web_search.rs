@@ -338,8 +338,16 @@ async fn brave_search(
         .iter()
         .take(limit)
         .filter_map(|item| {
-            // Brave includes thumbnail.src for most results
-            let image_url = item["thumbnail"]["src"].as_str().map(|s| s.to_owned());
+            // Brave includes thumbnail.original (direct URL) and thumbnail.src (proxy URL)
+            let image_url = item["thumbnail"]["original"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.replace("&amp;", "&"))
+                .or_else(|| {
+                    item["thumbnail"]["src"]
+                        .as_str()
+                        .and_then(unwrap_brave_proxy_url)
+                });
             Some(SearchHit {
                 title: item["title"].as_str()?.to_owned(),
                 url: item["url"].as_str()?.to_owned(),
@@ -397,4 +405,56 @@ async fn searxng_search(
             })
         })
         .collect())
+}
+
+/// Unwraps Brave Search internal image proxy URLs (`imgs.search.brave.com`)
+/// back to the direct source image URL so it can be loaded without 403 Forbidden.
+pub(crate) fn unwrap_brave_proxy_url(url: &str) -> Option<String> {
+    if !url.contains("imgs.search.brave.com") {
+        return Some(url.to_owned());
+    }
+    let parts: Vec<&str> = url.split("imgs.search.brave.com/").collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let rest = parts[1];
+    let segments: Vec<&str> = rest.splitn(4, '/').collect();
+    if segments.len() < 4 {
+        return None;
+    }
+    let b64_raw = segments[3].replace('/', "");
+    let mut b64_clean = b64_raw.replace('-', "+").replace('_', "/");
+    let pad = (4 - (b64_clean.len() % 4)) % 4;
+    if pad > 0 {
+        b64_clean.push_str(&"=".repeat(pad));
+    }
+
+    use base64::Engine;
+    let decoded_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&b64_clean)
+        .ok()?;
+    let decoded_str = String::from_utf8(decoded_bytes).ok()?;
+    let unescaped = decoded_str.replace("&amp;", "&");
+    if unescaped.starts_with("http://") || unescaped.starts_with("https://") {
+        Some(unescaped)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unwrap_brave_proxy_url() {
+        let proxy_url = "https://imgs.search.brave.com/iiiU8DBa1f4RL6KkBtVSskc8YKDOrpvlttO7uM89tc/rs:fit:200:200:1:0/g:ce/aHR0cHM6Ly9pbWFnZXMuY3RmYXNzZXRzLm5ldC9rZnR6d2R5YXV3dDkvNmliQ2Fxc29PN0Y2WENOQ0lPOHphWi85NDc1Y2RlYmMxZjBhZjEwMDQxNGYxYzg1ODYwZmM0Yy9IZXJvXzE2eDkucG5nP3c9MTYwMCZhbXA7aD05MDAmYW1wO2ZpdD1maWxs";
+        let unwrapped = unwrap_brave_proxy_url(proxy_url);
+        assert_eq!(
+            unwrapped.as_deref(),
+            Some(
+                "https://images.ctfassets.net/kftzwdyauwt9/6ibCaqsoO7F6XCNCIO8zaZ/9475cdebc1f0af100414f1c85860fc4c/Hero_16x9.png?w=1600&h=900&fit=fill"
+            )
+        );
+    }
 }

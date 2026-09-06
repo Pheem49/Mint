@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { Images } from 'lucide-react'
+import { resolveMediaUrl } from '../utils/markdown'
 
 export interface ImageSearchHit {
   title: string
@@ -18,7 +19,8 @@ export interface ImageSearchData {
 
 function ImageTile({ image }: { image: ImageSearchHit }) {
   const [broken, setBroken] = useState(false)
-  const src = image.thumbnailUrl || image.imageUrl
+  const initialSrc = resolveMediaUrl(image.thumbnailUrl || image.imageUrl)
+  const [src, setSrc] = useState(initialSrc)
 
   if (broken || !src) {
     return null
@@ -45,7 +47,15 @@ function ImageTile({ image }: { image: ImageSearchHit }) {
         src={src}
         alt={image.title}
         loading="lazy"
-        onError={() => setBroken(true)}
+        referrerPolicy="no-referrer"
+        onError={() => {
+          const fallback = resolveMediaUrl(image.imageUrl)
+          if (src !== fallback && fallback) {
+            setSrc(fallback)
+          } else {
+            setBroken(true)
+          }
+        }}
         style={{
           width: '100%',
           height: '100%',

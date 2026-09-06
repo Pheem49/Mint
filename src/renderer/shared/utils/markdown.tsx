@@ -14,18 +14,42 @@ import ImageSearchCard from '../components/ImageSearchCard'
 import ImageGenCard from '../components/ImageGenCard'
 import MermaidCard from '../components/MermaidCard'
 
+/**
+ * Unwraps Brave Search internal image proxy URLs (imgs.search.brave.com)
+ * back to the direct source image URL so it loads without 403 Forbidden.
+ */
+export function unwrapBraveImageUrl(url: string): string {
+  if (!url || !url.includes('imgs.search.brave.com')) return url
+  try {
+    const match = url.match(/imgs\.search\.brave\.com\/[^\/]+\/[^\/]+\/[^\/]+\/(.+)$/)
+    if (!match) return url
+    const rawB64 = match[1].replace(/\//g, '')
+    const padded = rawB64 + '='.repeat((4 - (rawB64.length % 4)) % 4)
+    const stdB64 = padded.replace(/-/g, '+').replace(/_/g, '/')
+    const decoded = atob(stdB64)
+    const unescaped = decoded.replace(/&amp;/g, '&')
+    if (unescaped.startsWith('http://') || unescaped.startsWith('https://')) {
+      return unescaped
+    }
+  } catch {
+    // If decoding fails, fall back to original url
+  }
+  return url
+}
+
 export const resolveMediaUrl = (url: string): string => {
   if (!url) return ''
-  if (url.startsWith('data:') || url.startsWith('http://') || url.startsWith('https://')) {
-    return url
+  const unwrapped = unwrapBraveImageUrl(url)
+  if (unwrapped.startsWith('data:') || unwrapped.startsWith('http://') || unwrapped.startsWith('https://')) {
+    return unwrapped
   }
-  if (url.startsWith('/api/')) {
+  if (unwrapped.startsWith('/api/')) {
     const origin = typeof window !== 'undefined' && window.location.port === '9000'
       ? 'http://localhost:3000'
       : (typeof window !== 'undefined' ? window.location.origin : '')
-    return `${origin}${url}`
+    return `${origin}${unwrapped}`
   }
-  return url
+  return unwrapped
 }
 
 export const isTableLine = (line: string): boolean => {
@@ -291,13 +315,14 @@ const mdComponents = {
     </a>
   ),
   img: ({ src, alt }) => {
-    const url = String(src || '')
+    const rawUrl = String(src || '')
+    const url = resolveMediaUrl(rawUrl)
     const label = alt || 'Generated Image'
     const isExternal = url.startsWith('https://') || url.startsWith('http://')
     if (isExternal) {
       return (
         <a
-          href={resolveMediaUrl(url)}
+          href={url}
           target="_blank"
           rel="noopener noreferrer"
           title={label}
@@ -305,9 +330,10 @@ const mdComponents = {
           style={{ display: 'block', margin: '6px 0 10px 0', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)', maxWidth: '420px', textDecoration: 'none', cursor: 'pointer' }}
         >
           <img
-            src={resolveMediaUrl(url)}
+            src={url}
             alt={label}
             loading="lazy"
+            referrerPolicy="no-referrer"
             style={{ width: '100%', maxHeight: '200px', objectFit: 'cover', display: 'block' }}
             onError={(e) => { (e.currentTarget as HTMLImageElement).closest('a')!.style.display = 'none' }}
           />
@@ -319,7 +345,7 @@ const mdComponents = {
     }
     return (
       <div className="chat-media-card" style={{ margin: '10px 0', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border, rgba(255,255,255,0.12))', background: 'var(--panel-bg, #141416)' }}>
-        <img src={resolveMediaUrl(url)} alt={label} style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
+        <img src={url} alt={label} referrerPolicy="no-referrer" style={{ width: '100%', maxHeight: '420px', objectFit: 'contain', display: 'block', borderRadius: '8px' }} />
       </div>
     )
   },
@@ -341,7 +367,7 @@ const mdComponents = {
     return renderCodeCard(lang, codeText)
   },
   table: ({ children }) => (
-    <div className="chat-table-container" style={{ overflowX: 'auto', margin: '14px 0', width: '100%', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.12)', background: 'var(--panel-bg)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' }}>
+    <div className="chat-table-container" style={{ overflowX: 'auto', margin: '14px 0', width: '100%', borderRadius: '8px', border: '1px solid var(--border-light, rgba(255, 255, 255, 0.12))', background: 'var(--panel-bg)', boxShadow: 'var(--shadow-sm, 0 4px 12px rgba(0, 0, 0, 0.15))' }}>
       <table className="chat-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem', textAlign: 'left', lineHeight: '1.5' }}>
         {children}
       </table>
@@ -352,7 +378,9 @@ const mdComponents = {
       {Children.map(children, (child) =>
         isValidElement(child)
           ? cloneElement(child as ReactElement<{ style?: CSSProperties }>, {
-              style: { background: 'rgba(255, 255, 255, 0.04)', borderBottom: '2px solid rgba(255, 255, 255, 0.15)' },
+              // color-mix with --text-main so the tint adapts per theme
+              // (light overlay on dark themes, dark overlay on light theme).
+              style: { background: 'color-mix(in srgb, var(--text-main, #e2e8f0) 5%, transparent)', borderBottom: '2px solid var(--border-light, rgba(255, 255, 255, 0.15))' },
             })
           : child
       )}
@@ -371,8 +399,8 @@ const mdComponents = {
           return cloneElement(child as ReactElement<{ style?: CSSProperties }>, {
             key: child.key ?? idx,
             style: {
-              background: idx % 2 === 1 ? 'rgba(255, 255, 255, 0.015)' : 'transparent',
-              borderBottom: idx < rowElements.length - 1 ? '1px solid rgba(255, 255, 255, 0.08)' : 'none',
+              background: idx % 2 === 1 ? 'color-mix(in srgb, var(--text-main, #e2e8f0) 2%, transparent)' : 'transparent',
+              borderBottom: idx < rowElements.length - 1 ? '1px solid var(--border, rgba(255, 255, 255, 0.08))' : 'none',
             },
           })
         })}
