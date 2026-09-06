@@ -760,7 +760,30 @@ impl MintConfig {
     }
 }
 
+fn is_test_environment() -> bool {
+    if cfg!(test) {
+        return true;
+    }
+    if std::env::var("RUST_TEST_THREADS").is_ok() || std::env::var("CARGO_TARGET_TMPDIR").is_ok() {
+        return true;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let path = exe.to_string_lossy();
+        if path.contains("/target/") && path.contains("/deps/") {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn config_path() -> Result<PathBuf, ConfigError> {
+    if let Ok(override_path) = std::env::var("MINT_CONFIG_PATH") {
+        return Ok(PathBuf::from(override_path));
+    }
+    if is_test_environment() {
+        let tmp = std::env::temp_dir().join("mint-test").join("mint-config.json");
+        return Ok(tmp);
+    }
     dirs::config_dir()
         .map(|directory| directory.join("mint").join("mint-config.json"))
         .ok_or(ConfigError::ConfigDirectoryUnavailable)
@@ -857,6 +880,10 @@ fn save_config_to(path: &Path, config: &MintConfig) -> Result<(), ConfigError> {
             path: directory.to_path_buf(),
             source,
         })?;
+    }
+    if path.exists() {
+        let bak = path.with_extension("json.bak");
+        let _ = fs::copy(path, &bak);
     }
     let raw = serde_json::to_string_pretty(config).map_err(ConfigError::Serialize)?;
     fs::write(path, format!("{raw}\n")).map_err(|source| ConfigError::Write {

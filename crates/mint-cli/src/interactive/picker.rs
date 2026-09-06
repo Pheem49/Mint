@@ -19,7 +19,7 @@ pub fn prompt_interactive_select(
     use crossterm::event::{self, Event, KeyCode};
     use crossterm::tty::IsTty;
 
-    if !io::stdout().is_tty() || options.is_empty() {
+    if !io::stdout().is_tty() || !io::stdin().is_tty() || options.is_empty() {
         return Ok(None);
     }
 

@@ -127,7 +127,7 @@ const SlashSuggestions = forwardRef<SlashSuggestionsHandle, Props>(function Slas
         desc: 'Restrict this message to this MCP server / plugin',
         kind: 'plugin' as const,
       }))
-    return [...BUILTIN_CONTEXTS, ...mcp].filter((c) => c.label.toLowerCase().includes(q))
+    return [...mcp, ...BUILTIN_CONTEXTS].filter((c) => c.label.toLowerCase().includes(q))
   }, [mode, message, mcpServers])
 
   // Flat, render-order list the keyboard walks over.

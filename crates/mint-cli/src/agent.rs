@@ -170,7 +170,11 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let summary = if instruction.len() > 60 {
-                format!("{}...", &instruction[..57])
+                let mut end = 57;
+                while !instruction.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}...", &instruction[..end])
             } else {
                 instruction.to_string()
             };
@@ -321,6 +325,7 @@ pub async fn run_code_agent_with_options(
         if options.queueing
             && !options.fast_mode
             && io::stdout().is_tty()
+            && io::stdin().is_tty()
             && let Ok(mut status) = live_status.lock()
         {
             status.queue_enabled = true;
@@ -970,14 +975,13 @@ pub async fn run_code_agent_with_options(
         progress_cb,
         on_chunk,
     );
-    let res = if options.fast_mode {
-        agent_loop.await
-    } else {
-        tokio::select! {
-            res = agent_loop => res,
-            _ = wait_for_escape_interrupt(Arc::clone(&approval_active), Arc::clone(&live_status)) => {
-                Err(OrchestrationError::Agent("interrupted by Esc".into()))
-            }
+    let res = tokio::select! {
+        res = agent_loop => res,
+        _ = wait_for_escape_interrupt(Arc::clone(&approval_active), Arc::clone(&live_status)) => {
+            Err(OrchestrationError::Agent("interrupted by user (Esc / Ctrl+C)".into()))
+        }
+        _ = tokio::signal::ctrl_c() => {
+            Err(OrchestrationError::Agent("interrupted by Ctrl+C".into()))
         }
     };
     avatar_bridge.on_turn_end(res.is_ok());

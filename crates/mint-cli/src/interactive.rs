@@ -247,8 +247,28 @@ fn record_prompt(history: &mut Vec<String>, line: &str) {
     }
 }
 
+fn print_turn_error(error: &anyhow::Error) {
+    let err_str = error.to_string();
+    if err_str.to_lowercase().contains("interrupted") {
+        println!("{DIM}[Cancelled by user]{RESET}\n");
+    } else {
+        println!("{ERROR}Error:{RESET} {error}\n");
+    }
+}
+
 pub async fn run_interactive_chat() -> Result<()> {
-    let config = mint_core::load_config()?;
+    run_interactive_chat_with_options(None, false, false).await
+}
+
+pub async fn run_interactive_chat_with_options(
+    model_override: Option<String>,
+    fast_mode: bool,
+    plan_mode: bool,
+) -> Result<()> {
+    let mut config = mint_core::load_config()?;
+    if let Some(ref m) = model_override {
+        crate::apply_temporary_model_override(&mut config, m);
+    }
 
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
@@ -267,8 +287,8 @@ pub async fn run_interactive_chat() -> Result<()> {
     let mut session = InteractiveSession {
         config,
         current_dir: current_dir.clone(),
-        fast_mode: false,
-        plan_mode: false,
+        fast_mode,
+        plan_mode,
         pending_image: None,
         history: load_prompt_history(),
         jobs: BackgroundJobs::new(),
@@ -389,9 +409,9 @@ pub async fn run_interactive_chat() -> Result<()> {
                 println!("{}", skill.content);
                 println!("{DIM}────────────────────────────────────────────{RESET}\n");
 
-                if confirm("ต้องการ activate skill นี้ไหม? [y/N] ")? {
+                if confirm(&format!("Activate skill '{}'? [y/N] ", skill.name))? {
                     let final_task = if task_part.is_empty() {
-                        print!("พิมพ์ Task ที่ต้องการให้ทำงานด้วย Skill นี้: ");
+                        print!("Enter task for this skill: ");
                         let _ = io::stdout().flush();
                         let mut input = String::new();
                         io::stdin().read_line(&mut input)?;
@@ -436,7 +456,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                             pending_inputs.extend(queued);
                             pending_draft = draft;
                         }
-                        Err(error) => println!("{ERROR}Error:{RESET} {error}\n"),
+                        Err(error) => print_turn_error(&error),
                     }
                 } else {
                     println!("{DIM}Cancelled.{RESET}\n");
@@ -477,7 +497,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                         pending_inputs.extend(queued);
                         pending_draft = draft;
                     }
-                    Err(error) => println!("{ERROR}Error:{RESET} {error}\n"),
+                    Err(error) => print_turn_error(&error),
                 }
                 continue;
             }
@@ -507,7 +527,7 @@ pub async fn run_interactive_chat() -> Result<()> {
                 pending_inputs.extend(queued);
                 pending_draft = draft;
             }
-            Err(error) => println!("{ERROR}Error:{RESET} {error}\n"),
+            Err(error) => print_turn_error(&error),
         }
     }
 

@@ -165,6 +165,121 @@ fn first_line_preview(path: &Path) -> String {
     }
 }
 
+fn print_rendered_markdown(text: &str) {
+    let mut table_buffer: Vec<String> = Vec::new();
+    for line in text.lines() {
+        if crate::markdown::is_table_line(line) {
+            table_buffer.push(line.to_string());
+        } else {
+            if !table_buffer.is_empty() {
+                print!("{}", crate::markdown::render_markdown_table(&table_buffer));
+                table_buffer.clear();
+            }
+            if let Some(h) = line.strip_prefix("## ") {
+                println!("\n{BLUE}{h}{RESET}");
+            } else if let Some(h) = line.strip_prefix("# ") {
+                println!("\n{BLUE}{h}{RESET}");
+            } else {
+                println!("{line}");
+            }
+        }
+    }
+    if !table_buffer.is_empty() {
+        print!("{}", crate::markdown::render_markdown_table(&table_buffer));
+    }
+}
+
+async fn execute_core_slash(
+    session: &mut InteractiveSession,
+    query: &str,
+) -> Option<SlashResult> {
+    use mint_core::slash::{SlashEffect, SlashRequest, SlashResponse};
+
+    let req = SlashRequest {
+        input: query.trim().to_string(),
+        cwd: Some(session.current_dir.to_string_lossy().to_string()),
+        surface: Some("cli".to_string()),
+    };
+
+    let response = mint_core::slash::execute(&req, &mut session.config);
+
+    match response {
+        SlashResponse::Message { markdown } => {
+            print_rendered_markdown(&markdown);
+            Some(SlashResult::Handled)
+        }
+        SlashResponse::Applied { markdown, effects } => {
+            let mut save_needed = false;
+            for effect in &effects {
+                match effect {
+                    SlashEffect::ConfigChanged | SlashEffect::MultiAgentChanged { .. } => {
+                        save_needed = true;
+                    }
+                    SlashEffect::ProviderChanged { display } => {
+                        save_needed = true;
+                        println!("Switched to: {MINT}{display}{RESET}\n");
+                    }
+                    SlashEffect::FastModeChanged { enabled } => {
+                        session.fast_mode = *enabled;
+                        save_needed = true;
+                    }
+                    SlashEffect::WorkspaceChanged { path } => {
+                        let new_path = PathBuf::from(path);
+                        if new_path.is_dir() {
+                            session.current_dir = new_path;
+                            let _ = std::env::set_current_dir(&session.current_dir);
+                        }
+                    }
+                    SlashEffect::HistoryCleared => {
+                        session.history.clear();
+                    }
+                }
+            }
+            if save_needed && !cfg!(test) {
+                let _ = mint_core::save_config(&session.config);
+            }
+            if !markdown.is_empty() {
+                print_rendered_markdown(&markdown);
+            }
+            Some(SlashResult::Handled)
+        }
+        SlashResponse::NeedsChoice {
+            command,
+            title,
+            options,
+        } => {
+            let labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
+            let default_choice = labels.first().cloned().unwrap_or_default();
+            match prompt_interactive_select(&title, &labels, &default_choice) {
+                Ok(Some(selected_label)) => {
+                    if let Some(opt) = options.iter().find(|o| o.label == selected_label) {
+                        let next_input = format!("{command} {}", opt.value);
+                        return Box::pin(handle_slash_command(session, &next_input)).await;
+                    }
+                }
+                Ok(None) => {
+                    println!("Cancelled.\n");
+                }
+                Err(e) => {
+                    println!("{ERROR}Selection error:{RESET} {e}\n");
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+        SlashResponse::ForwardToAgent { prompt, .. } => {
+            Some(SlashResult::ForwardToAgent(prompt))
+        }
+        SlashResponse::Navigate { markdown, .. } => {
+            if !markdown.is_empty() {
+                print_rendered_markdown(&markdown);
+            }
+            Some(SlashResult::Handled)
+        }
+        SlashResponse::Exit => Some(SlashResult::Exit),
+        SlashResponse::NotHandled => None,
+    }
+}
+
 /// Route `/…` commands. Returns `None` if the input is not a slash command.
 pub async fn handle_slash_command(
     session: &mut InteractiveSession,
@@ -180,6 +295,29 @@ pub async fn handle_slash_command(
         .split_once(char::is_whitespace)
         .map(|(c, r)| (c, r.trim()))
         .unwrap_or((trimmed, ""));
+
+    // Check CLI-specific commands and interactive bare wizards first:
+    let is_cli_only_or_wizard = matches!(
+        cmd,
+        "/plan"
+            | "/bg"
+            | "/jobs"
+            | "/shells"
+            | "/palette"
+            | "/image"
+            | "/paste"
+            | "/avatar"
+            | "/n8n"
+            | "/notebook"
+            | "/exit"
+            | "/quit"
+    ) || (matches!(cmd, "/mcp" | "/cron" | "/subagent") && rest.is_empty());
+
+    if !is_cli_only_or_wizard {
+        if let Some(res) = execute_core_slash(session, trimmed).await {
+            return Some(res);
+        }
+    }
 
     match cmd {
         "/help" => {
@@ -3165,5 +3303,39 @@ mod tests {
              entry for it — add one, or add it to UNDOCUMENTED_ALIASES if it's a deliberately \
              undocumented shortcut for another command's token.",
         );
+    }
+
+    #[tokio::test]
+    async fn core_slash_clear_clears_history() {
+        let mut session = InteractiveSession {
+            config: MintConfig::default(),
+            current_dir: std::env::current_dir().unwrap(),
+            fast_mode: false,
+            plan_mode: false,
+            pending_image: None,
+            history: vec!["msg1".into(), "msg2".into()],
+            jobs: BackgroundJobs::new(),
+        };
+
+        let res = handle_slash_command(&mut session, "/clear").await;
+        assert!(matches!(res, Some(SlashResult::Handled)));
+        assert!(session.history.is_empty());
+    }
+
+    #[tokio::test]
+    async fn core_slash_fast_mode_toggle() {
+        let mut session = InteractiveSession {
+            config: MintConfig::default(),
+            current_dir: std::env::current_dir().unwrap(),
+            fast_mode: false,
+            plan_mode: false,
+            pending_image: None,
+            history: Vec::new(),
+            jobs: BackgroundJobs::new(),
+        };
+
+        let res = handle_slash_command(&mut session, "/fast on").await;
+        assert!(matches!(res, Some(SlashResult::Handled)));
+        assert!(session.fast_mode);
     }
 }

@@ -86,6 +86,110 @@ pub(crate) fn cursor_visual_column(
         .sum();
     4 + visual
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MentionCandidate {
+    pub label: String,
+    pub description: String,
+    pub kind: MentionKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MentionKind {
+    Context,
+    Plugin,
+    File,
+    Folder,
+}
+
+impl MentionKind {
+    pub fn badge(&self) -> (&'static str, &'static str) {
+        match self {
+            MentionKind::Context => ("[Context]", "\x1b[36m"),
+            MentionKind::Plugin => ("[Plugin]", "\x1b[32m"),
+            MentionKind::File => ("[File]", "\x1b[33m"),
+            MentionKind::Folder => ("[Folder]", "\x1b[34m"),
+        }
+    }
+}
+
+pub fn collect_mention_candidates(query: &str, current_dir: &Path) -> Vec<MentionCandidate> {
+    let prefix = query.strip_prefix('@').unwrap_or(query).to_lowercase();
+    let mut candidates = Vec::new();
+
+    // 1. Configured MCP servers (Plugins on top)
+    if let Ok(servers) = mint_core::list_mcp_servers() {
+        for (name, srv) in servers {
+            if srv.disabled {
+                continue;
+            }
+            if name.to_lowercase().starts_with(&prefix) || prefix.is_empty() {
+                candidates.push(MentionCandidate {
+                    label: format!("@{name}"),
+                    description: "Restrict this turn to this MCP server".to_string(),
+                    kind: MentionKind::Plugin,
+                });
+            }
+        }
+    }
+
+    // 2. Builtin contexts (matching GUI's BUILTIN_CONTEXTS in SlashSuggestions.tsx)
+    let builtins = [
+        ("@workspace", "Include workspace path & context"),
+        ("@file", "Reference workspace file"),
+        ("@docs", "Include documentation context"),
+        ("@memory", "Include long-term memory store"),
+    ];
+    for (label, desc) in builtins {
+        if label.strip_prefix('@').unwrap().to_lowercase().starts_with(&prefix) || prefix.is_empty() {
+            candidates.push(MentionCandidate {
+                label: label.to_string(),
+                description: desc.to_string(),
+                kind: MentionKind::Context,
+            });
+        }
+    }
+
+    // 3. Workspace files and folders
+    if let Ok(entries) = std::fs::read_dir(current_dir) {
+        let mut file_entries = Vec::new();
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.')
+                || name == "target"
+                || name == "node_modules"
+                || name == "dist"
+                || name == "build"
+            {
+                continue;
+            }
+            let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+            if name.to_lowercase().starts_with(&prefix) || prefix.is_empty() {
+                file_entries.push((name, is_dir));
+            }
+        }
+        file_entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        for (name, is_dir) in file_entries.into_iter().take(20) {
+            let (label, kind) = if is_dir {
+                (format!("@{name}/"), MentionKind::Folder)
+            } else {
+                (format!("@{name}"), MentionKind::File)
+            };
+            candidates.push(MentionCandidate {
+                label,
+                description: if is_dir {
+                    "Workspace directory".into()
+                } else {
+                    "Workspace file".into()
+                },
+                kind,
+            });
+        }
+    }
+
+    candidates
+}
+
 /// Builds the input box's full content as ANSI-formatted lines (composer
 /// blank/input rows/blank/status/suggestions) plus where within those lines
 /// the terminal's cursor should sit — everything one `ratatui` draw call
@@ -292,18 +396,24 @@ pub(crate) fn compose_input_box(
                 }
             }
         }
-    } else if search_query.starts_with('@') {
-        // Parse server name (excluding arguments), mirroring the `$skill` branch above.
-        let server_query = search_query
-            .split_whitespace()
-            .next()
-            .unwrap_or(search_query);
-        let prefix = &server_query[1..].to_lowercase();
-        let servers = mint_core::list_mcp_servers().unwrap_or_default();
-        let matches: Vec<_> = servers
-            .keys()
-            .filter(|name| name.to_lowercase().starts_with(prefix.as_str()))
-            .collect();
+    } else if let Some(ref mention_word) = {
+        let prefix_chars = &input_chars[..cursor_pos.min(input_chars.len())];
+        let word_start = prefix_chars
+            .iter()
+            .rposition(|&c| c.is_whitespace())
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let word: String = prefix_chars[word_start..].iter().collect();
+        if word.starts_with('@') {
+            Some(word)
+        } else if search_query.starts_with('@') {
+            Some(search_query.to_string())
+        } else {
+            None
+        }
+    } {
+        let query_part = mention_word.split_whitespace().next().unwrap_or(mention_word);
+        let matches = collect_mention_candidates(query_part, current_dir);
 
         if !matches.is_empty() {
             let total_pages = matches.len().div_ceil(5);
@@ -320,16 +430,17 @@ pub(crate) fn compose_input_box(
                 total_pages
             ));
             for i in s_start_idx..s_end_idx {
-                let name = matches[i];
+                let candidate = &matches[i];
+                let (badge, badge_color) = candidate.kind.badge();
                 if Some(i) == highlight_idx {
                     lines.push(format!(
-                        "  {BLUE}▶ @{:<20}{RESET} {MINT}[Plugin]{RESET} {DIM}Restrict this turn to this MCP server{RESET}",
-                        name
+                        "  {BLUE}▶ {:<24}{RESET} {badge_color}{:<9}{RESET} {DIM}{}{RESET}",
+                        candidate.label, badge, candidate.description
                     ));
                 } else {
                     lines.push(format!(
-                        "    {DIM}@{:<20} [Plugin] Restrict this turn to this MCP server{RESET}",
-                        name
+                        "    {DIM}{:<24} {:<9} {}{RESET}",
+                        candidate.label, badge, candidate.description
                     ));
                 }
             }
@@ -389,7 +500,7 @@ pub fn read_line_interactive(
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
     use crossterm::tty::IsTty;
 
-    if !io::stdout().is_tty() {
+    if !io::stdout().is_tty() || !io::stdin().is_tty() {
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         let trimmed = input.trim().to_owned();
@@ -409,6 +520,7 @@ pub fn read_line_interactive(
     let mut cursor_pos = input_chars.len();
     let placeholder = "Ask anything...";
     let mut ctrl_d_pressed = false;
+    let mut ctrl_c_pressed = false;
     let mut pasted_image: Option<String> = None;
     let mut paste_contents: Vec<(String, String)> = Vec::new();
     let mut last_paste_time: Option<std::time::Instant> = None;
@@ -600,9 +712,11 @@ pub fn read_line_interactive(
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::ALT);
 
+                let is_ctrl_c = matches!(key_event.code, KeyCode::Char('c')) && ctrl;
                 let is_ctrl_d = matches!(key_event.code, KeyCode::Char('d')) && ctrl;
 
-                if !is_ctrl_d {
+                if !is_ctrl_c && !is_ctrl_d {
+                    ctrl_c_pressed = false;
                     ctrl_d_pressed = false;
                 }
 
@@ -618,33 +732,54 @@ pub fn read_line_interactive(
                 }
 
                 match key_event.code {
-                    KeyCode::Char('c')
-                        if key_event
-                            .modifiers
-                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
-                    {
-                        input_chars.clear();
-                        cursor_pos = 0;
-                        disable_raw_mode()?;
-                        redraw_input_box(
-                            &input_chars,
-                            cursor_pos,
-                            placeholder,
-                            model,
-                            path_str,
-                            None,
-                            None,
-                            current_dir,
-                            &mut cursor_row,
-                        );
-                        enable_raw_mode()?;
+                    KeyCode::Char('c') if ctrl => {
+                        if input_chars.is_empty() {
+                            if ctrl_c_pressed || ctrl_d_pressed {
+                                disable_raw_mode()?;
+                                clear_input_box(cursor_row);
+                                let _ = io::stdout().flush();
+                                break Some(InteractiveInput {
+                                    text: "/exit".to_string(),
+                                    pasted_image: None,
+                                });
+                            } else {
+                                ctrl_c_pressed = true;
+                                disable_raw_mode()?;
+                                let content_width = input_content_width();
+                                let (rows, cursor_row_idx, _) =
+                                    wrap_input_into_rows(&input_chars, content_width, cursor_pos);
+                                let down_lines = rows.len() - cursor_row_idx + 2;
+                                print!(
+                                    "\r\x1b[{down_lines}B\r\x1b[2K{WARN}Press Ctrl+C again or Ctrl+D to exit{RESET}\x1b[{down_lines}A"
+                                );
+                                print!(
+                                    "\x1b[{}G",
+                                    cursor_visual_column(&input_chars, cursor_pos, content_width)
+                                );
+                                let _ = io::stdout().flush();
+                                enable_raw_mode()?;
+                            }
+                        } else {
+                            input_chars.clear();
+                            cursor_pos = 0;
+                            ctrl_c_pressed = false;
+                            disable_raw_mode()?;
+                            redraw_input_box(
+                                &input_chars,
+                                cursor_pos,
+                                placeholder,
+                                model,
+                                path_str,
+                                None,
+                                None,
+                                current_dir,
+                                &mut cursor_row,
+                            );
+                            enable_raw_mode()?;
+                        }
                     }
-                    KeyCode::Char('d')
-                        if key_event
-                            .modifiers
-                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
-                    {
-                        if ctrl_d_pressed {
+                    KeyCode::Char('d') if ctrl => {
+                        if ctrl_d_pressed || ctrl_c_pressed {
                             disable_raw_mode()?;
                             clear_input_box(cursor_row);
                             let _ = io::stdout().flush();
@@ -865,23 +1000,37 @@ pub fn read_line_interactive(
                                 );
                                 enable_raw_mode()?;
                             }
-                        } else if base.starts_with('@') {
-                            let server_query = base.split_whitespace().next().unwrap_or(&base);
-                            let prefix = &server_query[1..].to_lowercase();
-                            let servers = mint_core::list_mcp_servers().unwrap_or_default();
-                            let matches: Vec<_> = servers
-                                .keys()
-                                .filter(|name| name.to_lowercase().starts_with(prefix.as_str()))
-                                .collect();
+                        } else if let Some((word_start, mention_word)) = {
+                            let prefix_chars = &input_chars[..cursor_pos.min(input_chars.len())];
+                            let word_start = prefix_chars
+                                .iter()
+                                .rposition(|&c| c.is_whitespace())
+                                .map(|i| i + 1)
+                                .unwrap_or(0);
+                            let word: String = prefix_chars[word_start..].iter().collect();
+                            if word.starts_with('@') {
+                                Some((word_start, word))
+                            } else if base.starts_with('@') {
+                                Some((0, base.clone()))
+                            } else {
+                                None
+                            }
+                        } {
+                            let base_mention = tab_base_input.as_deref().unwrap_or(&mention_word);
+                            let query_part = base_mention.split_whitespace().next().unwrap_or(base_mention);
+                            let matches = collect_mention_candidates(query_part, current_dir);
 
                             if !matches.is_empty() {
                                 let idx = tab_index.unwrap_or(0) % matches.len();
-                                let completed = format!("@{} ", matches[idx]);
-                                input_chars = completed.chars().collect();
-                                cursor_pos = input_chars.len();
+                                let completed = format!("{} ", matches[idx].label);
+                                input_chars.splice(word_start..cursor_pos, completed.chars());
+                                cursor_pos = word_start + completed.chars().count();
 
                                 let current_highlight = Some(idx);
                                 tab_index = Some(idx + 1);
+                                if tab_base_input.is_none() {
+                                    tab_base_input = Some(mention_word);
+                                }
 
                                 disable_raw_mode()?;
                                 redraw_input_box(
@@ -890,7 +1039,7 @@ pub fn read_line_interactive(
                                     placeholder,
                                     model,
                                     path_str,
-                                    Some(&base),
+                                    tab_base_input.as_deref(),
                                     current_highlight,
                                     current_dir,
                                     &mut cursor_row,
@@ -972,14 +1121,25 @@ pub fn read_line_interactive(
                                 );
                                 enable_raw_mode()?;
                             }
-                        } else if base.starts_with('@') {
-                            let server_query = base.split_whitespace().next().unwrap_or(&base);
-                            let prefix = &server_query[1..].to_lowercase();
-                            let servers = mint_core::list_mcp_servers().unwrap_or_default();
-                            let matches: Vec<_> = servers
-                                .keys()
-                                .filter(|name| name.to_lowercase().starts_with(prefix.as_str()))
-                                .collect();
+                        } else if let Some((word_start, mention_word)) = {
+                            let prefix_chars = &input_chars[..cursor_pos.min(input_chars.len())];
+                            let word_start = prefix_chars
+                                .iter()
+                                .rposition(|&c| c.is_whitespace())
+                                .map(|i| i + 1)
+                                .unwrap_or(0);
+                            let word: String = prefix_chars[word_start..].iter().collect();
+                            if word.starts_with('@') {
+                                Some((word_start, word))
+                            } else if base.starts_with('@') {
+                                Some((0, base.clone()))
+                            } else {
+                                None
+                            }
+                        } {
+                            let base_mention = tab_base_input.as_deref().unwrap_or(&mention_word);
+                            let query_part = base_mention.split_whitespace().next().unwrap_or(base_mention);
+                            let matches = collect_mention_candidates(query_part, current_dir);
 
                             if !matches.is_empty() {
                                 let new_idx = match tab_index {
@@ -987,9 +1147,12 @@ pub fn read_line_interactive(
                                     None => 0,
                                 };
                                 tab_index = Some(new_idx);
-                                let completed = format!("@{} ", matches[new_idx]);
-                                input_chars = completed.chars().collect();
-                                cursor_pos = input_chars.len();
+                                let completed = format!("{} ", matches[new_idx].label);
+                                input_chars.splice(word_start..cursor_pos, completed.chars());
+                                cursor_pos = word_start + completed.chars().count();
+                                if tab_base_input.is_none() {
+                                    tab_base_input = Some(mention_word);
+                                }
 
                                 disable_raw_mode()?;
                                 redraw_input_box(
@@ -998,7 +1161,7 @@ pub fn read_line_interactive(
                                     placeholder,
                                     model,
                                     path_str,
-                                    Some(&base),
+                                    tab_base_input.as_deref(),
                                     Some(new_idx),
                                     current_dir,
                                     &mut cursor_row,
@@ -1122,14 +1285,25 @@ pub fn read_line_interactive(
                                 );
                                 enable_raw_mode()?;
                             }
-                        } else if base.starts_with('@') {
-                            let server_query = base.split_whitespace().next().unwrap_or(&base);
-                            let prefix = &server_query[1..].to_lowercase();
-                            let servers = mint_core::list_mcp_servers().unwrap_or_default();
-                            let matches: Vec<_> = servers
-                                .keys()
-                                .filter(|name| name.to_lowercase().starts_with(prefix.as_str()))
-                                .collect();
+                        } else if let Some((word_start, mention_word)) = {
+                            let prefix_chars = &input_chars[..cursor_pos.min(input_chars.len())];
+                            let word_start = prefix_chars
+                                .iter()
+                                .rposition(|&c| c.is_whitespace())
+                                .map(|i| i + 1)
+                                .unwrap_or(0);
+                            let word: String = prefix_chars[word_start..].iter().collect();
+                            if word.starts_with('@') {
+                                Some((word_start, word))
+                            } else if base.starts_with('@') {
+                                Some((0, base.clone()))
+                            } else {
+                                None
+                            }
+                        } {
+                            let base_mention = tab_base_input.as_deref().unwrap_or(&mention_word);
+                            let query_part = base_mention.split_whitespace().next().unwrap_or(base_mention);
+                            let matches = collect_mention_candidates(query_part, current_dir);
 
                             if !matches.is_empty() {
                                 let new_idx = match tab_index {
@@ -1143,9 +1317,12 @@ pub fn read_line_interactive(
                                     None => matches.len() - 1,
                                 };
                                 tab_index = Some(new_idx);
-                                let completed = format!("@{} ", matches[new_idx]);
-                                input_chars = completed.chars().collect();
-                                cursor_pos = input_chars.len();
+                                let completed = format!("{} ", matches[new_idx].label);
+                                input_chars.splice(word_start..cursor_pos, completed.chars());
+                                cursor_pos = word_start + completed.chars().count();
+                                if tab_base_input.is_none() {
+                                    tab_base_input = Some(mention_word);
+                                }
 
                                 disable_raw_mode()?;
                                 redraw_input_box(
@@ -1154,7 +1331,7 @@ pub fn read_line_interactive(
                                     placeholder,
                                     model,
                                     path_str,
-                                    Some(&base),
+                                    tab_base_input.as_deref(),
                                     Some(new_idx),
                                     current_dir,
                                     &mut cursor_row,
@@ -1483,4 +1660,41 @@ mod tests {
         let col = cursor_visual_column(&chars, 9, content_width);
         assert_eq!(col, 4 + 3);
     }
+
+    #[test]
+    fn mention_candidates_include_builtins() {
+        let temp_dir = std::env::current_dir().unwrap();
+        let candidates = collect_mention_candidates("@", &temp_dir);
+        assert!(candidates.iter().any(|c| c.label == "@workspace" && c.kind == MentionKind::Context));
+        assert!(candidates.iter().any(|c| c.label == "@file" && c.kind == MentionKind::Context));
+        assert!(candidates.iter().any(|c| c.label == "@docs" && c.kind == MentionKind::Context));
+        assert!(candidates.iter().any(|c| c.label == "@memory" && c.kind == MentionKind::Context));
+    }
+
+    #[test]
+    fn mention_candidates_filter_by_prefix() {
+        let temp_dir = std::env::current_dir().unwrap();
+        let candidates = collect_mention_candidates("@work", &temp_dir);
+        assert!(candidates.iter().any(|c| c.label == "@workspace"));
+        assert!(!candidates.iter().any(|c| c.label == "@file"));
+    }
+
+    #[test]
+    fn mention_candidates_include_workspace_files() {
+        let temp_dir = std::env::current_dir().unwrap();
+        let candidates = collect_mention_candidates("@Cargo", &temp_dir);
+        assert!(candidates.iter().any(|c| c.label == "@Cargo.toml" && c.kind == MentionKind::File));
+    }
+
+    #[test]
+    fn mention_candidates_order_plugins_before_builtins() {
+        let temp_dir = std::env::current_dir().unwrap();
+        let candidates = collect_mention_candidates("@", &temp_dir);
+        let first_plugin_idx = candidates.iter().position(|c| c.kind == MentionKind::Plugin);
+        let first_context_idx = candidates.iter().position(|c| c.kind == MentionKind::Context);
+        if let (Some(p_idx), Some(c_idx)) = (first_plugin_idx, first_context_idx) {
+            assert!(p_idx < c_idx, "Plugins should appear before Builtin Contexts");
+        }
+    }
 }
+

@@ -28,7 +28,7 @@ fn confirm_scoped(
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
     use crossterm::tty::IsTty;
 
-    if !io::stdout().is_tty() || enable_raw_mode().is_err() {
+    if !io::stdout().is_tty() || !io::stdin().is_tty() || enable_raw_mode().is_err() {
         print!("  {} [y/N] ", clean_prompt);
         let _ = io::stdout().flush();
         let mut answer = String::new();
@@ -195,3 +195,36 @@ pub fn model_options_for_provider(config: &mint_core::MintConfig, provider: &str
     .map(|s| s.to_string())
     .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn confirm_session_approved_returns_true_immediately() {
+        SESSION_APPROVED.store(true, std::sync::atomic::Ordering::Relaxed);
+        let res = confirm("Test action [y/N]");
+        SESSION_APPROVED.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert!(res.unwrap());
+    }
+
+    #[test]
+    fn confirm_security_approved_returns_true_immediately() {
+        SECURITY_SESSION_APPROVED.store(true, std::sync::atomic::Ordering::Relaxed);
+        let res = confirm_security("Test sensitive action");
+        SECURITY_SESSION_APPROVED.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert!(res.unwrap());
+    }
+
+    #[test]
+    fn model_options_for_standard_providers() {
+        let config = mint_core::MintConfig::default();
+        let gemini = model_options_for_provider(&config, "gemini");
+        assert!(!gemini.is_empty());
+        let anthropic = model_options_for_provider(&config, "anthropic");
+        assert!(!anthropic.is_empty());
+        let unknown = model_options_for_provider(&config, "unknown_provider");
+        assert!(unknown.is_empty());
+    }
+}
+
