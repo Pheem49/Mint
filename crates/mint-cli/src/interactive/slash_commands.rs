@@ -223,6 +223,9 @@ async fn execute_core_slash(
                         session.fast_mode = *enabled;
                         save_needed = true;
                     }
+                    SlashEffect::PlanModeChanged { enabled } => {
+                        session.plan_mode = *enabled;
+                    }
                     SlashEffect::WorkspaceChanged { path } => {
                         let new_path = PathBuf::from(path);
                         if new_path.is_dir() {
@@ -266,7 +269,10 @@ async fn execute_core_slash(
             }
             Some(SlashResult::Handled)
         }
-        SlashResponse::ForwardToAgent { prompt, .. } => {
+        SlashResponse::ForwardToAgent { prompt, plan_mode, .. } => {
+            if plan_mode {
+                session.plan_mode = true;
+            }
             Some(SlashResult::ForwardToAgent(prompt))
         }
         SlashResponse::Navigate { markdown, .. } => {
@@ -563,9 +569,12 @@ pub async fn handle_slash_command(
                 match rest {
                     "on" => Some(true),
                     "off" => Some(false),
-                    _ => {
-                        println!("{WARN}/plan usage: /plan [on|off]{RESET}\n");
-                        None
+                    task => {
+                        session.plan_mode = true;
+                        println!(
+                            "{DIM}[Plan] mode ON — agent will investigate read-only and present a plan before editing{RESET}\n"
+                        );
+                        return Some(SlashResult::ForwardToAgent(task.to_string()));
                     }
                 }
             };

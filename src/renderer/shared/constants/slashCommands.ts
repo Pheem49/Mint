@@ -2,7 +2,7 @@
 // root and shared with the Rust CLI (`crates/mint-cli/src/interactive/commands.rs`).
 // Each entry's `surfaces` array decides which UIs list it — here we keep only the
 // commands surfaced to `web`/`desktop`, dropping CLI-only ones like `/bg`, `/jobs`,
-// `/shells`, `/exit`, `/plan`.
+// `/shells`, `/exit`.
 import manifest from '../../../../slash-commands.json'
 
 export interface SlashCommand {

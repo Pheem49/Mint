@@ -1164,7 +1164,7 @@ fn run_slash_command(
     let persists_config = matches!(
         &response,
         SlashResponse::Applied { effects, .. }
-            if effects.iter().any(|e| !matches!(e, SlashEffect::HistoryCleared))
+            if effects.iter().any(|e| !matches!(e, SlashEffect::HistoryCleared | SlashEffect::PlanModeChanged { .. }))
     );
     if persists_config {
         save_config(&config).map_err(|error| error.to_string())?;

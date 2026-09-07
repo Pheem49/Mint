@@ -104,16 +104,18 @@ pub(super) async fn compact_native_messages(
     compacted.push(ChatMessage {
         role: ChatRole::Assistant,
         content: vec![ContentBlock::ToolUse {
-            id: "compacted_summary".into(),
+            id: "call_compacted_summary".into(),
             name: "conversation_summary".into(),
-            input: serde_json::json!({}),
+            input: serde_json::json!({
+                "summary": format!("Summary of steps 1-{compact_pairs}")
+            }),
             thought_signature: None,
         }],
     });
     compacted.push(ChatMessage {
         role: ChatRole::Tool,
         content: vec![ContentBlock::ToolResult {
-            tool_use_id: "compacted_summary".into(),
+            tool_use_id: "call_compacted_summary".into(),
             content: format!(
                 "[Summary of steps 1-{compact_pairs}, compacted to save context]\n{}",
                 summary_response.text.trim()

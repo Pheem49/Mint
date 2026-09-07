@@ -119,6 +119,16 @@ fn dispatch_subagent_tool(subagents: &[crate::subagents::SubagentDefinition]) ->
 fn all_tools() -> Vec<ToolSpec> {
     vec![
         tool(
+            "conversation_summary",
+            "Internal tool representing a compacted conversation history summary from previous steps.",
+            schema(
+                json!({
+                    "summary": { "type": "string", "description": "Compacted summary text." }
+                }),
+                &[],
+            ),
+        ),
+        tool(
             "list_files",
             "List files and directories under a workspace path, ~/path, or an allowed user folder (Downloads, Documents, Desktop, Pictures, Music, Videos).",
             schema(
@@ -165,6 +175,29 @@ fn all_tools() -> Vec<ToolSpec> {
                     "limit": { "type": "integer" }
                 }),
                 &[],
+            ),
+        ),
+        tool(
+            "find_definition",
+            "Locate the declaration site (file, line number, signature) of a code symbol (function, type, class, struct, interface).",
+            schema(
+                json!({
+                    "symbol": { "type": "string", "description": "The symbol name to locate." },
+                    "path": { "type": "string", "description": "Path to search within. Defaults to \".\"." }
+                }),
+                &["symbol"],
+            ),
+        ),
+        tool(
+            "find_references",
+            "Find all usage sites and references to a symbol across the codebase.",
+            schema(
+                json!({
+                    "symbol": { "type": "string", "description": "The symbol name to find references for." },
+                    "path": { "type": "string", "description": "Path to search within. Defaults to \".\"." },
+                    "limit": { "type": "integer", "description": "Max references to return. Defaults to 30." }
+                }),
+                &["symbol"],
             ),
         ),
         tool(
@@ -369,6 +402,31 @@ fn all_tools() -> Vec<ToolSpec> {
         ),
         tool("git_branch", "List git branches.", schema(json!({}), &[])),
         tool(
+            "git_checkpoint",
+            "Create a manual checkpoint savepoint of the workspace state.",
+            schema(json!({ "summary": { "type": "string", "description": "Optional description of the checkpoint" } }), &[]),
+        ),
+        tool(
+            "git_rollback",
+            "Roll back workspace changes to the pre-task checkpoint or a specific step number.",
+            schema(json!({ "step": { "type": "integer", "description": "Optional step number to roll back to" } }), &[]),
+        ),
+        tool(
+            "git_restore_file",
+            "Restore a single file back to HEAD or a specified checkpoint commit.",
+            schema(json!({ "path": { "type": "string", "description": "File path to restore" }, "command": { "type": "string", "description": "Optional commit hash or ref to restore from (defaults to HEAD)" } }), &["path"]),
+        ),
+        tool(
+            "git_commit",
+            "Stage all tracked changes and commit them with a message (or auto-generate a conventional commit message if omitted).",
+            schema(json!({ "summary": { "type": "string", "description": "Commit message" } }), &[]),
+        ),
+        tool(
+            "git_create_branch",
+            "Create and switch to a new task branch (e.g. feature/mint-add-oauth).",
+            schema(json!({ "query": { "type": "string", "description": "Branch name slug (e.g. add-oauth)" } }), &["query"]),
+        ),
+        tool(
             "create_plan",
             "Create a multi-step implementation plan for the user to see.",
             schema(
@@ -450,6 +508,23 @@ fn all_tools() -> Vec<ToolSpec> {
             "view_image",
             "View an image file from the workspace.",
             schema(json!({ "path": { "type": "string" } }), &["path"]),
+        ),
+        tool(
+            "search_docs",
+            "Search local project documentation across docs/, architecture/, decisions/, api/, and troubleshooting/.",
+            schema(json!({ "query": { "type": "string", "description": "Search query" } }), &["query"]),
+        ),
+        tool(
+            "create_project_doc",
+            "Create a standardized documentation file (ADR, architecture spec, api guide, or troubleshooting).",
+            schema(
+                json!({
+                    "title": { "type": "string", "description": "Document title" },
+                    "kind": { "type": "string", "description": "Category: decisions, architecture, api, troubleshooting, or general" },
+                    "content": { "type": "string", "description": "Markdown body content" }
+                }),
+                &["title", "content"],
+            ),
         ),
         tool(
             "note_write",
@@ -564,6 +639,37 @@ fn all_tools() -> Vec<ToolSpec> {
             schema(
                 json!({ "commands": { "type": "array", "items": { "type": "string" } } }),
                 &["commands"],
+            ),
+        ),
+        tool(
+            "run_tests",
+            "Autonomously run the project's test suite using the auto-detected test runner (e.g. Vitest, Cargo test, Pytest, Go test). Auto-approved by default.",
+            schema(
+                json!({
+                    "filter": { "type": "string", "description": "Optional test name or path filter to run a specific test." },
+                    "command": { "type": "string", "description": "Optional custom test command override." }
+                }),
+                &[],
+            ),
+        ),
+        tool(
+            "run_typecheck",
+            "Autonomously run the project's typechecker or compiler diagnostics (e.g. tsc --noEmit, cargo check, go vet). Auto-approved by default.",
+            schema(
+                json!({
+                    "command": { "type": "string", "description": "Optional custom typecheck command override." }
+                }),
+                &[],
+            ),
+        ),
+        tool(
+            "run_linter",
+            "Autonomously run the project's linter (e.g. eslint, cargo clippy, flake8, golangci-lint). Auto-approved by default.",
+            schema(
+                json!({
+                    "command": { "type": "string", "description": "Optional custom linter command override." }
+                }),
+                &[],
             ),
         ),
         tool(
@@ -957,4 +1063,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&empty_root);
     }
+
+    #[test]
+    fn tool_catalog_names_are_strictly_unique() {
+        let config = MintConfig::default();
+        for plan_mode in [false, true] {
+            let tools = tool_catalog(&config, plan_mode, Path::new("."), true);
+            let mut seen = std::collections::HashSet::new();
+            for tool in tools {
+                assert!(
+                    seen.insert(tool.name.clone()),
+                    "Duplicate tool name in catalog (plan_mode={plan_mode}): {}",
+                    tool.name
+                );
+            }
+        }
+    }
 }
+

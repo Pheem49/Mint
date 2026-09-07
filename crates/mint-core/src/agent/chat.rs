@@ -427,6 +427,8 @@ pub enum ChatError {
     /// network link.
     #[error("no network connection to reach the provider")]
     NetworkUnavailable,
+    #[error("provider API error: {0}")]
+    Api(String),
 }
 
 pub async fn send_chat(
@@ -775,7 +777,12 @@ async fn send_openai_style_request(
     if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
         return Err(ChatError::InsufficientBalance(provider.to_string()));
     }
-    Ok(response.error_for_status()?.json().await?)
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(ChatError::Api(format!("HTTP {status}: {body}")));
+    }
+    Ok(response.json().await?)
 }
 
 /// Parses an OpenAI Chat Completions-shaped response (`choices[0].message`),
@@ -1358,8 +1365,12 @@ where
         .bearer_auth(if local { "not-needed" } else { &api_key })
         .json(&openai_chat_payload(&model, request, true)?)
         .send()
-        .await?
-        .error_for_status()?;
+        .await?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(ChatError::Api(format!("HTTP {status}: {body}")));
+    }
     collect_stream(response, StreamFormat::OpenAi, on_chunk)
         .await
         .map(|text| (model, text))
@@ -1729,6 +1740,8 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
         "read_file",
         "search_code",
         "symbols",
+        "find_definition",
+        "find_references",
         "semantic_index",
         "semantic_search",
         "knowledge_search",
@@ -1755,6 +1768,9 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
         "mcp_tool",
         "run_shell",
         "verify",
+        "run_tests",
+        "run_typecheck",
+        "run_linter",
         "apply_patch",
         "write_file",
     ];

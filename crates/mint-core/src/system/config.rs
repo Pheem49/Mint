@@ -294,6 +294,12 @@ pub fn permission_decision_for(
     {
         return Some(PermissionDecision::Allow);
     }
+    if matches!(
+        tool,
+        "run_tests" | "run_typecheck" | "run_linter" | "find_definition" | "find_references"
+    ) {
+        return Some(PermissionDecision::Allow);
+    }
     None
 }
 

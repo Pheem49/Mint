@@ -77,7 +77,11 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 ---
 
 ### 4. <img src="assets/code.svg" width="18" height="18" valign="middle" /> Autonomous Code Agent & Subagents
-- Run code-agent loops via `/code <task>` or `mint code agent "<task>"`: scan the workspace, plan multi-file changes, edit, run tests/shell commands, and verify before finishing.
+- Run code-agent loops via `/code <task>`, `mint code agent "<task>"`, or direct one-shot prompt `mint "<task>"`: scan the workspace, plan multi-file changes, edit, run tests/shell commands, and verify before finishing.
+- **Harness Engineering & Git Safety:** Automatic Git checkpoints before task execution, task-isolated branches, and one-click rollback if verification fails.
+- **Code Intelligence:** AST symbol navigation (`find_definition`, `find_references`) across Rust, TypeScript, JavaScript, Python, and Go without external LSPs.
+- **Safe Automated Verification:** Run tests, typechecks, and linters (`run_tests`, `run_typecheck`, `run_linter`) with zero-prompt pre-approval policies.
+- **Observability & Checklist:** Real-time plan progress checklists and run telemetry summary dashboards across CLI, Desktop, and Web.
 - Delegate focused sub-tasks to specialized subagents (`dispatch_subagent`), optionally isolated in a per-session Docker container (`sandboxBackend: "docker"`).
 > [!IMPORTANT]
 > **Safety First:** Risky actions and file writes require your explicit approval first.
@@ -372,6 +376,7 @@ mint chat "<message>"
 | Command | Purpose |
 | --- | --- |
 | `mint` | Start the interactive terminal chat assistant |
+| `mint "<prompt>"` | Execute one-shot code agent task directly without entering TUI |
 | `mint onboard` | Configure Mint for first use |
 | `mint setup` | Interactively manage enabled agent tools |
 | `mint plugins` | Centralized interactive management for built-in ecosystem plugins & skills |
@@ -400,6 +405,7 @@ mint chat "<message>"
 | `mint learn <path>` | Import a persistent learned skill file |
 | `mint skills add <path\|github-repo\|url>` | Install a skill — local path, or a GitHub repo/URL via `npx skills` |
 | `mint skills list` | List all skills Mint can see (global, workspace, taught) |
+| `mint eval --suite <path>` | Run benchmark evaluation suite on agent models / harness |
 | `mint update --check` | Check for an available update |
 
 ### Code Agent
@@ -407,6 +413,11 @@ mint chat "<message>"
 Mint includes native workspace tools for code inspection, planning, editing, and execution:
 
 ```bash
+# Direct one-shot prompt execution
+mint "inspect this repo and fix the failing tests"
+mint -m claude-3-7-sonnet -C ./crates/mint-core "refactor auth logic" --plan
+
+# Subcommand execution
 mint code agent "inspect this repo and fix the failing tests"
 mint code github-overview "Pheem49/Mint"
 mint code summary .
@@ -423,6 +434,26 @@ Inside interactive mode, use:
 ```
 
 Code-related fixes, workspace inspection, and test requests are routed into the code-agent loop automatically. Shell commands and file edits require explicit terminal approval before Mint applies them.
+
+#### Autonomous Harness Capabilities
+- **AST Code Intelligence**: Native symbol navigation (`find_definition`, `find_references`) across Rust, TypeScript, JavaScript, Python, and Go codebases without requiring external language server daemons.
+- **Git Safety Harness**: Automatic Git checkpoints before task execution, task-isolated branches (`mint/<task-id>-<slug>`), diff-aware commit message generation, and one-step task rollback.
+- **Safe Automated Verification**: Specialized `run_tests`, `run_typecheck`, and `run_linter` tools pre-approved for non-destructive automated verification passes.
+- **Task Planning & Observability**: Interactive multi-step plan checklists and telemetry run dashboards tracking token consumption, step latency, and tool call breakdown across CLI, Desktop, and Web.
+
+### Benchmark Evaluation (`mint eval`)
+
+Evaluate and benchmark agent models and harnesses across customizable test suites:
+
+```bash
+# Run a benchmark evaluation suite
+mint eval --suite benchmarks/mint_eval.json
+
+# Run with custom concurrency and save report
+mint eval --suite benchmarks/mint_eval.json --concurrency 4 --output eval_results.json
+```
+
+Benchmark cases define instructions, target files, and unit test assertions, producing structured pass/fail metrics and terminal scorecards.
 
 ### Tools And Automation
 

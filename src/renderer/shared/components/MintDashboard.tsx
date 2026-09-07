@@ -1231,6 +1231,10 @@ export default function MintDashboard() {
           | { kind: 'workspace_changed'; path: string }
           | undefined
         if (wsChange) setWorkspacePath(wsChange.path)
+        const planModeChange = resp.effects.find((e) => e.kind === 'plan_mode_changed') as
+          | { kind: 'plan_mode_changed'; enabled: boolean }
+          | undefined
+        if (planModeChange) setPlanMode(planModeChange.enabled)
         const providerChange = resp.effects.find((e) => e.kind === 'provider_changed') as
           | { kind: 'provider_changed'; display: string }
           | undefined
@@ -1267,6 +1271,7 @@ export default function MintDashboard() {
         changeView(slashNavView(resp.target as any))
         break
       case 'forward_to_agent':
+        if (resp.plan_mode) setPlanMode(true)
         if (resp.agent_mode) setAgentMode(true)
         await sendPrompt(resp.prompt, { clearComposer: true })
         break

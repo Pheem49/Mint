@@ -31,8 +31,8 @@ export function formatActivityTarget(value: string): string {
 }
 
 export function activityKind(action: string, target: string): AgentActivity['kind'] {
-  if (['search_code', 'semantic_search', 'knowledge_search', 'web_search', 'image_search', 'memory_recall'].includes(action)) return 'search'
-  if (['run_shell', 'verify'].includes(action)) return 'terminal'
+  if (['search_code', 'semantic_search', 'knowledge_search', 'web_search', 'image_search', 'memory_recall', 'find_definition', 'find_references'].includes(action)) return 'search'
+  if (['run_shell', 'verify', 'run_tests', 'run_typecheck', 'run_linter'].includes(action)) return 'terminal'
   if (['list_files', 'detect_project'].includes(action)) return 'folder'
   if (['read_file', 'symbols', 'read_diagnostics', 'git_diff', 'apply_patch', 'write_file', 'note_write', 'view_image'].includes(action)) return 'file'
   return target.includes('/') && !/\.[^/]+$/.test(target) ? 'folder' : 'tool'
@@ -44,15 +44,23 @@ export function describeTool(action: string, input: Record<string, unknown>): Ag
   const command = activityDetail(input, 'command')
   const name = activityDetail(input, 'name')
   const tool = activityDetail(input, 'tool')
+  const symbol = activityDetail(input, 'symbol')
+  const filter = activityDetail(input, 'filter')
   const fallbackTarget =
     action === 'web_search' || action === 'search_code' || action === 'knowledge_search'
       ? '(empty query)'
       : action === 'read_file' || action === 'write_file'
         ? '(empty path)'
-        : action === 'run_shell'
-          ? '(empty command)'
-          : action.replaceAll('_', ' ')
-  const rawTarget = path || query || command || name || tool || fallbackTarget
+        : action === 'find_definition' || action === 'find_references'
+          ? (symbol || '(empty symbol)')
+          : action === 'run_tests'
+            ? (filter || '(all tests)')
+            : action === 'run_typecheck' || action === 'run_linter'
+              ? (path || 'workspace')
+              : action === 'run_shell'
+                ? '(empty command)'
+                : action.replaceAll('_', ' ')
+  const rawTarget = path || query || command || symbol || filter || name || tool || fallbackTarget
 
   // Append line range for read_file when startLine / endLine are available
   let target = rawTarget

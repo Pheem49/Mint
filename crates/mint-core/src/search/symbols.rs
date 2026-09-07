@@ -225,13 +225,151 @@ pub fn build_symbol_index(
     })
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SymbolReference {
+    pub file: PathBuf,
+    pub line: usize,
+    pub line_text: String,
+    pub is_definition: bool,
+}
+
+pub fn find_definition(
+    root: &Path,
+    symbol_name: &str,
+    config: &MintConfig,
+) -> Result<Vec<CodeSymbol>, SymbolError> {
+    let target = symbol_name.trim();
+    if target.is_empty() {
+        return Ok(Vec::new());
+    }
+    let files = list_code_files(root, usize::MAX, config)?;
+    let mut matches = Vec::new();
+
+    for file in &files {
+        let Some(extension) = file.path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !matches!(
+            extension,
+            "rs" | "js" | "jsx" | "ts" | "tsx" | "py" | "cjs" | "mjs" | "go"
+        ) {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&file.path) else {
+            continue;
+        };
+        // Quick substring check before parsing
+        if !content.contains(target) {
+            continue;
+        }
+
+        let mut file_symbols = Vec::new();
+        let parsed_by_ts =
+            extract_tree_sitter_symbols(&file.path, &content, extension, &mut file_symbols, 200);
+
+        if !parsed_by_ts {
+            for (index, line) in content.lines().enumerate() {
+                for (kind, pattern) in PATTERNS.iter() {
+                    let Some(found) = pattern.captures(line).and_then(|captures| captures.get(1))
+                    else {
+                        continue;
+                    };
+                    file_symbols.push(CodeSymbol {
+                        name: found.as_str().into(),
+                        kind: (*kind).into(),
+                        file: file.path.clone(),
+                        line: index + 1,
+                        signature: line.trim().into(),
+                    });
+                    break;
+                }
+            }
+        }
+
+        for s in file_symbols {
+            if s.name == target || s.name.eq_ignore_ascii_case(target) {
+                matches.push(s);
+            }
+        }
+
+        if matches.len() >= 50 {
+            break;
+        }
+    }
+
+    Ok(matches)
+}
+
+pub fn find_references(
+    root: &Path,
+    symbol_name: &str,
+    limit: usize,
+    config: &MintConfig,
+) -> Result<Vec<SymbolReference>, SymbolError> {
+    let target = symbol_name.trim();
+    if target.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let definitions = find_definition(root, target, config).unwrap_or_default();
+    let def_set: std::collections::HashSet<(PathBuf, usize)> = definitions
+        .into_iter()
+        .map(|d| (d.file, d.line))
+        .collect();
+
+    let pattern = format!(r"\b{}\b", regex::escape(target));
+    let Ok(re) = Regex::new(&pattern) else {
+        return Ok(Vec::new());
+    };
+
+    let files = list_code_files(root, usize::MAX, config)?;
+    let mut references = Vec::new();
+
+    for file in files {
+        if references.len() >= limit {
+            break;
+        }
+        let Some(extension) = file.path.extension().and_then(|v| v.to_str()) else {
+            continue;
+        };
+        if !matches!(
+            extension,
+            "rs" | "js" | "jsx" | "ts" | "tsx" | "py" | "cjs" | "mjs" | "go" | "toml" | "json"
+        ) {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&file.path) else {
+            continue;
+        };
+
+        for (idx, line) in content.lines().enumerate() {
+            if re.is_match(line) {
+                let line_num = idx + 1;
+                let is_def = def_set.contains(&(file.path.clone(), line_num));
+                references.push(SymbolReference {
+                    file: file.path.clone(),
+                    line: line_num,
+                    line_text: line.trim().to_string(),
+                    is_definition: is_def,
+                });
+                if references.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(references)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn indexes_rust_and_typescript_symbols() {
-        let root = std::env::temp_dir().join("mint-symbol-index");
+        let root = std::env::temp_dir().join(format!("mint-symbol-index-{}", uuid::Uuid::new_v4()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("main.rs"), "pub struct Mint;\npub fn run() {}\n").unwrap();
@@ -243,6 +381,18 @@ mod tests {
         };
         let index = build_symbol_index(&root, 20, &config).unwrap();
         assert_eq!(index.symbol_count, 3);
+
+        let defs = find_definition(&root, "Widget", &config).unwrap();
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].name, "Widget");
+        assert_eq!(defs[0].kind, "interface");
+
+        let refs = find_references(&root, "Widget", 10, &config).unwrap();
+        assert_eq!(refs.len(), 1);
+        assert!(refs[0].is_definition);
+        assert!(refs[0].line_text.contains("export interface Widget"));
+
         let _ = fs::remove_dir_all(root);
     }
 }
+

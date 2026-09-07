@@ -11,12 +11,13 @@ pub(super) fn action_fingerprint(decision: &AgentDecision) -> String {
             let end = input.end_line.unwrap_or_else(|| start.saturating_add(239));
             format!("read_file:{}:{}:{}", input.path.trim(), start, end)
         }
-        "search_code" | "semantic_search" | "web_search" | "knowledge_search" | "memory_recall" => {
+        "search_code" | "semantic_search" | "web_search" | "knowledge_search" | "memory_recall" | "find_definition" | "find_references" => {
             format!(
-                "{}:{}:{}",
+                "{}:{}:{}:{}",
                 decision.action,
                 input.path.trim(),
-                input.query.trim()
+                input.query.trim(),
+                input.symbol.trim()
             )
         }
         "git_status" | "git_branch" | "detect_project" | "list_tests" | "read_diagnostics" => {
@@ -167,6 +168,8 @@ pub(super) fn is_parallelizable_read_only_tool(action: &str) -> bool {
             | "list_files"
             | "search_code"
             | "symbols"
+            | "find_definition"
+            | "find_references"
             | "repo_map"
             | "semantic_search"
             | "knowledge_search"
@@ -181,6 +184,7 @@ pub(super) fn is_parallelizable_read_only_tool(action: &str) -> bool {
             | "git_log"
             | "git_branch"
             | "detect_project"
+            | "search_docs"
             | "list_tests"
             | "read_diagnostics"
             | "view_image"

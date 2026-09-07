@@ -16,6 +16,9 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     "read_file",
     "search_code",
     "symbols",
+    "find_definition",
+    "find_references",
+    "run_typecheck",
     "repo_map",
     "semantic_index",
     "semantic_search",
@@ -53,6 +56,7 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
     // Cosmetic/non-mutating — no reason to block it during read-only
     // plan-mode investigation.
     "avatar_signal",
+    "conversation_summary",
 ];
 
 /// The full set of coding-agent actions before plan-mode/disabled-tools/browser
@@ -61,10 +65,13 @@ pub(crate) const PLAN_MODE_ALLOWED_ACTIONS: &[&str] = &[
 /// two paths can never drift on which actions exist.
 pub(crate) fn base_allowed_actions() -> Vec<&'static str> {
     vec![
+        "conversation_summary",
         "list_files",
         "read_file",
         "search_code",
         "symbols",
+        "find_definition",
+        "find_references",
         "repo_map",
         "semantic_index",
         "semantic_search",
@@ -93,6 +100,9 @@ pub(crate) fn base_allowed_actions() -> Vec<&'static str> {
         "mcp_list_tools",
         "run_shell",
         "verify",
+        "run_tests",
+        "run_typecheck",
+        "run_linter",
         "apply_patch",
         "write_file",
         "video_trim",
@@ -176,6 +186,21 @@ pub fn build_system_prompt(
     }
     if allowed_actions.contains(&"symbols") {
         input_formats.push("- symbols: {\"path\":\".\",\"limit\":100}");
+    }
+    if allowed_actions.contains(&"find_definition") {
+        input_formats.push("- find_definition: {\"symbol\":\"symbol_name\",\"path\":\".\"}");
+    }
+    if allowed_actions.contains(&"find_references") {
+        input_formats.push("- find_references: {\"symbol\":\"symbol_name\",\"path\":\".\",\"limit\":30}");
+    }
+    if allowed_actions.contains(&"run_tests") {
+        input_formats.push("- run_tests: {\"filter\":\"optional_filter\"} (runs project test suite autonomously)");
+    }
+    if allowed_actions.contains(&"run_typecheck") {
+        input_formats.push("- run_typecheck: {} (runs typecheck e.g. tsc or cargo check autonomously)");
+    }
+    if allowed_actions.contains(&"run_linter") {
+        input_formats.push("- run_linter: {} (runs linter e.g. eslint or clippy autonomously)");
     }
     if allowed_actions.contains(&"repo_map") {
         input_formats.push("- repo_map: {\"path\":\".\",\"limit\":2000} (generate compact AST-based outline of files and signatures with token budgeting)");
@@ -430,7 +455,10 @@ pub fn build_system_prompt(
     }
     if allowed_actions.contains(&"search_code") {
         rules.push(
-            "2. Use search_code before reading many files when searching for a symbol or behavior.",
+            "2. Use search_code, symbols, or find_definition before reading many files when searching for a symbol or behavior.",
+        );
+        rules.push(
+            "2a. BOUND INVESTIGATION: Keep investigations concise and targeted. Do NOT recursively read dozens of source files across directories. After 2-4 read/search inspection calls, synthesize your findings and present your answer or plan. Do NOT get trapped in endless exploratory reading.",
         );
     }
     if allowed_actions.contains(&"apply_patch") && allowed_actions.contains(&"write_file") {
@@ -502,7 +530,7 @@ pub fn build_system_prompt(
         rules.push("8a. Use git_status and git_diff before summarizing local code changes.");
     }
     if allowed_actions.contains(&"create_plan") || allowed_actions.contains(&"update_plan") {
-        rules.push("8b. Use create_plan/update_plan for multi-step implementation work.");
+        rules.push("8b. When the user asks to plan, structure, or inspect a workflow ('วางแผน', 'plan', 'structure', 'audit'), call `create_plan` FIRST with your step checklist before doing deep execution. Keep investigation focused and concise: NEVER recursively read dozens of source files when a directory listing, symbols, search_code, or architectural overview is sufficient.");
     }
     if allowed_actions.contains(&"note_write") {
         rules.push("9. Use note_write to save information to ~/.config/mint/notes/ when asked to remember something.");

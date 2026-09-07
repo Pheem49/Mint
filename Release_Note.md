@@ -1,5 +1,85 @@
 # Release Notes - Mint Agent v1.14.0
 
+## Agent Harness Engineering Upgrade (9-Pillar System)
+
+This release introduces a major architectural overhaul transforming Mint Agent into an enterprise-grade Autonomous Agent Harness. Grounded in systematic harness engineering principles, this upgrade equips Mint with deep workspace awareness, precise code navigation, safe autonomous verification loops, git checkpointing, structured knowledge authoring, run-level observability, and benchmarking across CLI, Desktop, and Web.
+
+### 1. Workspace & Monorepo Architecture Detection (Pillar 1)
+- **Deep Architecture Scanner (`mint_core::system::project_detector`)**:
+  - Automatically identifies monorepo structures (Cargo workspaces, pnpm-workspaces, Turborepo, Lerna, Nx) and primary project ecosystems (Rust, Node/TypeScript, Python, Go, Java).
+  - Scans workspace roots and sub-crates/packages, extracting build scripts, package managers, and test runner configurations.
+  - Automatically injects an architectural briefing directly into the Agent's system prompt before the first turn, eliminating exploratory "what kind of project is this?" steps.
+- **Custom Rules Auto-Ingestion**:
+  - Automatically scans and injects project rules from `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`, `.agents/rules/`, and `.agents/AGENTS.md` into the agent's context.
+
+### 2. Code Intelligence & AST Symbol Navigation (Pillar 2)
+- **AST / Syntax-Aware Symbol Extraction (`mint_core::search::symbols`)**:
+  - Added native symbol navigation without requiring heavyweight external Language Server Protocol (LSP) daemons.
+  - **`find_definition` Tool**: Locates definitions of functions, structs, classes, enums, interfaces, types, and traits across Rust, TypeScript, JavaScript, Python, and Go codebases.
+  - **`find_references` Tool**: Scans call-sites, usages, and implementations across workspace files.
+  - Eliminates blind full-text grep hallucinations when refactoring or tracing complex type hierarchies.
+
+### 3. Safe Automated Tooling & Zero-Prompt Pre-Approval Policy (Pillar 3)
+- **Dedicated Validation Tools (`mint_core::orchestration::tools::safe_tools`)**:
+  - **`run_tests`**: Automatically discovers and invokes test runners (`cargo test`, `npm test`, `pytest`, `go test`) or executes targeted test suites.
+  - **`run_typecheck`**: Invokes project type-checkers (`tsc`, `cargo check`, `pyright`, `mypy`) to catch compiler-level errors early.
+  - **`run_linter`**: Runs code linters (`clippy`, `eslint`, `flake8`/`ruff`, `golangci-lint`) to enforce style and correctness.
+- **Zero-Prompt Pre-Approval Policy**:
+  - Classified validation and test-running tools as non-destructive safe operations, allowing autonomous execution in the background without prompting the user for repetitive command approvals.
+
+### 4. Task Planning Checklist & State Machine (Pillar 4)
+- **Structured Plan State Machine (`mint_core::orchestration::tools::planning`)**:
+  - Introduces `plan_task` and `update_plan_step` tools enabling agents to establish structured, multi-step implementation workflows.
+  - Supports dynamic step states: `Pending`, `InProgress`, `Completed`, `Failed`, and `Skipped`.
+- **Live Terminal & UI Checklist Cards**:
+  - **CLI**: Live ANSI progress cards with status glyphs (`[ ]`, `[-]`, `[x]`, `[!]`, `[~]`) and dynamic step updates in `mint-cli`.
+  - **Desktop & Web**: Dedicated `PlanChecklistWidget` displaying interactive progress, step state transitions, and step timing.
+
+### 5. Active Verification Loop & Balanced Log Engineering (Pillar 5)
+- **Automatic Post-Modification Verification Hook**:
+  - Integrated post-edit verification passes in the orchestration loop to trigger targeted checks before declaring tasks completed.
+- **Balanced Log Truncation Engine (`Head + Tail Windowing`)**:
+  - Implemented 3 KB Head + 12 KB Tail balanced buffer windowing for command and test outputs.
+  - Preserves both invocation parameters at the start and critical failure stack traces/compiler errors at the end, joining them with a `[... N bytes truncated ...]` marker to avoid context blowup while retaining actionable diagnostic data.
+
+### 6. Git Safety Harness & Rollback Checkpoints (Pillar 6)
+- **Automatic Checkpoint & Rollback Engine (`mint_core::git::checkpoint`)**:
+  - **`git_checkpoint`**: Snapshots working tree state and stash references before risky multi-file edits.
+  - **`git_rollback`**: Safely reverts working directory changes back to the pre-task snapshot when tasks fail or the agent goes astray.
+  - **`git_restore_file`**: Precision rollbacks of individual modified files (`git checkout -- <file>`).
+  - **`git_create_branch`**: Automatically spins up isolated task branches (`mint/<task-id>-<slug>`).
+  - **`git_commit`**: Generates context-aware commit messages based on diff analysis and commits verified changes.
+
+### 7. Autonomous Knowledge Engine & Documentation (Pillar 8)
+- **Tiered Documentation Search & Authoring (`mint_core::system::knowledge_engine`)**:
+  - Recursively indexes repository knowledge repositories across `docs/`, `architecture/`, `decisions/` (ADRs), `api/`, and `troubleshooting/`.
+  - **`search_docs`**: High-speed keyword and semantic search across local project documentation before falling back to external sources.
+  - **`create_project_doc`**: Enables the agent to author, persist, and update Architecture Decision Records (ADRs), API guides, and troubleshooting runbooks directly in the workspace.
+
+### 8. Run Observability Dashboard & Telemetry (Pillar 9)
+- **Run Telemetry & Metrics Collection (`mint_core::orchestration`)**:
+  - Tracks total execution duration, step counts, token usage, tool breakdown counts, and per-tool execution latency via `RunTelemetrySummary` and `ToolExecutionRecord`.
+  - Emits `AgentProgress::RunCompleted` event upon task finalization.
+- **Cross-Platform Telemetry Dashboards**:
+  - **CLI**: Rich ANSI terminal summary card rendered upon agent turn completion.
+  - **Desktop UI & Web UI**: Themed `RunSummaryDashboard` component featuring execution statistics, status indicators, and an expandable tool-call latency drawer with platform parity across `src/renderer/src` and `src/renderer/src-web`.
+
+### 9. Benchmark Evaluation System (Pillar 10)
+- **Evaluation Suite Engine (`mint_core::eval`) & CLI Subcommand (`mint eval`)**:
+  - Added `mint eval --suite <path> [--concurrency <N>] [--output <path>]` command for automated benchmarking of agent models and harnesses.
+  - Evaluates benchmark cases against prompt instructions, file modifications, and unit test pass criteria.
+  - Includes benchmark suite templates under `benchmarks/mint_eval.json`.
+
+### 10. Design System & Theming Refactoring (`agent-observability.css`)
+- **Semantic CSS Token Integration**:
+  - Extracted all ad-hoc styles from `RunSummaryDashboard.tsx` and `PlanChecklistWidget.tsx` into a shared stylesheet `src/renderer/shared/css/agent-observability.css`.
+  - Strictly bound all components to Mint design tokens:
+    - Surfaces & borders: `var(--surface-bg)`, `var(--surface-bg-alt)`, `var(--border)`, `var(--border-light)`.
+    - Typography: `var(--text-main)`, `var(--text-muted)`.
+    - Accents & status: `var(--accent)`, `var(--accent-hover)`, `var(--status-speaking)` (success), `var(--status-error)` (failure), `var(--status-listening)` (warning).
+  - Guarantees seamless aesthetics and readability across Dark, Light, and Midnight themes on both Desktop and Web interfaces.
+
+
 ## Agent Activity Retry & Self-Correction UX Refinement
 
 - **Soft Recovered / Retry State for Intermediate Tool Errors**:

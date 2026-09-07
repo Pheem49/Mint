@@ -9,5 +9,7 @@ pub mod config;
 pub mod docker_sandbox;
 pub mod folder_picker;
 pub mod shell;
+pub mod project_detector;
+pub mod knowledge_engine;
 pub mod stock;
 pub mod weather;

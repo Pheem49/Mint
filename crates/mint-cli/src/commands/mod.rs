@@ -6,6 +6,7 @@ use mint_core::MintConfig;
 
 pub mod agent;
 pub mod config;
+pub mod eval;
 pub mod integrations;
 pub mod knowledge;
 pub mod system;
@@ -13,6 +14,7 @@ pub mod tasks;
 
 pub use agent::*;
 pub use config::*;
+pub use eval::*;
 pub use integrations::*;
 pub use knowledge::*;
 pub use system::*;
@@ -80,6 +82,15 @@ pub enum Command {
     },
     /// Run one queued or supplied task through the native CLI agent.
     Agent { task: Option<String> },
+    /// Run an engineering benchmark evaluation suite against the agent harness.
+    Eval {
+        /// Path to the benchmark suite JSON file.
+        #[arg(long, default_value = "benchmarks/mint_eval.json")]
+        suite: PathBuf,
+        /// Maximum number of tasks to execute.
+        #[arg(long, default_value_t = 1)]
+        limit: usize,
+    },
     /// Rewind workspace to a previous git checkpoint snapshot.
     Rewind {
         /// Step number to restore (omitting lists available checkpoints).
@@ -260,6 +271,7 @@ pub async fn dispatch(cmd: Command, config: &mut MintConfig, cli: &crate::Cli) -
         Command::Files { command } => system::handle_files(command),
 
         Command::Agent { task } => agent::handle_agent(task).await,
+        Command::Eval { suite, limit } => eval::handle_eval(suite, limit, config).await,
         Command::Rewind { step, chat_id } => agent::handle_rewind(step, chat_id),
         Command::Auto => agent::handle_auto().await,
         Command::Web { dev } => agent::handle_web(dev).await,

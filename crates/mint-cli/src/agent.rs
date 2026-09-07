@@ -858,6 +858,88 @@ pub async fn run_code_agent_with_options(
                     status.web_sources.extend(sources);
                 }
             }
+            AgentProgress::PlanUpdated { plan } => {
+                if let Ok(mut status) = progress_live_status.lock() {
+                    status.thinking = None;
+                    status.waiting_for_network = None;
+                    let mut card = format!("\x1b[1;36m┌─ Plan: {} \x1b[0m\n", plan.objective);
+                    for task in &plan.tasks {
+                        let mark = match task.status.as_str() {
+                            "completed" => "\x1b[32m[✓]\x1b[0m",
+                            "in_progress" => "\x1b[33m[>]\x1b[0m",
+                            "failed" => "\x1b[31m[✗]\x1b[0m",
+                            _ => "\x1b[90m[ ]\x1b[0m",
+                        };
+                        card.push_str(&format!("│  {} {}\n", mark, task.title));
+                    }
+                    card.push_str("\x1b[1;36m└────────────────────────────────────────\x1b[0m");
+                    status.tasks.push(card.into());
+                    render_live_status(&mut status);
+                }
+            }
+            AgentProgress::RunCompleted { summary } => {
+                if let Ok(mut status) = progress_live_status.lock() {
+                    status.thinking = None;
+                    status.waiting_for_network = None;
+                    let outcome_str = match summary.outcome.as_str() {
+                        "SUCCESS" => "\x1b[32m✓ Success\x1b[0m",
+                        "FAILED" => "\x1b[31m✗ Failure\x1b[0m",
+                        "ROLLED_BACK" => "\x1b[33m↺ Rolled Back\x1b[0m",
+                        _ => &summary.outcome,
+                    };
+                    let tokens_k = if summary.total_tokens >= 1000 {
+                        format!("{:.1}k", summary.total_tokens as f64 / 1000.0)
+                    } else {
+                        summary.total_tokens.to_string()
+                    };
+                    let mut card = format!(
+                        "\x1b[1;36m┌─ Agent Run #{} ────────────────────────────\x1b[0m\n\
+                         │ Status:   {}\n\
+                         │ Duration: {:.1}s\n\
+                         │ Tokens:   {}\n\
+                         │ Tools:    {} calls ({} retries)\n\
+                         │ Files:    {} modified\n",
+                        summary.run_id,
+                        outcome_str,
+                        summary.duration_secs,
+                        tokens_k,
+                        summary.tool_calls_count,
+                        summary.retries_count,
+                        summary.files_changed.len(),
+                    );
+                    if !summary.tool_timeline.is_empty() {
+                        card.push_str("│\n│ Tool calls timeline:\n");
+                        for rec in &summary.tool_timeline {
+                            let status_icon = if !rec.success {
+                                "\x1b[31m✗\x1b[0m"
+                            } else if rec.retried {
+                                "\x1b[33m↺\x1b[0m"
+                            } else {
+                                "\x1b[32m✓\x1b[0m"
+                            };
+                            let note = if !rec.success {
+                                " (failed)"
+                            } else if rec.retried {
+                                " (self-corrected)"
+                            } else {
+                                ""
+                            };
+                            let target_desc = if rec.target.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" [{}]", rec.target)
+                            };
+                            card.push_str(&format!(
+                                "│  {:02}s {} {}{}{}\n",
+                                rec.step, status_icon, rec.action, target_desc, note
+                            ));
+                        }
+                    }
+                    card.push_str("\x1b[1;36m└────────────────────────────────────────\x1b[0m");
+                    status.tasks.push(card.into());
+                    render_live_status(&mut status);
+                }
+            }
         }
     };
 

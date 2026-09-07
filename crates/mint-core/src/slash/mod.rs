@@ -90,8 +90,13 @@ pub enum SlashResponse {
     },
     /// Hand this string to the agent loop. `agent_mode` asks the GUI to switch
     /// into code-agent mode first (the CLI always runs forwarded input through
-    /// the code agent regardless).
-    ForwardToAgent { prompt: String, agent_mode: bool },
+    /// the code agent regardless). `plan_mode` enables plan investigation mode.
+    ForwardToAgent {
+        prompt: String,
+        agent_mode: bool,
+        #[serde(default)]
+        plan_mode: bool,
+    },
     /// GUI: switch to this view. CLI: print `markdown` as a hint.
     Navigate {
         target: SlashNavTarget,
@@ -128,6 +133,9 @@ pub enum SlashEffect {
         enabled: bool,
     },
     MultiAgentChanged {
+        enabled: bool,
+    },
+    PlanModeChanged {
         enabled: bool,
     },
 }
@@ -185,6 +193,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         "/init" => SlashResponse::ForwardToAgent {
             prompt: INIT_AGENTS_MD_PROMPT.to_string(),
             agent_mode: true,
+            plan_mode: false,
         },
         "/release-notes" => message(
             include_str!(concat!(
@@ -323,6 +332,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             target: SlashNavTarget::Skills,
             markdown: "📚 Opened Skills — import there or drop files in `.agents/skills/`.".into(),
         },
+        "/plan" => cmd_plan(req, rest),
         "/code" => {
             if rest.is_empty() {
                 error("Usage: /code <task>")
@@ -330,6 +340,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
                 SlashResponse::ForwardToAgent {
                     prompt: rest.to_string(),
                     agent_mode: true,
+                    plan_mode: false,
                 }
             }
         }
@@ -340,6 +351,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
                 SlashResponse::ForwardToAgent {
                     prompt: format!("Generate an image of {rest}"),
                     agent_mode: false,
+                    plan_mode: false,
                 }
             }
         }
@@ -350,6 +362,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
                 SlashResponse::ForwardToAgent {
                     prompt: format!("Edit the attached image: {rest}"),
                     agent_mode: false,
+                    plan_mode: false,
                 }
             }
         }
@@ -408,6 +421,80 @@ fn needs_on_off(command: &str, title: &str) -> SlashResponse {
                 value: "off".into(),
             },
         ],
+    }
+}
+
+fn cmd_plan(req: &SlashRequest, rest: &str) -> SlashResponse {
+    let trimmed = rest.trim();
+    if trimmed.is_empty() {
+        needs_on_off("/plan", "Plan Mode (investigate read-only and present plan)")
+    } else if trimmed == "on" {
+        SlashResponse::Applied {
+            markdown: "📋 Plan Mode **ON** (agent will investigate read-only and present a plan before editing).".into(),
+            effects: vec![SlashEffect::PlanModeChanged { enabled: true }],
+        }
+    } else if trimmed == "off" {
+        SlashResponse::Applied {
+            markdown: "📋 Plan Mode **OFF**.".into(),
+            effects: vec![SlashEffect::PlanModeChanged { enabled: false }],
+        }
+    } else if trimmed == "list" {
+        let ws = req.workspace();
+        let plan_dir = ws.join(".agents").join("plans");
+        let mut entries = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(&plan_dir) {
+            for entry in rd.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let first_line = std::fs::read_to_string(&path)
+                        .ok()
+                        .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
+                        .unwrap_or_default();
+                    entries.push(format!("- **{}**: {}", name, first_line));
+                }
+            }
+        }
+        if entries.is_empty() {
+            message("No saved plans found under `.agents/plans/`.")
+        } else {
+            message(format!("### Saved Plans\n\n{}", entries.join("\n")))
+        }
+    } else if let Some(show_arg) = trimmed.strip_prefix("show") {
+        let arg = show_arg.trim();
+        let ws = req.workspace();
+        let plan_dir = ws.join(".agents").join("plans");
+        let mut found_content = None;
+        if let Ok(rd) = std::fs::read_dir(&plan_dir) {
+            for entry in rd.flatten() {
+                let path = entry.path();
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if name.contains(arg) {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        found_content = Some((name, content));
+                        break;
+                    }
+                }
+            }
+        }
+        match found_content {
+            Some((name, content)) => message(format!("### Plan: {}\n\n{}", name, content)),
+            None => error(format!("No saved plan matching \"{}\" under `.agents/plans/`", arg)),
+        }
+    } else {
+        SlashResponse::ForwardToAgent {
+            prompt: trimmed.to_string(),
+            agent_mode: true,
+            plan_mode: true,
+        }
     }
 }
 
@@ -1468,7 +1555,7 @@ mod tests {
     fn code_forwards_in_agent_mode() {
         let mut cfg = MintConfig::default();
         match execute(&req("/code fix the parser"), &mut cfg) {
-            SlashResponse::ForwardToAgent { prompt, agent_mode } => {
+            SlashResponse::ForwardToAgent { prompt, agent_mode, .. } => {
                 assert_eq!(prompt, "fix the parser");
                 assert!(agent_mode);
             }
@@ -1507,6 +1594,31 @@ mod tests {
                 assert!(markdown.contains("`/bg`")); // cli-only, present in the cli list
             }
             _ => panic!("expected Message"),
+        }
+    }
+
+    #[test]
+    fn plan_toggles_and_forwards_task() {
+        let mut cfg = MintConfig::default();
+        match execute(&req("/plan on"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::PlanModeChanged { enabled: true }));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+        match execute(&req("/plan off"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::PlanModeChanged { enabled: false }));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+        match execute(&req("/plan refactor database"), &mut cfg) {
+            SlashResponse::ForwardToAgent { prompt, agent_mode, plan_mode } => {
+                assert_eq!(prompt, "refactor database");
+                assert!(agent_mode);
+                assert!(plan_mode);
+            }
+            other => panic!("expected ForwardToAgent, got {:?}", serde_json::to_value(other)),
         }
     }
 }

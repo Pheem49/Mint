@@ -4,10 +4,12 @@
  * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
  */
 import React, { useState } from 'react'
-import type { AgentProgress } from '../types'
+import type { AgentProgress, ActivePlan, RunTelemetrySummary } from '../types'
 import type { AgentActivityView } from '../utils/agentActivity'
 import { AgentActivityTable } from './AgentActivityTable'
 import { SubagentDagView } from './SubagentDagView'
+import { PlanChecklistWidget } from './PlanChecklistWidget'
+import { RunSummaryDashboard } from './RunSummaryDashboard'
 
 interface Props {
   activityView: AgentActivityView
@@ -29,7 +31,19 @@ export function AgentActivityDrawer({
 }: Props) {
   const [viewMode, setViewMode] = useState<'list' | 'dag'>('list')
 
-  if (activityView.items.length === 0) return null
+  const latestPlan = (rawProgress || [])
+    .slice()
+    .reverse()
+    .find((e): e is { type: 'PlanUpdated'; data: { plan: ActivePlan } } => e.type === 'PlanUpdated')
+    ?.data.plan
+
+  const latestRunSummary = (rawProgress || [])
+    .slice()
+    .reverse()
+    .find((e): e is { type: 'RunCompleted'; data: { summary: RunTelemetrySummary } } => e.type === 'RunCompleted')
+    ?.data.summary
+
+  if (activityView.items.length === 0 && !latestPlan && !latestRunSummary) return null
 
   const hasSubagents = (rawProgress || []).some(
     (e) =>
@@ -39,6 +53,18 @@ export function AgentActivityDrawer({
 
   const renderContent = () => (
     <>
+      {latestRunSummary && (
+        <div style={{ marginBottom: '12px' }}>
+          <RunSummaryDashboard summary={latestRunSummary} />
+        </div>
+      )}
+
+      {latestPlan && (
+        <div style={{ marginBottom: '12px' }}>
+          <PlanChecklistWidget plan={latestPlan} />
+        </div>
+      )}
+
       {hasSubagents && (
         <div
           style={{
@@ -116,11 +142,18 @@ export function AgentActivityDrawer({
 
       {viewMode === 'dag' && hasSubagents ? (
         <SubagentDagView progress={rawProgress || []} isLive={!isHistorical} />
-      ) : (
+      ) : activityView.items.length > 0 ? (
         <AgentActivityTable activityView={activityView} />
-      )}
+      ) : null}
     </>
   )
+
+  const displaySummary =
+    latestPlan?.objective ||
+    activityView.summary ||
+    (latestRunSummary
+      ? `Run Telemetry (${latestRunSummary.outcome})`
+      : 'Agent Activity')
 
   if (isHistorical) {
     return (
@@ -131,7 +164,7 @@ export function AgentActivityDrawer({
           aria-expanded={isOpen}
           onClick={onToggle}
         >
-          <span>{activityView.summary}</span>
+          <span>{displaySummary}</span>
           <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
         </button>
         {isOpen && (
@@ -148,10 +181,13 @@ export function AgentActivityDrawer({
     <div className="message ai-message agent-activity-message">
       <div className="agent-activity-card">
         <div className="agent-activity-header" style={{ cursor: 'pointer' }} onClick={onToggle}>
-          <span>{activityView.summary}</span>
+          <span>{displaySummary}</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="agent-activity-status" data-state={pendingApproval ? 'approval' : 'active'}>
-              {pendingApproval ? 'Waiting for approval' : 'Working'}
+            <span
+              className="agent-activity-status"
+              data-state={pendingApproval ? 'approval' : latestRunSummary ? 'done' : 'active'}
+            >
+              {pendingApproval ? 'Waiting for approval' : latestRunSummary ? 'Completed' : 'Working'}
             </span>
             <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
           </div>

@@ -541,6 +541,51 @@ pub enum AgentProgress {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subagent: Option<String>,
     },
+    PlanUpdated {
+        plan: ActivePlan,
+    },
+    RunCompleted {
+        summary: RunTelemetrySummary,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolExecutionRecord {
+    pub step: usize,
+    pub action: String,
+    pub target: String,
+    pub success: bool,
+    pub retried: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunTelemetrySummary {
+    pub run_id: String,
+    pub task: String,
+    pub outcome: String, // "SUCCESS" | "FAILED" | "ROLLED_BACK"
+    pub total_tokens: usize,
+    pub tool_calls_count: usize,
+    pub files_changed: Vec<String>,
+    pub duration_secs: f64,
+    pub tool_timeline: Vec<ToolExecutionRecord>,
+    pub retries_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanTaskItem {
+    pub id: String,
+    pub title: String,
+    pub status: String, // "pending", "in_progress", "completed", "failed"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivePlan {
+    pub objective: String,
+    pub tasks: Vec<PlanTaskItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -590,6 +635,10 @@ struct AgentInput {
     path: String,
     #[serde(default)]
     query: String,
+    #[serde(default)]
+    symbol: String,
+    #[serde(default)]
+    filter: String,
     #[serde(default)]
     options: Vec<AskUserOptionInput>,
     #[serde(default)]
@@ -644,6 +693,12 @@ struct AgentInput {
     title: String,
     #[serde(default)]
     status: String,
+    #[serde(default)]
+    step: Option<usize>,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    content: String,
     #[serde(default)]
     url: String,
     #[serde(default)]
@@ -1048,6 +1103,8 @@ where
         // sums every step's completion since each step's output is new work.
         let mut last_input_tokens: u64 = 0;
         let mut turn_generated_tokens: u64 = 0;
+        let mut executed_tools: Vec<ToolExecutionRecord> = Vec::new();
+        let mut files_modified: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         'steps: for step in 1..=MAX_STEPS {
             let (active_config, agent_instruction, active_agent_name, active_model_name) =
@@ -1580,6 +1637,20 @@ where
                                 skills.clone(),
                             );
                         }
+                        let run_summary = RunTelemetrySummary {
+                            run_id: format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
+                            task: task.to_string(),
+                            outcome: "SUCCESS".to_string(),
+                            total_tokens: turn_total_tokens as usize,
+                            tool_calls_count: executed_tools.len(),
+                            files_changed: files_modified.into_iter().collect(),
+                            duration_secs: started_at.elapsed().as_secs_f64(),
+                            tool_timeline: executed_tools.clone(),
+                            retries_count: executed_tools.iter().filter(|t| t.retried).count(),
+                        };
+                        progress(AgentProgress::RunCompleted {
+                            summary: run_summary,
+                        });
 
                         return Ok(AgentResult {
                             provider: final_provider,
@@ -1765,14 +1836,42 @@ where
                         subagent: None,
                     });
 
+                    let success = action_succeeded && !shell_result_failed(&result);
+                    let target = if !decision.input.path.is_empty() {
+                        decision.input.path.clone()
+                    } else if !decision.input.command.is_empty() {
+                        decision.input.command.clone()
+                    } else if !decision.input.query.is_empty() {
+                        decision.input.query.clone()
+                    } else if !decision.input.symbol.is_empty() {
+                        decision.input.symbol.clone()
+                    } else {
+                        String::new()
+                    };
+                    let retried = success && (action_count > 1 || last_verify_failed == Some(true));
+                    executed_tools.push(ToolExecutionRecord {
+                        step,
+                        action: decision.action.clone(),
+                        target,
+                        success,
+                        retried,
+                    });
+
                     if action_succeeded {
                         match decision.action.as_str() {
-                            "apply_patch" | "write_file" => last_modify_step = Some(step),
+                            "apply_patch" | "write_file" => {
+                                last_modify_step = Some(step);
+                                if let Some(patch) = &decision.input.patch {
+                                    files_modified.insert(patch.path.to_string_lossy().into_owned());
+                                } else if !decision.input.path.is_empty() {
+                                    files_modified.insert(decision.input.path.clone());
+                                }
+                            }
                             // Counts even if the commands it ran failed — an attempted check
                             // still counts as verification having been attempted; whether it
                             // actually passed is tracked separately in `last_verify_failed`
                             // and enforced by `unacknowledged_verify_failure` at finish time.
-                            "verify" => {
+                            "verify" | "run_tests" | "run_typecheck" | "run_linter" => {
                                 last_verify_step = Some(step);
                                 last_verify_failed = Some(shell_result_failed(&result));
                             }
@@ -1802,7 +1901,7 @@ where
                     } else {
                         truncate(&result)
                     };
-                    if decision.action == "run_shell" || decision.action == "verify" {
+                    if matches!(decision.action.as_str(), "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter") {
                         if shell_result_failed(&result) {
                             final_result.push_str(
                         "\n\n[System Tip: The command failed with a non-zero exit code. \
@@ -1932,6 +2031,21 @@ where
 
             rebuild_observation(task, &root, &trajectory, &mut observation);
         }
+
+        let run_summary = RunTelemetrySummary {
+            run_id: format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
+            task: task.to_string(),
+            outcome: "FAILED".to_string(),
+            total_tokens: turn_total_tokens as usize,
+            tool_calls_count: executed_tools.len(),
+            files_changed: files_modified.into_iter().collect(),
+            duration_secs: started_at.elapsed().as_secs_f64(),
+            tool_timeline: executed_tools.clone(),
+            retries_count: executed_tools.iter().filter(|t| t.retried).count(),
+        };
+        progress(AgentProgress::RunCompleted {
+            summary: run_summary,
+        });
 
         Err(OrchestrationError::Agent(format!(
             "code agent reached the limit of {} steps",
@@ -2480,7 +2594,13 @@ async fn execute_tool(
             )
             .await
         }
-        "search_code" | "symbols" | "repo_map" | "semantic_index" | "semantic_search" => {
+        "search_code"
+        | "symbols"
+        | "find_definition"
+        | "find_references"
+        | "repo_map"
+        | "semantic_index"
+        | "semantic_search" => {
             tools::code_search::execute(
                 decision.action.as_str(),
                 input,
@@ -2513,6 +2633,10 @@ async fn execute_tool(
             )
             .await
         }
+        "conversation_summary" => Ok(serde_json::json!({
+            "status": "acknowledged",
+            "message": "Previous steps summary is already recorded in context."
+        }).to_string()),
         "browser_open"
         | "browser_click"
         | "browser_type"
@@ -2531,7 +2655,15 @@ async fn execute_tool(
             )
             .await
         }
-        "git_status" | "git_diff" | "git_log" | "git_branch" => {
+        "git_status"
+        | "git_diff"
+        | "git_log"
+        | "git_branch"
+        | "git_checkpoint"
+        | "git_rollback"
+        | "git_restore_file"
+        | "git_commit"
+        | "git_create_branch" => {
             tools::git::execute(
                 decision.action.as_str(),
                 input,
@@ -2550,10 +2682,16 @@ async fn execute_tool(
                 config,
                 chat_id,
                 approve_cb,
+                progress,
             )
             .await
         }
-        "detect_project" | "list_tests" | "read_diagnostics" | "view_image" => {
+        "detect_project"
+        | "list_tests"
+        | "read_diagnostics"
+        | "view_image"
+        | "search_docs"
+        | "create_project_doc" => {
             tools::project::execute(
                 decision.action.as_str(),
                 input,
@@ -2577,7 +2715,13 @@ async fn execute_tool(
             )
             .await
         }
-        "run_shell" | "shell_output" | "kill_shell" | "verify" => {
+        "run_shell"
+        | "shell_output"
+        | "kill_shell"
+        | "verify"
+        | "run_tests"
+        | "run_typecheck"
+        | "run_linter" => {
             tools::shell::execute(
                 decision.action.as_str(),
                 input,

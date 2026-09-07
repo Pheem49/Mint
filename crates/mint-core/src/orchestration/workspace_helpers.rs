@@ -41,35 +41,19 @@ pub(super) fn run_git(root: &Path, args: &[&str]) -> Result<String, Orchestratio
 }
 
 pub(super) fn detect_project(root: &Path) -> Value {
-    let mut languages = Vec::new();
-    let mut managers = Vec::new();
-    let mut diagnostics = Vec::new();
-    if root.join("Cargo.toml").exists() {
-        languages.push("rust");
-        managers.push("cargo");
-        diagnostics.push("cargo check");
-    }
-    if root.join("package.json").exists() {
-        languages.push("javascript/typescript");
-        managers.push(if root.join("pnpm-lock.yaml").exists() {
-            "pnpm"
-        } else if root.join("yarn.lock").exists() {
-            "yarn"
-        } else {
-            "npm"
-        });
-        diagnostics.push("npm run build or npm run typecheck");
-    }
-    if root.join("pyproject.toml").exists() || root.join("requirements.txt").exists() {
-        languages.push("python");
-        managers.push("pip/uv");
-        diagnostics.push("pytest or python -m compileall");
-    }
-    serde_json::json!({
-        "root": root,
-        "languages": languages,
-        "packageManagers": managers,
-        "diagnostics": diagnostics,
+    let deep = crate::system::project_detector::detect_project_deep(root);
+    serde_json::to_value(&deep).unwrap_or_else(|_| {
+        serde_json::json!({
+            "root": root,
+            "summarySentence": deep.summary_sentence,
+            "languages": deep.languages,
+            "packageManagers": deep.package_managers,
+            "frameworks": deep.frameworks,
+            "testRunners": deep.test_runners,
+            "diagnostics": deep.diagnostics,
+            "workspacePackages": deep.workspace_packages,
+            "testFilesCount": deep.test_files_count,
+        })
     })
 }
 
@@ -246,7 +230,9 @@ pub(super) async fn run_shell(
 }
 
 pub(super) fn workspace_context(root: &Path) -> String {
+    let deep = crate::system::project_detector::detect_project_deep(root);
     let mut context = String::from("Automatic workspace context:\n");
+    context.push_str(&format!("Project Architecture: {}\n", deep.summary_sentence));
     context.push_str(&format!(
         "Git status:\n{}\n",
         command_output(root, "git", &["status", "--short"])
@@ -255,6 +241,28 @@ pub(super) fn workspace_context(root: &Path) -> String {
         "Diff summary:\n{}\n",
         command_output(root, "git", &["diff", "--stat"])
     ));
+    let plan_path = root.join(".agents").join("plans").join("active_plan.json");
+    if let Ok(content) = std::fs::read_to_string(plan_path) {
+        if let Ok(plan) = serde_json::from_str::<ActivePlan>(&content) {
+            let done = plan.tasks.iter().filter(|t| t.status == "completed").count();
+            context.push_str(&format!(
+                "Active Plan Checklist: \"{}\" ({}/{} steps completed)\n",
+                plan.objective,
+                done,
+                plan.tasks.len()
+            ));
+            for task in &plan.tasks {
+                let mark = if task.status == "completed" {
+                    "[✓]"
+                } else if task.status == "in_progress" {
+                    "[>]"
+                } else {
+                    "[ ]"
+                };
+                context.push_str(&format!("  {} {}\n", mark, task.title));
+            }
+        }
+    }
     context.push_str(&format!("Package scripts:\n{}\n", package_scripts(root)));
     context
 }
@@ -424,10 +432,30 @@ pub(super) fn truncate(value: &str) -> String {
     if value.len() <= MAX_OBSERVATION_BYTES {
         value.into()
     } else {
-        let mut end = MAX_OBSERVATION_BYTES;
-        while !value.is_char_boundary(end) {
-            end -= 1;
+        // Head + Tail preservation: Preserve top ~3KB (command & invocation context)
+        // and bottom ~12KB (stack traces, compiler errors, assertion failures)
+        const HEAD_BYTES: usize = 3_000;
+        let mut head_end = HEAD_BYTES.min(MAX_OBSERVATION_BYTES / 4);
+        while !value.is_char_boundary(head_end) {
+            head_end -= 1;
         }
-        format!("{}\n...<truncated>", &value[..end])
+
+        let tail_target = MAX_OBSERVATION_BYTES.saturating_sub(head_end);
+        let mut tail_start = value.len().saturating_sub(tail_target);
+        while !value.is_char_boundary(tail_start) {
+            tail_start += 1;
+        }
+
+        let omitted = tail_start.saturating_sub(head_end);
+        if omitted > 0 {
+            format!(
+                "{}\n\n... [{} bytes omitted from output to protect context window; tail error output preserved below] ...\n\n{}",
+                &value[..head_end],
+                omitted,
+                &value[tail_start..]
+            )
+        } else {
+            value.into()
+        }
     }
 }

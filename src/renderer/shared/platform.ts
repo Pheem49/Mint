@@ -50,12 +50,13 @@ export type SlashEffect =
   | { kind: 'history_cleared' }
   | { kind: 'fast_mode_changed'; enabled: boolean }
   | { kind: 'multi_agent_changed'; enabled: boolean }
+  | { kind: 'plan_mode_changed'; enabled: boolean }
 
 export type SlashResponse =
   | { kind: 'message'; markdown: string }
   | { kind: 'applied'; markdown: string; effects: SlashEffect[] }
   | { kind: 'needs_choice'; command: string; title: string; options: SlashChoice[] }
-  | { kind: 'forward_to_agent'; prompt: string; agent_mode: boolean }
+  | { kind: 'forward_to_agent'; prompt: string; agent_mode: boolean; plan_mode?: boolean }
   | { kind: 'navigate'; target: SlashNavTarget; markdown: string }
   | { kind: 'exit' }
   | { kind: 'not_handled' }
