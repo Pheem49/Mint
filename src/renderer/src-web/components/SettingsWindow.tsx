@@ -33,6 +33,7 @@ export type {
 
 import { DEFAULT_CONFIG } from '../../shared/constants/config'
 export { DEFAULT_CONFIG }
+import { APP_VERSION } from '../../shared/version'
 
 type TabType = 'sect-general' | 'sect-profile' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
 
@@ -531,10 +532,12 @@ export default function SettingsWindow() {
     window.settingsApi?.closeSettings()
   }
 
-  const handleQuit = () => {
-    if (!isDesktopApp) return
-    if (confirm('Are you sure you want to exit Mint?')) {
-      window.settingsApi?.quitApp()
+  const handleOpenExternal = (e: React.MouseEvent, url: string) => {
+    e.preventDefault()
+    if (window.settingsApi?.openExternal) {
+      window.settingsApi.openExternal(url)
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer')
     }
   }
 
@@ -682,27 +685,29 @@ export default function SettingsWindow() {
               aria-label="Search settings"
             />
           </div>
-          {SETTINGS_NAV_GROUPS.map((group) => {
-            const items = SETTINGS_NAV.filter(
-              (item) => item.group === group && item.label.toLowerCase().includes(navSearch.trim().toLowerCase())
-            )
-            if (!items.length) return null
-            return (
-              <div className="settings-nav-group" key={group}>
-                <p className="settings-nav-group-label">{group}</p>
-                {items.map((item) => (
-                  <button
-                    key={item.id}
-                    className={`tab-btn ${activeTab === item.id ? 'active' : ''}`}
-                    onClick={() => setActiveTab(item.id)}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>{item.icon}</span>
-                    <strong>{item.label}</strong>
-                  </button>
-                ))}
-              </div>
-            )
-          })}
+          <div className="settings-nav-scroll">
+            {SETTINGS_NAV_GROUPS.map((group) => {
+              const items = SETTINGS_NAV.filter(
+                (item) => item.group === group && item.label.toLowerCase().includes(navSearch.trim().toLowerCase())
+              )
+              if (!items.length) return null
+              return (
+                <div className="settings-nav-group" key={group}>
+                  <p className="settings-nav-group-label">{group}</p>
+                  {items.map((item) => (
+                    <button
+                      key={item.id}
+                      className={`tab-btn ${activeTab === item.id ? 'active' : ''}`}
+                      onClick={() => setActiveTab(item.id)}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center' }}>{item.icon}</span>
+                      <strong>{item.label}</strong>
+                    </button>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
         </nav>
 
         <div className="settings-content">
@@ -821,14 +826,42 @@ export default function SettingsWindow() {
       </main>
 
       <footer className="settings-footer">
-        <button type="button" className="btn-danger" onClick={handleQuit} disabled={!isDesktopApp} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-            <polyline points="16 17 21 12 16 7"></polyline>
-            <line x1="21" y1="12" x2="9" y2="12"></line>
-          </svg>
-          Quit Application
-        </button>
+        <div className="settings-footer-meta">
+          <span className="settings-footer-version">Version: {APP_VERSION}</span>
+          <div className="settings-footer-links">
+            <a
+              href="https://github.com/Pheem49/Mint"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => handleOpenExternal(e, 'https://github.com/Pheem49/Mint')}
+              className="settings-footer-link"
+              title="https://github.com/Pheem49/Mint"
+            >
+              GitHub
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+            <span className="settings-footer-separator">•</span>
+            <a
+              href="https://mint.aemeth.xyz/"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => handleOpenExternal(e, 'https://mint.aemeth.xyz/')}
+              className="settings-footer-link"
+              title="https://mint.aemeth.xyz/"
+            >
+              Website
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+          </div>
+        </div>
         <div className="footer-actions">
           <button type="button" className="btn-secondary" onClick={handleReset} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

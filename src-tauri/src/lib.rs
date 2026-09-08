@@ -1038,9 +1038,29 @@ fn rename_chat_session(chat_id: String, new_title: String) -> Result<usize, Stri
 
 #[tauri::command]
 fn get_profile_value(key: String) -> Result<Option<String>, String> {
-    MemoryStore::open_default()
-        .and_then(|memory| memory.get_profile(&key))
-        .map_err(|error| error.to_string())
+    if let Ok(memory) = MemoryStore::open_default() {
+        if let Ok(Some(val)) = memory.get_profile(&key) {
+            if !val.trim().is_empty() {
+                return Ok(Some(val));
+            }
+        }
+    }
+    if let Ok(cfg) = load_config() {
+        if key == "veoModel" {
+            let m = mint_core::media::video_models::active_video_model_for_provider(&cfg, "veo");
+            if !m.is_empty() {
+                return Ok(Some(m.to_string()));
+            }
+        } else if key == "videoGenProvider" {
+            let p = cfg
+                .extra
+                .get("videoGenProvider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("veo");
+            return Ok(Some(p.to_string()));
+        }
+    }
+    Ok(None)
 }
 
 #[tauri::command]

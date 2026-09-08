@@ -28,6 +28,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 .collect();
             let status_json = serde_json::json!({
                 "backend": "rust-api-server",
+                "version": env!("CARGO_PKG_VERSION"),
                 "configPath": path_str,
                 "activeProvider": active,
                 "availableProviders": available,

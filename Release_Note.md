@@ -201,5 +201,22 @@ This release introduces a major architectural overhaul transforming Mint Agent i
     - **CLI (`crates/mint-cli`)**: Added `/image-models` slash command, enhanced `/image-provider` with live model fetching, and integrated live model discovery into `mint onboard` Step 4 with transient loading indicators.
     - **Desktop UI (`src/renderer/src`)**: Added Tauri command `fetch_image_provider_models`, React hook `useImageProviderModels`, and updated Settings General Tab & Image Studio Panel (`ImageStudioPanel.tsx`) with dynamic dropdown selection.
     - **Web UI (`src/renderer/src-web`)**: Added API endpoint `GET /api/image-models` on `mint_core` API server, web-runtime shim in `src-web/tauri.ts`, and Web UI `useImageProviderModels` hook ensuring identical dynamic image model discovery.
+- **Dynamic Video Generation Model Fetching & Studio Parity (Google Veo)**:
+  - Transitioned Google Veo video generation from hardcoded strings to dynamic API-discovered model discovery with static fallback presets (`veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview`, `veo-3.1-lite-generate-preview`, `veo-2.0-generate-001`).
+  - **In-Memory Cache & Network Resilience (`mint_core::media::video_model_fetcher`)**:
+    - Live video models queried from Gemini API (`/v1beta/models`), filtered by `veo`/`video` keywords, with `models/` prefix stripping.
+    - Cached process-wide for 1 hour (`CACHE_TTL = 3600s`) with a 6-second timeout guard, falling back instantly to canonical presets in `mint_core::media::video_models` on network or authentication errors.
+  - **Full Platform Parity across CLI, Desktop, and Web**:
+    - **CLI (`crates/mint-cli`)**: Added `/video-models` (and `/videomodels`) slash command, upgraded `/video-provider` with live discovery and interactive selection prompts (`SlashResponse::NeedsChoice`), and integrated live model fetching into `mint onboard` with transient terminal loading indicators (`Fetching available models...`).
+    - **Desktop UI (`src/renderer/src`)**: Added Tauri IPC command `fetch_video_provider_models`, created React hook `useVideoProviderModels`, and updated the Settings General tab to render dynamic model dropdowns with bidirectional configuration persistence.
+    - **Web UI (`src/renderer/src-web`)**: Added REST API endpoint `GET /api/video-models` and dedicated `GET /api/video-gen/providers`, web-runtime IPC shim in `src-web/tauri.ts`, and Web `useVideoProviderModels` hook.
+    - **Veo Studio Panel (`VeoStudioPanel.tsx`)**: Upgraded studio model selection dropdown to dynamically load available live models while preserving static presets, synchronizing the active model seamlessly with settings and CLI commands via the centralized `modelManager`.
 
-
+- **Application Version & Community Links in Settings Footer**:
+  - Replaced the legacy "Quit Application" button in the Settings modal footer with a clean metadata block.
+  - Displays application version (`Version: {APP_VERSION}`) dynamically sourced from `version.ts`.
+  - Added external link to GitHub repository ([GitHub](https://github.com/Pheem49/Mint)) with external link indicator icon (`↗`).
+  - Added external link to Mint website ([Website](https://mint.aemeth.xyz/)) with external link indicator icon (`↗`).
+  - Implemented across both Desktop UI (`src/renderer/src`) and Web UI (`src/renderer/src-web`) with responsive wrapping on compact viewports (< 620px).
+  - Exported `APP_VERSION` from `package.json` into a centralized frontend module (`src/renderer/shared/version.ts`) ensuring a single source of truth without manual string duplication.
+  - Added `"version"` reporting to the core API server `/api/status` endpoint.

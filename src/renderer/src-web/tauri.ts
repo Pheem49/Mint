@@ -1928,6 +1928,13 @@ export async function generateVideo(request: VideoGenRequest): Promise<VideoGenR
 }
 
 export async function getVideoGenProviders(): Promise<VideoGenProviders> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase()
+    try {
+      const res = await authFetch(`${API_BASE}/video-gen/providers`)
+      if (res.ok) return await res.json()
+    } catch (_) { /* ignore */ }
+  }
   return { active: 'veo', available: ['veo'] }
 }
 

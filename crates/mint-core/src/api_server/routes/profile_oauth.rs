@@ -17,17 +17,30 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
     match (method, route) {
         ("GET", "/api/profile") => {
             let key = query_param(query, "key").unwrap_or_default();
+            let mut value = String::new();
             if let Ok(memory) = MemoryStore::open_default() {
-                let value = memory.get_profile(&key).unwrap_or(None).unwrap_or_default();
-                send_json_response(
-                    socket,
-                    "200 OK",
-                    &serde_json::json!({ "value": value }).to_string(),
-                )
-                .await;
-                return;
+                value = memory.get_profile(&key).unwrap_or(None).unwrap_or_default();
             }
-            send_json_response(socket, "500 Internal Server Error", "{\"value\":\"\"}").await;
+            if value.trim().is_empty() {
+                if let Ok(cfg) = load_config() {
+                    if key == "veoModel" {
+                        value = crate::media::video_models::active_video_model_for_provider(&cfg, "veo").to_string();
+                    } else if key == "videoGenProvider" {
+                        value = cfg
+                            .extra
+                            .get("videoGenProvider")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("veo")
+                            .to_string();
+                    }
+                }
+            }
+            send_json_response(
+                socket,
+                "200 OK",
+                &serde_json::json!({ "value": value }).to_string(),
+            )
+            .await;
         }
 
         ("POST", "/api/profile") => {

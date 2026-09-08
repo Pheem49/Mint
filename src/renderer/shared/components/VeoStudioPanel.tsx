@@ -146,6 +146,7 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
         for (const p of presets) {
           if (!seen.has(p.value)) {
             seen.add(p.value)
+            merged.push(p)
           }
         }
         setDynamicOptions((prev) => ({ ...prev, [selectedProvider]: merged }))

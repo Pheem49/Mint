@@ -693,8 +693,28 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             }
         }
         (_, "/api/video-gen/providers")
-        | (_, "/api/video/providers")
-        | ("GET", "/api/image-gen/providers") => {
+        | (_, "/api/video/providers") => {
+            let config = load_config().unwrap_or_default();
+            let mut available: Vec<String> = Vec::new();
+            if !config.api_key.trim().is_empty() {
+                available.push("veo".into());
+            } else {
+                available.push("veo".into());
+            }
+            let active = config
+                .extra
+                .get("videoGenProvider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("veo")
+                .to_string();
+            if !available.contains(&active) {
+                available.push(active.clone());
+            }
+            let response = json!({ "active": active, "available": available });
+            send_json_response(socket, "200 OK", &response.to_string()).await;
+        }
+
+        ("GET", "/api/image-gen/providers") => {
             let config = load_config().unwrap_or_default();
             let mut available: Vec<String> = Vec::new();
             if !config.api_key.trim().is_empty() {
