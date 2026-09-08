@@ -297,6 +297,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             &["veo"],
             config,
         ),
+        "/video-models" | "/videomodels" => cmd_video_models_sync(rest, config),
         "/image-provider" => {
             if rest.is_empty() {
                 return message(
@@ -394,6 +395,12 @@ pub async fn execute_async(req: &SlashRequest, config: &mut MintConfig) -> Slash
     }
     if cmd == "/image-models" {
         return cmd_image_models_async(rest, config).await;
+    }
+    if cmd == "/video-provider" {
+        return cmd_video_provider_async(rest, config).await;
+    }
+    if cmd == "/video-models" || cmd == "/videomodels" {
+        return cmd_video_models_async(rest, config).await;
     }
 
     execute(req, config)
@@ -839,6 +846,221 @@ async fn cmd_image_models_async(rest: &str, config: &mut MintConfig) -> SlashRes
     let display = format!(
         "{} • {}",
         image_models::image_provider_display_name(&provider),
+        model_str
+    );
+
+    SlashResponse::Applied {
+        markdown: String::new(),
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ProviderChanged { display },
+        ],
+    }
+}
+
+async fn cmd_video_provider_async(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    use crate::media::video_models;
+
+    let available_providers = vec!["veo"];
+
+    if rest.is_empty() {
+        return SlashResponse::NeedsChoice {
+            command: "/video-provider".into(),
+            title: "Select Video Generation provider".into(),
+            options: available_providers
+                .into_iter()
+                .map(|p| SlashChoice {
+                    label: video_models::video_provider_display_name(p),
+                    value: p.to_string(),
+                })
+                .collect(),
+        };
+    }
+
+    let (provider, model) = match rest.split_once(['/', ' ']) {
+        Some((p, m)) => (p.trim(), Some(m.trim()).filter(|m| !m.is_empty())),
+        None => (rest.trim(), None),
+    };
+
+    if model.is_none() {
+        let options = video_models::video_model_options_for_provider_async(config, provider).await;
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/video-provider {provider}"),
+                title: format!(
+                    "Select {} video model",
+                    video_models::video_provider_display_name(provider)
+                ),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    video_models::set_active_video_provider_model(config, provider, model);
+    let active_model = video_models::active_video_model_for_provider(config, provider);
+    let display = format!(
+        "{} • {}",
+        video_models::video_provider_display_name(provider),
+        active_model
+    );
+
+    SlashResponse::Applied {
+        markdown: String::new(),
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ProviderChanged { display },
+        ],
+    }
+}
+
+async fn cmd_video_models_async(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    use crate::media::video_models;
+
+    let trimmed = rest.trim();
+    let known_providers = ["veo", "google", "gemini"];
+
+    let (provider, model) = if trimmed.is_empty() {
+        let p = config
+            .extra
+            .get("videoGenProvider")
+            .and_then(|v| v.as_str())
+            .unwrap_or("veo")
+            .to_string();
+        (p, None)
+    } else {
+        let (first_word, rem) = trimmed
+            .split_once(['/', ' '])
+            .map(|(p, m)| (p.trim(), Some(m.trim()).filter(|s| !s.is_empty())))
+            .unwrap_or((trimmed, None));
+
+        if known_providers.contains(&first_word.to_lowercase().as_str()) {
+            let canonical_p = if first_word.eq_ignore_ascii_case("google")
+                || first_word.eq_ignore_ascii_case("gemini")
+            {
+                "veo".to_string()
+            } else {
+                first_word.to_string()
+            };
+            (canonical_p, rem.map(|s| s.to_string()))
+        } else {
+            let p = config
+                .extra
+                .get("videoGenProvider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("veo")
+                .to_string();
+            (p, Some(trimmed.to_string()))
+        }
+    };
+
+    if model.is_none() {
+        let options = video_models::video_model_options_for_provider_async(config, &provider).await;
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/video-models {provider}"),
+                title: format!(
+                    "Select {} video model",
+                    video_models::video_provider_display_name(&provider)
+                ),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    let model_str = model.unwrap_or_default();
+    video_models::set_active_video_provider_model(config, &provider, Some(&model_str));
+    let display = format!(
+        "{} • {}",
+        video_models::video_provider_display_name(&provider),
+        model_str
+    );
+
+    SlashResponse::Applied {
+        markdown: String::new(),
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ProviderChanged { display },
+        ],
+    }
+}
+
+fn cmd_video_models_sync(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    use crate::media::video_models;
+
+    let trimmed = rest.trim();
+    let known_providers = ["veo", "google", "gemini"];
+
+    let (provider, model) = if trimmed.is_empty() {
+        let p = config
+            .extra
+            .get("videoGenProvider")
+            .and_then(|v| v.as_str())
+            .unwrap_or("veo")
+            .to_string();
+        (p, None)
+    } else {
+        let (first_word, rem) = trimmed
+            .split_once(['/', ' '])
+            .map(|(p, m)| (p.trim(), Some(m.trim()).filter(|s| !s.is_empty())))
+            .unwrap_or((trimmed, None));
+
+        if known_providers.contains(&first_word.to_lowercase().as_str()) {
+            let canonical_p = if first_word.eq_ignore_ascii_case("google")
+                || first_word.eq_ignore_ascii_case("gemini")
+            {
+                "veo".to_string()
+            } else {
+                first_word.to_string()
+            };
+            (canonical_p, rem.map(|s| s.to_string()))
+        } else {
+            let p = config
+                .extra
+                .get("videoGenProvider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("veo")
+                .to_string();
+            (p, Some(trimmed.to_string()))
+        }
+    };
+
+    if model.is_none() {
+        let options = video_models::video_model_options_for_provider(config, &provider);
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/video-models {provider}"),
+                title: format!(
+                    "Select {} video model",
+                    video_models::video_provider_display_name(&provider)
+                ),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    let model_str = model.unwrap_or_default();
+    video_models::set_active_video_provider_model(config, &provider, Some(&model_str));
+    let display = format!(
+        "{} • {}",
+        video_models::video_provider_display_name(&provider),
         model_str
     );
 

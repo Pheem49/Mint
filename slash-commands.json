@@ -40,6 +40,7 @@
   { "token": "/gen-image", "usage": "<prompt>", "description": "Generate image using AI model", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/veo", "usage": "<prompt>", "description": "Generate video using Google Veo", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/video-provider", "usage": "[name]", "description": "List video gen providers or switch default provider", "category": "models", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/video-models", "usage": "[model]", "description": "List or switch default video generation model", "category": "models", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/search-provider", "usage": "[name]", "description": "List web search providers or switch default provider", "category": "models", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/bg", "usage": "<query>", "description": "Run a query in the background, non-blocking", "category": "tools", "surfaces": ["cli"] },
   { "token": "/jobs", "usage": "[show|cancel <id>]", "description": "List, inspect, or cancel background jobs", "category": "tools", "surfaces": ["cli"] },

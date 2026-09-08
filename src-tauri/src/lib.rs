@@ -233,6 +233,36 @@ async fn fetch_image_provider_models(
     }
 }
 
+/// Returns the dynamic list of video models for the specified provider on success,
+/// or the static preset fallback if the network is unavailable or the API key is absent/invalid.
+#[tauri::command]
+async fn fetch_video_provider_models(
+    provider: String,
+    api_key: String,
+) -> Result<Vec<String>, String> {
+    let config = load_config().map_err(|e| e.to_string())?;
+    let key = if api_key.trim().is_empty() {
+        match provider.to_lowercase().as_str() {
+            "veo" | "gemini" | "google" => config.api_key.clone(),
+            _ => String::new(),
+        }
+    } else {
+        api_key
+    };
+    let dynamic = mint_core::media::video_model_fetcher::fetch_video_provider_models(
+        &provider,
+        &key,
+    )
+    .await;
+
+    if !dynamic.is_empty() {
+        Ok(dynamic)
+    } else {
+        // Fallback to static presets so the UI is never empty.
+        Ok(mint_core::media::video_models::video_model_options_for_provider(&config, &provider))
+    }
+}
+
 #[tauri::command]
 async fn create_workspace_file(path: String) -> Result<(), String> {
     std::fs::write(&path, "").map_err(|error| error.to_string())
@@ -1836,6 +1866,7 @@ pub fn run() {
             list_mcp_server_tools,
             fetch_provider_models,
             fetch_image_provider_models,
+            fetch_video_provider_models,
             get_workspace_tree,
             create_workspace_file,
             create_workspace_folder,

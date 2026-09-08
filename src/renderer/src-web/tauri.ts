@@ -371,6 +371,25 @@ export async function fetchImageProviderModels(
   return invoke<string[]>('fetch_image_provider_models', { provider, apiKey: apiKey || '' })
 }
 
+/** Fetch the live model list for video `provider` from its API.
+ *  Returns a dynamic list on success, falling back to static presets on any
+ *  network or auth error. Results are cached for 1 hour on the Rust side. */
+export async function fetchVideoProviderModels(
+  provider: string,
+  apiKey: string = '',
+): Promise<string[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const params = new URLSearchParams({ provider, apiKey: apiKey || '' })
+    const API_BASE = getApiBase()
+    const res = await fetch(`${API_BASE}/video-models?${params.toString()}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json().catch(() => null)
+    return Array.isArray(data?.models) ? data.models : []
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_video_provider_models', { provider, apiKey: apiKey || '' })
+}
+
 export async function sendChatMessage(
   message: string,
   imageDataUri?: string | null,

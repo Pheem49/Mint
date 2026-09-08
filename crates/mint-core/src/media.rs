@@ -16,3 +16,5 @@ pub mod timeline;
 pub mod tts;
 pub mod video_edit;
 pub mod video_gen;
+pub mod video_model_fetcher;
+pub mod video_models;

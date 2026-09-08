@@ -3,6 +3,7 @@ import { getProfileValue, setProfileValue, setActiveModel, authUpdateProfile } f
 import { useAuthUser } from '../../shared/components/AuthGate'
 import { useProviderModels } from '../hooks/useProviderModels'
 import { useImageProviderModels } from '../hooks/useImageProviderModels'
+import { useVideoProviderModels } from '../hooks/useVideoProviderModels'
 import GeneralTab from './Settings/GeneralTab'
 import ProfileTab from './Settings/ProfileTab'
 import MemoryTab from './Settings/MemoryTab'
@@ -222,6 +223,12 @@ export default function SettingsWindow() {
     ideogram: ideogramImageOpts,
     bfl: bflImageOpts,
   }), [nanoBananaImageOpts, dalleImageOpts, replicateImageOpts, stabilityImageOpts, ideogramImageOpts, bflImageOpts])
+
+  // Dynamic video model lists
+  const { options: veoVideoOpts } = useVideoProviderModels('veo', config.apiKey)
+  const dynamicVideoModels = React.useMemo(() => ({
+    veo: veoVideoOpts,
+  }), [veoVideoOpts])
 
   // New MCP Server Form state
   const [mcpName, setMcpName] = useState('')
@@ -700,6 +707,7 @@ export default function SettingsWindow() {
               dynamicDeepSeekModels={dynamicDeepSeekModels}
               dynamicLocalModels={dynamicLocalModels}
               dynamicImageModels={dynamicImageModels}
+              dynamicVideoModels={dynamicVideoModels}
               updateAvailable={updateAvailable}
               updateMessage={updateMessage}
               handleCheckUpdates={handleCheckUpdates}

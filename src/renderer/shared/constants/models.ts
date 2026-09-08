@@ -149,6 +149,7 @@ export const VEO_STUDIO_MODELS = {
     { value: 'veo-3.1-generate-preview',      label: 'Veo 3.1 Generate Preview (Default)' },
     { value: 'veo-3.1-fast-generate-preview', label: 'Veo 3.1 Fast Generate Preview' },
     { value: 'veo-3.1-lite-generate-preview', label: 'Veo 3.1 Lite Generate Preview' },
+    { value: 'veo-2.0-generate-001',          label: 'Veo 2.0 Generate' },
   ],
 }
 

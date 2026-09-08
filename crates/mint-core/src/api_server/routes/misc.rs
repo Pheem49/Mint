@@ -393,6 +393,55 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             .await;
         }
 
+        ("GET", "/api/video-models") => {
+            // Query params: provider=<id>&apiKey=<key>
+            let provider = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("provider="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+            let mut api_key = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("apiKey="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+
+            let cfg_opt = load_config().ok();
+            if api_key.trim().is_empty() {
+                if let Some(ref cfg) = cfg_opt {
+                    api_key = match provider.to_lowercase().as_str() {
+                        "veo" | "gemini" | "google" => cfg.api_key.clone(),
+                        _ => String::new(),
+                    };
+                }
+            }
+
+            let dynamic = crate::media::video_model_fetcher::fetch_video_provider_models(
+                &provider,
+                &api_key,
+            )
+            .await;
+
+            let models = if !dynamic.is_empty() {
+                dynamic
+            } else {
+                match cfg_opt {
+                    Some(ref cfg) => crate::media::video_models::video_model_options_for_provider(cfg, &provider),
+                    None => match load_config() {
+                        Ok(cfg) => crate::media::video_models::video_model_options_for_provider(&cfg, &provider),
+                        Err(_) => Vec::new(),
+                    },
+                }
+            };
+
+            send_json_response(
+                socket,
+                "200 OK",
+                &serde_json::json!({ "models": models }).to_string(),
+            )
+            .await;
+        }
+
         _ => unreachable!(
             "api_server routed an unhandled route into routes::misc::execute: {method} {route}"
         ),

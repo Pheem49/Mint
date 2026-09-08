@@ -26,12 +26,15 @@ async fn fetch_image_models_with_notice(config: &mint_core::MintConfig, provider
     models
 }
 
-// ── Video Generation Providers ──────────────────────────────────────────────
-const VEO_VIDEO_MODEL_PRESETS: &[&str] = &[
-    "veo-3.1-generate-preview",
-    "veo-3.1-fast-generate-preview",
-    "veo-3.1-lite-generate-preview",
-];
+async fn fetch_video_models_with_notice(config: &mint_core::MintConfig, provider: &str) -> Vec<String> {
+    print!("\x1b[90mFetching available {provider} video models...\x1b[0m\r");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let models =
+        mint_core::media::video_models::video_model_options_for_provider_async(config, provider).await;
+    print!("\r\x1b[2K");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    models
+}
 
 // ── Realtime Live Model (Gemini Live voice) ─────────────────────────────────
 // Note: gemini-3.1-flash-live-preview requires requesting allowlist access from Google
@@ -1039,9 +1042,10 @@ pub async fn run() -> Result<()> {
             .and_then(|v| v.as_str())
             .unwrap_or("veo-3.1-generate-preview")
             .to_string();
+        let veo_models = fetch_video_models_with_notice(&config, "veo").await;
         let selected_veo_model = prompt_select_or_custom(
             "Veo Model",
-            static_model_options(VEO_VIDEO_MODEL_PRESETS),
+            veo_models,
             Some(&current_veo_model),
             "Custom Veo model...",
         )?;

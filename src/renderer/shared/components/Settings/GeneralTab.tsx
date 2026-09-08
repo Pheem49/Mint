@@ -10,6 +10,7 @@ import {
   LOCAL_MODELS,
   IMAGE_STUDIO_MODELS,
   IMAGE_GEN_PROVIDER_MODELS,
+  VEO_STUDIO_MODELS,
 } from '../../constants/models'
 import type {
   CustomProviderConfig,
@@ -96,6 +97,9 @@ interface GeneralTabProps {
   /** Dynamic image model lists fetched from provider APIs, keyed by listKey ('nanobanana', 'dalle', etc.).
    *  Falls back to static presets from `shared/constants/models.ts` when not provided. */
   dynamicImageModels?: Partial<Record<string, Array<{ value: string; label: string }>>>
+  /** Dynamic video model lists fetched from provider APIs, keyed by provider ('veo').
+   *  Falls back to static presets from `shared/constants/models.ts` when not provided. */
+  dynamicVideoModels?: Partial<Record<string, Array<{ value: string; label: string }>>>
   updateAvailable: boolean
   updateMessage: string
   handleCheckUpdates: () => void
@@ -131,6 +135,7 @@ export default function GeneralTab({
   dynamicDeepSeekModels = [...DEEPSEEK_MODELS],
   dynamicLocalModels = [...LOCAL_MODELS],
   dynamicImageModels,
+  dynamicVideoModels,
   updateAvailable,
   updateMessage,
   handleCheckUpdates,
@@ -997,17 +1002,26 @@ export default function GeneralTab({
               <p className="hint">Uses your Gemini API key — no extra key needed.</p>
               <div className="setting-row">
                 <label>Default Veo Model</label>
-                <select
-                  value={config.veoModel || 'veo-3.1-generate-preview'}
-                  onChange={(e) => {
-                    updateField('veoModel', e.target.value)
-                    setActiveModel('veoModel', e.target.value, 'video')
-                  }}
-                >
-                  <option value="veo-3.1-generate-preview">veo-3.1-generate-preview (Default)</option>
-                  <option value="veo-3.1-fast-generate-preview">veo-3.1-fast-generate-preview</option>
-                  <option value="veo-3.1-lite-generate-preview">veo-3.1-lite-generate-preview</option>
-                </select>
+                {(() => {
+                  const veoOpts = dynamicVideoModels?.veo || VEO_STUDIO_MODELS.veo || []
+                  const currentVeoModel = config.veoModel || 'veo-3.1-generate-preview'
+                  return (
+                    <select
+                      value={currentVeoModel}
+                      onChange={(e) => {
+                        updateField('veoModel', e.target.value)
+                        setActiveModel('veoModel', e.target.value, 'video')
+                      }}
+                    >
+                      {veoOpts.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                      {currentVeoModel && !veoOpts.some((m) => m.value === currentVeoModel) && (
+                        <option key={currentVeoModel} value={currentVeoModel}>{currentVeoModel}</option>
+                      )}
+                    </select>
+                  )
+                })()}
               </div>
             </div>
           </div>

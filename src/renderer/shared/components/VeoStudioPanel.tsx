@@ -3,6 +3,7 @@ import { getActiveModel, setActiveModel, subscribeModelChange } from '../utils/m
 import {
   generateVideo,
   getVideoGenProviders,
+  fetchVideoProviderModels,
   convertFileSrc,
   getProfileValue,
   setProfileValue,
@@ -89,6 +90,7 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
   const [providers, setProviders] = useState<VideoGenProviders>({ active: 'veo', available: ['veo'] })
   const [selectedProvider, setSelectedProvider] = useState('veo')
   const [selectedModel, setSelectedModel] = useState(defaultModelForProvider('veo'))
+  const [dynamicOptions, setDynamicOptions] = useState<Record<string, Array<{ value: string; label: string }>>>({})
 
   const promptRef = useRef<HTMLTextAreaElement>(null)
 
@@ -119,9 +121,43 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
     }
   }, [])
 
+  // Dynamically fetch models for selected provider
+  useEffect(() => {
+    let cancelled = false
+    fetchVideoProviderModels(selectedProvider)
+      .then((live) => {
+        if (cancelled || !live || live.length === 0) return
+        const presets = PROVIDER_MODELS[selectedProvider] ?? []
+        const presetMap = new Map<string, string>()
+        for (const p of presets) {
+          presetMap.set(p.value, p.label)
+        }
+        const merged: Array<{ value: string; label: string }> = []
+        const seen = new Set<string>()
+        for (const id of live) {
+          if (!seen.has(id)) {
+            seen.add(id)
+            merged.push({
+              value: id,
+              label: presetMap.get(id) ?? id,
+            })
+          }
+        }
+        for (const p of presets) {
+          if (!seen.has(p.value)) {
+            seen.add(p.value)
+          }
+        }
+        setDynamicOptions((prev) => ({ ...prev, [selectedProvider]: merged }))
+      })
+      .catch(() => { /* keep presets */ })
+    return () => { cancelled = true }
+  }, [selectedProvider])
+
   const handleProviderChange = (provider: string) => {
     setSelectedProvider(provider)
-    const def = defaultModelForProvider(provider)
+    const opts = dynamicOptions[provider] ?? PROVIDER_MODELS[provider] ?? []
+    const def = opts[0]?.value || defaultModelForProvider(provider)
     setSelectedModel(def)
     setActiveModel('veoModel', def, 'video')
   }
@@ -177,7 +213,7 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
     document.body.removeChild(a)
   }
 
-  const modelOptions = PROVIDER_MODELS[selectedProvider] ?? []
+  const modelOptions = dynamicOptions[selectedProvider] ?? PROVIDER_MODELS[selectedProvider] ?? []
 
   // ── Edit tab: video editing is delegated to the FableMint MCP server ────
   const [activeTab, setActiveTab] = useState<'generate' | 'edit'>('generate')

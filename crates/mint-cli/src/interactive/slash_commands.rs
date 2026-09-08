@@ -207,14 +207,30 @@ async fn execute_core_slash(
         surface: Some("cli".to_string()),
     };
 
-    if matches!(cmd, "/models" | "/image-models" | "/image-provider") {
+    if matches!(
+        cmd,
+        "/models"
+            | "/image-models"
+            | "/image-provider"
+            | "/video-models"
+            | "/videomodels"
+            | "/video-provider"
+    ) {
         print!("{DIM}Fetching available models...{RESET}\r");
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
 
     let response = mint_core::slash::execute_async(&req, &mut session.config).await;
 
-    if matches!(cmd, "/models" | "/image-models" | "/image-provider") {
+    if matches!(
+        cmd,
+        "/models"
+            | "/image-models"
+            | "/image-provider"
+            | "/video-models"
+            | "/videomodels"
+            | "/video-provider"
+    ) {
         print!("\r\x1b[2K");
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
