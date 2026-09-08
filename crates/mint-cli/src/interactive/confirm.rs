@@ -171,29 +171,19 @@ fn confirm_scoped(
         _ => Ok(false),
     }
 }
-/// second picker after the provider is chosen. Empty means no known list
-/// (e.g. `local_openai`), so `/models` skips straight to that provider's
-/// current/default model instead of showing an empty picker.
+/// Model options for a provider. Delegates to [`mint_core::slash::models::model_options_for_provider`].
+#[allow(dead_code)]
 pub fn model_options_for_provider(config: &mint_core::MintConfig, provider: &str) -> Vec<String> {
-    match provider {
-        "gemini" => onboard::GEMINI_MODEL_PRESETS,
-        "anthropic" => onboard::ANTHROPIC_MODEL_PRESETS,
-        "openai" => onboard::OPENAI_MODEL_PRESETS,
-        "openrouter" => onboard::OPENROUTER_MODEL_PRESETS,
-        "deepseek" => onboard::DEEPSEEK_MODEL_PRESETS,
-        "huggingface" => onboard::HUGGINGFACE_MODEL_PRESETS,
-        "ollama" => return onboard::installed_ollama_models(),
-        p if p.starts_with("custom:") => {
-            return config
-                .resolve_custom_provider(p)
-                .map(|cp| cp.models.iter().map(|m| m.model_id.clone()).collect())
-                .unwrap_or_default();
-        }
-        _ => &[],
-    }
-    .iter()
-    .map(|s| s.to_string())
-    .collect()
+    mint_core::slash::models::model_options_for_provider(config, provider)
+}
+
+/// Like [`model_options_for_provider`] but tries the provider's live API first.
+#[allow(dead_code)]
+pub async fn model_options_for_provider_async(
+    config: &mint_core::MintConfig,
+    provider: &str,
+) -> Vec<String> {
+    mint_core::slash::models::model_options_for_provider_async(config, provider).await
 }
 
 #[cfg(test)]

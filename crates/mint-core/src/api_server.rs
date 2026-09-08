@@ -1094,7 +1094,9 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
-                ("GET", "/api/checkpoints")
+                ("GET", "/api/models")
+                | ("GET", "/api/image-models")
+                | ("GET", "/api/checkpoints")
                 | ("POST", "/api/checkpoints/rollback")
                 | ("GET", "/api/file/read") => {
                     routes::misc::execute(

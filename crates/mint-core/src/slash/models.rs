@@ -1,6 +1,9 @@
 //! Provider → model presets, shared by the slash engine's `/models` picker, the
 //! CLI onboarding wizard (`crates/mint-cli/src/onboard.rs`), and the CLI's
 //! `model_options_for_provider` (`crates/mint-cli/src/interactive/confirm.rs`).
+//!
+//! For live model lists prefer [`model_options_for_provider_async`], which tries
+//! the provider's API first and falls back to the static presets here.
 
 use crate::MintConfig;
 
@@ -114,4 +117,46 @@ pub fn model_options_for_provider(config: &MintConfig, provider: &str) -> Vec<St
     .iter()
     .map(|s| s.to_string())
     .collect()
+}
+
+/// Like [`model_options_for_provider`] but tries the provider's live API first.
+///
+/// On success the live list replaces the static presets for this call; on any
+/// network/auth error it silently falls back to the static presets, so callers
+/// always get *something* useful even when offline or before the user has
+/// entered an API key.
+///
+/// Results are cached for 1 hour inside [`super::model_fetcher`].
+pub async fn model_options_for_provider_async(
+    config: &MintConfig,
+    provider: &str,
+) -> Vec<String> {
+    use super::model_fetcher;
+
+    // Resolve the API key and optional base URL for this provider.
+    let (api_key, base_url): (&str, Option<&str>) = match provider {
+        "gemini"       => (&config.api_key, None),
+        "anthropic"    => (&config.anthropic_api_key, None),
+        "openai"       => (&config.openai_api_key, None),
+        "openrouter"   => (&config.openrouter_api_key, None),
+        "deepseek"     => (&config.deepseek_api_key, None),
+        "local_openai" => ("", Some(config.local_api_base_url.as_str())),
+        // Ollama and HuggingFace keep their existing sync paths.
+        _ => return model_options_for_provider(config, provider),
+    };
+
+    let dynamic = model_fetcher::fetch_provider_models(provider, api_key, base_url).await;
+    if !dynamic.is_empty() {
+        // Merge: put dynamic list first, then append any presets not already present.
+        let mut merged = dynamic;
+        for preset in model_options_for_provider(config, provider) {
+            if !merged.contains(&preset) {
+                merged.push(preset);
+            }
+        }
+        merged
+    } else {
+        // Network/auth error → fall back to static presets.
+        model_options_for_provider(config, provider)
+    }
 }

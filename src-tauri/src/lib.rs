@@ -170,6 +170,69 @@ async fn list_mcp_server_tools(name: String) -> Result<Vec<String>, String> {
         .map_err(|error| error.to_string())
 }
 
+/// Fetch the live model list for `provider` from its API.
+///
+/// Returns the dynamic list on success, or the static preset fallback if the
+/// network is unavailable or the API key is absent/invalid. This is the bridge
+/// used by the Desktop Settings UI's model-picker dropdowns so they always show
+/// up-to-date models without a hardcoded list.
+#[tauri::command]
+async fn fetch_provider_models(
+    provider: String,
+    api_key: String,
+    base_url: Option<String>,
+) -> Result<Vec<String>, String> {
+    let config = load_config().map_err(|e| e.to_string())?;
+    let dynamic = mint_core::slash::model_fetcher::fetch_provider_models(
+        &provider,
+        &api_key,
+        base_url.as_deref(),
+    )
+    .await;
+
+    if !dynamic.is_empty() {
+        Ok(dynamic)
+    } else {
+        // Fallback to static presets so the UI is never empty.
+        Ok(mint_core::slash::models::model_options_for_provider(&config, &provider))
+    }
+}
+
+/// Returns the dynamic list of image models for the specified provider on success,
+/// or the static preset fallback if the network is unavailable or the API key is absent/invalid.
+#[tauri::command]
+async fn fetch_image_provider_models(
+    provider: String,
+    api_key: String,
+) -> Result<Vec<String>, String> {
+    let config = load_config().map_err(|e| e.to_string())?;
+    let key = if api_key.trim().is_empty() {
+        match provider.to_lowercase().as_str() {
+            "nanobanana" | "gemini" | "google" => config.api_key.clone(),
+            "dalle" | "openai" => config.openai_api_key.clone(),
+            "stability" => config.stability_api_key.clone(),
+            "ideogram" => config.ideogram_api_key.clone(),
+            "replicate" => config.replicate_api_key.clone(),
+            "bfl" | "flux" => config.bfl_api_key.clone(),
+            _ => String::new(),
+        }
+    } else {
+        api_key
+    };
+    let dynamic = mint_core::media::image_model_fetcher::fetch_image_provider_models(
+        &provider,
+        &key,
+    )
+    .await;
+
+    if !dynamic.is_empty() {
+        Ok(dynamic)
+    } else {
+        // Fallback to static presets so the UI is never empty.
+        Ok(mint_core::media::image_models::image_model_options_for_provider(&config, &provider))
+    }
+}
+
 #[tauri::command]
 async fn create_workspace_file(path: String) -> Result<(), String> {
     std::fs::write(&path, "").map_err(|error| error.to_string())
@@ -1147,7 +1210,7 @@ fn delete_subagent(source_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn run_slash_command(
+async fn run_slash_command(
     app: AppHandle,
     input: String,
     cwd: Option<String>,
@@ -1159,7 +1222,7 @@ fn run_slash_command(
         cwd,
         surface: Some("desktop".to_string()),
     };
-    let response = mint_core::slash::execute(&request, &mut config);
+    let response = mint_core::slash::execute_async(&request, &mut config).await;
 
     let persists_config = matches!(
         &response,
@@ -1771,6 +1834,8 @@ pub fn run() {
             detect_system_tools,
             reauth_mcp_server,
             list_mcp_server_tools,
+            fetch_provider_models,
+            fetch_image_provider_models,
             get_workspace_tree,
             create_workspace_file,
             create_workspace_folder,

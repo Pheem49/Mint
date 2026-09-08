@@ -195,13 +195,29 @@ async fn execute_core_slash(
 ) -> Option<SlashResult> {
     use mint_core::slash::{SlashEffect, SlashRequest, SlashResponse};
 
+    let trimmed = query.trim();
+    let (cmd, _) = trimmed
+        .split_once(char::is_whitespace)
+        .map(|(c, r)| (c, r.trim()))
+        .unwrap_or((trimmed, ""));
+
     let req = SlashRequest {
-        input: query.trim().to_string(),
+        input: trimmed.to_string(),
         cwd: Some(session.current_dir.to_string_lossy().to_string()),
         surface: Some("cli".to_string()),
     };
 
-    let response = mint_core::slash::execute(&req, &mut session.config);
+    if matches!(cmd, "/models" | "/image-models" | "/image-provider") {
+        print!("{DIM}Fetching available models...{RESET}\r");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+
+    let response = mint_core::slash::execute_async(&req, &mut session.config).await;
+
+    if matches!(cmd, "/models" | "/image-models" | "/image-provider") {
+        print!("\r\x1b[2K");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
 
     match response {
         SlashResponse::Message { markdown } => {
@@ -621,8 +637,19 @@ pub async fn handle_slash_command(
                 // user isn't stuck with the default after choosing a provider.
                 match session.config.set_active_model(&provider, None) {
                     Ok(mut display_name) => {
+                        // Try live fetch from the provider API; fall back to
+                        // static presets if the network is unavailable or the
+                        // user hasn't entered an API key yet.
+                        print!("{DIM}Fetching available models for {provider}...{RESET}\r");
+                        let _ = std::io::Write::flush(&mut std::io::stdout());
                         let mut model_options =
-                            model_options_for_provider(&session.config, &provider);
+                            mint_core::slash::models::model_options_for_provider_async(
+                                &session.config,
+                                &provider,
+                            )
+                            .await;
+                        print!("\r\x1b[2K");
+                        let _ = std::io::Write::flush(&mut std::io::stdout());
                         let current_model = session.config.active_model().to_string();
                         if !current_model.is_empty()
                             && !model_options.iter().any(|m| m == &current_model)
@@ -1084,6 +1111,9 @@ pub async fn handle_slash_command(
             if !session.config.replicate_api_key.trim().is_empty() {
                 available.push("replicate");
             }
+            if !session.config.bfl_api_key.trim().is_empty() {
+                available.push("bfl");
+            }
             if available.is_empty() {
                 available.push("nanobanana");
             }
@@ -1115,17 +1145,81 @@ pub async fn handle_slash_command(
             };
 
             if let Some(provider) = selected_provider {
-                session.config.image_gen_provider = provider;
+                print!("{DIM}Fetching available image models for {provider}...{RESET}\r");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                let mut model_options =
+                    mint_core::media::image_models::image_model_options_for_provider_async(
+                        &session.config,
+                        &provider,
+                    )
+                    .await;
+                print!("\r\x1b[2K");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+
+                let current_model =
+                    mint_core::media::image_models::active_image_model_for_provider(
+                        &session.config,
+                        &provider,
+                    )
+                    .to_string();
+                if !current_model.is_empty() && !model_options.iter().any(|m| m == &current_model) {
+                    model_options.insert(0, current_model.clone());
+                }
+
+                if !model_options.is_empty() {
+                    match prompt_interactive_select(
+                        &format!(
+                            "Select {} model",
+                            mint_core::media::image_models::image_provider_display_name(&provider)
+                        ),
+                        &model_options,
+                        &current_model,
+                    ) {
+                        Ok(Some(model)) => {
+                            mint_core::media::image_models::set_active_image_provider_model(
+                                &mut session.config,
+                                &provider,
+                                Some(&model),
+                            );
+                        }
+                        Ok(None) => {
+                            mint_core::media::image_models::set_active_image_provider_model(
+                                &mut session.config,
+                                &provider,
+                                None,
+                            );
+                        }
+                        Err(e) => {
+                            println!("{ERROR}Error selecting image model:{RESET} {e}\n");
+                        }
+                    }
+                } else {
+                    mint_core::media::image_models::set_active_image_provider_model(
+                        &mut session.config,
+                        &provider,
+                        None,
+                    );
+                }
+
                 match mint_core::save_config(&session.config) {
-                    Ok(()) => println!(
-                        "{DIM}Switched default image provider to: {}{RESET}\n",
-                        session.config.image_gen_provider
-                    ),
+                    Ok(()) => {
+                        let active = mint_core::media::image_models::active_image_model_for_provider(
+                            &session.config,
+                            &provider,
+                        );
+                        println!(
+                            "{DIM}Switched default image provider to: {} • {}{RESET}\n",
+                            mint_core::media::image_models::image_provider_display_name(&provider),
+                            active
+                        );
+                    }
                     Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
                 }
             }
             Some(SlashResult::Handled)
         }
+
+
 
         "/video-provider" => {
             let mut available = Vec::new();

@@ -85,6 +85,17 @@ interface GeneralTabProps {
   customOllama: string
   setCustomOllama: (val: string) => void
   dynamicOllamaModels: string[]
+  /** Dynamic model lists fetched from provider APIs. Falls back to static
+   *  presets from `shared/constants/models.ts` when not provided. */
+  dynamicGeminiModels?: string[]
+  dynamicAnthropicModels?: string[]
+  dynamicOpenAIModels?: string[]
+  dynamicOpenRouterModels?: string[]
+  dynamicDeepSeekModels?: string[]
+  dynamicLocalModels?: string[]
+  /** Dynamic image model lists fetched from provider APIs, keyed by listKey ('nanobanana', 'dalle', etc.).
+   *  Falls back to static presets from `shared/constants/models.ts` when not provided. */
+  dynamicImageModels?: Partial<Record<string, Array<{ value: string; label: string }>>>
   updateAvailable: boolean
   updateMessage: string
   handleCheckUpdates: () => void
@@ -113,6 +124,13 @@ export default function GeneralTab({
   customOllama,
   setCustomOllama,
   dynamicOllamaModels,
+  dynamicGeminiModels = [...GEMINI_MODELS],
+  dynamicAnthropicModels = [...ANTHROPIC_MODELS],
+  dynamicOpenAIModels = [...OPENAI_MODELS],
+  dynamicOpenRouterModels = [...OPENROUTER_MODELS],
+  dynamicDeepSeekModels = [...DEEPSEEK_MODELS],
+  dynamicLocalModels = [...LOCAL_MODELS],
+  dynamicImageModels,
   updateAvailable,
   updateMessage,
   handleCheckUpdates,
@@ -301,16 +319,16 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>Gemini Model</label>
                   <select 
-                    value={(GEMINI_MODELS as readonly string[]).includes(config.geminiModel) ? config.geminiModel : 'custom'} 
+                    value={dynamicGeminiModels.includes(config.geminiModel) ? config.geminiModel : 'custom'} 
                     onChange={(e) => updateField('geminiModel', e.target.value)}
                   >
-                    {GEMINI_MODELS.map(model => (
+                    {dynamicGeminiModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(GEMINI_MODELS as readonly string[]).includes(config.geminiModel) || config.geminiModel === 'custom') && (
+                {(!dynamicGeminiModels.includes(config.geminiModel) || config.geminiModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom Gemini Model</label>
                     <input 
@@ -348,16 +366,16 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>Anthropic Model</label>
                   <select 
-                    value={(ANTHROPIC_MODELS as readonly string[]).includes(config.anthropicModel) ? config.anthropicModel : 'custom'} 
+                    value={dynamicAnthropicModels.includes(config.anthropicModel) ? config.anthropicModel : 'custom'} 
                     onChange={(e) => updateField('anthropicModel', e.target.value)}
                   >
-                    {ANTHROPIC_MODELS.map(model => (
+                    {dynamicAnthropicModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(ANTHROPIC_MODELS as readonly string[]).includes(config.anthropicModel) || config.anthropicModel === 'custom') && (
+                {(!dynamicAnthropicModels.includes(config.anthropicModel) || config.anthropicModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom Anthropic Model</label>
                     <input 
@@ -396,16 +414,16 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>OpenAI Model</label>
                   <select 
-                    value={(OPENAI_MODELS as readonly string[]).includes(config.openaiModel) ? config.openaiModel : 'custom'} 
+                    value={dynamicOpenAIModels.includes(config.openaiModel) ? config.openaiModel : 'custom'} 
                     onChange={(e) => updateField('openaiModel', e.target.value)}
                   >
-                    {OPENAI_MODELS.map(model => (
+                    {dynamicOpenAIModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(OPENAI_MODELS as readonly string[]).includes(config.openaiModel) || config.openaiModel === 'custom') && (
+                {(!dynamicOpenAIModels.includes(config.openaiModel) || config.openaiModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom OpenAI Model</label>
                     <input 
@@ -446,16 +464,16 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>OpenRouter Model</label>
                   <select
-                    value={(OPENROUTER_MODELS as readonly string[]).includes(config.openrouterModel) ? config.openrouterModel : 'custom'}
+                    value={dynamicOpenRouterModels.includes(config.openrouterModel) ? config.openrouterModel : 'custom'}
                     onChange={(e) => updateField('openrouterModel', e.target.value)}
                   >
-                    {OPENROUTER_MODELS.map(model => (
+                    {dynamicOpenRouterModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(OPENROUTER_MODELS as readonly string[]).includes(config.openrouterModel) || config.openrouterModel === 'custom') && (
+                {(!dynamicOpenRouterModels.includes(config.openrouterModel) || config.openrouterModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom OpenRouter Model</label>
                     <input
@@ -493,16 +511,16 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>DeepSeek Model</label>
                   <select
-                    value={(DEEPSEEK_MODELS as readonly string[]).includes(config.deepseekModel) ? config.deepseekModel : 'custom'}
+                    value={dynamicDeepSeekModels.includes(config.deepseekModel) ? config.deepseekModel : 'custom'}
                     onChange={(e) => updateField('deepseekModel', e.target.value)}
                   >
-                    {DEEPSEEK_MODELS.map(model => (
+                    {dynamicDeepSeekModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(DEEPSEEK_MODELS as readonly string[]).includes(config.deepseekModel) || config.deepseekModel === 'custom') && (
+                {(!dynamicDeepSeekModels.includes(config.deepseekModel) || config.deepseekModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom DeepSeek Model</label>
                     <input
@@ -590,16 +608,16 @@ export default function GeneralTab({
                 <div className="setting-row">
                   <label>LM Studio Model</label>
                   <select 
-                    value={(LOCAL_MODELS as readonly string[]).includes(config.localModelName) ? config.localModelName : 'custom'} 
+                    value={dynamicLocalModels.includes(config.localModelName) ? config.localModelName : 'custom'} 
                     onChange={(e) => updateField('localModelName', e.target.value)}
                   >
-                    {LOCAL_MODELS.map(model => (
+                    {dynamicLocalModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(LOCAL_MODELS as readonly string[]).includes(config.localModelName) || config.localModelName === 'custom') && (
+                {(!dynamicLocalModels.includes(config.localModelName) || config.localModelName === 'custom') && (
                   <div className="setting-row">
                     <label>Custom LM Studio Model</label>
                     <input 
@@ -824,7 +842,8 @@ export default function GeneralTab({
           <div className="provider-cards-container">
             {IMAGE_PROVIDERS.map(prov => {
               const entry = IMAGE_GEN_PROVIDER_MODELS[prov.id]
-              const opts = entry ? (IMAGE_STUDIO_MODELS[entry.listKey] ?? []) : []
+              const defaultOpts = entry ? (IMAGE_STUDIO_MODELS[entry.listKey] ?? []) : []
+              const opts = (entry && dynamicImageModels?.[entry.listKey]) || defaultOpts
               const modelField = entry?.configField as keyof typeof DEFAULT_CONFIG | undefined
               const currentModel = modelField ? ((config as any)[modelField] || opts[0]?.value || '') : ''
               return (
@@ -844,6 +863,9 @@ export default function GeneralTab({
                           {opts.map(m => (
                             <option key={m.value} value={m.value}>{m.label}</option>
                           ))}
+                          {currentModel && !opts.some(m => m.value === currentModel) && (
+                            <option key={currentModel} value={currentModel}>{currentModel}</option>
+                          )}
                         </select>
                       </div>
                     )}

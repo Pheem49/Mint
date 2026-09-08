@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { getLocalApiBase, isTauriRuntime, getProfileValue, setProfileValue, setActiveModel, authUpdateProfile } from '../tauri'
 import { useAuthUser } from '../../shared/components/AuthGate'
+import { useProviderModels } from '../hooks/useProviderModels'
+import { useImageProviderModels } from '../hooks/useImageProviderModels'
 import GeneralTab from './Settings/GeneralTab'
 import ProfileTab from './Settings/ProfileTab'
 import MemoryTab from './Settings/MemoryTab'
@@ -194,6 +196,32 @@ export default function SettingsWindow() {
   const [customLocal, setCustomLocal] = useState('')
   const [customOllama, setCustomOllama] = useState('')
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
+
+  // Dynamic model lists — fetched live from each provider's API.
+  // The hook initialises with static presets and updates when the fetch succeeds.
+  const { models: dynamicGeminiModels }     = useProviderModels('gemini',     config.apiKey)
+  const { models: dynamicAnthropicModels }  = useProviderModels('anthropic',  config.anthropicApiKey)
+  const { models: dynamicOpenAIModels }     = useProviderModels('openai',     config.openaiApiKey)
+  const { models: dynamicOpenRouterModels } = useProviderModels('openrouter', config.openrouterApiKey)
+  const { models: dynamicDeepSeekModels }   = useProviderModels('deepseek',   config.deepseekApiKey)
+  const { models: dynamicLocalModels }      = useProviderModels('local_openai', '', config.localApiBaseUrl)
+
+  // Dynamic image model lists
+  const { options: nanoBananaImageOpts } = useImageProviderModels('nanobanana', config.apiKey)
+  const { options: dalleImageOpts } = useImageProviderModels('dalle', config.openaiApiKey)
+  const { options: replicateImageOpts } = useImageProviderModels('replicate', config.replicateApiKey)
+  const { options: stabilityImageOpts } = useImageProviderModels('stability', config.stabilityApiKey)
+  const { options: ideogramImageOpts } = useImageProviderModels('ideogram', config.ideogramApiKey)
+  const { options: bflImageOpts } = useImageProviderModels('bfl', config.bflApiKey)
+
+  const dynamicImageModels = React.useMemo(() => ({
+    nanobanana: nanoBananaImageOpts,
+    dalle: dalleImageOpts,
+    replicate: replicateImageOpts,
+    stability: stabilityImageOpts,
+    ideogram: ideogramImageOpts,
+    bfl: bflImageOpts,
+  }), [nanoBananaImageOpts, dalleImageOpts, replicateImageOpts, stabilityImageOpts, ideogramImageOpts, bflImageOpts])
 
   // New MCP Server Form state
   const [mcpName, setMcpName] = useState('')
@@ -699,6 +727,13 @@ export default function SettingsWindow() {
               customOllama={customOllama}
               setCustomOllama={setCustomOllama}
               dynamicOllamaModels={dynamicOllamaModels}
+              dynamicGeminiModels={dynamicGeminiModels}
+              dynamicAnthropicModels={dynamicAnthropicModels}
+              dynamicOpenAIModels={dynamicOpenAIModels}
+              dynamicOpenRouterModels={dynamicOpenRouterModels}
+              dynamicDeepSeekModels={dynamicDeepSeekModels}
+              dynamicLocalModels={dynamicLocalModels}
+              dynamicImageModels={dynamicImageModels}
               updateAvailable={updateAvailable}
               updateMessage={updateMessage}
               handleCheckUpdates={handleCheckUpdates}

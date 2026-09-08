@@ -298,6 +298,29 @@ export async function listMcpServerTools(name: string): Promise<string[]> {
   return invoke<string[]>('list_mcp_server_tools', { name })
 }
 
+/** Fetch the live model list for `provider` from its API.
+ *  Returns a dynamic list on success, falling back to static presets on any
+ *  network or auth error.  Results are cached for 1 hour on the Rust side. */
+export async function fetchProviderModels(
+  provider: string,
+  apiKey: string,
+  baseUrl?: string,
+): Promise<string[]> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_provider_models', { provider, apiKey, baseUrl })
+}
+
+/** Fetch the live model list for image `provider` from its API.
+ *  Returns a dynamic list on success, falling back to static presets on any
+ *  network or auth error. Results are cached for 1 hour on the Rust side. */
+export async function fetchImageProviderModels(
+  provider: string,
+  apiKey: string = '',
+): Promise<string[]> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_image_provider_models', { provider, apiKey: apiKey || '' })
+}
+
 export async function uploadFile(file: File): Promise<string> {
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();

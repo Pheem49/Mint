@@ -35,6 +35,7 @@
   { "token": "/link", "usage": "", "description": "Link a folder chat can auto-write notes into", "category": "workspace", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/link add", "usage": "<name> | <path> | <desc>", "description": "Link a folder chat can auto-write notes into", "category": "workspace", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/image-provider", "usage": "[name]", "description": "List image gen providers or switch default provider", "category": "models", "surfaces": ["cli", "web", "desktop"] },
+  { "token": "/image-models", "usage": "[model]", "description": "List or switch default image generation model", "category": "models", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/generate-image", "usage": "<prompt>", "description": "Generate image using AI model", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/gen-image", "usage": "<prompt>", "description": "Generate image using AI model", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/veo", "usage": "<prompt>", "description": "Generate video using Google Veo", "category": "tools", "surfaces": ["cli", "web", "desktop"] },

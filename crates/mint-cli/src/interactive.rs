@@ -1,5 +1,4 @@
 use crate::background::{BackgroundJobs, JobStatus};
-use crate::onboard;
 use crate::{BLUE, DIM, ERROR, MINT, RESET, WARN};
 use crate::{agent, image};
 use anyhow::Result;

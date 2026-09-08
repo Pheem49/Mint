@@ -186,3 +186,20 @@ This release introduces a major architectural overhaul transforming Mint Agent i
   - Added automatic backup preservation (`mint-config.json.bak`) before every configuration write operation in `save_config_to`.
   - Added `MINT_CONFIG_PATH` environment variable override support for testing and custom config paths.
 
+- **Dynamic Model Fetching (Hybrid Approach)**:
+  - Replaced hardcoded model presets with live API discovery across Gemini (`/v1beta/models`), Anthropic (`/v1/models`), OpenAI (`/v1/models`), OpenRouter (`/api/v1/models`), DeepSeek (`/v1/models`), and local OpenAI-compatible endpoints (e.g. LM Studio).
+  - **In-Memory Cache & Network Resilience**: Live model lists are cached process-wide for 1 hour (`CACHE_TTL`). Configured a 6-second HTTP request timeout in `mint_core::slash::model_fetcher` to promptly and silently fall back to static presets on network/DNS errors, authentication failures, or offline environments without hanging.
+  - **Cross-Platform Parity across CLI, Desktop, and Web**:
+    - **CLI (`crates/mint-cli`)**: Integrated async live model fetching into `/models <provider>` selection and the interactive onboarding wizard (`mint onboard`), complete with transient terminal loading feedback (`Fetching available models...`).
+    - **Desktop UI (`src/renderer/src`)**: Added Tauri command `fetch_provider_models` and React hook `useProviderModels` powering the Settings General tab for hosted providers and LM Studio.
+    - **Web UI (`src/renderer/src-web`)**: Added API endpoint `GET /api/models` on the core API server, web-runtime shim in `src-web/tauri.ts`, and Web UI `useProviderModels` hook ensuring identical dynamic model lists.
+
+- **Dynamic Image Model Fetching (Hybrid Approach)**:
+  - Replaced hardcoded image model presets with live API discovery across Google Gemini / NanoBanana (`/v1beta/models`), OpenAI DALL·E (`/v1/models`), and Replicate (`/v1/collections/text-to-image`), with immediate static fallback for Stability AI, Ideogram, and Black Forest Labs (FLUX).
+  - **In-Memory Cache & Network Resilience**: Live image model lists are cached process-wide for 1 hour (`CACHE_TTL`), with a 6-second HTTP request timeout in `mint_core::media::image_model_fetcher` falling back gracefully to static presets on offline or auth errors.
+  - **Cross-Platform Parity across CLI, Desktop, and Web**:
+    - **CLI (`crates/mint-cli`)**: Added `/image-models` slash command, enhanced `/image-provider` with live model fetching, and integrated live model discovery into `mint onboard` Step 4 with transient loading indicators.
+    - **Desktop UI (`src/renderer/src`)**: Added Tauri command `fetch_image_provider_models`, React hook `useImageProviderModels`, and updated Settings General Tab & Image Studio Panel (`ImageStudioPanel.tsx`) with dynamic dropdown selection.
+    - **Web UI (`src/renderer/src-web`)**: Added API endpoint `GET /api/image-models` on `mint_core` API server, web-runtime shim in `src-web/tauri.ts`, and Web UI `useImageProviderModels` hook ensuring identical dynamic image model discovery.
+
+

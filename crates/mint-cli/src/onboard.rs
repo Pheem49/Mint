@@ -14,94 +14,17 @@ struct OnboardService {
     enabled: bool,
 }
 
-pub(crate) const GEMINI_MODEL_PRESETS: &[&str] = &[
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-flash",
-];
+use mint_core::slash::models::HUGGINGFACE_MODEL_PRESETS;
 
-pub(crate) const ANTHROPIC_MODEL_PRESETS: &[&str] = &[
-    "claude-sonnet-5",
-    "claude-opus-5",
-    "claude-sonnet-4.6",
-    "claude-opus-4.8",
-    "claude-haiku-4.5",
-];
-
-pub(crate) const OPENAI_MODEL_PRESETS: &[&str] = &[
-    "gpt-5.6-sol",
-    "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5-thinking",
-    "gpt-5.5-pro",
-];
-
-pub(crate) const OPENROUTER_MODEL_PRESETS: &[&str] = &[
-    "openai/gpt-5.6-terra",
-    "anthropic/claude-sonnet-5",
-    "google/gemini-3.6-flash",
-    "x-ai/grok-4.5",
-    "deepseek/deepseek-v4-pro",
-];
-
-pub(crate) const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
-    "deepseek-v4-flash",
-    "deepseek-v4-pro",
-    "deepseek-chat",
-    "deepseek-reasoner",
-];
-
-pub(crate) const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
-    "Qwen/Qwen3.6-27B",
-    "deepseek-ai/DeepSeek-V4-Flash",
-    "google/gemma-3-27b-it",
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "microsoft/phi-4",
-    "zai-org/GLM-5.2-FP8",
-    "mistralai/Mistral-Large-Instruct",
-    "openai/gpt-oss-120b",
-];
-
-// ── Image Generation Providers ──────────────────────────────────────────────
-const NANOBANANA_IMAGE_MODEL_PRESETS: &[&str] = &[
-    "gemini-3.1-flash-image",
-    "gemini-3-pro-image",
-    "gemini-2.5-flash-image",
-];
-
-const DALLE_MODEL_PRESETS: &[&str] = &["gpt-image-1", "dall-e-3"];
-
-const STABILITY_MODEL_PRESETS: &[&str] = &[
-    "ultra",
-    "core",
-    "sd3.5-large",
-    "sd3.5-large-turbo",
-    "sd3-medium",
-];
-
-const IDEOGRAM_MODEL_PRESETS: &[&str] = &["V_3", "V_2", "V_2_TURBO"];
-
-const REPLICATE_MODEL_PRESETS: &[&str] = &[
-    "black-forest-labs/flux-1.1-pro",
-    "black-forest-labs/flux-kontext-pro",
-    "black-forest-labs/flux-fill-pro",
-    "black-forest-labs/flux-schnell",
-    "stability-ai/sdxl",
-    "timbrooks/instruct-pix2pix",
-];
-
-const BFL_MODEL_PRESETS: &[&str] = &[
-    "flux-pro-1.1",
-    "flux-pro-1.1-ultra",
-    "flux-pro",
-    "flux-dev",
-    "flux-schnell",
-    "flux-kontext-pro",
-    "flux-kontext-max",
-    "flux-fill-pro",
-];
+async fn fetch_image_models_with_notice(config: &mint_core::MintConfig, provider: &str) -> Vec<String> {
+    print!("\x1b[90mFetching available {provider} image models...\x1b[0m\r");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let models =
+        mint_core::media::image_models::image_model_options_for_provider_async(config, provider).await;
+    print!("\r\x1b[2K");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    models
+}
 
 // ── Video Generation Providers ──────────────────────────────────────────────
 const VEO_VIDEO_MODEL_PRESETS: &[&str] = &[
@@ -121,6 +44,16 @@ const GEMINI_LIVE_MODEL_PRESETS: &[&str] = &[
     "gemini-3.1-flash-live-preview",
 ];
 
+async fn fetch_models_with_notice(config: &mint_core::MintConfig, provider: &str) -> Vec<String> {
+    print!("\x1b[90mFetching available {provider} models...\x1b[0m\r");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let models =
+        mint_core::slash::models::model_options_for_provider_async(config, provider).await;
+    print!("\r\x1b[2K");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    models
+}
+
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
 
@@ -136,9 +69,10 @@ pub async fn run() -> Result<()> {
     println!("\x1b[33mStep 1: Core AI Activation (Gemini)\x1b[0m");
     println!("Mint is powered primarily by Google Gemini.");
     config.api_key = prompt_sensitive("Gemini API Key", &config.api_key)?;
+    let gemini_models = fetch_models_with_notice(&config, "gemini").await;
     config.gemini_model = prompt_select_or_custom(
         "Gemini Model",
-        static_model_options(GEMINI_MODEL_PRESETS),
+        gemini_models,
         Some(&config.gemini_model),
         "Custom Gemini model...",
     )?;
@@ -453,9 +387,10 @@ pub async fn run() -> Result<()> {
         println!("\n\x1b[36m--- Anthropic (Claude) API ---\x1b[0m");
         config.anthropic_api_key =
             prompt_sensitive("Anthropic API Key", &config.anthropic_api_key)?;
+        let anthropic_models = fetch_models_with_notice(&config, "anthropic").await;
         config.anthropic_model = prompt_select_or_custom(
             "Anthropic Model",
-            static_model_options(ANTHROPIC_MODEL_PRESETS),
+            anthropic_models,
             Some(&config.anthropic_model),
             "Custom Anthropic model...",
         )?;
@@ -467,9 +402,10 @@ pub async fn run() -> Result<()> {
     if is_selected("openai", &services) {
         println!("\n\x1b[36m--- OpenAI API ---\x1b[0m");
         config.openai_api_key = prompt_sensitive("OpenAI API Key", &config.openai_api_key)?;
+        let openai_models = fetch_models_with_notice(&config, "openai").await;
         config.openai_model = prompt_select_or_custom(
             "OpenAI Model",
-            static_model_options(OPENAI_MODEL_PRESETS),
+            openai_models,
             Some(&config.openai_model),
             "Custom OpenAI model...",
         )?;
@@ -485,9 +421,10 @@ pub async fn run() -> Result<()> {
         );
         config.openrouter_api_key =
             prompt_sensitive("OpenRouter API Key", &config.openrouter_api_key)?;
+        let openrouter_models = fetch_models_with_notice(&config, "openrouter").await;
         config.openrouter_model = prompt_select_or_custom(
             "OpenRouter Model Slug",
-            static_model_options(OPENROUTER_MODEL_PRESETS),
+            openrouter_models,
             Some(&config.openrouter_model),
             "Custom model slug...",
         )?;
@@ -502,9 +439,10 @@ pub async fn run() -> Result<()> {
             "\x1b[90mDeepSeek uses OpenAI-compatible model names. Prefer deepseek-v4-flash or deepseek-v4-pro; deepseek-chat and deepseek-reasoner are compatibility aliases scheduled for deprecation on 2026-07-24.\x1b[0m"
         );
         config.deepseek_api_key = prompt_sensitive("DeepSeek API Key", &config.deepseek_api_key)?;
+        let deepseek_models = fetch_models_with_notice(&config, "deepseek").await;
         config.deepseek_model = prompt_select_or_custom(
             "DeepSeek Model",
-            static_model_options(DEEPSEEK_MODEL_PRESETS),
+            deepseek_models,
             Some(&config.deepseek_model),
             "Custom DeepSeek model...",
         )?;
@@ -991,9 +929,10 @@ pub async fn run() -> Result<()> {
         println!(
             "\x1b[90mUses the same Gemini API key as Step 1. Select the image generation model.\x1b[0m"
         );
+        let nanobanana_models = fetch_image_models_with_notice(&config, "nanobanana").await;
         config.nanobanana_model = prompt_select_or_custom(
             "NanoBanana Model",
-            static_model_options(NANOBANANA_IMAGE_MODEL_PRESETS),
+            nanobanana_models,
             Some(&config.nanobanana_model),
             "Custom NanoBanana model...",
         )?;
@@ -1005,9 +944,10 @@ pub async fn run() -> Result<()> {
         println!(
             "\x1b[90mUses the same OpenAI API key. DALL·E 3 supports only 1 image per request; DALL·E 2 supports up to 10.\x1b[0m"
         );
+        let dalle_models = fetch_image_models_with_notice(&config, "dalle").await;
         config.dalle_model = prompt_select_or_custom(
             "DALL·E Model",
-            static_model_options(DALLE_MODEL_PRESETS),
+            dalle_models,
             Some(&config.dalle_model),
             "Custom DALL·E model...",
         )?;
@@ -1021,9 +961,10 @@ pub async fn run() -> Result<()> {
         );
         config.stability_api_key =
             prompt_sensitive("Stability AI API Key", &config.stability_api_key)?;
+        let stability_models = fetch_image_models_with_notice(&config, "stability").await;
         config.stability_model = prompt_select_or_custom(
             "Stability Model",
-            static_model_options(STABILITY_MODEL_PRESETS),
+            stability_models,
             Some(&config.stability_model),
             "Custom Stability model...",
         )?;
@@ -1038,9 +979,10 @@ pub async fn run() -> Result<()> {
             "\x1b[90mGet your API key at https://ideogram.ai/api. Supports V_3, V_2, and V_2_TURBO.\x1b[0m"
         );
         config.ideogram_api_key = prompt_sensitive("Ideogram API Key", &config.ideogram_api_key)?;
+        let ideogram_models = fetch_image_models_with_notice(&config, "ideogram").await;
         config.ideogram_model = prompt_select_or_custom(
             "Ideogram Model",
-            static_model_options(IDEOGRAM_MODEL_PRESETS),
+            ideogram_models,
             Some(&config.ideogram_model),
             "Custom Ideogram model...",
         )?;
@@ -1056,9 +998,10 @@ pub async fn run() -> Result<()> {
         );
         config.replicate_api_key =
             prompt_sensitive("Replicate API Token", &config.replicate_api_key)?;
+        let replicate_models = fetch_image_models_with_notice(&config, "replicate").await;
         config.replicate_model = prompt_select_or_custom(
             "Replicate Model (owner/model-name)",
-            static_model_options(REPLICATE_MODEL_PRESETS),
+            replicate_models,
             Some(&config.replicate_model),
             "Custom Replicate model...",
         )?;
@@ -1073,9 +1016,10 @@ pub async fn run() -> Result<()> {
             "\x1b[90mGet your API key at https://api.bfl.ml. Supports flux-pro-1.1, flux-pro-1.1-ultra, flux-dev, and flux-pro-1.0-fill.\x1b[0m"
         );
         config.bfl_api_key = prompt_sensitive("Black Forest Labs API Key", &config.bfl_api_key)?;
+        let bfl_models = fetch_image_models_with_notice(&config, "bfl").await;
         config.bfl_model = prompt_select_or_custom(
             "FLUX Model",
-            static_model_options(BFL_MODEL_PRESETS),
+            bfl_models,
             Some(&config.bfl_model),
             "Custom FLUX model...",
         )?;

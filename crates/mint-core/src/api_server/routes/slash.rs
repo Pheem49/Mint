@@ -41,7 +41,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                     return;
                 }
             };
-            let response = crate::slash::execute(&req, &mut config);
+            let response = crate::slash::execute_async(&req, &mut config).await;
             if slash_persists_config(&response) {
                 let _ = save_config(&config);
             }

@@ -39,6 +39,7 @@ Rules:
 - Write only the file, then briefly confirm what you wrote.";
 
 pub mod catalog;
+pub mod model_fetcher;
 pub mod models;
 mod render;
 
@@ -372,6 +373,32 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
     }
 }
 
+/// Asynchronous variant of [`execute`] that fetches live data from APIs
+/// (such as provider model lists for `/models`) before falling back to static presets.
+pub async fn execute_async(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
+    let raw = req.input.trim();
+    if !raw.starts_with('/') {
+        return error("Not a slash command (must begin with '/')");
+    }
+
+    let (cmd, rest) = match raw.split_once([' ', '\t']) {
+        Some((c, r)) => (c, r.trim_start()),
+        None => (raw, ""),
+    };
+
+    if cmd == "/models" {
+        return cmd_models_async(rest, config).await;
+    }
+    if cmd == "/image-provider" {
+        return cmd_image_provider_async(rest, config).await;
+    }
+    if cmd == "/image-models" {
+        return cmd_image_models_async(rest, config).await;
+    }
+
+    execute(req, config)
+}
+
 fn cmd_help(cli: bool) -> SlashResponse {
     let rows: Vec<Vec<String>> = catalog::SLASH_COMMANDS
         .iter()
@@ -653,6 +680,169 @@ fn cmd_models(rest: &str, config: &mut MintConfig) -> SlashResponse {
     SlashResponse::Applied {
         // No Markdown body: the `provider_change` chip is the feedback on both
         // surfaces (see the `ProviderChanged` handling in each host).
+        markdown: String::new(),
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ProviderChanged { display },
+        ],
+    }
+}
+
+async fn cmd_models_async(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    if rest.is_empty() {
+        return cmd_models(rest, config);
+    }
+    // `/models <provider>` (optionally `<provider> <model>` or `<provider>/<model>`).
+    let (provider, model) = match rest.split_once(['/', ' ']) {
+        Some((p, m)) => (p.trim(), Some(m.trim()).filter(|m| !m.is_empty())),
+        None => (rest.trim(), None),
+    };
+
+    // Provider given but no model yet — offer the model picker using live fetch first.
+    if model.is_none() {
+        let options = models::model_options_for_provider_async(config, provider).await;
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/models {provider}"),
+                title: format!("Select {provider} model"),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    cmd_models(rest, config)
+}
+
+async fn cmd_image_provider_async(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    use crate::media::image_models;
+
+    let available_providers = vec![
+        "nanobanana",
+        "dalle",
+        "stability",
+        "ideogram",
+        "replicate",
+        "bfl",
+    ];
+
+    if rest.is_empty() {
+        return SlashResponse::NeedsChoice {
+            command: "/image-provider".into(),
+            title: "Select Image Generation provider".into(),
+            options: available_providers
+                .into_iter()
+                .map(|p| SlashChoice {
+                    label: image_models::image_provider_display_name(p),
+                    value: p.to_string(),
+                })
+                .collect(),
+        };
+    }
+
+    let (provider, model) = match rest.split_once(['/', ' ']) {
+        Some((p, m)) => (p.trim(), Some(m.trim()).filter(|m| !m.is_empty())),
+        None => (rest.trim(), None),
+    };
+
+    if model.is_none() {
+        let options = image_models::image_model_options_for_provider_async(config, provider).await;
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/image-provider {provider}"),
+                title: format!("Select {} image model", image_models::image_provider_display_name(provider)),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    image_models::set_active_image_provider_model(config, provider, model);
+    let active_model = image_models::active_image_model_for_provider(config, provider);
+    let display = format!("{} • {}", image_models::image_provider_display_name(provider), active_model);
+
+    SlashResponse::Applied {
+        markdown: String::new(),
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ProviderChanged { display },
+        ],
+    }
+}
+
+async fn cmd_image_models_async(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    use crate::media::image_models;
+
+    let trimmed = rest.trim();
+    let known_providers = [
+        "nanobanana", "gemini", "google", "dalle", "openai", "stability", "ideogram", "replicate",
+        "bfl", "flux",
+    ];
+
+    let (provider, model) = if trimmed.is_empty() {
+        let p = if config.image_gen_provider.is_empty() {
+            "nanobanana".to_string()
+        } else {
+            config.image_gen_provider.clone()
+        };
+        (p, None)
+    } else {
+        let (first_word, rem) = trimmed
+            .split_once(['/', ' '])
+            .map(|(p, m)| (p.trim(), Some(m.trim()).filter(|s| !s.is_empty())))
+            .unwrap_or((trimmed, None));
+
+        if known_providers.contains(&first_word.to_lowercase().as_str()) {
+            (first_word.to_string(), rem.map(|s| s.to_string()))
+        } else {
+            let p = if config.image_gen_provider.is_empty() {
+                "nanobanana".to_string()
+            } else {
+                config.image_gen_provider.clone()
+            };
+            (p, Some(trimmed.to_string()))
+        }
+    };
+
+    if model.is_none() {
+        let options = image_models::image_model_options_for_provider_async(config, &provider).await;
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/image-models {provider}"),
+                title: format!(
+                    "Select {} image model",
+                    image_models::image_provider_display_name(&provider)
+                ),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    let model_str = model.unwrap_or_default();
+    image_models::set_active_image_provider_model(config, &provider, Some(&model_str));
+    let display = format!(
+        "{} • {}",
+        image_models::image_provider_display_name(&provider),
+        model_str
+    );
+
+    SlashResponse::Applied {
         markdown: String::new(),
         effects: vec![
             SlashEffect::ConfigChanged,

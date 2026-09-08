@@ -297,6 +297,102 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             }
         }
 
+        ("GET", "/api/models") => {
+            // Query params: provider=<id>&apiKey=<key>&baseUrl=<url>
+            let provider = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("provider="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+            let api_key = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("apiKey="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+            let base_url_opt = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("baseUrl="))
+                .map(|v| percent_decode(v));
+
+            let dynamic = crate::slash::model_fetcher::fetch_provider_models(
+                &provider,
+                &api_key,
+                base_url_opt.as_deref(),
+            )
+            .await;
+
+            let models = if !dynamic.is_empty() {
+                dynamic
+            } else {
+                // Fallback: static presets so the UI is never empty.
+                match load_config() {
+                    Ok(cfg) => crate::slash::models::model_options_for_provider(&cfg, &provider),
+                    Err(_) => Vec::new(),
+                }
+            };
+
+            send_json_response(
+                socket,
+                "200 OK",
+                &serde_json::json!({ "models": models }).to_string(),
+            )
+            .await;
+        }
+
+        ("GET", "/api/image-models") => {
+            // Query params: provider=<id>&apiKey=<key>
+            let provider = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("provider="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+            let mut api_key = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("apiKey="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+
+            let cfg_opt = load_config().ok();
+            if api_key.trim().is_empty() {
+                if let Some(ref cfg) = cfg_opt {
+                    api_key = match provider.to_lowercase().as_str() {
+                        "nanobanana" | "gemini" | "google" => cfg.api_key.clone(),
+                        "dalle" | "openai" => cfg.openai_api_key.clone(),
+                        "stability" => cfg.stability_api_key.clone(),
+                        "ideogram" => cfg.ideogram_api_key.clone(),
+                        "replicate" => cfg.replicate_api_key.clone(),
+                        "bfl" | "flux" => cfg.bfl_api_key.clone(),
+                        _ => String::new(),
+                    };
+                }
+            }
+
+            let dynamic = crate::media::image_model_fetcher::fetch_image_provider_models(
+                &provider,
+                &api_key,
+            )
+            .await;
+
+            let models = if !dynamic.is_empty() {
+                dynamic
+            } else {
+                match cfg_opt {
+                    Some(ref cfg) => crate::media::image_models::image_model_options_for_provider(cfg, &provider),
+                    None => match load_config() {
+                        Ok(cfg) => crate::media::image_models::image_model_options_for_provider(&cfg, &provider),
+                        Err(_) => Vec::new(),
+                    },
+                }
+            };
+
+            send_json_response(
+                socket,
+                "200 OK",
+                &serde_json::json!({ "models": models }).to_string(),
+            )
+            .await;
+        }
+
         _ => unreachable!(
             "api_server routed an unhandled route into routes::misc::execute: {method} {route}"
         ),
