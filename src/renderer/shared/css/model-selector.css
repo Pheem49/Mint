@@ -1,0 +1,359 @@
+/**
+ * shared/css/model-selector.css
+ * Spotlight / Quick Switcher Popover for AI Provider & Model in Chat Bar
+ */
+
+.model-selector-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  grid-column: 3;
+  grid-row: 3;
+}
+
+#chat-form:not(:has(.mint-attachment)) .model-selector-container {
+  grid-row: 2;
+}
+
+/* ─── Trigger Button ────────────────────────────────────────────────────────── */
+
+.model-selector-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+  color: var(--text-soft, #a1a1aa);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  max-width: 260px;
+  -webkit-app-region: no-drag;
+}
+
+.model-selector-trigger:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--text-main, #f4f4f5);
+}
+
+.model-selector-trigger.active {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: var(--accent, #10b981);
+  color: var(--text-main, #f4f4f5);
+}
+
+.model-selector-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.model-selector-trigger-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, #10b981);
+  flex-shrink: 0;
+}
+
+.model-selector-trigger-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-selector-trigger-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted, #71717a);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.model-selector-trigger-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* ─── Spotlight Floating Popover ────────────────────────────────────────────── */
+
+.model-spotlight-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 420px;
+  max-width: min(94vw, 460px);
+  max-height: 420px;
+  background: #18181b;
+  background: color-mix(in srgb, var(--surface, #18181b) 94%, black);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 1000;
+  animation: modelPopoverSlideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  -webkit-app-region: no-drag;
+}
+
+@keyframes modelPopoverSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ─── Search Bar ────────────────────────────────────────────────────────────── */
+
+.model-spotlight-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  transition: all 0.15s ease;
+}
+
+.model-spotlight-search-bar:focus-within {
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom-color: rgba(255, 255, 255, 0.16);
+}
+
+.model-spotlight-search-bar .search-icon {
+  flex-shrink: 0;
+  color: var(--text-muted, #71717a);
+}
+
+.model-spotlight-input,
+.model-spotlight-input:focus,
+.model-spotlight-input:focus-visible {
+  flex: 1;
+  min-width: 0;
+  background: transparent !important;
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  color: var(--text-main, #f4f4f5);
+  font-family: inherit;
+  font-size: 0.82rem;
+}
+
+.model-spotlight-input::placeholder {
+  color: var(--text-muted, #71717a);
+}
+
+.search-clear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted, #71717a);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.search-clear-btn:hover {
+  color: var(--text-main, #f4f4f5);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ─── List & Groups ─────────────────────────────────────────────────────────── */
+
+.model-spotlight-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 310px;
+  padding: 6px 0;
+}
+
+.model-spotlight-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.model-spotlight-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.model-spotlight-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+.model-spotlight-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.model-spotlight-group {
+  margin-bottom: 4px;
+}
+
+.model-spotlight-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted, #71717a);
+}
+
+.group-header-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted, #71717a);
+}
+
+.model-spotlight-group-items {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Item Row ──────────────────────────────────────────────────────────────── */
+
+.model-spotlight-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 12px;
+  margin: 1px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+
+.model-spotlight-item:hover,
+.model-spotlight-item.is-highlighted {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.model-spotlight-item.is-active {
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.model-spotlight-item.is-active.is-highlighted {
+  background: rgba(16, 185, 129, 0.18);
+}
+
+.model-item-left {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.model-item-name {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-main, #f4f4f5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-item-repo {
+  font-size: 0.68rem;
+  color: var(--text-muted, #71717a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-item-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.model-item-badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.model-item-check {
+  color: var(--accent, #10b981);
+  flex-shrink: 0;
+}
+
+/* ─── Badges (Neutral/Slate Ghost - Modern Dev Tool Style) ────────────────────── */
+
+.model-tag-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6.5px;
+  border-radius: 4px;
+  font-size: 0.67rem;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.model-tag-badge svg {
+  opacity: 0.75;
+  color: inherit;
+  flex-shrink: 0;
+}
+
+.model-spotlight-item:hover .model-tag-badge,
+.model-spotlight-item.is-highlighted .model-tag-badge {
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.model-spotlight-item.is-active .model-tag-badge {
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.13);
+}
+
+/* Neutral subtle accents across badges */
+.model-tag-badge.badge-fast,
+.model-tag-badge.badge-reasoning,
+.model-tag-badge.badge-top,
+.model-tag-badge.badge-vision {
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+/* ─── Empty State ───────────────────────────────────────────────────────────── */
+
+.model-spotlight-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: var(--text-muted, #71717a);
+  font-size: 0.82rem;
+  text-align: center;
+}

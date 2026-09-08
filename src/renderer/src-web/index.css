@@ -17,6 +17,7 @@
 @import '../shared/css/image-studio.css';
 @import '../shared/css/veo-studio.css';
 @import '../shared/css/agent-observability.css';
+@import '../shared/css/model-selector.css';
 
 * {
   box-sizing: border-box;

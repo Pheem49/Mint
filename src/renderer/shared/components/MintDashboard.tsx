@@ -1453,6 +1453,46 @@ export default function MintDashboard() {
     }
   }
 
+  async function changeProviderAndModel(provider: string, modelName: string) {
+    try {
+      const config = await window.settingsApi.getSettings()
+      config.aiProvider = provider
+      if (provider === 'gemini') {
+        config.geminiModel = modelName
+      } else if (provider === 'openai') {
+        config.openaiModel = modelName
+      } else if (provider === 'openrouter') {
+        config.openrouterModel = modelName
+      } else if (provider === 'deepseek') {
+        config.deepseekModel = modelName
+      } else if (provider === 'anthropic') {
+        config.anthropicModel = modelName
+      } else if (provider === 'huggingface') {
+        config.hfModel = modelName
+      } else if (provider === 'local_openai') {
+        config.localModelName = modelName
+      } else if (provider === 'ollama') {
+        config.ollamaModel = modelName
+      } else if (provider.startsWith('custom:')) {
+        const id = provider.replace(/^custom:/, '')
+        config.customModelSelections = {
+          ...(config.customModelSelections ?? {}),
+          [id]: modelName
+        }
+      }
+      await window.settingsApi.saveSettings(config)
+      setSettingsConfig(config)
+      setStatus(await getRuntimeStatus())
+
+      // Record system event in chat history
+      const displayName = formatProviderChangeText(provider, modelName)
+      await saveSystemInteraction(conversationId, displayName, '', 'system', 'provider_change')
+      await refreshHistory()
+    } catch (reason) {
+      setError(errorMessage(reason))
+    }
+  }
+
   async function changeGeminiLiveVoice(voiceName: string) {
     try {
       const config = await window.settingsApi.getSettings()
@@ -1694,6 +1734,7 @@ export default function MintDashboard() {
             onSelectWorkspace={isDesktopApp ? selectWorkspace : undefined}
             settingsConfig={settingsConfig}
             onSetModel={changeModel}
+            onSelectModelAndProvider={changeProviderAndModel}
             onSetGeminiLiveVoice={changeGeminiLiveVoice}
             onApproval={handleApproval}
             onCancelMessage={handleCancelMessage}

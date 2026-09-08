@@ -30,6 +30,7 @@ import { useVoiceInput } from '@/voiceInput'
 import { useGeminiLiveVoice } from '../utils/useGeminiLiveVoice'
 import GeminiLiveOverlay from './GeminiLiveOverlay'
 import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documentTypes'
+import ModelSelectorPopover from './ModelSelectorPopover'
 
 import {
   APP_ICON_PATH,
@@ -42,6 +43,7 @@ import {
   stopGeminiLiveSession,
   listGitCheckpoints,
   rollbackGitCheckpoint,
+  fetchProviderModels,
 } from '@/tauri'
 
 
@@ -93,6 +95,7 @@ interface ChatPanelProps {
   onApproval: (approved: boolean, autoApproveSession?: boolean, answer?: string) => void
   settingsConfig: any
   onSetModel: (model: string) => void
+  onSelectModelAndProvider?: (provider: string, model: string) => void
   onCancelMessage: () => void
   onClearMessages: () => void
   onSetGeminiLiveVoice: (voice: string) => Promise<void>
@@ -145,6 +148,7 @@ export default function ChatPanel({
   onApproval,
   settingsConfig,
   onSetModel,
+  onSelectModelAndProvider,
   onCancelMessage,
   onClearMessages,
   onSetGeminiLiveVoice,
@@ -168,26 +172,49 @@ export default function ChatPanel({
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
 
   useEffect(() => {
+    let cancelled = false
     const fetchOllamaModels = async () => {
-      if (status?.activeProvider !== 'ollama') return;
-      const host = settingsConfig?.ollamaHost || 'http://localhost:11434';
-      const cleanHost = host.endsWith('/') ? host.slice(0, -1) : host;
+      const host = settingsConfig?.ollamaHost || 'http://localhost:11434'
+      const cleanHost = host.endsWith('/') ? host.slice(0, -1) : host
       try {
-        const res = await fetch(`${cleanHost}/api/tags`);
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 2000)
+        const res = await fetch(`${cleanHost}/api/tags`, { signal: controller.signal })
+        clearTimeout(timer)
         if (res.ok) {
-          const data = await res.json();
-          if (data && Array.isArray(data.models)) {
-            setDynamicOllamaModels(data.models.map((m: any) => m.name));
-            return;
+          const data = await res.json()
+          if (!cancelled && data && Array.isArray(data.models) && data.models.length > 0) {
+            setDynamicOllamaModels(data.models.map((m: any) => m.name))
+            return
           }
         }
       } catch (err) {
-        // fallback to default if fetch fails
+        // Direct fetch failed or timed out — try backend Tauri / API server
       }
-      setDynamicOllamaModels(OLLAMA_MODELS);
+
+      try {
+        const live = await fetchProviderModels('ollama', '')
+        if (!cancelled && live && live.length > 0) {
+          setDynamicOllamaModels(live)
+          return
+        }
+      } catch (err) {
+        // Fallback
+      }
+
+      if (!cancelled) {
+        if (settingsConfig?.ollamaModel) {
+          setDynamicOllamaModels([settingsConfig.ollamaModel])
+        } else {
+          setDynamicOllamaModels(OLLAMA_MODELS)
+        }
+      }
     }
-    fetchOllamaModels();
-  }, [status?.activeProvider, settingsConfig?.ollamaHost])
+    fetchOllamaModels()
+    return () => {
+      cancelled = true
+    }
+  }, [settingsConfig?.ollamaHost, settingsConfig?.ollamaModel])
 
   useEffect(() => {
     if (!sending) {
@@ -1554,73 +1581,21 @@ export default function ChatPanel({
           <button id="screen-capture-btn" type="button" onClick={onCaptureScreen} aria-label="Capture screen">
             <span className="screen-capture-eye" aria-hidden="true" />
           </button>
-          <div className="chat-provider-select" style={{ display: 'flex', gap: '4px', padding: 0, background: 'transparent', border: 0, width: '100%', height: '32px' }}>
-            <select 
-              value={status?.activeProvider ?? ''} 
-              onChange={(event) => onSetProvider(event.target.value)}
-              style={{
-                flex: 1,
-                minWidth: '65px',
-                height: '100%',
-                padding: '0 20px 0 6px',
-                background: 'transparent',
-                border: 0,
-                color: 'var(--text-soft)',
-                fontSize: '0.78rem',
-                outline: 'none',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {status?.availableProviders.map((provider) => {
-                let displayName = provider
-                if (provider === 'gemini') displayName = 'Gemini'
-                else if (provider === 'openai') displayName = 'OpenAI'
-                else if (provider === 'openrouter') displayName = 'OpenRouter'
-                else if (provider === 'deepseek') displayName = 'DeepSeek'
-                else if (provider === 'anthropic') displayName = 'Claude'
-                else if (provider === 'huggingface') displayName = 'HF'
-                else if (provider === 'local_openai') displayName = 'Local'
-                else if (provider === 'ollama') displayName = 'Ollama'
-                else if (provider.startsWith('custom:')) {
-                  const id = provider.replace(/^custom:/, '')
-                  const cp = (settingsConfig?.customProviders ?? []).find(p => p.id === id)
-                  displayName = cp?.displayName || id
-                }
-                return <option key={provider} value={provider}>{displayName}</option>
-              })}
-            </select>
-            {(availableModels.length > 0 || activeModel) && (
-              <select 
-                value={activeModel} 
-                onChange={(event) => onSetModel(event.target.value)}
-                style={{
-                  flex: 1.2,
-                  minWidth: '85px',
-                  height: '100%',
-                  padding: '0 20px 0 6px',
-                  background: 'transparent',
-                  border: 0,
-                  color: 'var(--text-soft)',
-                  fontSize: '0.78rem',
-                  outline: 'none',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                {availableModels.map((model) => (
-                  <option key={model} value={model}>{model.split('/').pop()}</option>
-                ))}
-                {!availableModels.includes(activeModel) && activeModel && (
-                  <option value={activeModel}>{activeModel.split('/').pop()}</option>
-                )}
-              </select>
-            )}
-          </div>
+          <ModelSelectorPopover
+            activeProvider={status?.activeProvider ?? ''}
+            activeModel={activeModel}
+            availableProviders={status?.availableProviders ?? []}
+            settingsConfig={settingsConfig}
+            dynamicOllamaModels={dynamicOllamaModels}
+            onSelect={(provider, model) => {
+              if (onSelectModelAndProvider) {
+                onSelectModelAndProvider(provider, model)
+              } else {
+                onSetProvider(provider)
+                onSetModel(model)
+              }
+            }}
+          />
           <button
             id="mic-btn"
             className={`${isRecording ? 'is-recording' : ''} ${voiceMode ? 'voice-mode-active' : ''}`}

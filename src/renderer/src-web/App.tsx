@@ -40,6 +40,21 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [])
 
+  useEffect(() => {
+    const handlePreloadError = (event: Event) => {
+      // Prevent crash when an outdated chunk hash is requested after a rebuild
+      event.preventDefault()
+      const key = 'mint_vite_preload_reload'
+      if (typeof window !== 'undefined' && !window.sessionStorage.getItem(key)) {
+        window.sessionStorage.setItem(key, 'true')
+        window.location.reload()
+      }
+    }
+    window.addEventListener('vite:preloadError', handlePreloadError)
+    return () => window.removeEventListener('vite:preloadError', handlePreloadError)
+  }, [])
+
+
   let content = <MintDashboard />
 
   // For web, show settings as a centered modal overlay instead of a full-page route

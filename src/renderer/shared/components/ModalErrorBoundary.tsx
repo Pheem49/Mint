@@ -11,6 +11,18 @@ interface State {
   error?: unknown
 }
 
+function isChunkLoadError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err || '')
+  const name = err instanceof Error ? err.name : ''
+  return (
+    name === 'ChunkLoadError' ||
+    /Failed to fetch dynamically imported module/i.test(msg) ||
+    /Loading chunk .* failed/i.test(msg) ||
+    /error loading dynamically imported module/i.test(msg) ||
+    /Failed to load module script/i.test(msg)
+  )
+}
+
 export default class ModalErrorBoundary extends React.Component<Props, State> {
   state: State = { hasError: false }
 
@@ -22,8 +34,19 @@ export default class ModalErrorBoundary extends React.Component<Props, State> {
     console.error('Modal component failed to render:', error)
   }
 
+  handleRetry = () => {
+    if (isChunkLoadError(this.state.error)) {
+      window.location.reload()
+    } else {
+      this.setState({ hasError: false, error: undefined })
+    }
+  }
+
   render() {
     if (this.state.hasError) {
+      const isChunk = isChunkLoadError(this.state.error)
+      const errorMsg = this.state.error instanceof Error ? this.state.error.message : String(this.state.error || '')
+
       return (
         <div
           style={{
@@ -40,15 +63,32 @@ export default class ModalErrorBoundary extends React.Component<Props, State> {
           }}
         >
           <div style={{ fontSize: '1.05rem', fontWeight: 600 }}>
-            {this.props.title || 'Could not load settings'}
+            {isChunk ? 'App update detected' : (this.props.title || 'Could not load settings')}
           </div>
-          <div style={{ fontSize: '0.875rem', color: 'var(--text-muted, #a1a1aa)', maxWidth: 400 }}>
-            A component failed to render. You can try refreshing the view or closing the modal.
+          <div style={{ fontSize: '0.875rem', color: 'var(--text-muted, #a1a1aa)', maxWidth: 420 }}>
+            {isChunk
+              ? 'A newer version of the application was built or loaded. Please reload the page to apply the update.'
+              : 'A component failed to render. You can try refreshing the view or closing the modal.'}
           </div>
+          {errorMsg && !isChunk && (
+            <div
+              style={{
+                fontSize: '0.75rem',
+                color: '#ef4444',
+                background: 'rgba(239, 68, 68, 0.1)',
+                padding: '6px 12px',
+                borderRadius: 6,
+                maxWidth: 460,
+                wordBreak: 'break-word',
+              }}
+            >
+              {errorMsg}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
             <button
               type="button"
-              onClick={() => this.setState({ hasError: false })}
+              onClick={this.handleRetry}
               style={{
                 padding: '8px 20px',
                 borderRadius: 8,
@@ -60,7 +100,7 @@ export default class ModalErrorBoundary extends React.Component<Props, State> {
                 fontSize: '0.9rem',
               }}
             >
-              Retry
+              {isChunk ? 'Reload Page' : 'Retry'}
             </button>
             <button
               type="button"
@@ -84,3 +124,4 @@ export default class ModalErrorBoundary extends React.Component<Props, State> {
     return this.props.children
   }
 }
+

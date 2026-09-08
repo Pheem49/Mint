@@ -313,7 +313,15 @@ export default function GeneralTab({
                   </svg>
                   Google Gemini (Cloud)
                 </div>
-                {config.aiProvider === 'gemini' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'gemini' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'gemini')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
@@ -360,7 +368,15 @@ export default function GeneralTab({
                   </svg>
                   Anthropic Claude
                 </div>
-                {config.aiProvider === 'anthropic' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'anthropic' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'anthropic')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
@@ -408,7 +424,15 @@ export default function GeneralTab({
                   </svg>
                   OpenAI
                 </div>
-                {config.aiProvider === 'openai' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'openai' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'openai')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
@@ -458,7 +482,15 @@ export default function GeneralTab({
                   </svg>
                   OpenRouter
                 </div>
-                {config.aiProvider === 'openrouter' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'openrouter' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'openrouter')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
@@ -505,7 +537,15 @@ export default function GeneralTab({
                   </svg>
                   DeepSeek
                 </div>
-                {config.aiProvider === 'deepseek' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'deepseek' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'deepseek')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
@@ -554,7 +594,15 @@ export default function GeneralTab({
                   </svg>
                   Hugging Face (Inference API)
                 </div>
-                {config.aiProvider === 'huggingface' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'huggingface' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'huggingface')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
@@ -602,7 +650,15 @@ export default function GeneralTab({
                   </svg>
                   LM Studio / Local OpenAI
                 </div>
-                {config.aiProvider === 'local_openai' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'local_openai' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'local_openai')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
@@ -649,7 +705,15 @@ export default function GeneralTab({
                   </svg>
                   Ollama (Local)
                 </div>
-                {config.aiProvider === 'ollama' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'ollama' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'ollama')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
@@ -853,7 +917,19 @@ export default function GeneralTab({
                       {imageProviderIcon}
                       {prov.cardTitle}
                     </div>
-                    {config.imageGenProvider === prov.id && <span className="provider-active-badge">Active</span>}
+                    <div className="provider-card-actions">
+                      {config.imageGenProvider === prov.id ? (
+                        <span className="provider-active-badge">Active</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-secondary btn-small"
+                          onClick={() => updateField('imageGenProvider', prov.id)}
+                        >
+                          Set active
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="provider-card-body">
                     {modelField && opts.length > 0 && (
@@ -997,7 +1073,17 @@ export default function GeneralTab({
                       {cp.displayName || cp.id || 'Unnamed Provider'}
                     </div>
                     <div className="provider-card-actions">
-                      {isActive && <span className="provider-active-badge">Active</span>}
+                      {isActive ? (
+                        <span className="provider-active-badge">Active</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-secondary btn-small"
+                          onClick={() => updateField('aiProvider', `custom:${cp.id}`)}
+                        >
+                          Set active
+                        </button>
+                      )}
                       <button
                         className="btn btn-primary btn-xs"
                         onClick={() => handleSaveProvider(cp.id)}
