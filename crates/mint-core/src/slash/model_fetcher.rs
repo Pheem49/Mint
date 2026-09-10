@@ -181,6 +181,85 @@ async fn fetch_gemini_models(api_key: &str) -> Result<Vec<String>, ()> {
     Ok(models)
 }
 
+// -- Gemini Live (BidiGenerateContent / native-audio) -----------------------
+
+/// Fetch the list of Gemini models that support the Live / BidiGenerateContent
+/// API (used by the realtime voice feature). Returns `Vec::new()` on any error
+/// or when `api_key` is empty — callers fall back to the static preset list.
+///
+/// Uses a separate cache key (`gemini_live:…`) so it doesn't collide with
+/// the regular `gemini:…` text-chat model cache.
+pub async fn fetch_gemini_live_models(api_key: &str) -> Vec<String> {
+    if api_key.is_empty() {
+        return Vec::new();
+    }
+
+    let key_ident: String = api_key.chars().take(8).collect();
+    let cache_key = format!("gemini_live:{key_ident}");
+    if let Some(cached) = cache_get(&cache_key) {
+        return cached;
+    }
+
+    let models = fetch_gemini_live_models_inner(api_key)
+        .await
+        .unwrap_or_default();
+
+    if !models.is_empty() {
+        cache_set(&cache_key, models.clone());
+    }
+
+    models
+}
+
+#[derive(Deserialize)]
+struct GeminiLiveModelsResponse {
+    models: Vec<GeminiLiveModel>,
+}
+
+#[derive(Deserialize)]
+struct GeminiLiveModel {
+    name: String,
+    #[serde(rename = "supportedGenerationMethods")]
+    supported_generation_methods: Option<Vec<String>>,
+}
+
+async fn fetch_gemini_live_models_inner(api_key: &str) -> Result<Vec<String>, ()> {
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models?key={api_key}&pageSize=200"
+    );
+    let resp = reqwest_get(&url, None).await?;
+    let parsed: GeminiLiveModelsResponse = serde_json::from_str(&resp).map_err(|_| ())?;
+
+    let models = parsed
+        .models
+        .into_iter()
+        .filter(|m| {
+            // Keep models that explicitly support BidiGenerateContent (the Live API),
+            // or whose name contains live/native-audio heuristics for older API responses
+            // that may not yet advertise the BidiGenerateContent method.
+            let methods = m.supported_generation_methods.as_deref().unwrap_or(&[]);
+            let supports_bidi = methods.iter().any(|meth| meth == "BidiGenerateContent");
+            let name_lower = m.name.to_lowercase();
+            let heuristic = name_lower.contains("native-audio") || name_lower.contains("-live-");
+            supports_bidi || heuristic
+        })
+        .filter_map(|m| {
+            // Strip "models/" prefix → e.g. "gemini-2.5-flash-native-audio-preview-12-2025"
+            let id = m.name.strip_prefix("models/").unwrap_or(&m.name).to_string();
+            // Exclude TTS-only models (they're not BidiGenerateContent even if
+            // they mention audio) and embedding models.
+            let lower = id.to_lowercase();
+            if lower.contains("tts") || lower.contains("embedding") {
+                None
+            } else {
+                Some(id)
+            }
+        })
+        .collect();
+
+    Ok(models)
+}
+
 // -- Anthropic ---------------------------------------------------------------
 
 #[derive(Deserialize)]

@@ -57,6 +57,31 @@ async fn fetch_models_with_notice(config: &mint_core::MintConfig, provider: &str
     models
 }
 
+/// Fetch Gemini Live–capable models (BidiGenerateContent / native-audio) with a
+/// short spinner. Falls back to `GEMINI_LIVE_MODEL_PRESETS` on any error so the
+/// UI is never empty.
+async fn fetch_live_models_with_notice(api_key: &str) -> Vec<String> {
+    print!("\x1b[90mFetching available Gemini Live models...\x1b[0m\r");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let live = mint_core::slash::model_fetcher::fetch_gemini_live_models(api_key).await;
+    print!("\r\x1b[2K");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+
+    if live.is_empty() {
+        // Fallback: static presets.
+        static_model_options(GEMINI_LIVE_MODEL_PRESETS)
+    } else {
+        // Merge: live first, then any presets not already present.
+        let mut merged = live;
+        for p in GEMINI_LIVE_MODEL_PRESETS {
+            if !merged.iter().any(|m| m == p) {
+                merged.push(p.to_string());
+            }
+        }
+        merged
+    }
+}
+
 pub async fn run() -> Result<()> {
     let mut config = load_config()?;
 
@@ -1077,9 +1102,11 @@ pub async fn run() -> Result<()> {
             .and_then(|v| v.as_str())
             .unwrap_or("gemini-2.5-flash-native-audio-preview-12-2025")
             .to_string();
+        // Fetch live-capable models dynamically; fallback to presets if offline/no key.
+        let live_model_options = fetch_live_models_with_notice(&config.api_key).await;
         let selected_live_model = prompt_select_or_custom(
             "Realtime Live Model",
-            static_model_options(GEMINI_LIVE_MODEL_PRESETS),
+            live_model_options,
             Some(&current_live_model),
             "Custom realtime live model...",
         )?;

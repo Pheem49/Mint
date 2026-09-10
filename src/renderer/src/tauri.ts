@@ -332,6 +332,15 @@ export async function fetchVideoProviderModels(
   return invoke<string[]>('fetch_video_provider_models', { provider, apiKey: apiKey || '' })
 }
 
+/** Fetch the list of Gemini Live–capable models (BidiGenerateContent / native-audio)
+ *  from the Gemini API. Returns a dynamic list on success; falls back to an empty
+ *  array so the hook can use its static GEMINI_LIVE_MODELS preset instead.
+ *  Results are cached for 1 hour on the Rust side. */
+export async function fetchGeminiLiveModels(apiKey: string): Promise<string[]> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_gemini_live_models', { apiKey: apiKey || '' })
+}
+
 export async function uploadFile(file: File): Promise<string> {
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();

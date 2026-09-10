@@ -339,6 +339,37 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             .await;
         }
 
+        ("GET", "/api/live-models") => {
+            // Query param: apiKey=<gemini_key>
+            // Returns models that support Gemini Live (BidiGenerateContent / native-audio).
+            // Falls back to the static GEMINI_LIVE_MODELS preset list so the UI is never empty.
+            let api_key = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("apiKey="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+
+            let dynamic =
+                crate::slash::model_fetcher::fetch_gemini_live_models(&api_key).await;
+
+            let models = if !dynamic.is_empty() {
+                dynamic
+            } else {
+                // Static preset fallback — always two well-known live models.
+                vec![
+                    "gemini-2.5-flash-native-audio-preview-12-2025".to_string(),
+                    "gemini-3.1-flash-live-preview".to_string(),
+                ]
+            };
+
+            send_json_response(
+                socket,
+                "200 OK",
+                &serde_json::json!({ "models": models }).to_string(),
+            )
+            .await;
+        }
+
         ("GET", "/api/image-models") => {
             // Query params: provider=<id>&apiKey=<key>
             let provider = query

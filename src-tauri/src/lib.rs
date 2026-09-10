@@ -263,6 +263,31 @@ async fn fetch_video_provider_models(
     }
 }
 
+/// Returns the dynamic list of Gemini Live–capable models (BidiGenerateContent /
+/// native-audio) from the Gemini API. Returns the static preset fallback if the
+/// network is unavailable or the API key is absent/invalid.
+#[tauri::command]
+async fn fetch_gemini_live_models(api_key: String) -> Result<Vec<String>, String> {
+    let config = load_config().map_err(|e| e.to_string())?;
+    let key = if api_key.trim().is_empty() {
+        config.api_key.clone()
+    } else {
+        api_key
+    };
+    let dynamic =
+        mint_core::slash::model_fetcher::fetch_gemini_live_models(&key).await;
+
+    if !dynamic.is_empty() {
+        Ok(dynamic)
+    } else {
+        // Static preset fallback.
+        Ok(vec![
+            "gemini-2.5-flash-native-audio-preview-12-2025".to_string(),
+            "gemini-3.1-flash-live-preview".to_string(),
+        ])
+    }
+}
+
 #[tauri::command]
 async fn create_workspace_file(path: String) -> Result<(), String> {
     std::fs::write(&path, "").map_err(|error| error.to_string())
@@ -1887,6 +1912,7 @@ pub fn run() {
             fetch_provider_models,
             fetch_image_provider_models,
             fetch_video_provider_models,
+            fetch_gemini_live_models,
             get_workspace_tree,
             create_workspace_file,
             create_workspace_folder,

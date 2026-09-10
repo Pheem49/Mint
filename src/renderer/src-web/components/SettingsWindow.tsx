@@ -778,6 +778,7 @@ export default function SettingsWindow() {
             <AudioTab
               config={config}
               updateField={updateField}
+              apiKey={config.apiKey}
             />
           )}
 

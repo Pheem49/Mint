@@ -1,16 +1,19 @@
 import React, { useState } from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
-import { GEMINI_LIVE_MODELS, GEMINI_LIVE_VOICES } from '../../constants/models'
+import { GEMINI_LIVE_VOICES } from '../../constants/models'
+import { useGeminiLiveModels } from '@/hooks/useGeminiLiveModels'
 
 interface AudioTabProps {
   config: typeof DEFAULT_CONFIG
   updateField: (field: keyof typeof DEFAULT_CONFIG, value: any) => void
+  /** Gemini API key — used to fetch the live model list dynamically. */
+  apiKey: string
 }
 
-export default function AudioTab({ config, updateField }: AudioTabProps) {
+export default function AudioTab({ config, updateField, apiKey }: AudioTabProps) {
   const [customLiveModel, setCustomLiveModel] = useState(false)
-  const knownLiveModels = GEMINI_LIVE_MODELS as readonly string[]
-  const isCustomLiveModel = customLiveModel || !knownLiveModels.includes(config.geminiLiveModel)
+  const { models: liveModels, loading: liveLoading } = useGeminiLiveModels(apiKey)
+  const isCustomLiveModel = customLiveModel || !liveModels.includes(config.geminiLiveModel)
   return (
     <div className="tab-pane active">
       <section className="setting-section">
@@ -80,7 +83,7 @@ export default function AudioTab({ config, updateField }: AudioTabProps) {
         {config.voiceMode === 'geminiLive' && (
           <div className="form-grid single">
             <div className="setting-row">
-              <label>Realtime Live Model</label>
+              <label>Realtime Live Model{liveLoading && <span style={{ marginLeft: 6, opacity: 0.5, fontSize: '0.8em' }}>loading…</span>}</label>
               <select
                 value={isCustomLiveModel ? 'custom' : config.geminiLiveModel}
                 onChange={(e) => {
@@ -92,7 +95,7 @@ export default function AudioTab({ config, updateField }: AudioTabProps) {
                   }
                 }}
               >
-                {GEMINI_LIVE_MODELS.map((model) => (
+                {liveModels.map((model) => (
                   <option key={model} value={model}>{model}</option>
                 ))}
                 <option value="custom">Custom...</option>
