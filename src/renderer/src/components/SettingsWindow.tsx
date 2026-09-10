@@ -33,6 +33,7 @@ export type {
 
 import { DEFAULT_CONFIG } from '../../shared/constants/config'
 export { DEFAULT_CONFIG }
+import { applyThemeStyles } from '../../shared/utils/ui'
 import { APP_VERSION } from '../../shared/version'
 
 type TabType = 'sect-general' | 'sect-profile' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
@@ -322,64 +323,7 @@ export default function SettingsWindow() {
     fetchOllamaModels();
   }, [config.ollamaHost]);
 
-  const applyThemeStyles = (cfg: typeof DEFAULT_CONFIG) => {
-    document.documentElement.setAttribute('data-theme', cfg.theme)
-    document.documentElement.style.setProperty('--accent', cfg.accentColor)
-    document.documentElement.style.setProperty('--accent-hover', lightenColor(cfg.accentColor, 20))
-    document.documentElement.style.setProperty('--text-main', cfg.systemTextColor)
-    document.documentElement.style.setProperty('--glass-blur', cfg.glassBlur)
-    document.body.style.fontFamily = cfg.fontFamily
-    document.documentElement.style.fontSize = cfg.fontSize
 
-    if (cfg.theme === 'custom') {
-      if (cfg.customBgStart && cfg.customBgEnd) {
-        const gradient = `linear-gradient(135deg, ${cfg.customBgStart} 0%, ${cfg.customBgEnd} 100%)`
-        document.documentElement.style.setProperty('--bg-color', cfg.customBgStart)
-        document.documentElement.style.setProperty('--bg-gradient', gradient)
-      }
-      if (cfg.customPanelBg) {
-        const rgb = hexToRgb(cfg.customPanelBg)
-        document.documentElement.style.setProperty('--panel-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.75)`)
-        document.documentElement.style.setProperty('--panel-raised', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.82)`)
-        document.documentElement.style.setProperty('--panel-soft', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.46)`)
-        document.documentElement.style.setProperty('--chrome-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.88)`)
-        document.documentElement.style.setProperty('--surface-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.62)`)
-        document.documentElement.style.setProperty('--surface-strong', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.86)`)
-        document.documentElement.style.setProperty('--input-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.72)`)
-      }
-    } else {
-      [
-        '--bg-color',
-        '--bg-gradient',
-        '--panel-bg',
-        '--panel-raised',
-        '--panel-soft',
-        '--chrome-bg',
-        '--surface-bg',
-        '--surface-strong',
-        '--input-bg'
-      ].forEach(name => document.documentElement.style.removeProperty(name))
-    }
-  }
-
-  const lightenColor = (hex: string, amount: number) => {
-    const clean = hex.replace('#', '')
-    if (clean.length !== 6) return hex
-    const num = parseInt(clean, 16)
-    const r = Math.min(255, (num >> 16) + amount)
-    const g = Math.min(255, ((num >> 8) & 0x00FF) + amount)
-    const b = Math.min(255, (num & 0x0000FF) + amount)
-    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
-  }
-
-  const hexToRgb = (hex: string) => {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-    return result ? {
-        r: parseInt(result[1], 16),
-        g: parseInt(result[2], 16),
-        b: parseInt(result[3], 16)
-    } : { r: 15, g: 23, b: 42 }
-  }
 
   const handleSave = async () => {
     const finalConfig = { ...config }

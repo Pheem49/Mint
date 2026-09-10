@@ -148,6 +148,11 @@ export default function ThemeTab({ config, updateField }: ThemeTabProps) {
             <label>System Text</label>
             <input type="color" value={config.systemTextColor} onChange={(e) => updateField('systemTextColor', e.target.value)} />
           </div>
+          <div className="setting-row">
+            <label>Chat Text</label>
+            <input type="color" value={config.chatTextColor || config.systemTextColor} onChange={(e) => updateField('chatTextColor', e.target.value)} />
+            <p className="hint">Color of chat message body text and code snippets. Defaults to System Text if not set.</p>
+          </div>
         </div>
       </section>
 

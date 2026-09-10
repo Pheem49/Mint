@@ -7,6 +7,7 @@ export const DEFAULT_CONFIG = {
   theme: 'dark',
   accentColor: '#10b981',
   systemTextColor: '#f8fafc',
+  chatTextColor: '#f8fafc',
   customBgStart: '#0f172a',
   customBgEnd: '#1e1b4b',
   customPanelBg: '#1e293b',

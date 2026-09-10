@@ -18,6 +18,7 @@
   --surface-strong: #404042;
   --input-bg: #2c2c2e;
   --text-main: #e8e8ea;
+  --text-chat: var(--text-main);
   --text-muted: #8f8f94;
   --text-soft: #d1d1d4;
   --placeholder: #818187;

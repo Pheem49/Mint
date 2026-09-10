@@ -92,7 +92,7 @@ button {
 }
 
 .chat-code-block-lang {
-  color: var(--accent);
+  color: var(--text-chat, var(--text-main));
   font-size: 0.78rem;
   font-weight: 650;
   text-transform: capitalize;
@@ -132,19 +132,19 @@ button {
 .chat-code-block-body code {
   font-family: 'Fira Code', 'Courier New', Courier, monospace;
   font-size: 0.88rem;
-  color: var(--text-main, #e2e8f0);
+  color: var(--text-chat, var(--text-main, #e2e8f0));
   line-height: 1.5;
   white-space: pre;
 }
 
 .chat-bold-highlight {
-  color: var(--accent) !important;
+  color: var(--text-chat, var(--text-main)) !important;
 }
 
 .chat-inline-code {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--text-chat, var(--text-main)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-chat, var(--text-main)) 24%, transparent);
+  color: var(--text-chat, var(--text-main));
   padding: 2px 6px;
   border-radius: 4px;
   font-family: 'Fira Code', 'Courier New', Courier, monospace;

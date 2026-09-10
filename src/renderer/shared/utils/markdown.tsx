@@ -415,7 +415,7 @@ const mdComponents = {
     </th>
   ),
   td: ({ children }) => (
-    <td style={{ padding: '12px 16px', color: 'var(--text-main, #e2e8f0)' }}>
+    <td style={{ padding: '12px 16px', color: 'var(--text-chat, var(--text-main, #e2e8f0))' }}>
       {highlightMentions(children)}
     </td>
   ),

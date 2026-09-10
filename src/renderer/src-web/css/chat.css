@@ -281,7 +281,7 @@
   border: none;
   border-radius: 0;
   box-shadow: none;
-  color: var(--text-main);
+  color: var(--text-chat, var(--text-main));
   padding: 0; /* keep spacing handled by wrapper */
 }
 
@@ -310,6 +310,7 @@
   word-break: break-word;
   overflow-wrap: anywhere;
   line-break: relaxed;
+  color: var(--text-chat, var(--text-main));
 }
 
 .chat-paragraph {
@@ -318,6 +319,7 @@
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
+  color: var(--text-chat, var(--text-main));
 }
 
 .chat-paragraph:last-child {
@@ -326,22 +328,22 @@
 
 .chat-heading {
   font-weight: 700;
-  color: var(--text-main);
+  color: var(--text-chat, var(--text-main));
   margin-top: 14px;
   margin-bottom: 6px;
   line-height: 1.45;
 }
 
-.chat-heading-1 { font-size: 1.25rem; color: var(--accent-hover, #34d399); }
+.chat-heading-1 { font-size: 1.25rem; color: var(--text-chat, var(--text-main)); }
 
-.chat-heading-2 { font-size: 1.15rem; color: var(--text-main); }
+.chat-heading-2 { font-size: 1.15rem; color: var(--text-chat, var(--text-main)); }
 
-.chat-heading-3 { font-size: 1.05rem; color: var(--text-main); }
+.chat-heading-3 { font-size: 1.05rem; color: var(--text-chat, var(--text-main)); }
 
 .chat-section-title {
   font-size: 1.02rem;
   font-weight: 700;
-  color: var(--accent-hover, #34d399);
+  color: var(--text-chat, var(--text-main));
   padding-bottom: 2px;
   margin-top: 12px;
   margin-bottom: 6px;
@@ -383,7 +385,7 @@
 }
 
 .chat-list-number {
-  color: var(--accent-hover, #34d399);
+  color: var(--text-chat, var(--accent-hover, #34d399));
   font-weight: 700;
   font-size: 0.9em;
   flex-shrink: 0;
@@ -396,6 +398,7 @@
   min-width: 0;
   word-break: break-word;
   white-space: pre-wrap;
+  color: var(--text-chat, var(--text-main));
 }
 
 .chat-link {
@@ -413,16 +416,17 @@
 
 .chat-bold-highlight {
   font-weight: 600;
-  color: var(--text-main);
+  color: var(--text-chat, var(--text-main));
 }
 
 .chat-inline-code {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text-chat, var(--text-main)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-chat, var(--text-main)) 24%, transparent);
   padding: 2px 6px;
   border-radius: var(--radius-xs);
-  font-family: monospace;
+  font-family: 'Fira Code', monospace;
   font-size: 0.88em;
-  color: #38bdf8;
+  color: var(--text-chat, var(--text-main));
 }
 
 /* Typing Indicator */
