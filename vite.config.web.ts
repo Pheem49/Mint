@@ -12,7 +12,7 @@ export default defineConfig({
   base: '/',
   cacheDir: resolve(__dirname, '.vite-web'),
   build: {
-    outDir: resolve(__dirname, 'out/renderer'),
+    outDir: resolve(__dirname, 'out/web'),
     emptyOutDir: true,
     rollupOptions: {
       input: {
@@ -24,6 +24,13 @@ export default defineConfig({
     port: 9000,
     host: true,
     strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: true,
+        ws: true,
+      }
+    },
     fs: {
       allow: [
         resolve(__dirname)
@@ -34,9 +41,13 @@ export default defineConfig({
     port: 9000,
     host: true,
     strictPort: true,
-  },
-  optimizeDeps: {
-    force: true,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:3000',
+        changeOrigin: true,
+        ws: true,
+      }
+    },
   },
   plugins: [
     react(),

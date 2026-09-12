@@ -50,6 +50,14 @@ let lastAiNotification: Notification | null = null
 export const APP_ICON_PATH = '/assets/icon.png'
 
 export const getLocalApiBase = () => {
+  if (typeof window !== 'undefined') {
+    // When served via Vite dev/preview (port 9000), behind a reverse proxy,
+    // or over HTTPS, using relative '/api' leverages Vite's proxy, avoids CORS
+    // preflight OPTIONS round-trips, and eliminates mixed-content issues.
+    if (window.location.port === '9000' || !window.location.port || window.location.protocol === 'https:') {
+      return '/api';
+    }
+  }
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   return `http://${host}:3000/api`;
 };
@@ -77,6 +85,10 @@ function setStoredAuthToken(token: string | null) {
   }
 }
 
+interface AuthFetchInit extends RequestInit {
+  timeoutMs?: number
+}
+
 /**
  * fetch() wrapper that attaches the signed-in user's session token to every
  * request to this app's own local API server. Without this, the server has
@@ -84,12 +96,23 @@ function setStoredAuthToken(token: string | null) {
  * even while a user is signed in, since only a handful of /auth/* endpoints
  * used to send the header explicitly.
  */
-function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+function authFetch(input: RequestInfo | URL, init: AuthFetchInit = {}): Promise<Response> {
   const token = getStoredAuthToken()
-  if (!token) return fetch(input, init)
   const headers = new Headers(init.headers)
-  if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
-  return fetch(input, { ...init, headers })
+  if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
+  
+  let signal = init.signal
+  let timer: any = null
+  if (!signal && init.timeoutMs && typeof AbortController !== 'undefined') {
+    const controller = new AbortController()
+    signal = controller.signal
+    timer = setTimeout(() => controller.abort(new Error(`Request timed out after ${init.timeoutMs}ms`)), init.timeoutMs)
+  }
+  const fetchPromise = fetch(input, { ...init, headers, signal })
+  if (timer) {
+    return fetchPromise.finally(() => clearTimeout(timer))
+  }
+  return fetchPromise
 }
 
 export async function authRegister(
@@ -151,6 +174,7 @@ export async function authGetCurrentUser(): Promise<AuthUser | null> {
     try {
       const res = await authFetch(`${getApiBase()}/auth/session`, {
         headers: { Authorization: `Bearer ${token}` },
+        timeoutMs: 5000,
       })
       if (!res.ok) return null
       const data = await res.json()
@@ -216,7 +240,7 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await authFetch(`${API_BASE}/status`);
+      const res = await authFetch(`${API_BASE}/status`, { timeoutMs: 5000 });
       return await res.json();
     } catch (e) {
       console.error("Failed to fetch runtime status from local server:", e);
@@ -1052,7 +1076,7 @@ export function installTauriAdapters() {
     (window as any).settingsApi = {
       getSettings: async () => {
         try {
-          const res = await authFetch(`${API_BASE}/config`);
+          const res = await authFetch(`${API_BASE}/config`, { timeoutMs: 5000 });
           return await res.json();
         } catch (e) {
           console.error("Failed to fetch settings from local server:", e);

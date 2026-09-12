@@ -1,5 +1,47 @@
 # Release Notes - Mint Agent v1.14.0
 
+## Claude Desktop Style Choice Cards UI Overhaul (Web & Desktop)
+
+Redesigned the Action Approval and AskUser Question interface across both Web (`src/renderer/src-web`) and Desktop (`src/renderer/src`):
+
+- **Claude Desktop "Choice Cards" Layout**:
+  - Replaced legacy small horizontal buttons with vertical, interactive Choice Cards featuring dedicated hotkey badges (`[ 1 ]`, `[ 2 ]`, `[ 3 ]`), titles, and explanatory subtitles.
+  - Distinct hover accents for Approve (emerald), Session Allow (sky blue), and Deny/Cancel (rose red).
+  - Clean header with tool-specific badges (RunShell 🐚, File Edit 📝, MCP 🔌, Question 💬) and risk tiers (`DANGEROUS`, `APPROVAL REQUIRED`).
+  - Monospace code box for shell commands and diffs with quick syntax review.
+- **Global Keyboard Hotkey Triggers**:
+  - Pressing `1`, `2`, `3` on the keyboard instantly selects or approves the corresponding choice card when not actively typing in an input field.
+- **Enhanced AskUser Selection & Custom Answer**:
+  - Full support for single-select choices, multi-select checkboxes, and custom write-in answers with `Enter`-to-submit.
+- **Full Platform Parity**:
+  - Unified across Desktop and Web via the shared `ApprovalCard.tsx` component and matching CSS tokens.
+
+## Web UI Performance & Reliability Overhaul
+
+This update resolves intermittent slow loading, white screens, and update error loops when accessing Mint via web browser:
+
+- **Decoupled Build Output Targets (`out/web` vs `out/renderer`)**:
+  - Web UI now builds cleanly to `out/web` while Desktop UI continues building to `out/renderer`.
+  - Completely eliminates output clobbering where desktop builds wiped out `index-web.html` or chunk hashes.
+- **Same-Origin Vite API Reverse Proxying**:
+  - Added reverse proxy configuration for `/api` in Vite dev and preview modes routing to backend port 3000.
+  - Eliminated CORS preflight `OPTIONS` requests, dramatically reducing API response times.
+  - Resolves browser mixed-content blocks when accessing over HTTPS, SSH tunnels, or VS Code port forwarding.
+- **Removed Render-Blocking Unused Live2D Script**:
+  - Removed 150 KB synchronous `Live2DCubismCore.js` script tag from `index-web.html` `<head>`, as Live2D companion rendering is desktop-only.
+- **Service Worker Dev Isolation & Smart Fallbacks**:
+  - Dev mode now automatically purges leftover service workers from preview/production runs so Vite HMR is never intercepted or corrupted.
+  - Added strict exclusions in `sw.js` for Vite internal endpoints.
+- **Resilient Chunk Error Boundary & Dark Recovery Screen**:
+  - Replaced the harsh white `#ffffff` error screen with an on-theme Mint dark card.
+  - "Refresh & Update" button automatically clears stale `caches` and unregisters old service workers before reloading to guarantee a clean recovery loop.
+- **Failsafe Timeout Guards**:
+  - Added 5-second fetch timeouts to `authGetCurrentUser`, `getRuntimeStatus`, and `getSettings` with a 6-second failsafe in `AuthGate`, preventing indefinite hangs on "Loading Mint…".
+- **Intelligent CLI Binary Discovery & Fast Dev Iteration**:
+  - Rewrote [src/bin/index.js](file:///home/pheem49/vscode/Project/Mint-CLI/src/bin/index.js) to resolve binaries dynamically across local release (`target/release/mint`), fast local debug (`target/debug/mint`), user Cargo installation (`~/.cargo/bin/mint`), user local bin (`~/.local/bin/mint`), and global system paths (`/usr/local/bin`).
+  - Running `cargo build -p mint-cli` (debug) is now immediately picked up by the CLI runner without requiring a full 5-10 minute `--release` build or reinstall.
+  - Added `npm run install:cli` (`cargo install --path crates/mint-cli --locked`) to install the native binary permanently to `~/.cargo/bin`.
+
 ## Agent Harness Engineering Upgrade (9-Pillar System)
 
 This release introduces a major architectural overhaul transforming Mint Agent into an enterprise-grade Autonomous Agent Harness. Grounded in systematic harness engineering principles, this upgrade equips Mint with deep workspace awareness, precise code navigation, safe autonomous verification loops, git checkpointing, structured knowledge authoring, run-level observability, and benchmarking across CLI, Desktop, and Web.

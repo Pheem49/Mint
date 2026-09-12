@@ -821,59 +821,287 @@
   overflow-wrap: anywhere;
 }
 
+/* ==========================================================================
+   Claude Desktop Styled Choice Cards for Tool & Action Approval (Neutral & Left-Aligned)
+   ========================================================================== */
 .approval-card {
-  align-items: stretch;
+  width: 100%;
+  background: var(--panel-bg, #18181b);
+  border: 1px solid var(--border-light, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-xl, 14px);
+  padding: 16px 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
   flex-direction: column;
-  background: transparent;
-  border-color: transparent;
+  align-items: stretch;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  text-align: left;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .approval-card[data-tier="dangerous"] {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.42);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
-.approval-card-content {
-  display: grid;
-  gap: 4px;
-}
-
-.approval-card-title {
+.approval-card-header {
+  width: 100%;
+  display: flex;
   align-items: center;
-  color: var(--text-main);
-  display: flex;
-  flex-wrap: wrap;
-  font-weight: 700;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
 }
 
-.approval-header-chip {
-  background: rgba(16, 185, 129, 0.16);
-  border: 1px solid rgba(16, 185, 129, 0.4);
-  border-radius: 999px;
-  color: var(--text-main);
-  font-size: 0.7rem;
+.approval-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+}
+
+.approval-tool-icon-wrapper {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  flex-shrink: 0;
+}
+
+.approval-title-text {
+  font-size: 0.92rem;
   font-weight: 600;
-  padding: 2px 9px;
+  color: var(--text-main, #f4f4f5);
+  letter-spacing: -0.01em;
+  text-align: left;
+}
+
+/* Neutral monochrome badge chip */
+.approval-badge-chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted, #a1a1aa);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.approval-card-body {
-  color: var(--text-main);
-  overflow-wrap: anywhere;
+.approval-badge-chip.dangerous,
+.approval-badge-chip.question,
+.approval-badge-chip.edit,
+.approval-badge-chip.mcp,
+.approval-badge-chip.command,
+.approval-badge-chip.default {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted, #a1a1aa);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
-.approval-card-reason {
-  color: var(--text-muted);
+.approval-content-box {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  padding: 10px 14px;
+  font-family: 'Fira Code', ui-monospace, monospace;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--text-main, #e4e4e7);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.approval-content-box.question-text {
+  font-family: inherit;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  background: transparent;
+  border: none;
+  padding: 2px 0;
+  color: var(--text-main, #f4f4f5);
+  text-align: left;
+}
+
+.approval-reason-text {
+  width: 100%;
   font-size: 0.78rem;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.4;
+  margin-top: -4px;
+  text-align: left;
 }
 
-.approval-card-actions {
+/* Claude Desktop Choice Cards Stack */
+.claude-choice-stack {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 4px;
+  width: 100%;
+  text-align: left;
+}
+
+.claude-choice-options {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 100%;
+  text-align: left;
+}
+
+.claude-choice-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 13px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
+}
+
+.claude-choice-card:hover {
+  background: rgba(255, 255, 255, 0.075);
+  border-color: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
+}
+
+.claude-choice-card.variant-approve:hover,
+.claude-choice-card.variant-session:hover,
+.claude-choice-card.variant-cancel:hover {
+  background: rgba(255, 255, 255, 0.075);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.claude-choice-card.selected {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow: none;
+}
+
+.claude-choice-left {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  text-align: left;
+}
+
+.claude-choice-key {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Fira Code', ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted, #a1a1aa);
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.claude-choice-card:hover .claude-choice-key {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.claude-choice-card.selected .claude-choice-key {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.claude-choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.claude-choice-title {
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: var(--text-main, #f4f4f5);
+  line-height: 1.3;
+  text-align: left;
+}
+
+.claude-choice-desc {
+  font-size: 0.74rem;
+  color: var(--text-muted, #a1a1aa);
+  line-height: 1.35;
+  text-align: left;
+}
+
+.claude-choice-right {
+  display: flex;
+  align-items: center;
+  margin-left: 10px;
+  flex-shrink: 0;
+  color: var(--text-muted, #71717a);
+  font-size: 0.95rem;
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.claude-choice-card:hover .claude-choice-right {
+  color: var(--text-main, #f4f4f5);
+  transform: translateX(2px);
+}
+
+.claude-choice-card.selected .claude-choice-right {
+  color: #ffffff;
+}
+
+.claude-choice-custom-box {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  margin-top: 6px;
+  width: 100%;
+}
+
+.claude-choice-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: var(--text-main, #f4f4f5);
+  font-size: 0.84rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.claude-choice-input:focus {
+  border-color: var(--accent, #10b981);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
 }
 
 .approval-btn {
@@ -893,57 +1121,6 @@
 
 .approval-btn-approve {
   background: rgba(245, 158, 11, 0.28);
-}
-
-.approval-card[data-tier="dangerous"] .approval-btn-approve {
-  background: rgba(239, 68, 68, 0.28);
-}
-
-.approval-btn-cancel {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.approval-option-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.approval-option-btn {
-  text-align: left;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-main);
-  cursor: pointer;
-  font-size: 0.86rem;
-  padding: 9px 12px;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.approval-option-btn:hover {
-  background: rgba(16, 185, 129, 0.12);
-  border-color: rgba(16, 185, 129, 0.4);
-}
-
-.approval-option-btn.selected {
-  background: rgba(16, 185, 129, 0.22);
-  border-color: rgba(16, 185, 129, 0.55);
-}
-
-.approval-option-desc {
-  color: var(--text-muted);
-  font-size: 0.74rem;
-  margin-top: 2px;
-}
-
-.approval-option-divider {
-  color: var(--text-muted);
-  font-size: 0.74rem;
-  margin: 2px 0 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .agent-activity-message {

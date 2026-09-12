@@ -3,7 +3,17 @@
 // service worker intercept and cache HMR/module-graph requests, breaking
 // live reload in ways that are confusing to debug.
 export function registerServiceWorker() {
-  if (!import.meta.env.PROD || !('serviceWorker' in navigator)) {
+  if (!('serviceWorker' in navigator)) {
+    return
+  }
+  if (!import.meta.env.PROD) {
+    // In dev mode, unregister any leftover service worker from preview/production runs
+    // so it doesn't intercept or corrupt Vite's module graph.
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for (const registration of registrations) {
+        registration.unregister()
+      }
+    }).catch(() => {})
     return
   }
   window.addEventListener('load', () => {

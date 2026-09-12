@@ -11,7 +11,7 @@
 // built assets don't need that, since Vite already content-hashes their
 // filenames, so a new deploy's JS/CSS naturally misses the old cache and
 // gets fetched fresh.
-const CACHE_NAME = 'mint-web-runtime-v1';
+const CACHE_NAME = 'mint-web-runtime-v4';
 const APP_SHELL_URL = '/index-web.html';
 
 self.addEventListener('install', () => {
@@ -75,8 +75,13 @@ self.addEventListener('fetch', (event) => {
   }
 
   const url = new URL(request.url);
-  if (url.pathname.startsWith('/api/')) {
-    return; // never intercept the backend — always live
+  if (
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/@') ||
+    url.pathname.includes('node_modules') ||
+    url.searchParams.has('t')
+  ) {
+    return; // never intercept backend or Vite dev/HMR requests — always live
   }
 
   if (request.mode === 'navigate') {

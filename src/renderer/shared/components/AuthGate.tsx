@@ -38,17 +38,28 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false
+    const fallbackTimer = setTimeout(() => {
+      if (!cancelled) {
+        setStatus('signed-out')
+      }
+    }, 6000)
+
     authGetCurrentUser()
       .then((current) => {
         if (cancelled) return
+        clearTimeout(fallbackTimer)
         setUser(current)
         setStatus(current ? 'signed-in' : 'signed-out')
       })
       .catch(() => {
-        if (!cancelled) setStatus('signed-out')
+        if (!cancelled) {
+          clearTimeout(fallbackTimer)
+          setStatus('signed-out')
+        }
       })
     return () => {
       cancelled = true
+      clearTimeout(fallbackTimer)
     }
   }, [])
 

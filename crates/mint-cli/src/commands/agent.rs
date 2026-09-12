@@ -225,13 +225,17 @@ pub(crate) async fn launch_mint_target(target: String, dev: bool) -> Result<()> 
                     anyhow::anyhow!("Failed to find project root directory containing package.json")
                 })?
             };
-            let dist_web = project_root
+            let dist_web_out = project_root
+                .join("out")
+                .join("web")
+                .join("index-web.html");
+            let dist_web_legacy = project_root
                 .join("out")
                 .join("renderer")
                 .join("index-web.html");
             let web_cmd = if dev {
                 "dev:web"
-            } else if dist_web.exists() {
+            } else if dist_web_out.exists() || dist_web_legacy.exists() {
                 "preview:web"
             } else {
                 "dev:web"

@@ -29,6 +29,25 @@ export default class ChunkErrorBoundary extends React.Component<Props, State> {
     console.error('Mint failed to load:', error)
   }
 
+  private handleReload = async () => {
+    try {
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.removeItem('mint_chunk_reload_attempted')
+        window.sessionStorage.removeItem('mint_vite_preload_reload')
+        if ('caches' in window) {
+          const keys = await caches.keys().catch(() => [])
+          await Promise.all(keys.map((k) => caches.delete(k))).catch(() => {})
+        }
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations().catch(() => [])
+          await Promise.all(regs.map((r) => r.unregister())).catch(() => {})
+        }
+      }
+    } finally {
+      window.location.reload()
+    }
+  }
+
   render() {
     if (this.state.hasError) {
       return (
@@ -38,32 +57,76 @@ export default class ChunkErrorBoundary extends React.Component<Props, State> {
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 16,
+            gap: 20,
             height: '100vh',
             width: '100vw',
-            background: '#ffffff',
-            color: '#3f3f46',
-            fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
-            fontSize: '0.95rem',
+            background: '#09090b',
+            color: '#e4e4e7',
+            fontFamily: 'Outfit, Inter, ui-sans-serif, system-ui, sans-serif',
+            padding: 24,
+            boxSizing: 'border-box',
           }}
         >
-          <span>Mint couldn&apos;t finish loading. This usually means the app was updated.</span>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
+          <div
             style={{
-              padding: '10px 24px',
-              borderRadius: 10,
-              border: 'none',
-              background: '#10b981',
-              color: '#ffffff',
-              fontWeight: 650,
-              fontSize: '0.9rem',
-              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              maxWidth: 420,
+              textAlign: 'center',
+              padding: '32px 28px',
+              borderRadius: 20,
+              background: '#18181b',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.6)',
+              gap: 16,
             }}
           >
-            Reload
-          </button>
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 14,
+                background: 'rgba(16, 185, 129, 0.12)',
+                border: '1px solid rgba(16, 185, 129, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#10b981',
+                fontSize: '1.4rem',
+                fontWeight: 700,
+              }}
+            >
+              ✦
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 650, color: '#f4f4f5' }}>
+                Mint needs to refresh
+              </h2>
+              <span style={{ fontSize: '0.88rem', color: '#a1a1aa', lineHeight: 1.5 }}>
+                An asset failed to load or a new version was deployed. Refreshing will load the latest version.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={this.handleReload}
+              style={{
+                marginTop: 6,
+                padding: '10px 24px',
+                borderRadius: 12,
+                border: 'none',
+                background: '#10b981',
+                color: '#06120c',
+                fontWeight: 650,
+                fontSize: '0.9rem',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(16, 185, 129, 0.25)',
+                transition: 'background 0.15s ease, transform 0.1s ease',
+              }}
+            >
+              Refresh &amp; Update
+            </button>
+          </div>
         </div>
       )
     }
