@@ -49,14 +49,25 @@ pub fn prompt_interactive_select(
     }
 
     let render = |terminal: &mut ratatui::Terminal<_>, selected: usize| {
-        let mut lines = vec![format!(
-            "{BLUE}{title} (Use ↑/↓ to navigate, Enter to select, Esc to cancel):{RESET}"
-        )];
+        let nav_hint = if options.len() <= 9 {
+            format!("(Press 1-{}, ↑/↓ to navigate, Enter to select, Esc to cancel)", options.len())
+        } else {
+            "(Use ↑/↓ to navigate, Enter to select, Esc to cancel)".to_string()
+        };
+        let mut lines = vec![format!("{BLUE}{title} {nav_hint}:{RESET}")];
         for (i, opt) in options.iter().enumerate() {
-            if i == selected {
-                lines.push(format!("  {BLUE}❯ {opt}{RESET}"));
+            let prefix = if options.len() <= 9
+                && !opt.starts_with('[')
+                && !opt.starts_with(&format!("{}.", i + 1))
+            {
+                format!("[{}] ", i + 1)
             } else {
-                lines.push(format!("    {DIM}{opt}{RESET}"));
+                String::new()
+            };
+            if i == selected {
+                lines.push(format!("  {BLUE}❯ {prefix}{opt}{RESET}"));
+            } else {
+                lines.push(format!("    {DIM}{prefix}{opt}{RESET}"));
             }
         }
         if let Ok(text) = lines.join("\n").into_text() {
@@ -83,6 +94,12 @@ pub fn prompt_interactive_select(
                         }
 
                         match key_event.code {
+                            KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
+                                let idx = (c as usize) - ('1' as usize);
+                                if idx < options.len() {
+                                    break Some(idx);
+                                }
+                            }
                             KeyCode::Up => {
                                 selected = if selected > 0 {
                                     selected - 1

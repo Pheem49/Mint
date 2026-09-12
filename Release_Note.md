@@ -1,5 +1,35 @@
 # Release Notes - Mint Agent v1.14.0
 
+## Live Preview Path Resolution & File Changes Deduplication (CLI, Desktop & Web)
+
+- **Intelligent Path Resolution (`mint_core::files::resolve_readable_path`)**:
+  - Solved `Failed to read file: Not Found` preview errors when viewing files with relative paths, tilde (`~`) prefixes, or notes stored in `~/.config/mint/notes/`.
+  - Automatically resolves file targets across candidates: user home directory expansion, active workspace root, current working directory, and system config note locations.
+  - Implemented with complete parity across all three interfaces: Web API endpoint (`/api/file/read`), Desktop Tauri command (`read_workspace_file`), and CLI (`mint preview` / `handle_preview`).
+- **Distinct Operation Tracking for Creation & Modifications (`agentProgress.ts`)**:
+  - Preserved distinct file change records for separate tool actions (e.g. initial file creation via `note_write` vs subsequent edits via `apply_patch`), ensuring the summary accurately reflects `1 created, 1 modified` with dedicated diff inspection for each step.
+  - Both cards link to the resolved target on disk so clicking Preview on either the created or modified entry works seamlessly without path errors.
+- **Preview Resiliency & Fallback Content**:
+  - Pass initial created file content as in-memory fallback to `ArtifactPreviewPanel`, ensuring previews render instantly and gracefully even before disk sync or in transient environments.
+  - Propagated `workspacePath` through `ArtifactPreviewPanel` and `readWorkspaceFile` bridge for precise relative-path resolution in multi-workspace setups.
+
+## File Changes, Live Preview & Diff Viewer Theme Parity (Desktop & Web UI)
+
+- **Comprehensive Theme Alignment**:
+  - Replaced hardcoded inline styles (`#10b981`, `#0b0f19`, `rgba(15, 23, 42, 0.6)`, `#a7f3d0`) in the File Changes summary and live Diff viewer with dynamic CSS theme variables (`var(--accent)`, `var(--surface-bg)`, `var(--input-bg)`, `var(--border)`, `var(--text-chat, var(--text-main))`, `var(--text-muted)`).
+  - Ensured complete visual parity across default dark, light (`[data-theme="light"]`), midnight (`[data-theme="midnight"]`), and custom themes.
+- **Live Preview Split View Panel (`ArtifactPreviewPanel.tsx`)**:
+  - Replaced legacy fallback colors (`#232730`, `#111317`, `#f3f4f6`, `#181a20`, `#10b981`) across the entire Preview panel with native Mint theme tokens: `--panel-bg`, `--surface-bg`, `--border`, `--text-main`, and `--accent`.
+  - Preview/Code tab toggles, device viewport selectors (Desktop/Tablet/Mobile), artifact badges, and markdown view now fully match the active system theme.
+- **Diff Review Modal (`DiffReviewModal.tsx`)**:
+  - Split and unified diff panes, header diff badge, and addition/deletion counters now track the active theme accent, error, and text variables.
+- **Readable Diff Line Highlighting**:
+  - Diff hunk lines now preserve the user's configured chat text color (`var(--text-chat, var(--text-main))`) while clearly highlighting additions and deletions with subtle background tints, accent/error border indicators, and separate unselectable sign markers (`+` in `var(--accent)`, `-` in `var(--status-error)`).
+- **Rewind Action & Status Badges**:
+  - Rewind checkpoint button, [NEW FILE] badge, and Preview button now cleanly utilize system theme tokens (`var(--status-error)`, `var(--hover-delete-bg)`, `var(--accent)`, `var(--radius-xs)`).
+- **Platform Parity**:
+  - Reusable `.file-changes-*` styling standardized across both Desktop (`src/renderer/src/css/chat.css`) and Web (`src/renderer/src-web/css/chat.css`).
+
 ## Claude Desktop Style Choice Cards UI Overhaul (Web & Desktop)
 
 Redesigned the Action Approval and AskUser Question interface across both Web (`src/renderer/src-web`) and Desktop (`src/renderer/src`):

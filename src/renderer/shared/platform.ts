@@ -136,5 +136,5 @@ export interface MintPlatformApi {
   readClipboardImage(): Promise<string | null>
   listGitCheckpoints(chatId: string): Promise<GitCheckpoint[]>
   rollbackGitCheckpoint(chatId: string, step: number, workspacePath?: string): Promise<{ status: string; message: string }>
-  readWorkspaceFile(path: string): Promise<string>
+  readWorkspaceFile(path: string, workspacePath?: string): Promise<string>
 }

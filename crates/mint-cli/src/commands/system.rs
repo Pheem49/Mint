@@ -76,11 +76,15 @@ pub fn handle_open_app(name: String) -> Result<()> {
 }
 
 pub fn handle_preview(path: PathBuf) -> Result<()> {
-    actions::preview_file(&path)
+    let path_str = path.to_string_lossy();
+    let resolved = mint_core::files::resolve_readable_path(&path_str, None);
+    actions::preview_file(&resolved)
 }
 
 pub fn handle_read_file(path: PathBuf) -> Result<()> {
-    actions::read_file_content(&path)
+    let path_str = path.to_string_lossy();
+    let resolved = mint_core::files::resolve_readable_path(&path_str, None);
+    actions::read_file_content(&resolved)
 }
 
 pub fn handle_read_folder(path: PathBuf) -> Result<()> {

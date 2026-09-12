@@ -64,6 +64,7 @@ export interface RunTelemetrySummary {
   totalTokens: number
   toolCallsCount: number
   filesChanged: string[]
+  filesCreated?: string[]
   durationSecs: number
   toolTimeline: ToolExecutionRecord[]
   retriesCount: number

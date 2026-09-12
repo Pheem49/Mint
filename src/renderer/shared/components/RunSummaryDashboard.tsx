@@ -91,8 +91,21 @@ export function RunSummaryDashboard({ summary, className = '' }: Props) {
             <span>Files</span>
           </div>
           <div className="run-kpi-value">
-            {summary.filesChanged.length}{' '}
-            <span className="run-kpi-subtext">modified</span>
+            {summary.filesCreated && summary.filesCreated.length > 0 && summary.filesChanged.length - summary.filesCreated.length > 0 ? (
+              <>
+                {summary.filesCreated.length} <span className="run-kpi-subtext">created</span>, {summary.filesChanged.length - summary.filesCreated.length} <span className="run-kpi-subtext">modified</span>
+              </>
+            ) : summary.filesCreated && summary.filesCreated.length > 0 ? (
+              <>
+                {summary.filesCreated.length}{' '}
+                <span className="run-kpi-subtext">created</span>
+              </>
+            ) : (
+              <>
+                {summary.filesChanged.length}{' '}
+                <span className="run-kpi-subtext">modified</span>
+              </>
+            )}
           </div>
         </div>
       </div>

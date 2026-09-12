@@ -1595,8 +1595,10 @@ fn rollback_git_checkpoint(
 }
 
 #[tauri::command]
-fn read_workspace_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("failed to read file '{path}': {e}"))
+fn read_workspace_file(path: String, workspace_path: Option<String>) -> Result<String, String> {
+    let ws_path = workspace_path.as_deref().map(std::path::Path::new);
+    let resolved = mint_core::files::resolve_readable_path(&path, ws_path);
+    std::fs::read_to_string(&resolved).map_err(|e| format!("failed to read file '{}': {e}", resolved.display()))
 }
 
 #[tauri::command]

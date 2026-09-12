@@ -11,7 +11,7 @@
 // built assets don't need that, since Vite already content-hashes their
 // filenames, so a new deploy's JS/CSS naturally misses the old cache and
 // gets fetched fresh.
-const CACHE_NAME = 'mint-web-runtime-v4';
+const CACHE_NAME = 'mint-web-runtime-v5';
 const APP_SHELL_URL = '/index-web.html';
 
 self.addEventListener('install', () => {

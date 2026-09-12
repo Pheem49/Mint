@@ -2306,12 +2306,17 @@ export async function rollbackGitCheckpoint(
   }
 }
 
-export const readWorkspaceFile = async (path: string): Promise<string> => {
+export const readWorkspaceFile = async (path: string, workspacePath?: string): Promise<string> => {
   if (!isTauriRuntime()) {
     try {
-      const res = await fetch(`${getLocalApiBase()}/file/read?path=${encodeURIComponent(path)}`)
+      let url = `${getLocalApiBase()}/file/read?path=${encodeURIComponent(path)}`
+      if (workspacePath) {
+        url += `&workspace=${encodeURIComponent(workspacePath)}`
+      }
+      const res = await fetch(url)
       if (!res.ok) {
-        throw new Error(`Failed to read file: ${res.statusText}`)
+        const errorData = await res.json().catch(() => null)
+        throw new Error(errorData?.error || `Failed to read file: ${res.statusText}`)
       }
       const data = await res.json()
       return data.content || ''
@@ -2321,7 +2326,7 @@ export const readWorkspaceFile = async (path: string): Promise<string> => {
     }
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('read_workspace_file', { path })
+  return invoke('read_workspace_file', { path, workspacePath })
 }
 
 // Enforce compile-time check against the shared platform interface

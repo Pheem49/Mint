@@ -147,6 +147,7 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 Before you can build or run Mint locally, make sure you have the following system tools installed:
 
+
 | Tool | Description | Required For |
 | :--- | :--- | :--- |
 | **Node.js & npm** | JavaScript runtime and package manager | Frontend UI (React, Vite, TypeScript) |
@@ -168,6 +169,7 @@ sudo apt-get install -y \
 ```
 
 **Fedora / RHEL / CentOS:**
+
 ```bash
 sudo dnf groupinstall -y "Development Tools"
 sudo dnf install -y \

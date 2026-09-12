@@ -2186,9 +2186,9 @@ export async function rollbackGitCheckpoint(
   }
 }
 
-export const readWorkspaceFile = async (path: string): Promise<string> => {
+export const readWorkspaceFile = async (path: string, workspacePath?: string): Promise<string> => {
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('read_workspace_file', { path })
+  return invoke('read_workspace_file', { path, workspacePath })
 }
 
 // Enforce compile-time check against the shared platform interface

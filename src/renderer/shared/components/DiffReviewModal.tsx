@@ -206,7 +206,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
             <div
               className="management-card-icon"
-              style={{ width: 34, height: 34, fontSize: '0.72rem', fontWeight: 700, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', borderRadius: '6px' }}
+              style={{ width: 34, height: 34, fontSize: '0.72rem', fontWeight: 700, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)', borderRadius: '6px' }}
             >
               DIFF
             </div>
@@ -234,8 +234,8 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                   style={{
                     fontSize: '0.75rem',
                     fontWeight: 700,
-                    color: '#34d399',
-                    background: 'rgba(16, 185, 129, 0.15)',
+                    color: 'var(--accent)',
+                    background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
                     padding: '1px 6px',
                     borderRadius: '4px',
                   }}
@@ -246,8 +246,8 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                   style={{
                     fontSize: '0.75rem',
                     fontWeight: 700,
-                    color: '#f87171',
-                    background: 'rgba(239, 68, 68, 0.15)',
+                    color: 'var(--status-error, #f87171)',
+                    background: 'var(--hover-delete-bg, rgba(239, 68, 68, 0.15))',
                     padding: '1px 6px',
                     borderRadius: '4px',
                   }}
@@ -380,9 +380,9 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                     <div
                       style={{
                         display: 'flex',
-                        borderRight: '1px solid rgba(255,255,255,0.06)',
-                        background: left?.isDel ? 'rgba(239, 68, 68, 0.16)' : 'transparent',
-                        borderLeft: left?.isDel ? '3px solid #ef4444' : '3px solid transparent',
+                        borderRight: '1px solid var(--border)',
+                        background: left?.isDel ? 'color-mix(in srgb, var(--status-error, #ef4444) 14%, transparent)' : 'transparent',
+                        borderLeft: left?.isDel ? '3px solid var(--status-error, #ef4444)' : '3px solid transparent',
                         minHeight: '22px',
                       }}
                     >
@@ -391,7 +391,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                           width: '44px',
                           textAlign: 'right',
                           paddingRight: '10px',
-                          color: left?.isDel ? '#fca5a5' : '#475569',
+                          color: left?.isDel ? 'var(--status-error, #f87171)' : 'var(--text-muted)',
                           userSelect: 'none',
                           flexShrink: 0,
                         }}
@@ -403,7 +403,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-all',
                           paddingRight: '8px',
-                          color: left?.isDel ? '#fecaca' : '#cbd5e1',
+                          color: left?.isDel ? 'var(--hover-delete, #fca5a5)' : 'var(--text-chat, var(--text-main))',
                         }}
                       >
                         {left ? left.content : ''}
@@ -414,8 +414,8 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                     <div
                       style={{
                         display: 'flex',
-                        background: right?.isAdd ? 'rgba(16, 185, 129, 0.16)' : 'transparent',
-                        borderLeft: right?.isAdd ? '3px solid #10b981' : '3px solid transparent',
+                        background: right?.isAdd ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
+                        borderLeft: right?.isAdd ? '3px solid var(--accent)' : '3px solid transparent',
                         minHeight: '22px',
                       }}
                     >
@@ -424,7 +424,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                           width: '44px',
                           textAlign: 'right',
                           paddingRight: '10px',
-                          color: right?.isAdd ? '#86efac' : '#475569',
+                          color: right?.isAdd ? 'var(--accent)' : 'var(--text-muted)',
                           userSelect: 'none',
                           flexShrink: 0,
                         }}
@@ -436,7 +436,7 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                           whiteSpace: 'pre-wrap',
                           wordBreak: 'break-all',
                           paddingRight: '8px',
-                          color: right?.isAdd ? '#bbf7d0' : '#cbd5e1',
+                          color: right?.isAdd ? 'var(--accent-hover, var(--accent))' : 'var(--text-chat, var(--text-main))',
                         }}
                       >
                         {right ? right.content : ''}
@@ -477,18 +477,18 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
 
                 let bg = 'transparent'
                 let borderL = '3px solid transparent'
-                let textCol = '#cbd5e1'
+                let textCol = 'var(--text-chat, var(--text-main))'
                 let prefix = ' '
 
                 if (line.type === 'add') {
-                  bg = 'rgba(16, 185, 129, 0.14)'
-                  borderL = '3px solid #10b981'
-                  textCol = '#bbf7d0'
+                  bg = 'color-mix(in srgb, var(--accent) 14%, transparent)'
+                  borderL = '3px solid var(--accent)'
+                  textCol = 'var(--text-chat, var(--text-main))'
                   prefix = '+'
                 } else if (line.type === 'del') {
-                  bg = 'rgba(239, 68, 68, 0.14)'
-                  borderL = '3px solid #ef4444'
-                  textCol = '#fecaca'
+                  bg = 'color-mix(in srgb, var(--status-error, #ef4444) 14%, transparent)'
+                  borderL = '3px solid var(--status-error, #ef4444)'
+                  textCol = 'var(--text-chat, var(--text-main))'
                   prefix = '-'
                 }
 
@@ -502,13 +502,13 @@ export const DiffReviewModal: React.FC<DiffReviewModalProps> = ({
                       padding: '1px 0',
                     }}
                   >
-                    <span style={{ width: '42px', textAlign: 'right', color: '#475569', paddingRight: '8px', userSelect: 'none', flexShrink: 0 }}>
+                    <span style={{ width: '42px', textAlign: 'right', color: 'var(--text-muted)', paddingRight: '8px', userSelect: 'none', flexShrink: 0 }}>
                       {line.oldNum || ''}
                     </span>
-                    <span style={{ width: '42px', textAlign: 'right', color: '#475569', paddingRight: '8px', userSelect: 'none', flexShrink: 0 }}>
+                    <span style={{ width: '42px', textAlign: 'right', color: 'var(--text-muted)', paddingRight: '8px', userSelect: 'none', flexShrink: 0 }}>
                       {line.newNum || ''}
                     </span>
-                    <span style={{ width: '16px', color: line.type === 'add' ? '#34d399' : line.type === 'del' ? '#f87171' : '#64748b', userSelect: 'none' }}>
+                    <span style={{ width: '16px', color: line.type === 'add' ? 'var(--accent)' : line.type === 'del' ? 'var(--status-error, #f87171)' : 'var(--text-muted)', userSelect: 'none' }}>
                       {prefix}
                     </span>
                     <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: textCol }}>

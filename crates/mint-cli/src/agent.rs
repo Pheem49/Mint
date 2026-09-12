@@ -148,6 +148,10 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
             let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("");
             (false, format!("[write_file] Writing file: {}...", path))
         }
+        "note_write" => {
+            let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            (false, format!("[note_write] Writing note: {}...", name))
+        }
         "apply_patch" => {
             let path = input
                 .get("patch")
@@ -892,20 +896,29 @@ pub async fn run_code_agent_with_options(
                     } else {
                         summary.total_tokens.to_string()
                     };
+                    let created_count = summary.files_created.len();
+                    let modified_count = summary.files_changed.len().saturating_sub(created_count);
+                    let files_str = if created_count > 0 && modified_count > 0 {
+                        format!("{} created, {} modified", created_count, modified_count)
+                    } else if created_count > 0 {
+                        format!("{} created", created_count)
+                    } else {
+                        format!("{} modified", summary.files_changed.len())
+                    };
                     let mut card = format!(
                         "\x1b[1;36m┌─ Agent Run #{} ────────────────────────────\x1b[0m\n\
                          │ Status:   {}\n\
                          │ Duration: {:.1}s\n\
                          │ Tokens:   {}\n\
                          │ Tools:    {} calls ({} retries)\n\
-                         │ Files:    {} modified\n",
+                         │ Files:    {}\n",
                         summary.run_id,
                         outcome_str,
                         summary.duration_secs,
                         tokens_k,
                         summary.tool_calls_count,
                         summary.retries_count,
-                        summary.files_changed.len(),
+                        files_str,
                     );
                     if !summary.tool_timeline.is_empty() {
                         card.push_str("│\n│ Tool calls timeline:\n");

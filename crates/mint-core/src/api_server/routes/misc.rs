@@ -280,17 +280,20 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 .await;
                 return;
             }
-            match std::fs::read_to_string(&file_path) {
+            let workspace = query_param(query, "workspace");
+            let ws_path = workspace.as_deref().map(std::path::Path::new);
+            let resolved = crate::files::resolve_readable_path(&file_path, ws_path);
+            match std::fs::read_to_string(&resolved) {
                 Ok(content) => {
                     let res = json!({
-                        "path": file_path,
+                        "path": resolved.display().to_string(),
                         "content": content
                     });
                     send_json_response(socket, "200 OK", &res.to_string()).await;
                 }
                 Err(err) => {
                     let res = json!({
-                        "error": format!("unable to read file: {err}")
+                        "error": format!("unable to read file '{}': {err}", resolved.display())
                     });
                     send_json_response(socket, "404 Not Found", &res.to_string()).await;
                 }

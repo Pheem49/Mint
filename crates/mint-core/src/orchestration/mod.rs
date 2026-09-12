@@ -568,6 +568,8 @@ pub struct RunTelemetrySummary {
     pub total_tokens: usize,
     pub tool_calls_count: usize,
     pub files_changed: Vec<String>,
+    #[serde(default)]
+    pub files_created: Vec<String>,
     pub duration_secs: f64,
     pub tool_timeline: Vec<ToolExecutionRecord>,
     pub retries_count: usize,
@@ -1105,6 +1107,7 @@ where
         let mut turn_generated_tokens: u64 = 0;
         let mut executed_tools: Vec<ToolExecutionRecord> = Vec::new();
         let mut files_modified: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut files_created: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         'steps: for step in 1..=MAX_STEPS {
             let (active_config, agent_instruction, active_agent_name, active_model_name) =
@@ -1643,7 +1646,8 @@ where
                             outcome: "SUCCESS".to_string(),
                             total_tokens: turn_total_tokens as usize,
                             tool_calls_count: executed_tools.len(),
-                            files_changed: files_modified.into_iter().collect(),
+                            files_changed: files_created.iter().chain(files_modified.iter()).cloned().collect(),
+                            files_created: files_created.into_iter().collect(),
                             duration_secs: started_at.elapsed().as_secs_f64(),
                             tool_timeline: executed_tools.clone(),
                             retries_count: executed_tools.iter().filter(|t| t.retried).count(),
@@ -1675,6 +1679,29 @@ where
                     // stays false for plan-mode/hook blocks and the duplicate-shell skip, since
                     // those don't actually run anything and shouldn't count toward verification.
                     let mut action_succeeded = false;
+                    let target_file_existed = match decision.action.as_str() {
+                        "write_file" => {
+                            !decision.input.path.is_empty()
+                                && root.join(&decision.input.path).exists()
+                        }
+                        "note_write" => {
+                            !decision.input.name.is_empty()
+                                && root
+                                    .join(format!(
+                                        ".config/mint/notes/{}",
+                                        decision.input.name
+                                    ))
+                                    .exists()
+                        }
+                        "apply_patch" => {
+                            if let Some(patch) = &decision.input.patch {
+                                root.join(&patch.path).exists()
+                            } else {
+                                true
+                            }
+                        }
+                        _ => true,
+                    };
                     let result = if decision.action == "enter_plan_mode" {
                         let reason = decision.input.reason.trim().to_owned();
                         match approve(&AgentApproval::EnterPlanMode {
@@ -1773,7 +1800,7 @@ where
                                 )
                             }
                             crate::hooks::PreHookOutcome::Allowed => {
-                                if matches!(decision.action.as_str(), "write_file" | "apply_patch")
+                                if matches!(decision.action.as_str(), "write_file" | "apply_patch" | "note_write")
                                 {
                                     let target_path = if !decision.input.path.is_empty() {
                                         Some(decision.input.path.as_str())
@@ -1859,12 +1886,25 @@ where
 
                     if action_succeeded {
                         match decision.action.as_str() {
-                            "apply_patch" | "write_file" => {
+                            "apply_patch" | "write_file" | "note_write" => {
                                 last_modify_step = Some(step);
-                                if let Some(patch) = &decision.input.patch {
-                                    files_modified.insert(patch.path.to_string_lossy().into_owned());
+                                let path = if let Some(patch) = &decision.input.patch {
+                                    patch.path.to_string_lossy().into_owned()
                                 } else if !decision.input.path.is_empty() {
-                                    files_modified.insert(decision.input.path.clone());
+                                    decision.input.path.clone()
+                                } else if !decision.input.name.is_empty() {
+                                    format!(".config/mint/notes/{}", decision.input.name)
+                                } else {
+                                    String::new()
+                                };
+                                if !path.is_empty() {
+                                    if !files_created.contains(&path)
+                                        && (target_file_existed || files_modified.contains(&path))
+                                    {
+                                        files_modified.insert(path);
+                                    } else {
+                                        files_created.insert(path);
+                                    }
                                 }
                             }
                             // Counts even if the commands it ran failed — an attempted check
@@ -2038,7 +2078,8 @@ where
             outcome: "FAILED".to_string(),
             total_tokens: turn_total_tokens as usize,
             tool_calls_count: executed_tools.len(),
-            files_changed: files_modified.into_iter().collect(),
+            files_changed: files_created.iter().chain(files_modified.iter()).cloned().collect(),
+            files_created: files_created.into_iter().collect(),
             duration_secs: started_at.elapsed().as_secs_f64(),
             tool_timeline: executed_tools.clone(),
             retries_count: executed_tools.iter().filter(|t| t.retried).count(),

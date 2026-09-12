@@ -45,7 +45,7 @@ export function getFileLanguage(filePath: string): string {
   return map[ext] || ext || 'plaintext'
 }
 
-export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
+export function ArtifactPreviewPanel({ artifact, onClose, workspacePath }: Props) {
   const [activeTab, setActiveTab] = useState<'preview' | 'code'>('preview')
   const [viewport, setViewport] = useState<ViewportMode>('desktop')
   const [content, setContent] = useState<string>(artifact?.content || '')
@@ -72,7 +72,7 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
     setLoading(true)
     setError(null)
     try {
-      const text = await readWorkspaceFile(filePath)
+      const text = await readWorkspaceFile(filePath, workspacePath)
       setContent(text)
     } catch (err: any) {
       // If content was already supplied in artifact, fallback to it
@@ -84,7 +84,7 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [filePath, artifact])
+  }, [filePath, workspacePath, artifact])
 
   useEffect(() => {
     if (artifact?.content) {
@@ -132,9 +132,9 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
         minWidth: '380px',
         maxWidth: '800px',
         height: '100%',
-        borderLeft: '1px solid var(--border-color, #232730)',
-        background: 'var(--bg-primary, #111317)',
-        color: 'var(--text-primary, #f3f4f6)',
+        borderLeft: '1px solid var(--border)',
+        background: 'var(--panel-bg, #1e1e20)',
+        color: 'var(--text-main, #e8e8ea)',
         position: 'relative',
         zIndex: 10,
         overflow: 'hidden',
@@ -147,8 +147,8 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '10px 14px',
-          borderBottom: '1px solid var(--border-color, #232730)',
-          background: 'var(--bg-secondary, #181a20)',
+          borderBottom: '1px solid var(--border)',
+          background: 'var(--surface-bg, #252527)',
           gap: '8px',
           flexShrink: 0,
         }}
@@ -161,9 +161,9 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
               justifyContent: 'center',
               width: '24px',
               height: '24px',
-              borderRadius: '6px',
-              background: 'rgba(16, 185, 129, 0.12)',
-              color: '#10b981',
+              borderRadius: 'var(--radius-xs, 4px)',
+              background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
+              color: 'var(--accent)',
               fontSize: '0.68rem',
               fontWeight: 700,
               flexShrink: 0,
@@ -176,6 +176,7 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
               style={{
                 fontWeight: 600,
                 fontSize: '0.86rem',
+                color: 'var(--text-main)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -190,7 +191,7 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
               style={{
                 background: 'none',
                 border: 'none',
-                color: copied ? '#10b981' : 'var(--text-muted, #9ca3af)',
+                color: copied ? 'var(--accent)' : 'var(--text-muted)',
                 fontSize: '0.7rem',
                 padding: 0,
                 cursor: 'pointer',
@@ -212,19 +213,19 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
             style={{
               display: 'inline-flex',
               padding: '2px',
-              background: 'rgba(255, 255, 255, 0.05)',
-              borderRadius: '6px',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'color-mix(in srgb, var(--text-main) 6%, transparent)',
+              borderRadius: 'var(--radius-sm, 6px)',
+              border: '1px solid var(--border)',
             }}
           >
             <button
               type="button"
               onClick={() => setActiveTab('preview')}
               style={{
-                background: activeTab === 'preview' ? 'var(--accent, #10b981)' : 'transparent',
-                color: activeTab === 'preview' ? '#ffffff' : 'var(--text-muted, #9ca3af)',
+                background: activeTab === 'preview' ? 'var(--accent)' : 'transparent',
+                color: activeTab === 'preview' ? '#ffffff' : 'var(--text-muted)',
                 border: 'none',
-                borderRadius: '4px',
+                borderRadius: 'var(--radius-xs, 4px)',
                 padding: '3px 9px',
                 fontSize: '0.75rem',
                 fontWeight: 500,
@@ -238,10 +239,10 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
               type="button"
               onClick={() => setActiveTab('code')}
               style={{
-                background: activeTab === 'code' ? 'var(--accent, #10b981)' : 'transparent',
-                color: activeTab === 'code' ? '#ffffff' : 'var(--text-muted, #9ca3af)',
+                background: activeTab === 'code' ? 'var(--accent)' : 'transparent',
+                color: activeTab === 'code' ? '#ffffff' : 'var(--text-muted)',
                 border: 'none',
-                borderRadius: '4px',
+                borderRadius: 'var(--radius-xs, 4px)',
                 padding: '3px 9px',
                 fontSize: '0.75rem',
                 fontWeight: 500,
@@ -259,9 +260,9 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
               style={{
                 display: 'inline-flex',
                 padding: '2px',
-                background: 'rgba(255, 255, 255, 0.05)',
-                borderRadius: '6px',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
+                background: 'color-mix(in srgb, var(--text-main) 6%, transparent)',
+                borderRadius: 'var(--radius-sm, 6px)',
+                border: '1px solid var(--border)',
               }}
             >
               <button
@@ -269,10 +270,10 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
                 onClick={() => setViewport('desktop')}
                 title="Desktop 100%"
                 style={{
-                  background: viewport === 'desktop' ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
-                  color: viewport === 'desktop' ? '#fff' : '#9ca3af',
+                  background: viewport === 'desktop' ? 'color-mix(in srgb, var(--text-main) 12%, transparent)' : 'transparent',
+                  color: viewport === 'desktop' ? 'var(--text-main)' : 'var(--text-muted)',
                   border: 'none',
-                  borderRadius: '4px',
+                  borderRadius: 'var(--radius-xs, 4px)',
                   padding: '3px 7px',
                   cursor: 'pointer',
                   fontSize: '0.72rem',
@@ -285,10 +286,10 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
                 onClick={() => setViewport('tablet')}
                 title="Tablet (768px)"
                 style={{
-                  background: viewport === 'tablet' ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
-                  color: viewport === 'tablet' ? '#fff' : '#9ca3af',
+                  background: viewport === 'tablet' ? 'color-mix(in srgb, var(--text-main) 12%, transparent)' : 'transparent',
+                  color: viewport === 'tablet' ? 'var(--text-main)' : 'var(--text-muted)',
                   border: 'none',
-                  borderRadius: '4px',
+                  borderRadius: 'var(--radius-xs, 4px)',
                   padding: '3px 7px',
                   cursor: 'pointer',
                   fontSize: '0.72rem',
@@ -301,10 +302,10 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
                 onClick={() => setViewport('mobile')}
                 title="Mobile (375px)"
                 style={{
-                  background: viewport === 'mobile' ? 'rgba(255, 255, 255, 0.12)' : 'transparent',
-                  color: viewport === 'mobile' ? '#fff' : '#9ca3af',
+                  background: viewport === 'mobile' ? 'color-mix(in srgb, var(--text-main) 12%, transparent)' : 'transparent',
+                  color: viewport === 'mobile' ? 'var(--text-main)' : 'var(--text-muted)',
                   border: 'none',
-                  borderRadius: '4px',
+                  borderRadius: 'var(--radius-xs, 4px)',
                   padding: '3px 7px',
                   cursor: 'pointer',
                   fontSize: '0.72rem',
@@ -326,9 +327,9 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
             style={{
               background: 'none',
               border: 'none',
-              color: 'var(--text-muted, #9ca3af)',
+              color: 'var(--text-muted)',
               padding: '5px',
-              borderRadius: '4px',
+              borderRadius: 'var(--radius-xs, 4px)',
               cursor: 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
@@ -358,9 +359,9 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
             style={{
               background: 'none',
               border: 'none',
-              color: 'var(--text-muted, #9ca3af)',
+              color: 'var(--text-muted)',
               padding: '5px',
-              borderRadius: '4px',
+              borderRadius: 'var(--radius-xs, 4px)',
               cursor: 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
@@ -380,9 +381,9 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
             style={{
               background: 'none',
               border: 'none',
-              color: 'var(--text-muted, #9ca3af)',
+              color: 'var(--text-muted)',
               padding: '5px',
-              borderRadius: '4px',
+              borderRadius: 'var(--radius-xs, 4px)',
               cursor: 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
@@ -405,12 +406,12 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'flex-start',
-          background: activeTab === 'preview' && artifactType === 'html' ? '#0b0c0e' : 'transparent',
+          background: activeTab === 'preview' && artifactType === 'html' ? 'var(--input-bg, #0a0a0b)' : 'transparent',
           padding: activeTab === 'preview' && artifactType === 'html' ? '16px' : '0',
         }}
       >
         {error ? (
-          <div style={{ padding: '24px', textAlign: 'center', color: '#f87171' }}>
+          <div style={{ padding: '24px', textAlign: 'center', color: 'var(--status-error, #f87171)' }}>
             <p style={{ fontWeight: 600, marginBottom: '8px' }}>Error loading preview</p>
             <p style={{ fontSize: '0.8rem', opacity: 0.8 }}>{error}</p>
             <button
@@ -419,10 +420,10 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
               style={{
                 marginTop: '12px',
                 padding: '4px 12px',
-                borderRadius: '4px',
-                background: 'rgba(239, 68, 68, 0.15)',
-                color: '#f87171',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: 'var(--radius-xs, 4px)',
+                background: 'var(--hover-delete-bg, rgba(239, 68, 68, 0.15))',
+                color: 'var(--status-error, #f87171)',
+                border: '1px solid color-mix(in srgb, var(--status-error, #ef4444) 30%, transparent)',
                 cursor: 'pointer',
                 fontSize: '0.78rem',
               }}
@@ -441,10 +442,10 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
               maxWidth: '100%',
               height: '100%',
               background: '#ffffff',
-              borderRadius: viewport === 'desktop' ? '0px' : '8px',
+              borderRadius: viewport === 'desktop' ? '0px' : 'var(--radius-md, 8px)',
               overflow: 'hidden',
-              boxShadow: viewport === 'desktop' ? 'none' : '0 10px 25px rgba(0,0,0,0.5)',
-              border: viewport === 'desktop' ? 'none' : '1px solid rgba(255,255,255,0.15)',
+              boxShadow: viewport === 'desktop' ? 'none' : 'var(--shadow-md, 0 10px 25px rgba(0,0,0,0.5))',
+              border: viewport === 'desktop' ? 'none' : '1px solid var(--border)',
               transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
             }}
           >
@@ -470,7 +471,7 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
               justifyContent: 'center',
               padding: '24px',
               backgroundImage:
-                'linear-gradient(45deg, rgba(255,255,255,0.03) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,0.03) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.03) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.03) 75%)',
+                'linear-gradient(45deg, color-mix(in srgb, var(--text-main) 4%, transparent) 25%, transparent 25%), linear-gradient(-45deg, color-mix(in srgb, var(--text-main) 4%, transparent) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--text-main) 4%, transparent) 75%), linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--text-main) 4%, transparent) 75%)',
               backgroundSize: '20px 20px',
               backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
               overflow: 'auto',
@@ -489,6 +490,7 @@ export function ArtifactPreviewPanel({ artifact, onClose }: Props) {
               overflow: 'auto',
               padding: '20px 24px',
               lineHeight: 1.6,
+              color: 'var(--text-chat, var(--text-main))',
             }}
           >
             {renderFormattedMessage(content)}

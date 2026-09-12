@@ -59,6 +59,126 @@ pub fn create_folder(target: &Path, config: &MintConfig) -> Result<PathBuf, File
     Ok(target)
 }
 
+
+/// Resolves a file path for reading/previewing across CLI, Desktop, and Web.
+/// Handles:
+/// 1. Tilde expansion (`~` or `~/...`) to user home directory.
+/// 2. Config/notes paths (`.config/mint/notes/...`, `notes/...`, etc.) relative to home/config dir.
+/// 3. Workspace-relative paths if workspace root is provided.
+/// 4. Current working directory relative paths.
+/// 5. Absolute paths.
+/// Returns the first candidate that exists on disk, or the primary resolved path if none exists.
+pub fn resolve_readable_path(target: &str, workspace: Option<&Path>) -> PathBuf {
+    let trimmed = target.trim();
+    if trimmed.is_empty() {
+        return PathBuf::new();
+    }
+
+    let norm_slash = trimmed.replace('\\', "/");
+
+    // 1. Tilde expansion (~/ or ~\)
+    if let Some(home) = dirs::home_dir() {
+        if trimmed == "~" {
+            return home;
+        }
+        if let Some(rest) = norm_slash.strip_prefix("~/") {
+            let candidate = home.join(rest);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+
+    let req_path = Path::new(trimmed);
+
+    // If absolute and exists, return immediately
+    if req_path.is_absolute() && req_path.exists() {
+        return req_path.to_path_buf();
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if req_path.is_absolute() {
+        candidates.push(req_path.to_path_buf());
+    }
+
+    // Workspace-relative candidate
+    if let Some(ws) = workspace {
+        if !ws.as_os_str().is_empty() {
+            if norm_slash != trimmed {
+                candidates.push(ws.join(&norm_slash));
+            }
+            candidates.push(ws.join(trimmed));
+        }
+    }
+
+    // Current working directory candidate
+    if let Ok(cwd) = std::env::current_dir() {
+        if norm_slash != trimmed {
+            candidates.push(cwd.join(&norm_slash));
+        }
+        candidates.push(cwd.join(trimmed));
+    }
+
+    // Home directory candidates
+    if let Some(home) = dirs::home_dir() {
+        if let Some(rest) = norm_slash.strip_prefix("~/") {
+            candidates.push(home.join(rest));
+        }
+        if norm_slash != trimmed {
+            candidates.push(home.join(&norm_slash));
+        }
+        candidates.push(home.join(trimmed));
+        if norm_slash.starts_with(".config/") {
+            candidates.push(home.join(trimmed));
+            if let Some(rest) = norm_slash.strip_prefix(".config/") {
+                candidates.push(home.join(".config").join(rest));
+            }
+        }
+        candidates.push(home.join(".config").join("mint").join("notes").join(trimmed));
+        if norm_slash != trimmed {
+            candidates.push(home.join(".config").join("mint").join("notes").join(&norm_slash));
+        }
+        if let Some(fname) = req_path.file_name() {
+            candidates.push(home.join(".config").join("mint").join("notes").join(fname));
+        }
+    }
+
+    // Config directory candidates (native OS: macOS ~/Library/Application Support, Windows %APPDATA%, Linux ~/.config)
+    if let Some(cfg) = dirs::config_dir() {
+        candidates.push(cfg.join(trimmed));
+        if norm_slash != trimmed {
+            candidates.push(cfg.join(&norm_slash));
+        }
+        if let Some(rest) = norm_slash.strip_prefix(".config/") {
+            candidates.push(cfg.join(rest));
+        }
+        candidates.push(cfg.join("mint").join("notes").join(trimmed));
+        if norm_slash != trimmed {
+            candidates.push(cfg.join("mint").join("notes").join(&norm_slash));
+        }
+        if let Some(fname) = req_path.file_name() {
+            candidates.push(cfg.join("mint").join("notes").join(fname));
+        }
+    }
+
+    // Return the first candidate that exists as a file or directory
+    for candidate in &candidates {
+        if candidate.is_file() || candidate.exists() {
+            return candidate.clone();
+        }
+    }
+
+    // Fallback if none exists
+    if let Some(ws) = workspace {
+        if !ws.as_os_str().is_empty() {
+            return ws.join(trimmed);
+        }
+    }
+
+    candidates.into_iter().next().unwrap_or_else(|| req_path.to_path_buf())
+}
+
 pub fn find_paths(
     query: &str,
     roots: &[PathBuf],
@@ -156,4 +276,26 @@ mod tests {
         assert_eq!(matches.len(), 1);
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn test_resolve_readable_path_workspace() {
+        let temp_dir = std::env::temp_dir().join(format!("mint-resolve-test-{}", std::process::id()));
+        let _ = fs::create_dir_all(temp_dir.join("sub"));
+        let test_file = temp_dir.join("sub").join("sample.md");
+        let _ = fs::write(&test_file, "# Test Preview");
+
+        // Relative path with workspace provided (both slash and backslash)
+        let resolved = resolve_readable_path("sub/sample.md", Some(&temp_dir));
+        assert_eq!(resolved, test_file);
+
+        let resolved_win = resolve_readable_path("sub\\sample.md", Some(&temp_dir));
+        assert_eq!(resolved_win, test_file);
+
+        // Non-existent path returns fallback joined with workspace
+        let missing = resolve_readable_path("missing.md", Some(&temp_dir));
+        assert_eq!(missing, temp_dir.join("missing.md"));
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
 }
+

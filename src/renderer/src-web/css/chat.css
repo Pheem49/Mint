@@ -1124,6 +1124,183 @@
   animation: agent-activity-slide-up-fade 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* File Changes & Review Card Styles */
+
+.file-changes-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+
+.file-changes-toggle:hover {
+  color: var(--accent-hover, var(--accent));
+}
+
+.file-changes-rewind-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  border-radius: var(--radius-xs, 4px);
+  background: var(--hover-delete-bg, rgba(239, 68, 68, 0.1));
+  color: var(--status-error, #f87171);
+  border: 1px solid color-mix(in srgb, var(--status-error, #ef4444) 30%, transparent);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.file-changes-rewind-btn:hover {
+  background: color-mix(in srgb, var(--status-error, #ef4444) 18%, transparent);
+  border-color: color-mix(in srgb, var(--status-error, #ef4444) 50%, transparent);
+}
+
+.file-changes-card {
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border)) !important;
+  border-radius: var(--radius-md, 8px) !important;
+  padding: 10px !important;
+  background: var(--surface-bg, #1e1e20) !important;
+  margin-top: 4px;
+}
+
+.file-changes-item {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+.file-changes-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.file-changes-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-xs, 4px);
+  transition: background 0.15s ease;
+}
+
+.file-changes-item-header:hover {
+  background: color-mix(in srgb, var(--text-main) 5%, transparent);
+}
+
+.file-changes-filename {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-chat, var(--text-main));
+}
+
+.file-changes-filename.is-new {
+  color: var(--accent);
+}
+
+.file-changes-dirpath {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.file-changes-badge-new {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-xs, 4px);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  letter-spacing: 0.04em;
+}
+
+.file-changes-count-add {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.file-changes-count-del {
+  color: var(--status-error, #ef4444);
+  font-weight: 600;
+}
+
+.file-changes-preview-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  fontSize: 0.68rem;
+  border-radius: var(--radius-xs, 4px);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.file-changes-preview-btn:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent-hover, var(--accent));
+}
+
+.file-changes-diff-box {
+  margin-top: 6px;
+  background: var(--input-bg, #0a0a0b);
+  border-radius: var(--radius-sm, 6px);
+  padding: 8px;
+  border: 1px solid var(--border);
+  overflow-x: auto;
+  max-height: 300px;
+}
+
+.file-changes-diff-hunk {
+  font-size: 0.74rem;
+  font-family: 'Fira Code', 'Courier New', Courier, monospace;
+  line-height: 1.45;
+}
+
+.file-changes-diff-del {
+  background: color-mix(in srgb, var(--status-error, #ef4444) 10%, transparent);
+  border-left: 3px solid var(--status-error, #ef4444);
+  padding: 4px 6px;
+  color: var(--text-chat, var(--text-main));
+  white-space: pre-wrap;
+}
+
+.file-changes-diff-add {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-left: 3px solid var(--accent);
+  padding: 4px 6px;
+  color: var(--text-chat, var(--text-main));
+  white-space: pre-wrap;
+}
+
+.file-changes-diff-sign-del {
+  color: var(--status-error, #ef4444);
+  margin-right: 6px;
+  user-select: none;
+  font-weight: 600;
+  display: inline-block;
+  min-width: 10px;
+}
+
+.file-changes-diff-sign-add {
+  color: var(--accent);
+  margin-right: 6px;
+  user-select: none;
+  font-weight: 600;
+  display: inline-block;
+  min-width: 10px;
+}
+
+
 .agent-activity-card-history {
   padding-top: 0;
 }
