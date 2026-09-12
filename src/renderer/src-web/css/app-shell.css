@@ -822,7 +822,11 @@ h1 {
   z-index: 1;
 }
 
-.chat-panel-split-wrapper {
+.chat-panel-split-wrapper.no-preview {
+  display: contents;
+}
+
+.chat-panel-split-wrapper.has-preview {
   grid-column: 1 / -1;
   width: 100%;
   height: 100%;
@@ -833,14 +837,86 @@ h1 {
   z-index: 1;
 }
 
-.chat-panel-split-wrapper .conversation-panel {
-  flex: 1 1 50%;
-  min-width: 340px;
+.chat-panel-split-wrapper.has-preview .conversation-panel {
+  flex: 0 0 calc(100% - var(--preview-width, 50%));
+  min-width: 320px;
   max-width: none;
-  width: auto;
+  width: calc(100% - var(--preview-width, 50%));
   margin: 0;
   height: 100%;
   grid-column: auto;
+}
+
+.chat-panel-split-wrapper.has-preview .artifact-preview-panel {
+  flex: 0 0 var(--preview-width, 50%);
+  width: var(--preview-width, 50%);
+  min-width: 280px;
+  max-width: none;
+  height: 100%;
+}
+
+.preview-split-resizer {
+  width: 8px;
+  margin: 0 -4px;
+  height: 100%;
+  cursor: col-resize;
+  position: relative;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.preview-split-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3.5px;
+  width: 1px;
+  background: var(--border);
+  transition: background 0.15s ease, width 0.15s ease, box-shadow 0.15s ease;
+}
+
+.preview-split-resizer:hover::before,
+.preview-split-resizer.is-dragging::before {
+  background: var(--accent);
+  width: 2px;
+  left: 3px;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.preview-split-resizer-grip {
+  width: 4px;
+  height: 28px;
+  border-radius: 2px;
+  background: var(--border);
+  position: relative;
+  z-index: 1;
+  transition: background 0.15s ease, height 0.15s ease;
+}
+
+.preview-split-resizer:hover .preview-split-resizer-grip,
+.preview-split-resizer.is-dragging .preview-split-resizer-grip {
+  background: var(--accent);
+  height: 38px;
+}
+
+.chat-panel-split-wrapper.is-resizing {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.chat-panel-split-wrapper.is-resizing * {
+  user-select: none !important;
+  pointer-events: none !important;
+}
+
+.chat-panel-split-wrapper.is-resizing .preview-split-resizer {
+  pointer-events: auto !important;
 }
 
 .assistant-workspace.model-hidden .chat-container {

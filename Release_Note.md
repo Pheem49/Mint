@@ -11,7 +11,15 @@
   - Both cards link to the resolved target on disk so clicking Preview on either the created or modified entry works seamlessly without path errors.
 - **Preview Resiliency & Fallback Content**:
   - Pass initial created file content as in-memory fallback to `ArtifactPreviewPanel`, ensuring previews render instantly and gracefully even before disk sync or in transient environments.
-  - Propagated `workspacePath` through `ArtifactPreviewPanel` and `readWorkspaceFile` bridge for precise relative-path resolution in multi-workspace setups.
+- **Chat Scroll Preservation on Preview Toggle**:
+  - Eliminated the issue where opening or closing the Live Preview panel caused the chat messages container to unmount and reset its scroll position (`scrollTop = 0`) to the top of history.
+  - Stabilized the split view wrapper DOM hierarchy (`.chat-panel-split-wrapper` with `display: contents` in `no-preview` mode) so the conversation panel never unmounts, while anchoring the scroll position to the active message.
+- **Draggable & Resizable Split Pane Divider**:
+  - Added an interactive divider bar (`.preview-split-resizer`) between the Chat Panel and Live Preview panel.
+  - Smooth 60fps mouse drag-to-resize using direct CSS variable updates (`--preview-width`), preventing costly re-renders of the chat conversation while dragging.
+  - Double-click on the divider grip bar instantly snaps back to 50/50 balance.
+  - Automatically persists the user's preferred split ratio in `localStorage` (`mint_preview_split_ratio`), preserving custom sizing across sessions.
+  - Safety constraints prevent either pane from collapsing (Chat >= 340px, Preview >= 280px).
 
 ## File Changes, Live Preview & Diff Viewer Theme Parity (Desktop & Web UI)
 

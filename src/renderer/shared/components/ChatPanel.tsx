@@ -237,17 +237,94 @@ export default function ChatPanel({
 
   const chatContainerRef = useRef<HTMLDivElement | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  const isNearBottomRef = useRef(true)
 
   const handleChatScroll = useCallback(() => {
     const el = chatContainerRef.current
     if (!el) return
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    setShowScrollToBottom(distanceFromBottom > 240)
+    const nearBottom = distanceFromBottom <= 240
+    setShowScrollToBottom(!nearBottom)
+    isNearBottomRef.current = nearBottom
   }, [])
+
+  useEffect(() => {
+    const el = chatContainerRef.current
+    if (!el) return
+    if (isNearBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [activeArtifact])
 
   const scrollToBottom = useCallback(() => {
     chatEnd.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatEnd])
+
+  const [splitRatio, setSplitRatio] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('mint_preview_split_ratio')
+      if (saved) {
+        const val = parseFloat(saved)
+        if (!isNaN(val) && val >= 0.2 && val <= 0.8) {
+          return val
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return 0.5
+  })
+  const currentRatioRef = useRef(splitRatio)
+  const wrapperRef = useRef<HTMLDivElement | null>(null)
+
+  const handleResizerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
+
+    wrapper.classList.add('is-resizing')
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const rect = wrapper.getBoundingClientRect()
+      const totalWidth = rect.width
+      if (totalWidth <= 0) return
+
+      const previewPx = rect.right - moveEvent.clientX
+      const clampedPreviewPx = Math.max(280, Math.min(totalWidth - 340, previewPx))
+      const newRatio = clampedPreviewPx / totalWidth
+      currentRatioRef.current = newRatio
+      wrapper.style.setProperty('--preview-width', `${(newRatio * 100).toFixed(2)}%`)
+    }
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+      wrapper.classList.remove('is-resizing')
+      setSplitRatio(currentRatioRef.current)
+      try {
+        localStorage.setItem('mint_preview_split_ratio', currentRatioRef.current.toFixed(4))
+      } catch {
+        // ignore
+      }
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }, [])
+
+  const handleResizerDoubleClick = useCallback(() => {
+    const defaultRatio = 0.5
+    currentRatioRef.current = defaultRatio
+    setSplitRatio(defaultRatio)
+    if (wrapperRef.current) {
+      wrapperRef.current.style.setProperty('--preview-width', '50%')
+    }
+    try {
+      localStorage.setItem('mint_preview_split_ratio', '0.5')
+    } catch {
+      // ignore
+    }
+  }, [])
 
   const handleCopyMessage = useCallback(async (id: string | number, text: string) => {
     try {
@@ -1056,7 +1133,7 @@ export default function ChatPanel({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      style={activeArtifact ? { flex: '1 1 50%', minWidth: '340px', width: 'auto', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
+      style={activeArtifact ? { flex: '0 0 calc(100% - var(--preview-width, 50%))', width: 'calc(100% - var(--preview-width, 50%))', minWidth: '320px', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
     >
         {isDragging && (
           <div
@@ -1650,29 +1727,38 @@ export default function ChatPanel({
     </section>
   )
 
-  if (!activeArtifact) {
-    return sectionContent
-  }
-
   return (
     <div
-      className="chat-panel-split-wrapper"
+      ref={wrapperRef}
+      className={`chat-panel-split-wrapper ${activeArtifact ? 'has-preview' : 'no-preview'}`}
       style={{
-        display: 'flex',
         width: '100%',
         height: '100%',
         overflow: 'hidden',
         position: 'relative',
         gridColumn: '1 / -1',
         zIndex: 1,
-      }}
+        '--preview-width': `${(splitRatio * 100).toFixed(2)}%`,
+      } as React.CSSProperties}
     >
       {sectionContent}
-      <ArtifactPreviewPanel
-        artifact={activeArtifact}
-        onClose={() => setActiveArtifact(null)}
-        workspacePath={workspacePath}
-      />
+      {activeArtifact && (
+        <>
+          <div
+            className="preview-split-resizer"
+            onMouseDown={handleResizerMouseDown}
+            onDoubleClick={handleResizerDoubleClick}
+            title="Drag to resize · Double-click to reset 50/50"
+          >
+            <div className="preview-split-resizer-grip" />
+          </div>
+          <ArtifactPreviewPanel
+            artifact={activeArtifact}
+            onClose={() => setActiveArtifact(null)}
+            workspacePath={workspacePath}
+          />
+        </>
+      )}
     </div>
   )
 }
