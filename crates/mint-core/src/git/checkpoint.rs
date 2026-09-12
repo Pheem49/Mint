@@ -157,24 +157,30 @@ pub fn rollback_checkpoint(root: &Path, checkpoint: &Checkpoint) -> Result<Strin
 
     // Create a rescue checkpoint first so user work is never lost
     let rescue_msg = format!("mint:rescue-before-rewind-to-step-{}", checkpoint.step);
+    let mut rescue_hash = String::new();
     if let Ok(rescue_out) = Command::new("git")
         .args(["stash", "create", &rescue_msg])
         .current_dir(root)
         .output()
     {
-        let rescue_hash = String::from_utf8_lossy(&rescue_out.stdout)
+        rescue_hash = String::from_utf8_lossy(&rescue_out.stdout)
             .trim()
             .to_string();
-        if !rescue_hash.is_empty() {
-            let _ = Command::new("git")
-                .args([
-                    "update-ref",
-                    &format!("refs/mint/rescue/{timestamp}"),
-                    &rescue_hash,
-                ])
-                .current_dir(root)
-                .output();
+    }
+    if rescue_hash.is_empty() {
+        if let Ok(head) = get_head_hash(root) {
+            rescue_hash = head;
         }
+    }
+    if !rescue_hash.is_empty() {
+        let _ = Command::new("git")
+            .args([
+                "update-ref",
+                &format!("refs/mint/rescue/{timestamp}"),
+                &rescue_hash,
+            ])
+            .current_dir(root)
+            .output();
     }
 
     // Restore working tree to the checkpoint commit
@@ -196,6 +202,74 @@ pub fn rollback_checkpoint(root: &Path, checkpoint: &Checkpoint) -> Result<Strin
         checkpoint.step,
         &checkpoint.commit_hash[..7.min(checkpoint.commit_hash.len())]
     ))
+}
+
+pub fn undo_rollback(root: &Path) -> Result<String, String> {
+    if !is_git_repo(root) {
+        return Err("Workspace is not a git repository".into());
+    }
+
+    // Find the most recent rescue ref in refs/mint/rescue/*
+    let output = Command::new("git")
+        .args([
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--count=1",
+            "--format=%(refname) %(objectname)",
+            "refs/mint/rescue/",
+        ])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("failed to list rescue checkpoints: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stdout.is_empty() {
+        return Err("No rescue checkpoint found to undo. No recent rewind recorded.".into());
+    }
+
+    let mut parts = stdout.split_whitespace();
+    let ref_name = parts.next().unwrap_or("");
+    let rescue_hash = parts.next().unwrap_or("");
+
+    if rescue_hash.is_empty() {
+        return Err("Rescue checkpoint reference is invalid".into());
+    }
+
+    // Before undoing, create a quick rescue stash of current state as safety
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let pre_undo_msg = format!("mint:rescue-before-undo-{timestamp}");
+    let _ = Command::new("git")
+        .args(["stash", "create", &pre_undo_msg])
+        .current_dir(root)
+        .output();
+
+    // Restore working tree to the rescue commit
+    let checkout_out = Command::new("git")
+        .args(["checkout", rescue_hash, "--", "."])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("failed to checkout rescue snapshot: {e}"))?;
+
+    if !checkout_out.status.success() {
+        return Err(format!(
+            "Failed to restore workspace from rescue snapshot: {}",
+            String::from_utf8_lossy(&checkout_out.stderr).trim()
+        ));
+    }
+
+    // Delete the consumed rescue ref so subsequent undo steps back further
+    if !ref_name.is_empty() {
+        let _ = Command::new("git")
+            .args(["update-ref", "-d", ref_name])
+            .current_dir(root)
+            .output();
+    }
+
+    let short_hash = &rescue_hash[..7.min(rescue_hash.len())];
+    Ok(format!("Successfully restored workspace from rescue snapshot ({short_hash})"))
 }
 
 pub fn rollback_to_step(root: &Path, chat_id: &str, step: usize) -> Result<String, String> {

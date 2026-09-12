@@ -355,6 +355,28 @@ export async function listMcpServerTools(name: string): Promise<string[]> {
   return invoke<string[]>('list_mcp_server_tools', { name })
 }
 
+/** Test remote MCP connection by URL and optional headers */
+export async function testMcpConnection(
+  url: string,
+  headers?: Record<string, string>,
+): Promise<{ ok: boolean; error?: string; server_info?: any; tools_count?: number; tools?: any[] }> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase()
+    const res = await authFetch(`${API_BASE}/mcp/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, headers }),
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) {
+      return { ok: false, error: data?.error || `HTTP ${res.status}` }
+    }
+    return data
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('test_mcp_connection', { url, headers })
+}
+
 /** Fetch the live model list for `provider` from its API.
  *  Returns a dynamic list on success, falling back to static presets on any
  *  network or auth error.  Results are cached for 1 hour on the Rust side. */
@@ -2306,6 +2328,34 @@ export async function rollbackGitCheckpoint(
   }
 }
 
+export async function undoGitCheckpoint(
+  workspacePath?: string,
+): Promise<{ status: string; message: string }> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase()
+    try {
+      const res = await authFetch(`${API_BASE}/checkpoints/undo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspacePath }),
+      })
+      return await res.json()
+    } catch (e: any) {
+      console.error('Failed to undo git checkpoint:', e)
+      return { status: 'error', message: e?.message || String(e) }
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  try {
+    const message = await invoke<string>('undo_git_checkpoint', {
+      workspacePath,
+    })
+    return { status: 'ok', message }
+  } catch (e: any) {
+    return { status: 'error', message: e?.message || String(e) }
+  }
+}
+
 export const readWorkspaceFile = async (path: string, workspacePath?: string): Promise<string> => {
   if (!isTauriRuntime()) {
     try {
@@ -2377,6 +2427,8 @@ const _apiCheck: MintPlatformApi = {
   readClipboardImage,
   listGitCheckpoints,
   rollbackGitCheckpoint,
+  undoGitCheckpoint,
   readWorkspaceFile,
+  testMcpConnection,
 }
 

@@ -1313,3 +1313,114 @@ h1 {
     box-shadow: 0 -4px 15px color-mix(in srgb, var(--accent) 22%, transparent);
   }
 }
+
+/* Rewind Floating Toast Banner */
+.rewind-toast-banner {
+  position: absolute;
+  bottom: 84px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 90%;
+  width: auto;
+  min-width: 380px;
+  background: color-mix(in srgb, var(--surface-bg, #1e1e20) 88%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  animation: rewindToastSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.rewind-toast-banner.is-success {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.rewind-toast-banner.is-error {
+  border-color: color-mix(in srgb, var(--status-error, #ef4444) 40%, var(--border));
+}
+
+.rewind-toast-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.rewind-toast-text {
+  font-size: 13px;
+  color: var(--text-main, #e8e8ea);
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rewind-toast-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.rewind-toast-undo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.rewind-toast-undo-btn:hover:not(:disabled) {
+  background: var(--accent);
+  color: #0b0f19;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.rewind-toast-undo-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.rewind-toast-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #8b8b8f);
+  cursor: pointer;
+  padding: 4px;
+  font-size: 12px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+}
+
+.rewind-toast-close-btn:hover {
+  color: var(--text-main, #fff);
+}
+
+@keyframes rewindToastSlideUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

@@ -102,7 +102,7 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 ---
 
 ### 7. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Tool & MCP Integrations
-- **Model Context Protocol (MCP)** servers for Search, Filesystem, GitHub, and more, plus local plugins for Spotify, Google Calendar, Gmail, and Notion — manage all of it interactively with `mint plugins`.
+- **Model Context Protocol (MCP)** servers supporting both **Local Command (`stdio`)** and **Remote Server (`sse` / `http`)** transports with Bearer Token and Custom Header authentication, plus local plugins for Spotify, Google Calendar, Gmail, and Notion — manage all of it interactively with `mint plugins` or `/mcp`.
 - Dedicated **Image Search** tool and an **Auto GitHub Link Resolver** that injects a linked repo's metadata/README as context automatically.
 
 ---
@@ -508,15 +508,30 @@ mint plugins
 
 ### MCP Servers
 
-Add a local MCP server and call one of its tools:
+Mint supports both **Local Command (`stdio`)** processes and **Remote Servers (URL / SSE)** with Bearer Token and Custom Header authentication.
 
+#### Local Server (stdio)
 ```bash
 mint mcp add filesystem npx \
   --args -y \
   --args @modelcontextprotocol/server-filesystem \
   --args .
+```
 
-mint mcp list                       # `[disabled]` marks turned-off servers
+#### Remote Server (URL / SSE)
+Connect cloud-hosted or remote MCP servers with zero local runtime dependencies:
+```bash
+# Public remote endpoint
+mint mcp add weather-api https://mcp.weather.com/sse
+
+# Remote endpoint with Bearer Token or custom headers
+mint mcp add internal-docs https://docs.internal.net/sse \
+  --env "Authorization=Bearer <secret-token>"
+```
+
+#### Inspect & Call Tools
+```bash
+mint mcp list                       # shows `(url: ...)` for remote servers
 mint mcp allow filesystem "*"       # let the agent call every tool
 mint mcp call filesystem list_directory \
   --arguments '{"path":"."}'
@@ -524,7 +539,7 @@ mint mcp call filesystem list_directory \
 
 | Command | Purpose |
 | --- | --- |
-| `mint mcp add <name> <cmd> [--args … --env K=V …]` | Add a server |
+| `mint mcp add <name> <cmd\|url> [--args … --env K=V …]` | Add a local command or remote URL server |
 | `mint mcp edit <name> [--command] [--args …] [--env K=V …] [--icon\|--no-icon]` | Change one or more fields in place |
 | `mint mcp disable <name>` / `mint mcp enable <name>` | Turn a server off/on without removing it |
 | `mint mcp allow <server> <tool>` / `mint mcp disallow <server> <tool>` | Grant/revoke a tool (`*` = all) |
@@ -532,9 +547,11 @@ mint mcp call filesystem list_directory \
 | `mint mcp remove <name>` / `mint mcp clear` | Remove one / all servers |
 
 The same operations are available interactively with `/mcp` (an arrow-key
-picker with an "＋ Add" row and a per-server action menu) and from the
-Desktop/Web **Settings → Plugins → MCP Servers** panel, including the per-server
-tool allowlist.
+picker supporting catalog presets, Remote URL (SSE), and Local Command flows) and from the
+Desktop/Web **Settings → MCP Servers** panel:
+- **Segmented Toggle:** Switch seamlessly between **Remote Server (URL / SSE)** and **Local Command (stdio)**.
+- **Pre-flight Live Testing:** Dedicated `Test Connection` button to verify network reachability and discover exposed tools before saving.
+- **Enterprise Security Warning:** Explicit risk notice and safety acknowledgement requirement before adding custom remote endpoints.
 
 ### Interactive Commands
 

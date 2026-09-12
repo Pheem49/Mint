@@ -111,7 +111,7 @@ pub use gemini_live::{
 pub use git::{
     Checkpoint, commit_task_changes, create_checkpoint, create_task_branch,
     generate_commit_message, get_head_hash, is_git_repo, list_checkpoints, record_checkpoint,
-    restore_file, rollback_checkpoint, rollback_task_changes, rollback_to_step,
+    restore_file, rollback_checkpoint, rollback_task_changes, rollback_to_step, undo_rollback,
 };
 pub use hooks::{
     HookEntry, HookError, HookEvent, PreHookOutcome, add_hook, clear_hooks, list_hooks,
@@ -150,14 +150,15 @@ pub use system::knowledge_engine::{
 };
 pub use mcp::{
     McpError, McpRegistryArgInput, McpRegistryEntry, McpRegistryEnvVar, McpServer, add_mcp_server,
-    allow_mcp_tool, allow_tool_in, call_configured_mcp_tool, call_mcp_tool, clear_mcp_servers,
-    clear_servers_in, close_all_mcp_sessions, close_mcp_session, configured_mcp_servers,
-    disallow_mcp_tool, disallow_tool_in, drain_mcp_notifications, expand_registry_entry,
-    get_server_prompt, is_mcp_tool_allowed, list_mcp_servers, list_server_prompts,
-    list_server_resources, list_server_tools, mcp_registry, mcp_registry_entry,
-    mcp_server_tool_names, mcp_tool_allowlist, read_server_resource, reauth_mcp_server,
-    remove_mcp_server, remove_server_in, set_mcp_server_disabled, set_server_disabled_in,
-    update_mcp_server, update_server_in, upsert_server_in,
+    add_remote_mcp_server, allow_mcp_tool, allow_tool_in, call_configured_mcp_tool, call_mcp_tool,
+    clear_mcp_servers, clear_servers_in, close_all_mcp_sessions, close_mcp_session,
+    configured_mcp_servers, disallow_mcp_tool, disallow_tool_in, drain_mcp_notifications,
+    expand_registry_entry, get_server_prompt, is_mcp_tool_allowed, list_mcp_servers,
+    list_server_prompts, list_server_resources, list_server_tools, mcp_registry,
+    mcp_registry_entry, mcp_server_tool_names, mcp_tool_allowlist, read_server_resource,
+    reauth_mcp_server, remove_mcp_server, remove_server_in, set_mcp_server_disabled,
+    set_server_disabled_in, test_remote_mcp_connection, update_mcp_server, update_server_in,
+    upsert_server_in,
 };
 pub use pictures::{
     PictureEntry, PictureError, delete_saved_picture, list_saved_pictures, parse_data_uri,

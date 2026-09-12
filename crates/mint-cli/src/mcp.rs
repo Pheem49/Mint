@@ -16,6 +16,14 @@ pub fn add(name: &str, command: &str, args: Vec<String>, env: Vec<String>) -> Re
     Ok(add_mcp_server(name, command, args, env)?)
 }
 
+pub fn add_remote(
+    name: &str,
+    url: &str,
+    headers: Option<BTreeMap<String, String>>,
+) -> Result<()> {
+    Ok(mint_core::add_remote_mcp_server(name, url, headers)?)
+}
+
 pub fn remove(name: &str) -> Result<bool> {
     Ok(remove_mcp_server(name)?)
 }

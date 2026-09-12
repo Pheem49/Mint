@@ -170,6 +170,17 @@ async fn list_mcp_server_tools(name: String) -> Result<Vec<String>, String> {
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+async fn test_mcp_connection(
+    url: String,
+    headers: Option<std::collections::BTreeMap<String, String>>,
+) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || mint_core::test_remote_mcp_connection(&url, headers))
+        .await
+        .map_err(|error| format!("test-mcp-connection task failed: {error}"))?
+        .map_err(|error| error.to_string())
+}
+
 /// Fetch the live model list for `provider` from its API.
 ///
 /// Returns the dynamic list on success, or the static preset fallback if the
@@ -1595,6 +1606,12 @@ fn rollback_git_checkpoint(
 }
 
 #[tauri::command]
+fn undo_git_checkpoint(workspace_path: Option<String>) -> Result<String, String> {
+    let root = workspace_root(workspace_path.as_deref())?;
+    mint_core::git::undo_rollback(&root)
+}
+
+#[tauri::command]
 fn read_workspace_file(path: String, workspace_path: Option<String>) -> Result<String, String> {
     let ws_path = workspace_path.as_deref().map(std::path::Path::new);
     let resolved = mint_core::files::resolve_readable_path(&path, ws_path);
@@ -1911,6 +1928,7 @@ pub fn run() {
             detect_system_tools,
             reauth_mcp_server,
             list_mcp_server_tools,
+            test_mcp_connection,
             fetch_provider_models,
             fetch_image_provider_models,
             fetch_video_provider_models,
@@ -1977,6 +1995,7 @@ pub fn run() {
             apply_desktop_code_edits,
             list_git_checkpoints,
             rollback_git_checkpoint,
+            undo_git_checkpoint,
             read_workspace_file,
             open_window,
             hide_desktop_window,

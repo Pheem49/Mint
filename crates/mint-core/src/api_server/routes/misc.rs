@@ -269,6 +269,30 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             .await;
         }
 
+        ("POST", "/api/checkpoints/undo") => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct UndoReq {
+                workspace_path: Option<String>,
+            }
+            let req = serde_json::from_str::<UndoReq>(body).unwrap_or(UndoReq { workspace_path: None });
+            let root = req
+                .workspace_path
+                .as_deref()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            match crate::git::undo_rollback(&root) {
+                Ok(msg) => {
+                    let res = json!({ "status": "ok", "message": msg });
+                    send_json_response(socket, "200 OK", &res.to_string()).await;
+                }
+                Err(err) => {
+                    let res = json!({ "status": "error", "message": err });
+                    send_json_response(socket, "400 Bad Request", &res.to_string()).await;
+                }
+            }
+        }
+
         ("GET", "/api/file/read") => {
             let file_path = query_param(query, "path").unwrap_or_default();
             if file_path.is_empty() {

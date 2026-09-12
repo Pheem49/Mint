@@ -583,8 +583,13 @@ fn cmd_rewind(req: &SlashRequest, rest: &str) -> SlashResponse {
                 cp.step, hash_short, cp.action, target
             ));
         }
-        md.push_str("\nUse `/rewind <step>` to restore your workspace to before that step.");
+        md.push_str("\nUse `/rewind <step>` to restore your workspace to before that step, or `/rewind undo` to restore from the latest rescue snapshot.");
         message(md)
+    } else if rest.trim().eq_ignore_ascii_case("undo") {
+        match crate::git::undo_rollback(&root) {
+            Ok(msg) => message(msg),
+            Err(err) => error(format!("Failed to undo rewind: {err}")),
+        }
     } else {
         match rest.trim().parse::<usize>() {
             Ok(step) => match crate::git::rollback_to_step(&root, chat_id, step) {
@@ -592,7 +597,7 @@ fn cmd_rewind(req: &SlashRequest, rest: &str) -> SlashResponse {
                 Err(err) => error(format!("Failed to rollback: {err}")),
             },
             Err(_) => error(format!(
-                "Invalid step number: \"{rest}\". Usage: /rewind <step>"
+                "Invalid step number: \"{rest}\". Usage: /rewind <step> or /rewind undo"
             )),
         }
     }
@@ -1510,13 +1515,30 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
             tokens.retain(|t| *t != "--allow-all");
             let mut parts = tokens.into_iter();
             match (parts.next(), parts.next()) {
-                (Some(name), Some(command)) => {
-                    let server = crate::McpServer {
-                        command: command.to_string(),
-                        args: parts.map(str::to_string).collect(),
-                        env: Default::default(),
-                        icon: None,
-                        disabled: false,
+                (Some(name), Some(target)) => {
+                    let is_url = target.starts_with("http://") || target.starts_with("https://");
+                    let server = if is_url {
+                        crate::McpServer {
+                            command: String::new(),
+                            args: Vec::new(),
+                            env: Default::default(),
+                            icon: None,
+                            disabled: false,
+                            url: Some(target.to_string()),
+                            headers: None,
+                            transport: Some("sse".to_string()),
+                        }
+                    } else {
+                        crate::McpServer {
+                            command: target.to_string(),
+                            args: parts.map(str::to_string).collect(),
+                            env: Default::default(),
+                            icon: None,
+                            disabled: false,
+                            url: None,
+                            headers: None,
+                            transport: None,
+                        }
                     };
                     match crate::upsert_server_in(config, name, server) {
                         Ok(()) => {
@@ -1535,7 +1557,7 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
                         Err(e) => error(e),
                     }
                 }
-                _ => error("Usage: /mcp add <name> <command> [args…] [--allow-all]"),
+                _ => error("Usage: /mcp add <name> <command|url> [args…] [--allow-all]"),
             }
         }
 

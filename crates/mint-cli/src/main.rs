@@ -212,15 +212,19 @@ pub(crate) fn print_mcp_servers(
         return;
     }
     for (name, srv) in servers {
-        let args_str = srv.args.join(" ");
+        let desc = if let Some(url) = srv.remote_url() {
+            format!("(url: {url})")
+        } else {
+            let args_str = srv.args.join(" ");
+            format!("({} {args_str})", srv.command)
+        };
         let (dot, suffix) = if srv.disabled {
             (DIM, format!(" {DIM}[disabled]{RESET}"))
         } else {
             (BLUE, String::new())
         };
         println!(
-            "  {dot}●{RESET} {name} {DIM}({} {}){RESET}{suffix}",
-            srv.command, args_str
+            "  {dot}●{RESET} {name} {DIM}{desc}{RESET}{suffix}",
         );
     }
     println!();

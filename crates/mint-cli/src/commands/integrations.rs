@@ -152,8 +152,24 @@ pub async fn handle_mcp(command: McpCommand) -> Result<()> {
             env,
             allow_all,
         } => {
-            mcp::add(&name, &command, args, env)?;
-            println!("Added MCP server: {name}");
+            if command.starts_with("http://") || command.starts_with("https://") {
+                let headers = if env.is_empty() {
+                    None
+                } else {
+                    let mut map = std::collections::BTreeMap::new();
+                    for item in env {
+                        if let Some((k, v)) = item.split_once('=') {
+                            map.insert(k.to_string(), v.to_string());
+                        }
+                    }
+                    Some(map)
+                };
+                mcp::add_remote(&name, &command, headers)?;
+                println!("Added Remote MCP server: {name} ({command})");
+            } else {
+                mcp::add(&name, &command, args, env)?;
+                println!("Added MCP server: {name}");
+            }
             if allow_all {
                 mcp::allow(&name, "*")?;
                 println!("Allowed all tools for {name}");

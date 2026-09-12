@@ -453,12 +453,22 @@ pub async fn handle_slash_command(
                         );
                     }
                     println!(
-                        "\n{DIM}Use {RESET}{MINT}/rewind <step>{RESET}{DIM} to restore workspace to before that step.{RESET}\n"
+                        "\n{DIM}Use {RESET}{MINT}/rewind <step>{RESET}{DIM} to restore workspace to before that step, or {RESET}{MINT}/rewind undo{RESET}{DIM} to recover from rescue snapshot.{RESET}\n"
                     );
                 }
                 Some(SlashResult::Handled)
+            } else if rest.trim().eq_ignore_ascii_case("undo") {
+                match mint_core::git::undo_rollback(&session.current_dir) {
+                    Ok(msg) => {
+                        println!("\n{MINT}{msg}{RESET}\n");
+                    }
+                    Err(err) => {
+                        println!("\n{ERROR}Failed to undo rewind:{RESET} {err}\n");
+                    }
+                }
+                Some(SlashResult::Handled)
             } else {
-                match rest.parse::<usize>() {
+                match rest.trim().parse::<usize>() {
                     Ok(step) => {
                         match mint_core::git::rollback_to_step(
                             &session.current_dir,
@@ -475,7 +485,7 @@ pub async fn handle_slash_command(
                     }
                     Err(_) => {
                         println!(
-                            "\n{ERROR}Invalid step number:{RESET} \"{rest}\". Usage: /rewind <step>\n"
+                            "\n{ERROR}Invalid step number:{RESET} \"{rest}\". Usage: /rewind <step> or /rewind undo\n"
                         );
                     }
                 }
@@ -2835,9 +2845,15 @@ fn handle_mcp_slash(session: &mut InteractiveSession, subcmd: &str, args: &str) 
             tokens.retain(|t| *t != "--allow-all");
             let mut parts = tokens.into_iter();
             match (parts.next(), parts.next()) {
-                (Some(name), Some(command)) => {
-                    let arg_list: Vec<String> = parts.map(str::to_string).collect();
-                    match crate::mcp::add(name, command, arg_list, vec![]) {
+                (Some(name), Some(target)) => {
+                    let is_url = target.starts_with("http://") || target.starts_with("https://");
+                    let result = if is_url {
+                        crate::mcp::add_remote(name, target, None)
+                    } else {
+                        let arg_list: Vec<String> = parts.map(str::to_string).collect();
+                        crate::mcp::add(name, target, arg_list, vec![])
+                    };
+                    match result {
                         Ok(()) => {
                             if allow_all {
                                 let _ = crate::mcp::allow(name, "*");
@@ -2856,7 +2872,7 @@ fn handle_mcp_slash(session: &mut InteractiveSession, subcmd: &str, args: &str) 
                     }
                 }
                 _ => println!(
-                    "{WARN}/mcp add usage:{RESET} <name> <command> [args...] [--allow-all]\n"
+                    "{WARN}/mcp add usage:{RESET} <name> <command|url> [args...] [--allow-all]\n"
                 ),
             }
         }
@@ -3030,10 +3046,13 @@ fn mcp_interactive_picker(session: &mut InteractiveSession) {
         } else {
             String::new()
         };
+        let desc = if let Some(url) = srv.remote_url() {
+            format!("(url: {url})")
+        } else {
+            format!("({} {})", srv.command, srv.args.join(" "))
+        };
         choices.push(format!(
-            "{name:<width$}{label}{disabled} {DIM}({} {}){RESET}",
-            srv.command,
-            srv.args.join(" ")
+            "{name:<width$}{label}{disabled} {DIM}{desc}{RESET}",
         ));
         names.push(name.clone());
     }
@@ -3058,10 +3077,15 @@ fn mcp_interactive_picker(session: &mut InteractiveSession) {
 }
 
 fn mcp_add_flow(session: &mut InteractiveSession) {
-    let choices = vec!["From catalog".to_string(), "Custom".to_string()];
+    let choices = vec![
+        "From catalog".to_string(),
+        "Remote URL (SSE)".to_string(),
+        "Local Command (stdio)".to_string(),
+    ];
     match prompt_interactive_select("Add MCP server", &choices, &choices[0]) {
         Ok(Some(c)) if c == "From catalog" => mcp_add_from_catalog(session),
-        Ok(Some(c)) if c == "Custom" => mcp_add_custom_flow(session),
+        Ok(Some(c)) if c == "Remote URL (SSE)" => mcp_add_remote_flow(session),
+        Ok(Some(c)) if c == "Local Command (stdio)" => mcp_add_custom_flow(session),
         _ => {}
     }
 }
@@ -3151,6 +3175,65 @@ fn mcp_add_from_catalog(session: &mut InteractiveSession) {
     }
 }
 
+fn mcp_add_remote_flow(session: &mut InteractiveSession) {
+    let name = crate::onboard::prompt_input("Server name", None).unwrap_or_default();
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        println!("{WARN}Cancelled (no name).{RESET}\n");
+        return;
+    }
+    let url = crate::onboard::prompt_input("Server URL (e.g. https://example.com/sse)", None)
+        .unwrap_or_default();
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        println!("{WARN}Cancelled (no URL).{RESET}\n");
+        return;
+    }
+    let auth = crate::onboard::prompt_input(
+        "Auth header or bearer token (blank for none, e.g. Bearer token)",
+        None,
+    )
+    .unwrap_or_default();
+    let headers = if auth.trim().is_empty() {
+        None
+    } else {
+        let mut map = std::collections::BTreeMap::new();
+        let trimmed = auth.trim();
+        if let Some((k, v)) = trimmed.split_once('=') {
+            map.insert(k.trim().to_string(), v.trim().to_string());
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            map.insert(k.trim().to_string(), v.trim().to_string());
+        } else if trimmed.starts_with("Bearer ") {
+            map.insert("Authorization".to_string(), trimmed.to_string());
+        } else {
+            map.insert("Authorization".to_string(), format!("Bearer {trimmed}"));
+        }
+        Some(map)
+    };
+
+    match crate::mcp::add_remote(&name, &url, headers) {
+        Ok(()) => {
+            let allow_all = confirm(
+                "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+            )
+            .unwrap_or(false);
+            if allow_all {
+                let _ = crate::mcp::allow(&name, "*");
+            }
+            println!(
+                "{MINT}Added Remote MCP server '{name}'{}.{RESET}\n",
+                if allow_all {
+                    " (all tools allowed)"
+                } else {
+                    ""
+                }
+            );
+            reload_session_config(session);
+        }
+        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+    }
+}
+
 fn mcp_add_custom_flow(session: &mut InteractiveSession) {
     let name = crate::onboard::prompt_input("Server name", None).unwrap_or_default();
     let name = name.trim().to_string();
@@ -3158,12 +3241,59 @@ fn mcp_add_custom_flow(session: &mut InteractiveSession) {
         println!("{WARN}Cancelled (no name).{RESET}\n");
         return;
     }
-    let command = crate::onboard::prompt_input("Command (e.g. npx)", None).unwrap_or_default();
+    let command = crate::onboard::prompt_input("Command or URL (e.g. npx or https://...)", None).unwrap_or_default();
     let command = command.trim().to_string();
     if command.is_empty() {
         println!("{WARN}Cancelled (no command).{RESET}\n");
         return;
     }
+
+    if command.starts_with("http://") || command.starts_with("https://") {
+        let auth = crate::onboard::prompt_input(
+            "Auth header or bearer token (blank for none)",
+            None,
+        )
+        .unwrap_or_default();
+        let headers = if auth.trim().is_empty() {
+            None
+        } else {
+            let mut map = std::collections::BTreeMap::new();
+            let trimmed = auth.trim();
+            if let Some((k, v)) = trimmed.split_once('=') {
+                map.insert(k.trim().to_string(), v.trim().to_string());
+            } else if let Some((k, v)) = trimmed.split_once(':') {
+                map.insert(k.trim().to_string(), v.trim().to_string());
+            } else if trimmed.starts_with("Bearer ") {
+                map.insert("Authorization".to_string(), trimmed.to_string());
+            } else {
+                map.insert("Authorization".to_string(), format!("Bearer {trimmed}"));
+            }
+            Some(map)
+        };
+        match crate::mcp::add_remote(&name, &command, headers) {
+            Ok(()) => {
+                let allow_all = confirm(
+                    "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+                )
+                .unwrap_or(false);
+                if allow_all {
+                    let _ = crate::mcp::allow(&name, "*");
+                }
+                println!(
+                    "{MINT}Added Remote MCP server '{name}'{}.{RESET}\n",
+                    if allow_all {
+                        " (all tools allowed)"
+                    } else {
+                        ""
+                    }
+                );
+                reload_session_config(session);
+            }
+            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+        }
+        return;
+    }
+
     let args = crate::onboard::prompt_input("Arguments (space-separated, blank for none)", None)
         .unwrap_or_default();
     let env_raw = crate::onboard::prompt_input(

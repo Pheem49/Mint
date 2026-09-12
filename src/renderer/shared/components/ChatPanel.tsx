@@ -24,7 +24,8 @@ import SourcesBlock from './SourcesBlock'
 import ChatMessageItem from './ChatMessageItem'
 import { AgentActivityDrawer } from './AgentActivityDrawer'
 import { ArtifactPreviewPanel, type ArtifactFile } from './ArtifactPreviewPanel'
-import type { DiffHunk, FileChange } from '../types'
+import { RewindModal } from './RewindModal'
+import type { DiffHunk, FileChange, GitCheckpoint } from '../types'
 import { numericSetting, shouldShowSessionDivider, formatSessionDividerLabel } from '../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
 import { useGeminiLiveVoice } from '../utils/useGeminiLiveVoice'
@@ -43,6 +44,7 @@ import {
   stopGeminiLiveSession,
   listGitCheckpoints,
   rollbackGitCheckpoint,
+  undoGitCheckpoint,
   fetchProviderModels,
 } from '@/tauri'
 
@@ -325,6 +327,114 @@ export default function ChatPanel({
       // ignore
     }
   }, [])
+
+  const [rewindModalState, setRewindModalState] = useState<{
+    isOpen: boolean
+    interaction: any | null
+    changes: FileChange[]
+    checkpoints: GitCheckpoint[]
+    targetCheckpoint: GitCheckpoint | null
+    isLoading: boolean
+  }>({
+    isOpen: false,
+    interaction: null,
+    changes: [],
+    checkpoints: [],
+    targetCheckpoint: null,
+    isLoading: false,
+  })
+
+  const [undoToastState, setUndoToastState] = useState<{
+    visible: boolean
+    message: string
+    canUndo: boolean
+    isUndoing: boolean
+    type: 'success' | 'error'
+  }>({
+    visible: false,
+    message: '',
+    canUndo: false,
+    isUndoing: false,
+    type: 'success',
+  })
+
+  useEffect(() => {
+    if (!undoToastState.visible) return
+    const timer = setTimeout(() => {
+      setUndoToastState((prev) => ({ ...prev, visible: false }))
+    }, 16000)
+    return () => clearTimeout(timer)
+  }, [undoToastState.visible, undoToastState.message])
+
+  const handleConfirmRewind = useCallback(async (targetStep: number) => {
+    const interaction = rewindModalState.interaction
+    if (!interaction) return
+    const chatId = interaction.chatId || 'cli'
+
+    setRewindModalState((prev) => ({ ...prev, isLoading: true }))
+    try {
+      const res = await rollbackGitCheckpoint(chatId, targetStep, workspacePath)
+      setRewindModalState((prev) => ({ ...prev, isOpen: false, isLoading: false }))
+      if (res.status === 'ok') {
+        setUndoToastState({
+          visible: true,
+          message: res.message,
+          canUndo: true,
+          isUndoing: false,
+          type: 'success',
+        })
+      } else {
+        setUndoToastState({
+          visible: true,
+          message: `Failed to rewind: ${res.message}`,
+          canUndo: false,
+          isUndoing: false,
+          type: 'error',
+        })
+      }
+    } catch (err: any) {
+      setRewindModalState((prev) => ({ ...prev, isOpen: false, isLoading: false }))
+      setUndoToastState({
+        visible: true,
+        message: `Error: ${err.message || String(err)}`,
+        canUndo: false,
+        isUndoing: false,
+        type: 'error',
+      })
+    }
+  }, [rewindModalState.interaction, workspacePath])
+
+  const handleUndoRewind = useCallback(async () => {
+    setUndoToastState((prev) => ({ ...prev, isUndoing: true }))
+    try {
+      const res = await undoGitCheckpoint(workspacePath)
+      if (res.status === 'ok') {
+        setUndoToastState({
+          visible: true,
+          message: res.message,
+          canUndo: false,
+          isUndoing: false,
+          type: 'success',
+        })
+      } else {
+        setUndoToastState({
+          visible: true,
+          message: `Failed to undo rewind: ${res.message}`,
+          canUndo: true,
+          isUndoing: false,
+          type: 'error',
+        })
+      }
+    } catch (err: any) {
+      setUndoToastState({
+        visible: true,
+        message: `Error: ${err.message || String(err)}`,
+        canUndo: true,
+        isUndoing: false,
+        type: 'error',
+      })
+    }
+  }, [workspacePath])
 
   const handleCopyMessage = useCallback(async (id: string | number, text: string) => {
     try {
@@ -993,25 +1103,62 @@ export default function ChatPanel({
     const handleRewind = async (e: React.MouseEvent) => {
       e.stopPropagation()
       const chatId = interaction.chatId || 'cli'
-      const confirmed = window.confirm(
-        'Are you sure you want to rewind your workspace files to the checkpoint before these changes? A rescue snapshot will be preserved automatically.'
-      )
-      if (!confirmed) return
       try {
         const checkpoints = await listGitCheckpoints(chatId)
-        if (checkpoints.length === 0) {
-          alert('No git checkpoints recorded for this session.')
+        if (!checkpoints || checkpoints.length === 0) {
+          setUndoToastState({
+            visible: true,
+            message: 'No git checkpoints recorded for this session.',
+            canUndo: false,
+            isUndoing: false,
+            type: 'error',
+          })
           return
         }
-        const targetCp = checkpoints[checkpoints.length - 1]
-        const res = await rollbackGitCheckpoint(chatId, targetCp.step, workspacePath)
-        if (res.status === 'ok') {
-          alert(res.message)
+
+        // Targeted Step Checkpoint resolution:
+        // Match checkpoints against files touched in this specific interaction
+        const changePaths = new Set(changes.map((c) => c.path.trim().toLowerCase()))
+        const matching = checkpoints.filter((cp) => {
+          if (!cp.targetPath) return false
+          const cpPath = cp.targetPath.trim().toLowerCase()
+          return changePaths.has(cpPath) || Array.from(changePaths).some((p) => cpPath.endsWith(p) || p.endsWith(cpPath))
+        })
+
+        let targetCp: GitCheckpoint | null = null
+        if (matching.length > 0) {
+          // Earliest matching checkpoint represents the state immediately before this turn's modifications
+          targetCp = matching.reduce((earliest, curr) => (curr.step < earliest.step ? curr : earliest), matching[0])
         } else {
-          alert(`Failed to rewind: ${res.message}`)
+          // If no direct target path, try matching by timestamp
+          const interactionTs = interaction.createdAt ? new Date(interaction.createdAt).getTime() / 1000 : 0
+          if (interactionTs > 0) {
+            const afterCreated = checkpoints.filter((cp) => cp.timestamp >= interactionTs - 10)
+            if (afterCreated.length > 0) {
+              targetCp = afterCreated[0]
+            }
+          }
+          if (!targetCp) {
+            targetCp = checkpoints[checkpoints.length - 1]
+          }
         }
+
+        setRewindModalState({
+          isOpen: true,
+          interaction,
+          changes,
+          checkpoints,
+          targetCheckpoint: targetCp,
+          isLoading: false,
+        })
       } catch (err: any) {
-        alert(`Error: ${err.message || String(err)}`)
+        setUndoToastState({
+          visible: true,
+          message: `Failed to load checkpoints: ${err.message || String(err)}`,
+          canUndo: false,
+          isUndoing: false,
+          type: 'error',
+        })
       }
     }
 
@@ -1724,6 +1871,57 @@ export default function ChatPanel({
           }}
         />
       )}
+      {undoToastState.visible && (
+        <div className={`rewind-toast-banner ${undoToastState.type === 'error' ? 'is-error' : 'is-success'}`}>
+          <div className="rewind-toast-content">
+            {undoToastState.type === 'error' ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--status-error, #ef4444)" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+            )}
+            <span className="rewind-toast-text">{undoToastState.message}</span>
+          </div>
+
+          <div className="rewind-toast-actions">
+            {undoToastState.canUndo && (
+              <button
+                type="button"
+                className="rewind-toast-undo-btn"
+                onClick={handleUndoRewind}
+                disabled={undoToastState.isUndoing}
+                title="Restore workspace files back from safety rescue snapshot"
+              >
+                {undoToastState.isUndoing ? (
+                  'Undoing...'
+                ) : (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <polyline points="9 14 4 9 9 4" />
+                      <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+                    </svg>
+                    Undo Rewind
+                  </>
+                )}
+              </button>
+            )}
+            <button
+              type="button"
+              className="rewind-toast-close-btn"
+              onClick={() => setUndoToastState((prev) => ({ ...prev, visible: false }))}
+              aria-label="Close notification"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   )
 
@@ -1758,6 +1956,18 @@ export default function ChatPanel({
             workspacePath={workspacePath}
           />
         </>
+      )}
+      {rewindModalState.isOpen && (
+        <RewindModal
+          isOpen={rewindModalState.isOpen}
+          onClose={() => setRewindModalState((prev) => ({ ...prev, isOpen: false }))}
+          onConfirm={handleConfirmRewind}
+          checkpoints={rewindModalState.checkpoints}
+          targetCheckpoint={rewindModalState.targetCheckpoint}
+          changes={rewindModalState.changes}
+          workspacePath={workspacePath}
+          isLoading={rewindModalState.isLoading}
+        />
       )}
     </div>
   )

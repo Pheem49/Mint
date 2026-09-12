@@ -1,5 +1,51 @@
 # Release Notes - Mint Agent v1.14.0
 
+## Remote MCP Server Connections via URL / SSE & Live Connection Testing (CLI, Desktop & Web)
+
+Mint now natively supports connecting to remote Model Context Protocol (MCP) servers hosted over HTTP / HTTPS with Server-Sent Events (SSE) streaming and direct HTTP POST JSON-RPC transports.
+
+- **Remote MCP Protocol Support (`crates/mint-core/src/integrations/mcp.rs`)**:
+  - Extended `McpServer` configuration with `url: Option<String>`, `headers: Option<BTreeMap<String, String>>`, and `transport: Option<String>`.
+  - Added `McpRemoteSession` with an SSE event listener thread and endpoint discovery (`endpoint` SSE events), dual-channel JSON-RPC dispatch (direct POST responses with SSE event fallback), and background keepalive.
+  - Unified local stdio processes and remote network connections under the `McpSession` abstraction.
+  - Implemented `test_remote_mcp_connection` for pre-flight connection verification and discovery of remote tools, prompts, and resources.
+- **Interactive UI with Segmented Transport Toggle & Live Testing (`McpServersView.tsx`)**:
+  - **Segmented Toggle**: Switch effortlessly between **`🌐 Remote Server (URL / SSE)`** and **`💻 Local Command (stdio)`** in the Add Server modal.
+  - **Remote Endpoint & Authentication Setup**: Configure Remote Server URL (`https://...`), choose Authentication type (`None`, `Bearer Token`, or `Custom Headers JSON`), and provide optional custom server icons.
+  - **Live Connection Testing**: Interactive **`Test Connection`** button triggers a non-blocking diagnostic test against the endpoint, displaying live loading states, success verification (reporting available tools, resources, and prompts count), or detailed error diagnostics before saving.
+  - **Enterprise-Grade Security Notice & Risk Acknowledgement**: Custom warning banner with `<ShieldAlert />` icon and safety acknowledgement checkbox before adding external endpoints, ensuring users review risks prior to granting remote tool execution.
+  - **Server Card & Details Parity**: Remote servers display a distinct `Remote` badge with Lucide vector icon on their card and reveal their full endpoint URL and custom headers in the server detail modal.
+- **Full Platform Parity across CLI, Desktop & Web**:
+  - **CLI (`crates/mint-cli`)**:
+    - `mint mcp add <name> <url>` auto-detects remote URLs and accepts authentication headers via `--env "Authorization=Bearer <token>"`.
+    - Interactive slash command `/mcp add <name> <url>` seamlessly adds remote servers with SSE transport.
+    - `mint mcp list` displays `(url: <url>)` for remote servers.
+  - **Desktop Tauri (`src-tauri` & `src/renderer/src`)**:
+    - Registered `test_mcp_connection` Tauri command for native asynchronous ping and schema validation.
+  - **Web UI & Server (`crates/mint-core/src/api_server/routes/cron_mcp.rs` & `src/renderer/src-web`)**:
+    - Added `POST /api/mcp/test` REST route running on a dedicated blocking task to prevent event-loop starvation.
+    - Updated Web `MintPlatformApi` with `testMcpConnection` bridging to the backend endpoint.
+
+## Rewind System Overhaul: Themed Confirmation Modal, Targeted Step Checkpoints & Rescue Undo (CLI, Desktop & Web)
+
+A comprehensive upgrade to Mint's file rewind and Git time machine capabilities:
+
+- **Custom Themed Rewind Confirmation Modal (`RewindModal.tsx`)**:
+  - Replaced raw browser `window.confirm()` and `alert()` with a custom, theme-aware review dialog (`.rewind-modal`).
+  - Highlights safety guarantee, target step badge, short commit hash, action type, timestamp, and the exact files to be reverted (with line addition/deletion indicators and `[NEW FILE]` tags).
+  - Supports keyboard shortcuts (`Escape` to dismiss, `Cmd/Ctrl + Enter` to confirm) and includes safety loading states.
+- **Targeted Step Checkpoint Matching**:
+  - Rewind buttons on file changes summary cards now dynamically bind to the exact pre-edit checkpoint for that specific interaction/turn, rather than defaulting to the latest session checkpoint.
+  - Matches checkpoints against files touched in that turn or interaction creation timestamp, ensuring rolling back an earlier turn restores the workspace to the exact state before that turn began.
+- **Rescue Snapshot Safety Net & Instant Undo (`/rewind undo`)**:
+  - Before any rollback occurs, Mint creates a safety rescue snapshot in Git (`refs/mint/rescue/<timestamp>`).
+  - **Floating Undo Banner**: After rewinding, an interactive floating notification appears in the chat panel with a prominent **`[ ↩ Undo Rewind ]`** button, allowing users to restore reverted files with a single click.
+  - **Full Platform Parity**:
+    - **CLI**: Run `/rewind undo` to recover from the latest rescue snapshot.
+    - **Backend Slash Command**: `/rewind undo` supported via `cmd_rewind`.
+    - **Desktop Tauri Command**: `undo_git_checkpoint` native invocation.
+    - **Web REST API**: `POST /api/checkpoints/undo` endpoint.
+
 ## Live Preview Path Resolution & File Changes Deduplication (CLI, Desktop & Web)
 
 - **Intelligent Path Resolution (`mint_core::files::resolve_readable_path`)**:

@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -29,6 +30,24 @@ const MCP_OAUTH_TIMEOUT: Duration = Duration::from_secs(120);
 /// talking to a chatty server.
 const MAX_BUFFERED_NOTIFICATIONS: usize = 64;
 
+static MCP_ASYNC_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .thread_name("mint-mcp-remote")
+        .build()
+        .expect("failed to start MCP async runtime")
+});
+
+fn block_on_mcp<F: std::future::Future<Output = T> + Send + 'static, T: Send + 'static>(f: F) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    MCP_ASYNC_RUNTIME.spawn(async move {
+        let res = f.await;
+        let _ = tx.send(res);
+    });
+    rx.recv().expect("MCP async task failed")
+}
+
 /// Live MCP server sessions, keyed by server name. Held as `Arc<Mutex<_>>` per
 /// session (rather than one lock guarding the whole map for a call's full
 /// duration) so calls to *different* servers don't serialize behind each
@@ -39,6 +58,7 @@ static SESSIONS: LazyLock<Mutex<HashMap<String, Arc<Mutex<McpSession>>>>> =
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpServer {
+    #[serde(default)]
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -52,6 +72,25 @@ pub struct McpServer {
     /// is refused before a process is spawned.
     #[serde(default, skip_serializing_if = "is_false")]
     pub disabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<String>,
+}
+
+impl McpServer {
+    pub fn is_remote(&self) -> bool {
+        self.url
+            .as_deref()
+            .map(|u| !u.trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    pub fn remote_url(&self) -> Option<&str> {
+        self.url.as_deref().filter(|u| !u.trim().is_empty())
+    }
 }
 
 fn is_false(value: &bool) -> bool {
@@ -79,6 +118,8 @@ pub enum McpError {
         command: String,
         source: std::io::Error,
     },
+    #[error("remote MCP error: {0}")]
+    Remote(String),
     #[error("MCP server stdin is unavailable")]
     MissingStdin,
     #[error("MCP server stdout is unavailable")]
@@ -205,6 +246,32 @@ pub fn add_mcp_server(
             env: parse_env(env)?,
             icon: None,
             disabled: false,
+            url: None,
+            headers: None,
+            transport: None,
+        },
+    )?;
+    Ok(save_config(&config)?)
+}
+
+pub fn add_remote_mcp_server(
+    name: &str,
+    url: &str,
+    headers: Option<BTreeMap<String, String>>,
+) -> Result<(), McpError> {
+    let mut config = load_config()?;
+    upsert_server_in(
+        &mut config,
+        name,
+        McpServer {
+            command: String::new(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            icon: None,
+            disabled: false,
+            url: Some(url.to_string()),
+            headers,
+            transport: Some("sse".to_string()),
         },
     )?;
     Ok(save_config(&config)?)
@@ -350,6 +417,10 @@ pub fn reauth_mcp_server(server_name: &str) -> Result<bool, McpError> {
 
     close_mcp_session(server_name);
 
+    if server.is_remote() {
+        return Ok(true);
+    }
+
     let mut args = server.args.clone();
     args.push("auth".to_string());
 
@@ -408,7 +479,7 @@ fn stream_and_watch_for_oauth_url(pipe: impl std::io::Read) {
 /// Closes and removes one server's persistent session, if one is running.
 pub fn close_mcp_session(server_name: &str) {
     if let Some(session) = SESSIONS.lock().unwrap().remove(server_name) {
-        let _ = session.lock().unwrap().process.kill();
+        session.lock().unwrap().close();
     }
 }
 
@@ -416,7 +487,7 @@ pub fn close_mcp_session(server_name: &str) {
 pub fn close_all_mcp_sessions() {
     let mut sessions = SESSIONS.lock().unwrap();
     for (_, session) in sessions.drain() {
-        let _ = session.lock().unwrap().process.kill();
+        session.lock().unwrap().close();
     }
 }
 
@@ -660,6 +731,9 @@ pub fn expand_registry_entry(
         env,
         icon: entry.icon.clone(),
         disabled: false,
+        url: None,
+        headers: None,
+        transport: None,
     }
 }
 
@@ -757,7 +831,7 @@ pub fn mcp_server_tool_names(server_name: &str) -> Result<Vec<String>, McpError>
 /// calls instead of being spawned and killed for every single request, and a
 /// single background reader thread (spawned once, not once per call) routes
 /// each incoming line to whichever in-flight request it answers.
-struct McpSession {
+struct McpStdioSession {
     process: Child,
     stdin: ChildStdin,
     next_id: AtomicU64,
@@ -774,9 +848,295 @@ struct McpSession {
     oauth_pending: Arc<AtomicBool>,
 }
 
-impl Drop for McpSession {
-    fn drop(&mut self) {
-        let _ = self.process.kill();
+struct McpRemoteSession {
+    #[allow(dead_code)]
+    url: String,
+    post_endpoint: Arc<Mutex<String>>,
+    headers: BTreeMap<String, String>,
+    client: reqwest::Client,
+    next_id: AtomicU64,
+    pending: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>>,
+    notifications: Arc<Mutex<VecDeque<Value>>>,
+    is_active: Arc<AtomicBool>,
+    server_info: Option<Value>,
+    abort_handle: Option<tokio::task::AbortHandle>,
+}
+
+fn resolve_endpoint(base_url: &str, endpoint: &str) -> String {
+    let endpoint = endpoint.trim();
+    if endpoint.starts_with("http://") || endpoint.starts_with("https://") {
+        return endpoint.to_string();
+    }
+    if let Ok(base) = reqwest::Url::parse(base_url) {
+        if let Ok(joined) = base.join(endpoint) {
+            return joined.to_string();
+        }
+    }
+    if endpoint.starts_with('/') {
+        if let Ok(base) = reqwest::Url::parse(base_url) {
+            let origin = format!("{}://{}", base.scheme(), base.host_str().unwrap_or(""));
+            let port = base.port().map(|p| format!(":{p}")).unwrap_or_default();
+            return format!("{origin}{port}{endpoint}");
+        }
+    }
+    format!("{}/{}", base_url.trim_end_matches('/'), endpoint.trim_start_matches('/'))
+}
+
+impl McpRemoteSession {
+    fn start(server: &McpServer) -> Result<Self, McpError> {
+        let url = server
+            .remote_url()
+            .ok_or_else(|| McpError::Remote("missing remote URL".into()))?
+            .to_string();
+
+        let mut client_builder = reqwest::Client::builder().timeout(Duration::from_secs(60));
+        let mut header_map = reqwest::header::HeaderMap::new();
+        let headers = server.headers.clone().unwrap_or_default();
+        for (k, v) in &headers {
+            if let (Ok(name), Ok(val)) = (
+                reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+                reqwest::header::HeaderValue::from_str(v),
+            ) {
+                header_map.insert(name, val);
+            }
+        }
+        client_builder = client_builder.default_headers(header_map);
+        let client = client_builder
+            .build()
+            .map_err(|e| McpError::Remote(format!("failed to build HTTP client: {e}")))?;
+
+        let post_endpoint = Arc::new(Mutex::new(url.clone()));
+        let pending: Arc<Mutex<HashMap<u64, mpsc::Sender<Value>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let notifications: Arc<Mutex<VecDeque<Value>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let is_active = Arc::new(AtomicBool::new(true));
+
+        let sse_url = url.clone();
+        let sse_client = client.clone();
+        let sse_post_endpoint = Arc::clone(&post_endpoint);
+        let sse_pending = Arc::clone(&pending);
+        let sse_notifications = Arc::clone(&notifications);
+        let sse_is_active = Arc::clone(&is_active);
+
+        let (notify_endpoint_tx, notify_endpoint_rx) = mpsc::channel::<()>();
+        let notify_endpoint_tx = Arc::new(Mutex::new(Some(notify_endpoint_tx)));
+
+        let connect_res = block_on_mcp(async move {
+            sse_client
+                .get(&sse_url)
+                .header(reqwest::header::ACCEPT, "text/event-stream")
+                .send()
+                .await
+        });
+
+        let mut abort_handle = None;
+
+        if let Ok(resp) = connect_res {
+            if resp.status().is_success() {
+                let base_url = url.clone();
+                let post_ep = Arc::clone(&sse_post_endpoint);
+                let reader_pending = Arc::clone(&sse_pending);
+                let reader_notifications = Arc::clone(&sse_notifications);
+                let stream_active = Arc::clone(&sse_is_active);
+                let ep_tx = Arc::clone(&notify_endpoint_tx);
+
+                let handle = MCP_ASYNC_RUNTIME.spawn(async move {
+                    let mut stream = resp.bytes_stream();
+                    let mut buffer = String::new();
+                    let mut current_event: Option<String> = None;
+                    let mut current_data: Vec<String> = Vec::new();
+
+                    while let Some(chunk_res) = stream.next().await {
+                        let bytes = match chunk_res {
+                            Ok(b) => b,
+                            Err(_) => break,
+                        };
+                        let text = match std::str::from_utf8(&bytes) {
+                            Ok(t) => t,
+                            Err(_) => continue,
+                        };
+                        buffer.push_str(text);
+
+                        while let Some(pos) = buffer.find('\n') {
+                            let line = buffer[..pos].trim_end_matches('\r').to_string();
+                            buffer.drain(..=pos);
+
+                            if line.is_empty() {
+                                if !current_data.is_empty() {
+                                    let data = current_data.join("\n");
+                                    if current_event.as_deref() == Some("endpoint") {
+                                        let resolved = resolve_endpoint(&base_url, &data);
+                                        *post_ep.lock().unwrap() = resolved;
+                                        if let Some(tx) = ep_tx.lock().unwrap().take() {
+                                            let _ = tx.send(());
+                                        }
+                                    } else if let Ok(value) = serde_json::from_str::<Value>(&data) {
+                                        match classify_mcp_line(&value) {
+                                            McpLine::Response(id, response) => {
+                                                if let Some(sender) =
+                                                    reader_pending.lock().unwrap().remove(&id)
+                                                {
+                                                    let _ = sender.send(response);
+                                                }
+                                            }
+                                            McpLine::Notification(notification) => {
+                                                buffer_notification(
+                                                    &reader_notifications,
+                                                    notification,
+                                                );
+                                            }
+                                            McpLine::Other => {}
+                                        }
+                                    }
+                                }
+                                current_event = None;
+                                current_data.clear();
+                            } else if let Some(rest) = line.strip_prefix("event:") {
+                                current_event = Some(rest.trim().to_string());
+                            } else if let Some(rest) = line.strip_prefix("data:") {
+                                current_data.push(rest.trim_start().to_string());
+                            }
+                        }
+                    }
+                    stream_active.store(false, Ordering::Relaxed);
+                });
+                abort_handle = Some(handle.abort_handle());
+
+                let _ = notify_endpoint_rx.recv_timeout(Duration::from_millis(1500));
+            }
+        }
+
+        let mut session = McpRemoteSession {
+            url,
+            post_endpoint,
+            headers,
+            client,
+            next_id: AtomicU64::new(2),
+            pending,
+            notifications,
+            is_active,
+            server_info: None,
+            abort_handle,
+        };
+
+        let init_response = session.request(
+            "initialize",
+            json!({
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "mint", "version": env!("CARGO_PKG_VERSION") }
+            }),
+        )?;
+
+        session.server_info = init_response.get("serverInfo").cloned();
+
+        let _ = session.notify("notifications/initialized", None);
+
+        Ok(session)
+    }
+
+    fn is_alive(&mut self) -> bool {
+        self.is_active.load(Ordering::Relaxed)
+    }
+
+    fn close(&mut self) {
+        self.is_active.store(false, Ordering::Relaxed);
+        if let Some(handle) = self.abort_handle.take() {
+            handle.abort();
+        }
+    }
+
+    fn notify(&mut self, method: &str, params: Option<Value>) -> Result<(), McpError> {
+        let post_url = self.post_endpoint.lock().unwrap().clone();
+        let mut payload = json!({
+            "jsonrpc": "2.0",
+            "method": method,
+        });
+        if let Some(p) = params {
+            payload["params"] = p;
+        }
+        let client = self.client.clone();
+        let headers = self.headers.clone();
+
+        let _ = block_on_mcp(async move {
+            let mut req = client.post(&post_url).json(&payload);
+            for (k, v) in &headers {
+                req = req.header(k, v);
+            }
+            let _ = req.send().await;
+        });
+        Ok(())
+    }
+
+    fn request(&mut self, method: &str, params: Value) -> Result<Value, McpError> {
+        if !self.is_active.load(Ordering::Relaxed) {
+            return Err(McpError::Remote(
+                "Remote MCP session is disconnected".into(),
+            ));
+        }
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (sender, receiver) = mpsc::channel();
+        self.pending.lock().unwrap().insert(id, sender);
+
+        let post_url = self.post_endpoint.lock().unwrap().clone();
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": params,
+        });
+
+        let client = self.client.clone();
+        let headers = self.headers.clone();
+
+        let post_result = block_on_mcp(async move {
+            let mut req = client.post(&post_url).json(&payload);
+            for (k, v) in &headers {
+                req = req.header(k, v);
+            }
+            req.send().await
+        });
+
+        let response = match post_result {
+            Ok(resp) => resp,
+            Err(e) => {
+                self.pending.lock().unwrap().remove(&id);
+                return Err(McpError::Remote(format!("HTTP POST request failed: {e}")));
+            }
+        };
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = block_on_mcp(async move { response.text().await.unwrap_or_default() });
+            self.pending.lock().unwrap().remove(&id);
+            return Err(McpError::Remote(format!("HTTP error {status}: {body}")));
+        }
+
+        let body_text = block_on_mcp(async move { response.text().await.unwrap_or_default() });
+        if !body_text.trim().is_empty() {
+            if let Ok(val) = serde_json::from_str::<Value>(&body_text) {
+                if val.get("id").and_then(Value::as_u64) == Some(id)
+                    || val.get("result").is_some()
+                    || val.get("error").is_some()
+                {
+                    self.pending.lock().unwrap().remove(&id);
+                    if let Some(err) = val.get("error") {
+                        return Err(McpError::Tool(err.clone()));
+                    }
+                    return Ok(val.get("result").cloned().unwrap_or(Value::Null));
+                }
+            }
+        }
+
+        let res = receiver.recv_timeout(MCP_TIMEOUT).map_err(|_| {
+            self.pending.lock().unwrap().remove(&id);
+            McpError::Timeout
+        })?;
+
+        if let Some(error) = res.get("error") {
+            return Err(McpError::Tool(error.clone()));
+        }
+        Ok(res.get("result").cloned().unwrap_or(Value::Null))
     }
 }
 
@@ -814,7 +1174,7 @@ fn buffer_notification(queue: &Mutex<VecDeque<Value>>, notification: Value) {
     queue.push_back(notification);
 }
 
-impl McpSession {
+impl McpStdioSession {
     fn start(server: &McpServer) -> Result<Self, McpError> {
         let mut process = Command::new(&server.command)
             .args(&server.args)
@@ -896,7 +1256,7 @@ impl McpSession {
             }
         });
 
-        let mut session = McpSession {
+        let mut session = McpStdioSession {
             process,
             stdin,
             next_id: AtomicU64::new(2), // 1 is reserved for `initialize` below.
@@ -974,6 +1334,122 @@ impl McpSession {
     }
 }
 
+enum McpSessionBackend {
+    Stdio(McpStdioSession),
+    Remote(McpRemoteSession),
+}
+
+struct McpSession {
+    backend: McpSessionBackend,
+    notifications: Arc<Mutex<VecDeque<Value>>>,
+}
+
+impl McpSession {
+    fn request(&mut self, method: &str, params: Value) -> Result<Value, McpError> {
+        match &mut self.backend {
+            McpSessionBackend::Stdio(s) => s.request(method, params),
+            McpSessionBackend::Remote(s) => s.request(method, params),
+        }
+    }
+
+    fn is_alive(&mut self) -> bool {
+        match &mut self.backend {
+            McpSessionBackend::Stdio(s) => s.is_alive(),
+            McpSessionBackend::Remote(s) => s.is_alive(),
+        }
+    }
+
+    fn close(&mut self) {
+        match &mut self.backend {
+            McpSessionBackend::Stdio(s) => {
+                let _ = s.process.kill();
+            }
+            McpSessionBackend::Remote(s) => {
+                s.close();
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn process_id(&mut self) -> Option<u32> {
+        match &mut self.backend {
+            McpSessionBackend::Stdio(s) => Some(s.process.id()),
+            McpSessionBackend::Remote(_) => None,
+        }
+    }
+
+    #[cfg(test)]
+    fn kill_process(&mut self) {
+        match &mut self.backend {
+            McpSessionBackend::Stdio(s) => {
+                let _ = s.process.kill();
+                let _ = s.process.wait();
+            }
+            McpSessionBackend::Remote(s) => s.close(),
+        }
+    }
+
+    #[cfg(test)]
+    fn oauth_pending(&self) -> Option<Arc<AtomicBool>> {
+        match &self.backend {
+            McpSessionBackend::Stdio(s) => Some(Arc::clone(&s.oauth_pending)),
+            McpSessionBackend::Remote(_) => None,
+        }
+    }
+}
+
+impl Drop for McpSession {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+pub fn test_remote_mcp_connection(
+    url: &str,
+    headers: Option<BTreeMap<String, String>>,
+) -> Result<Value, McpError> {
+    let url = url.trim();
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(McpError::Remote(
+            "URL must start with http:// or https://".to_string(),
+        ));
+    }
+
+    let server = McpServer {
+        command: String::new(),
+        args: Vec::new(),
+        env: BTreeMap::new(),
+        icon: None,
+        disabled: false,
+        url: Some(url.to_string()),
+        headers,
+        transport: Some("sse".to_string()),
+    };
+
+    let mut session = McpRemoteSession::start(&server)?;
+    let tools_res = session
+        .request("tools/list", json!({}))
+        .unwrap_or(json!({ "tools": [] }));
+    let tools = tools_res
+        .get("tools")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let tools_count = tools.len();
+
+    let server_info = session.server_info.clone().unwrap_or(json!({
+        "name": "Remote MCP Server",
+        "version": "1.0"
+    }));
+
+    Ok(json!({
+        "ok": true,
+        "server_info": server_info,
+        "tools_count": tools_count,
+        "tools": tools
+    }))
+}
+
 /// Gets the live session for `server_name`, transparently (re)spawning one if
 /// there isn't one yet or the previous process has exited. This lazy
 /// respawn-on-next-use *is* the reconnect mechanism — there's no
@@ -994,7 +1470,7 @@ fn get_or_start_session(
         // Turned off in Settings after a session was already running — kill it
         // so a stale process doesn't linger past the toggle.
         if let Some(session) = sessions.remove(server_name) {
-            let _ = session.lock().unwrap().process.kill();
+            session.lock().unwrap().close();
         }
         return Err(McpError::Disabled(server_name.into()));
     }
@@ -1004,7 +1480,22 @@ fn get_or_start_session(
             return Ok(Arc::clone(session));
         }
     }
-    let session = Arc::new(Mutex::new(McpSession::start(server)?));
+
+    let session = if server.is_remote() {
+        let remote = McpRemoteSession::start(server)?;
+        let notifications = Arc::clone(&remote.notifications);
+        Arc::new(Mutex::new(McpSession {
+            backend: McpSessionBackend::Remote(remote),
+            notifications,
+        }))
+    } else {
+        let stdio = McpStdioSession::start(server)?;
+        let notifications = Arc::clone(&stdio.notifications);
+        Arc::new(Mutex::new(McpSession {
+            backend: McpSessionBackend::Stdio(stdio),
+            notifications,
+        }))
+    };
     sessions.insert(server_name.to_string(), Arc::clone(&session));
     Ok(session)
 }
@@ -1090,6 +1581,9 @@ mod tests {
             env: BTreeMap::new(),
             icon: None,
             disabled: false,
+            url: None,
+            headers: None,
+            transport: None,
         }
     }
 
@@ -1119,8 +1613,8 @@ mod tests {
             .unwrap()
             .lock()
             .unwrap()
-            .process
-            .id();
+            .process_id()
+            .unwrap();
 
         let second = call_mcp_tool(&config, name, "anything", json!({})).unwrap();
         assert_eq!(second["echo"], true);
@@ -1131,8 +1625,8 @@ mod tests {
             .unwrap()
             .lock()
             .unwrap()
-            .process
-            .id();
+            .process_id()
+            .unwrap();
         assert_eq!(
             pid_after_first, pid_after_second,
             "the same child process should be reused across calls, not respawned"
@@ -1144,8 +1638,7 @@ mod tests {
         {
             let sessions = SESSIONS.lock().unwrap();
             let mut session = sessions.get(name).unwrap().lock().unwrap();
-            let _ = session.process.kill();
-            let _ = session.process.wait();
+            session.kill_process();
         }
         let third = call_mcp_tool(&config, name, "anything", json!({})).unwrap();
         assert_eq!(third["echo"], true);
@@ -1156,8 +1649,8 @@ mod tests {
             .unwrap()
             .lock()
             .unwrap()
-            .process
-            .id();
+            .process_id()
+            .unwrap();
         assert_ne!(
             pid_after_second, pid_after_respawn,
             "a dead session should be respawned with a fresh process"
@@ -1220,8 +1713,8 @@ mod tests {
         call_mcp_tool(&config_with_mock_echo_server(b), b, "x", json!({})).unwrap();
 
         let sessions = SESSIONS.lock().unwrap();
-        let a_flag = Arc::clone(&sessions.get(a).unwrap().lock().unwrap().oauth_pending);
-        let b_flag = Arc::clone(&sessions.get(b).unwrap().lock().unwrap().oauth_pending);
+        let a_flag = sessions.get(a).unwrap().lock().unwrap().oauth_pending().unwrap();
+        let b_flag = sessions.get(b).unwrap().lock().unwrap().oauth_pending().unwrap();
         drop(sessions);
 
         assert!(
@@ -1347,5 +1840,83 @@ mod tests {
         assert!(disallow_tool_in(&mut config, "srv", "*"));
         assert!(mcp_tool_allowlist(&config)["srv"].is_empty());
         assert!(!disallow_tool_in(&mut config, "srv", "read")); // nothing to remove
+    }
+
+    #[test]
+    fn remote_mcp_server_serialization_and_helpers() {
+        let mut headers = BTreeMap::new();
+        headers.insert("Authorization".to_string(), "Bearer secret-token".to_string());
+
+        let remote = McpServer {
+            command: String::new(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            icon: Some("🌐".into()),
+            disabled: false,
+            url: Some("https://example.com/sse".into()),
+            headers: Some(headers.clone()),
+            transport: Some("sse".into()),
+        };
+
+        assert!(remote.is_remote());
+        assert_eq!(remote.remote_url(), Some("https://example.com/sse"));
+
+        // Roundtrip JSON serialization
+        let serialized = serde_json::to_string(&remote).expect("serializes");
+        let deserialized: McpServer = serde_json::from_str(&serialized).expect("deserializes");
+        assert!(deserialized.is_remote());
+        assert_eq!(deserialized.remote_url(), Some("https://example.com/sse"));
+        assert_eq!(
+            deserialized.headers.as_ref().and_then(|h| h.get("Authorization")),
+            Some(&"Bearer secret-token".to_string())
+        );
+        assert_eq!(deserialized.transport.as_deref(), Some("sse"));
+
+        // Stdio server is not remote
+        let stdio = McpServer {
+            command: "npx".into(),
+            args: vec!["-y".into(), "test".into()],
+            env: BTreeMap::new(),
+            icon: None,
+            disabled: false,
+            url: None,
+            headers: None,
+            transport: None,
+        };
+        assert!(!stdio.is_remote());
+        assert_eq!(stdio.remote_url(), None);
+    }
+
+    #[test]
+    fn upsert_remote_mcp_server_adds_to_config() {
+        let mut config = MintConfig::default();
+        let mut headers = BTreeMap::new();
+        headers.insert("X-Api-Key".to_string(), "abc123xyz".to_string());
+
+        upsert_server_in(
+            &mut config,
+            "remote-docs",
+            McpServer {
+                command: String::new(),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                icon: Some("🌐".into()),
+                disabled: false,
+                url: Some("https://docs.example.com/mcp".into()),
+                headers: Some(headers),
+                transport: Some("sse".into()),
+            },
+        )
+        .expect("upserts remote mcp server");
+
+        let servers = configured_mcp_servers(&config).expect("configured servers");
+        let server = servers.get("remote-docs").expect("server exists");
+        assert!(server.is_remote());
+        assert_eq!(server.remote_url(), Some("https://docs.example.com/mcp"));
+        assert_eq!(
+            server.headers.as_ref().and_then(|h| h.get("X-Api-Key")),
+            Some(&"abc123xyz".to_string())
+        );
+        assert_eq!(server.transport.as_deref(), Some("sse"));
     }
 }

@@ -48,6 +48,15 @@ export function renderMcpSvgIcon(name: string, customIcon?: string) {
         </svg>
       )
     }
+    if (cleanCustom === 'globe' || cleanCustom === 'remote' || cleanCustom === 'web' || cleanCustom === 'url' || cleanCustom === '🌐') {
+      return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>
+      )
+    }
   }
 
   const cleanName = name.toLowerCase().trim()

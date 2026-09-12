@@ -612,7 +612,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
-                                ("POST", "/api/mcp/reauth") => {
+                                ("POST", "/api/mcp/reauth") | ("POST", "/api/mcp/test") => {
                     routes::cron_mcp::execute(
                         routes::RequestCtx {
                             method,
@@ -1099,6 +1099,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                 | ("GET", "/api/video-models")
                 | ("GET", "/api/checkpoints")
                 | ("POST", "/api/checkpoints/rollback")
+                | ("POST", "/api/checkpoints/undo")
                 | ("GET", "/api/file/read") => {
                     routes::misc::execute(
                         routes::RequestCtx {
