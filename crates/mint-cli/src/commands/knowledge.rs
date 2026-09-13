@@ -257,6 +257,7 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
             pinned_mcp_server: None,
             messages: None,
             tools: None,
+            temperature: config.temperature,
         },
     )
     .await {

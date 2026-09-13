@@ -1216,6 +1216,7 @@ where
                             &root,
                             allow_subagent_dispatch,
                         )),
+                        temperature: active_config.temperature,
                     },
                     &mut progress,
                 )
@@ -1237,6 +1238,7 @@ where
                         pinned_mcp_server: None,
                         messages: None,
                         tools: None,
+                        temperature: active_config.temperature,
                     },
                     &mut progress,
                 )
@@ -1361,6 +1363,7 @@ where
                             pinned_mcp_server: None,
                             messages: None,
                             tools: None,
+                            temperature: active_config.temperature,
                         },
                     )
                     .await?;
@@ -3059,6 +3062,7 @@ mod tests {
             pinned_mcp_server: None,
             messages: None,
             tools: None,
+            temperature: None,
         };
         let config = MintConfig::default();
         assert!(

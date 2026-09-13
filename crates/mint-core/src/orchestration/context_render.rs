@@ -95,6 +95,7 @@ pub(super) async fn compact_native_messages(
             pinned_mcp_server: None,
             messages: None,
             tools: None,
+            temperature: config.temperature,
         },
     )
     .await?;

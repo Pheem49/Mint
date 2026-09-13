@@ -1,5 +1,34 @@
 # Release Notes - Mint Agent v1.14.0
 
+## Dynamic Model Temperature Control, Per-Model Persistence & Interactive Wizard (CLI, Desktop & Web)
+
+Mint now provides comprehensive model temperature management with **per-model persistence**, interactive multi-step selection wizard, and fine-grained, model-aware defaults tailored to prevent repetitive reasoning loops on reasoning models while preserving strict precision on coding backends:
+
+- **Per-Model Persistence & Model-Aware Defaults (`crates/mint-core/src/system/config.rs`)**:
+  - **Independent Per-Model Overrides**: Stores custom temperatures in `modelTemperatures: HashMap<String, f64>` so each model independently remembers its configured temperature (e.g. `deepseek-chat` at `0.65`, `claude-sonnet-5` at `0.15`, while unset models seamlessly use smart defaults).
+  - Automatically sets temperature to **`0.6`** for Open-Weight Reasoning / CoT models (DeepSeek-R1/V3, Qwen-QwQ, and thinking/reasoner fine-tunes), directly mitigating the known agent looping/stagnation behavior caused by greedy decoding (`0.0`) or unconstrained drift (`1.0`).
+  - Sets temperature to **`0.1`** for Codestral and pure code completion models to maximize deterministic completion accuracy.
+  - Defaults to **`0.2`** for general coding and tool-calling models (Claude 3.5/3.7, GPT-4o, Gemini 2.5, Qwen 2.5 Coder, Llama 3.3, Ollama, etc.) for high accuracy, strict JSON schema adherence, and reliable tool execution.
+  - Automatically omits the `temperature` parameter for OpenAI reasoning architectures (`o1`, `o3`), which reject explicit temperature values with HTTP 400 Bad Request.
+  - Clamps all user values safely between `0.0` and `2.0`.
+- **Interactive Multi-Step `/temperature` Selection Flow (`crates/mint-core/src/slash/mod.rs` & `slash-commands.json`)**:
+  - **Interactive Wizard**: Pressing Enter on bare `/temperature` or `/temp` launches an interactive multi-step picker via `SlashResponse::NeedsChoice`:
+    1. **Provider / Active Model Shortcut**: Quickly choose between the currently active model shortcut or any configured/standard provider.
+    2. **Model Selection**: Lists provider models dynamically or from presets, tagged with current `[Custom: 0.XX]` or `[Auto: 0.XX]` status.
+    3. **Temperature Presets**: Choose from curated presets (`Auto`, `0.0 Deterministic`, `0.1 Codestral`, `0.2 Standard Coding`, `0.4 Balanced`, `0.6 DeepSeek/Reasoning`, `0.8 Creative`, `1.0 Brainstorming`) or specify custom values.
+  - **Fast Shorthands**:
+    - `/temperature <0.0-2.0>` sets custom temperature for the active model.
+    - `/temperature <model> <0.0-2.0>` sets temperature for a specific model directly.
+    - `/temperature default` resets the active model to smart defaults.
+    - `/temperature <model> default` resets that specific model.
+    - `/temperature status` displays a formatted markdown status table listing active model effective temperature, reasoning mode handling, and all configured per-model overrides.
+  - Available across all 3 interfaces with unified terminal interactive selection (CLI) and clickable chip selectors (Desktop & Web UI).
+- **Interactive UI Slider with Per-Model Binding in Settings (`GeneralTab.tsx` & `config.ts`)**:
+  - Added a dedicated **Model Temperature** control card under **AI Routing: Provider & Model** in Settings.
+  - Dynamically binds to `config.modelTemperatures[activeModel]`, displaying dynamic status badges (`Custom for <model> (0.XX)` or `Auto (<rationale>)`).
+  - Smooth slider (range `0.00` to `1.50`, step `0.05`) with live numerical display and an instant **`Reset to Auto`** action that removes the override for the active model while preserving other model configurations.
+  - Informative contextual tooltip explaining the optimal sampling entropy for each model archetype.
+
 ## Remote MCP Server Connections via URL / SSE & Live Connection Testing (CLI, Desktop & Web)
 
 Mint now natively supports connecting to remote Model Context Protocol (MCP) servers hosted over HTTP / HTTPS with Server-Sent Events (SSE) streaming and direct HTTP POST JSON-RPC transports.

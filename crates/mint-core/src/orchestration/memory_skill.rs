@@ -317,6 +317,7 @@ Worth saving:
         pinned_mcp_server: None,
         messages: None,
         tools: None,
+        temperature: config.temperature,
     };
 
     let response = send_chat(config, &request).await?;
@@ -544,6 +545,7 @@ Example response:
         pinned_mcp_server: None,
         messages: None,
         tools: None,
+        temperature: config.temperature,
     };
 
     // Send the chat request to LLM
@@ -902,6 +904,7 @@ Emit at most {MAX_FACT_OPS_PER_TURN} ops."#
         pinned_mcp_server: None,
         messages: None,
         tools: None,
+        temperature: config.temperature,
     };
 
     let response = send_chat(config, &request).await?;

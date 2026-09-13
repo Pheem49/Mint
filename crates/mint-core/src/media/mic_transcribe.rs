@@ -125,6 +125,7 @@ pub async fn transcribe_recording(
         pinned_mcp_server: None,
         messages: None,
         tools: None,
+        temperature: config.temperature,
     };
 
     // Deliberately `send_chat`, not `send_chat_with_fallback` — the fallback path

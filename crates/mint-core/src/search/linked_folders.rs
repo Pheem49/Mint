@@ -351,6 +351,7 @@ Worth saving:
         pinned_mcp_server: None,
         messages: None,
         tools: None,
+        temperature: config.temperature,
     };
 
     let response = crate::chat::send_chat(config, &request).await?;

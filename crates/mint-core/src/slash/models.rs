@@ -40,8 +40,6 @@ pub const OPENROUTER_MODEL_PRESETS: &[&str] = &[
 ];
 
 pub const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
-    "deepseek-v4-flash",
-    "deepseek-v4-pro",
     "deepseek-chat",
     "deepseek-reasoner",
 ];

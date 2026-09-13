@@ -22,6 +22,8 @@ export const DEFAULT_CONFIG = {
   deepseekModel: 'deepseek-v4-flash' as string,
   anthropicModel: 'claude-sonnet-5' as string,
   ollamaModel: 'llama3:latest' as string,
+  temperature: null as number | null,
+  modelTemperatures: {} as Record<string, number>,
   language: 'th-TH',
   proactiveInterval: 60,
   proactiveCooldown: 120,

@@ -81,6 +81,13 @@ pub struct MintConfig {
     /// hardware — the KV cache for a large window costs real RAM/VRAM.
     pub ollama_num_ctx: usize,
     pub nanobanana_model: String,
+    /// Sampling temperature for AI completions. When `None`, Mint uses a smart
+    /// model-aware default (0.6 for DeepSeek to prevent loops, 0.2 for coding on other models).
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    /// Optional per-model temperature overrides, keyed by model id (e.g. "deepseek-chat" => 0.65).
+    #[serde(default)]
+    pub model_temperatures: std::collections::HashMap<String, f64>,
     /// Active image-generation provider: "nanobanana" | "dalle" | "stability" | "ideogram" | "replicate"
     pub image_gen_provider: String,
     pub dalle_model: String,
@@ -374,6 +381,8 @@ impl Default for MintConfig {
             replicate_model: "black-forest-labs/flux-1.1-pro".into(),
             bfl_api_key: String::new(),
             bfl_model: "flux-pro-1.1".into(),
+            temperature: None,
+            model_temperatures: std::collections::HashMap::new(),
             show_desktop_widget: true,
             safety_enabled: true,
             sandbox_mode: "prefer".into(),
@@ -602,6 +611,80 @@ impl MintConfig {
                     .unwrap_or("")
             }
             _ => &self.gemini_model,
+        }
+    }
+
+    /// Returns whether the active model supports the `temperature` parameter.
+    ///
+    /// OpenAI reasoning models (`o1`, `o3`, etc.) reject explicit `temperature`
+    /// parameters and return HTTP 400 Bad Request if provided.
+    pub fn is_temperature_supported(&self) -> bool {
+        let model = self.active_model().to_ascii_lowercase();
+        let is_openai_family = matches!(
+            self.ai_provider.as_str(),
+            "openai" | "openrouter" | "local_openai"
+        );
+        if is_openai_family && (model.starts_with("o1") || model.starts_with("o3")) {
+            return false;
+        }
+        true
+    }
+
+    /// Returns the effective sampling temperature for a specific provider and model.
+    ///
+    /// Resolution order:
+    /// 1. Saved per-model override in `model_temperatures`
+    /// 2. Global fallback override in `temperature`
+    /// 3. Fine-grained smart model-aware defaults:
+    ///    - `0.6` for Open-Weight Reasoning / CoT models (DeepSeek-R1/V3, Qwen-QwQ, thinking/reasoner fine-tunes)
+    ///    - `0.1` for Codestral code completion
+    ///    - `0.2` for general coding and tool-calling models (Claude, GPT-4o, Gemini, Qwen-Coder, Llama)
+    pub fn resolved_temperature_for_model(&self, provider: &str, model: &str) -> f64 {
+        let model_clean = model.trim();
+        if let Some(&t) = self.model_temperatures.get(model_clean) {
+            return t.clamp(0.0, 2.0);
+        }
+        let model_lower = model_clean.to_ascii_lowercase();
+        for (k, &v) in &self.model_temperatures {
+            if k.to_ascii_lowercase() == model_lower {
+                return v.clamp(0.0, 2.0);
+            }
+        }
+
+        if let Some(t) = self.temperature {
+            return t.clamp(0.0, 2.0);
+        }
+
+        let provider_lower = provider.to_ascii_lowercase();
+        if provider_lower == "deepseek"
+            || model_lower.contains("deepseek")
+            || model_lower.contains("qwq")
+            || model_lower.contains("thinking")
+            || model_lower.contains("reasoner")
+            || model_lower.contains("r1")
+        {
+            0.6
+        } else if model_lower.contains("codestral") {
+            0.1
+        } else {
+            0.2
+        }
+    }
+
+    /// Returns the effective sampling temperature to send to the provider for the active model.
+    pub fn resolved_temperature(&self) -> f64 {
+        self.resolved_temperature_for_model(&self.ai_provider, self.active_model())
+    }
+
+    /// Sets or removes a custom temperature override for a specific model id.
+    pub fn set_model_temperature(&mut self, model: &str, temp: Option<f64>) {
+        let model_key = model.trim().to_string();
+        if let Some(val) = temp {
+            self.model_temperatures.insert(model_key, val.clamp(0.0, 2.0));
+        } else {
+            self.model_temperatures.remove(&model_key);
+            let lower = model_key.to_ascii_lowercase();
+            self.model_temperatures.retain(|k, _| k.to_ascii_lowercase() != lower);
         }
     }
 
@@ -1409,5 +1492,91 @@ mod tests {
         assert!(config.resolve_custom_provider("custom:myp").is_some());
         // Also works without prefix
         assert!(config.resolve_custom_provider("myp").is_some());
+    }
+
+    #[test]
+    fn resolved_temperature_smart_defaults_and_override() {
+        let mut config = MintConfig {
+            ai_provider: "deepseek".into(),
+            deepseek_model: "deepseek-chat".into(),
+            ..MintConfig::default()
+        };
+        // Smart default for DeepSeek is 0.6
+        assert_eq!(config.resolved_temperature(), 0.6);
+
+        // Smart default for Claude/OpenAI is 0.2
+        config.ai_provider = "anthropic".into();
+        assert_eq!(config.resolved_temperature(), 0.2);
+
+        // OpenRouter or other provider running deepseek model gets 0.6
+        config.ai_provider = "openrouter".into();
+        config.openrouter_model = "deepseek/deepseek-r1".into();
+        assert_eq!(config.resolved_temperature(), 0.6);
+
+        // QwQ reasoning model gets 0.6
+        config.ai_provider = "ollama".into();
+        config.ollama_model = "qwq:32b".into();
+        assert_eq!(config.resolved_temperature(), 0.6);
+
+        // Thinking fine-tunes get 0.6
+        config.ai_provider = "openai".into();
+        config.openai_model = "gpt-5.5-thinking".into();
+        assert_eq!(config.resolved_temperature(), 0.6);
+
+        // Codestral gets 0.1
+        config.ai_provider = "huggingface".into();
+        config.hf_model = "mistralai/Codestral-22B-v0.1".into();
+        assert_eq!(config.resolved_temperature(), 0.1);
+
+        // Standard Qwen Coder gets 0.2
+        config.ai_provider = "huggingface".into();
+        config.hf_model = "Qwen/Qwen2.5-Coder-32B-Instruct".into();
+        assert_eq!(config.resolved_temperature(), 0.2);
+
+        // Explicit temperature overrides smart default
+        config.temperature = Some(0.85);
+        assert_eq!(config.resolved_temperature(), 0.85);
+
+        // Out-of-range values get clamped
+        config.temperature = Some(3.5);
+        assert_eq!(config.resolved_temperature(), 2.0);
+        config.temperature = Some(-0.5);
+        assert_eq!(config.resolved_temperature(), 0.0);
+
+        // Temperature support checks for reasoning models
+        config.temperature = None;
+        config.ai_provider = "openai".into();
+        config.openai_model = "o1-preview".into();
+        assert!(!config.is_temperature_supported());
+
+        config.openai_model = "o3-mini".into();
+        assert!(!config.is_temperature_supported());
+
+        config.openai_model = "gpt-4o".into();
+        assert!(config.is_temperature_supported());
+
+        // Per-model temperature overrides take precedence over global and smart defaults
+        config.set_model_temperature("deepseek-chat", Some(0.65));
+        config.set_model_temperature("claude-sonnet-5", Some(0.15));
+
+        // When active model is deepseek-chat, resolved is 0.65
+        config.ai_provider = "deepseek".into();
+        config.deepseek_model = "deepseek-chat".into();
+        assert_eq!(config.resolved_temperature(), 0.65);
+
+        // When active model is deepseek-reasoner (not overridden), resolved falls back to smart default 0.6
+        config.deepseek_model = "deepseek-reasoner".into();
+        assert_eq!(config.resolved_temperature(), 0.6);
+
+        // When active model is claude-sonnet-5, resolved is 0.15
+        config.ai_provider = "anthropic".into();
+        config.anthropic_model = "claude-sonnet-5".into();
+        assert_eq!(config.resolved_temperature(), 0.15);
+
+        // Resetting model temperature restores smart default
+        config.set_model_temperature("deepseek-chat", None);
+        config.ai_provider = "deepseek".into();
+        config.deepseek_model = "deepseek-chat".into();
+        assert_eq!(config.resolved_temperature(), 0.6);
     }
 }

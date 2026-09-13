@@ -461,6 +461,7 @@ export default function ChatPanel({
   // Drag and Drop Zone Overlay
   const [isDragging, setIsDragging] = useState(false)
   const dragCounter = useRef(0)
+  const lastDropTimeRef = useRef(0)
 
   const handleDragEnter = (e: DragEvent<HTMLElement>) => {
     e.preventDefault()
@@ -486,8 +487,15 @@ export default function ChatPanel({
 
   const handleDrop = (e: DragEvent<HTMLElement>) => {
     e.preventDefault()
+    e.stopPropagation()
     dragCounter.current = 0
     setIsDragging(false)
+
+    const now = Date.now()
+    if (now - lastDropTimeRef.current < 250) {
+      return
+    }
+    lastDropTimeRef.current = now
 
     const files = e.dataTransfer?.files
     if (files && files.length > 0) {

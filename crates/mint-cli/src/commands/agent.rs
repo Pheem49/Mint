@@ -629,6 +629,7 @@ pub async fn handle_chat(
                 pinned_mcp_server: None,
                 messages: None,
                 tools: None,
+                temperature: config.temperature,
             },
         )
         .await?;

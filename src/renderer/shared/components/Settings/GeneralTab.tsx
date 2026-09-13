@@ -306,6 +306,168 @@ export default function GeneralTab({
                 </div>
               )
             })()}
+
+            {(() => {
+              const activeModelRaw = (
+                config.aiProvider === 'gemini' ? config.geminiModel :
+                config.aiProvider === 'openai' ? config.openaiModel :
+                config.aiProvider === 'anthropic' ? config.anthropicModel :
+                config.aiProvider === 'deepseek' ? config.deepseekModel :
+                config.aiProvider === 'ollama' ? config.ollamaModel :
+                config.aiProvider === 'openrouter' ? config.openrouterModel :
+                config.aiProvider === 'huggingface' ? config.hfModel :
+                config.aiProvider === 'local_openai' ? config.localModelName :
+                (config.aiProvider?.startsWith('custom:') ? ((config.customModelSelections ?? {})[config.aiProvider.replace(/^custom:/, '')] ?? '') : '')
+              ) || ''
+              const activeModel = activeModelRaw.toLowerCase()
+              const isReasoningOmit = (config.aiProvider === 'openai' || config.aiProvider === 'openrouter' || config.aiProvider === 'local_openai') &&
+                (activeModel.startsWith('o1') || activeModel.startsWith('o3'))
+              const isReasoningCoT = config.aiProvider === 'deepseek' ||
+                activeModel.includes('deepseek') ||
+                activeModel.includes('qwq') ||
+                activeModel.includes('thinking') ||
+                activeModel.includes('reasoner') ||
+                activeModel.includes('r1')
+              const isCodestral = activeModel.includes('codestral')
+
+              const smartDefault = isReasoningCoT ? 0.6 : isCodestral ? 0.1 : 0.2
+              const modelTemps = (config.modelTemperatures ?? {}) as Record<string, number>
+              const customModelTemp = activeModelRaw ? modelTemps[activeModelRaw] : undefined
+              const hasCustomModel = customModelTemp !== undefined
+              const hasCustomGlobal = config.temperature !== null && config.temperature !== undefined
+              const hasCustom = hasCustomModel || hasCustomGlobal
+
+              const currentTemp = hasCustomModel
+                ? customModelTemp!
+                : hasCustomGlobal
+                ? config.temperature!
+                : smartDefault
+
+              const modelDisplayName = (() => {
+                if (!activeModelRaw) return ''
+                const trimmed = activeModelRaw.trim()
+                const base = trimmed.includes('/') ? trimmed.split('/').pop()! : trimmed
+                const noTag = base.includes(':') ? base.split(':')[0]! : base
+                const lower = noTag.toLowerCase()
+
+                const KNOWN_MAP: Record<string, string> = {
+                  'deepseek-v4-flash': 'DeepSeek V4 Flash',
+                  'deepseek-v4-pro': 'DeepSeek V4 Pro',
+                  'deepseek-chat': 'DeepSeek Chat',
+                  'deepseek-reasoner': 'DeepSeek Reasoner',
+                  'claude-sonnet-5': 'Claude Sonnet 5',
+                  'claude-opus-5': 'Claude Opus 5',
+                  'claude-sonnet-4.6': 'Claude Sonnet 4.6',
+                  'claude-haiku-4.5': 'Claude Haiku 4.5',
+                  'gemini-2.5-flash': 'Gemini 2.5 Flash',
+                  'gemini-3.5-flash': 'Gemini 3.5 Flash',
+                  'gemini-3.6-flash': 'Gemini 3.6 Flash',
+                  'gpt-5.6-luna': 'GPT-5.6 Luna',
+                  'gpt-5.6-terra': 'GPT-5.6 Terra',
+                  'gpt-5.6-sol': 'GPT-5.6 Sol',
+                  'gpt-4o': 'GPT-4o',
+                  'gpt-4o-mini': 'GPT-4o Mini',
+                  'llama3': 'Llama 3',
+                }
+                if (KNOWN_MAP[lower]) return KNOWN_MAP[lower]
+
+                return noTag
+                  .split(/[-_]/)
+                  .filter(Boolean)
+                  .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                  .join(' ')
+              })()
+
+              const autoLabel = isReasoningOmit
+                ? `Auto (Omitted for ${modelDisplayName || 'Reasoning'})`
+                : isReasoningCoT
+                ? 'Auto (0.60 for Reasoning)'
+                : isCodestral
+                ? 'Auto (0.10 for Codestral)'
+                : 'Auto (0.20 for Coding)'
+
+              const badgeLabel = hasCustomModel
+                ? `Custom for ${modelDisplayName || activeModelRaw} (${customModelTemp!.toFixed(2)})`
+                : hasCustomGlobal
+                ? `Custom Global (${config.temperature!.toFixed(2)})`
+                : autoLabel
+
+              const handleReset = () => {
+                if (activeModelRaw && modelTemps[activeModelRaw] !== undefined) {
+                  const updated = { ...modelTemps }
+                  delete updated[activeModelRaw]
+                  updateField('modelTemperatures', updated)
+                }
+                if (config.temperature !== null && config.temperature !== undefined) {
+                  updateField('temperature', null)
+                }
+              }
+
+              const handleChange = (val: number) => {
+                if (activeModelRaw) {
+                  const updated = { ...modelTemps, [activeModelRaw]: val }
+                  updateField('modelTemperatures', updated)
+                } else {
+                  updateField('temperature', val)
+                }
+              }
+
+              return (
+                <div className="setting-row stacked" style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '8px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <label style={{ margin: 0, fontWeight: 600, display: 'flex', alignItems: 'baseline', gap: '0.45rem' }}>
+                      <span>Model Temperature</span>
+                      {modelDisplayName && (
+                        <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>
+                          · {modelDisplayName}
+                        </span>
+                      )}
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span className="section-current-badge" style={{ fontSize: '0.75rem' }}>
+                        {hasCustomModel ? `Custom (${customModelTemp!.toFixed(2)})` : hasCustomGlobal ? `Custom Global (${config.temperature!.toFixed(2)})` : autoLabel}
+                      </span>
+                      {hasCustom && (
+                        <button
+                          type="button"
+                          className="btn-secondary btn-small"
+                          style={{ padding: '0.15rem 0.45rem', fontSize: '0.75rem' }}
+                          onClick={handleReset}
+                          title={`Reset ${modelDisplayName || activeModelRaw || 'model'} to smart default`}
+                        >
+                          Reset to Auto
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1.5"
+                      step="0.05"
+                      value={currentTemp}
+                      onChange={(e) => handleChange(parseFloat(e.target.value))}
+                      style={{ flex: 1, accentColor: 'var(--accent-color, #10b981)', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: '0.85rem', minWidth: '2.5rem', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
+                      {currentTemp.toFixed(2)}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', opacity: 0.75, marginTop: '0.35rem', lineHeight: 1.4 }}>
+                    Controls sampling entropy for <strong>{modelDisplayName || activeModelRaw}</strong>. {
+                      isReasoningOmit
+                        ? 'Reasoning models (o1/o3) automatically omit this parameter.'
+                        : isReasoningCoT
+                        ? 'Smart default is 0.60 to prevent repetitive reasoning loops.'
+                        : isCodestral
+                        ? 'Smart default is 0.10 for deterministic code completion.'
+                        : 'Smart default is 0.20 for general coding and tool execution.'
+                    }
+                  </span>
+                </div>
+              )
+            })()}
           </div>
 
           <div className="provider-cards-container">

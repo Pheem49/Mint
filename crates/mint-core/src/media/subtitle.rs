@@ -268,6 +268,7 @@ pub async fn translate_subtitles(
             pinned_mcp_server: None,
             messages: None,
             tools: None,
+            temperature: config.temperature,
         };
 
         match crate::chat::send_chat_with_fallback(config, &chat_req).await {

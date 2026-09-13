@@ -31,6 +31,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 agent_id: Option<String>,
                 #[serde(default)]
                 pinned_mcp_server: Option<String>,
+                #[serde(default)]
+                temperature: Option<f64>,
             }
 
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
@@ -49,6 +51,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     pinned_mcp_server: req.pinned_mcp_server,
                     messages: None,
                     tools: None,
+                    temperature: req.temperature.or(config.temperature),
                 };
                 let mut chat_req = match chat_req.with_document_context(&config) {
                     Ok(req) => req,
@@ -195,6 +198,8 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                 agent_id: Option<String>,
                 #[serde(default)]
                 pinned_mcp_server: Option<String>,
+                #[serde(default)]
+                temperature: Option<f64>,
             }
 
             if let Ok(req) = serde_json::from_str::<ApiChatRequest>(body) {
@@ -213,6 +218,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                     pinned_mcp_server: req.pinned_mcp_server,
                     messages: None,
                     tools: None,
+                    temperature: req.temperature.or(config.temperature),
                 };
                 let mut chat_req = match chat_req.with_document_context(&config) {
                     Ok(req) => req,

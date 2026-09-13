@@ -1125,7 +1125,12 @@ export default function MintDashboard() {
       const objectUrl = createObjectUrlPreview(file).objectUrl
       const dataUri = await readImage(file)
       const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
-      setImageAttachments((current) => [...current, { dataUri, previewDataUri, objectUrl, name: file.name }])
+      setImageAttachments((current) => {
+        if (current.some((item) => item.name === file.name && item.dataUri === dataUri)) {
+          return current
+        }
+        return [...current, { dataUri, previewDataUri, objectUrl, name: file.name }]
+      })
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -1147,7 +1152,12 @@ export default function MintDashboard() {
         reader.onerror = reject
         reader.readAsDataURL(file)
       })
-      setVideoAttachments((current) => [...current, { dataUri, name: file.name }])
+      setVideoAttachments((current) => {
+        if (current.some((item) => item.name === file.name && item.dataUri === dataUri)) {
+          return current
+        }
+        return [...current, { dataUri, name: file.name }]
+      })
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
