@@ -1255,7 +1255,21 @@ export async function listen<T>(event: string, handler: (event: { payload: T }) 
 }
 
 export function convertFileSrc(filePath: string, protocol = 'asset'): string {
+  if (!filePath) return '';
+  if (
+    filePath.startsWith('http://') ||
+    filePath.startsWith('https://') ||
+    filePath.startsWith('blob:') ||
+    filePath.startsWith('data:')
+  ) {
+    return filePath;
+  }
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    if (filePath.startsWith('/api/')) {
+      const apiBase = getLocalApiBase();
+      const prefix = apiBase.replace(/\/api\/?$/, '');
+      return prefix ? `${prefix}${filePath}` : filePath;
+    }
     return filePath;
   }
   const internals = (window as any).__TAURI_INTERNALS__;

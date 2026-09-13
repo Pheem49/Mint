@@ -280,6 +280,7 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
             if route.starts_with("/api/")
                 && !route.starts_with("/api/pictures/")
                 && !route.starts_with("/api/thumbnails/")
+                && route != "/api/media"
                 && route != "/api/chat"
                 && route != "/api/chat-stream"
                 && route != "/api/image-generate"
@@ -950,6 +951,22 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                     )
                     .await;
                 }
+                                ("GET", "/api/media") => {
+                    routes::misc::execute(
+                        routes::RequestCtx {
+                            method,
+                            route,
+                            query,
+                            body,
+                            request_str: &request_str,
+                            request_bytes: &request_bytes,
+                            header_end,
+                            auth_label: auth_label.clone(),
+                        },
+                        socket,
+                    )
+                    .await;
+                }
                                 ("GET", route) if route.starts_with("/api/pictures/") => {
                     routes::misc::execute(
                         routes::RequestCtx {
@@ -1475,7 +1492,7 @@ fn thumbnail_bytes(filename: &str) -> Result<(String, Vec<u8>), String> {
     Ok(("image/png".to_string(), bytes))
 }
 
-fn query_param(query: &str, key: &str) -> Option<String> {
+pub(super) fn query_param(query: &str, key: &str) -> Option<String> {
     query.split('&').find_map(|pair| {
         let (name, value) = pair.split_once('=')?;
         (percent_decode(name) == key).then(|| percent_decode(value))

@@ -445,3 +445,30 @@ fn stores_lists_and_deletes_learned_skills() {
     assert_eq!(store.delete_learned_skill("guide").unwrap(), 1);
     assert!(store.learned_skills(10).unwrap().is_empty());
 }
+
+#[test]
+fn does_not_create_empty_chat_session_until_first_message() {
+    let store = store("no-empty-chat-session");
+    let fresh_id = "conversation-fresh-draft";
+
+    // 1. Reading interactions for an unstarted conversation must not create a chat session
+    let interactions = store.recent_interactions_for_chat(fresh_id, 10).unwrap();
+    assert!(interactions.is_empty());
+
+    let sessions = store.list_chat_sessions().unwrap();
+    assert!(
+        !sessions.iter().any(|s| s.id == fresh_id),
+        "Draft chat should not appear in list_chat_sessions before any messages are sent"
+    );
+
+    // 2. Only after saving the first message should the session be registered
+    store
+        .add_interaction_for_chat(fresh_id, "Hello Mint!", "Hi there!", "gemini", "gemini-flash")
+        .unwrap();
+
+    let updated_sessions = store.list_chat_sessions().unwrap();
+    let created = updated_sessions.iter().find(|s| s.id == fresh_id);
+    assert!(created.is_some(), "Chat session must exist after first message");
+    assert_eq!(created.unwrap().title, "Hello Mint!");
+}
+

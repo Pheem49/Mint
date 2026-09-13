@@ -527,7 +527,7 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
                       <article key={entry.id} className="veo-studio-card" aria-label={`Generated video ${idx + 1}`}>
                         <div className="veo-studio-card-video-wrap">
                           <video
-                            src={convertFileSrc(entry.path || entry.url)}
+                            src={convertFileSrc(entry.url || entry.path)}
                             className="veo-studio-card-video"
                             controls
                             preload="metadata"
@@ -608,7 +608,7 @@ export default function VeoStudioPanel({ view, onSendToChat, onToggleMobileSideb
                     <article key={video.id} className="veo-studio-card" aria-label={`Saved video ${idx + 1}`}>
                       <div className="veo-studio-card-video-wrap">
                         <video
-                          src={convertFileSrc(video.path || video.url)}
+                          src={convertFileSrc(video.url || video.path)}
                           className="veo-studio-card-video"
                           controls
                           preload="metadata"

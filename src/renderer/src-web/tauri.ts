@@ -1075,10 +1075,43 @@ export async function listen<T>(event: string, handler: (event: { payload: T }) 
 
 export function convertFileSrc(filePath: string, protocol = 'asset'): string {
   if (!filePath) return ''
-  if (typeof window === 'undefined' || !isTauriRuntime()) {
-    if (filePath.startsWith('http://') || filePath.startsWith('https://') || filePath.startsWith('blob:')) {
-      return filePath
+  if (
+    filePath.startsWith('http://') ||
+    filePath.startsWith('https://') ||
+    filePath.startsWith('blob:') ||
+    filePath.startsWith('data:')
+  ) {
+    return filePath
+  }
+  // If it's already an API route (/api/...)
+  if (filePath.startsWith('/api/')) {
+    const apiBase = getLocalApiBase()
+    const prefix = apiBase.replace(/\/api\/?$/, '')
+    return prefix ? `${prefix}${filePath}` : filePath
+  }
+  // If it's a web-relative path or root-relative static asset (/assets/...)
+  if (
+    filePath.startsWith('/') &&
+    !filePath.startsWith('/home/') &&
+    !filePath.startsWith('/root/') &&
+    !filePath.startsWith('/tmp/') &&
+    !filePath.startsWith('/var/') &&
+    !filePath.startsWith('/usr/')
+  ) {
+    return filePath
+  }
+  // If filePath points to a picture in Mint pictures directory
+  if (filePath.includes('/pictures/') || filePath.includes('\\pictures\\')) {
+    const filename = filePath.split(/[/\\]/).pop()
+    if (filename) {
+      const apiBase = getLocalApiBase()
+      if (filename.endsWith('.thumb.png')) {
+        return `${apiBase}/thumbnails/${encodeURIComponent(filename)}`
+      }
+      return `${apiBase}/pictures/${encodeURIComponent(filename)}`
     }
+  }
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase()
     return `${API_BASE}/media?path=${encodeURIComponent(filePath)}`
   }

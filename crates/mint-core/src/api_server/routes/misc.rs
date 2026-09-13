@@ -102,6 +102,76 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             }
         }
 
+        ("GET", "/api/media") => {
+            let path_param = query_param(query, "path")
+                .map(|p| percent_decode(&p))
+                .unwrap_or_default();
+            if path_param.is_empty() {
+                send_json_response(
+                    socket,
+                    "400 Bad Request",
+                    "{\"error\":\"missing path query parameter\"}",
+                )
+                .await;
+                return;
+            }
+            let target_path = std::path::Path::new(&path_param);
+            let Ok(canonical) = target_path.canonicalize() else {
+                send_json_response(
+                    socket,
+                    "404 Not Found",
+                    "{\"error\":\"media file not found\"}",
+                )
+                .await;
+                return;
+            };
+            if !canonical.is_file() {
+                send_json_response(
+                    socket,
+                    "404 Not Found",
+                    "{\"error\":\"media file not found\"}",
+                )
+                .await;
+                return;
+            }
+            let Some(mime_type) = (match canonical
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_lowercase()
+                .as_str()
+            {
+                "png" => Some("image/png"),
+                "jpg" | "jpeg" => Some("image/jpeg"),
+                "webp" => Some("image/webp"),
+                "gif" => Some("image/gif"),
+                "svg" => Some("image/svg+xml"),
+                "mp4" => Some("video/mp4"),
+                "webm" => Some("video/webm"),
+                "mov" => Some("video/quicktime"),
+                "mkv" => Some("video/x-matroska"),
+                "mp3" => Some("audio/mpeg"),
+                "wav" => Some("audio/wav"),
+                "ogg" => Some("audio/ogg"),
+                _ => None,
+            }) else {
+                send_json_response(
+                    socket,
+                    "403 Forbidden",
+                    "{\"error\":\"unsupported media type\"}",
+                )
+                .await;
+                return;
+            };
+            match std::fs::read(&canonical) {
+                Ok(bytes) => send_binary_response(socket, "200 OK", mime_type, &bytes).await,
+                Err(e) => {
+                    let err_msg = serde_json::json!({ "error": e.to_string() }).to_string();
+                    send_json_response(socket, "500 Internal Server Error", &err_msg).await;
+                }
+            }
+        }
+
         ("GET", "/api/config") => {
             let config = load_config().unwrap_or_default();
             if let Ok(json_str) = serde_json::to_string(&config) {
