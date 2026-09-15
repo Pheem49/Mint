@@ -453,6 +453,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
                                             total_tokens: None,
                                             input_tokens: None,
                                             output_tokens: None,
+                                            thought: None,
                                         };
                                         if let Ok(json_val) =
                                             serde_json::to_string(&serde_json::json!({

@@ -651,6 +651,7 @@ async fn send_chat_message(app: AppHandle, request: ChatRequest) -> Result<ChatR
         total_tokens: None,
         input_tokens: None,
         output_tokens: None,
+        thought: None,
     })
 }
 
@@ -857,6 +858,7 @@ async fn stream_chat_message(
         total_tokens: None,
         input_tokens: None,
         output_tokens: None,
+        thought: None,
     })
 }
 

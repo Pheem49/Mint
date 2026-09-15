@@ -229,9 +229,14 @@ const ChatMessageItem = React.memo(
             </div>
             {renderWebSearchSources(interaction)}
             <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <button className="provider-badge">{interaction.provider} • {interaction.model}</button>
+              <span className="provider-model-chip" data-provider={(interaction.provider || '').toLowerCase()} title={`${interaction.provider} • ${interaction.model}`}>
+                <span className="provider-chip-dot" aria-hidden="true" />
+                <span className="provider-chip-name">{interaction.provider}</span>
+                <span className="provider-chip-divider">/</span>
+                <span className="provider-chip-model">{interaction.model}</span>
+              </span>
               {fallbackNotice(interaction) && <span className="provider-fallback-notice">{fallbackNotice(interaction)}</span>}
-              <span>{parseUtcDate(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              <span className="message-timestamp">{parseUtcDate(interaction.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
                 <button
                   type="button"

@@ -25,6 +25,7 @@ export interface ChatResponse {
   provider: string
   model: string
   text: string
+  thought?: string | null
   fallbackProvider?: string | null
 }
 

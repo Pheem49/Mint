@@ -1291,7 +1291,10 @@ where
                         .enumerate()
                         .map(|(index, call)| {
                             let thought = if index == 0 {
-                                response.text.trim().to_string()
+                                match &response.thought {
+                                    Some(t) if !t.trim().is_empty() => t.trim().to_string(),
+                                    _ => response.text.trim().to_string(),
+                                }
                             } else {
                                 String::new()
                             };
@@ -1325,10 +1328,11 @@ where
                                  incomplete. Ask to continue or retry to get the rest.]",
                             );
                         }
+                        let thought = response.thought.clone().unwrap_or_default();
                         vec![(
                             format!("call_{step}_finish"),
                             AgentDecision {
-                                thought: String::new(),
+                                thought,
                                 action: "finish".to_string(),
                                 input: AgentInput {
                                     summary,
@@ -1339,34 +1343,34 @@ where
                     }
                 }
             } else {
-                let decision = match parse_decision_or_finish(&response.text) {
+                let mut decision = match parse_decision_or_finish(&response.text) {
                     Ok(decision) => decision,
                     Err(_) => {
                         let (repaired, _) = send_chat_with_fallback(
-                        &active_config,
-                        &ChatRequest {
-                            message: format!(
-                                "Your previous response was not valid Mint agent JSON.\n\
-                                 Return exactly one corrected JSON object with an action and input. \
-                                 Do not use markdown.\n\nPrevious response:\n{}",
-                                truncate(&response.text)
-                            ),
-                            system_instruction: active_system_prompt.clone(),
-                            chat_id: Some(chat_id.to_owned()),
-                            image_data_uri: None,
-                            audio_data_uri: None,
-                            video_data_uri: None,
-                            document_attachment: None,
-                            workspace_path: None,
-                            agent_id: None,
-                            plan_mode: false,
-                            pinned_mcp_server: None,
-                            messages: None,
-                            tools: None,
-                            temperature: active_config.temperature,
-                        },
-                    )
-                    .await?;
+                            &active_config,
+                            &ChatRequest {
+                                message: format!(
+                                    "Your previous response was not valid Mint agent JSON.\n\
+                                     Return exactly one corrected JSON object with an action and input. \
+                                     Do not use markdown.\n\nPrevious response:\n{}",
+                                    truncate(&response.text)
+                                ),
+                                system_instruction: active_system_prompt.clone(),
+                                chat_id: Some(chat_id.to_owned()),
+                                image_data_uri: None,
+                                audio_data_uri: None,
+                                video_data_uri: None,
+                                document_attachment: None,
+                                workspace_path: None,
+                                agent_id: None,
+                                plan_mode: false,
+                                pinned_mcp_server: None,
+                                messages: None,
+                                tools: None,
+                                temperature: active_config.temperature,
+                            },
+                        )
+                        .await?;
                         parse_decision_or_finish(&repaired.text).map_err(|e| {
                             OrchestrationError::Agent(format!(
                                 "unable to repair invalid agent response: {}",
@@ -1375,6 +1379,11 @@ where
                         })?
                     }
                 };
+                if decision.thought.trim().is_empty() {
+                    if let Some(t) = &response.thought {
+                        decision.thought = t.trim().to_string();
+                    }
+                }
                 vec![(format!("call_{step}"), decision)]
             };
 
@@ -1423,7 +1432,6 @@ where
             } else {
                 for (call_id, decision) in decisions {
                     if !fast_mode
-                        && decision.action != "finish"
                         && !decision.thought.trim().is_empty()
                     {
                         progress(AgentProgress::Thought {

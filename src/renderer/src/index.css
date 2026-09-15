@@ -71,37 +71,54 @@ button {
   margin: 0 2px;
 }
 
+/* Minimalist AI Workspace (Claude / Cursor style) Code Block */
 .chat-code-block-container {
   display: flex;
   flex-direction: column;
-  background: var(--input-bg, #0f172a);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: var(--panel-soft, #121214);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 9px;
   margin: 12px 0;
   overflow: hidden;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm, 0 4px 16px rgba(0, 0, 0, 0.18));
 }
 
 .chat-code-block-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--surface-bg, #1e293b);
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
+  background: var(--surface-bg, rgba(255, 255, 255, 0.03));
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  user-select: none;
+}
+
+.chat-code-block-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .chat-code-block-lang {
-  color: var(--text-chat, var(--text-main));
-  font-size: 0.78rem;
-  font-weight: 650;
-  text-transform: capitalize;
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: 0.02em;
+}
+
+.chat-code-block-lines {
+  font-size: 0.7rem;
+  color: var(--text-soft, #64748b);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 
 .chat-code-block-actions {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: 6px;
 }
 
 .chat-code-action-btn {
@@ -109,46 +126,166 @@ button {
   border: none;
   color: var(--text-soft, #94a3b8);
   cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  display: flex;
+  padding: 4px 8px;
+  border-radius: 5px;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  transition: all 0.15s ease;
 }
 
 .chat-code-action-btn:hover {
-  background: color-mix(in srgb, var(--text-main) 7%, transparent);
-  color: var(--accent-hover, #34d399);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-main, #f1f5f9);
+}
+
+.chat-code-download-btn {
+  padding: 4px 6px;
+}
+
+.chat-code-copy-btn.is-copied {
+  color: var(--accent, #10b981);
+}
+
+.chat-code-copy-btn.is-copied .chat-code-btn-label {
+  color: var(--accent, #10b981);
+}
+
+.chat-code-btn-label {
+  font-size: 0.75rem;
+  font-weight: 500;
 }
 
 .chat-code-block-body {
   margin: 0;
-  padding: 14px;
+  padding: 12px 0;
   overflow-x: auto;
-  background: var(--input-bg, #0f172a);
+  background: transparent;
 }
 
 .chat-code-block-body code {
-  font-family: 'Fira Code', 'Courier New', Courier, monospace;
-  font-size: 0.88rem;
-  color: var(--text-chat, var(--text-main, #e2e8f0));
-  line-height: 1.5;
+  font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.84rem;
+  line-height: 1.6;
   white-space: pre;
+  color: var(--text-chat, var(--text-main, #e2e8f0));
+  display: block;
+}
+
+/* Line-by-line layout & gutter */
+.chat-code-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 100%;
+  width: max-content;
+}
+
+.chat-code-line {
+  display: flex;
+  align-items: baseline;
+  padding: 0 14px 0 0;
+  min-height: 1.6em;
+}
+
+.chat-code-line:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.chat-code-line-num {
+  width: 44px;
+  min-width: 44px;
+  padding-right: 14px;
+  text-align: right;
+  color: var(--text-soft, #475569);
+  font-size: 0.76rem;
+  user-select: none;
+  opacity: 0.65;
+}
+
+.chat-code-line-content {
+  flex: 1;
+  padding-left: 14px;
+}
+
+.chat-code-lines:not(:has(.chat-code-line-num)) .chat-code-line-content {
+  padding-left: 16px;
+}
+
+/* Syntax Highlighting Tokens - Claude / Cursor low-saturation theme */
+.token-command {
+  color: #38bdf8; /* Soft sky blue */
+  font-weight: 500;
+}
+
+.token-keyword {
+  color: #818cf8; /* Soft indigo / violet */
+  font-weight: 500;
+}
+
+.token-string {
+  color: #86efac; /* Calm emerald green */
+}
+
+.token-flag {
+  color: #fde047; /* Soft yellow / amber */
+}
+
+.token-comment {
+  color: #64748b; /* Muted slate */
+  font-style: italic;
+}
+
+.token-number {
+  color: #fdba74; /* Soft warm orange */
+}
+
+.token-variable {
+  color: #f472b6; /* Soft pink */
+}
+
+.token-property {
+  color: #93c5fd; /* Soft light blue */
+}
+
+.token-function {
+  color: #38bdf8; /* Soft sky blue */
+}
+
+.token-type {
+  color: #a78bfa; /* Soft purple */
+}
+
+.token-boolean {
+  color: #fb7185; /* Soft rose */
+}
+
+.token-operator {
+  color: #94a3b8; /* Muted slate */
+}
+
+.token-punctuation {
+  color: #64748b; /* Darker muted slate */
 }
 
 .chat-bold-highlight {
   color: var(--text-chat, var(--text-main)) !important;
 }
 
+/* Tech Pill Inline Code */
 .chat-inline-code {
-  background: color-mix(in srgb, var(--text-chat, var(--text-main)) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--text-chat, var(--text-main)) 24%, transparent);
-  color: var(--text-chat, var(--text-main));
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-family: 'Fira Code', 'Courier New', Courier, monospace;
-  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-chat, var(--text-main, #e2e8f0));
+  padding: 1.5px 6px;
+  border-radius: 5px;
+  font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85em;
+  letter-spacing: -0.01em;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  display: inline-block;
+  vertical-align: baseline;
 }
 
 /* Premium Table Styles for Chat Panel */

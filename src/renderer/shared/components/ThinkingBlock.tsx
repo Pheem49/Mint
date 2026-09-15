@@ -4,6 +4,7 @@
  * Shared by both Desktop and Web ChatPanel — do NOT duplicate this.
  */
 import { useEffect, useRef, useState } from 'react'
+import { Brain, ChevronRight } from 'lucide-react'
 import { renderFormattedMessage } from '../utils/markdown'
 
 const THINKING_LABELS = {
@@ -60,26 +61,20 @@ export function ThinkingBlock({
   }
 
   return (
-    <div className={`thinking-block${isLive ? ' is-live' : ''}`}>
+    <div className={`thinking-block${isLive ? ' is-live' : ''}${isOpen ? ' is-expanded' : ''}`}>
       <button
         type="button"
         className="thinking-block-header"
         onClick={() => setOpen(!isOpen)}
         aria-expanded={isOpen}
       >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-          <line x1="12" y1="17" x2="12.01" y2="17" />
-          <circle cx="12" cy="12" r="10" />
-        </svg>
+        <Brain size={14} className="thinking-block-icon" style={{ flexShrink: 0 }} />
         <span className="thinking-block-label">
           {isLive ? THINKING_LABELS.live : THINKING_LABELS.completed(thoughts.length)}
         </span>
         {isLive && <span className="thinking-block-live-dot" aria-hidden="true" />}
         <span className={`thinking-block-chevron${isOpen ? ' is-open' : ''}`} aria-hidden="true">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
+          <ChevronRight size={13} strokeWidth={2.2} />
         </span>
       </button>
       {isOpen && (

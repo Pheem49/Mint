@@ -1476,7 +1476,12 @@ export default function ChatPanel({
                 </div>
                 {streamedResponse && (
                   <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button className="provider-badge">{badge(streamedResponse.provider, streamedResponse.model)}</button>
+                    <span className="provider-model-chip" data-provider={(streamedResponse.provider || '').toLowerCase()} title={`${streamedResponse.provider} • ${streamedResponse.model}`}>
+                      <span className="provider-chip-dot" aria-hidden="true" />
+                      <span className="provider-chip-name">{streamedResponse.provider}</span>
+                      <span className="provider-chip-divider">/</span>
+                      <span className="provider-chip-model">{streamedResponse.model}</span>
+                    </span>
                     {activeFallbackNotice && <span className="provider-fallback-notice">{activeFallbackNotice}</span>}
                     {streamedReply && (
                       <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>

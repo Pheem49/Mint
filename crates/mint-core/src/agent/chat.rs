@@ -387,6 +387,10 @@ pub struct ChatResponse {
     /// "came back down from the model" half. See `input_tokens`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u32>,
+    /// Model reasoning / chain-of-thought tokens, when reported by reasoning models
+    /// (e.g. DeepSeek Reasoner, Claude 3.7 Thinking, Gemini Thinking, or <think> tags).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought: Option<String>,
 }
 
 /// Internal, provider-agnostic result of a single non-streaming provider call.
@@ -394,6 +398,7 @@ pub struct ChatResponse {
 struct ProviderReply {
     model: String,
     text: String,
+    thought: Option<String>,
     tool_calls: Option<Vec<ToolCall>>,
     stop_reason: Option<String>,
     /// Prompt/context tokens processed for this call, when the provider reports
@@ -457,6 +462,7 @@ pub async fn send_chat(
         provider: provider.into(),
         model: reply.model,
         text: reply.text,
+        thought: reply.thought,
         fallback_provider: None,
         fallback_reason: None,
         tool_calls: reply.tool_calls,
@@ -498,6 +504,7 @@ where
         provider: provider.into(),
         model,
         text,
+        thought: None,
         fallback_provider: None,
         fallback_reason: None,
         tool_calls: None,
@@ -664,6 +671,27 @@ fn gemini_native_part(
     })
 }
 
+/// Extracts `<think>...</think>` chain-of-thought blocks emitted by reasoning models
+/// (e.g. DeepSeek-R1, QwQ) when embedded directly into plain text content.
+/// Returns `(Option<thought>, remaining_text)`.
+fn extract_think_tag(text: &str) -> (Option<String>, String) {
+    if let Some(start) = text.find("<think>") {
+        if let Some(end) = text[start + 7..].find("</think>") {
+            let thought = text[start + 7..start + 7 + end].trim().to_string();
+            let mut remaining = text[..start].to_string();
+            remaining.push_str(&text[start + 7 + end + 8..]);
+            let cleaned = remaining.trim().to_string();
+            (if thought.is_empty() { None } else { Some(thought) }, cleaned)
+        } else {
+            let thought = text[start + 7..].trim().to_string();
+            let cleaned = text[..start].trim().to_string();
+            (if thought.is_empty() { None } else { Some(thought) }, cleaned)
+        }
+    } else {
+        (None, text.to_string())
+    }
+}
+
 /// Parses a Gemini `generateContent` response, collecting text parts and any
 /// `functionCall` parts into tool calls. Gemini doesn't assign call ids, so a
 /// stable per-response index (`call_0`, `call_1`, ...) is synthesized; this is
@@ -675,10 +703,16 @@ fn parse_gemini_reply(model: String, response: &Value) -> Result<ProviderReply, 
         .cloned()
         .unwrap_or_default();
     let mut text = String::new();
+    let mut thought_parts: Vec<&str> = Vec::new();
     let mut tool_calls = Vec::new();
     for (index, part) in parts.iter().enumerate() {
+        let is_thought = part.get("thought").and_then(Value::as_bool).unwrap_or(false);
         if let Some(t) = part["text"].as_str() {
-            text.push_str(t);
+            if is_thought {
+                thought_parts.push(t);
+            } else {
+                text.push_str(t);
+            }
         }
         if let Some(call) = part.get("functionCall") {
             tool_calls.push(ToolCall {
@@ -694,12 +728,40 @@ fn parse_gemini_reply(model: String, response: &Value) -> Result<ProviderReply, 
             });
         }
     }
+    let direct_thought = if !thought_parts.is_empty() {
+        Some(thought_parts.join("").trim().to_string()).filter(|s| !s.is_empty())
+    } else {
+        None
+    };
+    let (thought, text) = if direct_thought.is_none() {
+        extract_think_tag(&text)
+    } else {
+        (direct_thought, text)
+    };
     if text.is_empty() && tool_calls.is_empty() {
+        if let Some(th) = &thought {
+            return Ok(ProviderReply {
+                model,
+                text: th.clone(),
+                thought: Some(th.clone()),
+                tool_calls: None,
+                stop_reason: response["candidates"][0]["finishReason"]
+                    .as_str()
+                    .map(str::to_owned),
+                input_tokens: response["usageMetadata"]["promptTokenCount"]
+                    .as_u64()
+                    .map(|n| n as u32),
+                output_tokens: response["usageMetadata"]["candidatesTokenCount"]
+                    .as_u64()
+                    .map(|n| n as u32),
+            });
+        }
         return Err(ChatError::MissingResponseText);
     }
     Ok(ProviderReply {
         model,
         text,
+        thought,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: response["candidates"][0]["finishReason"]
             .as_str()
@@ -799,7 +861,21 @@ async fn send_openai_style_request(
 /// and has its own parser below.
 fn parse_openai_style_reply(model: String, response: &Value) -> Result<ProviderReply, ChatError> {
     let message = &response["choices"][0]["message"];
-    let text = message["content"].as_str().unwrap_or_default().to_string();
+    let raw_text = message["content"].as_str().unwrap_or_default().to_string();
+    let direct_thought = message["reasoning_content"]
+        .as_str()
+        .or_else(|| message["reasoning"].as_str())
+        .or_else(|| message["thought"].as_str())
+        .or_else(|| message["thinking"].as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let (thought, text) = if direct_thought.is_none() {
+        extract_think_tag(&raw_text)
+    } else {
+        (direct_thought, raw_text)
+    };
+
     let tool_calls: Vec<ToolCall> = message["tool_calls"]
         .as_array()
         .map(|calls| {
@@ -822,11 +898,29 @@ fn parse_openai_style_reply(model: String, response: &Value) -> Result<ProviderR
         })
         .unwrap_or_default();
     if text.is_empty() && tool_calls.is_empty() {
+        if let Some(th) = &thought {
+            return Ok(ProviderReply {
+                model,
+                text: th.clone(),
+                thought: Some(th.clone()),
+                tool_calls: None,
+                stop_reason: response["choices"][0]["finish_reason"]
+                    .as_str()
+                    .map(str::to_owned),
+                input_tokens: response["usage"]["prompt_tokens"]
+                    .as_u64()
+                    .map(|n| n as u32),
+                output_tokens: response["usage"]["completion_tokens"]
+                    .as_u64()
+                    .map(|n| n as u32),
+            });
+        }
         return Err(ChatError::MissingResponseText);
     }
     Ok(ProviderReply {
         model,
         text,
+        thought,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: response["choices"][0]["finish_reason"]
             .as_str()
@@ -992,7 +1086,19 @@ fn ollama_native_messages(messages: &[ChatMessage]) -> Vec<Value> {
 /// (`{"choices": [{"message": {...}}]}`) that `parse_openai_style_reply` handles.
 fn parse_ollama_reply(model: String, response: &Value) -> Result<ProviderReply, ChatError> {
     let message = &response["message"];
-    let text = message["content"].as_str().unwrap_or_default().to_string();
+    let raw_text = message["content"].as_str().unwrap_or_default().to_string();
+    let direct_thought = message["thinking"]
+        .as_str()
+        .or_else(|| message["reasoning_content"].as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let (thought, text) = if direct_thought.is_none() {
+        extract_think_tag(&raw_text)
+    } else {
+        (direct_thought, raw_text)
+    };
+
     let tool_calls: Vec<ToolCall> = message["tool_calls"]
         .as_array()
         .map(|calls| {
@@ -1022,11 +1128,23 @@ fn parse_ollama_reply(model: String, response: &Value) -> Result<ProviderReply, 
         })
         .unwrap_or_default();
     if text.is_empty() && tool_calls.is_empty() {
+        if let Some(th) = &thought {
+            return Ok(ProviderReply {
+                model,
+                text: th.clone(),
+                thought: Some(th.clone()),
+                tool_calls: None,
+                stop_reason: None,
+                input_tokens: response["prompt_eval_count"].as_u64().map(|n| n as u32),
+                output_tokens: response["eval_count"].as_u64().map(|n| n as u32),
+            });
+        }
         return Err(ChatError::MissingResponseText);
     }
     Ok(ProviderReply {
         model,
         text,
+        thought,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: None,
         input_tokens: response["prompt_eval_count"].as_u64().map(|n| n as u32),
@@ -1241,12 +1359,18 @@ fn anthropic_content_block(block: &ContentBlock) -> Result<Value, ChatError> {
 fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderReply, ChatError> {
     let blocks = response["content"].as_array().cloned().unwrap_or_default();
     let mut text = String::new();
+    let mut thought_parts: Vec<&str> = Vec::new();
     let mut tool_calls = Vec::new();
     for block in &blocks {
         match block["type"].as_str() {
             Some("text") => {
                 if let Some(t) = block["text"].as_str() {
                     text.push_str(t);
+                }
+            }
+            Some("thinking") => {
+                if let Some(t) = block["thinking"].as_str() {
+                    thought_parts.push(t);
                 }
             }
             Some("tool_use") => {
@@ -1260,12 +1384,36 @@ fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderRepl
             _ => {}
         }
     }
+    let direct_thought = if !thought_parts.is_empty() {
+        Some(thought_parts.join("").trim().to_string()).filter(|s| !s.is_empty())
+    } else {
+        None
+    };
+    let (thought, text) = if direct_thought.is_none() {
+        extract_think_tag(&text)
+    } else {
+        (direct_thought, text)
+    };
     if text.is_empty() && tool_calls.is_empty() {
+        if let Some(th) = &thought {
+            return Ok(ProviderReply {
+                model,
+                text: th.clone(),
+                thought: Some(th.clone()),
+                tool_calls: None,
+                stop_reason: response["stop_reason"].as_str().map(str::to_owned),
+                input_tokens: response["usage"]["input_tokens"].as_u64().map(|n| n as u32),
+                output_tokens: response["usage"]["output_tokens"]
+                    .as_u64()
+                    .map(|n| n as u32),
+            });
+        }
         return Err(ChatError::MissingResponseText);
     }
     Ok(ProviderReply {
         model,
         text,
+        thought,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: response["stop_reason"].as_str().map(str::to_owned),
         input_tokens: response["usage"]["input_tokens"].as_u64().map(|n| n as u32),
@@ -3065,6 +3213,128 @@ mod tests {
         };
         let payload = anthropic_chat_payload(&config, "claude-sonnet-5", &request, false).unwrap();
         assert_eq!(payload["temperature"], 0.2);
+    }
+
+    #[test]
+    fn parse_openai_style_reply_extracts_deepseek_reasoning_content() {
+        let response = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "Evaluating 15 + 6 * (8 - 3) - 14 / 2 step by step...",
+                    "tool_calls": [{
+                        "id": "call_calc_1",
+                        "type": "function",
+                        "function": {
+                            "name": "calculation",
+                            "arguments": "{\"expression\":\"15 + 6 * (8 - 3) - 14 / 2\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        });
+        let reply = parse_openai_style_reply("deepseek-reasoner".into(), &response).unwrap();
+        assert_eq!(reply.text, "");
+        assert_eq!(
+            reply.thought.as_deref(),
+            Some("Evaluating 15 + 6 * (8 - 3) - 14 / 2 step by step...")
+        );
+        let calls = reply.tool_calls.unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "calculation");
+    }
+
+    #[test]
+    fn parse_openai_style_reply_extracts_openrouter_reasoning() {
+        let response = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "The answer is 38.",
+                    "reasoning": "First parentheses: 8 - 3 = 5..."
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        let reply = parse_openai_style_reply("deepseek/deepseek-r1".into(), &response).unwrap();
+        assert_eq!(reply.text, "The answer is 38.");
+        assert_eq!(
+            reply.thought.as_deref(),
+            Some("First parentheses: 8 - 3 = 5...")
+        );
+    }
+
+    #[test]
+    fn parse_openai_style_reply_extracts_think_tags() {
+        let response = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "<think>\nLet me solve this problem.\n</think>\nThe result is 42."
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        let reply = parse_openai_style_reply("qwq-32b".into(), &response).unwrap();
+        assert_eq!(reply.text, "The result is 42.");
+        assert_eq!(reply.thought.as_deref(), Some("Let me solve this problem."));
+    }
+
+    #[test]
+    fn parse_gemini_reply_extracts_thought_parts() {
+        let response = json!({
+            "candidates": [{
+                "content": {
+                    "parts": [
+                        { "text": "Thinking through the formula...", "thought": true },
+                        { "text": "The answer is 38." }
+                    ]
+                },
+                "finishReason": "STOP"
+            }]
+        });
+        let reply = parse_gemini_reply("gemini-2.0-flash-thinking".into(), &response).unwrap();
+        assert_eq!(reply.text, "The answer is 38.");
+        assert_eq!(
+            reply.thought.as_deref(),
+            Some("Thinking through the formula...")
+        );
+    }
+
+    #[test]
+    fn parse_anthropic_reply_extracts_thinking_blocks() {
+        let response = json!({
+            "content": [
+                { "type": "thinking", "thinking": "Let's break down the arithmetic..." },
+                { "type": "text", "text": "The result is 38." }
+            ],
+            "stop_reason": "end_turn"
+        });
+        let reply = parse_anthropic_reply("claude-3-7-sonnet".into(), &response).unwrap();
+        assert_eq!(reply.text, "The result is 38.");
+        assert_eq!(
+            reply.thought.as_deref(),
+            Some("Let's break down the arithmetic...")
+        );
+    }
+
+    #[test]
+    fn parse_ollama_reply_extracts_thinking_field() {
+        let response = json!({
+            "message": {
+                "role": "assistant",
+                "content": "Result is 38.",
+                "thinking": "Ollama internal thinking trace..."
+            }
+        });
+        let reply = parse_ollama_reply("deepseek-r1:8b".into(), &response).unwrap();
+        assert_eq!(reply.text, "Result is 38.");
+        assert_eq!(
+            reply.thought.as_deref(),
+            Some("Ollama internal thinking trace...")
+        );
     }
 }
 

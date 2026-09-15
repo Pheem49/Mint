@@ -1,5 +1,68 @@
 # Release Notes - Mint Agent v1.14.0
 
+## Model Chip, Ghost Message Actions & Enhanced Reasoning Block (Desktop & Web UI)
+
+Elevated the visual hierarchy, micro-interactions, and status indicators of conversation messages and reasoning chains:
+
+- **Modern Model Chip (`.provider-model-chip`)**:
+  - Replaced plain text provider badge with a sleek, pill-shaped chip displaying provider indicator dot, clean provider name, and model tag.
+  - Dynamic indicator dot styling tailored to provider archetype (Anthropic amber, OpenAI green, Google/Gemini cyan, DeepSeek blue, Ollama purple, Groq orange, Mint emerald).
+  - Built with theme-adaptive background (`var(--surface-bg)`), subtle border, and interactive hover illumination.
+  - Implemented across completed chat turns (`ChatMessageItem.tsx`) and live streaming responses (`ChatPanel.tsx`).
+- **Ghost Message Actions (`.msg-action-btn`)**:
+  - Upgraded action buttons (Copy, Read Aloud / TTS, Edit) into polished 26x26px ghost buttons.
+  - Smooth hover backgrounds, micro-border feedback, and prominent emerald accent states with pulsing glow for active playback and copy confirmation.
+- **Thinking / Reasoning CoT Block Overhaul (`ThinkingBlock.tsx`)**:
+  - **Quiet UI Aesthetic**: Replaced neon cyberpunk green borders and radioactive glowing effects with refined, quiet neutral borders (`var(--border, rgba(255, 255, 255, 0.08))`) inspired by Claude 3.7 and Cursor.
+  - Replaced legacy question-mark icon with an authentic, neutral **Brain** icon (`<Brain size={14} />`) from Lucide.
+  - Added a gentle, non-distracting live breathing pulse indicator (`@keyframes thinkingDotPulse`) without high-intensity colored halos.
+  - **Secondary Role Typography & Visual Hierarchy**:
+    - Downscaled reasoning body text size to `12.5px` (compact and distinct from the `15px` primary chat messages) with line-height `1.55`.
+    - Dropped text color to muted slate (`var(--text-muted, #94a3b8)` with `opacity: 0.88`), communicating its role as internal background reasoning / secondary metadata.
+    - Scoped all markdown children inside reasoning steps (`.chat-formatted-body`, `.chat-paragraph`, `.chat-heading`, `.chat-list-*`, `.chat-bold-highlight`, `.chat-inline-code`): clamped headings to `12.8px`, subdued bold highlights, neutralized list bullets and numbering from neon green to muted slate, and tightened vertical margins.
+  - Added custom ultra-slim 3px scrollbar (`.thinking-block-content::-webkit-scrollbar`) with translucent thumb for deep reasoning chains.
+- **Complete Desktop & Web Parity**:
+  - Unified component logic in `src/renderer/shared` and synchronized stylesheet updates across `src/renderer/src/css/chat.css` and `src/renderer/src-web/css/chat.css`.
+
+## Native Chain-of-Thought Reasoning Extraction & Full Provider Parity (CLI, Desktop & Web)
+
+Resolved an issue where reasoning models (such as `deepseek-reasoner` / DeepSeek-R1) appeared with `"Model didn't send thinking steps this time"` when executing tools in Agent Mode:
+
+- **Multi-Provider Reasoning & CoT Ingestion (`crates/mint-core/src/agent/chat.rs`)**:
+  - **DeepSeek Reasoner**: Extracted `message["reasoning_content"]` emitted during native tool calling and conversation turns.
+  - **OpenRouter & Compatible Endpoints**: Extracted `message["reasoning"]` and `message["thought"]` fields.
+  - **Embedded `<think>` Tags**: Added `extract_think_tag` parser to detect and extract `<think>...</think>` blocks embedded in model text streams (such as Ollama or local QwQ/R1 deployments).
+  - **Google Gemini 2.0 Flash Thinking**: Separated candidate parts with `thought: true` into the reasoning thought stream instead of blending into the final content string.
+  - **Anthropic Claude 3.7 Sonnet**: Ingested native `thinking` content blocks.
+  - **Ollama**: Extracted `message["thinking"]` and `message["reasoning_content"]`.
+- **Orchestration Agent Loop Integration (`crates/mint-core/src/orchestration/mod.rs`)**:
+  - Attached extracted `thought` tokens to `AgentDecision` across tool-calling and completion turns.
+  - Guaranteed `AgentProgress::Thought` is emitted for every step containing reasoning traces, allowing the frontend's `ThinkingBlock` to render the live pulsing brain icon and step-by-step reasoning steps.
+  - Added unit test coverage for each reasoning provider schema.
+
+
+## Minimalist AI Workspace Code Block & Command Styling (Desktop & Web UI)
+
+Mint's code block rendering and inline command displays have been redesigned to deliver a minimalist, high-clarity developer workspace aesthetic inspired by Claude and Cursor:
+
+- **Zero-Dependency Syntax Highlighting Engine (`src/renderer/shared/utils/syntaxHighlight.tsx`)**:
+  - Implemented a fast, lightweight, and resilient tokenization engine tailored for developer commands and code snippets.
+  - **Bash / Shell / Terminal Commands**: Intelligent distinction between primary commands (`ffmpeg`, `git`, `docker`, `cargo`, `npm`, etc.), command-line flags and options (`-i`, `-vf`, `--help`), string parameters, variables (`$VAR`), property assignments (`key=value`), comments, and pipe operators (`|`, `&&`).
+  - **Comprehensive Multi-Language Support**: Dedicated tokenizers for JavaScript, TypeScript, Python, Rust, JSON, SQL, HTML, CSS, and YAML with universal fallback handling.
+  - **Low-Saturation Aesthetic**: High-contrast, easy-on-the-eyes palette (soft sky blue commands, calm emerald strings, warm amber flags, muted slate comments).
+- **Redesigned Minimalist Header & Controls (`ChatCodeBlock.tsx`)**:
+  - Monospace lowercase language badge (`bash`, `typescript`, `python`, etc.) with subtle metadata tracking code line count for multi-line snippets.
+  - **Interactive Copy Action**: Added clear "Copy" label alongside the clipboard icon with fluid animated transition to green checkmark and "Copied!" confirmation.
+  - **Ghost Download Button**: Clean, unobtrusive button for downloading the snippet with the appropriate file extension.
+- **Line Numbers & Non-Selectable Gutter**:
+  - Automatically displays a neat gutter with line numbers for multi-line snippets (`> 1` lines).
+  - Designed with `user-select: none` so selecting code or copying to clipboard preserves clean code without stray line numbers.
+  - Single-line terminal commands (e.g. `ffmpeg ...`) remain uncluttered with full padding and zero gutter distraction.
+- **Refined Tech Pill Inline Code (`.chat-inline-code`)**:
+  - Updated inline code pills across Desktop and Web with subtle dark translucent background (`rgba(255, 255, 255, 0.06)`), fine border, and crisp typography for clear readability in paragraphs and lists.
+- **Full Platform Parity**:
+  - Shared component `ChatCodeBlock` and identical CSS rules implemented across both Desktop (`src/renderer/src/index.css`) and Web (`src/renderer/src-web/index.css`).
+
 ## Dynamic Model Temperature Control, Per-Model Persistence & Interactive Wizard (CLI, Desktop & Web)
 
 Mint now provides comprehensive model temperature management with **per-model persistence**, interactive multi-step selection wizard, and fine-grained, model-aware defaults tailored to prevent repetitive reasoning loops on reasoning models while preserving strict precision on coding backends:

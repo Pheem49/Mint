@@ -1314,6 +1314,7 @@ async fn run_web_agent_loop(
         total_tokens: None,
         input_tokens: None,
         output_tokens: None,
+        thought: None,
     })
 }
 
