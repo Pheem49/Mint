@@ -1,5 +1,30 @@
 # Release Notes - Mint Agent v1.14.0
 
+## Smart Consecutive Tool Grouping & Modern Activity Feed UI (Desktop & Web)
+
+Eliminated repetitive tool execution rows (e.g. `calculation >` repeated 6–7 times) by introducing consecutive tool grouping, rich category iconography, and accurate input target parsing:
+
+- **Smart Consecutive Tool Grouping (`agentActivity.ts` & `AgentActivityTable.tsx`)**:
+  - Automatically aggregates consecutive executions of the same tool into a single, clean collapsible group row by default (e.g. `Calculated 7 expressions` with `7 steps` badge).
+  - Designed with an interactive accordion: clicking the group reveals the granular sub-items connected by fine branch lines (`├─`, `└─`).
+  - Single tool executions remain unnested for instant visibility.
+- **Resilient Group Status Rollup & Smart Error Recovery**:
+  - Fixed false-positive red `Failed` badges on tool groups when searches or tool calls experienced intermediate non-fatal hiccups or trailing redundant calls.
+  - Group status in `agentActivity.ts` now rolls up to `done` (`✓`) if at least one sub-step succeeded (`hasDone`), marking a group as `error` only if zero sub-steps succeeded.
+  - Non-fatal tool errors occurring before an overall successful run (`RunCompleted` with `SUCCESS`) are marked as `retry` / recovered rather than fatal failures.
+  - Granular sub-step badges remain fully transparent when expanding the accordion.
+- **Cross-Platform Parameter Alias Resolution (CLI, Desktop & Web)**:
+  - **Rust Backend (`crates/mint-core`)**: Added Serde aliases on `AgentInput` for `query` (`q`, `keyword`, `search`, `searchTerm`, `search_term`), `symbol` (`ticker`), `city` (`location`, `place`), `expression` (`expr`, `math`), and `command` (`cmd`). In `tools/web.rs`, added fallback checks against `prompt`, `command`, and `symbol` to eliminate `(empty query)` errors.
+  - **CLI (`crates/mint-cli`)**: Added matching alias support in `generic_tool_label`, `explored_action_label`, and `ran_command_labels` ensuring 100% Platform Parity.
+  - **Frontend (`agentActivity.ts`)**: Enhanced `describeTool` to parse all parameter aliases and prioritized `query` over generic placeholders.
+- **Accurate Tool Target & Inline Result Extraction**:
+  - Enhanced `describeTool` in `agentActivity.ts` to extract `expression` / `expr` for math queries, `city` / `location` for weather, `symbol` for stock tickers, and `url` / `selector` for browser automation.
+  - Eliminated the fallback where target duplicated the action name (e.g. `calculation` repeating as target `calculation`).
+  - Added concise inline result previews (e.g. `16 - 28 + 12 → 0`).
+- **Modern Activity Feed Architecture (`AgentActivityTable.tsx`)**:
+  - Replaced the rigid 4-column raw table (`Tool | Target | >`) with a modern Activity Feed with category icons (Lucide `Calculator`, `FileCode`, `Folder`, `Terminal`, `Search`, `Wrench`), status badges, and expandable output logs.
+  - Synchronized CSS stylesheets across Desktop (`src/renderer/src/css/chat.css`) and Web (`src/renderer/src-web/css/chat.css`).
+
 ## Model Chip, Ghost Message Actions & Enhanced Reasoning Block (Desktop & Web UI)
 
 Elevated the visual hierarchy, micro-interactions, and status indicators of conversation messages and reasoning chains:

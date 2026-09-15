@@ -502,7 +502,15 @@ pub(super) fn explored_action_label(
             })
         }
         "search_code" => {
-            let query = input.get("query").and_then(|v| v.as_str())?;
+            let query = input
+                .get("query")
+                .or_else(|| input.get("q"))
+                .or_else(|| input.get("keyword"))
+                .or_else(|| input.get("search"))
+                .or_else(|| input.get("prompt"))
+                .or_else(|| input.get("searchTerm"))
+                .or_else(|| input.get("search_term"))
+                .and_then(|v| v.as_str())?;
             let path = input.get("path").and_then(|v| v.as_str()).unwrap_or(".");
             let target = if path.trim().is_empty() || path == "." {
                 query.to_owned()
@@ -1184,6 +1192,7 @@ pub(super) fn ran_command_labels(action: &str, input: &serde_json::Value) -> Opt
     match action {
         "run_shell" => input
             .get("command")
+            .or_else(|| input.get("cmd"))
             .and_then(|v| v.as_str())
             .filter(|command| !command.trim().is_empty())
             .map(|command| vec![command.trim().to_owned()]),

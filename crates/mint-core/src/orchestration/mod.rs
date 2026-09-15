@@ -635,9 +635,9 @@ struct AgentDecision {
 struct AgentInput {
     #[serde(default)]
     path: String,
-    #[serde(default)]
+    #[serde(default, alias = "q", alias = "keyword", alias = "search", alias = "searchTerm", alias = "search_term")]
     query: String,
-    #[serde(default)]
+    #[serde(default, alias = "ticker")]
     symbol: String,
     #[serde(default)]
     filter: String,
@@ -647,11 +647,11 @@ struct AgentInput {
     header: String,
     #[serde(default, alias = "multi_select")]
     multi_select: bool,
-    #[serde(default)]
+    #[serde(default, alias = "location", alias = "place")]
     city: String,
-    #[serde(default)]
+    #[serde(default, alias = "expr", alias = "math")]
     expression: String,
-    #[serde(default)]
+    #[serde(default, alias = "cmd")]
     command: String,
     #[serde(default)]
     background: bool,

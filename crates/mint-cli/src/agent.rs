@@ -87,20 +87,44 @@ pub async fn run_code_agent_with_image(
 /// Human-readable `(is_activity, label)` for a `ToolStart` whose action
 /// didn't already get a more specific rendering (`explored_action_label`'s
 /// grouped file/search targets, the plan/skill/memory special cases). Shared
+fn get_field_alias<'a>(input: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+    for &k in keys {
+        if let Some(v) = input.get(k).and_then(|v| v.as_str()) {
+            if !v.trim().is_empty() {
+                return Some(v.trim());
+            }
+        }
+    }
+    None
+}
+
+/// Helper to format a readable label for a tool action. Used symmetrically
 /// between the top-level progress handler and the nested-subagent one so a
 /// subagent's own tool calls get the same descriptive labels the top-level
 /// agent's do, not just a bare `[action] Using tool...` fallback.
 fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String) {
     match action {
         "web_search" => {
-            let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            let query = get_field_alias(
+                input,
+                &[
+                    "query",
+                    "q",
+                    "keyword",
+                    "search",
+                    "prompt",
+                    "searchTerm",
+                    "search_term",
+                ],
+            )
+            .unwrap_or("");
             (
                 true,
                 format!("[web_search] Searching the web for \"{}\"...", query),
             )
         }
         "run_shell" => {
-            let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            let command = get_field_alias(input, &["command", "cmd"]).unwrap_or("");
             let background = input
                 .get("background")
                 .and_then(|v| v.as_bool())
