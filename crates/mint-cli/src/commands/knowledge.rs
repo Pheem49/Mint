@@ -271,9 +271,7 @@ async fn run_github_overview(repo: &str, config: &MintConfig) -> Result<()> {
         }
     };
 
-    println!(
-        "\n--- AI Repository Overview for {owner}/{repo_name} ---"
-    );
+    println!("\n--- AI Repository Overview for {owner}/{repo_name} ---");
     println!("{}", response.text);
     println!("--------------------------------------------------");
     Ok(())
@@ -399,7 +397,11 @@ pub fn handle_knowledge(command: KnowledgeCommand) -> Result<()> {
     Ok(())
 }
 
-pub async fn handle_code(command: CodeCommand, cli: &crate::Cli, config: &MintConfig) -> Result<()> {
+pub async fn handle_code(
+    command: CodeCommand,
+    cli: &crate::Cli,
+    config: &MintConfig,
+) -> Result<()> {
     match command {
         CodeCommand::Agent { task, root, plan } => {
             run_oneshot_agent_task(
@@ -444,9 +446,7 @@ pub async fn handle_code(command: CodeCommand, cli: &crate::Cli, config: &MintCo
         }
         CodeCommand::Plan { task, root, file } => println!(
             "{}",
-            serde_json::to_string_pretty(&inspect_code_plan(
-                task, &root, file, config
-            )?)?
+            serde_json::to_string_pretty(&inspect_code_plan(task, &root, file, config)?)?
         ),
         CodeCommand::ProposeWrite {
             path,

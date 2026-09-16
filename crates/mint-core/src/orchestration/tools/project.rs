@@ -50,9 +50,13 @@ pub(in crate::orchestration) async fn execute(
             } else {
                 "general"
             };
-            let doc_path = crate::system::knowledge_engine::create_project_doc(root, category, title, content)
-                .map_err(OrchestrationError::Agent)?;
-            let rel = doc_path.strip_prefix(root).unwrap_or(&doc_path).to_string_lossy();
+            let doc_path =
+                crate::system::knowledge_engine::create_project_doc(root, category, title, content)
+                    .map_err(OrchestrationError::Agent)?;
+            let rel = doc_path
+                .strip_prefix(root)
+                .unwrap_or(&doc_path)
+                .to_string_lossy();
             Ok(format!("Documentation successfully created at: {rel}"))
         }
         _ => unreachable!(

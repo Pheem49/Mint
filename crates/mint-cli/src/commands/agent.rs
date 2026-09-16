@@ -225,10 +225,7 @@ pub(crate) async fn launch_mint_target(target: String, dev: bool) -> Result<()> 
                     anyhow::anyhow!("Failed to find project root directory containing package.json")
                 })?
             };
-            let dist_web_out = project_root
-                .join("out")
-                .join("web")
-                .join("index-web.html");
+            let dist_web_out = project_root.join("out").join("web").join("index-web.html");
             let dist_web_legacy = project_root
                 .join("out")
                 .join("renderer")
@@ -393,12 +390,8 @@ pub async fn handle_auto() -> Result<()> {
         );
     }
 
-    println!(
-        "🌐 Isolated browser running with remote debugging on http://127.0.0.1:9222"
-    );
-    println!(
-        "💬 Keep this terminal open while you want Mint to automate browser tasks."
-    );
+    println!("🌐 Isolated browser running with remote debugging on http://127.0.0.1:9222");
+    println!("💬 Keep this terminal open while you want Mint to automate browser tasks.");
     println!("Press Ctrl+C to terminate the automation browser session.");
     println!("----------------------------------------------------------------------");
 
@@ -422,21 +415,13 @@ pub async fn handle_auto() -> Result<()> {
             {
                 let reader = BufReader::new(file);
                 for line_str in reader.lines().map_while(Result::ok) {
-                    if line_str.contains("[NAVIGATE]")
-                        || line_str.contains("[NAVIGATE_SUCCESS]")
-                    {
+                    if line_str.contains("[NAVIGATE]") || line_str.contains("[NAVIGATE_SUCCESS]") {
                         println!("🌐 {line_str}");
-                    } else if line_str.contains("[CLICK]")
-                        || line_str.contains("[CLICK_SUCCESS]")
-                    {
+                    } else if line_str.contains("[CLICK]") || line_str.contains("[CLICK_SUCCESS]") {
                         println!("🖱️ {line_str}");
-                    } else if line_str.contains("[TYPE]")
-                        || line_str.contains("[TYPE_SUCCESS]")
-                    {
+                    } else if line_str.contains("[TYPE]") || line_str.contains("[TYPE_SUCCESS]") {
                         println!("⌨️ {line_str}");
-                    } else if line_str.contains("[READ]")
-                        || line_str.contains("[READ_SUCCESS]")
-                    {
+                    } else if line_str.contains("[READ]") || line_str.contains("[READ_SUCCESS]") {
                         println!("📖 {line_str}");
                     } else if line_str.contains("[MOUSE_MOVE]")
                         || line_str.contains("[MOUSE_MOVE_SUCCESS]")
@@ -482,9 +467,7 @@ pub async fn handle_api(port: u16) -> Result<()> {
     print_welcome_banner(&config);
 
     println!("\n{MINT}✔ Mint API Server is running!{RESET}\n");
-    println!(
-        "    {BLUE}API Server URL:{RESET} {MINT}http://localhost:{port}{RESET}\n"
-    );
+    println!("    {BLUE}API Server URL:{RESET} {MINT}http://localhost:{port}{RESET}\n");
 
     println!("Messaging Bridges Status:");
 
@@ -558,9 +541,7 @@ pub async fn handle_gateway(command: GatewayCommand) -> Result<()> {
             }
 
             if let Some(port) = api_port {
-                println!(
-                    "\n    {BLUE}API Server URL:{RESET} {MINT}http://localhost:{port}{RESET}"
-                );
+                println!("\n    {BLUE}API Server URL:{RESET} {MINT}http://localhost:{port}{RESET}");
                 tokio::spawn(async move {
                     if let Err(error) = mint_core::start_api_server(port).await {
                         eprintln!("{ERROR}API server exited: {error}{RESET}");
@@ -608,9 +589,7 @@ pub async fn handle_chat(
         )
         .await?;
     } else {
-        let image_data_uri = image_path
-            .map(image::load_image_as_data_uri)
-            .transpose()?;
+        let image_data_uri = image_path.map(image::load_image_as_data_uri).transpose()?;
         let (response, _) = orchestrate_chat_with_fallback(
             config,
             &ChatRequest {
@@ -621,9 +600,7 @@ pub async fn handle_chat(
                 audio_data_uri: None,
                 video_data_uri: None,
                 document_attachment: None,
-                workspace_path: Some(
-                    std::env::current_dir()?.to_string_lossy().into_owned(),
-                ),
+                workspace_path: Some(std::env::current_dir()?.to_string_lossy().into_owned()),
                 agent_id: None,
                 plan_mode: false,
                 pinned_mcp_server: None,
@@ -691,10 +668,7 @@ pub async fn handle_imagine(
                     }
                     if let (Some(out_path), Some(first)) = (&output, saved.first()) {
                         match std::fs::copy(&first.path, out_path) {
-                            Ok(_) => println!(
-                                "{MINT}✓{RESET} Copied to: {}",
-                                out_path.display()
-                            ),
+                            Ok(_) => println!("{MINT}✓{RESET} Copied to: {}", out_path.display()),
                             Err(e) => eprintln!(
                                 "{WARN}Warning: could not copy to output path: {e}{RESET}"
                             ),
@@ -783,9 +757,9 @@ pub async fn handle_veo(
 
 pub async fn handle_video(command: VideoCommand) -> Result<()> {
     use mint_core::{
-        ExportRequest, ExtractAudioRequest, MergeRequest, RemoveSilenceRequest,
-        ResizeRequest, TrimRequest, video_export, video_extract_audio, video_load,
-        video_merge, video_remove_silence, video_resize, video_trim,
+        ExportRequest, ExtractAudioRequest, MergeRequest, RemoveSilenceRequest, ResizeRequest,
+        TrimRequest, video_export, video_extract_audio, video_load, video_merge,
+        video_remove_silence, video_resize, video_trim,
     };
     match command {
         VideoCommand::Load { path } => {
@@ -898,12 +872,8 @@ pub async fn handle_video(command: VideoCommand) -> Result<()> {
             };
             match video_remove_silence(&req) {
                 Ok(r) => {
-                    let dur =
-                        r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
-                    println!(
-                        "{MINT}✓ Silence removed → {} ({dur}){RESET}",
-                        r.output_path
-                    );
+                    let dur = r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
+                    println!("{MINT}✓ Silence removed → {} ({dur}){RESET}", r.output_path);
                 }
                 Err(e) => {
                     eprintln!("{ERROR}✗ Remove silence failed: {e}{RESET}");
@@ -930,8 +900,7 @@ pub async fn handle_video(command: VideoCommand) -> Result<()> {
             };
             match video_export(&req) {
                 Ok(r) => {
-                    let dur =
-                        r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
+                    let dur = r.duration.map(|d| format!("{d:.2}s")).unwrap_or_default();
                     let size = r
                         .size_bytes
                         .map(|s| format!("{} bytes", s))
@@ -1015,10 +984,7 @@ pub async fn handle_video(command: VideoCommand) -> Result<()> {
             match mint_core::translate_subtitles(&config, &req).await {
                 Ok(translated_srt) => {
                     std::fs::write(&output, translated_srt)?;
-                    println!(
-                        "{MINT}✓ Subtitles translated → {}{RESET}",
-                        output.display()
-                    );
+                    println!("{MINT}✓ Subtitles translated → {}{RESET}", output.display());
                 }
                 Err(e) => {
                     eprintln!("{ERROR}✗ Subtitle translation failed: {e}{RESET}");

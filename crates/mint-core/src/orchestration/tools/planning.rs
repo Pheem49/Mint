@@ -87,12 +87,24 @@ pub(in crate::orchestration) async fn execute(
                         "pending".to_string()
                     };
                     let title = step
-                        .trim_start_matches(|c| c == '[' || c == ']' || c == 'x' || c == 'X' || c == '✓' || c == ' ' || c == '>')
+                        .trim_start_matches(|c| {
+                            c == '['
+                                || c == ']'
+                                || c == 'x'
+                                || c == 'X'
+                                || c == '✓'
+                                || c == ' '
+                                || c == '>'
+                        })
                         .trim()
                         .to_string();
                     PlanTaskItem {
                         id: format!("step-{}", idx + 1),
-                        title: if title.is_empty() { step.clone() } else { title },
+                        title: if title.is_empty() {
+                            step.clone()
+                        } else {
+                            title
+                        },
                         status,
                     }
                 })
@@ -267,4 +279,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp);
     }
 }
-

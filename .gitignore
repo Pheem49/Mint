@@ -10,7 +10,7 @@ node_modules/
 .cargo/
 .rustup/
 .rustup_copy/
-.rustup_home/ฃ
+.rustup_home/
 .vite-web
 .vite-web/
 

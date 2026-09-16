@@ -879,7 +879,11 @@ fn resolve_endpoint(base_url: &str, endpoint: &str) -> String {
             return format!("{origin}{port}{endpoint}");
         }
     }
-    format!("{}/{}", base_url.trim_end_matches('/'), endpoint.trim_start_matches('/'))
+    format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        endpoint.trim_start_matches('/')
+    )
 }
 
 impl McpRemoteSession {
@@ -1713,8 +1717,20 @@ mod tests {
         call_mcp_tool(&config_with_mock_echo_server(b), b, "x", json!({})).unwrap();
 
         let sessions = SESSIONS.lock().unwrap();
-        let a_flag = sessions.get(a).unwrap().lock().unwrap().oauth_pending().unwrap();
-        let b_flag = sessions.get(b).unwrap().lock().unwrap().oauth_pending().unwrap();
+        let a_flag = sessions
+            .get(a)
+            .unwrap()
+            .lock()
+            .unwrap()
+            .oauth_pending()
+            .unwrap();
+        let b_flag = sessions
+            .get(b)
+            .unwrap()
+            .lock()
+            .unwrap()
+            .oauth_pending()
+            .unwrap();
         drop(sessions);
 
         assert!(
@@ -1845,7 +1861,10 @@ mod tests {
     #[test]
     fn remote_mcp_server_serialization_and_helpers() {
         let mut headers = BTreeMap::new();
-        headers.insert("Authorization".to_string(), "Bearer secret-token".to_string());
+        headers.insert(
+            "Authorization".to_string(),
+            "Bearer secret-token".to_string(),
+        );
 
         let remote = McpServer {
             command: String::new(),
@@ -1867,7 +1886,10 @@ mod tests {
         assert!(deserialized.is_remote());
         assert_eq!(deserialized.remote_url(), Some("https://example.com/sse"));
         assert_eq!(
-            deserialized.headers.as_ref().and_then(|h| h.get("Authorization")),
+            deserialized
+                .headers
+                .as_ref()
+                .and_then(|h| h.get("Authorization")),
             Some(&"Bearer secret-token".to_string())
         );
         assert_eq!(deserialized.transport.as_deref(), Some("sse"));

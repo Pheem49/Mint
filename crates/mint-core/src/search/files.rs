@@ -59,7 +59,6 @@ pub fn create_folder(target: &Path, config: &MintConfig) -> Result<PathBuf, File
     Ok(target)
 }
 
-
 /// Resolves a file path for reading/previewing across CLI, Desktop, and Web.
 /// Handles:
 /// 1. Tilde expansion (`~` or `~/...`) to user home directory.
@@ -135,9 +134,19 @@ pub fn resolve_readable_path(target: &str, workspace: Option<&Path>) -> PathBuf 
                 candidates.push(home.join(".config").join(rest));
             }
         }
-        candidates.push(home.join(".config").join("mint").join("notes").join(trimmed));
+        candidates.push(
+            home.join(".config")
+                .join("mint")
+                .join("notes")
+                .join(trimmed),
+        );
         if norm_slash != trimmed {
-            candidates.push(home.join(".config").join("mint").join("notes").join(&norm_slash));
+            candidates.push(
+                home.join(".config")
+                    .join("mint")
+                    .join("notes")
+                    .join(&norm_slash),
+            );
         }
         if let Some(fname) = req_path.file_name() {
             candidates.push(home.join(".config").join("mint").join("notes").join(fname));
@@ -176,7 +185,10 @@ pub fn resolve_readable_path(target: &str, workspace: Option<&Path>) -> PathBuf 
         }
     }
 
-    candidates.into_iter().next().unwrap_or_else(|| req_path.to_path_buf())
+    candidates
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| req_path.to_path_buf())
 }
 
 pub fn find_paths(
@@ -279,7 +291,8 @@ mod tests {
 
     #[test]
     fn test_resolve_readable_path_workspace() {
-        let temp_dir = std::env::temp_dir().join(format!("mint-resolve-test-{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("mint-resolve-test-{}", std::process::id()));
         let _ = fs::create_dir_all(temp_dir.join("sub"));
         let test_file = temp_dir.join("sub").join("sample.md");
         let _ = fs::write(&test_file, "# Test Preview");
@@ -298,4 +311,3 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 }
-

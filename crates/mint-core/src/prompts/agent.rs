@@ -191,13 +191,17 @@ pub fn build_system_prompt(
         input_formats.push("- find_definition: {\"symbol\":\"symbol_name\",\"path\":\".\"}");
     }
     if allowed_actions.contains(&"find_references") {
-        input_formats.push("- find_references: {\"symbol\":\"symbol_name\",\"path\":\".\",\"limit\":30}");
+        input_formats
+            .push("- find_references: {\"symbol\":\"symbol_name\",\"path\":\".\",\"limit\":30}");
     }
     if allowed_actions.contains(&"run_tests") {
-        input_formats.push("- run_tests: {\"filter\":\"optional_filter\"} (runs project test suite autonomously)");
+        input_formats.push(
+            "- run_tests: {\"filter\":\"optional_filter\"} (runs project test suite autonomously)",
+        );
     }
     if allowed_actions.contains(&"run_typecheck") {
-        input_formats.push("- run_typecheck: {} (runs typecheck e.g. tsc or cargo check autonomously)");
+        input_formats
+            .push("- run_typecheck: {} (runs typecheck e.g. tsc or cargo check autonomously)");
     }
     if allowed_actions.contains(&"run_linter") {
         input_formats.push("- run_linter: {} (runs linter e.g. eslint or clippy autonomously)");

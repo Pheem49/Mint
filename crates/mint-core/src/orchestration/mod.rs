@@ -635,7 +635,14 @@ struct AgentDecision {
 struct AgentInput {
     #[serde(default)]
     path: String,
-    #[serde(default, alias = "q", alias = "keyword", alias = "search", alias = "searchTerm", alias = "search_term")]
+    #[serde(
+        default,
+        alias = "q",
+        alias = "keyword",
+        alias = "search",
+        alias = "searchTerm",
+        alias = "search_term"
+    )]
     query: String,
     #[serde(default, alias = "ticker")]
     symbol: String,
@@ -1106,8 +1113,10 @@ where
         let mut last_input_tokens: u64 = 0;
         let mut turn_generated_tokens: u64 = 0;
         let mut executed_tools: Vec<ToolExecutionRecord> = Vec::new();
-        let mut files_modified: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        let mut files_created: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut files_modified: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        let mut files_created: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
 
         'steps: for step in 1..=MAX_STEPS {
             let (active_config, agent_instruction, active_agent_name, active_model_name) =
@@ -1431,9 +1440,7 @@ where
                 .await;
             } else {
                 for (call_id, decision) in decisions {
-                    if !fast_mode
-                        && !decision.thought.trim().is_empty()
-                    {
+                    if !fast_mode && !decision.thought.trim().is_empty() {
                         progress(AgentProgress::Thought {
                             thought: decision.thought.trim().to_owned(),
                         });
@@ -1657,7 +1664,11 @@ where
                             outcome: "SUCCESS".to_string(),
                             total_tokens: turn_total_tokens as usize,
                             tool_calls_count: executed_tools.len(),
-                            files_changed: files_created.iter().chain(files_modified.iter()).cloned().collect(),
+                            files_changed: files_created
+                                .iter()
+                                .chain(files_modified.iter())
+                                .cloned()
+                                .collect(),
                             files_created: files_created.into_iter().collect(),
                             duration_secs: started_at.elapsed().as_secs_f64(),
                             tool_timeline: executed_tools.clone(),
@@ -1698,10 +1709,7 @@ where
                         "note_write" => {
                             !decision.input.name.is_empty()
                                 && root
-                                    .join(format!(
-                                        ".config/mint/notes/{}",
-                                        decision.input.name
-                                    ))
+                                    .join(format!(".config/mint/notes/{}", decision.input.name))
                                     .exists()
                         }
                         "apply_patch" => {
@@ -1811,8 +1819,10 @@ where
                                 )
                             }
                             crate::hooks::PreHookOutcome::Allowed => {
-                                if matches!(decision.action.as_str(), "write_file" | "apply_patch" | "note_write")
-                                {
+                                if matches!(
+                                    decision.action.as_str(),
+                                    "write_file" | "apply_patch" | "note_write"
+                                ) {
                                     let target_path = if !decision.input.path.is_empty() {
                                         Some(decision.input.path.as_str())
                                     } else {
@@ -1952,7 +1962,10 @@ where
                     } else {
                         truncate(&result)
                     };
-                    if matches!(decision.action.as_str(), "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter") {
+                    if matches!(
+                        decision.action.as_str(),
+                        "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
+                    ) {
                         if shell_result_failed(&result) {
                             final_result.push_str(
                         "\n\n[System Tip: The command failed with a non-zero exit code. \
@@ -2089,7 +2102,11 @@ where
             outcome: "FAILED".to_string(),
             total_tokens: turn_total_tokens as usize,
             tool_calls_count: executed_tools.len(),
-            files_changed: files_created.iter().chain(files_modified.iter()).cloned().collect(),
+            files_changed: files_created
+                .iter()
+                .chain(files_modified.iter())
+                .cloned()
+                .collect(),
             files_created: files_created.into_iter().collect(),
             duration_secs: started_at.elapsed().as_secs_f64(),
             tool_timeline: executed_tools.clone(),
@@ -2646,13 +2663,8 @@ async fn execute_tool(
             )
             .await
         }
-        "search_code"
-        | "symbols"
-        | "find_definition"
-        | "find_references"
-        | "repo_map"
-        | "semantic_index"
-        | "semantic_search" => {
+        "search_code" | "symbols" | "find_definition" | "find_references" | "repo_map"
+        | "semantic_index" | "semantic_search" => {
             tools::code_search::execute(
                 decision.action.as_str(),
                 input,
@@ -2688,7 +2700,8 @@ async fn execute_tool(
         "conversation_summary" => Ok(serde_json::json!({
             "status": "acknowledged",
             "message": "Previous steps summary is already recorded in context."
-        }).to_string()),
+        })
+        .to_string()),
         "browser_open"
         | "browser_click"
         | "browser_type"
@@ -2707,15 +2720,8 @@ async fn execute_tool(
             )
             .await
         }
-        "git_status"
-        | "git_diff"
-        | "git_log"
-        | "git_branch"
-        | "git_checkpoint"
-        | "git_rollback"
-        | "git_restore_file"
-        | "git_commit"
-        | "git_create_branch" => {
+        "git_status" | "git_diff" | "git_log" | "git_branch" | "git_checkpoint"
+        | "git_rollback" | "git_restore_file" | "git_commit" | "git_create_branch" => {
             tools::git::execute(
                 decision.action.as_str(),
                 input,
@@ -2738,11 +2744,7 @@ async fn execute_tool(
             )
             .await
         }
-        "detect_project"
-        | "list_tests"
-        | "read_diagnostics"
-        | "view_image"
-        | "search_docs"
+        "detect_project" | "list_tests" | "read_diagnostics" | "view_image" | "search_docs"
         | "create_project_doc" => {
             tools::project::execute(
                 decision.action.as_str(),
@@ -2767,12 +2769,7 @@ async fn execute_tool(
             )
             .await
         }
-        "run_shell"
-        | "shell_output"
-        | "kill_shell"
-        | "verify"
-        | "run_tests"
-        | "run_typecheck"
+        "run_shell" | "shell_output" | "kill_shell" | "verify" | "run_tests" | "run_typecheck"
         | "run_linter" => {
             tools::shell::execute(
                 decision.action.as_str(),

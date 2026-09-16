@@ -313,10 +313,8 @@ pub fn find_references(
     }
 
     let definitions = find_definition(root, target, config).unwrap_or_default();
-    let def_set: std::collections::HashSet<(PathBuf, usize)> = definitions
-        .into_iter()
-        .map(|d| (d.file, d.line))
-        .collect();
+    let def_set: std::collections::HashSet<(PathBuf, usize)> =
+        definitions.into_iter().map(|d| (d.file, d.line)).collect();
 
     let pattern = format!(r"\b{}\b", regex::escape(target));
     let Ok(re) = Regex::new(&pattern) else {
@@ -395,4 +393,3 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 }
-

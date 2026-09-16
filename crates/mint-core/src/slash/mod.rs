@@ -465,7 +465,10 @@ fn needs_on_off(command: &str, title: &str) -> SlashResponse {
 fn cmd_plan(req: &SlashRequest, rest: &str) -> SlashResponse {
     let trimmed = rest.trim();
     if trimmed.is_empty() {
-        needs_on_off("/plan", "Plan Mode (investigate read-only and present plan)")
+        needs_on_off(
+            "/plan",
+            "Plan Mode (investigate read-only and present plan)",
+        )
     } else if trimmed == "on" {
         SlashResponse::Applied {
             markdown: "📋 Plan Mode **ON** (agent will investigate read-only and present a plan before editing).".into(),
@@ -525,7 +528,10 @@ fn cmd_plan(req: &SlashRequest, rest: &str) -> SlashResponse {
         }
         match found_content {
             Some((name, content)) => message(format!("### Plan: {}\n\n{}", name, content)),
-            None => error(format!("No saved plan matching \"{}\" under `.agents/plans/`", arg)),
+            None => error(format!(
+                "No saved plan matching \"{}\" under `.agents/plans/`",
+                arg
+            )),
         }
     } else {
         SlashResponse::ForwardToAgent {
@@ -772,7 +778,9 @@ fn cmd_temperature_status(config: &MintConfig) -> SlashResponse {
             || model_lower.contains("reasoner")
             || model_lower.contains("r1");
         if is_reasoning {
-            format!("Auto `{resolved:.2}` (smart default for DeepSeek / Reasoning models to prevent loops)")
+            format!(
+                "Auto `{resolved:.2}` (smart default for DeepSeek / Reasoning models to prevent loops)"
+            )
         } else if model_lower.contains("codestral") {
             format!("Auto `{resolved:.2}` (smart default for pure code completion)")
         } else {
@@ -788,7 +796,9 @@ fn cmd_temperature_status(config: &MintConfig) -> SlashResponse {
     );
 
     if config.model_temperatures.is_empty() {
-        md.push_str("*No custom per-model temperatures configured. All models use smart defaults.*\n\n");
+        md.push_str(
+            "*No custom per-model temperatures configured. All models use smart defaults.*\n\n",
+        );
     } else {
         md.push_str("#### Configured Per-Model Overrides\n\n");
         md.push_str("| Model | Temperature |\n| :--- | :--- |\n");
@@ -806,7 +816,7 @@ fn cmd_temperature_status(config: &MintConfig) -> SlashResponse {
          - `/temperature <0.0-2.0>` — set temperature for active model\n\
          - `/temperature <model> <0.0-2.0>` — set temperature for specific model\n\
          - `/temperature default` — reset active model to smart default\n\
-         - `/temperature <model> default` — reset specific model"
+         - `/temperature <model> default` — reset specific model",
     );
 
     message(md)
@@ -818,7 +828,8 @@ fn cmd_temperature(rest: &str, config: &mut MintConfig) -> SlashResponse {
         let active_provider = config.ai_provider.clone();
         let active_model = config.active_model().to_string();
         let active_resolved = config.resolved_temperature();
-        let is_custom = config.model_temperatures.contains_key(&active_model) || config.temperature.is_some();
+        let is_custom =
+            config.model_temperatures.contains_key(&active_model) || config.temperature.is_some();
         let current_tag = if is_custom {
             format!("Custom: {active_resolved:.2}")
         } else {
@@ -838,7 +849,13 @@ fn cmd_temperature(rest: &str, config: &mut MintConfig) -> SlashResponse {
             providers.insert(0, active_provider.clone());
         }
         let standard_providers = [
-            "anthropic", "openai", "gemini", "deepseek", "groq", "openrouter", "ollama",
+            "anthropic",
+            "openai",
+            "gemini",
+            "deepseek",
+            "groq",
+            "openrouter",
+            "ollama",
         ];
         for sp in standard_providers {
             if !providers.contains(&sp.to_string()) {
@@ -878,7 +895,9 @@ fn cmd_temperature(rest: &str, config: &mut MintConfig) -> SlashResponse {
             config.temperature = None;
             let resolved = config.resolved_temperature();
             return SlashResponse::Applied {
-                markdown: format!("🌡️ Temperature for **{active_model}** reset to **Auto** (smart default `{resolved:.2}`)."),
+                markdown: format!(
+                    "🌡️ Temperature for **{active_model}** reset to **Auto** (smart default `{resolved:.2}`)."
+                ),
                 effects: vec![SlashEffect::ConfigChanged],
             };
         }
@@ -898,12 +917,7 @@ fn cmd_temperature(rest: &str, config: &mut MintConfig) -> SlashResponse {
         // Check if arg is provider/model syntax (e.g. "deepseek/deepseek-chat")
         if let Some((p, m)) = arg.split_once('/') {
             if !p.is_empty() && !m.is_empty() {
-                return temperature_presets_choice(
-                    format!("/temperature {p} {m}"),
-                    p,
-                    m,
-                    config,
-                );
+                return temperature_presets_choice(format!("/temperature {p} {m}"), p, m, config);
             }
         }
 
@@ -950,7 +964,9 @@ fn cmd_temperature(rest: &str, config: &mut MintConfig) -> SlashResponse {
             config.set_model_temperature(t0, None);
             let resolved = config.resolved_temperature_for_model(&config.ai_provider, t0);
             return SlashResponse::Applied {
-                markdown: format!("🌡️ Temperature for **{t0}** reset to **Auto** (smart default `{resolved:.2}`)."),
+                markdown: format!(
+                    "🌡️ Temperature for **{t0}** reset to **Auto** (smart default `{resolved:.2}`)."
+                ),
                 effects: vec![SlashEffect::ConfigChanged],
             };
         }
@@ -969,12 +985,7 @@ fn cmd_temperature(rest: &str, config: &mut MintConfig) -> SlashResponse {
         }
 
         // t0 is provider, t1 is model: e.g. `/temperature deepseek deepseek-chat`
-        return temperature_presets_choice(
-            format!("/temperature {t0} {t1}"),
-            t0,
-            t1,
-            config,
-        );
+        return temperature_presets_choice(format!("/temperature {t0} {t1}"), t0, t1, config);
     }
 
     // tokens.len() >= 3: e.g. `/temperature deepseek deepseek-chat 0.65` or `/temperature openrouter anthropic/claude-3.7-sonnet 0.2`
@@ -989,7 +1000,9 @@ fn cmd_temperature(rest: &str, config: &mut MintConfig) -> SlashResponse {
         config.set_model_temperature(&model, None);
         let resolved = config.resolved_temperature_for_model(provider, &model);
         return SlashResponse::Applied {
-            markdown: format!("🌡️ Temperature for **{model}** reset to **Auto** (smart default `{resolved:.2}`)."),
+            markdown: format!(
+                "🌡️ Temperature for **{model}** reset to **Auto** (smart default `{resolved:.2}`)."
+            ),
             effects: vec![SlashEffect::ConfigChanged],
         };
     }
@@ -1113,7 +1126,10 @@ async fn cmd_image_provider_async(rest: &str, config: &mut MintConfig) -> SlashR
         if !options.is_empty() {
             return SlashResponse::NeedsChoice {
                 command: format!("/image-provider {provider}"),
-                title: format!("Select {} image model", image_models::image_provider_display_name(provider)),
+                title: format!(
+                    "Select {} image model",
+                    image_models::image_provider_display_name(provider)
+                ),
                 options: options
                     .into_iter()
                     .map(|m| SlashChoice {
@@ -1127,7 +1143,11 @@ async fn cmd_image_provider_async(rest: &str, config: &mut MintConfig) -> SlashR
 
     image_models::set_active_image_provider_model(config, provider, model);
     let active_model = image_models::active_image_model_for_provider(config, provider);
-    let display = format!("{} • {}", image_models::image_provider_display_name(provider), active_model);
+    let display = format!(
+        "{} • {}",
+        image_models::image_provider_display_name(provider),
+        active_model
+    );
 
     SlashResponse::Applied {
         markdown: String::new(),
@@ -1143,8 +1163,16 @@ async fn cmd_image_models_async(rest: &str, config: &mut MintConfig) -> SlashRes
 
     let trimmed = rest.trim();
     let known_providers = [
-        "nanobanana", "gemini", "google", "dalle", "openai", "stability", "ideogram", "replicate",
-        "bfl", "flux",
+        "nanobanana",
+        "gemini",
+        "google",
+        "dalle",
+        "openai",
+        "stability",
+        "ideogram",
+        "replicate",
+        "bfl",
+        "flux",
     ];
 
     let (provider, model) = if trimmed.is_empty() {
@@ -2335,7 +2363,9 @@ mod tests {
     fn code_forwards_in_agent_mode() {
         let mut cfg = MintConfig::default();
         match execute(&req("/code fix the parser"), &mut cfg) {
-            SlashResponse::ForwardToAgent { prompt, agent_mode, .. } => {
+            SlashResponse::ForwardToAgent {
+                prompt, agent_mode, ..
+            } => {
                 assert_eq!(prompt, "fix the parser");
                 assert!(agent_mode);
             }
@@ -2393,12 +2423,19 @@ mod tests {
             other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
         }
         match execute(&req("/plan refactor database"), &mut cfg) {
-            SlashResponse::ForwardToAgent { prompt, agent_mode, plan_mode } => {
+            SlashResponse::ForwardToAgent {
+                prompt,
+                agent_mode,
+                plan_mode,
+            } => {
                 assert_eq!(prompt, "refactor database");
                 assert!(agent_mode);
                 assert!(plan_mode);
             }
-            other => panic!("expected ForwardToAgent, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected ForwardToAgent, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
     }
 
@@ -2412,31 +2449,46 @@ mod tests {
 
         // 1. Bare /temperature returns NeedsChoice with provider & active model options
         match execute(&req("/temperature"), &mut cfg) {
-            SlashResponse::NeedsChoice { command, options, .. } => {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
                 assert_eq!(command, "/temperature");
                 assert!(options.iter().any(|o| o.label.contains("deepseek-chat")));
                 assert!(options.iter().any(|o| o.value == "deepseek"));
             }
-            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
 
         // 2. /temperature deepseek returns NeedsChoice for models
         match execute(&req("/temperature deepseek"), &mut cfg) {
-            SlashResponse::NeedsChoice { command, options, .. } => {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
                 assert_eq!(command, "/temperature deepseek");
                 assert!(options.iter().any(|o| o.value == "deepseek-chat"));
             }
-            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
 
         // 3. /temperature deepseek deepseek-chat returns NeedsChoice for presets
         match execute(&req("/temperature deepseek deepseek-chat"), &mut cfg) {
-            SlashResponse::NeedsChoice { command, options, .. } => {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
                 assert_eq!(command, "/temperature deepseek deepseek-chat");
                 assert!(options.iter().any(|o| o.value == "0.6"));
                 assert!(options.iter().any(|o| o.value == "default"));
             }
-            other => panic!("expected NeedsChoice, got {:?}", serde_json::to_value(other)),
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
         }
 
         // 4. Set explicit temperature via full path /temperature <provider> <model> <temp>

@@ -11,7 +11,8 @@ pub(super) fn action_fingerprint(decision: &AgentDecision) -> String {
             let end = input.end_line.unwrap_or_else(|| start.saturating_add(239));
             format!("read_file:{}:{}:{}", input.path.trim(), start, end)
         }
-        "search_code" | "semantic_search" | "web_search" | "knowledge_search" | "memory_recall" | "find_definition" | "find_references" => {
+        "search_code" | "semantic_search" | "web_search" | "knowledge_search" | "memory_recall"
+        | "find_definition" | "find_references" => {
             format!(
                 "{}:{}:{}:{}",
                 decision.action,

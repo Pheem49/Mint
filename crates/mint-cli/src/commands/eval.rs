@@ -1,23 +1,26 @@
-use std::path::PathBuf;
-use std::time::Instant;
 use anyhow::{Context, Result};
 use mint_core::MintConfig;
-use mint_core::eval::{
-    evaluate_task_result, aggregate_benchmark_report, load_suite_from_file,
-};
+use mint_core::eval::{aggregate_benchmark_report, evaluate_task_result, load_suite_from_file};
+use std::path::PathBuf;
+use std::time::Instant;
 
 pub async fn handle_eval(suite_path: PathBuf, limit: usize, config: &MintConfig) -> Result<()> {
     println!("\x1b[1;36m┌─ Mint Benchmark Evaluation Harness ──────────────────────\x1b[0m");
     if !suite_path.exists() {
-        println!("│ \x1b[31mBenchmark suite file not found: {}\x1b[0m", suite_path.display());
+        println!(
+            "│ \x1b[31mBenchmark suite file not found: {}\x1b[0m",
+            suite_path.display()
+        );
         println!("\x1b[1;36m└─────────────────────────────────────────────────────────\x1b[0m");
         anyhow::bail!("Suite file not found: {}", suite_path.display());
     }
 
-    let suite = load_suite_from_file(&suite_path)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let suite = load_suite_from_file(&suite_path).map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    println!("│ Suite:       \x1b[1m{}\x1b[0m (v{})", suite.name, suite.version);
+    println!(
+        "│ Suite:       \x1b[1m{}\x1b[0m (v{})",
+        suite.name, suite.version
+    );
     println!("│ Total Tasks: {}", suite.tasks.len());
     println!("\x1b[1;36m├─────────────────────────────────────────────────────────\x1b[0m");
 
@@ -27,7 +30,13 @@ pub async fn handle_eval(suite_path: PathBuf, limit: usize, config: &MintConfig)
     let run_count = tasks_to_run.len();
 
     for (idx, task) in tasks_to_run.into_iter().enumerate() {
-        println!("│ [{}/{}] Task: \x1b[1;33m{}\x1b[0m ({})", idx + 1, run_count, task.title, task.id);
+        println!(
+            "│ [{}/{}] Task: \x1b[1;33m{}\x1b[0m ({})",
+            idx + 1,
+            run_count,
+            task.title,
+            task.id
+        );
         let start = Instant::now();
 
         // 1. Setup commands
@@ -55,7 +64,7 @@ pub async fn handle_eval(suite_path: PathBuf, limit: usize, config: &MintConfig)
                 .current_dir(&cwd)
                 .status();
             match status {
-                Ok(s) if s.success() => {},
+                Ok(s) if s.success() => {}
                 _ => {
                     test_passed = false;
                 }
@@ -96,19 +105,17 @@ pub async fn handle_eval(suite_path: PathBuf, limit: usize, config: &MintConfig)
                     None,
                 )
             }
-            Err(e) => {
-                evaluate_task_result(
-                    &task,
-                    0,
-                    0,
-                    &[],
-                    duration,
-                    0,
-                    false,
-                    false,
-                    Some(e.to_string()),
-                )
-            }
+            Err(e) => evaluate_task_result(
+                &task,
+                0,
+                0,
+                &[],
+                duration,
+                0,
+                false,
+                false,
+                Some(e.to_string()),
+            ),
         };
 
         let status_mark = if eval_res.passed {
@@ -126,8 +133,15 @@ pub async fn handle_eval(suite_path: PathBuf, limit: usize, config: &MintConfig)
     let report = aggregate_benchmark_report(&suite.name, results);
     println!("\x1b[1;36m├─ Final Evaluation Report ───────────────────────────────\x1b[0m");
     println!("│ Suite:            {}", report.suite_name);
-    println!("│ Tasks Completed:  {}/{}", report.passed_tasks, report.total_tasks);
-    println!("│ Success Rate:     \x1b[1;{}m{:.1}%\x1b[0m", if report.success_rate >= 80.0 { 32 } else { 33 }, report.success_rate);
+    println!(
+        "│ Tasks Completed:  {}/{}",
+        report.passed_tasks, report.total_tasks
+    );
+    println!(
+        "│ Success Rate:     \x1b[1;{}m{:.1}%\x1b[0m",
+        if report.success_rate >= 80.0 { 32 } else { 33 },
+        report.success_rate
+    );
     println!("│ Avg Duration:     {:.1}s", report.avg_duration_secs);
     println!("│ Avg Tokens:       {}", report.avg_tokens);
     println!("│ Avg Tool Calls:   {:.1}", report.avg_tool_calls);

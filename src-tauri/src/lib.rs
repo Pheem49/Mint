@@ -205,7 +205,9 @@ async fn fetch_provider_models(
         Ok(dynamic)
     } else {
         // Fallback to static presets so the UI is never empty.
-        Ok(mint_core::slash::models::model_options_for_provider(&config, &provider))
+        Ok(mint_core::slash::models::model_options_for_provider(
+            &config, &provider,
+        ))
     }
 }
 
@@ -230,11 +232,8 @@ async fn fetch_image_provider_models(
     } else {
         api_key
     };
-    let dynamic = mint_core::media::image_model_fetcher::fetch_image_provider_models(
-        &provider,
-        &key,
-    )
-    .await;
+    let dynamic =
+        mint_core::media::image_model_fetcher::fetch_image_provider_models(&provider, &key).await;
 
     if !dynamic.is_empty() {
         Ok(dynamic)
@@ -260,11 +259,8 @@ async fn fetch_video_provider_models(
     } else {
         api_key
     };
-    let dynamic = mint_core::media::video_model_fetcher::fetch_video_provider_models(
-        &provider,
-        &key,
-    )
-    .await;
+    let dynamic =
+        mint_core::media::video_model_fetcher::fetch_video_provider_models(&provider, &key).await;
 
     if !dynamic.is_empty() {
         Ok(dynamic)
@@ -285,8 +281,7 @@ async fn fetch_gemini_live_models(api_key: String) -> Result<Vec<String>, String
     } else {
         api_key
     };
-    let dynamic =
-        mint_core::slash::model_fetcher::fetch_gemini_live_models(&key).await;
+    let dynamic = mint_core::slash::model_fetcher::fetch_gemini_live_models(&key).await;
 
     if !dynamic.is_empty() {
         Ok(dynamic)
@@ -1617,7 +1612,8 @@ fn undo_git_checkpoint(workspace_path: Option<String>) -> Result<String, String>
 fn read_workspace_file(path: String, workspace_path: Option<String>) -> Result<String, String> {
     let ws_path = workspace_path.as_deref().map(std::path::Path::new);
     let resolved = mint_core::files::resolve_readable_path(&path, ws_path);
-    std::fs::read_to_string(&resolved).map_err(|e| format!("failed to read file '{}': {e}", resolved.display()))
+    std::fs::read_to_string(&resolved)
+        .map_err(|e| format!("failed to read file '{}': {e}", resolved.display()))
 }
 
 #[tauri::command]

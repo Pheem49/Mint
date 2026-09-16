@@ -196,7 +196,10 @@ pub fn detect_project_deep(root: &Path) -> ProjectArchitectureSummary {
     let framework_str = if frameworks.is_empty() {
         String::new()
     } else {
-        format!(" (using {})", frameworks.iter().cloned().collect::<Vec<_>>().join(", "))
+        format!(
+            " (using {})",
+            frameworks.iter().cloned().collect::<Vec<_>>().join(", ")
+        )
     };
 
     let test_info = if test_runners.is_empty() {
@@ -219,9 +222,7 @@ pub fn detect_project_deep(root: &Path) -> ProjectArchitectureSummary {
         String::new()
     };
 
-    let summary_sentence = format!(
-        "{lang_str} project{framework_str}{workspace_info}{test_info}."
-    );
+    let summary_sentence = format!("{lang_str} project{framework_str}{workspace_info}{test_info}.");
 
     ProjectArchitectureSummary {
         root: root.to_path_buf(),
@@ -322,7 +323,11 @@ mod tests {
         .unwrap();
 
         let summary = detect_project_deep(dir.path());
-        assert!(summary.languages.contains(&"JavaScript/TypeScript".to_string()));
+        assert!(
+            summary
+                .languages
+                .contains(&"JavaScript/TypeScript".to_string())
+        );
         assert!(summary.frameworks.contains(&"React".to_string()));
         assert!(summary.frameworks.contains(&"Zustand".to_string()));
         assert!(summary.frameworks.contains(&"Vite".to_string()));

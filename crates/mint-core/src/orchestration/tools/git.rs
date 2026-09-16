@@ -42,7 +42,9 @@ pub(in crate::orchestration) async fn execute(
                     &cp.commit_hash[..7.min(cp.commit_hash.len())]
                 )),
                 Ok(None) => Ok("Not a git repository, checkpoint skipped.".into()),
-                Err(e) => Err(OrchestrationError::Agent(format!("Failed to create checkpoint: {e}"))),
+                Err(e) => Err(OrchestrationError::Agent(format!(
+                    "Failed to create checkpoint: {e}"
+                ))),
             }
         }
         "git_rollback" => {
@@ -50,8 +52,7 @@ pub(in crate::orchestration) async fn execute(
                 crate::git::rollback_to_step(root, _chat_id, step)
                     .map_err(OrchestrationError::Agent)
             } else {
-                crate::git::rollback_task_changes(root, _chat_id)
-                    .map_err(OrchestrationError::Agent)
+                crate::git::rollback_task_changes(root, _chat_id).map_err(OrchestrationError::Agent)
             }
         }
         "git_restore_file" => {
@@ -61,8 +62,7 @@ pub(in crate::orchestration) async fn execute(
             } else {
                 None
             };
-            crate::git::restore_file(root, path, git_ref)
-                .map_err(OrchestrationError::Agent)
+            crate::git::restore_file(root, path, git_ref).map_err(OrchestrationError::Agent)
         }
         "git_commit" => {
             let msg = if !input.summary.trim().is_empty() {
@@ -71,8 +71,7 @@ pub(in crate::orchestration) async fn execute(
                 crate::git::generate_commit_message(root, None)
                     .unwrap_or_else(|_| "feat: update project files".to_string())
             };
-            crate::git::commit_task_changes(root, &msg)
-                .map_err(OrchestrationError::Agent)
+            crate::git::commit_task_changes(root, &msg).map_err(OrchestrationError::Agent)
         }
         "git_create_branch" => {
             let branch = if !input.query.trim().is_empty() {
@@ -82,8 +81,7 @@ pub(in crate::orchestration) async fn execute(
             } else {
                 required(&input.query, "query")?
             };
-            crate::git::create_task_branch(root, branch)
-                .map_err(OrchestrationError::Agent)
+            crate::git::create_task_branch(root, branch).map_err(OrchestrationError::Agent)
         }
         _ => unreachable!(
             "execute_tool routed an unhandled action into tools::git::execute: {action}"

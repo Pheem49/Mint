@@ -404,27 +404,42 @@ fn all_tools() -> Vec<ToolSpec> {
         tool(
             "git_checkpoint",
             "Create a manual checkpoint savepoint of the workspace state.",
-            schema(json!({ "summary": { "type": "string", "description": "Optional description of the checkpoint" } }), &[]),
+            schema(
+                json!({ "summary": { "type": "string", "description": "Optional description of the checkpoint" } }),
+                &[],
+            ),
         ),
         tool(
             "git_rollback",
             "Roll back workspace changes to the pre-task checkpoint or a specific step number.",
-            schema(json!({ "step": { "type": "integer", "description": "Optional step number to roll back to" } }), &[]),
+            schema(
+                json!({ "step": { "type": "integer", "description": "Optional step number to roll back to" } }),
+                &[],
+            ),
         ),
         tool(
             "git_restore_file",
             "Restore a single file back to HEAD or a specified checkpoint commit.",
-            schema(json!({ "path": { "type": "string", "description": "File path to restore" }, "command": { "type": "string", "description": "Optional commit hash or ref to restore from (defaults to HEAD)" } }), &["path"]),
+            schema(
+                json!({ "path": { "type": "string", "description": "File path to restore" }, "command": { "type": "string", "description": "Optional commit hash or ref to restore from (defaults to HEAD)" } }),
+                &["path"],
+            ),
         ),
         tool(
             "git_commit",
             "Stage all tracked changes and commit them with a message (or auto-generate a conventional commit message if omitted).",
-            schema(json!({ "summary": { "type": "string", "description": "Commit message" } }), &[]),
+            schema(
+                json!({ "summary": { "type": "string", "description": "Commit message" } }),
+                &[],
+            ),
         ),
         tool(
             "git_create_branch",
             "Create and switch to a new task branch (e.g. feature/mint-add-oauth).",
-            schema(json!({ "query": { "type": "string", "description": "Branch name slug (e.g. add-oauth)" } }), &["query"]),
+            schema(
+                json!({ "query": { "type": "string", "description": "Branch name slug (e.g. add-oauth)" } }),
+                &["query"],
+            ),
         ),
         tool(
             "create_plan",
@@ -512,7 +527,10 @@ fn all_tools() -> Vec<ToolSpec> {
         tool(
             "search_docs",
             "Search local project documentation across docs/, architecture/, decisions/, api/, and troubleshooting/.",
-            schema(json!({ "query": { "type": "string", "description": "Search query" } }), &["query"]),
+            schema(
+                json!({ "query": { "type": "string", "description": "Search query" } }),
+                &["query"],
+            ),
         ),
         tool(
             "create_project_doc",
@@ -1080,4 +1098,3 @@ mod tests {
         }
     }
 }
-

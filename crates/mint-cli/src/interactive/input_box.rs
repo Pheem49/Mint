@@ -141,7 +141,13 @@ pub fn collect_mention_candidates(query: &str, current_dir: &Path) -> Vec<Mentio
         ("@memory", "Include long-term memory store"),
     ];
     for (label, desc) in builtins {
-        if label.strip_prefix('@').unwrap().to_lowercase().starts_with(&prefix) || prefix.is_empty() {
+        if label
+            .strip_prefix('@')
+            .unwrap()
+            .to_lowercase()
+            .starts_with(&prefix)
+            || prefix.is_empty()
+        {
             candidates.push(MentionCandidate {
                 label: label.to_string(),
                 description: desc.to_string(),
@@ -412,7 +418,10 @@ pub(crate) fn compose_input_box(
             None
         }
     } {
-        let query_part = mention_word.split_whitespace().next().unwrap_or(mention_word);
+        let query_part = mention_word
+            .split_whitespace()
+            .next()
+            .unwrap_or(mention_word);
         let matches = collect_mention_candidates(query_part, current_dir);
 
         if !matches.is_empty() {
@@ -1017,7 +1026,10 @@ pub fn read_line_interactive(
                             }
                         } {
                             let base_mention = tab_base_input.as_deref().unwrap_or(&mention_word);
-                            let query_part = base_mention.split_whitespace().next().unwrap_or(base_mention);
+                            let query_part = base_mention
+                                .split_whitespace()
+                                .next()
+                                .unwrap_or(base_mention);
                             let matches = collect_mention_candidates(query_part, current_dir);
 
                             if !matches.is_empty() {
@@ -1138,7 +1150,10 @@ pub fn read_line_interactive(
                             }
                         } {
                             let base_mention = tab_base_input.as_deref().unwrap_or(&mention_word);
-                            let query_part = base_mention.split_whitespace().next().unwrap_or(base_mention);
+                            let query_part = base_mention
+                                .split_whitespace()
+                                .next()
+                                .unwrap_or(base_mention);
                             let matches = collect_mention_candidates(query_part, current_dir);
 
                             if !matches.is_empty() {
@@ -1302,7 +1317,10 @@ pub fn read_line_interactive(
                             }
                         } {
                             let base_mention = tab_base_input.as_deref().unwrap_or(&mention_word);
-                            let query_part = base_mention.split_whitespace().next().unwrap_or(base_mention);
+                            let query_part = base_mention
+                                .split_whitespace()
+                                .next()
+                                .unwrap_or(base_mention);
                             let matches = collect_mention_candidates(query_part, current_dir);
 
                             if !matches.is_empty() {
@@ -1665,10 +1683,26 @@ mod tests {
     fn mention_candidates_include_builtins() {
         let temp_dir = std::env::current_dir().unwrap();
         let candidates = collect_mention_candidates("@", &temp_dir);
-        assert!(candidates.iter().any(|c| c.label == "@workspace" && c.kind == MentionKind::Context));
-        assert!(candidates.iter().any(|c| c.label == "@file" && c.kind == MentionKind::Context));
-        assert!(candidates.iter().any(|c| c.label == "@docs" && c.kind == MentionKind::Context));
-        assert!(candidates.iter().any(|c| c.label == "@memory" && c.kind == MentionKind::Context));
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.label == "@workspace" && c.kind == MentionKind::Context)
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.label == "@file" && c.kind == MentionKind::Context)
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.label == "@docs" && c.kind == MentionKind::Context)
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.label == "@memory" && c.kind == MentionKind::Context)
+        );
     }
 
     #[test]
@@ -1683,18 +1717,28 @@ mod tests {
     fn mention_candidates_include_workspace_files() {
         let temp_dir = std::env::current_dir().unwrap();
         let candidates = collect_mention_candidates("@Cargo", &temp_dir);
-        assert!(candidates.iter().any(|c| c.label == "@Cargo.toml" && c.kind == MentionKind::File));
+        assert!(
+            candidates
+                .iter()
+                .any(|c| c.label == "@Cargo.toml" && c.kind == MentionKind::File)
+        );
     }
 
     #[test]
     fn mention_candidates_order_plugins_before_builtins() {
         let temp_dir = std::env::current_dir().unwrap();
         let candidates = collect_mention_candidates("@", &temp_dir);
-        let first_plugin_idx = candidates.iter().position(|c| c.kind == MentionKind::Plugin);
-        let first_context_idx = candidates.iter().position(|c| c.kind == MentionKind::Context);
+        let first_plugin_idx = candidates
+            .iter()
+            .position(|c| c.kind == MentionKind::Plugin);
+        let first_context_idx = candidates
+            .iter()
+            .position(|c| c.kind == MentionKind::Context);
         if let (Some(p_idx), Some(c_idx)) = (first_plugin_idx, first_context_idx) {
-            assert!(p_idx < c_idx, "Plugins should appear before Builtin Contexts");
+            assert!(
+                p_idx < c_idx,
+                "Plugins should appear before Builtin Contexts"
+            );
         }
     }
 }
-

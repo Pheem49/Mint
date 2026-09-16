@@ -39,10 +39,7 @@ pub const OPENROUTER_MODEL_PRESETS: &[&str] = &[
     "deepseek/deepseek-v4-pro",
 ];
 
-pub const DEEPSEEK_MODEL_PRESETS: &[&str] = &[
-    "deepseek-chat",
-    "deepseek-reasoner",
-];
+pub const DEEPSEEK_MODEL_PRESETS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
 
 pub const HUGGINGFACE_MODEL_PRESETS: &[&str] = &[
     "Qwen/Qwen3.6-27B",
@@ -125,19 +122,16 @@ pub fn model_options_for_provider(config: &MintConfig, provider: &str) -> Vec<St
 /// entered an API key.
 ///
 /// Results are cached for 1 hour inside [`super::model_fetcher`].
-pub async fn model_options_for_provider_async(
-    config: &MintConfig,
-    provider: &str,
-) -> Vec<String> {
+pub async fn model_options_for_provider_async(config: &MintConfig, provider: &str) -> Vec<String> {
     use super::model_fetcher;
 
     // Resolve the API key and optional base URL for this provider.
     let (api_key, base_url): (&str, Option<&str>) = match provider {
-        "gemini"       => (&config.api_key, None),
-        "anthropic"    => (&config.anthropic_api_key, None),
-        "openai"       => (&config.openai_api_key, None),
-        "openrouter"   => (&config.openrouter_api_key, None),
-        "deepseek"     => (&config.deepseek_api_key, None),
+        "gemini" => (&config.api_key, None),
+        "anthropic" => (&config.anthropic_api_key, None),
+        "openai" => (&config.openai_api_key, None),
+        "openrouter" => (&config.openrouter_api_key, None),
+        "deepseek" => (&config.deepseek_api_key, None),
         "local_openai" => ("", Some(config.local_api_base_url.as_str())),
         // Ollama and HuggingFace keep their existing sync paths.
         _ => return model_options_for_provider(config, provider),

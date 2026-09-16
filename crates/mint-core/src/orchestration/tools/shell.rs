@@ -77,7 +77,8 @@ pub(in crate::orchestration) async fn execute(
                 } else {
                     "npm test".to_string()
                 }
-            } else if root.join("pyproject.toml").exists() || root.join("requirements.txt").exists() {
+            } else if root.join("pyproject.toml").exists() || root.join("requirements.txt").exists()
+            {
                 if !input.filter.trim().is_empty() {
                     format!("pytest -k {}", input.filter.trim())
                 } else {
@@ -87,13 +88,18 @@ pub(in crate::orchestration) async fn execute(
                 "go test ./...".to_string()
             } else {
                 return Err(OrchestrationError::Agent(
-                    "No test runner auto-detected. Specify a command via the 'command' argument.".into(),
+                    "No test runner auto-detected. Specify a command via the 'command' argument."
+                        .into(),
                 ));
             };
 
             let out = run_shell(root, config, chat_id, &cmd).await?;
             let failed = shell_result_failed(&out);
-            let status_mark = if failed { "✗ [TEST FAILED]" } else { "✓ [TEST PASSED]" };
+            let status_mark = if failed {
+                "✗ [TEST FAILED]"
+            } else {
+                "✓ [TEST PASSED]"
+            };
             Ok(format!("{}\nCommand: {}\n\n{}", status_mark, cmd, out))
         }
         "run_typecheck" => {
@@ -119,7 +125,11 @@ pub(in crate::orchestration) async fn execute(
 
             let out = run_shell(root, config, chat_id, &cmd).await?;
             let failed = shell_result_failed(&out);
-            let status_mark = if failed { "✗ [TYPECHECK FAILED]" } else { "✓ [TYPECHECK PASSED]" };
+            let status_mark = if failed {
+                "✗ [TYPECHECK FAILED]"
+            } else {
+                "✓ [TYPECHECK PASSED]"
+            };
             Ok(format!("{}\nCommand: {}\n\n{}", status_mark, cmd, out))
         }
         "run_linter" => {
@@ -141,7 +151,11 @@ pub(in crate::orchestration) async fn execute(
 
             let out = run_shell(root, config, chat_id, &cmd).await?;
             let failed = shell_result_failed(&out);
-            let status_mark = if failed { "✗ [LINT FAILED]" } else { "✓ [LINT PASSED]" };
+            let status_mark = if failed {
+                "✗ [LINT FAILED]"
+            } else {
+                "✓ [LINT PASSED]"
+            };
             Ok(format!("{}\nCommand: {}\n\n{}", status_mark, cmd, out))
         }
         _ => unreachable!(

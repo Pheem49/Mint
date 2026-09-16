@@ -692,8 +692,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 }
             }
         }
-        (_, "/api/video-gen/providers")
-        | (_, "/api/video/providers") => {
+        (_, "/api/video-gen/providers") | (_, "/api/video/providers") => {
             let config = load_config().unwrap_or_default();
             let mut available: Vec<String> = Vec::new();
             if !config.api_key.trim().is_empty() {

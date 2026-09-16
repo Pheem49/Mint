@@ -463,12 +463,20 @@ fn does_not_create_empty_chat_session_until_first_message() {
 
     // 2. Only after saving the first message should the session be registered
     store
-        .add_interaction_for_chat(fresh_id, "Hello Mint!", "Hi there!", "gemini", "gemini-flash")
+        .add_interaction_for_chat(
+            fresh_id,
+            "Hello Mint!",
+            "Hi there!",
+            "gemini",
+            "gemini-flash",
+        )
         .unwrap();
 
     let updated_sessions = store.list_chat_sessions().unwrap();
     let created = updated_sessions.iter().find(|s| s.id == fresh_id);
-    assert!(created.is_some(), "Chat session must exist after first message");
+    assert!(
+        created.is_some(),
+        "Chat session must exist after first message"
+    );
     assert_eq!(created.unwrap().title, "Hello Mint!");
 }
-

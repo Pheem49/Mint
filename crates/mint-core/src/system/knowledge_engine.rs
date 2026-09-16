@@ -76,7 +76,11 @@ fn collect_doc_hits(
 
         if path.is_dir() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !name.starts_with('.') && name != "node_modules" && name != "target" && name != "build" {
+            if !name.starts_with('.')
+                && name != "node_modules"
+                && name != "target"
+                && name != "build"
+            {
                 collect_doc_hits(&path, root, query_terms, hits, visited, depth + 1);
             }
             continue;
@@ -194,9 +198,10 @@ pub fn create_project_doc(
         }
         "architecture" | "arch" => (root.join("docs").join("architecture"), format!("{slug}.md")),
         "api" => (root.join("docs").join("api"), format!("{slug}.md")),
-        "troubleshooting" | "bugs" | "runbook" => {
-            (root.join("docs").join("troubleshooting"), format!("{slug}.md"))
-        }
+        "troubleshooting" | "bugs" | "runbook" => (
+            root.join("docs").join("troubleshooting"),
+            format!("{slug}.md"),
+        ),
         _ => (root.join("docs"), format!("{slug}.md")),
     };
 
@@ -215,14 +220,17 @@ pub fn create_project_doc(
         ),
         "troubleshooting" => format!(
             "# Troubleshooting: {}\n\n## Symptoms / Problem Description\n{}\n\n## Root Cause\nAnalysis of why this issue occurs.\n\n## Resolution / Fix Steps\nStep-by-step fix guide.\n",
-            title,
-            content
+            title, content
         ),
         _ => format!("# {}\n\n{}\n", title, content),
     };
 
-    fs::write(&file_path, full_doc)
-        .map_err(|e| format!("Failed to write documentation file {}: {e}", file_path.display()))?;
+    fs::write(&file_path, full_doc).map_err(|e| {
+        format!(
+            "Failed to write documentation file {}: {e}",
+            file_path.display()
+        )
+    })?;
 
     Ok(file_path)
 }
@@ -233,7 +241,8 @@ mod tests {
 
     #[test]
     fn test_create_and_search_project_doc() {
-        let temp = std::env::temp_dir().join(format!("mint-knowledge-test-{}", uuid::Uuid::new_v4()));
+        let temp =
+            std::env::temp_dir().join(format!("mint-knowledge-test-{}", uuid::Uuid::new_v4()));
         let _ = fs::remove_dir_all(&temp);
         fs::create_dir_all(&temp).unwrap();
 

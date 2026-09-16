@@ -681,11 +681,25 @@ fn extract_think_tag(text: &str) -> (Option<String>, String) {
             let mut remaining = text[..start].to_string();
             remaining.push_str(&text[start + 7 + end + 8..]);
             let cleaned = remaining.trim().to_string();
-            (if thought.is_empty() { None } else { Some(thought) }, cleaned)
+            (
+                if thought.is_empty() {
+                    None
+                } else {
+                    Some(thought)
+                },
+                cleaned,
+            )
         } else {
             let thought = text[start + 7..].trim().to_string();
             let cleaned = text[..start].trim().to_string();
-            (if thought.is_empty() { None } else { Some(thought) }, cleaned)
+            (
+                if thought.is_empty() {
+                    None
+                } else {
+                    Some(thought)
+                },
+                cleaned,
+            )
         }
     } else {
         (None, text.to_string())
@@ -706,7 +720,10 @@ fn parse_gemini_reply(model: String, response: &Value) -> Result<ProviderReply, 
     let mut thought_parts: Vec<&str> = Vec::new();
     let mut tool_calls = Vec::new();
     for (index, part) in parts.iter().enumerate() {
-        let is_thought = part.get("thought").and_then(Value::as_bool).unwrap_or(false);
+        let is_thought = part
+            .get("thought")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         if let Some(t) = part["text"].as_str() {
             if is_thought {
                 thought_parts.push(t);
@@ -2020,7 +2037,9 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
 /// Resolves the effective sampling temperature for this request, prioritizing
 /// `request.temperature` if present, otherwise falling back to `config.resolved_temperature()`.
 pub(crate) fn effective_temperature(config: &MintConfig, request: &ChatRequest) -> f64 {
-    request.temperature.unwrap_or_else(|| config.resolved_temperature())
+    request
+        .temperature
+        .unwrap_or_else(|| config.resolved_temperature())
 }
 
 fn openai_chat_payload(
@@ -3186,11 +3205,13 @@ mod tests {
             openai_model: "gpt-4o".into(),
             ..MintConfig::default()
         };
-        let openai_payload = openai_chat_payload(&openai_config, "gpt-4o", &request, false).unwrap();
+        let openai_payload =
+            openai_chat_payload(&openai_config, "gpt-4o", &request, false).unwrap();
         assert_eq!(openai_payload["temperature"], 0.2);
 
         // Reasoning models (o1, o3) omit temperature parameter
-        let o1_payload = openai_chat_payload(&openai_config, "o1-preview", &request, false).unwrap();
+        let o1_payload =
+            openai_chat_payload(&openai_config, "o1-preview", &request, false).unwrap();
         assert!(o1_payload.get("temperature").is_none());
 
         let o3_payload = openai_chat_payload(&openai_config, "o3-mini", &request, false).unwrap();
@@ -3199,7 +3220,8 @@ mod tests {
         // Explicit request temperature override
         let mut override_req = request.clone();
         override_req.temperature = Some(0.75);
-        let override_payload = openai_chat_payload(&ds_config, "deepseek-chat", &override_req, false).unwrap();
+        let override_payload =
+            openai_chat_payload(&ds_config, "deepseek-chat", &override_req, false).unwrap();
         assert_eq!(override_payload["temperature"], 0.75);
     }
 
@@ -3337,4 +3359,3 @@ mod tests {
         );
     }
 }
-

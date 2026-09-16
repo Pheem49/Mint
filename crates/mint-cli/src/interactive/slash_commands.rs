@@ -189,10 +189,7 @@ fn print_rendered_markdown(text: &str) {
     }
 }
 
-async fn execute_core_slash(
-    session: &mut InteractiveSession,
-    query: &str,
-) -> Option<SlashResult> {
+async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Option<SlashResult> {
     use mint_core::slash::{SlashEffect, SlashRequest, SlashResponse};
 
     let trimmed = query.trim();
@@ -301,7 +298,9 @@ async fn execute_core_slash(
             }
             Some(SlashResult::Handled)
         }
-        SlashResponse::ForwardToAgent { prompt, plan_mode, .. } => {
+        SlashResponse::ForwardToAgent {
+            prompt, plan_mode, ..
+        } => {
             if plan_mode {
                 session.plan_mode = true;
             }
@@ -349,7 +348,8 @@ pub async fn handle_slash_command(
             | "/notebook"
             | "/exit"
             | "/quit"
-    ) || (matches!(cmd, "/mcp" | "/cron" | "/subagent") && rest.is_empty());
+    ) || (matches!(cmd, "/mcp" | "/cron" | "/subagent")
+        && rest.is_empty());
 
     if !is_cli_only_or_wizard {
         if let Some(res) = execute_core_slash(session, trimmed).await {
@@ -1229,10 +1229,11 @@ pub async fn handle_slash_command(
 
                 match mint_core::save_config(&session.config) {
                     Ok(()) => {
-                        let active = mint_core::media::image_models::active_image_model_for_provider(
-                            &session.config,
-                            &provider,
-                        );
+                        let active =
+                            mint_core::media::image_models::active_image_model_for_provider(
+                                &session.config,
+                                &provider,
+                            );
                         println!(
                             "{DIM}Switched default image provider to: {} • {}{RESET}\n",
                             mint_core::media::image_models::image_provider_display_name(&provider),
@@ -1244,8 +1245,6 @@ pub async fn handle_slash_command(
             }
             Some(SlashResult::Handled)
         }
-
-
 
         "/video-provider" => {
             let mut available = Vec::new();
@@ -3241,7 +3240,8 @@ fn mcp_add_custom_flow(session: &mut InteractiveSession) {
         println!("{WARN}Cancelled (no name).{RESET}\n");
         return;
     }
-    let command = crate::onboard::prompt_input("Command or URL (e.g. npx or https://...)", None).unwrap_or_default();
+    let command = crate::onboard::prompt_input("Command or URL (e.g. npx or https://...)", None)
+        .unwrap_or_default();
     let command = command.trim().to_string();
     if command.is_empty() {
         println!("{WARN}Cancelled (no command).{RESET}\n");
@@ -3249,11 +3249,9 @@ fn mcp_add_custom_flow(session: &mut InteractiveSession) {
     }
 
     if command.starts_with("http://") || command.starts_with("https://") {
-        let auth = crate::onboard::prompt_input(
-            "Auth header or bearer token (blank for none)",
-            None,
-        )
-        .unwrap_or_default();
+        let auth =
+            crate::onboard::prompt_input("Auth header or bearer token (blank for none)", None)
+                .unwrap_or_default();
         let headers = if auth.trim().is_empty() {
             None
         } else {

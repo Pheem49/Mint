@@ -50,7 +50,10 @@ pub fn prompt_interactive_select(
 
     let render = |terminal: &mut ratatui::Terminal<_>, selected: usize| {
         let nav_hint = if options.len() <= 9 {
-            format!("(Press 1-{}, ↑/↓ to navigate, Enter to select, Esc to cancel)", options.len())
+            format!(
+                "(Press 1-{}, ↑/↓ to navigate, Enter to select, Esc to cancel)",
+                options.len()
+            )
         } else {
             "(Use ↑/↓ to navigate, Enter to select, Esc to cancel)".to_string()
         };

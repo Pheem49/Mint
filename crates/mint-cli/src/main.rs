@@ -108,7 +108,8 @@ pub(crate) fn apply_temporary_model_override(config: &mut MintConfig, model_str:
     } else if trimmed.starts_with("claude") {
         config.ai_provider = "anthropic".to_string();
         config.anthropic_model = trimmed.to_string();
-    } else if trimmed.starts_with("gpt-") || trimmed.starts_with("o1") || trimmed.starts_with("o3") {
+    } else if trimmed.starts_with("gpt-") || trimmed.starts_with("o1") || trimmed.starts_with("o3")
+    {
         config.ai_provider = "openai".to_string();
         config.openai_model = trimmed.to_string();
     } else if trimmed.starts_with("gemini") {
@@ -145,9 +146,7 @@ pub(crate) async fn run_oneshot_agent_task(
     plan_mode: bool,
     image_path: Option<&Path>,
 ) -> Result<()> {
-    let image_data_uri = image_path
-        .map(image::load_image_as_data_uri)
-        .transpose()?;
+    let image_data_uri = image_path.map(image::load_image_as_data_uri).transpose()?;
 
     let pinned_mcp_server = mint_core::list_mcp_servers().ok().and_then(|servers| {
         task.split_whitespace()
@@ -223,15 +222,17 @@ pub(crate) fn print_mcp_servers(
         } else {
             (BLUE, String::new())
         };
-        println!(
-            "  {dot}●{RESET} {name} {DIM}{desc}{RESET}{suffix}",
-        );
+        println!("  {dot}●{RESET} {name} {DIM}{desc}{RESET}{suffix}",);
     }
     println!();
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "mint", version, about = "Mint native CLI — AI agent for your terminal and workspace")]
+#[command(
+    name = "mint",
+    version,
+    about = "Mint native CLI — AI agent for your terminal and workspace"
+)]
 pub struct Cli {
     /// Workspace directory to run in (mirrors `git -C`)
     #[arg(short = 'C', long, global = true)]
@@ -444,9 +445,7 @@ mod cli_tests {
     fn parse_subcommand_run() {
         let cli = Cli::try_parse_from(["mint", "run", "--approve", "cargo", "test"]).unwrap();
         if let Some(Command::Run {
-            approve,
-            command,
-            ..
+            approve, command, ..
         }) = cli.command
         {
             assert!(approve);

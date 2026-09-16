@@ -24,7 +24,10 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, mut socket: TcpS
             if value.trim().is_empty() {
                 if let Ok(cfg) = load_config() {
                     if key == "veoModel" {
-                        value = crate::media::video_models::active_video_model_for_provider(&cfg, "veo").to_string();
+                        value = crate::media::video_models::active_video_model_for_provider(
+                            &cfg, "veo",
+                        )
+                        .to_string();
                     } else if key == "videoGenProvider" {
                         value = cfg
                             .extra

@@ -345,7 +345,9 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             struct UndoReq {
                 workspace_path: Option<String>,
             }
-            let req = serde_json::from_str::<UndoReq>(body).unwrap_or(UndoReq { workspace_path: None });
+            let req = serde_json::from_str::<UndoReq>(body).unwrap_or(UndoReq {
+                workspace_path: None,
+            });
             let root = req
                 .workspace_path
                 .as_deref()
@@ -446,8 +448,7 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 .map(|v| percent_decode(v))
                 .unwrap_or_default();
 
-            let dynamic =
-                crate::slash::model_fetcher::fetch_gemini_live_models(&api_key).await;
+            let dynamic = crate::slash::model_fetcher::fetch_gemini_live_models(&api_key).await;
 
             let models = if !dynamic.is_empty() {
                 dynamic
@@ -495,19 +496,21 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 }
             }
 
-            let dynamic = crate::media::image_model_fetcher::fetch_image_provider_models(
-                &provider,
-                &api_key,
-            )
-            .await;
+            let dynamic =
+                crate::media::image_model_fetcher::fetch_image_provider_models(&provider, &api_key)
+                    .await;
 
             let models = if !dynamic.is_empty() {
                 dynamic
             } else {
                 match cfg_opt {
-                    Some(ref cfg) => crate::media::image_models::image_model_options_for_provider(cfg, &provider),
+                    Some(ref cfg) => {
+                        crate::media::image_models::image_model_options_for_provider(cfg, &provider)
+                    }
                     None => match load_config() {
-                        Ok(cfg) => crate::media::image_models::image_model_options_for_provider(&cfg, &provider),
+                        Ok(cfg) => crate::media::image_models::image_model_options_for_provider(
+                            &cfg, &provider,
+                        ),
                         Err(_) => Vec::new(),
                     },
                 }
@@ -544,19 +547,21 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 }
             }
 
-            let dynamic = crate::media::video_model_fetcher::fetch_video_provider_models(
-                &provider,
-                &api_key,
-            )
-            .await;
+            let dynamic =
+                crate::media::video_model_fetcher::fetch_video_provider_models(&provider, &api_key)
+                    .await;
 
             let models = if !dynamic.is_empty() {
                 dynamic
             } else {
                 match cfg_opt {
-                    Some(ref cfg) => crate::media::video_models::video_model_options_for_provider(cfg, &provider),
+                    Some(ref cfg) => {
+                        crate::media::video_models::video_model_options_for_provider(cfg, &provider)
+                    }
                     None => match load_config() {
-                        Ok(cfg) => crate::media::video_models::video_model_options_for_provider(&cfg, &provider),
+                        Ok(cfg) => crate::media::video_models::video_model_options_for_provider(
+                            &cfg, &provider,
+                        ),
                         Err(_) => Vec::new(),
                     },
                 }

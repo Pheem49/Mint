@@ -232,7 +232,10 @@ pub(super) async fn run_shell(
 pub(super) fn workspace_context(root: &Path) -> String {
     let deep = crate::system::project_detector::detect_project_deep(root);
     let mut context = String::from("Automatic workspace context:\n");
-    context.push_str(&format!("Project Architecture: {}\n", deep.summary_sentence));
+    context.push_str(&format!(
+        "Project Architecture: {}\n",
+        deep.summary_sentence
+    ));
     context.push_str(&format!(
         "Git status:\n{}\n",
         command_output(root, "git", &["status", "--short"])
@@ -244,7 +247,11 @@ pub(super) fn workspace_context(root: &Path) -> String {
     let plan_path = root.join(".agents").join("plans").join("active_plan.json");
     if let Ok(content) = std::fs::read_to_string(plan_path) {
         if let Ok(plan) = serde_json::from_str::<ActivePlan>(&content) {
-            let done = plan.tasks.iter().filter(|t| t.status == "completed").count();
+            let done = plan
+                .tasks
+                .iter()
+                .filter(|t| t.status == "completed")
+                .count();
             context.push_str(&format!(
                 "Active Plan Checklist: \"{}\" ({}/{} steps completed)\n",
                 plan.objective,

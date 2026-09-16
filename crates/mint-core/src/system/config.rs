@@ -680,11 +680,13 @@ impl MintConfig {
     pub fn set_model_temperature(&mut self, model: &str, temp: Option<f64>) {
         let model_key = model.trim().to_string();
         if let Some(val) = temp {
-            self.model_temperatures.insert(model_key, val.clamp(0.0, 2.0));
+            self.model_temperatures
+                .insert(model_key, val.clamp(0.0, 2.0));
         } else {
             self.model_temperatures.remove(&model_key);
             let lower = model_key.to_ascii_lowercase();
-            self.model_temperatures.retain(|k, _| k.to_ascii_lowercase() != lower);
+            self.model_temperatures
+                .retain(|k, _| k.to_ascii_lowercase() != lower);
         }
     }
 
@@ -870,7 +872,9 @@ pub fn config_path() -> Result<PathBuf, ConfigError> {
         return Ok(PathBuf::from(override_path));
     }
     if is_test_environment() {
-        let tmp = std::env::temp_dir().join("mint-test").join("mint-config.json");
+        let tmp = std::env::temp_dir()
+            .join("mint-test")
+            .join("mint-config.json");
         return Ok(tmp);
     }
     dirs::config_dir()

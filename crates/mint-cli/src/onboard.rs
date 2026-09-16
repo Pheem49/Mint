@@ -16,21 +16,29 @@ struct OnboardService {
 
 use mint_core::slash::models::HUGGINGFACE_MODEL_PRESETS;
 
-async fn fetch_image_models_with_notice(config: &mint_core::MintConfig, provider: &str) -> Vec<String> {
+async fn fetch_image_models_with_notice(
+    config: &mint_core::MintConfig,
+    provider: &str,
+) -> Vec<String> {
     print!("\x1b[90mFetching available {provider} image models...\x1b[0m\r");
     let _ = std::io::Write::flush(&mut std::io::stdout());
     let models =
-        mint_core::media::image_models::image_model_options_for_provider_async(config, provider).await;
+        mint_core::media::image_models::image_model_options_for_provider_async(config, provider)
+            .await;
     print!("\r\x1b[2K");
     let _ = std::io::Write::flush(&mut std::io::stdout());
     models
 }
 
-async fn fetch_video_models_with_notice(config: &mint_core::MintConfig, provider: &str) -> Vec<String> {
+async fn fetch_video_models_with_notice(
+    config: &mint_core::MintConfig,
+    provider: &str,
+) -> Vec<String> {
     print!("\x1b[90mFetching available {provider} video models...\x1b[0m\r");
     let _ = std::io::Write::flush(&mut std::io::stdout());
     let models =
-        mint_core::media::video_models::video_model_options_for_provider_async(config, provider).await;
+        mint_core::media::video_models::video_model_options_for_provider_async(config, provider)
+            .await;
     print!("\r\x1b[2K");
     let _ = std::io::Write::flush(&mut std::io::stdout());
     models
@@ -50,8 +58,7 @@ const GEMINI_LIVE_MODEL_PRESETS: &[&str] = &[
 async fn fetch_models_with_notice(config: &mint_core::MintConfig, provider: &str) -> Vec<String> {
     print!("\x1b[90mFetching available {provider} models...\x1b[0m\r");
     let _ = std::io::Write::flush(&mut std::io::stdout());
-    let models =
-        mint_core::slash::models::model_options_for_provider_async(config, provider).await;
+    let models = mint_core::slash::models::model_options_for_provider_async(config, provider).await;
     print!("\r\x1b[2K");
     let _ = std::io::Write::flush(&mut std::io::stdout());
     models

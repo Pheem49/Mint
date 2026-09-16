@@ -269,7 +269,9 @@ pub fn undo_rollback(root: &Path) -> Result<String, String> {
     }
 
     let short_hash = &rescue_hash[..7.min(rescue_hash.len())];
-    Ok(format!("Successfully restored workspace from rescue snapshot ({short_hash})"))
+    Ok(format!(
+        "Successfully restored workspace from rescue snapshot ({short_hash})"
+    ))
 }
 
 pub fn rollback_to_step(root: &Path, chat_id: &str, step: usize) -> Result<String, String> {
@@ -281,7 +283,11 @@ pub fn rollback_to_step(root: &Path, chat_id: &str, step: usize) -> Result<Strin
     rollback_checkpoint(root, target)
 }
 
-pub fn restore_file(root: &Path, file_path: &str, target_ref: Option<&str>) -> Result<String, String> {
+pub fn restore_file(
+    root: &Path,
+    file_path: &str,
+    target_ref: Option<&str>,
+) -> Result<String, String> {
     if !is_git_repo(root) {
         return Err("Workspace is not a git repository".into());
     }
@@ -332,7 +338,13 @@ pub fn create_task_branch(root: &Path, task_slug: &str) -> Result<String, String
     }
     let sanitized: String = task_slug
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let branch_name = format!("feature/mint-{}", sanitized.trim_matches('-'));
     let output = Command::new("git")
@@ -450,14 +462,29 @@ mod tests {
         std::fs::create_dir_all(&temp).unwrap();
 
         // Initialize git repo
-        let _ = Command::new("git").args(["init"]).current_dir(&temp).output();
-        let _ = Command::new("git").args(["config", "user.email", "mint@test.com"]).current_dir(&temp).output();
-        let _ = Command::new("git").args(["config", "user.name", "Mint Tester"]).current_dir(&temp).output();
+        let _ = Command::new("git")
+            .args(["init"])
+            .current_dir(&temp)
+            .output();
+        let _ = Command::new("git")
+            .args(["config", "user.email", "mint@test.com"])
+            .current_dir(&temp)
+            .output();
+        let _ = Command::new("git")
+            .args(["config", "user.name", "Mint Tester"])
+            .current_dir(&temp)
+            .output();
 
         let test_file = temp.join("README.md");
         std::fs::write(&test_file, "# Initial Title\n").unwrap();
-        let _ = Command::new("git").args(["add", "."]).current_dir(&temp).output();
-        let _ = Command::new("git").args(["commit", "-m", "Initial commit"]).current_dir(&temp).output();
+        let _ = Command::new("git")
+            .args(["add", "."])
+            .current_dir(&temp)
+            .output();
+        let _ = Command::new("git")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(&temp)
+            .output();
 
         // Test create_task_branch
         let branch_res = create_task_branch(&temp, "add-auth-feature");
@@ -465,11 +492,17 @@ mod tests {
 
         // Modify file and test restore_file
         std::fs::write(&test_file, "# Broken Content\n").unwrap();
-        assert_eq!(std::fs::read_to_string(&test_file).unwrap(), "# Broken Content\n");
+        assert_eq!(
+            std::fs::read_to_string(&test_file).unwrap(),
+            "# Broken Content\n"
+        );
 
         let restore_res = restore_file(&temp, "README.md", None);
         assert!(restore_res.is_ok());
-        assert_eq!(std::fs::read_to_string(&test_file).unwrap(), "# Initial Title\n");
+        assert_eq!(
+            std::fs::read_to_string(&test_file).unwrap(),
+            "# Initial Title\n"
+        );
 
         let _ = std::fs::remove_dir_all(&temp);
     }

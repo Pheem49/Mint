@@ -56,8 +56,12 @@ pub struct BenchmarkReport {
 }
 
 pub fn load_suite_from_file(path: &Path) -> Result<BenchmarkSuite, String> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read benchmark suite file {}: {e}", path.display()))?;
+    let raw = std::fs::read_to_string(path).map_err(|e| {
+        format!(
+            "Failed to read benchmark suite file {}: {e}",
+            path.display()
+        )
+    })?;
     load_suite_from_json(&raw)
 }
 

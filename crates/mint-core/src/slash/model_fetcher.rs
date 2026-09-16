@@ -93,11 +93,11 @@ pub async fn fetch_provider_models(
     }
 
     let models = match provider {
-        "gemini"     => fetch_gemini_models(api_key).await,
-        "anthropic"  => fetch_anthropic_models(api_key).await,
-        "openai"     => fetch_openai_models(api_key, "https://api.openai.com").await,
+        "gemini" => fetch_gemini_models(api_key).await,
+        "anthropic" => fetch_anthropic_models(api_key).await,
+        "openai" => fetch_openai_models(api_key, "https://api.openai.com").await,
         "openrouter" => fetch_openrouter_models(api_key).await,
-        "deepseek"   => fetch_openai_models(api_key, "https://api.deepseek.com").await,
+        "deepseek" => fetch_openai_models(api_key, "https://api.deepseek.com").await,
         "local_openai" => {
             let url = base_url
                 .map(str::trim)
@@ -162,7 +162,11 @@ async fn fetch_gemini_models(api_key: &str) -> Result<Vec<String>, ()> {
         })
         .filter_map(|m| {
             // Strip "models/" prefix → "gemini-2.5-flash"
-            let id = m.name.strip_prefix("models/").unwrap_or(&m.name).to_string();
+            let id = m
+                .name
+                .strip_prefix("models/")
+                .unwrap_or(&m.name)
+                .to_string();
             // Exclude embedding, TTS, image, and live-only models
             let lower = id.to_lowercase();
             if lower.contains("embedding")
@@ -245,7 +249,11 @@ async fn fetch_gemini_live_models_inner(api_key: &str) -> Result<Vec<String>, ()
         })
         .filter_map(|m| {
             // Strip "models/" prefix → e.g. "gemini-2.5-flash-native-audio-preview-12-2025"
-            let id = m.name.strip_prefix("models/").unwrap_or(&m.name).to_string();
+            let id = m
+                .name
+                .strip_prefix("models/")
+                .unwrap_or(&m.name)
+                .to_string();
             // Exclude TTS-only models (they're not BidiGenerateContent even if
             // they mention audio) and embedding models.
             let lower = id.to_lowercase();
@@ -437,7 +445,8 @@ mod tests {
     #[tokio::test]
     async fn fetch_unreachable_endpoint_returns_empty_without_panicking() {
         // Points to an unused port on localhost that should immediately refuse or time out
-        let models = fetch_provider_models("local_openai", "", Some("http://127.0.0.1:59999")).await;
+        let models =
+            fetch_provider_models("local_openai", "", Some("http://127.0.0.1:59999")).await;
         assert!(models.is_empty());
     }
 }

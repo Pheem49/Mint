@@ -27,7 +27,9 @@ fn global_video_cache() -> &'static Cache {
 }
 
 fn cache_get(key: &str) -> Option<Vec<String>> {
-    let guard = global_video_cache().lock().unwrap_or_else(|e| e.into_inner());
+    let guard = global_video_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     guard.get(key).and_then(|entry| {
         if entry.fetched_at.elapsed() < CACHE_TTL {
             Some(entry.models.clone())
@@ -38,7 +40,9 @@ fn cache_get(key: &str) -> Option<Vec<String>> {
 }
 
 fn cache_set(key: &str, models: Vec<String>) {
-    let mut guard = global_video_cache().lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = global_video_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     guard.insert(
         key.to_string(),
         CacheEntry {
@@ -50,7 +54,9 @@ fn cache_set(key: &str, models: Vec<String>) {
 
 /// Invalidate video model cache for a given provider.
 pub fn invalidate_video_cache(provider: &str) {
-    let mut guard = global_video_cache().lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = global_video_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     guard.retain(|key, _| !key.starts_with(&format!("{provider}:")));
 }
 
@@ -114,7 +120,11 @@ async fn fetch_gemini_video_models(api_key: &str) -> Result<Vec<String>, ()> {
         .models
         .into_iter()
         .filter_map(|m| {
-            let id = m.name.strip_prefix("models/").unwrap_or(&m.name).to_string();
+            let id = m
+                .name
+                .strip_prefix("models/")
+                .unwrap_or(&m.name)
+                .to_string();
             let lower = id.to_lowercase();
 
             let is_video_method = m
