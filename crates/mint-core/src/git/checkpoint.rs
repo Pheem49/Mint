@@ -157,24 +157,30 @@ pub fn rollback_checkpoint(root: &Path, checkpoint: &Checkpoint) -> Result<Strin
 
     // Create a rescue checkpoint first so user work is never lost
     let rescue_msg = format!("mint:rescue-before-rewind-to-step-{}", checkpoint.step);
+    let mut rescue_hash = String::new();
     if let Ok(rescue_out) = Command::new("git")
         .args(["stash", "create", &rescue_msg])
         .current_dir(root)
         .output()
     {
-        let rescue_hash = String::from_utf8_lossy(&rescue_out.stdout)
+        rescue_hash = String::from_utf8_lossy(&rescue_out.stdout)
             .trim()
             .to_string();
-        if !rescue_hash.is_empty() {
-            let _ = Command::new("git")
-                .args([
-                    "update-ref",
-                    &format!("refs/mint/rescue/{timestamp}"),
-                    &rescue_hash,
-                ])
-                .current_dir(root)
-                .output();
+    }
+    if rescue_hash.is_empty() {
+        if let Ok(head) = get_head_hash(root) {
+            rescue_hash = head;
         }
+    }
+    if !rescue_hash.is_empty() {
+        let _ = Command::new("git")
+            .args([
+                "update-ref",
+                &format!("refs/mint/rescue/{timestamp}"),
+                &rescue_hash,
+            ])
+            .current_dir(root)
+            .output();
     }
 
     // Restore working tree to the checkpoint commit
@@ -198,6 +204,76 @@ pub fn rollback_checkpoint(root: &Path, checkpoint: &Checkpoint) -> Result<Strin
     ))
 }
 
+pub fn undo_rollback(root: &Path) -> Result<String, String> {
+    if !is_git_repo(root) {
+        return Err("Workspace is not a git repository".into());
+    }
+
+    // Find the most recent rescue ref in refs/mint/rescue/*
+    let output = Command::new("git")
+        .args([
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--count=1",
+            "--format=%(refname) %(objectname)",
+            "refs/mint/rescue/",
+        ])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("failed to list rescue checkpoints: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stdout.is_empty() {
+        return Err("No rescue checkpoint found to undo. No recent rewind recorded.".into());
+    }
+
+    let mut parts = stdout.split_whitespace();
+    let ref_name = parts.next().unwrap_or("");
+    let rescue_hash = parts.next().unwrap_or("");
+
+    if rescue_hash.is_empty() {
+        return Err("Rescue checkpoint reference is invalid".into());
+    }
+
+    // Before undoing, create a quick rescue stash of current state as safety
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let pre_undo_msg = format!("mint:rescue-before-undo-{timestamp}");
+    let _ = Command::new("git")
+        .args(["stash", "create", &pre_undo_msg])
+        .current_dir(root)
+        .output();
+
+    // Restore working tree to the rescue commit
+    let checkout_out = Command::new("git")
+        .args(["checkout", rescue_hash, "--", "."])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("failed to checkout rescue snapshot: {e}"))?;
+
+    if !checkout_out.status.success() {
+        return Err(format!(
+            "Failed to restore workspace from rescue snapshot: {}",
+            String::from_utf8_lossy(&checkout_out.stderr).trim()
+        ));
+    }
+
+    // Delete the consumed rescue ref so subsequent undo steps back further
+    if !ref_name.is_empty() {
+        let _ = Command::new("git")
+            .args(["update-ref", "-d", ref_name])
+            .current_dir(root)
+            .output();
+    }
+
+    let short_hash = &rescue_hash[..7.min(rescue_hash.len())];
+    Ok(format!(
+        "Successfully restored workspace from rescue snapshot ({short_hash})"
+    ))
+}
+
 pub fn rollback_to_step(root: &Path, chat_id: &str, step: usize) -> Result<String, String> {
     let checkpoints = list_checkpoints(chat_id);
     let target = checkpoints
@@ -205,6 +281,157 @@ pub fn rollback_to_step(root: &Path, chat_id: &str, step: usize) -> Result<Strin
         .find(|c| c.step == step)
         .ok_or_else(|| format!("No checkpoint found for step {step} in chat {chat_id}"))?;
     rollback_checkpoint(root, target)
+}
+
+pub fn restore_file(
+    root: &Path,
+    file_path: &str,
+    target_ref: Option<&str>,
+) -> Result<String, String> {
+    if !is_git_repo(root) {
+        return Err("Workspace is not a git repository".into());
+    }
+    let git_ref = target_ref.unwrap_or("HEAD");
+    let output = Command::new("git")
+        .args(["checkout", git_ref, "--", file_path])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("failed to run git checkout: {e}"))?;
+
+    if output.status.success() {
+        Ok(format!("Successfully restored {file_path} from {git_ref}"))
+    } else {
+        Err(format!(
+            "Failed to restore {file_path}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+
+pub fn rollback_task_changes(root: &Path, chat_id: &str) -> Result<String, String> {
+    let checkpoints = list_checkpoints(chat_id);
+    if let Some(first) = checkpoints.first() {
+        rollback_checkpoint(root, first)
+    } else {
+        if !is_git_repo(root) {
+            return Err("Workspace is not a git repository".into());
+        }
+        let output = Command::new("git")
+            .args(["checkout", "HEAD", "--", "."])
+            .current_dir(root)
+            .output()
+            .map_err(|e| format!("failed to checkout HEAD: {e}"))?;
+        if output.status.success() {
+            Ok("Successfully rolled back all uncommitted task changes to HEAD".into())
+        } else {
+            Err(format!(
+                "Failed to rollback changes: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
+        }
+    }
+}
+
+pub fn create_task_branch(root: &Path, task_slug: &str) -> Result<String, String> {
+    if !is_git_repo(root) {
+        return Err("Workspace is not a git repository".into());
+    }
+    let sanitized: String = task_slug
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let branch_name = format!("feature/mint-{}", sanitized.trim_matches('-'));
+    let output = Command::new("git")
+        .args(["checkout", "-B", &branch_name])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("failed to checkout branch: {e}"))?;
+
+    if output.status.success() {
+        Ok(format!("Switched to new task branch: {branch_name}"))
+    } else {
+        Err(format!(
+            "Failed to create task branch {branch_name}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+
+pub fn generate_commit_message(root: &Path, summary_hint: Option<&str>) -> Result<String, String> {
+    if !is_git_repo(root) {
+        return Err("Workspace is not a git repository".into());
+    }
+    let diff_output = Command::new("git")
+        .args(["diff", "--stat", "HEAD"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("failed to get git diff stat: {e}"))?;
+    let stat = String::from_utf8_lossy(&diff_output.stdout);
+
+    let prefix = if stat.contains("test") {
+        "test"
+    } else if stat.contains("doc") || stat.contains(".md") {
+        "docs"
+    } else if stat.contains("fix") {
+        "fix"
+    } else {
+        "feat"
+    };
+
+    let msg = if let Some(hint) = summary_hint.filter(|h| !h.trim().is_empty()) {
+        format!("{}: {}", prefix, hint.trim())
+    } else {
+        let first_file = stat
+            .lines()
+            .next()
+            .and_then(|l| l.split('|').next())
+            .map(|s| s.trim())
+            .unwrap_or("changes");
+        format!("{}: update {}", prefix, first_file)
+    };
+    Ok(msg)
+}
+
+pub fn commit_task_changes(root: &Path, message: &str) -> Result<String, String> {
+    if !is_git_repo(root) {
+        return Err("Workspace is not a git repository".into());
+    }
+    let add_out = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("failed to git add: {e}"))?;
+    if !add_out.status.success() {
+        return Err(format!(
+            "git add failed: {}",
+            String::from_utf8_lossy(&add_out.stderr).trim()
+        ));
+    }
+
+    let commit_out = Command::new("git")
+        .args(["commit", "-m", message])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("failed to git commit: {e}"))?;
+
+    if commit_out.status.success() {
+        Ok(format!(
+            "Committed changes with message: \"{}\"\n{}",
+            message,
+            String::from_utf8_lossy(&commit_out.stdout).trim()
+        ))
+    } else {
+        Err(format!(
+            "git commit failed: {}",
+            String::from_utf8_lossy(&commit_out.stderr).trim()
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -226,5 +453,57 @@ mod tests {
         let json = serde_json::to_string(&cp).unwrap();
         let deserialized: Checkpoint = serde_json::from_str(&json).unwrap();
         assert_eq!(cp, deserialized);
+    }
+
+    #[test]
+    fn test_git_safety_operations() {
+        let temp = std::env::temp_dir().join(format!("mint-git-test-{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        // Initialize git repo
+        let _ = Command::new("git")
+            .args(["init"])
+            .current_dir(&temp)
+            .output();
+        let _ = Command::new("git")
+            .args(["config", "user.email", "mint@test.com"])
+            .current_dir(&temp)
+            .output();
+        let _ = Command::new("git")
+            .args(["config", "user.name", "Mint Tester"])
+            .current_dir(&temp)
+            .output();
+
+        let test_file = temp.join("README.md");
+        std::fs::write(&test_file, "# Initial Title\n").unwrap();
+        let _ = Command::new("git")
+            .args(["add", "."])
+            .current_dir(&temp)
+            .output();
+        let _ = Command::new("git")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(&temp)
+            .output();
+
+        // Test create_task_branch
+        let branch_res = create_task_branch(&temp, "add-auth-feature");
+        assert!(branch_res.is_ok());
+
+        // Modify file and test restore_file
+        std::fs::write(&test_file, "# Broken Content\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&test_file).unwrap(),
+            "# Broken Content\n"
+        );
+
+        let restore_res = restore_file(&temp, "README.md", None);
+        assert!(restore_res.is_ok());
+        assert_eq!(
+            std::fs::read_to_string(&test_file).unwrap(),
+            "# Initial Title\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp);
     }
 }

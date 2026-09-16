@@ -298,6 +298,58 @@ export async function listMcpServerTools(name: string): Promise<string[]> {
   return invoke<string[]>('list_mcp_server_tools', { name })
 }
 
+/** Test remote MCP connection by URL and optional headers */
+export async function testMcpConnection(
+  url: string,
+  headers?: Record<string, string>,
+): Promise<{ ok: boolean; error?: string; server_info?: any; tools_count?: number; tools?: any[] }> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('test_mcp_connection', { url, headers })
+}
+
+/** Fetch the live model list for `provider` from its API.
+ *  Returns a dynamic list on success, falling back to static presets on any
+ *  network or auth error.  Results are cached for 1 hour on the Rust side. */
+export async function fetchProviderModels(
+  provider: string,
+  apiKey: string,
+  baseUrl?: string,
+): Promise<string[]> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_provider_models', { provider, apiKey, baseUrl })
+}
+
+/** Fetch the live model list for image `provider` from its API.
+ *  Returns a dynamic list on success, falling back to static presets on any
+ *  network or auth error. Results are cached for 1 hour on the Rust side. */
+export async function fetchImageProviderModels(
+  provider: string,
+  apiKey: string = '',
+): Promise<string[]> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_image_provider_models', { provider, apiKey: apiKey || '' })
+}
+
+/** Fetch the live model list for video `provider` from its API.
+ *  Returns a dynamic list on success, falling back to static presets on any
+ *  network or auth error. Results are cached for 1 hour on the Rust side. */
+export async function fetchVideoProviderModels(
+  provider: string,
+  apiKey: string = '',
+): Promise<string[]> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_video_provider_models', { provider, apiKey: apiKey || '' })
+}
+
+/** Fetch the list of Gemini Live–capable models (BidiGenerateContent / native-audio)
+ *  from the Gemini API. Returns a dynamic list on success; falls back to an empty
+ *  array so the hook can use its static GEMINI_LIVE_MODELS preset instead.
+ *  Results are cached for 1 hour on the Rust side. */
+export async function fetchGeminiLiveModels(apiKey: string): Promise<string[]> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_gemini_live_models', { apiKey: apiKey || '' })
+}
+
 export async function uploadFile(file: File): Promise<string> {
   if (!isTauriRuntime()) {
     const API_BASE = getLocalApiBase();
@@ -1203,7 +1255,21 @@ export async function listen<T>(event: string, handler: (event: { payload: T }) 
 }
 
 export function convertFileSrc(filePath: string, protocol = 'asset'): string {
+  if (!filePath) return '';
+  if (
+    filePath.startsWith('http://') ||
+    filePath.startsWith('https://') ||
+    filePath.startsWith('blob:') ||
+    filePath.startsWith('data:')
+  ) {
+    return filePath;
+  }
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    if (filePath.startsWith('/api/')) {
+      const apiBase = getLocalApiBase();
+      const prefix = apiBase.replace(/\/api\/?$/, '');
+      return prefix ? `${prefix}${filePath}` : filePath;
+    }
     return filePath;
   }
   const internals = (window as any).__TAURI_INTERNALS__;
@@ -1806,6 +1872,13 @@ export async function generateVideo(request: VideoGenRequest): Promise<VideoGenR
 }
 
 export async function getVideoGenProviders(): Promise<VideoGenProviders> {
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase()
+    try {
+      const res = await authFetch(`${API_BASE}/video-gen/providers`)
+      if (res.ok) return await res.json()
+    } catch (_) { /* ignore */ }
+  }
   return { active: 'veo', available: ['veo'] }
 }
 
@@ -2136,9 +2209,37 @@ export async function rollbackGitCheckpoint(
   }
 }
 
-export const readWorkspaceFile = async (path: string): Promise<string> => {
+export async function undoGitCheckpoint(
+  workspacePath?: string,
+): Promise<{ status: string; message: string }> {
+  if (!isTauriRuntime()) {
+    const API_BASE = getLocalApiBase()
+    try {
+      const res = await authFetch(`${API_BASE}/checkpoints/undo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspacePath }),
+      })
+      return await res.json()
+    } catch (e: any) {
+      console.error('Failed to undo git checkpoint:', e)
+      return { status: 'error', message: e?.message || String(e) }
+    }
+  }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('read_workspace_file', { path })
+  try {
+    const message = await invoke<string>('undo_git_checkpoint', {
+      workspacePath,
+    })
+    return { status: 'ok', message }
+  } catch (e: any) {
+    return { status: 'error', message: e?.message || String(e) }
+  }
+}
+
+export const readWorkspaceFile = async (path: string, workspacePath?: string): Promise<string> => {
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('read_workspace_file', { path, workspacePath })
 }
 
 // Enforce compile-time check against the shared platform interface
@@ -2189,5 +2290,7 @@ const _apiCheck: MintPlatformApi = {
   readClipboardImage,
   listGitCheckpoints,
   rollbackGitCheckpoint,
+  undoGitCheckpoint,
   readWorkspaceFile,
+  testMcpConnection,
 }

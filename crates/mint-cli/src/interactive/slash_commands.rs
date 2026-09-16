@@ -165,6 +165,158 @@ fn first_line_preview(path: &Path) -> String {
     }
 }
 
+fn print_rendered_markdown(text: &str) {
+    let mut table_buffer: Vec<String> = Vec::new();
+    for line in text.lines() {
+        if crate::markdown::is_table_line(line) {
+            table_buffer.push(line.to_string());
+        } else {
+            if !table_buffer.is_empty() {
+                print!("{}", crate::markdown::render_markdown_table(&table_buffer));
+                table_buffer.clear();
+            }
+            if let Some(h) = line.strip_prefix("## ") {
+                println!("\n{BLUE}{h}{RESET}");
+            } else if let Some(h) = line.strip_prefix("# ") {
+                println!("\n{BLUE}{h}{RESET}");
+            } else {
+                println!("{line}");
+            }
+        }
+    }
+    if !table_buffer.is_empty() {
+        print!("{}", crate::markdown::render_markdown_table(&table_buffer));
+    }
+}
+
+async fn execute_core_slash(session: &mut InteractiveSession, query: &str) -> Option<SlashResult> {
+    use mint_core::slash::{SlashEffect, SlashRequest, SlashResponse};
+
+    let trimmed = query.trim();
+    let (cmd, _) = trimmed
+        .split_once(char::is_whitespace)
+        .map(|(c, r)| (c, r.trim()))
+        .unwrap_or((trimmed, ""));
+
+    let req = SlashRequest {
+        input: trimmed.to_string(),
+        cwd: Some(session.current_dir.to_string_lossy().to_string()),
+        surface: Some("cli".to_string()),
+    };
+
+    if matches!(
+        cmd,
+        "/models"
+            | "/image-models"
+            | "/image-provider"
+            | "/video-models"
+            | "/videomodels"
+            | "/video-provider"
+    ) {
+        print!("{DIM}Fetching available models...{RESET}\r");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+
+    let response = mint_core::slash::execute_async(&req, &mut session.config).await;
+
+    if matches!(
+        cmd,
+        "/models"
+            | "/image-models"
+            | "/image-provider"
+            | "/video-models"
+            | "/videomodels"
+            | "/video-provider"
+    ) {
+        print!("\r\x1b[2K");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+
+    match response {
+        SlashResponse::Message { markdown } => {
+            print_rendered_markdown(&markdown);
+            Some(SlashResult::Handled)
+        }
+        SlashResponse::Applied { markdown, effects } => {
+            let mut save_needed = false;
+            for effect in &effects {
+                match effect {
+                    SlashEffect::ConfigChanged | SlashEffect::MultiAgentChanged { .. } => {
+                        save_needed = true;
+                    }
+                    SlashEffect::ProviderChanged { display } => {
+                        save_needed = true;
+                        println!("Switched to: {MINT}{display}{RESET}\n");
+                    }
+                    SlashEffect::FastModeChanged { enabled } => {
+                        session.fast_mode = *enabled;
+                        save_needed = true;
+                    }
+                    SlashEffect::PlanModeChanged { enabled } => {
+                        session.plan_mode = *enabled;
+                    }
+                    SlashEffect::WorkspaceChanged { path } => {
+                        let new_path = PathBuf::from(path);
+                        if new_path.is_dir() {
+                            session.current_dir = new_path;
+                            let _ = std::env::set_current_dir(&session.current_dir);
+                        }
+                    }
+                    SlashEffect::HistoryCleared => {
+                        session.history.clear();
+                    }
+                }
+            }
+            if save_needed && !cfg!(test) {
+                let _ = mint_core::save_config(&session.config);
+            }
+            if !markdown.is_empty() {
+                print_rendered_markdown(&markdown);
+            }
+            Some(SlashResult::Handled)
+        }
+        SlashResponse::NeedsChoice {
+            command,
+            title,
+            options,
+        } => {
+            let labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
+            let default_choice = labels.first().cloned().unwrap_or_default();
+            match prompt_interactive_select(&title, &labels, &default_choice) {
+                Ok(Some(selected_label)) => {
+                    if let Some(opt) = options.iter().find(|o| o.label == selected_label) {
+                        let next_input = format!("{command} {}", opt.value);
+                        return Box::pin(handle_slash_command(session, &next_input)).await;
+                    }
+                }
+                Ok(None) => {
+                    println!("Cancelled.\n");
+                }
+                Err(e) => {
+                    println!("{ERROR}Selection error:{RESET} {e}\n");
+                }
+            }
+            Some(SlashResult::Handled)
+        }
+        SlashResponse::ForwardToAgent {
+            prompt, plan_mode, ..
+        } => {
+            if plan_mode {
+                session.plan_mode = true;
+            }
+            Some(SlashResult::ForwardToAgent(prompt))
+        }
+        SlashResponse::Navigate { markdown, .. } => {
+            if !markdown.is_empty() {
+                print_rendered_markdown(&markdown);
+            }
+            Some(SlashResult::Handled)
+        }
+        SlashResponse::Exit => Some(SlashResult::Exit),
+        SlashResponse::NotHandled => None,
+    }
+}
+
 /// Route `/…` commands. Returns `None` if the input is not a slash command.
 pub async fn handle_slash_command(
     session: &mut InteractiveSession,
@@ -180,6 +332,30 @@ pub async fn handle_slash_command(
         .split_once(char::is_whitespace)
         .map(|(c, r)| (c, r.trim()))
         .unwrap_or((trimmed, ""));
+
+    // Check CLI-specific commands and interactive bare wizards first:
+    let is_cli_only_or_wizard = matches!(
+        cmd,
+        "/plan"
+            | "/bg"
+            | "/jobs"
+            | "/shells"
+            | "/palette"
+            | "/image"
+            | "/paste"
+            | "/avatar"
+            | "/n8n"
+            | "/notebook"
+            | "/exit"
+            | "/quit"
+    ) || (matches!(cmd, "/mcp" | "/cron" | "/subagent")
+        && rest.is_empty());
+
+    if !is_cli_only_or_wizard {
+        if let Some(res) = execute_core_slash(session, trimmed).await {
+            return Some(res);
+        }
+    }
 
     match cmd {
         "/help" => {
@@ -277,12 +453,22 @@ pub async fn handle_slash_command(
                         );
                     }
                     println!(
-                        "\n{DIM}Use {RESET}{MINT}/rewind <step>{RESET}{DIM} to restore workspace to before that step.{RESET}\n"
+                        "\n{DIM}Use {RESET}{MINT}/rewind <step>{RESET}{DIM} to restore workspace to before that step, or {RESET}{MINT}/rewind undo{RESET}{DIM} to recover from rescue snapshot.{RESET}\n"
                     );
                 }
                 Some(SlashResult::Handled)
+            } else if rest.trim().eq_ignore_ascii_case("undo") {
+                match mint_core::git::undo_rollback(&session.current_dir) {
+                    Ok(msg) => {
+                        println!("\n{MINT}{msg}{RESET}\n");
+                    }
+                    Err(err) => {
+                        println!("\n{ERROR}Failed to undo rewind:{RESET} {err}\n");
+                    }
+                }
+                Some(SlashResult::Handled)
             } else {
-                match rest.parse::<usize>() {
+                match rest.trim().parse::<usize>() {
                     Ok(step) => {
                         match mint_core::git::rollback_to_step(
                             &session.current_dir,
@@ -299,7 +485,7 @@ pub async fn handle_slash_command(
                     }
                     Err(_) => {
                         println!(
-                            "\n{ERROR}Invalid step number:{RESET} \"{rest}\". Usage: /rewind <step>\n"
+                            "\n{ERROR}Invalid step number:{RESET} \"{rest}\". Usage: /rewind <step> or /rewind undo\n"
                         );
                     }
                 }
@@ -425,9 +611,12 @@ pub async fn handle_slash_command(
                 match rest {
                     "on" => Some(true),
                     "off" => Some(false),
-                    _ => {
-                        println!("{WARN}/plan usage: /plan [on|off]{RESET}\n");
-                        None
+                    task => {
+                        session.plan_mode = true;
+                        println!(
+                            "{DIM}[Plan] mode ON — agent will investigate read-only and present a plan before editing{RESET}\n"
+                        );
+                        return Some(SlashResult::ForwardToAgent(task.to_string()));
                     }
                 }
             };
@@ -474,8 +663,19 @@ pub async fn handle_slash_command(
                 // user isn't stuck with the default after choosing a provider.
                 match session.config.set_active_model(&provider, None) {
                     Ok(mut display_name) => {
+                        // Try live fetch from the provider API; fall back to
+                        // static presets if the network is unavailable or the
+                        // user hasn't entered an API key yet.
+                        print!("{DIM}Fetching available models for {provider}...{RESET}\r");
+                        let _ = std::io::Write::flush(&mut std::io::stdout());
                         let mut model_options =
-                            model_options_for_provider(&session.config, &provider);
+                            mint_core::slash::models::model_options_for_provider_async(
+                                &session.config,
+                                &provider,
+                            )
+                            .await;
+                        print!("\r\x1b[2K");
+                        let _ = std::io::Write::flush(&mut std::io::stdout());
                         let current_model = session.config.active_model().to_string();
                         if !current_model.is_empty()
                             && !model_options.iter().any(|m| m == &current_model)
@@ -937,6 +1137,9 @@ pub async fn handle_slash_command(
             if !session.config.replicate_api_key.trim().is_empty() {
                 available.push("replicate");
             }
+            if !session.config.bfl_api_key.trim().is_empty() {
+                available.push("bfl");
+            }
             if available.is_empty() {
                 available.push("nanobanana");
             }
@@ -968,12 +1171,75 @@ pub async fn handle_slash_command(
             };
 
             if let Some(provider) = selected_provider {
-                session.config.image_gen_provider = provider;
+                print!("{DIM}Fetching available image models for {provider}...{RESET}\r");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+                let mut model_options =
+                    mint_core::media::image_models::image_model_options_for_provider_async(
+                        &session.config,
+                        &provider,
+                    )
+                    .await;
+                print!("\r\x1b[2K");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+
+                let current_model =
+                    mint_core::media::image_models::active_image_model_for_provider(
+                        &session.config,
+                        &provider,
+                    )
+                    .to_string();
+                if !current_model.is_empty() && !model_options.iter().any(|m| m == &current_model) {
+                    model_options.insert(0, current_model.clone());
+                }
+
+                if !model_options.is_empty() {
+                    match prompt_interactive_select(
+                        &format!(
+                            "Select {} model",
+                            mint_core::media::image_models::image_provider_display_name(&provider)
+                        ),
+                        &model_options,
+                        &current_model,
+                    ) {
+                        Ok(Some(model)) => {
+                            mint_core::media::image_models::set_active_image_provider_model(
+                                &mut session.config,
+                                &provider,
+                                Some(&model),
+                            );
+                        }
+                        Ok(None) => {
+                            mint_core::media::image_models::set_active_image_provider_model(
+                                &mut session.config,
+                                &provider,
+                                None,
+                            );
+                        }
+                        Err(e) => {
+                            println!("{ERROR}Error selecting image model:{RESET} {e}\n");
+                        }
+                    }
+                } else {
+                    mint_core::media::image_models::set_active_image_provider_model(
+                        &mut session.config,
+                        &provider,
+                        None,
+                    );
+                }
+
                 match mint_core::save_config(&session.config) {
-                    Ok(()) => println!(
-                        "{DIM}Switched default image provider to: {}{RESET}\n",
-                        session.config.image_gen_provider
-                    ),
+                    Ok(()) => {
+                        let active =
+                            mint_core::media::image_models::active_image_model_for_provider(
+                                &session.config,
+                                &provider,
+                            );
+                        println!(
+                            "{DIM}Switched default image provider to: {} • {}{RESET}\n",
+                            mint_core::media::image_models::image_provider_display_name(&provider),
+                            active
+                        );
+                    }
                     Err(error) => println!("{ERROR}Config error:{RESET} {error}"),
                 }
             }
@@ -2578,9 +2844,15 @@ fn handle_mcp_slash(session: &mut InteractiveSession, subcmd: &str, args: &str) 
             tokens.retain(|t| *t != "--allow-all");
             let mut parts = tokens.into_iter();
             match (parts.next(), parts.next()) {
-                (Some(name), Some(command)) => {
-                    let arg_list: Vec<String> = parts.map(str::to_string).collect();
-                    match crate::mcp::add(name, command, arg_list, vec![]) {
+                (Some(name), Some(target)) => {
+                    let is_url = target.starts_with("http://") || target.starts_with("https://");
+                    let result = if is_url {
+                        crate::mcp::add_remote(name, target, None)
+                    } else {
+                        let arg_list: Vec<String> = parts.map(str::to_string).collect();
+                        crate::mcp::add(name, target, arg_list, vec![])
+                    };
+                    match result {
                         Ok(()) => {
                             if allow_all {
                                 let _ = crate::mcp::allow(name, "*");
@@ -2599,7 +2871,7 @@ fn handle_mcp_slash(session: &mut InteractiveSession, subcmd: &str, args: &str) 
                     }
                 }
                 _ => println!(
-                    "{WARN}/mcp add usage:{RESET} <name> <command> [args...] [--allow-all]\n"
+                    "{WARN}/mcp add usage:{RESET} <name> <command|url> [args...] [--allow-all]\n"
                 ),
             }
         }
@@ -2773,10 +3045,13 @@ fn mcp_interactive_picker(session: &mut InteractiveSession) {
         } else {
             String::new()
         };
+        let desc = if let Some(url) = srv.remote_url() {
+            format!("(url: {url})")
+        } else {
+            format!("({} {})", srv.command, srv.args.join(" "))
+        };
         choices.push(format!(
-            "{name:<width$}{label}{disabled} {DIM}({} {}){RESET}",
-            srv.command,
-            srv.args.join(" ")
+            "{name:<width$}{label}{disabled} {DIM}{desc}{RESET}",
         ));
         names.push(name.clone());
     }
@@ -2801,10 +3076,15 @@ fn mcp_interactive_picker(session: &mut InteractiveSession) {
 }
 
 fn mcp_add_flow(session: &mut InteractiveSession) {
-    let choices = vec!["From catalog".to_string(), "Custom".to_string()];
+    let choices = vec![
+        "From catalog".to_string(),
+        "Remote URL (SSE)".to_string(),
+        "Local Command (stdio)".to_string(),
+    ];
     match prompt_interactive_select("Add MCP server", &choices, &choices[0]) {
         Ok(Some(c)) if c == "From catalog" => mcp_add_from_catalog(session),
-        Ok(Some(c)) if c == "Custom" => mcp_add_custom_flow(session),
+        Ok(Some(c)) if c == "Remote URL (SSE)" => mcp_add_remote_flow(session),
+        Ok(Some(c)) if c == "Local Command (stdio)" => mcp_add_custom_flow(session),
         _ => {}
     }
 }
@@ -2894,6 +3174,65 @@ fn mcp_add_from_catalog(session: &mut InteractiveSession) {
     }
 }
 
+fn mcp_add_remote_flow(session: &mut InteractiveSession) {
+    let name = crate::onboard::prompt_input("Server name", None).unwrap_or_default();
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        println!("{WARN}Cancelled (no name).{RESET}\n");
+        return;
+    }
+    let url = crate::onboard::prompt_input("Server URL (e.g. https://example.com/sse)", None)
+        .unwrap_or_default();
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        println!("{WARN}Cancelled (no URL).{RESET}\n");
+        return;
+    }
+    let auth = crate::onboard::prompt_input(
+        "Auth header or bearer token (blank for none, e.g. Bearer token)",
+        None,
+    )
+    .unwrap_or_default();
+    let headers = if auth.trim().is_empty() {
+        None
+    } else {
+        let mut map = std::collections::BTreeMap::new();
+        let trimmed = auth.trim();
+        if let Some((k, v)) = trimmed.split_once('=') {
+            map.insert(k.trim().to_string(), v.trim().to_string());
+        } else if let Some((k, v)) = trimmed.split_once(':') {
+            map.insert(k.trim().to_string(), v.trim().to_string());
+        } else if trimmed.starts_with("Bearer ") {
+            map.insert("Authorization".to_string(), trimmed.to_string());
+        } else {
+            map.insert("Authorization".to_string(), format!("Bearer {trimmed}"));
+        }
+        Some(map)
+    };
+
+    match crate::mcp::add_remote(&name, &url, headers) {
+        Ok(()) => {
+            let allow_all = confirm(
+                "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+            )
+            .unwrap_or(false);
+            if allow_all {
+                let _ = crate::mcp::allow(&name, "*");
+            }
+            println!(
+                "{MINT}Added Remote MCP server '{name}'{}.{RESET}\n",
+                if allow_all {
+                    " (all tools allowed)"
+                } else {
+                    ""
+                }
+            );
+            reload_session_config(session);
+        }
+        Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+    }
+}
+
 fn mcp_add_custom_flow(session: &mut InteractiveSession) {
     let name = crate::onboard::prompt_input("Server name", None).unwrap_or_default();
     let name = name.trim().to_string();
@@ -2901,12 +3240,58 @@ fn mcp_add_custom_flow(session: &mut InteractiveSession) {
         println!("{WARN}Cancelled (no name).{RESET}\n");
         return;
     }
-    let command = crate::onboard::prompt_input("Command (e.g. npx)", None).unwrap_or_default();
+    let command = crate::onboard::prompt_input("Command or URL (e.g. npx or https://...)", None)
+        .unwrap_or_default();
     let command = command.trim().to_string();
     if command.is_empty() {
         println!("{WARN}Cancelled (no command).{RESET}\n");
         return;
     }
+
+    if command.starts_with("http://") || command.starts_with("https://") {
+        let auth =
+            crate::onboard::prompt_input("Auth header or bearer token (blank for none)", None)
+                .unwrap_or_default();
+        let headers = if auth.trim().is_empty() {
+            None
+        } else {
+            let mut map = std::collections::BTreeMap::new();
+            let trimmed = auth.trim();
+            if let Some((k, v)) = trimmed.split_once('=') {
+                map.insert(k.trim().to_string(), v.trim().to_string());
+            } else if let Some((k, v)) = trimmed.split_once(':') {
+                map.insert(k.trim().to_string(), v.trim().to_string());
+            } else if trimmed.starts_with("Bearer ") {
+                map.insert("Authorization".to_string(), trimmed.to_string());
+            } else {
+                map.insert("Authorization".to_string(), format!("Bearer {trimmed}"));
+            }
+            Some(map)
+        };
+        match crate::mcp::add_remote(&name, &command, headers) {
+            Ok(()) => {
+                let allow_all = confirm(
+                    "Allow the agent to call all of this server's tools now? (else approve them one by one)",
+                )
+                .unwrap_or(false);
+                if allow_all {
+                    let _ = crate::mcp::allow(&name, "*");
+                }
+                println!(
+                    "{MINT}Added Remote MCP server '{name}'{}.{RESET}\n",
+                    if allow_all {
+                        " (all tools allowed)"
+                    } else {
+                        ""
+                    }
+                );
+                reload_session_config(session);
+            }
+            Err(e) => println!("{ERROR}MCP error:{RESET} {e}\n"),
+        }
+        return;
+    }
+
     let args = crate::onboard::prompt_input("Arguments (space-separated, blank for none)", None)
         .unwrap_or_default();
     let env_raw = crate::onboard::prompt_input(
@@ -3165,5 +3550,39 @@ mod tests {
              entry for it — add one, or add it to UNDOCUMENTED_ALIASES if it's a deliberately \
              undocumented shortcut for another command's token.",
         );
+    }
+
+    #[tokio::test]
+    async fn core_slash_clear_clears_history() {
+        let mut session = InteractiveSession {
+            config: MintConfig::default(),
+            current_dir: std::env::current_dir().unwrap(),
+            fast_mode: false,
+            plan_mode: false,
+            pending_image: None,
+            history: vec!["msg1".into(), "msg2".into()],
+            jobs: BackgroundJobs::new(),
+        };
+
+        let res = handle_slash_command(&mut session, "/clear").await;
+        assert!(matches!(res, Some(SlashResult::Handled)));
+        assert!(session.history.is_empty());
+    }
+
+    #[tokio::test]
+    async fn core_slash_fast_mode_toggle() {
+        let mut session = InteractiveSession {
+            config: MintConfig::default(),
+            current_dir: std::env::current_dir().unwrap(),
+            fast_mode: false,
+            plan_mode: false,
+            pending_image: None,
+            history: Vec::new(),
+            jobs: BackgroundJobs::new(),
+        };
+
+        let res = handle_slash_command(&mut session, "/fast on").await;
+        assert!(matches!(res, Some(SlashResult::Handled)));
+        assert!(session.fast_mode);
     }
 }

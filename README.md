@@ -11,15 +11,48 @@
   [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 </div>
 
-Mint is a local-first AI assistant that runs on your own machine and follows you
-wherever you already are: message it from Telegram, Discord, Slack, LINE, or
-WhatsApp like you'd message a person, no desktop window required. It's also a
-native desktop app with a Live2D companion, and a full terminal agent for
-coding tasks — all backed by the same Tauri v2 + Rust + React/TypeScript core,
-so chat, memory, knowledge, tools, and safety policies behave identically no
-matter which door you walk in through.
+Mint is a local-first AI assistant and autonomous coding agent that runs on your own machine. Powered by a high-performance Rust **Agent Execution Harness** (`mint-core`), Mint wraps foundation models (Claude, GPT-4o, Gemini, Ollama, DeepSeek) with deterministic tool execution, verification gates, subagent DAG orchestration, memory compaction, and human-in-the-loop safety guardrails.
 
-See [Release Notes](Release_Note.md) for what's new.
+It follows you wherever you already are: message it from Telegram, Discord, Slack, LINE, or WhatsApp like you'd message a person, no desktop window required. It's also a native desktop app with a Live2D companion, a web application, and a full terminal agent for coding tasks — all backed by the exact same execution harness and safety policies, so chat, memory, knowledge, tools, and safety behave identically no matter which door you walk in through.
+
+See [Release Notes](Release_Note.md) for what's new, and read the [Agent Harness Architecture Guide](docs/AGENT_HARNESS.md) for deep technical details.
+
+## 🏛️ Architecture: The Mint Agent Harness
+
+In modern AI engineering, **Harness Engineering** bridges the gap between foundation models (reasoning engines) and real-world execution. Mint implements a complete, deterministic agent harness in Rust:
+
+```text
+                     ┌────────────────────────────────────────────────────────┐
+                     │                   Foundation Models                    │
+                     │          (Claude, GPT-4o, Gemini, Ollama, DeepSeek)    │
+                     └───────────────────────────▲────────────────────────────┘
+                                                 │ (Reasoning / Tool Invocations)
+┌────────────────────────────────────────────────▼────────────────────────────────────────────────┐
+│                                   MINT AGENT HARNESS (mint-core)                                │
+│                                                                                                 │
+│  ┌──────────────────────────┐  ┌──────────────────────────┐  ┌───────────────────────────────┐  │
+│  │   Orchestration Loop     │  │   Safety & Verification  │  │   Memory & Context Engine     │  │
+│  │  • ReAct / OODA Cycle    │  │  • Human-in-the-Loop Gate│  │  • Context Compaction         │  │
+│  │  • Self-Correction Loop  │  │  • Verification Gating   │  │  • Two-Tier Memory Recall     │  │
+│  │  • Read-Only Concurrency │  │  • Process Sandbox/Docker│  │  • Fact Quarantine & Promote  │  │
+│  └──────────────────────────┘  └──────────────────────────┘  └───────────────────────────────┘  │
+│  ┌──────────────────────────┐  ┌──────────────────────────┐  ┌───────────────────────────────┐  │
+│  │   Tool Actuator System   │  │   Subagent DAG Engine    │  │   Protocol & Plugin Bridge    │  │
+│  │  • File I/O & Git Diff   │  │  • Parallel Subagents    │  │  • Model Context Protocol     │  │
+│  │  • Terminal / Shell Exec │  │  • Scoped Tool Isolation │  │  • Ecosystem Plugins (7+)     │  │
+│  │  • Search (Web/Code/KB)  │  │  • DAG State Tracking    │  │  • Messaging Bridges (7+)     │  │
+│  └──────────────────────────┘  └──────────────────────────┘  └───────────────────────────────┘  │
+└────────────────────────────────────────────────┬────────────────────────────────────────────────┘
+                                                 │ Unified Telemetry & State Stream
+                     ┌───────────────────────────┼────────────────────────────┐
+                     │                           │                            │
+        ┌────────────▼────────────┐ ┌────────────▼────────────┐ ┌─────────────▼────────────┐
+        │        Mint CLI         │ │       Desktop App       │ │     Web UI & Messaging    │
+        │   (Terminal TUI / ANSI) │ │      (Tauri v2 + React) │ │     (Vite + Bot Bridges)  │
+        └─────────────────────────┘ └─────────────────────────┘ └───────────────────────────┘
+```
+
+> 📖 **Deep Dive:** Read the complete architecture guide in [docs/AGENT_HARNESS.md](docs/AGENT_HARNESS.md) to learn how Mint achieves autonomous self-correction, verification gating, token budgeting, and subagent DAG workflows.
 
 ## <img src="assets/features.svg" width="24" height="24" valign="middle" /> What Mint Can Do
 
@@ -44,7 +77,11 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 ---
 
 ### 4. <img src="assets/code.svg" width="18" height="18" valign="middle" /> Autonomous Code Agent & Subagents
-- Run code-agent loops via `/code <task>` or `mint code agent "<task>"`: scan the workspace, plan multi-file changes, edit, run tests/shell commands, and verify before finishing.
+- Run code-agent loops via `/code <task>`, `mint code agent "<task>"`, or direct one-shot prompt `mint "<task>"`: scan the workspace, plan multi-file changes, edit, run tests/shell commands, and verify before finishing.
+- **Harness Engineering & Git Safety:** Automatic Git checkpoints before task execution, task-isolated branches, and one-click rollback if verification fails.
+- **Code Intelligence:** AST symbol navigation (`find_definition`, `find_references`) across Rust, TypeScript, JavaScript, Python, and Go without external LSPs.
+- **Safe Automated Verification:** Run tests, typechecks, and linters (`run_tests`, `run_typecheck`, `run_linter`) with zero-prompt pre-approval policies.
+- **Observability & Checklist:** Real-time plan progress checklists and run telemetry summary dashboards across CLI, Desktop, and Web.
 - Delegate focused sub-tasks to specialized subagents (`dispatch_subagent`), optionally isolated in a per-session Docker container (`sandboxBackend: "docker"`).
 > [!IMPORTANT]
 > **Safety First:** Risky actions and file writes require your explicit approval first.
@@ -65,7 +102,7 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 ---
 
 ### 7. <img src="assets/tools.svg" width="18" height="18" valign="middle" /> Tool & MCP Integrations
-- **Model Context Protocol (MCP)** servers for Search, Filesystem, GitHub, and more, plus local plugins for Spotify, Google Calendar, Gmail, and Notion — manage all of it interactively with `mint plugins`.
+- **Model Context Protocol (MCP)** servers supporting both **Local Command (`stdio`)** and **Remote Server (`sse` / `http`)** transports with Bearer Token and Custom Header authentication, plus local plugins for Spotify, Google Calendar, Gmail, and Notion — manage all of it interactively with `mint plugins` or `/mcp`.
 - Dedicated **Image Search** tool and an **Auto GitHub Link Resolver** that injects a linked repo's metadata/README as context automatically.
 
 ---
@@ -110,6 +147,7 @@ Mint is a local-first AI assistant running on your machine, capable of handling 
 
 Before you can build or run Mint locally, make sure you have the following system tools installed:
 
+
 | Tool | Description | Required For |
 | :--- | :--- | :--- |
 | **Node.js & npm** | JavaScript runtime and package manager | Frontend UI (React, Vite, TypeScript) |
@@ -131,6 +169,7 @@ sudo apt-get install -y \
 ```
 
 **Fedora / RHEL / CentOS:**
+
 ```bash
 sudo dnf groupinstall -y "Development Tools"
 sudo dnf install -y \
@@ -339,6 +378,7 @@ mint chat "<message>"
 | Command | Purpose |
 | --- | --- |
 | `mint` | Start the interactive terminal chat assistant |
+| `mint "<prompt>"` | Execute one-shot code agent task directly without entering TUI |
 | `mint onboard` | Configure Mint for first use |
 | `mint setup` | Interactively manage enabled agent tools |
 | `mint plugins` | Centralized interactive management for built-in ecosystem plugins & skills |
@@ -367,6 +407,7 @@ mint chat "<message>"
 | `mint learn <path>` | Import a persistent learned skill file |
 | `mint skills add <path\|github-repo\|url>` | Install a skill — local path, or a GitHub repo/URL via `npx skills` |
 | `mint skills list` | List all skills Mint can see (global, workspace, taught) |
+| `mint eval --suite <path>` | Run benchmark evaluation suite on agent models / harness |
 | `mint update --check` | Check for an available update |
 
 ### Code Agent
@@ -374,6 +415,11 @@ mint chat "<message>"
 Mint includes native workspace tools for code inspection, planning, editing, and execution:
 
 ```bash
+# Direct one-shot prompt execution
+mint "inspect this repo and fix the failing tests"
+mint -m claude-3-7-sonnet -C ./crates/mint-core "refactor auth logic" --plan
+
+# Subcommand execution
 mint code agent "inspect this repo and fix the failing tests"
 mint code github-overview "Pheem49/Mint"
 mint code summary .
@@ -390,6 +436,26 @@ Inside interactive mode, use:
 ```
 
 Code-related fixes, workspace inspection, and test requests are routed into the code-agent loop automatically. Shell commands and file edits require explicit terminal approval before Mint applies them.
+
+#### Autonomous Harness Capabilities
+- **AST Code Intelligence**: Native symbol navigation (`find_definition`, `find_references`) across Rust, TypeScript, JavaScript, Python, and Go codebases without requiring external language server daemons.
+- **Git Safety Harness**: Automatic Git checkpoints before task execution, task-isolated branches (`mint/<task-id>-<slug>`), diff-aware commit message generation, and one-step task rollback.
+- **Safe Automated Verification**: Specialized `run_tests`, `run_typecheck`, and `run_linter` tools pre-approved for non-destructive automated verification passes.
+- **Task Planning & Observability**: Interactive multi-step plan checklists and telemetry run dashboards tracking token consumption, step latency, and tool call breakdown across CLI, Desktop, and Web.
+
+### Benchmark Evaluation (`mint eval`)
+
+Evaluate and benchmark agent models and harnesses across customizable test suites:
+
+```bash
+# Run a benchmark evaluation suite
+mint eval --suite benchmarks/mint_eval.json
+
+# Run with custom concurrency and save report
+mint eval --suite benchmarks/mint_eval.json --concurrency 4 --output eval_results.json
+```
+
+Benchmark cases define instructions, target files, and unit test assertions, producing structured pass/fail metrics and terminal scorecards.
 
 ### Tools And Automation
 
@@ -442,15 +508,30 @@ mint plugins
 
 ### MCP Servers
 
-Add a local MCP server and call one of its tools:
+Mint supports both **Local Command (`stdio`)** processes and **Remote Servers (URL / SSE)** with Bearer Token and Custom Header authentication.
 
+#### Local Server (stdio)
 ```bash
 mint mcp add filesystem npx \
   --args -y \
   --args @modelcontextprotocol/server-filesystem \
   --args .
+```
 
-mint mcp list                       # `[disabled]` marks turned-off servers
+#### Remote Server (URL / SSE)
+Connect cloud-hosted or remote MCP servers with zero local runtime dependencies:
+```bash
+# Public remote endpoint
+mint mcp add weather-api https://mcp.weather.com/sse
+
+# Remote endpoint with Bearer Token or custom headers
+mint mcp add internal-docs https://docs.internal.net/sse \
+  --env "Authorization=Bearer <secret-token>"
+```
+
+#### Inspect & Call Tools
+```bash
+mint mcp list                       # shows `(url: ...)` for remote servers
 mint mcp allow filesystem "*"       # let the agent call every tool
 mint mcp call filesystem list_directory \
   --arguments '{"path":"."}'
@@ -458,7 +539,7 @@ mint mcp call filesystem list_directory \
 
 | Command | Purpose |
 | --- | --- |
-| `mint mcp add <name> <cmd> [--args … --env K=V …]` | Add a server |
+| `mint mcp add <name> <cmd\|url> [--args … --env K=V …]` | Add a local command or remote URL server |
 | `mint mcp edit <name> [--command] [--args …] [--env K=V …] [--icon\|--no-icon]` | Change one or more fields in place |
 | `mint mcp disable <name>` / `mint mcp enable <name>` | Turn a server off/on without removing it |
 | `mint mcp allow <server> <tool>` / `mint mcp disallow <server> <tool>` | Grant/revoke a tool (`*` = all) |
@@ -466,9 +547,11 @@ mint mcp call filesystem list_directory \
 | `mint mcp remove <name>` / `mint mcp clear` | Remove one / all servers |
 
 The same operations are available interactively with `/mcp` (an arrow-key
-picker with an "＋ Add" row and a per-server action menu) and from the
-Desktop/Web **Settings → Plugins → MCP Servers** panel, including the per-server
-tool allowlist.
+picker supporting catalog presets, Remote URL (SSE), and Local Command flows) and from the
+Desktop/Web **Settings → MCP Servers** panel:
+- **Segmented Toggle:** Switch seamlessly between **Remote Server (URL / SSE)** and **Local Command (stdio)**.
+- **Pre-flight Live Testing:** Dedicated `Test Connection` button to verify network reachability and discover exposed tools before saving.
+- **Enterprise Security Warning:** Explicit risk notice and safety acknowledgement requirement before adding custom remote endpoints.
 
 ### Interactive Commands
 

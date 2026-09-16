@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { getProfileValue, setProfileValue, setActiveModel, authUpdateProfile } from '../tauri'
 import { useAuthUser } from '../../shared/components/AuthGate'
+import { useProviderModels } from '../hooks/useProviderModels'
+import { useImageProviderModels } from '../hooks/useImageProviderModels'
+import { useVideoProviderModels } from '../hooks/useVideoProviderModels'
 import GeneralTab from './Settings/GeneralTab'
 import ProfileTab from './Settings/ProfileTab'
 import MemoryTab from './Settings/MemoryTab'
@@ -22,27 +25,16 @@ import {
 
 // ─── Custom Provider Types ────────────────────────────────────────────────────
 
-export interface CustomProviderModel {
-  modelId: string
-  displayName: string
-}
-
-export interface CustomProviderHeader {
-  name: string
-  value: string
-}
-
-export interface CustomProviderConfig {
-  id: string
-  displayName: string
-  baseUrl: string
-  apiKey: string
-  models: CustomProviderModel[]
-  headers: CustomProviderHeader[]
-}
+export type {
+  CustomProviderModel,
+  CustomProviderHeader,
+  CustomProviderConfig,
+} from '../../shared/types'
 
 import { DEFAULT_CONFIG } from '../../shared/constants/config'
 export { DEFAULT_CONFIG }
+import { applyThemeStyles } from '../../shared/utils/ui'
+import { APP_VERSION } from '../../shared/version'
 
 type TabType = 'sect-general' | 'sect-profile' | 'sect-audio' | 'sect-automation' | 'sect-theme' | 'sect-plugins' | 'sect-shortcuts' | 'sect-memory' | 'sect-agents'
 
@@ -208,6 +200,38 @@ export default function SettingsWindow() {
   const [customOllama, setCustomOllama] = useState('')
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
 
+  // Dynamic model lists — fetched live from each provider's API.
+  // The hook initialises with static presets and updates when the fetch succeeds.
+  const { models: dynamicGeminiModels }     = useProviderModels('gemini',     config.apiKey)
+  const { models: dynamicAnthropicModels }  = useProviderModels('anthropic',  config.anthropicApiKey)
+  const { models: dynamicOpenAIModels }     = useProviderModels('openai',     config.openaiApiKey)
+  const { models: dynamicOpenRouterModels } = useProviderModels('openrouter', config.openrouterApiKey)
+  const { models: dynamicDeepSeekModels }   = useProviderModels('deepseek',   config.deepseekApiKey)
+  const { models: dynamicLocalModels }      = useProviderModels('local_openai', '', config.localApiBaseUrl)
+
+  // Dynamic image model lists
+  const { options: nanoBananaImageOpts } = useImageProviderModels('nanobanana', config.apiKey)
+  const { options: dalleImageOpts } = useImageProviderModels('dalle', config.openaiApiKey)
+  const { options: replicateImageOpts } = useImageProviderModels('replicate', config.replicateApiKey)
+  const { options: stabilityImageOpts } = useImageProviderModels('stability', config.stabilityApiKey)
+  const { options: ideogramImageOpts } = useImageProviderModels('ideogram', config.ideogramApiKey)
+  const { options: bflImageOpts } = useImageProviderModels('bfl', config.bflApiKey)
+
+  const dynamicImageModels = React.useMemo(() => ({
+    nanobanana: nanoBananaImageOpts,
+    dalle: dalleImageOpts,
+    replicate: replicateImageOpts,
+    stability: stabilityImageOpts,
+    ideogram: ideogramImageOpts,
+    bfl: bflImageOpts,
+  }), [nanoBananaImageOpts, dalleImageOpts, replicateImageOpts, stabilityImageOpts, ideogramImageOpts, bflImageOpts])
+
+  // Dynamic video model lists
+  const { options: veoVideoOpts } = useVideoProviderModels('veo', config.apiKey)
+  const dynamicVideoModels = React.useMemo(() => ({
+    veo: veoVideoOpts,
+  }), [veoVideoOpts])
+
   // New MCP Server Form state
   const [mcpName, setMcpName] = useState('')
   const [mcpCmd, setMcpCmd] = useState('')
@@ -299,64 +323,7 @@ export default function SettingsWindow() {
     fetchOllamaModels();
   }, [config.ollamaHost]);
 
-  const applyThemeStyles = (cfg: typeof DEFAULT_CONFIG) => {
-    document.documentElement.setAttribute('data-theme', cfg.theme)
-    document.documentElement.style.setProperty('--accent', cfg.accentColor)
-    document.documentElement.style.setProperty('--accent-hover', lightenColor(cfg.accentColor, 20))
-    document.documentElement.style.setProperty('--text-main', cfg.systemTextColor)
-    document.documentElement.style.setProperty('--glass-blur', cfg.glassBlur)
-    document.body.style.fontFamily = cfg.fontFamily
-    document.documentElement.style.fontSize = cfg.fontSize
 
-    if (cfg.theme === 'custom') {
-      if (cfg.customBgStart && cfg.customBgEnd) {
-        const gradient = `linear-gradient(135deg, ${cfg.customBgStart} 0%, ${cfg.customBgEnd} 100%)`
-        document.documentElement.style.setProperty('--bg-color', cfg.customBgStart)
-        document.documentElement.style.setProperty('--bg-gradient', gradient)
-      }
-      if (cfg.customPanelBg) {
-        const rgb = hexToRgb(cfg.customPanelBg)
-        document.documentElement.style.setProperty('--panel-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.75)`)
-        document.documentElement.style.setProperty('--panel-raised', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.82)`)
-        document.documentElement.style.setProperty('--panel-soft', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.46)`)
-        document.documentElement.style.setProperty('--chrome-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.88)`)
-        document.documentElement.style.setProperty('--surface-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.62)`)
-        document.documentElement.style.setProperty('--surface-strong', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.86)`)
-        document.documentElement.style.setProperty('--input-bg', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.72)`)
-      }
-    } else {
-      [
-        '--bg-color',
-        '--bg-gradient',
-        '--panel-bg',
-        '--panel-raised',
-        '--panel-soft',
-        '--chrome-bg',
-        '--surface-bg',
-        '--surface-strong',
-        '--input-bg'
-      ].forEach(name => document.documentElement.style.removeProperty(name))
-    }
-  }
-
-  const lightenColor = (hex: string, amount: number) => {
-    const clean = hex.replace('#', '')
-    if (clean.length !== 6) return hex
-    const num = parseInt(clean, 16)
-    const r = Math.min(255, (num >> 16) + amount)
-    const g = Math.min(255, ((num >> 8) & 0x00FF) + amount)
-    const b = Math.min(255, (num & 0x0000FF) + amount)
-    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`
-  }
-
-  const hexToRgb = (hex: string) => {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-    return result ? {
-        r: parseInt(result[1], 16),
-        g: parseInt(result[2], 16),
-        b: parseInt(result[3], 16)
-    } : { r: 15, g: 23, b: 42 }
-  }
 
   const handleSave = async () => {
     const finalConfig = { ...config }
@@ -496,9 +463,12 @@ export default function SettingsWindow() {
     window.settingsApi?.closeSettings()
   }
 
-  const handleQuit = () => {
-    if (confirm('Are you sure you want to exit Mint?')) {
-      window.settingsApi?.quitApp()
+  const handleOpenExternal = (e: React.MouseEvent, url: string) => {
+    e.preventDefault()
+    if (window.settingsApi?.openExternal) {
+      window.settingsApi.openExternal(url)
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer')
     }
   }
 
@@ -633,27 +603,29 @@ export default function SettingsWindow() {
               aria-label="Search settings"
             />
           </div>
-          {SETTINGS_NAV_GROUPS.map((group) => {
-            const items = SETTINGS_NAV.filter(
-              (item) => item.group === group && item.label.toLowerCase().includes(navSearch.trim().toLowerCase())
-            )
-            if (!items.length) return null
-            return (
-              <div className="settings-nav-group" key={group}>
-                <p className="settings-nav-group-label">{group}</p>
-                {items.map((item) => (
-                  <button
-                    key={item.id}
-                    className={`tab-btn ${activeTab === item.id ? 'active' : ''}`}
-                    onClick={() => setActiveTab(item.id)}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>{item.icon}</span>
-                    <strong>{item.label}</strong>
-                  </button>
-                ))}
-              </div>
-            )
-          })}
+          <div className="settings-nav-scroll">
+            {SETTINGS_NAV_GROUPS.map((group) => {
+              const items = SETTINGS_NAV.filter(
+                (item) => item.group === group && item.label.toLowerCase().includes(navSearch.trim().toLowerCase())
+              )
+              if (!items.length) return null
+              return (
+                <div className="settings-nav-group" key={group}>
+                  <p className="settings-nav-group-label">{group}</p>
+                  {items.map((item) => (
+                    <button
+                      key={item.id}
+                      className={`tab-btn ${activeTab === item.id ? 'active' : ''}`}
+                      onClick={() => setActiveTab(item.id)}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center' }}>{item.icon}</span>
+                      <strong>{item.label}</strong>
+                    </button>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
         </nav>
 
         <div className="settings-content">
@@ -678,6 +650,14 @@ export default function SettingsWindow() {
               customOllama={customOllama}
               setCustomOllama={setCustomOllama}
               dynamicOllamaModels={dynamicOllamaModels}
+              dynamicGeminiModels={dynamicGeminiModels}
+              dynamicAnthropicModels={dynamicAnthropicModels}
+              dynamicOpenAIModels={dynamicOpenAIModels}
+              dynamicOpenRouterModels={dynamicOpenRouterModels}
+              dynamicDeepSeekModels={dynamicDeepSeekModels}
+              dynamicLocalModels={dynamicLocalModels}
+              dynamicImageModels={dynamicImageModels}
+              dynamicVideoModels={dynamicVideoModels}
               updateAvailable={updateAvailable}
               updateMessage={updateMessage}
               handleCheckUpdates={handleCheckUpdates}
@@ -708,6 +688,7 @@ export default function SettingsWindow() {
             <AudioTab
               config={config}
               updateField={updateField}
+              apiKey={config.apiKey}
             />
           )}
 
@@ -756,14 +737,42 @@ export default function SettingsWindow() {
       </main>
 
       <footer className="settings-footer">
-        <button type="button" className="btn-danger" onClick={handleQuit} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-            <polyline points="16 17 21 12 16 7"></polyline>
-            <line x1="21" y1="12" x2="9" y2="12"></line>
-          </svg>
-          Quit Application
-        </button>
+        <div className="settings-footer-meta">
+          <span className="settings-footer-version">Version: {APP_VERSION}</span>
+          <div className="settings-footer-links">
+            <a
+              href="https://github.com/Pheem49/Mint"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => handleOpenExternal(e, 'https://github.com/Pheem49/Mint')}
+              className="settings-footer-link"
+              title="https://github.com/Pheem49/Mint"
+            >
+              GitHub
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+            <span className="settings-footer-separator">•</span>
+            <a
+              href="https://mint.aemeth.xyz/"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => handleOpenExternal(e, 'https://mint.aemeth.xyz/')}
+              className="settings-footer-link"
+              title="https://mint.aemeth.xyz/"
+            >
+              Website
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+            </a>
+          </div>
+        </div>
         <div className="footer-actions">
           <button type="button" className="btn-secondary" onClick={handleReset} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

@@ -557,6 +557,8 @@ impl AvatarBridge {
             }
             AgentProgress::Thought { .. } => {}
             AgentProgress::WaitingForNetwork { .. } => {}
+            AgentProgress::PlanUpdated { .. } => {}
+            AgentProgress::RunCompleted { .. } => {}
         }
     }
 

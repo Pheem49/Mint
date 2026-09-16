@@ -11,6 +11,7 @@ pub mod agent;
 pub mod avatar_bridge;
 pub mod browser;
 pub mod cron;
+pub mod eval;
 pub mod git;
 pub mod integrations;
 pub mod live_sync;
@@ -103,13 +104,18 @@ pub use cron::{
     CronError, CronJob, CronJobDraft, CronStore, localize_schedule, start_cron_scheduler,
 };
 pub use docker_sandbox::{docker_available, has_session, start_session, stop_session};
+pub use eval::{
+    BenchmarkReport, BenchmarkSuite, BenchmarkTask, TaskEvalResult, aggregate_benchmark_report,
+    evaluate_task_result, load_suite_from_file, load_suite_from_json,
+};
 pub use files::{FileOperationError, PathKind, PathMatch, create_folder, find_paths};
 pub use gemini_live::{
     GeminiLiveEvent, GeminiLiveHandle, start_session as start_gemini_live_session,
 };
 pub use git::{
-    Checkpoint, create_checkpoint, get_head_hash, is_git_repo, list_checkpoints, record_checkpoint,
-    rollback_checkpoint, rollback_to_step,
+    Checkpoint, commit_task_changes, create_checkpoint, create_task_branch,
+    generate_commit_message, get_head_hash, is_git_repo, list_checkpoints, record_checkpoint,
+    restore_file, rollback_checkpoint, rollback_task_changes, rollback_to_step, undo_rollback,
 };
 pub use hooks::{
     HookEntry, HookError, HookEvent, PreHookOutcome, add_hook, clear_hooks, list_hooks,
@@ -128,14 +134,15 @@ pub use linked_folders::{
 };
 pub use mcp::{
     McpError, McpRegistryArgInput, McpRegistryEntry, McpRegistryEnvVar, McpServer, add_mcp_server,
-    allow_mcp_tool, allow_tool_in, call_configured_mcp_tool, call_mcp_tool, clear_mcp_servers,
-    clear_servers_in, close_all_mcp_sessions, close_mcp_session, configured_mcp_servers,
-    disallow_mcp_tool, disallow_tool_in, drain_mcp_notifications, expand_registry_entry,
-    get_server_prompt, is_mcp_tool_allowed, list_mcp_servers, list_server_prompts,
-    list_server_resources, list_server_tools, mcp_registry, mcp_registry_entry,
-    mcp_server_tool_names, mcp_tool_allowlist, read_server_resource, reauth_mcp_server,
-    remove_mcp_server, remove_server_in, set_mcp_server_disabled, set_server_disabled_in,
-    update_mcp_server, update_server_in, upsert_server_in,
+    add_remote_mcp_server, allow_mcp_tool, allow_tool_in, call_configured_mcp_tool, call_mcp_tool,
+    clear_mcp_servers, clear_servers_in, close_all_mcp_sessions, close_mcp_session,
+    configured_mcp_servers, disallow_mcp_tool, disallow_tool_in, drain_mcp_notifications,
+    expand_registry_entry, get_server_prompt, is_mcp_tool_allowed, list_mcp_servers,
+    list_server_prompts, list_server_resources, list_server_tools, mcp_registry,
+    mcp_registry_entry, mcp_server_tool_names, mcp_tool_allowlist, read_server_resource,
+    reauth_mcp_server, remove_mcp_server, remove_server_in, set_mcp_server_disabled,
+    set_server_disabled_in, test_remote_mcp_connection, update_mcp_server, update_server_in,
+    upsert_server_in,
 };
 pub use memory::{
     CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, Fact, InteractionMemory, LearnedSkill,
@@ -145,9 +152,10 @@ pub use mic_transcribe::{
     MicRecordingHandle, MicTranscribeError, start_recording, stop_recording, transcribe_recording,
 };
 pub use orchestration::{
-    AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption,
-    MCP_ALLOW_ALL_SENTINEL, OrchestrationError, orchestrate_agent_loop, orchestrate_chat,
-    orchestrate_chat_stream, orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
+    ActivePlan, AgentApproval, AgentProgress, AgentResult, ApprovalOutcome, AskUserOption,
+    MCP_ALLOW_ALL_SENTINEL, OrchestrationError, PlanTaskItem, RunTelemetrySummary,
+    ToolExecutionRecord, orchestrate_agent_loop, orchestrate_chat, orchestrate_chat_stream,
+    orchestrate_chat_stream_with_fallback, orchestrate_chat_with_fallback,
 };
 pub use pictures::{
     PictureEntry, PictureError, delete_saved_picture, list_saved_pictures, parse_data_uri,
@@ -183,8 +191,15 @@ pub use subtitle::{
     BurnSubtitleRequest, SubtitleError, SubtitleStyle, TranslateSubtitleRequest, burn_subtitles,
     generate_srt, secs_to_srt_timestamp, translate_subtitles,
 };
-pub use symbols::{CodeSymbol, SymbolError, SymbolIndex, build_symbol_index};
-pub use tasks::{Task, TaskError, TaskStore, tasks_path};
+pub use symbols::{
+    CodeSymbol, SymbolError, SymbolIndex, SymbolReference, build_symbol_index, find_definition,
+    find_references,
+};
+pub use system::knowledge_engine::{
+    TieredDocSearchResult, create_project_doc, search_project_knowledge,
+};
+pub use system::project_detector::{ProjectArchitectureSummary, detect_project_deep};
+pub use tasks::{Task, TaskError, TaskStore};
 pub use timeline::{
     RenderTimelineRequest, RenderTimelineResult, Timeline, TimelineAudio, TimelineClip,
     TimelineEffect, TimelineError, TimelineOutput, TimelineSubtitle, render_timeline,

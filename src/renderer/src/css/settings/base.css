@@ -859,8 +859,57 @@ kbd {
     background: var(--panel-bg);
 }
 
-.settings-footer .btn-danger {
-    min-width: 150px;
+.settings-footer-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
+.settings-footer-version {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    user-select: text;
+}
+
+.settings-footer-links {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.settings-footer-separator {
+    color: var(--border);
+    font-size: 0.75rem;
+    user-select: none;
+}
+
+.settings-footer-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color 0.15s ease;
+    cursor: pointer;
+}
+
+.settings-footer-link:hover {
+    color: var(--text-main);
+    text-decoration: underline;
+}
+
+.settings-footer-link svg {
+    opacity: 0.75;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.settings-footer-link:hover svg {
+    opacity: 1;
+    transform: translate(1px, -1px);
 }
 
 .footer-actions {
@@ -872,6 +921,12 @@ kbd {
         width: 64px;
         min-width: 64px;
         padding: 12px 8px;
+    }
+
+    .settings-footer-meta {
+        align-items: center;
+        text-align: center;
+        order: 2;
     }
 
     .tab-btn {

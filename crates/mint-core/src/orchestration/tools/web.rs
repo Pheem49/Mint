@@ -22,7 +22,17 @@ pub(in crate::orchestration) async fn execute(
         )
         .map_err(|e| OrchestrationError::Agent(e.to_string()))?),
         "web_search" => {
-            let query = required(&input.query, "query")?;
+            let query = if !input.query.trim().is_empty() {
+                input.query.trim()
+            } else if !input.prompt.trim().is_empty() {
+                input.prompt.trim()
+            } else if !input.command.trim().is_empty() {
+                input.command.trim()
+            } else if !input.symbol.trim().is_empty() {
+                input.symbol.trim()
+            } else {
+                required(&input.query, "query")?
+            };
             let limit = input.limit.unwrap_or(5);
             match crate::web_search::search(query, limit, config).await {
                 Ok((hits, provider)) => {

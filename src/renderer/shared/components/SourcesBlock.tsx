@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import type { WebSearchSource } from '../utils/agentActivity'
+import { resolveMediaUrl } from '../utils/markdown'
 
 export interface SourcesBlockProps {
   sources: WebSearchSource[]
@@ -163,9 +164,10 @@ export const SourcesBlock: React.FC<SourcesBlockProps> = React.memo(function Sou
                 {primaryItem.imageUrl && (
                   <div style={{ width: '100%', height: '80px', overflow: 'hidden', background: 'rgba(255,255,255,0.06)', flexShrink: 0 }}>
                     <img
-                      src={primaryItem.imageUrl}
+                      src={resolveMediaUrl(primaryItem.imageUrl)}
                       alt={primaryItem.title}
                       loading="lazy"
+                      referrerPolicy="no-referrer"
                       style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                       onError={(e) => { (e.currentTarget as HTMLImageElement).parentElement!.style.display = 'none' }}
                     />

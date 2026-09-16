@@ -83,6 +83,48 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             }
         }
 
+        ("POST", "/api/mcp/test") => {
+            #[derive(Deserialize)]
+            struct TestMcpPayload {
+                url: String,
+                headers: Option<std::collections::BTreeMap<String, String>>,
+            }
+            match serde_json::from_str::<TestMcpPayload>(body) {
+                Ok(payload) => {
+                    let result = tokio::task::spawn_blocking(move || {
+                        crate::test_remote_mcp_connection(&payload.url, payload.headers)
+                    })
+                    .await;
+                    match result {
+                        Ok(Ok(info)) => {
+                            send_json_response(socket, "200 OK", &info.to_string()).await;
+                        }
+                        Ok(Err(err)) => {
+                            let err_msg =
+                                json!({ "ok": false, "error": err.to_string() }).to_string();
+                            send_json_response(socket, "400 Bad Request", &err_msg).await;
+                        }
+                        Err(err) => {
+                            let err_msg = json!({
+                                "ok": false,
+                                "error": format!("task failed: {err}")
+                            })
+                            .to_string();
+                            send_json_response(socket, "500 Internal Server Error", &err_msg).await;
+                        }
+                    }
+                }
+                Err(_) => {
+                    send_json_response(
+                        socket,
+                        "400 Bad Request",
+                        "{\"ok\": false, \"error\":\"Invalid request body.\"}",
+                    )
+                    .await;
+                }
+            }
+        }
+
         ("GET", "/api/cron") => {
             let jobs = crate::CronStore::open_default()
                 .and_then(|store| store.list())

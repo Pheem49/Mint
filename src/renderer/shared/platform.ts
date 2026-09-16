@@ -50,12 +50,13 @@ export type SlashEffect =
   | { kind: 'history_cleared' }
   | { kind: 'fast_mode_changed'; enabled: boolean }
   | { kind: 'multi_agent_changed'; enabled: boolean }
+  | { kind: 'plan_mode_changed'; enabled: boolean }
 
 export type SlashResponse =
   | { kind: 'message'; markdown: string }
   | { kind: 'applied'; markdown: string; effects: SlashEffect[] }
   | { kind: 'needs_choice'; command: string; title: string; options: SlashChoice[] }
-  | { kind: 'forward_to_agent'; prompt: string; agent_mode: boolean }
+  | { kind: 'forward_to_agent'; prompt: string; agent_mode: boolean; plan_mode?: boolean }
   | { kind: 'navigate'; target: SlashNavTarget; markdown: string }
   | { kind: 'exit' }
   | { kind: 'not_handled' }
@@ -135,5 +136,10 @@ export interface MintPlatformApi {
   readClipboardImage(): Promise<string | null>
   listGitCheckpoints(chatId: string): Promise<GitCheckpoint[]>
   rollbackGitCheckpoint(chatId: string, step: number, workspacePath?: string): Promise<{ status: string; message: string }>
-  readWorkspaceFile(path: string): Promise<string>
+  undoGitCheckpoint(workspacePath?: string): Promise<{ status: string; message: string }>
+  readWorkspaceFile(path: string, workspacePath?: string): Promise<string>
+  testMcpConnection(
+    url: string,
+    headers?: Record<string, string>,
+  ): Promise<{ ok: boolean; error?: string; server_info?: any; tools_count?: number; tools?: any[] }>
 }

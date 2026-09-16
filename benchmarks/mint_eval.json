@@ -1,0 +1,33 @@
+{
+  "name": "Mint Agent Harness Core Benchmark",
+  "version": "1.0.0",
+  "tasks": [
+    {
+      "id": "eval-001",
+      "title": "Search Documentation and Knowledge Base",
+      "prompt": "Use the search_docs tool to search for architecture guidelines in the project.",
+      "setupCommands": [],
+      "verifyCommands": [],
+      "maxFilesModified": 0,
+      "expectedModifiedFiles": []
+    },
+    {
+      "id": "eval-002",
+      "title": "Create Architecture Decision Record (ADR)",
+      "prompt": "Create an architecture decision record document for Git Safety using create_project_doc.",
+      "setupCommands": [],
+      "verifyCommands": [],
+      "maxFilesModified": 2,
+      "expectedModifiedFiles": []
+    },
+    {
+      "id": "eval-003",
+      "title": "Git Safety Checkpoint and Rollback Test",
+      "prompt": "Create a safety checkpoint before making changes.",
+      "setupCommands": [],
+      "verifyCommands": [],
+      "maxFilesModified": 1,
+      "expectedModifiedFiles": []
+    }
+  ]
+}

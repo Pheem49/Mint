@@ -24,12 +24,14 @@ import SourcesBlock from './SourcesBlock'
 import ChatMessageItem from './ChatMessageItem'
 import { AgentActivityDrawer } from './AgentActivityDrawer'
 import { ArtifactPreviewPanel, type ArtifactFile } from './ArtifactPreviewPanel'
-import type { DiffHunk, FileChange } from '../types'
+import { RewindModal } from './RewindModal'
+import type { DiffHunk, FileChange, GitCheckpoint } from '../types'
 import { numericSetting, shouldShowSessionDivider, formatSessionDividerLabel } from '../utils/ui'
 import { useVoiceInput } from '@/voiceInput'
 import { useGeminiLiveVoice } from '../utils/useGeminiLiveVoice'
 import GeminiLiveOverlay from './GeminiLiveOverlay'
 import { isSupportedDocument, SUPPORTED_DOCUMENT_ACCEPT } from '../utils/documentTypes'
+import ModelSelectorPopover from './ModelSelectorPopover'
 
 import {
   APP_ICON_PATH,
@@ -42,6 +44,8 @@ import {
   stopGeminiLiveSession,
   listGitCheckpoints,
   rollbackGitCheckpoint,
+  undoGitCheckpoint,
+  fetchProviderModels,
 } from '@/tauri'
 
 
@@ -93,6 +97,7 @@ interface ChatPanelProps {
   onApproval: (approved: boolean, autoApproveSession?: boolean, answer?: string) => void
   settingsConfig: any
   onSetModel: (model: string) => void
+  onSelectModelAndProvider?: (provider: string, model: string) => void
   onCancelMessage: () => void
   onClearMessages: () => void
   onSetGeminiLiveVoice: (voice: string) => Promise<void>
@@ -145,6 +150,7 @@ export default function ChatPanel({
   onApproval,
   settingsConfig,
   onSetModel,
+  onSelectModelAndProvider,
   onCancelMessage,
   onClearMessages,
   onSetGeminiLiveVoice,
@@ -168,26 +174,49 @@ export default function ChatPanel({
   const [dynamicOllamaModels, setDynamicOllamaModels] = useState<string[]>(OLLAMA_MODELS)
 
   useEffect(() => {
+    let cancelled = false
     const fetchOllamaModels = async () => {
-      if (status?.activeProvider !== 'ollama') return;
-      const host = settingsConfig?.ollamaHost || 'http://localhost:11434';
-      const cleanHost = host.endsWith('/') ? host.slice(0, -1) : host;
+      const host = settingsConfig?.ollamaHost || 'http://localhost:11434'
+      const cleanHost = host.endsWith('/') ? host.slice(0, -1) : host
       try {
-        const res = await fetch(`${cleanHost}/api/tags`);
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 2000)
+        const res = await fetch(`${cleanHost}/api/tags`, { signal: controller.signal })
+        clearTimeout(timer)
         if (res.ok) {
-          const data = await res.json();
-          if (data && Array.isArray(data.models)) {
-            setDynamicOllamaModels(data.models.map((m: any) => m.name));
-            return;
+          const data = await res.json()
+          if (!cancelled && data && Array.isArray(data.models) && data.models.length > 0) {
+            setDynamicOllamaModels(data.models.map((m: any) => m.name))
+            return
           }
         }
       } catch (err) {
-        // fallback to default if fetch fails
+        // Direct fetch failed or timed out — try backend Tauri / API server
       }
-      setDynamicOllamaModels(OLLAMA_MODELS);
+
+      try {
+        const live = await fetchProviderModels('ollama', '')
+        if (!cancelled && live && live.length > 0) {
+          setDynamicOllamaModels(live)
+          return
+        }
+      } catch (err) {
+        // Fallback
+      }
+
+      if (!cancelled) {
+        if (settingsConfig?.ollamaModel) {
+          setDynamicOllamaModels([settingsConfig.ollamaModel])
+        } else {
+          setDynamicOllamaModels(OLLAMA_MODELS)
+        }
+      }
     }
-    fetchOllamaModels();
-  }, [status?.activeProvider, settingsConfig?.ollamaHost])
+    fetchOllamaModels()
+    return () => {
+      cancelled = true
+    }
+  }, [settingsConfig?.ollamaHost, settingsConfig?.ollamaModel])
 
   useEffect(() => {
     if (!sending) {
@@ -210,17 +239,202 @@ export default function ChatPanel({
 
   const chatContainerRef = useRef<HTMLDivElement | null>(null)
   const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+  const isNearBottomRef = useRef(true)
 
   const handleChatScroll = useCallback(() => {
     const el = chatContainerRef.current
     if (!el) return
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    setShowScrollToBottom(distanceFromBottom > 240)
+    const nearBottom = distanceFromBottom <= 240
+    setShowScrollToBottom(!nearBottom)
+    isNearBottomRef.current = nearBottom
   }, [])
+
+  useEffect(() => {
+    const el = chatContainerRef.current
+    if (!el) return
+    if (isNearBottomRef.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [activeArtifact])
 
   const scrollToBottom = useCallback(() => {
     chatEnd.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatEnd])
+
+  const [splitRatio, setSplitRatio] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('mint_preview_split_ratio')
+      if (saved) {
+        const val = parseFloat(saved)
+        if (!isNaN(val) && val >= 0.2 && val <= 0.8) {
+          return val
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return 0.5
+  })
+  const currentRatioRef = useRef(splitRatio)
+  const wrapperRef = useRef<HTMLDivElement | null>(null)
+
+  const handleResizerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
+
+    wrapper.classList.add('is-resizing')
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const rect = wrapper.getBoundingClientRect()
+      const totalWidth = rect.width
+      if (totalWidth <= 0) return
+
+      const previewPx = rect.right - moveEvent.clientX
+      const clampedPreviewPx = Math.max(280, Math.min(totalWidth - 340, previewPx))
+      const newRatio = clampedPreviewPx / totalWidth
+      currentRatioRef.current = newRatio
+      wrapper.style.setProperty('--preview-width', `${(newRatio * 100).toFixed(2)}%`)
+    }
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+      wrapper.classList.remove('is-resizing')
+      setSplitRatio(currentRatioRef.current)
+      try {
+        localStorage.setItem('mint_preview_split_ratio', currentRatioRef.current.toFixed(4))
+      } catch {
+        // ignore
+      }
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }, [])
+
+  const handleResizerDoubleClick = useCallback(() => {
+    const defaultRatio = 0.5
+    currentRatioRef.current = defaultRatio
+    setSplitRatio(defaultRatio)
+    if (wrapperRef.current) {
+      wrapperRef.current.style.setProperty('--preview-width', '50%')
+    }
+    try {
+      localStorage.setItem('mint_preview_split_ratio', '0.5')
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  const [rewindModalState, setRewindModalState] = useState<{
+    isOpen: boolean
+    interaction: any | null
+    changes: FileChange[]
+    checkpoints: GitCheckpoint[]
+    targetCheckpoint: GitCheckpoint | null
+    isLoading: boolean
+  }>({
+    isOpen: false,
+    interaction: null,
+    changes: [],
+    checkpoints: [],
+    targetCheckpoint: null,
+    isLoading: false,
+  })
+
+  const [undoToastState, setUndoToastState] = useState<{
+    visible: boolean
+    message: string
+    canUndo: boolean
+    isUndoing: boolean
+    type: 'success' | 'error'
+  }>({
+    visible: false,
+    message: '',
+    canUndo: false,
+    isUndoing: false,
+    type: 'success',
+  })
+
+  useEffect(() => {
+    if (!undoToastState.visible) return
+    const timer = setTimeout(() => {
+      setUndoToastState((prev) => ({ ...prev, visible: false }))
+    }, 16000)
+    return () => clearTimeout(timer)
+  }, [undoToastState.visible, undoToastState.message])
+
+  const handleConfirmRewind = useCallback(async (targetStep: number) => {
+    const interaction = rewindModalState.interaction
+    if (!interaction) return
+    const chatId = interaction.chatId || 'cli'
+
+    setRewindModalState((prev) => ({ ...prev, isLoading: true }))
+    try {
+      const res = await rollbackGitCheckpoint(chatId, targetStep, workspacePath)
+      setRewindModalState((prev) => ({ ...prev, isOpen: false, isLoading: false }))
+      if (res.status === 'ok') {
+        setUndoToastState({
+          visible: true,
+          message: res.message,
+          canUndo: true,
+          isUndoing: false,
+          type: 'success',
+        })
+      } else {
+        setUndoToastState({
+          visible: true,
+          message: `Failed to rewind: ${res.message}`,
+          canUndo: false,
+          isUndoing: false,
+          type: 'error',
+        })
+      }
+    } catch (err: any) {
+      setRewindModalState((prev) => ({ ...prev, isOpen: false, isLoading: false }))
+      setUndoToastState({
+        visible: true,
+        message: `Error: ${err.message || String(err)}`,
+        canUndo: false,
+        isUndoing: false,
+        type: 'error',
+      })
+    }
+  }, [rewindModalState.interaction, workspacePath])
+
+  const handleUndoRewind = useCallback(async () => {
+    setUndoToastState((prev) => ({ ...prev, isUndoing: true }))
+    try {
+      const res = await undoGitCheckpoint(workspacePath)
+      if (res.status === 'ok') {
+        setUndoToastState({
+          visible: true,
+          message: res.message,
+          canUndo: false,
+          isUndoing: false,
+          type: 'success',
+        })
+      } else {
+        setUndoToastState({
+          visible: true,
+          message: `Failed to undo rewind: ${res.message}`,
+          canUndo: true,
+          isUndoing: false,
+          type: 'error',
+        })
+      }
+    } catch (err: any) {
+      setUndoToastState({
+        visible: true,
+        message: `Error: ${err.message || String(err)}`,
+        canUndo: true,
+        isUndoing: false,
+        type: 'error',
+      })
+    }
+  }, [workspacePath])
 
   const handleCopyMessage = useCallback(async (id: string | number, text: string) => {
     try {
@@ -247,6 +461,7 @@ export default function ChatPanel({
   // Drag and Drop Zone Overlay
   const [isDragging, setIsDragging] = useState(false)
   const dragCounter = useRef(0)
+  const lastDropTimeRef = useRef(0)
 
   const handleDragEnter = (e: DragEvent<HTMLElement>) => {
     e.preventDefault()
@@ -272,8 +487,15 @@ export default function ChatPanel({
 
   const handleDrop = (e: DragEvent<HTMLElement>) => {
     e.preventDefault()
+    e.stopPropagation()
     dragCounter.current = 0
     setIsDragging(false)
+
+    const now = Date.now()
+    if (now - lastDropTimeRef.current < 250) {
+      return
+    }
+    lastDropTimeRef.current = now
 
     const files = e.dataTransfer?.files
     if (files && files.length > 0) {
@@ -770,6 +992,101 @@ export default function ChatPanel({
     return <SourcesBlock sources={sources} />
   }, [agentActivitySnapshots])
 
+  const renderChangesList = (changes: ReturnType<typeof parseFileChangesFromProgress>, idPrefix: string) => {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        {changes.map((change) => {
+          const fileKey = `${idPrefix}-${change.path}`
+          const isDiffOpen = Boolean(openFileDiffs[fileKey])
+          const fileName = change.path.split('/').pop() || change.path
+          const dirPath = change.path.includes('/') ? change.path.substring(0, change.path.lastIndexOf('/')) : ''
+
+          return (
+            <div key={change.path} className="file-changes-item">
+              <div
+                className="file-changes-item-header"
+                onClick={() => setOpenFileDiffs((current) => ({ ...current, [fileKey]: !current[fileKey] }))}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-muted)' }}>
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                  <span className={`file-changes-filename ${change.created ? 'is-new' : ''}`}>
+                    {fileName}
+                    {dirPath && <span className="file-changes-dirpath">{dirPath}</span>}
+                    {change.created && (
+                      <span className="file-changes-badge-new">
+                        [NEW FILE]
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem' }}>
+                  {change.created ? (
+                    <span className="file-changes-count-add">
+                      +{change.additions} {change.additions === 1 ? 'line' : 'lines'}
+                    </span>
+                  ) : (
+                    <>
+                      {change.additions > 0 && <span className="file-changes-count-add">+{change.additions}</span>}
+                      {change.deletions > 0 && <span className="file-changes-count-del">-{change.deletions}</span>}
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className="file-changes-preview-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      const fallbackContent =
+                        change.created && change.hunks.length > 0
+                          ? change.hunks.map((h) => h.newText).filter(Boolean).join('\n')
+                          : undefined
+                      setActiveArtifact({ path: change.path, content: fallbackContent })
+                    }}
+                    title="Open Live Preview Split View"
+                  >
+                    Preview
+                  </button>
+                  <span style={{ color: 'var(--text-muted)', transform: isDiffOpen ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform 0.15s' }}>&gt;</span>
+                </div>
+              </div>
+
+              {isDiffOpen && (
+                <div className="file-changes-diff-box">
+                  {change.hunks.map((hunk, hIdx) => (
+                    <div key={hIdx} className="file-changes-diff-hunk" style={{ marginBottom: hIdx < change.hunks.length - 1 ? '10px' : 0 }}>
+                      {hunk.oldText && (
+                        <div className="file-changes-diff-del">
+                          {hunk.oldText.split('\n').map((line, lIdx) => (
+                            <div key={lIdx} style={{ display: 'flex' }}>
+                              <span className="file-changes-diff-sign-del">-</span>
+                              <span>{line}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {hunk.newText && (
+                        <div className="file-changes-diff-add">
+                          {hunk.newText.split('\n').map((line, lIdx) => (
+                            <div key={lIdx} style={{ display: 'flex' }}>
+                              <span className="file-changes-diff-sign-add">+</span>
+                              <span>{line}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   const renderFileChanges = useCallback((interaction: any) => {
     const interactionId = String(interaction.id)
     const progress = agentActivitySnapshots[interactionId] ?? interaction.agentActivity ?? []
@@ -778,30 +1095,78 @@ export default function ChatPanel({
 
     const totalAdditions = changes.reduce((sum, c) => sum + c.additions, 0)
     const totalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0)
+    const createdCount = changes.filter((c) => c.created).length
+    const modifiedCount = changes.length - createdCount
     const isOpen = Boolean(openReviewIds[interactionId])
+
+    let summaryLabel = ''
+    if (createdCount > 0 && modifiedCount === 0) {
+      summaryLabel = `${createdCount} ${createdCount === 1 ? 'file created' : 'files created'}`
+    } else if (createdCount > 0 && modifiedCount > 0) {
+      summaryLabel = `${createdCount} created, ${modifiedCount} modified`
+    } else {
+      summaryLabel = `${changes.length} ${changes.length === 1 ? 'file changed' : 'files changed'}`
+    }
 
     const handleRewind = async (e: React.MouseEvent) => {
       e.stopPropagation()
       const chatId = interaction.chatId || 'cli'
-      const confirmed = window.confirm(
-        'Are you sure you want to rewind your workspace files to the checkpoint before these changes? A rescue snapshot will be preserved automatically.'
-      )
-      if (!confirmed) return
       try {
         const checkpoints = await listGitCheckpoints(chatId)
-        if (checkpoints.length === 0) {
-          alert('No git checkpoints recorded for this session.')
+        if (!checkpoints || checkpoints.length === 0) {
+          setUndoToastState({
+            visible: true,
+            message: 'No git checkpoints recorded for this session.',
+            canUndo: false,
+            isUndoing: false,
+            type: 'error',
+          })
           return
         }
-        const targetCp = checkpoints[checkpoints.length - 1]
-        const res = await rollbackGitCheckpoint(chatId, targetCp.step, workspacePath)
-        if (res.status === 'ok') {
-          alert(res.message)
+
+        // Targeted Step Checkpoint resolution:
+        // Match checkpoints against files touched in this specific interaction
+        const changePaths = new Set(changes.map((c) => c.path.trim().toLowerCase()))
+        const matching = checkpoints.filter((cp) => {
+          if (!cp.targetPath) return false
+          const cpPath = cp.targetPath.trim().toLowerCase()
+          return changePaths.has(cpPath) || Array.from(changePaths).some((p) => cpPath.endsWith(p) || p.endsWith(cpPath))
+        })
+
+        let targetCp: GitCheckpoint | null = null
+        if (matching.length > 0) {
+          // Earliest matching checkpoint represents the state immediately before this turn's modifications
+          targetCp = matching.reduce((earliest, curr) => (curr.step < earliest.step ? curr : earliest), matching[0])
         } else {
-          alert(`Failed to rewind: ${res.message}`)
+          // If no direct target path, try matching by timestamp
+          const interactionTs = interaction.createdAt ? new Date(interaction.createdAt).getTime() / 1000 : 0
+          if (interactionTs > 0) {
+            const afterCreated = checkpoints.filter((cp) => cp.timestamp >= interactionTs - 10)
+            if (afterCreated.length > 0) {
+              targetCp = afterCreated[0]
+            }
+          }
+          if (!targetCp) {
+            targetCp = checkpoints[checkpoints.length - 1]
+          }
         }
+
+        setRewindModalState({
+          isOpen: true,
+          interaction,
+          changes,
+          checkpoints,
+          targetCheckpoint: targetCp,
+          isLoading: false,
+        })
       } catch (err: any) {
-        alert(`Error: ${err.message || String(err)}`)
+        setUndoToastState({
+          visible: true,
+          message: `Failed to load checkpoints: ${err.message || String(err)}`,
+          canUndo: false,
+          isUndoing: false,
+          type: 'error',
+        })
       }
     }
 
@@ -810,41 +1175,35 @@ export default function ChatPanel({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
           <button
             type="button"
-            className="agent-activity-toggle"
+            className="agent-activity-toggle file-changes-toggle"
             aria-expanded={isOpen}
             onClick={() => setOpenReviewIds((current) => ({ ...current, [interactionId]: !current[interactionId] }))}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 500 }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
               <polyline points="22 4 12 14.01 9 11.01" />
             </svg>
             <span>
-              {changes.length} {changes.length === 1 ? 'file' : 'files'} changed
-              {totalAdditions > 0 && <span style={{ color: '#10b981', marginLeft: '6px' }}>+{totalAdditions}</span>}
-              {totalDeletions > 0 && <span style={{ color: '#ef4444', marginLeft: '4px' }}>-{totalDeletions}</span>}
+              {summaryLabel}
+              {createdCount > 0 && modifiedCount === 0 ? (
+                <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>
+                  (+{totalAdditions} {totalAdditions === 1 ? 'line' : 'lines'})
+                </span>
+              ) : (
+                <>
+                  {totalAdditions > 0 && <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>+{totalAdditions}</span>}
+                  {totalDeletions > 0 && <span className="file-changes-count-del" style={{ marginLeft: '4px' }}>-{totalDeletions}</span>}
+                </>
+              )}
             </span>
             <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
           </button>
 
           <button
             type="button"
+            className="file-changes-rewind-btn"
             onClick={handleRewind}
             title="Rewind workspace to before these file edits (Git Checkpoint)"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              padding: '2px 8px',
-              fontSize: '0.72rem',
-              borderRadius: '4px',
-              background: 'rgba(239, 68, 68, 0.1)',
-              color: '#f87171',
-              border: '1px solid rgba(239, 68, 68, 0.25)',
-              cursor: 'pointer',
-              fontWeight: 500,
-              transition: 'all 0.15s ease'
-            }}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="1 4 1 10 7 10" />
@@ -855,92 +1214,13 @@ export default function ChatPanel({
         </div>
 
         {isOpen && (
-          <div className="agent-activity-card" style={{ border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '8px', padding: '10px', background: 'rgba(15, 23, 42, 0.6)', marginTop: '4px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {changes.map((change) => {
-                const fileKey = `${interactionId}-${change.path}`
-                const isDiffOpen = Boolean(openFileDiffs[fileKey])
-                const fileName = change.path.split('/').pop() || change.path
-                const dirPath = change.path.includes('/') ? change.path.substring(0, change.path.lastIndexOf('/')) : ''
-
-                return (
-                  <div key={change.path} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '4px' }}>
-                    <div
-                      onClick={() => setOpenFileDiffs((current) => ({ ...current, [fileKey]: !current[fileKey] }))}
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '4px 6px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.02)' }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                          <polyline points="14 2 14 8 20 8" />
-                        </svg>
-                        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: change.created ? '#10b981' : '#cbd5e1' }}>
-                          {fileName}
-                          {dirPath && <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 400, marginLeft: '6px' }}>{dirPath}</span>}
-                          {change.created && <span style={{ fontSize: '0.7rem', color: '#10b981', marginLeft: '6px', padding: '1px 4px', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '3px', background: 'rgba(16, 185, 129, 0.1)' }}>new</span>}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem' }}>
-                        {change.additions > 0 && <span style={{ color: '#10b981' }}>+{change.additions}</span>}
-                        {change.deletions > 0 && <span style={{ color: '#ef4444' }}>-{change.deletions}</span>}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setActiveArtifact({ path: change.path })
-                          }}
-                          title="Open Live Preview Split View"
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '3px',
-                            padding: '1px 6px',
-                            fontSize: '0.68rem',
-                            borderRadius: '4px',
-                            background: 'rgba(16, 185, 129, 0.15)',
-                            color: '#10b981',
-                            border: '1px solid rgba(16, 185, 129, 0.3)',
-                            cursor: 'pointer',
-                            fontWeight: 500,
-                          }}
-                        >
-                          Preview
-                        </button>
-                        <span style={{ color: '#64748b', transform: isDiffOpen ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform 0.15s' }}>&gt;</span>
-                      </div>
-                    </div>
-
-                    {isDiffOpen && (
-                      <div style={{ marginTop: '6px', background: '#0b0f19', borderRadius: '6px', padding: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', overflowX: 'auto', maxHeight: '300px' }}>
-                        {change.hunks.map((hunk, hIdx) => (
-                          <div key={hIdx} style={{ fontSize: '0.74rem', fontFamily: 'monospace', lineHeight: '1.4', marginBottom: hIdx < change.hunks.length - 1 ? '10px' : 0 }}>
-                            {hunk.oldText && (
-                              <div style={{ background: 'rgba(239, 68, 68, 0.12)', borderLeft: '3px solid #ef4444', padding: '4px 6px', color: '#fca5a5', whiteSpace: 'pre-wrap' }}>
-                                {hunk.oldText.split('\n').map((line, lIdx) => (
-                                  <div key={lIdx}>- {line}</div>
-                                ))}
-                              </div>
-                            )}
-                            {hunk.newText && (
-                              <div style={{ background: 'rgba(16, 185, 129, 0.12)', borderLeft: '3px solid #10b981', padding: '4px 6px', color: '#a7f3d0', whiteSpace: 'pre-wrap' }}>
-                                {hunk.newText.split('\n').map((line, lIdx) => (
-                                  <div key={lIdx}>+ {line}</div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+          <div className="agent-activity-card file-changes-card">
+            {renderChangesList(changes, interactionId)}
           </div>
         )}
       </div>
     )
-  }, [agentActivitySnapshots, openReviewIds, openFileDiffs])
+  }, [agentActivitySnapshots, openReviewIds, openFileDiffs, workspacePath])
 
   const renderActiveFileChanges = () => {
     const changes = parseFileChangesFromProgress(agentProgress)
@@ -948,110 +1228,52 @@ export default function ChatPanel({
 
     const totalAdditions = changes.reduce((sum, c) => sum + c.additions, 0)
     const totalDeletions = changes.reduce((sum, c) => sum + c.deletions, 0)
+    const createdCount = changes.filter((c) => c.created).length
+    const modifiedCount = changes.length - createdCount
     const isOpen = Boolean(openReviewIds['active-run'])
+
+    let summaryLabel = ''
+    if (createdCount > 0 && modifiedCount === 0) {
+      summaryLabel = `${createdCount} ${createdCount === 1 ? 'file created' : 'files created'} in this run`
+    } else if (createdCount > 0 && modifiedCount > 0) {
+      summaryLabel = `${createdCount} created, ${modifiedCount} modified in this run`
+    } else {
+      summaryLabel = `${changes.length} ${changes.length === 1 ? 'file changed' : 'files changed'} in this run`
+    }
 
     return (
       <div className="message ai-message agent-activity-message" style={{ marginTop: '4px', marginBottom: '8px' }}>
-        <div className="agent-activity-card" style={{ border: '1px solid rgba(16, 185, 129, 0.25)', borderRadius: '8px', padding: '10px', background: 'rgba(15, 23, 42, 0.6)' }}>
+        <div className="agent-activity-card file-changes-card">
           <button
             type="button"
-            className="agent-activity-toggle"
+            className="agent-activity-toggle file-changes-toggle"
             aria-expanded={isOpen}
             onClick={() => setOpenReviewIds((current) => ({ ...current, 'active-run': !current['active-run'] }))}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 500, border: 0, background: 'transparent', padding: 0 }}
+            style={{ border: 0, background: 'transparent', padding: 0 }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '2px' }}>
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
               <polyline points="22 4 12 14.01 9 11.01" />
             </svg>
             <span>
-              {changes.length} {changes.length === 1 ? 'file' : 'files'} changed in this run
-              {totalAdditions > 0 && <span style={{ color: '#10b981', marginLeft: '6px' }}>+{totalAdditions}</span>}
-              {totalDeletions > 0 && <span style={{ color: '#ef4444', marginLeft: '4px' }}>-{totalDeletions}</span>}
+              {summaryLabel}
+              {createdCount > 0 && modifiedCount === 0 ? (
+                <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>
+                  (+{totalAdditions} {totalAdditions === 1 ? 'line' : 'lines'})
+                </span>
+              ) : (
+                <>
+                  {totalAdditions > 0 && <span className="file-changes-count-add" style={{ marginLeft: '6px' }}>+{totalAdditions}</span>}
+                  {totalDeletions > 0 && <span className="file-changes-count-del" style={{ marginLeft: '4px' }}>-{totalDeletions}</span>}
+                </>
+              )}
             </span>
             <span aria-hidden="true">{isOpen ? '^' : '>'}</span>
           </button>
 
           {isOpen && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
-              {changes.map((change) => {
-                const fileKey = `active-${change.path}`
-                const isDiffOpen = Boolean(openFileDiffs[fileKey])
-                const fileName = change.path.split('/').pop() || change.path
-                const dirPath = change.path.includes('/') ? change.path.substring(0, change.path.lastIndexOf('/')) : ''
-
-                return (
-                  <div key={change.path} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)', paddingBottom: '4px' }}>
-                    <div
-                      onClick={() => setOpenFileDiffs((current) => ({ ...current, [fileKey]: !current[fileKey] }))}
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '4px 6px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.02)' }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                          <polyline points="14 2 14 8 20 8" />
-                        </svg>
-                        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: change.created ? '#10b981' : '#cbd5e1' }}>
-                          {fileName}
-                          {dirPath && <span style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 400, marginLeft: '6px' }}>{dirPath}</span>}
-                          {change.created && <span style={{ fontSize: '0.7rem', color: '#10b981', marginLeft: '6px', padding: '1px 4px', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '3px', background: 'rgba(16, 185, 129, 0.1)' }}>new</span>}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.76rem' }}>
-                        {change.additions > 0 && <span style={{ color: '#10b981' }}>+{change.additions}</span>}
-                        {change.deletions > 0 && <span style={{ color: '#ef4444' }}>-{change.deletions}</span>}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setActiveArtifact({ path: change.path })
-                          }}
-                          title="Open Live Preview Split View"
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '3px',
-                            padding: '1px 6px',
-                            fontSize: '0.68rem',
-                            borderRadius: '4px',
-                            background: 'rgba(16, 185, 129, 0.15)',
-                            color: '#10b981',
-                            border: '1px solid rgba(16, 185, 129, 0.3)',
-                            cursor: 'pointer',
-                            fontWeight: 500,
-                          }}
-                        >
-                          Preview
-                        </button>
-                        <span style={{ color: '#64748b', transform: isDiffOpen ? 'rotate(90deg)' : 'none', display: 'inline-block', transition: 'transform 0.15s' }}>&gt;</span>
-                      </div>
-                    </div>
-
-                    {isDiffOpen && (
-                      <div style={{ marginTop: '6px', background: '#0b0f19', borderRadius: '6px', padding: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', overflowX: 'auto', maxHeight: '300px' }}>
-                        {change.hunks.map((hunk, hunkIdx) => (
-                          <div key={hunkIdx} style={{ fontSize: '0.74rem', fontFamily: 'monospace', lineHeight: '1.4', marginBottom: hunkIdx < change.hunks.length - 1 ? '10px' : 0 }}>
-                            {hunk.oldText && (
-                              <div style={{ background: 'rgba(239, 68, 68, 0.12)', borderLeft: '3px solid #ef4444', padding: '4px 6px', color: '#fca5a5', whiteSpace: 'pre-wrap' }}>
-                                {hunk.oldText.split('\n').map((line, lIdx) => (
-                                  <div key={lIdx}>- {line}</div>
-                                ))}
-                              </div>
-                            )}
-                            {hunk.newText && (
-                              <div style={{ background: 'rgba(16, 185, 129, 0.12)', borderLeft: '3px solid #10b981', padding: '4px 6px', color: '#a7f3d0', whiteSpace: 'pre-wrap' }}>
-                                {hunk.newText.split('\n').map((line, lIdx) => (
-                                  <div key={lIdx}>+ {line}</div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+            <div style={{ marginTop: '8px' }}>
+              {renderChangesList(changes, 'active')}
             </div>
           )}
         </div>
@@ -1066,7 +1288,7 @@ export default function ChatPanel({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      style={activeArtifact ? { flex: '1 1 50%', minWidth: '340px', width: 'auto', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
+      style={activeArtifact ? { flex: '0 0 calc(100% - var(--preview-width, 50%))', width: 'calc(100% - var(--preview-width, 50%))', minWidth: '320px', maxWidth: 'none', margin: 0, position: 'relative' } : undefined}
     >
         {isDragging && (
           <div
@@ -1095,7 +1317,7 @@ export default function ChatPanel({
               pointerEvents: 'auto',
             }}
           >
-            <div style={{ marginBottom: '16px', color: '#10b981' }}>
+            <div style={{ marginBottom: '16px', color: 'var(--accent)' }}>
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                 <circle cx="8.5" cy="8.5" r="1.5" />
@@ -1103,7 +1325,7 @@ export default function ChatPanel({
               </svg>
             </div>
             <div style={{ fontSize: '1.25rem', fontWeight: 'bold', letterSpacing: '0.5px' }}>Drag files to attach data</div>
-            <div style={{ fontSize: '0.85rem', color: '#94a3b8', marginTop: '8px' }}>Supports images (PNG, JPEG, WebP, GIF), videos (MP4, WebM, MOV, MKV), and PDF files</div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '8px' }}>Supports images (PNG, JPEG, WebP, GIF), videos (MP4, WebM, MOV, MKV), and PDF files</div>
           </div>
         )}
         <div className="chat-header">
@@ -1133,11 +1355,11 @@ export default function ChatPanel({
                 title="Close Live Preview"
                 onClick={() => setActiveArtifact(null)}
                 style={{
-                  color: '#10b981',
-                  background: 'rgba(16, 185, 129, 0.1)',
-                  border: '1px solid rgba(16, 185, 129, 0.25)',
+                  color: 'var(--accent)',
+                  background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)',
                   padding: '2px 8px',
-                  borderRadius: '4px',
+                  borderRadius: 'var(--radius-xs, 4px)',
                   fontSize: '0.74rem',
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -1254,7 +1476,12 @@ export default function ChatPanel({
                 </div>
                 {streamedResponse && (
                   <div className="message-time" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <button className="provider-badge">{badge(streamedResponse.provider, streamedResponse.model)}</button>
+                    <span className="provider-model-chip" data-provider={(streamedResponse.provider || '').toLowerCase()} title={`${streamedResponse.provider} • ${streamedResponse.model}`}>
+                      <span className="provider-chip-dot" aria-hidden="true" />
+                      <span className="provider-chip-name">{streamedResponse.provider}</span>
+                      <span className="provider-chip-divider">/</span>
+                      <span className="provider-chip-model">{streamedResponse.model}</span>
+                    </span>
                     {activeFallbackNotice && <span className="provider-fallback-notice">{activeFallbackNotice}</span>}
                     {streamedReply && (
                       <div className="message-action-buttons" style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
@@ -1554,73 +1781,21 @@ export default function ChatPanel({
           <button id="screen-capture-btn" type="button" onClick={onCaptureScreen} aria-label="Capture screen">
             <span className="screen-capture-eye" aria-hidden="true" />
           </button>
-          <div className="chat-provider-select" style={{ display: 'flex', gap: '4px', padding: 0, background: 'transparent', border: 0, width: '100%', height: '32px' }}>
-            <select 
-              value={status?.activeProvider ?? ''} 
-              onChange={(event) => onSetProvider(event.target.value)}
-              style={{
-                flex: 1,
-                minWidth: '65px',
-                height: '100%',
-                padding: '0 20px 0 6px',
-                background: 'transparent',
-                border: 0,
-                color: 'var(--text-soft)',
-                fontSize: '0.78rem',
-                outline: 'none',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {status?.availableProviders.map((provider) => {
-                let displayName = provider
-                if (provider === 'gemini') displayName = 'Gemini'
-                else if (provider === 'openai') displayName = 'OpenAI'
-                else if (provider === 'openrouter') displayName = 'OpenRouter'
-                else if (provider === 'deepseek') displayName = 'DeepSeek'
-                else if (provider === 'anthropic') displayName = 'Claude'
-                else if (provider === 'huggingface') displayName = 'HF'
-                else if (provider === 'local_openai') displayName = 'Local'
-                else if (provider === 'ollama') displayName = 'Ollama'
-                else if (provider.startsWith('custom:')) {
-                  const id = provider.replace(/^custom:/, '')
-                  const cp = (settingsConfig?.customProviders ?? []).find(p => p.id === id)
-                  displayName = cp?.displayName || id
-                }
-                return <option key={provider} value={provider}>{displayName}</option>
-              })}
-            </select>
-            {(availableModels.length > 0 || activeModel) && (
-              <select 
-                value={activeModel} 
-                onChange={(event) => onSetModel(event.target.value)}
-                style={{
-                  flex: 1.2,
-                  minWidth: '85px',
-                  height: '100%',
-                  padding: '0 20px 0 6px',
-                  background: 'transparent',
-                  border: 0,
-                  color: 'var(--text-soft)',
-                  fontSize: '0.78rem',
-                  outline: 'none',
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                {availableModels.map((model) => (
-                  <option key={model} value={model}>{model.split('/').pop()}</option>
-                ))}
-                {!availableModels.includes(activeModel) && activeModel && (
-                  <option value={activeModel}>{activeModel.split('/').pop()}</option>
-                )}
-              </select>
-            )}
-          </div>
+          <ModelSelectorPopover
+            activeProvider={status?.activeProvider ?? ''}
+            activeModel={activeModel}
+            availableProviders={status?.availableProviders ?? []}
+            settingsConfig={settingsConfig}
+            dynamicOllamaModels={dynamicOllamaModels}
+            onSelect={(provider, model) => {
+              if (onSelectModelAndProvider) {
+                onSelectModelAndProvider(provider, model)
+              } else {
+                onSetProvider(provider)
+                onSetModel(model)
+              }
+            }}
+          />
           <button
             id="mic-btn"
             className={`${isRecording ? 'is-recording' : ''} ${voiceMode ? 'voice-mode-active' : ''}`}
@@ -1709,32 +1884,104 @@ export default function ChatPanel({
           }}
         />
       )}
+      {undoToastState.visible && (
+        <div className={`rewind-toast-banner ${undoToastState.type === 'error' ? 'is-error' : 'is-success'}`}>
+          <div className="rewind-toast-content">
+            {undoToastState.type === 'error' ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--status-error, #ef4444)" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+            )}
+            <span className="rewind-toast-text">{undoToastState.message}</span>
+          </div>
+
+          <div className="rewind-toast-actions">
+            {undoToastState.canUndo && (
+              <button
+                type="button"
+                className="rewind-toast-undo-btn"
+                onClick={handleUndoRewind}
+                disabled={undoToastState.isUndoing}
+                title="Restore workspace files back from safety rescue snapshot"
+              >
+                {undoToastState.isUndoing ? (
+                  'Undoing...'
+                ) : (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <polyline points="9 14 4 9 9 4" />
+                      <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+                    </svg>
+                    Undo Rewind
+                  </>
+                )}
+              </button>
+            )}
+            <button
+              type="button"
+              className="rewind-toast-close-btn"
+              onClick={() => setUndoToastState((prev) => ({ ...prev, visible: false }))}
+              aria-label="Close notification"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   )
 
-  if (!activeArtifact) {
-    return sectionContent
-  }
-
   return (
     <div
-      className="chat-panel-split-wrapper"
+      ref={wrapperRef}
+      className={`chat-panel-split-wrapper ${activeArtifact ? 'has-preview' : 'no-preview'}`}
       style={{
-        display: 'flex',
         width: '100%',
         height: '100%',
         overflow: 'hidden',
         position: 'relative',
         gridColumn: '1 / -1',
         zIndex: 1,
-      }}
+        '--preview-width': `${(splitRatio * 100).toFixed(2)}%`,
+      } as React.CSSProperties}
     >
       {sectionContent}
-      <ArtifactPreviewPanel
-        artifact={activeArtifact}
-        onClose={() => setActiveArtifact(null)}
-        workspacePath={workspacePath}
-      />
+      {activeArtifact && (
+        <>
+          <div
+            className="preview-split-resizer"
+            onMouseDown={handleResizerMouseDown}
+            onDoubleClick={handleResizerDoubleClick}
+            title="Drag to resize · Double-click to reset 50/50"
+          >
+            <div className="preview-split-resizer-grip" />
+          </div>
+          <ArtifactPreviewPanel
+            artifact={activeArtifact}
+            onClose={() => setActiveArtifact(null)}
+            workspacePath={workspacePath}
+          />
+        </>
+      )}
+      {rewindModalState.isOpen && (
+        <RewindModal
+          isOpen={rewindModalState.isOpen}
+          onClose={() => setRewindModalState((prev) => ({ ...prev, isOpen: false }))}
+          onConfirm={handleConfirmRewind}
+          checkpoints={rewindModalState.checkpoints}
+          targetCheckpoint={rewindModalState.targetCheckpoint}
+          changes={rewindModalState.changes}
+          workspacePath={workspacePath}
+          isLoading={rewindModalState.isLoading}
+        />
+      )}
     </div>
   )
 }

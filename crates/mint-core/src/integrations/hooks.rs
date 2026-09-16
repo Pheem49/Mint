@@ -130,7 +130,11 @@ fn truncate(text: &str) -> String {
     if text.len() <= MAX_HOOK_OUTPUT_BYTES {
         text.to_owned()
     } else {
-        format!("{}... [truncated]", &text[..MAX_HOOK_OUTPUT_BYTES])
+        let mut end = MAX_HOOK_OUTPUT_BYTES;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}... [truncated]", &text[..end])
     }
 }
 
@@ -319,5 +323,15 @@ mod tests {
             &std::env::temp_dir(),
         );
         assert_eq!(messages, vec!["formatted ok".to_string()]);
+    }
+
+    #[test]
+    fn truncate_handles_multibyte_utf8_safely() {
+        let mut text = "a".repeat(MAX_HOOK_OUTPUT_BYTES - 2);
+        text.push('\u{0e38}'); // 3-byte Thai char spanning across the boundary
+        text.push_str("extra trailing content");
+        assert!(text.len() > MAX_HOOK_OUTPUT_BYTES);
+        let truncated = truncate(&text);
+        assert!(truncated.ends_with("... [truncated]"));
     }
 }

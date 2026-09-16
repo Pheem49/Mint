@@ -232,7 +232,6 @@ impl MemoryStore {
         let chat_id = normalized_chat_id(chat_id);
         let connection = self.connection()?;
         ensure_builtin_chat_sessions(&connection)?;
-        ensure_chat_session_row(&connection, &chat_id)?;
         let mut statement = connection.prepare(
             "SELECT id, chat_id, user_text, ai_text, provider, model, fallback_provider, created_at, agent_activity_json
              FROM interaction_memories
@@ -272,8 +271,8 @@ impl MemoryStore {
                  SELECT id FROM interaction_memories
                  WHERE chat_id = ?2 ORDER BY id DESC LIMIT ?3
                )
-             ORDER BY bm25(interaction_fts)
-             LIMIT ?4",
+              ORDER BY bm25(interaction_fts)
+              LIMIT ?4",
         )?;
         let rows = statement.query_map(
             params![match_query, chat_id, exclude_recent as i64, limit as i64],
@@ -285,6 +284,14 @@ impl MemoryStore {
     pub fn list_chat_sessions(&self) -> Result<Vec<ChatSession>, MemoryError> {
         let connection = self.connection()?;
         ensure_builtin_chat_sessions(&connection)?;
+        let _ = connection.execute(
+            "DELETE FROM chat_sessions
+             WHERE kind = 'conversation'
+               AND id != ?1
+               AND id NOT LIKE 'cron::%'
+               AND (SELECT COUNT(*) FROM interaction_memories WHERE interaction_memories.chat_id = chat_sessions.id) = 0",
+            params![DEFAULT_CONVERSATION_ID],
+        );
         let mut statement = connection.prepare(
             "SELECT id, title, kind, created_at, updated_at
              FROM chat_sessions

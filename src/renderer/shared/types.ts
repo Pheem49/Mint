@@ -25,6 +25,7 @@ export interface ChatResponse {
   provider: string
   model: string
   text: string
+  thought?: string | null
   fallbackProvider?: string | null
 }
 
@@ -38,11 +39,45 @@ export interface DocumentAttachment {
   dataUri: string
 }
 
+export interface PlanTaskItem {
+  id: string
+  title: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+}
+
+export interface ActivePlan {
+  objective: string
+  tasks: PlanTaskItem[]
+}
+
+export interface ToolExecutionRecord {
+  step: number
+  action: string
+  target: string
+  success: boolean
+  retried: boolean
+}
+
+export interface RunTelemetrySummary {
+  runId: string
+  task: string
+  outcome: 'SUCCESS' | 'FAILED' | 'ROLLED_BACK' | string
+  totalTokens: number
+  toolCallsCount: number
+  filesChanged: string[]
+  filesCreated?: string[]
+  durationSecs: number
+  toolTimeline: ToolExecutionRecord[]
+  retriesCount: number
+}
+
 export type AgentProgress =
   | { type: 'Thinking'; data: { elapsed_secs: number; agent_name?: string; model_name?: string } }
   | { type: 'Thought'; data: { thought: string } }
   | { type: 'ToolStart'; data: { action: string; input: Record<string, unknown>; subagent?: string } }
   | { type: 'ToolEnd'; data: { action: string; input: Record<string, unknown>; result: string; subagent?: string } }
+  | { type: 'PlanUpdated'; data: { plan: ActivePlan } }
+  | { type: 'RunCompleted'; data: { summary: RunTelemetrySummary } }
 
 export interface InteractionMemory {
   id: number
@@ -216,5 +251,24 @@ export interface GitCheckpoint {
   description: string
   action: string
   targetPath?: string | null
+}
+
+export interface CustomProviderModel {
+  modelId: string
+  displayName: string
+}
+
+export interface CustomProviderHeader {
+  name: string
+  value: string
+}
+
+export interface CustomProviderConfig {
+  id: string
+  displayName: string
+  baseUrl: string
+  apiKey: string
+  models: CustomProviderModel[]
+  headers: CustomProviderHeader[]
 }
 

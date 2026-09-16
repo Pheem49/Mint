@@ -75,6 +75,11 @@ pub(super) async fn wait_for_escape_interrupt(
     let mut raw_mode = RawModeGuard(false);
 
     loop {
+        if !crossterm::tty::IsTty::is_tty(&io::stdin()) {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            continue;
+        }
+
         let blocked =
             approval_active.load(Ordering::Relaxed) || CURSOR_QUERY_ACTIVE.load(Ordering::Relaxed);
         let accepting = !blocked
@@ -102,7 +107,9 @@ pub(super) async fn wait_for_escape_interrupt(
                     event::read(),
                     Ok(Event::Key(key_event))
                         if key_event.kind == event::KeyEventKind::Press
-                            && key_event.code == KeyCode::Esc
+                            && (key_event.code == KeyCode::Esc
+                                || (key_event.code == KeyCode::Char('c')
+                                    && key_event.modifiers.contains(KeyModifiers::CONTROL)))
                 );
             let _ = crossterm::terminal::disable_raw_mode();
             if escaped {
@@ -132,7 +139,10 @@ pub(super) async fn wait_for_escape_interrupt(
             let mut changed = false;
             if let Ok(mut status) = live_status.lock() {
                 for key_event in key_events {
-                    if key_event.code == KeyCode::Esc {
+                    if key_event.code == KeyCode::Esc
+                        || (key_event.code == KeyCode::Char('c')
+                            && key_event.modifiers.contains(KeyModifiers::CONTROL))
+                    {
                         escaped = true;
                         break;
                     }
@@ -729,7 +739,7 @@ pub(super) fn prompt_persistent_approval(subject: &str) -> usize {
         "No".to_string(),
     ];
 
-    if !io::stdout().is_tty() {
+    if !io::stdout().is_tty() || !io::stdin().is_tty() {
         print!("  Approve? [y]es / [d]on't ask again this session / [N]o: ");
         let _ = io::stdout().flush();
         let mut answer = String::new();

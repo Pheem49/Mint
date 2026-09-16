@@ -72,9 +72,14 @@ export const McpToolAllowlist: React.FC<McpToolAllowlistProps> = ({
           Allowed tools
         </span>
         <label
-          style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', fontSize: '0.85rem' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', fontSize: '0.85rem', cursor: 'pointer', userSelect: 'none' }}
         >
-          <input type="checkbox" checked={wildcard} onChange={toggleWildcard} />
+          <input
+            type="checkbox"
+            className="mint-custom-checkbox"
+            checked={wildcard}
+            onChange={toggleWildcard}
+          />
           Allow all (*)
         </label>
       </div>

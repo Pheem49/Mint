@@ -94,11 +94,32 @@ pub fn learned_skills_context(
     }
 
     if let Some(root) = workspace_root {
-        let workspace_agents_path1 = root.join(".agents").join("AGENTS.md");
-        load_agent_rules_file(&workspace_agents_path1, &mut skills);
+        let rule_files = [
+            root.join(".agents").join("AGENTS.md"),
+            root.join("AGENTS.md"),
+            root.join(".claude").join("CLAUDE.md"),
+            root.join("CLAUDE.md"),
+            root.join(".cursorrules"),
+            root.join(".github").join("copilot-instructions.md"),
+        ];
+        for rule_path in &rule_files {
+            if rule_path.is_file() {
+                load_agent_rules_file(rule_path, &mut skills);
+            }
+        }
 
-        let workspace_agents_path2 = root.join("AGENTS.md");
-        load_agent_rules_file(&workspace_agents_path2, &mut skills);
+        let cursor_rules_dir = root.join(".cursor").join("rules");
+        if let Ok(entries) = std::fs::read_dir(cursor_rules_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file()
+                    && (path.extension().and_then(|e| e.to_str()) == Some("mdc")
+                        || path.extension().and_then(|e| e.to_str()) == Some("md"))
+                {
+                    load_agent_rules_file(&path, &mut skills);
+                }
+            }
+        }
 
         let workspace_skills_path1 = root.join(".agents").join("skills");
         load_skills_from_dir(&workspace_skills_path1, &mut skills);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
+import { DEFAULT_CONFIG } from '../../constants/config'
 import {
-  DEFAULT_CONFIG,
   GEMINI_MODELS,
   OPENAI_MODELS,
   OPENROUTER_MODELS,
@@ -8,8 +8,8 @@ import {
   ANTHROPIC_MODELS,
   HF_MODELS,
   LOCAL_MODELS,
-  CustomProviderConfig,
-} from '@/components/SettingsWindow'
+} from '../../constants/models'
+import type { CustomProviderConfig } from '../../types'
 import { listSubagents, saveSubagent, deleteSubagent, SubagentDefinition, SubagentDraft } from '@/tauri'
 import ApiKeyInput from './ApiKeyInput'
 

@@ -541,6 +541,53 @@ pub enum AgentProgress {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subagent: Option<String>,
     },
+    PlanUpdated {
+        plan: ActivePlan,
+    },
+    RunCompleted {
+        summary: RunTelemetrySummary,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolExecutionRecord {
+    pub step: usize,
+    pub action: String,
+    pub target: String,
+    pub success: bool,
+    pub retried: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunTelemetrySummary {
+    pub run_id: String,
+    pub task: String,
+    pub outcome: String, // "SUCCESS" | "FAILED" | "ROLLED_BACK"
+    pub total_tokens: usize,
+    pub tool_calls_count: usize,
+    pub files_changed: Vec<String>,
+    #[serde(default)]
+    pub files_created: Vec<String>,
+    pub duration_secs: f64,
+    pub tool_timeline: Vec<ToolExecutionRecord>,
+    pub retries_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanTaskItem {
+    pub id: String,
+    pub title: String,
+    pub status: String, // "pending", "in_progress", "completed", "failed"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivePlan {
+    pub objective: String,
+    pub tasks: Vec<PlanTaskItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -588,19 +635,30 @@ struct AgentDecision {
 struct AgentInput {
     #[serde(default)]
     path: String,
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "q",
+        alias = "keyword",
+        alias = "search",
+        alias = "searchTerm",
+        alias = "search_term"
+    )]
     query: String,
+    #[serde(default, alias = "ticker")]
+    symbol: String,
+    #[serde(default)]
+    filter: String,
     #[serde(default)]
     options: Vec<AskUserOptionInput>,
     #[serde(default)]
     header: String,
     #[serde(default, alias = "multi_select")]
     multi_select: bool,
-    #[serde(default)]
+    #[serde(default, alias = "location", alias = "place")]
     city: String,
-    #[serde(default)]
+    #[serde(default, alias = "expr", alias = "math")]
     expression: String,
-    #[serde(default)]
+    #[serde(default, alias = "cmd")]
     command: String,
     #[serde(default)]
     background: bool,
@@ -644,6 +702,12 @@ struct AgentInput {
     title: String,
     #[serde(default)]
     status: String,
+    #[serde(default)]
+    step: Option<usize>,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    content: String,
     #[serde(default)]
     url: String,
     #[serde(default)]
@@ -1048,6 +1112,11 @@ where
         // sums every step's completion since each step's output is new work.
         let mut last_input_tokens: u64 = 0;
         let mut turn_generated_tokens: u64 = 0;
+        let mut executed_tools: Vec<ToolExecutionRecord> = Vec::new();
+        let mut files_modified: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        let mut files_created: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
 
         'steps: for step in 1..=MAX_STEPS {
             let (active_config, agent_instruction, active_agent_name, active_model_name) =
@@ -1156,6 +1225,7 @@ where
                             &root,
                             allow_subagent_dispatch,
                         )),
+                        temperature: active_config.temperature,
                     },
                     &mut progress,
                 )
@@ -1177,6 +1247,7 @@ where
                         pinned_mcp_server: None,
                         messages: None,
                         tools: None,
+                        temperature: active_config.temperature,
                     },
                     &mut progress,
                 )
@@ -1229,7 +1300,10 @@ where
                         .enumerate()
                         .map(|(index, call)| {
                             let thought = if index == 0 {
-                                response.text.trim().to_string()
+                                match &response.thought {
+                                    Some(t) if !t.trim().is_empty() => t.trim().to_string(),
+                                    _ => response.text.trim().to_string(),
+                                }
                             } else {
                                 String::new()
                             };
@@ -1263,10 +1337,11 @@ where
                                  incomplete. Ask to continue or retry to get the rest.]",
                             );
                         }
+                        let thought = response.thought.clone().unwrap_or_default();
                         vec![(
                             format!("call_{step}_finish"),
                             AgentDecision {
-                                thought: String::new(),
+                                thought,
                                 action: "finish".to_string(),
                                 input: AgentInput {
                                     summary,
@@ -1277,33 +1352,34 @@ where
                     }
                 }
             } else {
-                let decision = match parse_decision_or_finish(&response.text) {
+                let mut decision = match parse_decision_or_finish(&response.text) {
                     Ok(decision) => decision,
                     Err(_) => {
                         let (repaired, _) = send_chat_with_fallback(
-                        &active_config,
-                        &ChatRequest {
-                            message: format!(
-                                "Your previous response was not valid Mint agent JSON.\n\
-                                 Return exactly one corrected JSON object with an action and input. \
-                                 Do not use markdown.\n\nPrevious response:\n{}",
-                                truncate(&response.text)
-                            ),
-                            system_instruction: active_system_prompt.clone(),
-                            chat_id: Some(chat_id.to_owned()),
-                            image_data_uri: None,
-                            audio_data_uri: None,
-                            video_data_uri: None,
-                            document_attachment: None,
-                            workspace_path: None,
-                            agent_id: None,
-                            plan_mode: false,
-                            pinned_mcp_server: None,
-                            messages: None,
-                            tools: None,
-                        },
-                    )
-                    .await?;
+                            &active_config,
+                            &ChatRequest {
+                                message: format!(
+                                    "Your previous response was not valid Mint agent JSON.\n\
+                                     Return exactly one corrected JSON object with an action and input. \
+                                     Do not use markdown.\n\nPrevious response:\n{}",
+                                    truncate(&response.text)
+                                ),
+                                system_instruction: active_system_prompt.clone(),
+                                chat_id: Some(chat_id.to_owned()),
+                                image_data_uri: None,
+                                audio_data_uri: None,
+                                video_data_uri: None,
+                                document_attachment: None,
+                                workspace_path: None,
+                                agent_id: None,
+                                plan_mode: false,
+                                pinned_mcp_server: None,
+                                messages: None,
+                                tools: None,
+                                temperature: active_config.temperature,
+                            },
+                        )
+                        .await?;
                         parse_decision_or_finish(&repaired.text).map_err(|e| {
                             OrchestrationError::Agent(format!(
                                 "unable to repair invalid agent response: {}",
@@ -1312,6 +1388,11 @@ where
                         })?
                     }
                 };
+                if decision.thought.trim().is_empty() {
+                    if let Some(t) = &response.thought {
+                        decision.thought = t.trim().to_string();
+                    }
+                }
                 vec![(format!("call_{step}"), decision)]
             };
 
@@ -1359,10 +1440,7 @@ where
                 .await;
             } else {
                 for (call_id, decision) in decisions {
-                    if !fast_mode
-                        && decision.action != "finish"
-                        && !decision.thought.trim().is_empty()
-                    {
+                    if !fast_mode && !decision.thought.trim().is_empty() {
                         progress(AgentProgress::Thought {
                             thought: decision.thought.trim().to_owned(),
                         });
@@ -1580,6 +1658,25 @@ where
                                 skills.clone(),
                             );
                         }
+                        let run_summary = RunTelemetrySummary {
+                            run_id: format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
+                            task: task.to_string(),
+                            outcome: "SUCCESS".to_string(),
+                            total_tokens: turn_total_tokens as usize,
+                            tool_calls_count: executed_tools.len(),
+                            files_changed: files_created
+                                .iter()
+                                .chain(files_modified.iter())
+                                .cloned()
+                                .collect(),
+                            files_created: files_created.into_iter().collect(),
+                            duration_secs: started_at.elapsed().as_secs_f64(),
+                            tool_timeline: executed_tools.clone(),
+                            retries_count: executed_tools.iter().filter(|t| t.retried).count(),
+                        };
+                        progress(AgentProgress::RunCompleted {
+                            summary: run_summary,
+                        });
 
                         return Ok(AgentResult {
                             provider: final_provider,
@@ -1604,6 +1701,26 @@ where
                     // stays false for plan-mode/hook blocks and the duplicate-shell skip, since
                     // those don't actually run anything and shouldn't count toward verification.
                     let mut action_succeeded = false;
+                    let target_file_existed = match decision.action.as_str() {
+                        "write_file" => {
+                            !decision.input.path.is_empty()
+                                && root.join(&decision.input.path).exists()
+                        }
+                        "note_write" => {
+                            !decision.input.name.is_empty()
+                                && root
+                                    .join(format!(".config/mint/notes/{}", decision.input.name))
+                                    .exists()
+                        }
+                        "apply_patch" => {
+                            if let Some(patch) = &decision.input.patch {
+                                root.join(&patch.path).exists()
+                            } else {
+                                true
+                            }
+                        }
+                        _ => true,
+                    };
                     let result = if decision.action == "enter_plan_mode" {
                         let reason = decision.input.reason.trim().to_owned();
                         match approve(&AgentApproval::EnterPlanMode {
@@ -1702,8 +1819,10 @@ where
                                 )
                             }
                             crate::hooks::PreHookOutcome::Allowed => {
-                                if matches!(decision.action.as_str(), "write_file" | "apply_patch")
-                                {
+                                if matches!(
+                                    decision.action.as_str(),
+                                    "write_file" | "apply_patch" | "note_write"
+                                ) {
                                     let target_path = if !decision.input.path.is_empty() {
                                         Some(decision.input.path.as_str())
                                     } else {
@@ -1765,14 +1884,55 @@ where
                         subagent: None,
                     });
 
+                    let success = action_succeeded && !shell_result_failed(&result);
+                    let target = if !decision.input.path.is_empty() {
+                        decision.input.path.clone()
+                    } else if !decision.input.command.is_empty() {
+                        decision.input.command.clone()
+                    } else if !decision.input.query.is_empty() {
+                        decision.input.query.clone()
+                    } else if !decision.input.symbol.is_empty() {
+                        decision.input.symbol.clone()
+                    } else {
+                        String::new()
+                    };
+                    let retried = success && (action_count > 1 || last_verify_failed == Some(true));
+                    executed_tools.push(ToolExecutionRecord {
+                        step,
+                        action: decision.action.clone(),
+                        target,
+                        success,
+                        retried,
+                    });
+
                     if action_succeeded {
                         match decision.action.as_str() {
-                            "apply_patch" | "write_file" => last_modify_step = Some(step),
+                            "apply_patch" | "write_file" | "note_write" => {
+                                last_modify_step = Some(step);
+                                let path = if let Some(patch) = &decision.input.patch {
+                                    patch.path.to_string_lossy().into_owned()
+                                } else if !decision.input.path.is_empty() {
+                                    decision.input.path.clone()
+                                } else if !decision.input.name.is_empty() {
+                                    format!(".config/mint/notes/{}", decision.input.name)
+                                } else {
+                                    String::new()
+                                };
+                                if !path.is_empty() {
+                                    if !files_created.contains(&path)
+                                        && (target_file_existed || files_modified.contains(&path))
+                                    {
+                                        files_modified.insert(path);
+                                    } else {
+                                        files_created.insert(path);
+                                    }
+                                }
+                            }
                             // Counts even if the commands it ran failed — an attempted check
                             // still counts as verification having been attempted; whether it
                             // actually passed is tracked separately in `last_verify_failed`
                             // and enforced by `unacknowledged_verify_failure` at finish time.
-                            "verify" => {
+                            "verify" | "run_tests" | "run_typecheck" | "run_linter" => {
                                 last_verify_step = Some(step);
                                 last_verify_failed = Some(shell_result_failed(&result));
                             }
@@ -1802,7 +1962,10 @@ where
                     } else {
                         truncate(&result)
                     };
-                    if decision.action == "run_shell" || decision.action == "verify" {
+                    if matches!(
+                        decision.action.as_str(),
+                        "run_shell" | "verify" | "run_tests" | "run_typecheck" | "run_linter"
+                    ) {
                         if shell_result_failed(&result) {
                             final_result.push_str(
                         "\n\n[System Tip: The command failed with a non-zero exit code. \
@@ -1932,6 +2095,26 @@ where
 
             rebuild_observation(task, &root, &trajectory, &mut observation);
         }
+
+        let run_summary = RunTelemetrySummary {
+            run_id: format!("run-{}", chrono::Local::now().format("%Y%m%d%H%M%S")),
+            task: task.to_string(),
+            outcome: "FAILED".to_string(),
+            total_tokens: turn_total_tokens as usize,
+            tool_calls_count: executed_tools.len(),
+            files_changed: files_created
+                .iter()
+                .chain(files_modified.iter())
+                .cloned()
+                .collect(),
+            files_created: files_created.into_iter().collect(),
+            duration_secs: started_at.elapsed().as_secs_f64(),
+            tool_timeline: executed_tools.clone(),
+            retries_count: executed_tools.iter().filter(|t| t.retried).count(),
+        };
+        progress(AgentProgress::RunCompleted {
+            summary: run_summary,
+        });
 
         Err(OrchestrationError::Agent(format!(
             "code agent reached the limit of {} steps",
@@ -2480,7 +2663,8 @@ async fn execute_tool(
             )
             .await
         }
-        "search_code" | "symbols" | "repo_map" | "semantic_index" | "semantic_search" => {
+        "search_code" | "symbols" | "find_definition" | "find_references" | "repo_map"
+        | "semantic_index" | "semantic_search" => {
             tools::code_search::execute(
                 decision.action.as_str(),
                 input,
@@ -2513,6 +2697,11 @@ async fn execute_tool(
             )
             .await
         }
+        "conversation_summary" => Ok(serde_json::json!({
+            "status": "acknowledged",
+            "message": "Previous steps summary is already recorded in context."
+        })
+        .to_string()),
         "browser_open"
         | "browser_click"
         | "browser_type"
@@ -2531,7 +2720,8 @@ async fn execute_tool(
             )
             .await
         }
-        "git_status" | "git_diff" | "git_log" | "git_branch" => {
+        "git_status" | "git_diff" | "git_log" | "git_branch" | "git_checkpoint"
+        | "git_rollback" | "git_restore_file" | "git_commit" | "git_create_branch" => {
             tools::git::execute(
                 decision.action.as_str(),
                 input,
@@ -2550,10 +2740,12 @@ async fn execute_tool(
                 config,
                 chat_id,
                 approve_cb,
+                progress,
             )
             .await
         }
-        "detect_project" | "list_tests" | "read_diagnostics" | "view_image" => {
+        "detect_project" | "list_tests" | "read_diagnostics" | "view_image" | "search_docs"
+        | "create_project_doc" => {
             tools::project::execute(
                 decision.action.as_str(),
                 input,
@@ -2577,7 +2769,8 @@ async fn execute_tool(
             )
             .await
         }
-        "run_shell" | "shell_output" | "kill_shell" | "verify" => {
+        "run_shell" | "shell_output" | "kill_shell" | "verify" | "run_tests" | "run_typecheck"
+        | "run_linter" => {
             tools::shell::execute(
                 decision.action.as_str(),
                 input,
@@ -2874,6 +3067,7 @@ mod tests {
             pinned_mcp_server: None,
             messages: None,
             tools: None,
+            temperature: None,
         };
         let config = MintConfig::default();
         assert!(

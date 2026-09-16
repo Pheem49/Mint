@@ -1034,3 +1034,269 @@
   margin: 0 auto 20px auto;
   line-height: 1.5;
 }
+
+/* MCP Server Type Segmented Toggle */
+.mcp-server-type-toggle {
+  display: flex;
+  background: var(--input-bg, rgba(0, 0, 0, 0.25));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-xl, 12px);
+  padding: 4px;
+  gap: 4px;
+}
+
+.mcp-toggle-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-lg, 8px);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-muted, #94a3b8);
+  background: transparent;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mcp-toggle-btn:hover {
+  color: var(--text-main, #ffffff);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mcp-toggle-btn.active {
+  background: var(--accent, #3b82f6);
+  color: #ffffff;
+  box-shadow: 0 2px 8px var(--accent-glow, rgba(59, 130, 246, 0.3));
+}
+
+.mcp-toggle-icon {
+  font-size: 1rem;
+}
+
+/* MCP Test Connection Bar */
+.mcp-test-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.mcp-test-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius-lg, 8px);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  background: var(--surface-bg, rgba(255, 255, 255, 0.06));
+  color: var(--text-main, #ffffff);
+  transition: all 0.2s ease;
+}
+
+.mcp-test-btn:hover:not(:disabled) {
+  background: var(--surface-strong, rgba(255, 255, 255, 0.12));
+  border-color: var(--accent, #3b82f6);
+}
+
+.mcp-test-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.mcp-test-status {
+  font-size: 0.84rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.mcp-test-status.success {
+  color: #34d399;
+}
+
+.mcp-test-status.error {
+  color: #f87171;
+}
+
+.mcp-test-status.testing {
+  color: var(--accent, #60a5fa);
+}
+
+.management-badge.remote {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.mcp-spin {
+  animation: mcp-spin 0.8s linear infinite;
+}
+
+@keyframes mcp-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* MCP Security Notice */
+.mcp-security-notice {
+  margin-top: 14px;
+  border-radius: var(--radius-lg, 10px);
+  overflow: hidden;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.mcp-security-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  font-size: 0.86rem;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.mcp-security-icon {
+  flex-shrink: 0;
+  color: #f59e0b;
+}
+
+.mcp-security-body {
+  padding: 12px 14px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.mcp-security-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mcp-security-ack-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.84rem;
+  color: var(--text-main, #e2e8f0);
+}
+
+.mcp-security-subtext {
+  font-size: 0.78rem;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.4;
+}
+
+/* Custom Mint Checkbox */
+.mint-custom-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.16s cubic-bezier(0.4, 0, 0.2, 1);
+  margin: 0;
+  outline: none;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.mint-custom-checkbox:hover {
+  border-color: var(--accent, #10b981);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.16);
+}
+
+.mint-custom-checkbox:checked {
+  background-color: var(--accent, #10b981);
+  border-color: var(--accent, #10b981);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='3.5 8.5 6.5 11.5 12.5 5.5'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 11px 11px;
+  box-shadow: 0 2px 8px var(--accent-glow, rgba(16, 185, 129, 0.35));
+}
+
+.mint-custom-checkbox:active {
+  transform: scale(0.92);
+}
+
+.mint-custom-checkbox:focus-visible {
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+}
+
+/* Allow All Tools Row */
+.mcp-allow-all-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg, 10px);
+  background: var(--surface-bg, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+  margin-top: 14px;
+}
+
+.mcp-allow-all-row:hover {
+  background: var(--surface-strong, rgba(255, 255, 255, 0.06));
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.mcp-allow-all-row:hover .mint-custom-checkbox:not(:checked),
+.mcp-security-ack:hover .mint-custom-checkbox:not(:checked) {
+  border-color: var(--accent, #10b981);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.mcp-allow-all-row .mint-custom-checkbox,
+.mcp-security-ack .mint-custom-checkbox {
+  margin-top: 2px;
+}
+
+.mcp-allow-all-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mcp-allow-all-title {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text-main, #ffffff);
+}
+
+.mcp-allow-all-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.4;
+}
+
+

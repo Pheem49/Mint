@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react'
 import {
   generateImages,
   getImageGenProviders,
+  fetchImageProviderModels,
   convertFileSrc,
   listSavedPictures,
   type ImageGenRequest,
@@ -88,6 +89,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
   const [selectedProvider, setSelectedProvider] = useState('nanobanana')
   const [selectedModel, setSelectedModel] = useState(defaultModelForProvider('nanobanana'))
   const [customModel, setCustomModel] = useState('')
+  const [dynamicOptions, setDynamicOptions] = useState<Record<string, Array<{ value: string; label: string }>>>({})
 
   const promptRef = useRef<HTMLTextAreaElement>(null)
 
@@ -103,6 +105,40 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
     loadHistory()
     return () => { cancelled = true }
   }, [loadHistory])
+
+  // Dynamically fetch models for selected provider
+  useEffect(() => {
+    let cancelled = false
+    fetchImageProviderModels(selectedProvider)
+      .then((live) => {
+        if (cancelled || !live || live.length === 0) return
+        const presets = PROVIDER_MODELS[selectedProvider] ?? []
+        const presetMap = new Map<string, string>()
+        for (const p of presets) {
+          presetMap.set(p.value, p.label)
+        }
+        const merged: Array<{ value: string; label: string }> = []
+        const seen = new Set<string>()
+        for (const id of live) {
+          if (!seen.has(id)) {
+            seen.add(id)
+            merged.push({
+              value: id,
+              label: presetMap.get(id) ?? id,
+            })
+          }
+        }
+        for (const p of presets) {
+          if (!seen.has(p.value)) {
+            seen.add(p.value)
+            merged.push(p)
+          }
+        }
+        setDynamicOptions((prev) => ({ ...prev, [selectedProvider]: merged }))
+      })
+      .catch(() => { /* keep presets */ })
+    return () => { cancelled = true }
+  }, [selectedProvider])
 
   // When provider changes, reset model to provider's default
   const handleProviderChange = (provider: string) => {
@@ -193,7 +229,7 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
     document.body.removeChild(a)
   }
 
-  const modelOptions = PROVIDER_MODELS[selectedProvider] ?? []
+  const modelOptions = dynamicOptions[selectedProvider] ?? PROVIDER_MODELS[selectedProvider] ?? []
 
   return (
     <div
@@ -273,6 +309,9 @@ export default function ImageStudioPanel({ view, onRefreshPictures, onSendToChat
                 {modelOptions.map(({ value, label }) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
+                {selectedModel && selectedModel !== 'custom' && !modelOptions.some(m => m.value === selectedModel) && (
+                  <option key={selectedModel} value={selectedModel}>{selectedModel}</option>
+                )}
                 <option value="custom">Custom Model ID...</option>
               </select>
             </div>

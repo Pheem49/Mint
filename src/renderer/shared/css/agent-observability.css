@@ -1,0 +1,270 @@
+/* ==========================================================================
+   Agent Observability & Planning Dashboard Styles
+   Uses Mint Theme Tokens & CSS Variables for full dynamic theme support
+   ========================================================================== */
+
+/* --- Run Summary Dashboard --- */
+.run-summary-card {
+  border-radius: var(--radius-lg, 10px);
+  border: 1px solid var(--border-light, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--surface-bg, #252527) 80%, transparent);
+  backdrop-filter: var(--glass-blur, blur(12px));
+  -webkit-backdrop-filter: var(--glass-blur, blur(12px));
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  color: var(--text-main, #e8e8ea);
+}
+
+.run-summary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
+
+.run-summary-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-main, #e8e8ea);
+}
+
+.run-summary-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full, 999px);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.run-summary-badge.success {
+  background: color-mix(in srgb, var(--status-speaking, #22c55e) 15%, transparent);
+  color: var(--status-speaking, #22c55e);
+  border: 1px solid color-mix(in srgb, var(--status-speaking, #22c55e) 35%, transparent);
+}
+
+.run-summary-badge.rollback {
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #f59e0b;
+  border: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+}
+
+.run-summary-badge.failure {
+  background: color-mix(in srgb, var(--status-error, #ef4444) 15%, transparent);
+  color: var(--status-error, #ef4444);
+  border: 1px solid color-mix(in srgb, var(--status-error, #ef4444) 35%, transparent);
+}
+
+.run-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.run-kpi-box {
+  background: color-mix(in srgb, var(--input-bg, #2c2c2e) 60%, transparent);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  border-radius: var(--radius-md, 8px);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.run-kpi-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.7rem;
+  color: var(--text-muted, #8f8f94);
+}
+
+.run-kpi-value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-main, #e8e8ea);
+}
+
+.run-kpi-subtext {
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--text-muted, #8f8f94);
+}
+
+.run-timeline-container {
+  margin-top: 12px;
+}
+
+.run-timeline-title {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #8f8f94);
+  margin-bottom: 6px;
+}
+
+.run-timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.run-timeline-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--panel-bg, #1e1e20) 40%, transparent);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.04));
+  font-size: 0.75rem;
+  transition: background 0.15s ease;
+}
+
+.run-timeline-item:hover {
+  background: color-mix(in srgb, var(--surface-bg, #252527) 70%, transparent);
+}
+
+.run-timeline-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.run-timeline-step {
+  font-family: monospace;
+  font-size: 0.72rem;
+  color: var(--text-muted, #8f8f94);
+  min-width: 24px;
+}
+
+.run-timeline-action {
+  font-weight: 600;
+  color: var(--text-main, #e8e8ea);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-timeline-target {
+  font-family: monospace;
+  font-size: 0.7rem;
+  color: var(--status-listening, #7dd3fc);
+  background: color-mix(in srgb, var(--status-listening, #7dd3fc) 12%, transparent);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs, 4px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.run-timeline-note-failed {
+  color: var(--status-error, #ef4444);
+  font-weight: 600;
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+.run-timeline-note-retry {
+  color: #f59e0b;
+  font-weight: 600;
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+/* --- Plan Checklist Widget --- */
+.plan-checklist-card {
+  border-radius: var(--radius-lg, 10px);
+  border: 1px solid var(--border-light, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--surface-bg, #252527) 80%, transparent);
+  backdrop-filter: var(--glass-blur, blur(12px));
+  -webkit-backdrop-filter: var(--glass-blur, blur(12px));
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.plan-checklist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.plan-checklist-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-main, #e8e8ea);
+}
+
+.plan-checklist-count {
+  font-size: 0.72rem;
+  color: var(--text-muted, #8f8f94);
+  font-weight: 500;
+}
+
+.plan-progress-track {
+  height: 4px;
+  width: 100%;
+  border-radius: var(--radius-full, 999px);
+  background: color-mix(in srgb, var(--border, rgba(255, 255, 255, 0.08)) 100%, transparent);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.plan-progress-bar {
+  height: 100%;
+  background: var(--accent, #10b981);
+  transition: width 0.4s ease;
+}
+
+.plan-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.plan-task-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 0.76rem;
+  color: var(--text-main, #e8e8ea);
+  transition: background 0.15s ease;
+}
+
+.plan-task-item.in-progress {
+  background: color-mix(in srgb, var(--accent, #10b981) 12%, transparent);
+  color: var(--accent-hover, #34d399);
+}
+
+.plan-task-item.completed {
+  text-decoration: line-through;
+  opacity: 0.65;
+  color: var(--text-muted, #8f8f94);
+}
+
+.plan-task-item.failed {
+  background: color-mix(in srgb, var(--status-error, #ef4444) 12%, transparent);
+  color: var(--status-error, #ef4444);
+}
+
+.plan-task-text {
+  flex: 1;
+  line-height: 1.3;
+}

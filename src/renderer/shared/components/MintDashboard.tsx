@@ -68,6 +68,37 @@ import { DEFAULT_CONFIG } from '../constants/config'
 
 const LAST_WORKSPACE_PATH_KEY = 'mint:last-workspace-path'
 const ACTIVE_CONVERSATION_ID_KEY = 'mint:active-conversation-id'
+const LAST_ACTIVE_TIME_KEY = 'mint:last-active-timestamp'
+const DESKTOP_INACTIVITY_THRESHOLD_MS = 30 * 60 * 1000 // 30 minutes
+
+function touchActiveTimestamp() {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(LAST_ACTIVE_TIME_KEY, Date.now().toString())
+  } catch {
+    /* ignore */
+  }
+}
+
+function isDesktopRecentlyActive(): boolean {
+  if (typeof window === 'undefined') return false
+  if (!isTauriRuntime()) return false
+  const lastActiveStr = window.localStorage.getItem(LAST_ACTIVE_TIME_KEY)
+  if (!lastActiveStr) return false
+  const lastActive = parseInt(lastActiveStr, 10)
+  if (isNaN(lastActive) || lastActive <= 0) return false
+
+  const now = Date.now()
+  const diff = now - lastActive
+  if (diff < 0 || diff > DESKTOP_INACTIVITY_THRESHOLD_MS) {
+    return false
+  }
+
+  // Also verify same calendar day
+  const lastDate = new Date(lastActive).toDateString()
+  const today = new Date(now).toDateString()
+  return lastDate === today
+}
 
 // Unsent composer text, stashed per conversation so switching chats or
 // reloading the page doesn't lose an in-progress message.
@@ -120,20 +151,76 @@ function getConversationIdFromUrl(): string | null {
   return null
 }
 
+function isRootOrNewChatRoute(): boolean {
+  if (typeof window === 'undefined') return true
+  const pathname = (window.location.pathname || '').replace(/\/+$/, '')
+  const hash = (window.location.hash || '').replace(/^#\/?/, '').replace(/\/+$/, '')
+  const target = (pathname || hash).toLowerCase()
+
+  // Explicit conversation ID specified in URL
+  if (getConversationIdFromUrl()) {
+    return false
+  }
+
+  // Explicit other panel view (skills, mcp, plugins, etc.)
+  if (
+    target.includes('skills') ||
+    target.includes('mcp') ||
+    target.includes('plugins') ||
+    target.includes('picture') ||
+    target.includes('image-studio') ||
+    target.includes('imagine') ||
+    target.includes('veo-studio') ||
+    target.includes('veo') ||
+    target.includes('settings')
+  ) {
+    return false
+  }
+
+  // Root or generic chat route without specific conversation ID
+  return !target || target === '' || target === '/chat' || target === 'chat' || target === '/index.html' || target === 'index.html'
+}
+
 function activeConversationId() {
   const fromUrl = getConversationIdFromUrl()
   if (fromUrl) {
     window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, fromUrl)
+    touchActiveTimestamp()
     return fromUrl
   }
+
+  // Desktop Smart Inactivity:
+  // On Desktop App (Tauri), if the user was active recently (within 30 mins and on the same calendar day),
+  // resume the previous conversation so a quick window close/reopen or system restart doesn't drop context.
+  if (isTauriRuntime() && isDesktopRecentlyActive()) {
+    const existing = window.localStorage.getItem(ACTIVE_CONVERSATION_ID_KEY)
+    if (existing) {
+      touchActiveTimestamp()
+      return existing === 'conversation-default' ? 'cli' : existing
+    }
+  }
+
+  // When visiting Root URL ('/' or '/chat' without specific ID), always start a fresh New Chat
+  // (matching ChatGPT / Claude / Gemini industry-standard UX).
+  // Applies to Web UI always, and Desktop App upon cold launch / inactivity / new day.
+  if (isRootOrNewChatRoute()) {
+    const next = createConversationId()
+    touchActiveTimestamp()
+    return next
+  }
+
   const existing = window.localStorage.getItem(ACTIVE_CONVERSATION_ID_KEY)
   if (existing === 'conversation-default') {
     window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, 'cli')
+    touchActiveTimestamp()
     return 'cli'
   }
-  if (existing) return existing
+  if (existing) {
+    touchActiveTimestamp()
+    return existing
+  }
   const next = createConversationId()
-  window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, next)
+  touchActiveTimestamp()
   return next
 }
 
@@ -295,6 +382,17 @@ export default function MintDashboard() {
           setInteractions(reversed)
           setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
         })
+      } else if (!urlSessionId && isRootOrNewChatRoute()) {
+        const next = createConversationId()
+        setConversationId(next)
+        setInteractions([])
+        setAgentActivitySnapshots({})
+        setStreamedReply('')
+        setStreamedResponse(null)
+        setMessage('')
+        setImageAttachments([])
+        setDocumentAttachment(null)
+        setAgentProgress([])
       }
     }
     window.addEventListener('popstate', handleUrlChange)
@@ -304,6 +402,19 @@ export default function MintDashboard() {
       window.removeEventListener('hashchange', handleUrlChange)
     }
   }, [conversationId, workspacePath])
+
+  useEffect(() => {
+    touchActiveTimestamp()
+    const handleActivity = () => touchActiveTimestamp()
+    window.addEventListener('beforeunload', handleActivity)
+    document.addEventListener('visibilitychange', handleActivity)
+    window.addEventListener('focus', handleActivity)
+    return () => {
+      window.removeEventListener('beforeunload', handleActivity)
+      document.removeEventListener('visibilitychange', handleActivity)
+      window.removeEventListener('focus', handleActivity)
+    }
+  }, [])
   const [status, setStatus] = useState<RuntimeStatus | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState(() => readDraft(conversationId))
@@ -595,23 +706,9 @@ export default function MintDashboard() {
     setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
   }
 
-  async function refreshChatSessions(nextActiveId = conversationId) {
+  async function refreshChatSessions() {
     const sessions = await listChatSessions()
-    const isKnown = sessions.some((session) => session.id === nextActiveId)
-    setChatSessions(
-      isKnown || nextActiveId === 'cli'
-        ? sessions
-        : [
-            {
-              id: nextActiveId,
-              title: 'New chat',
-              kind: 'conversation',
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            },
-            ...sessions,
-          ],
-    )
+    setChatSessions(sessions)
   }
 
   const [picturesRefreshing, setPicturesRefreshing] = useState(false)
@@ -903,6 +1000,14 @@ export default function MintDashboard() {
       setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, enrichedHistory))
       await refreshChatSessions()
       await refreshPictures()
+      if (typeof window !== 'undefined') {
+        const pathname = (window.location.pathname || '').replace(/\/+$/, '')
+        const hash = (window.location.hash || '').replace(/^#\/?/, '').replace(/\/+$/, '')
+        const target = (pathname || hash).toLowerCase()
+        if (!target || target === '' || target === '/chat' || target === 'chat' || target === '/index.html' || target === 'index.html') {
+          window.history.replaceState({}, '', `/chat/${encodeURIComponent(conversationId)}`)
+        }
+      }
       getRuntimeStatus().then(setStatus).catch(() => {})
       setStreamedReply('')
       setStreamedResponse(null)
@@ -1020,7 +1125,12 @@ export default function MintDashboard() {
       const objectUrl = createObjectUrlPreview(file).objectUrl
       const dataUri = await readImage(file)
       const previewDataUri = await createTrimmedImagePreview(dataUri).catch(() => dataUri)
-      setImageAttachments((current) => [...current, { dataUri, previewDataUri, objectUrl, name: file.name }])
+      setImageAttachments((current) => {
+        if (current.some((item) => item.name === file.name && item.dataUri === dataUri)) {
+          return current
+        }
+        return [...current, { dataUri, previewDataUri, objectUrl, name: file.name }]
+      })
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -1042,7 +1152,12 @@ export default function MintDashboard() {
         reader.onerror = reject
         reader.readAsDataURL(file)
       })
-      setVideoAttachments((current) => [...current, { dataUri, name: file.name }])
+      setVideoAttachments((current) => {
+        if (current.some((item) => item.name === file.name && item.dataUri === dataUri)) {
+          return current
+        }
+        return [...current, { dataUri, name: file.name }]
+      })
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -1167,7 +1282,22 @@ export default function MintDashboard() {
     try {
       if (action === 'New chat') {
         const next = createConversationId()
-        selectConversation(next)
+        setConversationId(next)
+        setInteractions([])
+        setAgentActivitySnapshots({})
+        setStreamedReply('')
+        setStreamedResponse(null)
+        setMessage('')
+        setImageAttachments([])
+        setDocumentAttachment(null)
+        setAgentProgress([])
+        setViewState('chat')
+        if (typeof window !== 'undefined') {
+          const currentPath = (window.location.pathname || '').replace(/\/+$/, '')
+          if (currentPath !== '' && currentPath !== '/chat') {
+            window.history.pushState({}, '', '/chat')
+          }
+        }
         return
       } else {
         if (!window.confirm(`${action} will clear the current conversation history. Continue?`)) return
@@ -1231,6 +1361,10 @@ export default function MintDashboard() {
           | { kind: 'workspace_changed'; path: string }
           | undefined
         if (wsChange) setWorkspacePath(wsChange.path)
+        const planModeChange = resp.effects.find((e) => e.kind === 'plan_mode_changed') as
+          | { kind: 'plan_mode_changed'; enabled: boolean }
+          | undefined
+        if (planModeChange) setPlanMode(planModeChange.enabled)
         const providerChange = resp.effects.find((e) => e.kind === 'provider_changed') as
           | { kind: 'provider_changed'; display: string }
           | undefined
@@ -1267,6 +1401,7 @@ export default function MintDashboard() {
         changeView(slashNavView(resp.target as any))
         break
       case 'forward_to_agent':
+        if (resp.plan_mode) setPlanMode(true)
         if (resp.agent_mode) setAgentMode(true)
         await sendPrompt(resp.prompt, { clearComposer: true })
         break
@@ -1285,6 +1420,7 @@ export default function MintDashboard() {
 
   async function selectConversation(id: string) {
     window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, id)
+    touchActiveTimestamp()
     setConversationId(id)
     changeView('chat', id)
     setStreamedReply('')
@@ -1313,7 +1449,17 @@ export default function MintDashboard() {
         : conversationId
 
       if (nextActive !== conversationId) {
-        window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, nextActive)
+        if (remaining.length > 0 && remaining[0]?.id) {
+          window.localStorage.setItem(ACTIVE_CONVERSATION_ID_KEY, nextActive)
+          if (typeof window !== 'undefined') {
+            window.history.replaceState({}, '', `/chat/${encodeURIComponent(nextActive)}`)
+          }
+        } else {
+          window.localStorage.removeItem(ACTIVE_CONVERSATION_ID_KEY)
+          if (typeof window !== 'undefined') {
+            window.history.replaceState({}, '', '/chat')
+          }
+        }
         setConversationId(nextActive)
         setAgentProgress([])
         const history = await getRecentInteractions(50, nextActive, workspacePath || null)
@@ -1322,7 +1468,7 @@ export default function MintDashboard() {
         setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
       }
 
-      await refreshChatSessions(nextActive)
+      await refreshChatSessions()
       if (id !== conversationId) return
       setStreamedReply('')
       setStreamedResponse(null)
@@ -1338,7 +1484,7 @@ export default function MintDashboard() {
     if (!newTitle.trim()) return
     try {
       await renameChatSession(id, newTitle.trim())
-      await refreshChatSessions(conversationId)
+      await refreshChatSessions()
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -1396,11 +1542,13 @@ export default function MintDashboard() {
       setSettingsConfig(config)
       setStatus(await getRuntimeStatus())
 
-      // Record system event in chat history
+      // Record system event in chat history if conversation already has messages
       const activeModel = getActiveModelName(config, provider)
       const displayName = formatProviderChangeText(provider, activeModel)
-      await saveSystemInteraction(conversationId, displayName, '', 'system', 'provider_change')
-      await refreshHistory()
+      if (interactions.length > 0) {
+        await saveSystemInteraction(conversationId, displayName, '', 'system', 'provider_change')
+        await refreshHistory()
+      }
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -1439,10 +1587,54 @@ export default function MintDashboard() {
       setSettingsConfig(config)
       setStatus(await getRuntimeStatus())
 
-      // Record system event in chat history
+      // Record system event in chat history if conversation already has messages
       const displayName = formatProviderChangeText(provider, modelName)
-      await saveSystemInteraction(conversationId, displayName, '', 'system', 'provider_change')
-      await refreshHistory()
+      if (interactions.length > 0) {
+        await saveSystemInteraction(conversationId, displayName, '', 'system', 'provider_change')
+        await refreshHistory()
+      }
+    } catch (reason) {
+      setError(errorMessage(reason))
+    }
+  }
+
+  async function changeProviderAndModel(provider: string, modelName: string) {
+    try {
+      const config = await window.settingsApi.getSettings()
+      config.aiProvider = provider
+      if (provider === 'gemini') {
+        config.geminiModel = modelName
+      } else if (provider === 'openai') {
+        config.openaiModel = modelName
+      } else if (provider === 'openrouter') {
+        config.openrouterModel = modelName
+      } else if (provider === 'deepseek') {
+        config.deepseekModel = modelName
+      } else if (provider === 'anthropic') {
+        config.anthropicModel = modelName
+      } else if (provider === 'huggingface') {
+        config.hfModel = modelName
+      } else if (provider === 'local_openai') {
+        config.localModelName = modelName
+      } else if (provider === 'ollama') {
+        config.ollamaModel = modelName
+      } else if (provider.startsWith('custom:')) {
+        const id = provider.replace(/^custom:/, '')
+        config.customModelSelections = {
+          ...(config.customModelSelections ?? {}),
+          [id]: modelName
+        }
+      }
+      await window.settingsApi.saveSettings(config)
+      setSettingsConfig(config)
+      setStatus(await getRuntimeStatus())
+
+      // Record system event in chat history if conversation already has messages
+      const displayName = formatProviderChangeText(provider, modelName)
+      if (interactions.length > 0) {
+        await saveSystemInteraction(conversationId, displayName, '', 'system', 'provider_change')
+        await refreshHistory()
+      }
     } catch (reason) {
       setError(errorMessage(reason))
     }
@@ -1689,6 +1881,7 @@ export default function MintDashboard() {
             onSelectWorkspace={isDesktopApp ? selectWorkspace : undefined}
             settingsConfig={settingsConfig}
             onSetModel={changeModel}
+            onSelectModelAndProvider={changeProviderAndModel}
             onSetGeminiLiveVoice={changeGeminiLiveVoice}
             onApproval={handleApproval}
             onCancelMessage={handleCancelMessage}

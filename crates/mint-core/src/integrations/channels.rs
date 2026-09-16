@@ -769,6 +769,7 @@ pub async fn answer_channel(
             pinned_mcp_server: None,
             messages: None,
             tools: None,
+            temperature: config.temperature,
         },
     )
     .await

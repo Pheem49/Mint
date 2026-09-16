@@ -242,12 +242,15 @@ async fn brave_image_search(
         .iter()
         .take(limit)
         .filter_map(|item| {
-            let thumbnail_url = item["thumbnail"]["src"].as_str().unwrap_or("").to_owned();
-            let image_url = item["properties"]["url"]
+            let direct_url = item["properties"]["url"]
                 .as_str()
                 .filter(|s| !s.is_empty())
-                .unwrap_or(&thumbnail_url)
-                .to_owned();
+                .map(|s| s.replace("&amp;", "&"));
+            let thumb_src = item["thumbnail"]["src"].as_str().unwrap_or("");
+            let thumbnail_url = crate::search::web_search::unwrap_brave_proxy_url(thumb_src)
+                .or_else(|| direct_url.clone())
+                .unwrap_or_default();
+            let image_url = direct_url.unwrap_or_else(|| thumbnail_url.clone());
             if image_url.is_empty() {
                 return None;
             }

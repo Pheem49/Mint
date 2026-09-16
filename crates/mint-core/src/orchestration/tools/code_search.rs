@@ -64,6 +64,34 @@ pub(in crate::orchestration) async fn execute(
             )
             .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
         }
+        "find_definition" => {
+            let path = workspace_path(root, &input.path)?;
+            let symbol_target = if !input.symbol.trim().is_empty() {
+                &input.symbol
+            } else {
+                &input.query
+            };
+            let symbol = required(symbol_target, "symbol")?;
+            Ok(serde_json::to_string_pretty(
+                &crate::find_definition(&path, symbol, config)
+                    .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
+            )
+            .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+        }
+        "find_references" => {
+            let path = workspace_path(root, &input.path)?;
+            let symbol_target = if !input.symbol.trim().is_empty() {
+                &input.symbol
+            } else {
+                &input.query
+            };
+            let symbol = required(symbol_target, "symbol")?;
+            Ok(serde_json::to_string_pretty(
+                &crate::find_references(&path, symbol, input.limit.unwrap_or(30), config)
+                    .map_err(|e| OrchestrationError::Agent(e.to_string()))?,
+            )
+            .map_err(|e| OrchestrationError::Agent(e.to_string()))?)
+        }
         _ => unreachable!(
             "execute_tool routed an unhandled action into tools::code_search::execute: {action}"
         ),

@@ -1,6 +1,6 @@
 import React from 'react'
+import { DEFAULT_CONFIG } from '../../constants/config'
 import { 
-  DEFAULT_CONFIG,
   GEMINI_MODELS,
   OPENAI_MODELS,
   OPENROUTER_MODELS,
@@ -8,13 +8,17 @@ import {
   ANTHROPIC_MODELS,
   HF_MODELS,
   LOCAL_MODELS,
+  IMAGE_STUDIO_MODELS,
+  IMAGE_GEN_PROVIDER_MODELS,
+  VEO_STUDIO_MODELS,
+} from '../../constants/models'
+import type {
   CustomProviderConfig,
   CustomProviderModel,
   CustomProviderHeader,
-} from '@/components/SettingsWindow'
+} from '../../types'
 import { setActiveModel } from '../../utils/modelManager'
 import { providerLabel as aiProviderLabel } from '../../utils/providers'
-import { IMAGE_STUDIO_MODELS, IMAGE_GEN_PROVIDER_MODELS } from '../../constants/models'
 import ApiKeyInput from './ApiKeyInput'
 
 // One card per image-gen provider (mirrors the chat "Provider & Model"
@@ -82,6 +86,20 @@ interface GeneralTabProps {
   customOllama: string
   setCustomOllama: (val: string) => void
   dynamicOllamaModels: string[]
+  /** Dynamic model lists fetched from provider APIs. Falls back to static
+   *  presets from `shared/constants/models.ts` when not provided. */
+  dynamicGeminiModels?: string[]
+  dynamicAnthropicModels?: string[]
+  dynamicOpenAIModels?: string[]
+  dynamicOpenRouterModels?: string[]
+  dynamicDeepSeekModels?: string[]
+  dynamicLocalModels?: string[]
+  /** Dynamic image model lists fetched from provider APIs, keyed by listKey ('nanobanana', 'dalle', etc.).
+   *  Falls back to static presets from `shared/constants/models.ts` when not provided. */
+  dynamicImageModels?: Partial<Record<string, Array<{ value: string; label: string }>>>
+  /** Dynamic video model lists fetched from provider APIs, keyed by provider ('veo').
+   *  Falls back to static presets from `shared/constants/models.ts` when not provided. */
+  dynamicVideoModels?: Partial<Record<string, Array<{ value: string; label: string }>>>
   updateAvailable: boolean
   updateMessage: string
   handleCheckUpdates: () => void
@@ -110,6 +128,14 @@ export default function GeneralTab({
   customOllama,
   setCustomOllama,
   dynamicOllamaModels,
+  dynamicGeminiModels = [...GEMINI_MODELS],
+  dynamicAnthropicModels = [...ANTHROPIC_MODELS],
+  dynamicOpenAIModels = [...OPENAI_MODELS],
+  dynamicOpenRouterModels = [...OPENROUTER_MODELS],
+  dynamicDeepSeekModels = [...DEEPSEEK_MODELS],
+  dynamicLocalModels = [...LOCAL_MODELS],
+  dynamicImageModels,
+  dynamicVideoModels,
   updateAvailable,
   updateMessage,
   handleCheckUpdates,
@@ -280,6 +306,168 @@ export default function GeneralTab({
                 </div>
               )
             })()}
+
+            {(() => {
+              const activeModelRaw = (
+                config.aiProvider === 'gemini' ? config.geminiModel :
+                config.aiProvider === 'openai' ? config.openaiModel :
+                config.aiProvider === 'anthropic' ? config.anthropicModel :
+                config.aiProvider === 'deepseek' ? config.deepseekModel :
+                config.aiProvider === 'ollama' ? config.ollamaModel :
+                config.aiProvider === 'openrouter' ? config.openrouterModel :
+                config.aiProvider === 'huggingface' ? config.hfModel :
+                config.aiProvider === 'local_openai' ? config.localModelName :
+                (config.aiProvider?.startsWith('custom:') ? ((config.customModelSelections ?? {})[config.aiProvider.replace(/^custom:/, '')] ?? '') : '')
+              ) || ''
+              const activeModel = activeModelRaw.toLowerCase()
+              const isReasoningOmit = (config.aiProvider === 'openai' || config.aiProvider === 'openrouter' || config.aiProvider === 'local_openai') &&
+                (activeModel.startsWith('o1') || activeModel.startsWith('o3'))
+              const isReasoningCoT = config.aiProvider === 'deepseek' ||
+                activeModel.includes('deepseek') ||
+                activeModel.includes('qwq') ||
+                activeModel.includes('thinking') ||
+                activeModel.includes('reasoner') ||
+                activeModel.includes('r1')
+              const isCodestral = activeModel.includes('codestral')
+
+              const smartDefault = isReasoningCoT ? 0.6 : isCodestral ? 0.1 : 0.2
+              const modelTemps = (config.modelTemperatures ?? {}) as Record<string, number>
+              const customModelTemp = activeModelRaw ? modelTemps[activeModelRaw] : undefined
+              const hasCustomModel = customModelTemp !== undefined
+              const hasCustomGlobal = config.temperature !== null && config.temperature !== undefined
+              const hasCustom = hasCustomModel || hasCustomGlobal
+
+              const currentTemp = hasCustomModel
+                ? customModelTemp!
+                : hasCustomGlobal
+                ? config.temperature!
+                : smartDefault
+
+              const modelDisplayName = (() => {
+                if (!activeModelRaw) return ''
+                const trimmed = activeModelRaw.trim()
+                const base = trimmed.includes('/') ? trimmed.split('/').pop()! : trimmed
+                const noTag = base.includes(':') ? base.split(':')[0]! : base
+                const lower = noTag.toLowerCase()
+
+                const KNOWN_MAP: Record<string, string> = {
+                  'deepseek-v4-flash': 'DeepSeek V4 Flash',
+                  'deepseek-v4-pro': 'DeepSeek V4 Pro',
+                  'deepseek-chat': 'DeepSeek Chat',
+                  'deepseek-reasoner': 'DeepSeek Reasoner',
+                  'claude-sonnet-5': 'Claude Sonnet 5',
+                  'claude-opus-5': 'Claude Opus 5',
+                  'claude-sonnet-4.6': 'Claude Sonnet 4.6',
+                  'claude-haiku-4.5': 'Claude Haiku 4.5',
+                  'gemini-2.5-flash': 'Gemini 2.5 Flash',
+                  'gemini-3.5-flash': 'Gemini 3.5 Flash',
+                  'gemini-3.6-flash': 'Gemini 3.6 Flash',
+                  'gpt-5.6-luna': 'GPT-5.6 Luna',
+                  'gpt-5.6-terra': 'GPT-5.6 Terra',
+                  'gpt-5.6-sol': 'GPT-5.6 Sol',
+                  'gpt-4o': 'GPT-4o',
+                  'gpt-4o-mini': 'GPT-4o Mini',
+                  'llama3': 'Llama 3',
+                }
+                if (KNOWN_MAP[lower]) return KNOWN_MAP[lower]
+
+                return noTag
+                  .split(/[-_]/)
+                  .filter(Boolean)
+                  .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+                  .join(' ')
+              })()
+
+              const autoLabel = isReasoningOmit
+                ? `Auto (Omitted for ${modelDisplayName || 'Reasoning'})`
+                : isReasoningCoT
+                ? 'Auto (0.60 for Reasoning)'
+                : isCodestral
+                ? 'Auto (0.10 for Codestral)'
+                : 'Auto (0.20 for Coding)'
+
+              const badgeLabel = hasCustomModel
+                ? `Custom for ${modelDisplayName || activeModelRaw} (${customModelTemp!.toFixed(2)})`
+                : hasCustomGlobal
+                ? `Custom Global (${config.temperature!.toFixed(2)})`
+                : autoLabel
+
+              const handleReset = () => {
+                if (activeModelRaw && modelTemps[activeModelRaw] !== undefined) {
+                  const updated = { ...modelTemps }
+                  delete updated[activeModelRaw]
+                  updateField('modelTemperatures', updated)
+                }
+                if (config.temperature !== null && config.temperature !== undefined) {
+                  updateField('temperature', null)
+                }
+              }
+
+              const handleChange = (val: number) => {
+                if (activeModelRaw) {
+                  const updated = { ...modelTemps, [activeModelRaw]: val }
+                  updateField('modelTemperatures', updated)
+                } else {
+                  updateField('temperature', val)
+                }
+              }
+
+              return (
+                <div className="setting-row stacked" style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '8px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <label style={{ margin: 0, fontWeight: 600, display: 'flex', alignItems: 'baseline', gap: '0.45rem' }}>
+                      <span>Model Temperature</span>
+                      {modelDisplayName && (
+                        <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>
+                          · {modelDisplayName}
+                        </span>
+                      )}
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span className="section-current-badge" style={{ fontSize: '0.75rem' }}>
+                        {hasCustomModel ? `Custom (${customModelTemp!.toFixed(2)})` : hasCustomGlobal ? `Custom Global (${config.temperature!.toFixed(2)})` : autoLabel}
+                      </span>
+                      {hasCustom && (
+                        <button
+                          type="button"
+                          className="btn-secondary btn-small"
+                          style={{ padding: '0.15rem 0.45rem', fontSize: '0.75rem' }}
+                          onClick={handleReset}
+                          title={`Reset ${modelDisplayName || activeModelRaw || 'model'} to smart default`}
+                        >
+                          Reset to Auto
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1.5"
+                      step="0.05"
+                      value={currentTemp}
+                      onChange={(e) => handleChange(parseFloat(e.target.value))}
+                      style={{ flex: 1, accentColor: 'var(--accent-color, #10b981)', cursor: 'pointer' }}
+                    />
+                    <span style={{ fontSize: '0.85rem', minWidth: '2.5rem', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
+                      {currentTemp.toFixed(2)}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', opacity: 0.75, marginTop: '0.35rem', lineHeight: 1.4 }}>
+                    Controls sampling entropy for <strong>{modelDisplayName || activeModelRaw}</strong>. {
+                      isReasoningOmit
+                        ? 'Reasoning models (o1/o3) automatically omit this parameter.'
+                        : isReasoningCoT
+                        ? 'Smart default is 0.60 to prevent repetitive reasoning loops.'
+                        : isCodestral
+                        ? 'Smart default is 0.10 for deterministic code completion.'
+                        : 'Smart default is 0.20 for general coding and tool execution.'
+                    }
+                  </span>
+                </div>
+              )
+            })()}
           </div>
 
           <div className="provider-cards-container">
@@ -292,22 +480,30 @@ export default function GeneralTab({
                   </svg>
                   Google Gemini (Cloud)
                 </div>
-                {config.aiProvider === 'gemini' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'gemini' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'gemini')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>Gemini Model</label>
                   <select 
-                    value={(GEMINI_MODELS as readonly string[]).includes(config.geminiModel) ? config.geminiModel : 'custom'} 
+                    value={dynamicGeminiModels.includes(config.geminiModel) ? config.geminiModel : 'custom'} 
                     onChange={(e) => updateField('geminiModel', e.target.value)}
                   >
-                    {GEMINI_MODELS.map(model => (
+                    {dynamicGeminiModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(GEMINI_MODELS as readonly string[]).includes(config.geminiModel) || config.geminiModel === 'custom') && (
+                {(!dynamicGeminiModels.includes(config.geminiModel) || config.geminiModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom Gemini Model</label>
                     <input 
@@ -339,22 +535,30 @@ export default function GeneralTab({
                   </svg>
                   Anthropic Claude
                 </div>
-                {config.aiProvider === 'anthropic' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'anthropic' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'anthropic')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>Anthropic Model</label>
                   <select 
-                    value={(ANTHROPIC_MODELS as readonly string[]).includes(config.anthropicModel) ? config.anthropicModel : 'custom'} 
+                    value={dynamicAnthropicModels.includes(config.anthropicModel) ? config.anthropicModel : 'custom'} 
                     onChange={(e) => updateField('anthropicModel', e.target.value)}
                   >
-                    {ANTHROPIC_MODELS.map(model => (
+                    {dynamicAnthropicModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(ANTHROPIC_MODELS as readonly string[]).includes(config.anthropicModel) || config.anthropicModel === 'custom') && (
+                {(!dynamicAnthropicModels.includes(config.anthropicModel) || config.anthropicModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom Anthropic Model</label>
                     <input 
@@ -387,22 +591,30 @@ export default function GeneralTab({
                   </svg>
                   OpenAI
                 </div>
-                {config.aiProvider === 'openai' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'openai' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'openai')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>OpenAI Model</label>
                   <select 
-                    value={(OPENAI_MODELS as readonly string[]).includes(config.openaiModel) ? config.openaiModel : 'custom'} 
+                    value={dynamicOpenAIModels.includes(config.openaiModel) ? config.openaiModel : 'custom'} 
                     onChange={(e) => updateField('openaiModel', e.target.value)}
                   >
-                    {OPENAI_MODELS.map(model => (
+                    {dynamicOpenAIModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(OPENAI_MODELS as readonly string[]).includes(config.openaiModel) || config.openaiModel === 'custom') && (
+                {(!dynamicOpenAIModels.includes(config.openaiModel) || config.openaiModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom OpenAI Model</label>
                     <input 
@@ -437,22 +649,30 @@ export default function GeneralTab({
                   </svg>
                   OpenRouter
                 </div>
-                {config.aiProvider === 'openrouter' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'openrouter' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'openrouter')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>OpenRouter Model</label>
                   <select
-                    value={(OPENROUTER_MODELS as readonly string[]).includes(config.openrouterModel) ? config.openrouterModel : 'custom'}
+                    value={dynamicOpenRouterModels.includes(config.openrouterModel) ? config.openrouterModel : 'custom'}
                     onChange={(e) => updateField('openrouterModel', e.target.value)}
                   >
-                    {OPENROUTER_MODELS.map(model => (
+                    {dynamicOpenRouterModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(OPENROUTER_MODELS as readonly string[]).includes(config.openrouterModel) || config.openrouterModel === 'custom') && (
+                {(!dynamicOpenRouterModels.includes(config.openrouterModel) || config.openrouterModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom OpenRouter Model</label>
                     <input
@@ -484,22 +704,30 @@ export default function GeneralTab({
                   </svg>
                   DeepSeek
                 </div>
-                {config.aiProvider === 'deepseek' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'deepseek' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'deepseek')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>DeepSeek Model</label>
                   <select
-                    value={(DEEPSEEK_MODELS as readonly string[]).includes(config.deepseekModel) ? config.deepseekModel : 'custom'}
+                    value={dynamicDeepSeekModels.includes(config.deepseekModel) ? config.deepseekModel : 'custom'}
                     onChange={(e) => updateField('deepseekModel', e.target.value)}
                   >
-                    {DEEPSEEK_MODELS.map(model => (
+                    {dynamicDeepSeekModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(DEEPSEEK_MODELS as readonly string[]).includes(config.deepseekModel) || config.deepseekModel === 'custom') && (
+                {(!dynamicDeepSeekModels.includes(config.deepseekModel) || config.deepseekModel === 'custom') && (
                   <div className="setting-row">
                     <label>Custom DeepSeek Model</label>
                     <input
@@ -533,7 +761,15 @@ export default function GeneralTab({
                   </svg>
                   Hugging Face (Inference API)
                 </div>
-                {config.aiProvider === 'huggingface' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'huggingface' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'huggingface')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
@@ -581,22 +817,30 @@ export default function GeneralTab({
                   </svg>
                   LM Studio / Local OpenAI
                 </div>
-                {config.aiProvider === 'local_openai' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'local_openai' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'local_openai')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
                   <label>LM Studio Model</label>
                   <select 
-                    value={(LOCAL_MODELS as readonly string[]).includes(config.localModelName) ? config.localModelName : 'custom'} 
+                    value={dynamicLocalModels.includes(config.localModelName) ? config.localModelName : 'custom'} 
                     onChange={(e) => updateField('localModelName', e.target.value)}
                   >
-                    {LOCAL_MODELS.map(model => (
+                    {dynamicLocalModels.map(model => (
                       <option key={model} value={model}>{model}</option>
                     ))}
                     <option value="custom">Custom...</option>
                   </select>
                 </div>
-                {(!(LOCAL_MODELS as readonly string[]).includes(config.localModelName) || config.localModelName === 'custom') && (
+                {(!dynamicLocalModels.includes(config.localModelName) || config.localModelName === 'custom') && (
                   <div className="setting-row">
                     <label>Custom LM Studio Model</label>
                     <input 
@@ -628,7 +872,15 @@ export default function GeneralTab({
                   </svg>
                   Ollama (Local)
                 </div>
-                {config.aiProvider === 'ollama' && <span className="provider-active-badge">Active</span>}
+                <div className="provider-card-actions">
+                  {config.aiProvider === 'ollama' ? (
+                    <span className="provider-active-badge">Active</span>
+                  ) : (
+                    <button type="button" className="btn-secondary btn-small" onClick={() => updateField('aiProvider', 'ollama')}>
+                      Set active
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="provider-card-body">
                 <div className="setting-row">
@@ -821,7 +1073,8 @@ export default function GeneralTab({
           <div className="provider-cards-container">
             {IMAGE_PROVIDERS.map(prov => {
               const entry = IMAGE_GEN_PROVIDER_MODELS[prov.id]
-              const opts = entry ? (IMAGE_STUDIO_MODELS[entry.listKey] ?? []) : []
+              const defaultOpts = entry ? (IMAGE_STUDIO_MODELS[entry.listKey] ?? []) : []
+              const opts = (entry && dynamicImageModels?.[entry.listKey]) || defaultOpts
               const modelField = entry?.configField as keyof typeof DEFAULT_CONFIG | undefined
               const currentModel = modelField ? ((config as any)[modelField] || opts[0]?.value || '') : ''
               return (
@@ -831,7 +1084,19 @@ export default function GeneralTab({
                       {imageProviderIcon}
                       {prov.cardTitle}
                     </div>
-                    {config.imageGenProvider === prov.id && <span className="provider-active-badge">Active</span>}
+                    <div className="provider-card-actions">
+                      {config.imageGenProvider === prov.id ? (
+                        <span className="provider-active-badge">Active</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-secondary btn-small"
+                          onClick={() => updateField('imageGenProvider', prov.id)}
+                        >
+                          Set active
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="provider-card-body">
                     {modelField && opts.length > 0 && (
@@ -841,6 +1106,9 @@ export default function GeneralTab({
                           {opts.map(m => (
                             <option key={m.value} value={m.value}>{m.label}</option>
                           ))}
+                          {currentModel && !opts.some(m => m.value === currentModel) && (
+                            <option key={currentModel} value={currentModel}>{currentModel}</option>
+                          )}
                         </select>
                       </div>
                     )}
@@ -896,17 +1164,26 @@ export default function GeneralTab({
               <p className="hint">Uses your Gemini API key — no extra key needed.</p>
               <div className="setting-row">
                 <label>Default Veo Model</label>
-                <select
-                  value={config.veoModel || 'veo-3.1-generate-preview'}
-                  onChange={(e) => {
-                    updateField('veoModel', e.target.value)
-                    setActiveModel('veoModel', e.target.value, 'video')
-                  }}
-                >
-                  <option value="veo-3.1-generate-preview">veo-3.1-generate-preview (Default)</option>
-                  <option value="veo-3.1-fast-generate-preview">veo-3.1-fast-generate-preview</option>
-                  <option value="veo-3.1-lite-generate-preview">veo-3.1-lite-generate-preview</option>
-                </select>
+                {(() => {
+                  const veoOpts = dynamicVideoModels?.veo || VEO_STUDIO_MODELS.veo || []
+                  const currentVeoModel = config.veoModel || 'veo-3.1-generate-preview'
+                  return (
+                    <select
+                      value={currentVeoModel}
+                      onChange={(e) => {
+                        updateField('veoModel', e.target.value)
+                        setActiveModel('veoModel', e.target.value, 'video')
+                      }}
+                    >
+                      {veoOpts.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                      {currentVeoModel && !veoOpts.some((m) => m.value === currentVeoModel) && (
+                        <option key={currentVeoModel} value={currentVeoModel}>{currentVeoModel}</option>
+                      )}
+                    </select>
+                  )
+                })()}
               </div>
             </div>
           </div>
@@ -972,7 +1249,17 @@ export default function GeneralTab({
                       {cp.displayName || cp.id || 'Unnamed Provider'}
                     </div>
                     <div className="provider-card-actions">
-                      {isActive && <span className="provider-active-badge">Active</span>}
+                      {isActive ? (
+                        <span className="provider-active-badge">Active</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-secondary btn-small"
+                          onClick={() => updateField('aiProvider', `custom:${cp.id}`)}
+                        >
+                          Set active
+                        </button>
+                      )}
                       <button
                         className="btn btn-primary btn-xs"
                         onClick={() => handleSaveProvider(cp.id)}

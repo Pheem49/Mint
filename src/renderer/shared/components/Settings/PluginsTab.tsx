@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { DEFAULT_CONFIG } from '@/components/SettingsWindow'
+import { DEFAULT_CONFIG } from '../../constants/config'
 import { listLearnedSkills, addLearnedSkill, deleteLearnedSkill, LearnedSkill, detectSystemTools, DetectedTools, listMcpServerTools } from '@/tauri'
 import McpToolAllowlist from '../McpToolAllowlist'
 import McpRegistryPicker from '../McpRegistryPicker'
@@ -545,11 +545,16 @@ export default function PluginsTab({
               rows={3}
             />
           </div>
-          <label className="setting-row" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-            <input type="checkbox" checked={addMcpAllowAll} onChange={(e) => setAddMcpAllowAll(e.target.checked)} />
-            <span>
-              Allow the agent to call all of this server’s tools (*)
-              <span style={{ display: 'block', opacity: 0.6, fontSize: '0.8rem' }}>
+          <label className="mcp-allow-all-row" style={{ marginTop: 10, marginBottom: 12 }}>
+            <input
+              type="checkbox"
+              className="mint-custom-checkbox"
+              checked={addMcpAllowAll}
+              onChange={(e) => setAddMcpAllowAll(e.target.checked)}
+            />
+            <span className="mcp-allow-all-text">
+              <span className="mcp-allow-all-title">Allow the agent to call all of this server’s tools (*)</span>
+              <span className="mcp-allow-all-desc">
                 Leave off to approve tools one by one afterwards.
               </span>
             </span>

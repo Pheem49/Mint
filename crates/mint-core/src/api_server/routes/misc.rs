@@ -102,6 +102,76 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             }
         }
 
+        ("GET", "/api/media") => {
+            let path_param = query_param(query, "path")
+                .map(|p| percent_decode(&p))
+                .unwrap_or_default();
+            if path_param.is_empty() {
+                send_json_response(
+                    socket,
+                    "400 Bad Request",
+                    "{\"error\":\"missing path query parameter\"}",
+                )
+                .await;
+                return;
+            }
+            let target_path = std::path::Path::new(&path_param);
+            let Ok(canonical) = target_path.canonicalize() else {
+                send_json_response(
+                    socket,
+                    "404 Not Found",
+                    "{\"error\":\"media file not found\"}",
+                )
+                .await;
+                return;
+            };
+            if !canonical.is_file() {
+                send_json_response(
+                    socket,
+                    "404 Not Found",
+                    "{\"error\":\"media file not found\"}",
+                )
+                .await;
+                return;
+            }
+            let Some(mime_type) = (match canonical
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_lowercase()
+                .as_str()
+            {
+                "png" => Some("image/png"),
+                "jpg" | "jpeg" => Some("image/jpeg"),
+                "webp" => Some("image/webp"),
+                "gif" => Some("image/gif"),
+                "svg" => Some("image/svg+xml"),
+                "mp4" => Some("video/mp4"),
+                "webm" => Some("video/webm"),
+                "mov" => Some("video/quicktime"),
+                "mkv" => Some("video/x-matroska"),
+                "mp3" => Some("audio/mpeg"),
+                "wav" => Some("audio/wav"),
+                "ogg" => Some("audio/ogg"),
+                _ => None,
+            }) else {
+                send_json_response(
+                    socket,
+                    "403 Forbidden",
+                    "{\"error\":\"unsupported media type\"}",
+                )
+                .await;
+                return;
+            };
+            match std::fs::read(&canonical) {
+                Ok(bytes) => send_binary_response(socket, "200 OK", mime_type, &bytes).await,
+                Err(e) => {
+                    let err_msg = serde_json::json!({ "error": e.to_string() }).to_string();
+                    send_json_response(socket, "500 Internal Server Error", &err_msg).await;
+                }
+            }
+        }
+
         ("GET", "/api/config") => {
             let config = load_config().unwrap_or_default();
             if let Ok(json_str) = serde_json::to_string(&config) {
@@ -269,6 +339,32 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
             .await;
         }
 
+        ("POST", "/api/checkpoints/undo") => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct UndoReq {
+                workspace_path: Option<String>,
+            }
+            let req = serde_json::from_str::<UndoReq>(body).unwrap_or(UndoReq {
+                workspace_path: None,
+            });
+            let root = req
+                .workspace_path
+                .as_deref()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            match crate::git::undo_rollback(&root) {
+                Ok(msg) => {
+                    let res = json!({ "status": "ok", "message": msg });
+                    send_json_response(socket, "200 OK", &res.to_string()).await;
+                }
+                Err(err) => {
+                    let res = json!({ "status": "error", "message": err });
+                    send_json_response(socket, "400 Bad Request", &res.to_string()).await;
+                }
+            }
+        }
+
         ("GET", "/api/file/read") => {
             let file_path = query_param(query, "path").unwrap_or_default();
             if file_path.is_empty() {
@@ -280,21 +376,203 @@ pub(in crate::api_server) async fn execute(ctx: RequestCtx<'_>, socket: TcpStrea
                 .await;
                 return;
             }
-            match std::fs::read_to_string(&file_path) {
+            let workspace = query_param(query, "workspace");
+            let ws_path = workspace.as_deref().map(std::path::Path::new);
+            let resolved = crate::files::resolve_readable_path(&file_path, ws_path);
+            match std::fs::read_to_string(&resolved) {
                 Ok(content) => {
                     let res = json!({
-                        "path": file_path,
+                        "path": resolved.display().to_string(),
                         "content": content
                     });
                     send_json_response(socket, "200 OK", &res.to_string()).await;
                 }
                 Err(err) => {
                     let res = json!({
-                        "error": format!("unable to read file: {err}")
+                        "error": format!("unable to read file '{}': {err}", resolved.display())
                     });
                     send_json_response(socket, "404 Not Found", &res.to_string()).await;
                 }
             }
+        }
+
+        ("GET", "/api/models") => {
+            // Query params: provider=<id>&apiKey=<key>&baseUrl=<url>
+            let provider = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("provider="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+            let api_key = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("apiKey="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+            let base_url_opt = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("baseUrl="))
+                .map(|v| percent_decode(v));
+
+            let dynamic = crate::slash::model_fetcher::fetch_provider_models(
+                &provider,
+                &api_key,
+                base_url_opt.as_deref(),
+            )
+            .await;
+
+            let models = if !dynamic.is_empty() {
+                dynamic
+            } else {
+                // Fallback: static presets so the UI is never empty.
+                match load_config() {
+                    Ok(cfg) => crate::slash::models::model_options_for_provider(&cfg, &provider),
+                    Err(_) => Vec::new(),
+                }
+            };
+
+            send_json_response(
+                socket,
+                "200 OK",
+                &serde_json::json!({ "models": models }).to_string(),
+            )
+            .await;
+        }
+
+        ("GET", "/api/live-models") => {
+            // Query param: apiKey=<gemini_key>
+            // Returns models that support Gemini Live (BidiGenerateContent / native-audio).
+            // Falls back to the static GEMINI_LIVE_MODELS preset list so the UI is never empty.
+            let api_key = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("apiKey="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+
+            let dynamic = crate::slash::model_fetcher::fetch_gemini_live_models(&api_key).await;
+
+            let models = if !dynamic.is_empty() {
+                dynamic
+            } else {
+                // Static preset fallback — always two well-known live models.
+                vec![
+                    "gemini-2.5-flash-native-audio-preview-12-2025".to_string(),
+                    "gemini-3.1-flash-live-preview".to_string(),
+                ]
+            };
+
+            send_json_response(
+                socket,
+                "200 OK",
+                &serde_json::json!({ "models": models }).to_string(),
+            )
+            .await;
+        }
+
+        ("GET", "/api/image-models") => {
+            // Query params: provider=<id>&apiKey=<key>
+            let provider = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("provider="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+            let mut api_key = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("apiKey="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+
+            let cfg_opt = load_config().ok();
+            if api_key.trim().is_empty() {
+                if let Some(ref cfg) = cfg_opt {
+                    api_key = match provider.to_lowercase().as_str() {
+                        "nanobanana" | "gemini" | "google" => cfg.api_key.clone(),
+                        "dalle" | "openai" => cfg.openai_api_key.clone(),
+                        "stability" => cfg.stability_api_key.clone(),
+                        "ideogram" => cfg.ideogram_api_key.clone(),
+                        "replicate" => cfg.replicate_api_key.clone(),
+                        "bfl" | "flux" => cfg.bfl_api_key.clone(),
+                        _ => String::new(),
+                    };
+                }
+            }
+
+            let dynamic =
+                crate::media::image_model_fetcher::fetch_image_provider_models(&provider, &api_key)
+                    .await;
+
+            let models = if !dynamic.is_empty() {
+                dynamic
+            } else {
+                match cfg_opt {
+                    Some(ref cfg) => {
+                        crate::media::image_models::image_model_options_for_provider(cfg, &provider)
+                    }
+                    None => match load_config() {
+                        Ok(cfg) => crate::media::image_models::image_model_options_for_provider(
+                            &cfg, &provider,
+                        ),
+                        Err(_) => Vec::new(),
+                    },
+                }
+            };
+
+            send_json_response(
+                socket,
+                "200 OK",
+                &serde_json::json!({ "models": models }).to_string(),
+            )
+            .await;
+        }
+
+        ("GET", "/api/video-models") => {
+            // Query params: provider=<id>&apiKey=<key>
+            let provider = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("provider="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+            let mut api_key = query
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("apiKey="))
+                .map(|v| percent_decode(v))
+                .unwrap_or_default();
+
+            let cfg_opt = load_config().ok();
+            if api_key.trim().is_empty() {
+                if let Some(ref cfg) = cfg_opt {
+                    api_key = match provider.to_lowercase().as_str() {
+                        "veo" | "gemini" | "google" => cfg.api_key.clone(),
+                        _ => String::new(),
+                    };
+                }
+            }
+
+            let dynamic =
+                crate::media::video_model_fetcher::fetch_video_provider_models(&provider, &api_key)
+                    .await;
+
+            let models = if !dynamic.is_empty() {
+                dynamic
+            } else {
+                match cfg_opt {
+                    Some(ref cfg) => {
+                        crate::media::video_models::video_model_options_for_provider(cfg, &provider)
+                    }
+                    None => match load_config() {
+                        Ok(cfg) => crate::media::video_models::video_model_options_for_provider(
+                            &cfg, &provider,
+                        ),
+                        Err(_) => Vec::new(),
+                    },
+                }
+            };
+
+            send_json_response(
+                socket,
+                "200 OK",
+                &serde_json::json!({ "models": models }).to_string(),
+            )
+            .await;
         }
 
         _ => unreachable!(

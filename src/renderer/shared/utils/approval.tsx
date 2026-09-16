@@ -93,15 +93,15 @@ export function renderDiff(diffText: string): ReactNode {
 
   return (
     <div style={{
-      background: '#0b0f19',
-      borderRadius: '6px',
+      background: 'var(--input-bg, #0a0a0b)',
+      borderRadius: 'var(--radius-sm, 6px)',
       padding: '8px',
-      border: '1px solid rgba(255, 255, 255, 0.08)',
+      border: '1px solid var(--border)',
       overflowX: 'auto',
       maxHeight: '400px',
-      fontFamily: 'monospace',
+      fontFamily: "'Fira Code', 'Courier New', Courier, monospace",
       fontSize: '0.74rem',
-      lineHeight: '1.4',
+      lineHeight: '1.45',
     }}>
       {lines.map((line, idx) => {
         if (line.startsWith('@@')) {
@@ -111,14 +111,14 @@ export function renderDiff(diffText: string): ReactNode {
             currentNewLine = hunk.newStart
           }
           return (
-            <div key={idx} style={{ color: '#64748b', fontWeight: 'bold', padding: '2px 6px' }}>
+            <div key={idx} style={{ color: 'var(--text-muted)', fontWeight: 'bold', padding: '2px 6px' }}>
               {'       ' + line}
             </div>
           )
         }
         if (line.startsWith('---') || line.startsWith('+++')) {
           return (
-            <div key={idx} style={{ color: '#64748b', fontWeight: 'bold', padding: '2px 6px' }}>
+            <div key={idx} style={{ color: 'var(--text-muted)', fontWeight: 'bold', padding: '2px 6px' }}>
               {'       ' + line}
             </div>
           )
@@ -127,27 +127,41 @@ export function renderDiff(diffText: string): ReactNode {
         let lineNum = ''
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let style: any = { whiteSpace: 'pre-wrap', padding: '2px 6px', display: 'flex', alignItems: 'center' }
+        let sign = ''
+        let signColor = ''
+        let lineContent = line
         if (line.startsWith('+')) {
           lineNum = String(currentNewLine)
           currentNewLine++
-          style = { ...style, background: 'rgba(16, 185, 129, 0.12)', borderLeft: '3px solid #10b981', color: '#a7f3d0' }
+          style = { ...style, background: 'color-mix(in srgb, var(--accent) 10%, transparent)', borderLeft: '3px solid var(--accent)', color: 'var(--text-chat, var(--text-main))' }
+          sign = '+'
+          signColor = 'var(--accent)'
+          lineContent = line.slice(1)
         } else if (line.startsWith('-')) {
           lineNum = String(currentOldLine)
           currentOldLine++
-          style = { ...style, background: 'rgba(239, 68, 68, 0.12)', borderLeft: '3px solid #ef4444', color: '#fca5a5' }
+          style = { ...style, background: 'color-mix(in srgb, var(--status-error, #ef4444) 10%, transparent)', borderLeft: '3px solid var(--status-error, #ef4444)', color: 'var(--text-chat, var(--text-main))' }
+          sign = '-'
+          signColor = 'var(--status-error, #ef4444)'
+          lineContent = line.slice(1)
         } else {
           lineNum = String(currentNewLine)
           currentOldLine++
           currentNewLine++
-          style = { ...style, color: '#e2e8f0' }
+          style = { ...style, color: 'var(--text-chat, var(--text-main))' }
         }
 
         return (
           <div key={idx} style={style}>
-            <span style={{ color: '#64748b', marginRight: '12px', userSelect: 'none', display: 'inline-block', width: '36px', textAlign: 'right', flexShrink: 0 }}>
+            <span style={{ color: 'var(--text-muted)', marginRight: '12px', userSelect: 'none', display: 'inline-block', width: '36px', textAlign: 'right', flexShrink: 0 }}>
               {lineNum}
             </span>
-            <span>{line}</span>
+            {sign && (
+              <span style={{ color: signColor, marginRight: '4px', userSelect: 'none', fontWeight: 600 }}>
+                {sign}
+              </span>
+            )}
+            <span>{lineContent}</span>
           </div>
         )
       })}

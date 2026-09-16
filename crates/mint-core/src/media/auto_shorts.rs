@@ -296,6 +296,7 @@ async fn detect_highlights(
             pinned_mcp_server: None,
             messages: None,
             tools: None,
+            temperature: config.temperature,
         };
 
         if let Ok((res, _)) = crate::chat::send_chat_with_fallback(config, &chat_req).await {

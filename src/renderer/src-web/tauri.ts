@@ -50,6 +50,14 @@ let lastAiNotification: Notification | null = null
 export const APP_ICON_PATH = '/assets/icon.png'
 
 export const getLocalApiBase = () => {
+  if (typeof window !== 'undefined') {
+    // When served via Vite dev/preview (port 9000), behind a reverse proxy,
+    // or over HTTPS, using relative '/api' leverages Vite's proxy, avoids CORS
+    // preflight OPTIONS round-trips, and eliminates mixed-content issues.
+    if (window.location.port === '9000' || !window.location.port || window.location.protocol === 'https:') {
+      return '/api';
+    }
+  }
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   return `http://${host}:3000/api`;
 };
@@ -77,6 +85,10 @@ function setStoredAuthToken(token: string | null) {
   }
 }
 
+interface AuthFetchInit extends RequestInit {
+  timeoutMs?: number
+}
+
 /**
  * fetch() wrapper that attaches the signed-in user's session token to every
  * request to this app's own local API server. Without this, the server has
@@ -84,12 +96,23 @@ function setStoredAuthToken(token: string | null) {
  * even while a user is signed in, since only a handful of /auth/* endpoints
  * used to send the header explicitly.
  */
-function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+function authFetch(input: RequestInfo | URL, init: AuthFetchInit = {}): Promise<Response> {
   const token = getStoredAuthToken()
-  if (!token) return fetch(input, init)
   const headers = new Headers(init.headers)
-  if (!headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
-  return fetch(input, { ...init, headers })
+  if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
+  
+  let signal = init.signal
+  let timer: any = null
+  if (!signal && init.timeoutMs && typeof AbortController !== 'undefined') {
+    const controller = new AbortController()
+    signal = controller.signal
+    timer = setTimeout(() => controller.abort(new Error(`Request timed out after ${init.timeoutMs}ms`)), init.timeoutMs)
+  }
+  const fetchPromise = fetch(input, { ...init, headers, signal })
+  if (timer) {
+    return fetchPromise.finally(() => clearTimeout(timer))
+  }
+  return fetchPromise
 }
 
 export async function authRegister(
@@ -151,6 +174,7 @@ export async function authGetCurrentUser(): Promise<AuthUser | null> {
     try {
       const res = await authFetch(`${getApiBase()}/auth/session`, {
         headers: { Authorization: `Bearer ${token}` },
+        timeoutMs: 5000,
       })
       if (!res.ok) return null
       const data = await res.json()
@@ -216,7 +240,7 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase();
     try {
-      const res = await authFetch(`${API_BASE}/status`);
+      const res = await authFetch(`${API_BASE}/status`, { timeoutMs: 5000 });
       return await res.json();
     } catch (e) {
       console.error("Failed to fetch runtime status from local server:", e);
@@ -329,6 +353,104 @@ export async function listMcpServerTools(name: string): Promise<string[]> {
   }
   const { invoke } = await import('@tauri-apps/api/core')
   return invoke<string[]>('list_mcp_server_tools', { name })
+}
+
+/** Test remote MCP connection by URL and optional headers */
+export async function testMcpConnection(
+  url: string,
+  headers?: Record<string, string>,
+): Promise<{ ok: boolean; error?: string; server_info?: any; tools_count?: number; tools?: any[] }> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase()
+    const res = await authFetch(`${API_BASE}/mcp/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, headers }),
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok) {
+      return { ok: false, error: data?.error || `HTTP ${res.status}` }
+    }
+    return data
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke('test_mcp_connection', { url, headers })
+}
+
+/** Fetch the live model list for `provider` from its API.
+ *  Returns a dynamic list on success, falling back to static presets on any
+ *  network or auth error.  Results are cached for 1 hour on the Rust side. */
+export async function fetchProviderModels(
+  provider: string,
+  apiKey: string,
+  baseUrl?: string,
+): Promise<string[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const params = new URLSearchParams({ provider, apiKey })
+    if (baseUrl) params.set('baseUrl', baseUrl)
+    const API_BASE = getApiBase()
+    const res = await fetch(`${API_BASE}/models?${params.toString()}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json().catch(() => null)
+    return Array.isArray(data?.models) ? data.models : []
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_provider_models', { provider, apiKey, baseUrl })
+}
+
+/** Fetch the live model list for image `provider` from its API.
+ *  Returns a dynamic list on success, falling back to static presets on any
+ *  network or auth error. Results are cached for 1 hour on the Rust side. */
+export async function fetchImageProviderModels(
+  provider: string,
+  apiKey: string = '',
+): Promise<string[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const params = new URLSearchParams({ provider, apiKey: apiKey || '' })
+    const API_BASE = getApiBase()
+    const res = await fetch(`${API_BASE}/image-models?${params.toString()}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json().catch(() => null)
+    return Array.isArray(data?.models) ? data.models : []
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_image_provider_models', { provider, apiKey: apiKey || '' })
+}
+
+/** Fetch the live model list for video `provider` from its API.
+ *  Returns a dynamic list on success, falling back to static presets on any
+ *  network or auth error. Results are cached for 1 hour on the Rust side. */
+export async function fetchVideoProviderModels(
+  provider: string,
+  apiKey: string = '',
+): Promise<string[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const params = new URLSearchParams({ provider, apiKey: apiKey || '' })
+    const API_BASE = getApiBase()
+    const res = await fetch(`${API_BASE}/video-models?${params.toString()}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json().catch(() => null)
+    return Array.isArray(data?.models) ? data.models : []
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_video_provider_models', { provider, apiKey: apiKey || '' })
+}
+
+/** Fetch the list of Gemini Live–capable models (BidiGenerateContent / native-audio)
+ *  from the Gemini API. Returns a dynamic list on success; falls back to an empty
+ *  array so the hook can use its static GEMINI_LIVE_MODELS preset instead.
+ *  Results are cached for 1 hour on the Rust side. */
+export async function fetchGeminiLiveModels(apiKey: string): Promise<string[]> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const params = new URLSearchParams({ apiKey: apiKey || '' })
+    const API_BASE = getApiBase()
+    const res = await fetch(`${API_BASE}/live-models?${params.toString()}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json().catch(() => null)
+    return Array.isArray(data?.models) ? data.models : []
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  return invoke<string[]>('fetch_gemini_live_models', { apiKey: apiKey || '' })
 }
 
 export async function sendChatMessage(
@@ -953,10 +1075,43 @@ export async function listen<T>(event: string, handler: (event: { payload: T }) 
 
 export function convertFileSrc(filePath: string, protocol = 'asset'): string {
   if (!filePath) return ''
-  if (typeof window === 'undefined' || !isTauriRuntime()) {
-    if (filePath.startsWith('http://') || filePath.startsWith('https://') || filePath.startsWith('blob:')) {
-      return filePath
+  if (
+    filePath.startsWith('http://') ||
+    filePath.startsWith('https://') ||
+    filePath.startsWith('blob:') ||
+    filePath.startsWith('data:')
+  ) {
+    return filePath
+  }
+  // If it's already an API route (/api/...)
+  if (filePath.startsWith('/api/')) {
+    const apiBase = getLocalApiBase()
+    const prefix = apiBase.replace(/\/api\/?$/, '')
+    return prefix ? `${prefix}${filePath}` : filePath
+  }
+  // If it's a web-relative path or root-relative static asset (/assets/...)
+  if (
+    filePath.startsWith('/') &&
+    !filePath.startsWith('/home/') &&
+    !filePath.startsWith('/root/') &&
+    !filePath.startsWith('/tmp/') &&
+    !filePath.startsWith('/var/') &&
+    !filePath.startsWith('/usr/')
+  ) {
+    return filePath
+  }
+  // If filePath points to a picture in Mint pictures directory
+  if (filePath.includes('/pictures/') || filePath.includes('\\pictures\\')) {
+    const filename = filePath.split(/[/\\]/).pop()
+    if (filename) {
+      const apiBase = getLocalApiBase()
+      if (filename.endsWith('.thumb.png')) {
+        return `${apiBase}/thumbnails/${encodeURIComponent(filename)}`
+      }
+      return `${apiBase}/pictures/${encodeURIComponent(filename)}`
     }
+  }
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
     const API_BASE = getApiBase()
     return `${API_BASE}/media?path=${encodeURIComponent(filePath)}`
   }
@@ -976,7 +1131,7 @@ export function installTauriAdapters() {
     (window as any).settingsApi = {
       getSettings: async () => {
         try {
-          const res = await authFetch(`${API_BASE}/config`);
+          const res = await authFetch(`${API_BASE}/config`, { timeoutMs: 5000 });
           return await res.json();
         } catch (e) {
           console.error("Failed to fetch settings from local server:", e);
@@ -1869,6 +2024,13 @@ export async function generateVideo(request: VideoGenRequest): Promise<VideoGenR
 }
 
 export async function getVideoGenProviders(): Promise<VideoGenProviders> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase()
+    try {
+      const res = await authFetch(`${API_BASE}/video-gen/providers`)
+      if (res.ok) return await res.json()
+    } catch (_) { /* ignore */ }
+  }
   return { active: 'veo', available: ['veo'] }
 }
 
@@ -2199,12 +2361,45 @@ export async function rollbackGitCheckpoint(
   }
 }
 
-export const readWorkspaceFile = async (path: string): Promise<string> => {
+export async function undoGitCheckpoint(
+  workspacePath?: string,
+): Promise<{ status: string; message: string }> {
+  if (typeof window === 'undefined' || !isTauriRuntime()) {
+    const API_BASE = getApiBase()
+    try {
+      const res = await authFetch(`${API_BASE}/checkpoints/undo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspacePath }),
+      })
+      return await res.json()
+    } catch (e: any) {
+      console.error('Failed to undo git checkpoint:', e)
+      return { status: 'error', message: e?.message || String(e) }
+    }
+  }
+  const { invoke } = await import('@tauri-apps/api/core')
+  try {
+    const message = await invoke<string>('undo_git_checkpoint', {
+      workspacePath,
+    })
+    return { status: 'ok', message }
+  } catch (e: any) {
+    return { status: 'error', message: e?.message || String(e) }
+  }
+}
+
+export const readWorkspaceFile = async (path: string, workspacePath?: string): Promise<string> => {
   if (!isTauriRuntime()) {
     try {
-      const res = await fetch(`${getLocalApiBase()}/file/read?path=${encodeURIComponent(path)}`)
+      let url = `${getLocalApiBase()}/file/read?path=${encodeURIComponent(path)}`
+      if (workspacePath) {
+        url += `&workspace=${encodeURIComponent(workspacePath)}`
+      }
+      const res = await fetch(url)
       if (!res.ok) {
-        throw new Error(`Failed to read file: ${res.statusText}`)
+        const errorData = await res.json().catch(() => null)
+        throw new Error(errorData?.error || `Failed to read file: ${res.statusText}`)
       }
       const data = await res.json()
       return data.content || ''
@@ -2214,7 +2409,7 @@ export const readWorkspaceFile = async (path: string): Promise<string> => {
     }
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  return invoke('read_workspace_file', { path })
+  return invoke('read_workspace_file', { path, workspacePath })
 }
 
 // Enforce compile-time check against the shared platform interface
@@ -2265,6 +2460,8 @@ const _apiCheck: MintPlatformApi = {
   readClipboardImage,
   listGitCheckpoints,
   rollbackGitCheckpoint,
+  undoGitCheckpoint,
   readWorkspaceFile,
+  testMcpConnection,
 }
 

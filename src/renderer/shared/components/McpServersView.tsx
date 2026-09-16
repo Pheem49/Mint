@@ -4,6 +4,8 @@ import { renderMcpSvgIcon, renderMcpHubSvgIcon } from '../constants/plugins'
 import McpToolAllowlist from './McpToolAllowlist'
 import McpRegistryPicker from './McpRegistryPicker'
 import type { McpRegistryEntry } from '../constants/mcpRegistry'
+import { testMcpConnection } from '@/tauri'
+import { Globe, Terminal, Zap, Loader2, Check, AlertCircle, ShieldAlert } from 'lucide-react'
 
 export interface McpServersViewProps {
   config: any
@@ -52,6 +54,16 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
   const [searchQuery, setSearchQuery] = useState('')
   const [reauthStatus, setReauthStatus] = useState<Record<string, 'idle' | 'running' | 'success' | 'error'>>({})
 
+  // Remote MCP states
+  const [serverType, setServerType] = useState<'url' | 'command'>('url')
+  const [mcpUrl, setMcpUrl] = useState('')
+  const [authType, setAuthType] = useState<'none' | 'bearer' | 'custom'>('none')
+  const [bearerToken, setBearerToken] = useState('')
+  const [customHeaders, setCustomHeaders] = useState('')
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
+  const [testMessage, setTestMessage] = useState('')
+  const [securityAcknowledged, setSecurityAcknowledged] = useState(false)
+
   useEffect(() => {
     if (detectTools) {
       detectTools().then((t) => t && setDetectedTools(t)).catch(() => {})
@@ -84,23 +96,33 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
     customIcon?: string
     isEnabled: boolean
     isConfigured: boolean
+    isRemote: boolean
+    url?: string
     description?: string
   }> = []
 
   Object.entries(config.mcpServers || {}).forEach(([name, srv]: [string, any]) => {
-    let icon = '🔌'
-    if (name === 'docker') icon = '🐳'
-    if (name === 'git' || name === 'github') icon = '🐙'
+    let icon = 'plug'
+    if (name === 'docker') icon = 'docker'
+    if (name === 'git' || name === 'github') icon = 'git'
+    if (srv.url) icon = 'globe'
+
+    const isRemote = Boolean(srv.url)
+    const desc = isRemote
+      ? `URL: ${srv.url}`
+      : `Command: ${srv.command} ${(srv.args || []).join(' ')}`
 
     mcpListItems.push({
       name,
-      command: srv.command,
+      command: srv.command || '',
       args: srv.args || [],
       icon,
       customIcon: srv.icon,
       isEnabled: srv?.disabled !== true,
       isConfigured: true,
-      description: `Command: ${srv.command} ${(srv.args || []).join(' ')}`,
+      isRemote,
+      url: srv.url,
+      description: desc,
     })
   })
 
@@ -112,6 +134,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
       icon: '🐳',
       isEnabled: false,
       isConfigured: false,
+      isRemote: false,
       description: 'Docker MCP Server (Auto Discovered)',
     })
   }
@@ -124,6 +147,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
       icon: '🐙',
       isEnabled: false,
       isConfigured: false,
+      isRemote: false,
       description: 'Git MCP Server (Auto Discovered)',
     })
   }
@@ -131,6 +155,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
   const filteredMcpItems = mcpListItems.filter((item) =>
     item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     item.command.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (item.url || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (item.description || '').toLowerCase().includes(searchQuery.toLowerCase())
   )
 
@@ -151,11 +176,99 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
     }
   }
 
+  const handleTestConnection = async () => {
+    if (!mcpUrl.trim()) {
+      setTestStatus('error')
+      setTestMessage('Please enter a server URL first.')
+      return
+    }
+    let headers: Record<string, string> | undefined
+    if (authType === 'bearer') {
+      if (bearerToken.trim()) {
+        const token = bearerToken.trim().startsWith('Bearer ') ? bearerToken.trim() : `Bearer ${bearerToken.trim()}`
+        headers = { Authorization: token }
+      }
+    } else if (authType === 'custom') {
+      if (customHeaders.trim()) {
+        try {
+          headers = JSON.parse(customHeaders.trim())
+        } catch {
+          setTestStatus('error')
+          setTestMessage('Invalid JSON in Custom Headers field.')
+          return
+        }
+      }
+    }
+    setTestStatus('testing')
+    setTestMessage('Connecting to MCP server...')
+    try {
+      const res = await testMcpConnection(mcpUrl.trim(), headers)
+      if (res.ok) {
+        setTestStatus('success')
+        const name = res.server_info?.name || 'Remote Server'
+        const count = res.tools_count ?? 0
+        setTestMessage(`Connected: ${name} (${count} tools discovered)`)
+      } else {
+        setTestStatus('error')
+        setTestMessage(`Connection failed: ${res.error || 'Server unreachable'}`)
+      }
+    } catch (err: any) {
+      setTestStatus('error')
+      setTestMessage(`Connection failed: ${err?.message || String(err)}`)
+    }
+  }
+
   const onSubmitAddServer = (e: React.FormEvent) => {
     e.preventDefault()
-    handleAddMcpServer(addAllowAll)
-    setAddAllowAll(false)
-    setShowAddModal(false)
+    if (serverType === 'url') {
+      if (!mcpName.trim() || !mcpUrl.trim()) {
+        alert('Please provide a server name and URL.')
+        return
+      }
+      if (!securityAcknowledged) {
+        alert('Please acknowledge the security risks of connecting to a custom remote MCP server.')
+        return
+      }
+      let headers: Record<string, string> | undefined
+      if (authType === 'bearer' && bearerToken.trim()) {
+        const token = bearerToken.trim().startsWith('Bearer ') ? bearerToken.trim() : `Bearer ${bearerToken.trim()}`
+        headers = { Authorization: token }
+      } else if (authType === 'custom' && customHeaders.trim()) {
+        try {
+          headers = JSON.parse(customHeaders.trim())
+        } catch {
+          alert('Invalid JSON in Custom Headers field.')
+          return
+        }
+      }
+      const name = mcpName.trim()
+      const updated = { ...(config.mcpServers || {}) }
+      updated[name] = {
+        url: mcpUrl.trim(),
+        headers,
+        transport: 'sse',
+        disabled: false,
+        icon: mcpIcon?.trim() || undefined,
+      }
+      updateField('mcpServers', updated)
+      if (addAllowAll) {
+        const currentAllowed = (config as any).allowedMcpTools || {}
+        updateField('allowedMcpTools', { ...currentAllowed, [name]: ['*'] })
+      }
+      setMcpName('')
+      setMcpUrl('')
+      setBearerToken('')
+      setCustomHeaders('')
+      setTestStatus('idle')
+      setTestMessage('')
+      setSecurityAcknowledged(false)
+      setAddAllowAll(false)
+      setShowAddModal(false)
+    } else {
+      handleAddMcpServer(addAllowAll)
+      setAddAllowAll(false)
+      setShowAddModal(false)
+    }
   }
 
   const applyRegistryPick = (
@@ -163,6 +276,7 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
     argValues: string[],
     envSeed: Record<string, string>,
   ) => {
+    setServerType('command')
     setMcpName(entry.key)
     setMcpCmd(entry.command)
     setMcpArgs([...(entry.args || []), ...argValues].join(' '))
@@ -281,6 +395,11 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
               <div className="management-plugin-info">
                 <div className="management-plugin-name">
                   {item.name}
+                  {item.isRemote && (
+                    <span className="management-badge remote" style={{ fontSize: '0.72rem', padding: '2px 7px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <Globe size={11} /> Remote
+                    </span>
+                  )}
                   <span className={`management-dot ${item.isEnabled ? 'connected' : ''}`} title={item.isEnabled ? 'Active' : 'Inactive'} />
                 </div>
                 <div className="management-plugin-desc" style={{ fontFamily: 'monospace' }}>
@@ -372,52 +491,96 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                     <h4 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent, #3b82f6)', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 12px' }}>
                       Server Config
                     </h4>
-                    <div style={{ display: 'grid', gap: '12px' }}>
-                      <div className="management-form-group">
-                        <label className="management-label">Command</label>
-                        <input
-                          type="text"
-                          className="management-input-field"
-                          value={srvConfig.command || ''}
-                          onChange={(e) => handleUpdateMcpServerField(item.name, 'command', e.target.value)}
-                        />
+                    {srvConfig.url ? (
+                      <div style={{ display: 'grid', gap: '12px' }}>
+                        <div className="management-form-group">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label className="management-label">Server URL</label>
+                            <span className="management-badge remote" style={{ fontSize: '0.7rem' }}>SSE Transport</span>
+                          </div>
+                          <input
+                            type="text"
+                            className="management-input-field"
+                            value={srvConfig.url || ''}
+                            onChange={(e) => handleUpdateMcpServerField(item.name, 'url', e.target.value)}
+                          />
+                        </div>
+                        <div className="management-form-group">
+                          <label className="management-label">Custom Headers (JSON)</label>
+                          <textarea
+                            className="management-textarea-field"
+                            value={typeof srvConfig.headers === 'object' ? JSON.stringify(srvConfig.headers, null, 2) : srvConfig.headers || ''}
+                            onChange={(e) => {
+                              try {
+                                const parsed = JSON.parse(e.target.value)
+                                handleUpdateMcpServerField(item.name, 'headers', parsed)
+                              } catch {
+                                // allow live editing
+                              }
+                            }}
+                            rows={3}
+                            placeholder='{"Authorization": "Bearer ..."}'
+                          />
+                        </div>
+                        <div className="management-form-group">
+                          <label className="management-label">Icon (preset / URL / SVG)</label>
+                          <input
+                            type="text"
+                            className="management-input-field"
+                            placeholder="e.g. globe, search, database"
+                            value={srvConfig.icon || ''}
+                            onChange={(e) => handleUpdateMcpServerField(item.name, 'icon', e.target.value)}
+                          />
+                        </div>
                       </div>
-                      <div className="management-form-group">
-                        <label className="management-label">Arguments (space-separated)</label>
-                        <input
-                          type="text"
-                          className="management-input-field"
-                          value={(srvConfig.args || []).join(' ')}
-                          onChange={(e) => handleUpdateMcpServerField(item.name, 'args', e.target.value.split(/\s+/).filter(Boolean))}
-                        />
+                    ) : (
+                      <div style={{ display: 'grid', gap: '12px' }}>
+                        <div className="management-form-group">
+                          <label className="management-label">Command</label>
+                          <input
+                            type="text"
+                            className="management-input-field"
+                            value={srvConfig.command || ''}
+                            onChange={(e) => handleUpdateMcpServerField(item.name, 'command', e.target.value)}
+                          />
+                        </div>
+                        <div className="management-form-group">
+                          <label className="management-label">Arguments (space-separated)</label>
+                          <input
+                            type="text"
+                            className="management-input-field"
+                            value={(srvConfig.args || []).join(' ')}
+                            onChange={(e) => handleUpdateMcpServerField(item.name, 'args', e.target.value.split(/\s+/).filter(Boolean))}
+                          />
+                        </div>
+                        <div className="management-form-group">
+                          <label className="management-label">Icon (preset / URL / SVG)</label>
+                          <input
+                            type="text"
+                            className="management-input-field"
+                            placeholder="e.g. search, database, code"
+                            value={srvConfig.icon || ''}
+                            onChange={(e) => handleUpdateMcpServerField(item.name, 'icon', e.target.value)}
+                          />
+                        </div>
+                        <div className="management-form-group">
+                          <label className="management-label">Environment Variables (JSON)</label>
+                          <textarea
+                            className="management-textarea-field"
+                            value={typeof srvConfig.env === 'object' ? JSON.stringify(srvConfig.env, null, 2) : srvConfig.env || ''}
+                            onChange={(e) => {
+                              try {
+                                const parsed = JSON.parse(e.target.value)
+                                handleUpdateMcpServerField(item.name, 'env', parsed)
+                              } catch {
+                                // allow live editing
+                              }
+                            }}
+                            rows={3}
+                          />
+                        </div>
                       </div>
-                      <div className="management-form-group">
-                        <label className="management-label">Icon (preset / URL / SVG)</label>
-                        <input
-                          type="text"
-                          className="management-input-field"
-                          placeholder="e.g. search, database, code"
-                          value={srvConfig.icon || ''}
-                          onChange={(e) => handleUpdateMcpServerField(item.name, 'icon', e.target.value)}
-                        />
-                      </div>
-                      <div className="management-form-group">
-                        <label className="management-label">Environment Variables (JSON)</label>
-                        <textarea
-                          className="management-textarea-field"
-                          value={typeof srvConfig.env === 'object' ? JSON.stringify(srvConfig.env, null, 2) : srvConfig.env || ''}
-                          onChange={(e) => {
-                            try {
-                              const parsed = JSON.parse(e.target.value)
-                              handleUpdateMcpServerField(item.name, 'env', parsed)
-                            } catch {
-                              // allow live editing
-                            }
-                          }}
-                          rows={3}
-                        />
-                      </div>
-                    </div>
+                    )}
 
                     <McpToolAllowlist
                       serverName={item.name}
@@ -481,69 +644,249 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
 
             <form onSubmit={onSubmitAddServer}>
               <div className="management-modal-body">
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                  <div className="management-form-group">
-                    <label className="management-label">Server Name</label>
-                    <input
-                      type="text"
-                      className="management-input-field"
-                      placeholder="e.g. google-search"
-                      value={mcpName}
-                      onChange={(e) => setMcpName(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="management-form-group">
-                    <label className="management-label">Command</label>
-                    <input
-                      type="text"
-                      className="management-input-field"
-                      placeholder="e.g. npx"
-                      value={mcpCmd}
-                      onChange={(e) => setMcpCmd(e.target.value)}
-                      required
-                    />
-                  </div>
+                {/* Segmented Switcher */}
+                <div className="mcp-server-type-toggle">
+                  <button
+                    type="button"
+                    className={`mcp-toggle-btn ${serverType === 'url' ? 'active' : ''}`}
+                    onClick={() => {
+                      setServerType('url')
+                      setTestStatus('idle')
+                      setTestMessage('')
+                    }}
+                  >
+                    <Globe size={15} /> Remote Server (URL / SSE)
+                  </button>
+                  <button
+                    type="button"
+                    className={`mcp-toggle-btn ${serverType === 'command' ? 'active' : ''}`}
+                    onClick={() => {
+                      setServerType('command')
+                      setTestStatus('idle')
+                      setTestMessage('')
+                    }}
+                  >
+                    <Terminal size={15} /> Local Command (stdio)
+                  </button>
                 </div>
 
-                <div className="management-form-group">
-                  <label className="management-label">Arguments</label>
+                {serverType === 'url' ? (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div className="management-form-group">
+                        <label className="management-label">Server Name</label>
+                        <input
+                          type="text"
+                          className="management-input-field"
+                          placeholder="e.g. cloud-mcp"
+                          value={mcpName}
+                          onChange={(e) => setMcpName(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="management-form-group">
+                        <label className="management-label">Authentication</label>
+                        <select
+                          className="management-input-field"
+                          value={authType}
+                          onChange={(e) => {
+                            setAuthType(e.target.value as any)
+                            setTestStatus('idle')
+                            setTestMessage('')
+                          }}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <option value="none">None (Public)</option>
+                          <option value="bearer">Bearer Token</option>
+                          <option value="custom">Custom Headers (JSON)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="management-form-group">
+                      <label className="management-label">Server URL</label>
+                      <input
+                        type="url"
+                        className="management-input-field"
+                        placeholder="https://example.com/sse or http://localhost:8000/sse"
+                        value={mcpUrl}
+                        onChange={(e) => {
+                          setMcpUrl(e.target.value)
+                          setTestStatus('idle')
+                          setTestMessage('')
+                        }}
+                        required
+                      />
+                    </div>
+
+                    {authType === 'bearer' && (
+                      <div className="management-form-group">
+                        <label className="management-label">Bearer Token</label>
+                        <input
+                          type="password"
+                          className="management-input-field"
+                          placeholder="Paste API token or JWT..."
+                          value={bearerToken}
+                          onChange={(e) => {
+                            setBearerToken(e.target.value)
+                            setTestStatus('idle')
+                            setTestMessage('')
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    {authType === 'custom' && (
+                      <div className="management-form-group">
+                        <label className="management-label">Custom HTTP Headers (JSON)</label>
+                        <textarea
+                          className="management-textarea-field"
+                          placeholder='{"Authorization": "Bearer ...", "X-Custom-Auth": "secret"}'
+                          value={customHeaders}
+                          onChange={(e) => {
+                            setCustomHeaders(e.target.value)
+                            setTestStatus('idle')
+                            setTestMessage('')
+                          }}
+                          rows={3}
+                        />
+                      </div>
+                    )}
+
+                    <div className="management-form-group">
+                      <label className="management-label">Icon (Optional)</label>
+                      <input
+                        type="text"
+                        className="management-input-field"
+                        placeholder="e.g. globe, cloud, database, search"
+                        value={mcpIcon}
+                        onChange={(e) => setMcpIcon && setMcpIcon(e.target.value)}
+                      />
+                    </div>
+
+                    {/* Test Connection Bar */}
+                    <div className="mcp-test-row">
+                      <button
+                        type="button"
+                        className="mcp-test-btn"
+                        onClick={handleTestConnection}
+                        disabled={testStatus === 'testing' || !mcpUrl.trim()}
+                      >
+                        {testStatus === 'testing' ? (
+                          <>
+                            <Loader2 size={13} className="mcp-spin" /> Testing...
+                          </>
+                        ) : (
+                          <>
+                            <Zap size={13} /> Test Connection
+                          </>
+                        )}
+                      </button>
+                      {testMessage && (
+                        <span className={`mcp-test-status ${testStatus}`}>
+                          {testStatus === 'success' && <Check size={13} />}
+                          {testStatus === 'error' && <AlertCircle size={13} />}
+                          {testMessage}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Security Notice / Warning Box */}
+                    <div className="mcp-security-notice">
+                      <div className="mcp-security-header">
+                        <ShieldAlert size={16} className="mcp-security-icon" />
+                        <span>Custom MCP servers introduce security risks</span>
+                      </div>
+                      <div className="mcp-security-body">
+                        <label className="mcp-security-ack">
+                          <input
+                            type="checkbox"
+                            className="mint-custom-checkbox"
+                            checked={securityAcknowledged}
+                            onChange={(e) => setSecurityAcknowledged(e.target.checked)}
+                          />
+                          <span className="mcp-security-ack-text">
+                            <strong>I understand the risks and wish to proceed</strong>
+                            <span className="mcp-security-subtext">
+                              External endpoints can execute tools and receive prompt context. Malicious servers could attempt to access sensitive information or trigger unintended actions. Only connect to endpoints you trust.
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div className="management-form-group">
+                        <label className="management-label">Server Name</label>
+                        <input
+                          type="text"
+                          className="management-input-field"
+                          placeholder="e.g. google-search"
+                          value={mcpName}
+                          onChange={(e) => setMcpName(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="management-form-group">
+                        <label className="management-label">Command</label>
+                        <input
+                          type="text"
+                          className="management-input-field"
+                          placeholder="e.g. npx"
+                          value={mcpCmd}
+                          onChange={(e) => setMcpCmd(e.target.value)}
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="management-form-group">
+                      <label className="management-label">Arguments</label>
+                      <input
+                        type="text"
+                        className="management-input-field"
+                        placeholder="e.g. -y @modelcontextprotocol/server-brave-search"
+                        value={mcpArgs}
+                        onChange={(e) => setMcpArgs(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="management-form-group">
+                      <label className="management-label">Icon (Optional)</label>
+                      <input
+                        type="text"
+                        className="management-input-field"
+                        placeholder="e.g. search, database, cloud, code"
+                        value={mcpIcon}
+                        onChange={(e) => setMcpIcon && setMcpIcon(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="management-form-group">
+                      <label className="management-label">Environment Variables (JSON)</label>
+                      <textarea
+                        className="management-textarea-field"
+                        placeholder='e.g. {"BRAVE_API_KEY": "your_key_here"}'
+                        value={mcpEnv}
+                        onChange={(e) => setMcpEnv(e.target.value)}
+                        rows={3}
+                      />
+                    </div>
+                  </>
+                )}
+
+                <label className="mcp-allow-all-row">
                   <input
-                    type="text"
-                    className="management-input-field"
-                    placeholder="e.g. -y @modelcontextprotocol/server-brave-search"
-                    value={mcpArgs}
-                    onChange={(e) => setMcpArgs(e.target.value)}
+                    type="checkbox"
+                    className="mint-custom-checkbox"
+                    checked={addAllowAll}
+                    onChange={(e) => setAddAllowAll(e.target.checked)}
                   />
-                </div>
-
-                <div className="management-form-group">
-                  <label className="management-label">Icon (Optional)</label>
-                  <input
-                    type="text"
-                    className="management-input-field"
-                    placeholder="e.g. search, database, cloud, code"
-                    value={mcpIcon}
-                    onChange={(e) => setMcpIcon && setMcpIcon(e.target.value)}
-                  />
-                </div>
-
-                <div className="management-form-group">
-                  <label className="management-label">Environment Variables (JSON)</label>
-                  <textarea
-                    className="management-textarea-field"
-                    placeholder='e.g. {"BRAVE_API_KEY": "your_key_here"}'
-                    value={mcpEnv}
-                    onChange={(e) => setMcpEnv(e.target.value)}
-                    rows={3}
-                  />
-                </div>
-
-                <label className="management-form-group" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={addAllowAll} onChange={(e) => setAddAllowAll(e.target.checked)} />
-                  <span>
-                    Allow the agent to call all of this server’s tools (*)
-                    <span style={{ display: 'block', opacity: 0.6, fontSize: '0.8rem' }}>
+                  <span className="mcp-allow-all-text">
+                    <span className="mcp-allow-all-title">Allow the agent to call all of this server’s tools (*)</span>
+                    <span className="mcp-allow-all-desc">
                       Leave off to approve tools one by one afterwards.
                     </span>
                   </span>
@@ -554,7 +897,11 @@ export const McpServersView: React.FC<McpServersViewProps> = React.memo(function
                 <button type="button" className="management-action-btn" onClick={() => setShowAddModal(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="management-primary-btn">
+                <button
+                  type="submit"
+                  className="management-primary-btn"
+                  disabled={serverType === 'url' && !securityAcknowledged}
+                >
                   Add Server
                 </button>
               </div>

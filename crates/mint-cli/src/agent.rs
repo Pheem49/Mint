@@ -87,20 +87,44 @@ pub async fn run_code_agent_with_image(
 /// Human-readable `(is_activity, label)` for a `ToolStart` whose action
 /// didn't already get a more specific rendering (`explored_action_label`'s
 /// grouped file/search targets, the plan/skill/memory special cases). Shared
+fn get_field_alias<'a>(input: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+    for &k in keys {
+        if let Some(v) = input.get(k).and_then(|v| v.as_str()) {
+            if !v.trim().is_empty() {
+                return Some(v.trim());
+            }
+        }
+    }
+    None
+}
+
+/// Helper to format a readable label for a tool action. Used symmetrically
 /// between the top-level progress handler and the nested-subagent one so a
 /// subagent's own tool calls get the same descriptive labels the top-level
 /// agent's do, not just a bare `[action] Using tool...` fallback.
 fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String) {
     match action {
         "web_search" => {
-            let query = input.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            let query = get_field_alias(
+                input,
+                &[
+                    "query",
+                    "q",
+                    "keyword",
+                    "search",
+                    "prompt",
+                    "searchTerm",
+                    "search_term",
+                ],
+            )
+            .unwrap_or("");
             (
                 true,
                 format!("[web_search] Searching the web for \"{}\"...", query),
             )
         }
         "run_shell" => {
-            let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            let command = get_field_alias(input, &["command", "cmd"]).unwrap_or("");
             let background = input
                 .get("background")
                 .and_then(|v| v.as_bool())
@@ -148,6 +172,10 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
             let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("");
             (false, format!("[write_file] Writing file: {}...", path))
         }
+        "note_write" => {
+            let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            (false, format!("[note_write] Writing note: {}...", name))
+        }
         "apply_patch" => {
             let path = input
                 .get("patch")
@@ -170,7 +198,11 @@ fn generic_tool_label(action: &str, input: &serde_json::Value) -> (bool, String)
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let summary = if instruction.len() > 60 {
-                format!("{}...", &instruction[..57])
+                let mut end = 57;
+                while !instruction.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}...", &instruction[..end])
             } else {
                 instruction.to_string()
             };
@@ -321,6 +353,7 @@ pub async fn run_code_agent_with_options(
         if options.queueing
             && !options.fast_mode
             && io::stdout().is_tty()
+            && io::stdin().is_tty()
             && let Ok(mut status) = live_status.lock()
         {
             status.queue_enabled = true;
@@ -853,6 +886,97 @@ pub async fn run_code_agent_with_options(
                     status.web_sources.extend(sources);
                 }
             }
+            AgentProgress::PlanUpdated { plan } => {
+                if let Ok(mut status) = progress_live_status.lock() {
+                    status.thinking = None;
+                    status.waiting_for_network = None;
+                    let mut card = format!("\x1b[1;36m┌─ Plan: {} \x1b[0m\n", plan.objective);
+                    for task in &plan.tasks {
+                        let mark = match task.status.as_str() {
+                            "completed" => "\x1b[32m[✓]\x1b[0m",
+                            "in_progress" => "\x1b[33m[>]\x1b[0m",
+                            "failed" => "\x1b[31m[✗]\x1b[0m",
+                            _ => "\x1b[90m[ ]\x1b[0m",
+                        };
+                        card.push_str(&format!("│  {} {}\n", mark, task.title));
+                    }
+                    card.push_str("\x1b[1;36m└────────────────────────────────────────\x1b[0m");
+                    status.tasks.push(card.into());
+                    render_live_status(&mut status);
+                }
+            }
+            AgentProgress::RunCompleted { summary } => {
+                if let Ok(mut status) = progress_live_status.lock() {
+                    status.thinking = None;
+                    status.waiting_for_network = None;
+                    let outcome_str = match summary.outcome.as_str() {
+                        "SUCCESS" => "\x1b[32m✓ Success\x1b[0m",
+                        "FAILED" => "\x1b[31m✗ Failure\x1b[0m",
+                        "ROLLED_BACK" => "\x1b[33m↺ Rolled Back\x1b[0m",
+                        _ => &summary.outcome,
+                    };
+                    let tokens_k = if summary.total_tokens >= 1000 {
+                        format!("{:.1}k", summary.total_tokens as f64 / 1000.0)
+                    } else {
+                        summary.total_tokens.to_string()
+                    };
+                    let created_count = summary.files_created.len();
+                    let modified_count = summary.files_changed.len().saturating_sub(created_count);
+                    let files_str = if created_count > 0 && modified_count > 0 {
+                        format!("{} created, {} modified", created_count, modified_count)
+                    } else if created_count > 0 {
+                        format!("{} created", created_count)
+                    } else {
+                        format!("{} modified", summary.files_changed.len())
+                    };
+                    let mut card = format!(
+                        "\x1b[1;36m┌─ Agent Run #{} ────────────────────────────\x1b[0m\n\
+                         │ Status:   {}\n\
+                         │ Duration: {:.1}s\n\
+                         │ Tokens:   {}\n\
+                         │ Tools:    {} calls ({} retries)\n\
+                         │ Files:    {}\n",
+                        summary.run_id,
+                        outcome_str,
+                        summary.duration_secs,
+                        tokens_k,
+                        summary.tool_calls_count,
+                        summary.retries_count,
+                        files_str,
+                    );
+                    if !summary.tool_timeline.is_empty() {
+                        card.push_str("│\n│ Tool calls timeline:\n");
+                        for rec in &summary.tool_timeline {
+                            let status_icon = if !rec.success {
+                                "\x1b[31m✗\x1b[0m"
+                            } else if rec.retried {
+                                "\x1b[33m↺\x1b[0m"
+                            } else {
+                                "\x1b[32m✓\x1b[0m"
+                            };
+                            let note = if !rec.success {
+                                " (failed)"
+                            } else if rec.retried {
+                                " (self-corrected)"
+                            } else {
+                                ""
+                            };
+                            let target_desc = if rec.target.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" [{}]", rec.target)
+                            };
+                            card.push_str(&format!(
+                                "│  {:02}s {} {}{}{}\n",
+                                rec.step, status_icon, rec.action, target_desc, note
+                            ));
+                        }
+                    }
+                    card.push_str("\x1b[1;36m└────────────────────────────────────────\x1b[0m");
+                    status.tasks.push(card.into());
+                    render_live_status(&mut status);
+                }
+            }
         }
     };
 
@@ -970,14 +1094,13 @@ pub async fn run_code_agent_with_options(
         progress_cb,
         on_chunk,
     );
-    let res = if options.fast_mode {
-        agent_loop.await
-    } else {
-        tokio::select! {
-            res = agent_loop => res,
-            _ = wait_for_escape_interrupt(Arc::clone(&approval_active), Arc::clone(&live_status)) => {
-                Err(OrchestrationError::Agent("interrupted by Esc".into()))
-            }
+    let res = tokio::select! {
+        res = agent_loop => res,
+        _ = wait_for_escape_interrupt(Arc::clone(&approval_active), Arc::clone(&live_status)) => {
+            Err(OrchestrationError::Agent("interrupted by user (Esc / Ctrl+C)".into()))
+        }
+        _ = tokio::signal::ctrl_c() => {
+            Err(OrchestrationError::Agent("interrupted by Ctrl+C".into()))
         }
     };
     avatar_bridge.on_turn_end(res.is_ok());

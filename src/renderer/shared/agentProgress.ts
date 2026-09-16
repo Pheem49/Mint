@@ -48,6 +48,30 @@ export function parseFileChangesFromProgress(progress: AgentProgress[]): FileCha
   const changes = new Map<string, FileChange>()
   let activeEdit: { action: string; path: string; created: boolean; additions: number; deletions: number; hunks: DiffHunk[] } | null = null
 
+  const recordChange = (
+    path: string,
+    isCreated: boolean,
+    additions: number,
+    deletions: number,
+    hunks: DiffHunk[]
+  ) => {
+    const existing = changes.get(path)
+    if (existing) {
+      existing.additions += additions
+      existing.deletions += deletions
+      existing.hunks.push(...hunks)
+      if (isCreated) existing.created = true
+    } else {
+      changes.set(path, {
+        path,
+        created: isCreated,
+        additions,
+        deletions,
+        hunks: [...hunks]
+      })
+    }
+  }
+
   for (const event of progress || []) {
     if (event.type === 'ToolStart') {
       if (event.data.action === 'apply_patch') {
@@ -57,7 +81,9 @@ export function parseFileChangesFromProgress(progress: AgentProgress[]): FileCha
           let deletions = 0
           const hunksList: DiffHunk[] = []
           const hunks = patch.hunks
+          let isAllNew = false
           if (Array.isArray(hunks)) {
+            isAllNew = hunks.length > 0 && hunks.every((h: any) => !h?.oldText && Boolean(h?.newText))
             for (const hunk of hunks) {
               const oldText = hunk?.oldText || ''
               const newText = hunk?.newText || ''
@@ -71,20 +97,24 @@ export function parseFileChangesFromProgress(progress: AgentProgress[]): FileCha
           activeEdit = {
             action: 'apply_patch',
             path: patch.path,
-            created: false,
+            created: isAllNew && deletions === 0,
             additions,
             deletions,
             hunks: hunksList
           }
         }
-      } else if (event.data.action === 'write_file') {
-        const path = (event.data.input as any)?.path
-        const fileContent = (event.data.input as any)?.file_content || ''
-        if (typeof path === 'string') {
+      } else if (event.data.action === 'write_file' || event.data.action === 'note_write') {
+        const input = (event.data.input as any) || {}
+        let path = input.path || input.name || input.title || input.filePath || ''
+        if (event.data.action === 'note_write' && path && !path.includes('/') && !path.startsWith('.config/')) {
+          path = `.config/mint/notes/${path}`
+        }
+        const fileContent = input.fileContent ?? input.file_content ?? input.content ?? input.body ?? input.text ?? ''
+        if (typeof path === 'string' && path.trim()) {
           const additions = fileContent ? fileContent.split('\n').length : 0
           activeEdit = {
-            action: 'write_file',
-            path,
+            action: event.data.action,
+            path: path.trim(),
             created: true,
             additions,
             deletions: 0,
@@ -95,45 +125,22 @@ export function parseFileChangesFromProgress(progress: AgentProgress[]): FileCha
         activeEdit = null
       }
     } else if (event.type === 'ToolEnd') {
-      if (activeEdit && (event.data.action === 'apply_patch' || event.data.action === 'write_file')) {
-        const isError = typeof event.data.result === 'string' && event.data.result.startsWith('Error:')
+      if (activeEdit && (event.data.action === 'apply_patch' || event.data.action === 'write_file' || event.data.action === 'note_write')) {
+        const isError = typeof event.data.result === 'string' && (event.data.result.startsWith('Error:') || event.data.result.startsWith('Failed:'))
         if (!isError) {
           try {
             const applied = JSON.parse(event.data.result)
-            const appliedPaths = Array.isArray(applied) ? applied.map(item => item?.path).filter(Boolean) : [activeEdit.path]
-            
-            for (const path of appliedPaths) {
-              const existing = changes.get(path)
-              if (existing) {
-                existing.additions += activeEdit.additions
-                existing.deletions += activeEdit.deletions
-                existing.hunks.push(...activeEdit.hunks)
-              } else {
-                changes.set(path, {
-                  path,
-                  created: activeEdit.created,
-                  additions: activeEdit.additions,
-                  deletions: activeEdit.deletions,
-                  hunks: [...activeEdit.hunks]
-                })
+            if (Array.isArray(applied) && applied.length > 0) {
+              for (const item of applied) {
+                const path = item?.path || activeEdit.path
+                const isCreated = typeof item?.created === 'boolean' ? item.created : activeEdit.created
+                recordChange(path, isCreated, activeEdit.additions, activeEdit.deletions, activeEdit.hunks)
               }
-            }
-          } catch (e) {
-            const path = activeEdit.path
-            const existing = changes.get(path)
-            if (existing) {
-              existing.additions += activeEdit.additions
-              existing.deletions += activeEdit.deletions
-              existing.hunks.push(...activeEdit.hunks)
             } else {
-              changes.set(path, {
-                path,
-                created: activeEdit.created,
-                additions: activeEdit.additions,
-                deletions: activeEdit.deletions,
-                hunks: [...activeEdit.hunks]
-              })
+              recordChange(activeEdit.path, activeEdit.created, activeEdit.additions, activeEdit.deletions, activeEdit.hunks)
             }
+          } catch {
+            recordChange(activeEdit.path, activeEdit.created, activeEdit.additions, activeEdit.deletions, activeEdit.hunks)
           }
         }
       }

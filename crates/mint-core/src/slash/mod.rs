@@ -39,6 +39,7 @@ Rules:
 - Write only the file, then briefly confirm what you wrote.";
 
 pub mod catalog;
+pub mod model_fetcher;
 pub mod models;
 mod render;
 
@@ -90,8 +91,13 @@ pub enum SlashResponse {
     },
     /// Hand this string to the agent loop. `agent_mode` asks the GUI to switch
     /// into code-agent mode first (the CLI always runs forwarded input through
-    /// the code agent regardless).
-    ForwardToAgent { prompt: String, agent_mode: bool },
+    /// the code agent regardless). `plan_mode` enables plan investigation mode.
+    ForwardToAgent {
+        prompt: String,
+        agent_mode: bool,
+        #[serde(default)]
+        plan_mode: bool,
+    },
     /// GUI: switch to this view. CLI: print `markdown` as a hint.
     Navigate {
         target: SlashNavTarget,
@@ -128,6 +134,9 @@ pub enum SlashEffect {
         enabled: bool,
     },
     MultiAgentChanged {
+        enabled: bool,
+    },
+    PlanModeChanged {
         enabled: bool,
     },
 }
@@ -185,6 +194,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         "/init" => SlashResponse::ForwardToAgent {
             prompt: INIT_AGENTS_MD_PROMPT.to_string(),
             agent_mode: true,
+            plan_mode: false,
         },
         "/release-notes" => message(
             include_str!(concat!(
@@ -270,6 +280,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         },
 
         "/models" => cmd_models(rest, config),
+        "/temperature" | "/temp" => cmd_temperature(rest, config),
         // `/searchProvider` is a documented camelCase alias (see UNDOCUMENTED_ALIASES).
         "/search-provider" | "/searchprovider" => cmd_extra_provider(
             "/search-provider",
@@ -287,6 +298,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             &["veo"],
             config,
         ),
+        "/video-models" | "/videomodels" => cmd_video_models_sync(rest, config),
         "/image-provider" => {
             if rest.is_empty() {
                 return message(
@@ -323,6 +335,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             target: SlashNavTarget::Skills,
             markdown: "📚 Opened Skills — import there or drop files in `.agents/skills/`.".into(),
         },
+        "/plan" => cmd_plan(req, rest),
         "/code" => {
             if rest.is_empty() {
                 error("Usage: /code <task>")
@@ -330,6 +343,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
                 SlashResponse::ForwardToAgent {
                     prompt: rest.to_string(),
                     agent_mode: true,
+                    plan_mode: false,
                 }
             }
         }
@@ -340,6 +354,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
                 SlashResponse::ForwardToAgent {
                     prompt: format!("Generate an image of {rest}"),
                     agent_mode: false,
+                    plan_mode: false,
                 }
             }
         }
@@ -350,6 +365,7 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
                 SlashResponse::ForwardToAgent {
                     prompt: format!("Edit the attached image: {rest}"),
                     agent_mode: false,
+                    plan_mode: false,
                 }
             }
         }
@@ -357,6 +373,41 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
         // Not migrated yet, or CLI-only — caller falls back.
         _ => SlashResponse::NotHandled,
     }
+}
+
+/// Asynchronous variant of [`execute`] that fetches live data from APIs
+/// (such as provider model lists for `/models`) before falling back to static presets.
+pub async fn execute_async(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
+    let raw = req.input.trim();
+    if !raw.starts_with('/') {
+        return error("Not a slash command (must begin with '/')");
+    }
+
+    let (cmd, rest) = match raw.split_once([' ', '\t']) {
+        Some((c, r)) => (c, r.trim_start()),
+        None => (raw, ""),
+    };
+
+    if cmd == "/models" {
+        return cmd_models_async(rest, config).await;
+    }
+    if cmd == "/temperature" || cmd == "/temp" {
+        return cmd_temperature_async(rest, config).await;
+    }
+    if cmd == "/image-provider" {
+        return cmd_image_provider_async(rest, config).await;
+    }
+    if cmd == "/image-models" {
+        return cmd_image_models_async(rest, config).await;
+    }
+    if cmd == "/video-provider" {
+        return cmd_video_provider_async(rest, config).await;
+    }
+    if cmd == "/video-models" || cmd == "/videomodels" {
+        return cmd_video_models_async(rest, config).await;
+    }
+
+    execute(req, config)
 }
 
 fn cmd_help(cli: bool) -> SlashResponse {
@@ -411,6 +462,86 @@ fn needs_on_off(command: &str, title: &str) -> SlashResponse {
     }
 }
 
+fn cmd_plan(req: &SlashRequest, rest: &str) -> SlashResponse {
+    let trimmed = rest.trim();
+    if trimmed.is_empty() {
+        needs_on_off(
+            "/plan",
+            "Plan Mode (investigate read-only and present plan)",
+        )
+    } else if trimmed == "on" {
+        SlashResponse::Applied {
+            markdown: "📋 Plan Mode **ON** (agent will investigate read-only and present a plan before editing).".into(),
+            effects: vec![SlashEffect::PlanModeChanged { enabled: true }],
+        }
+    } else if trimmed == "off" {
+        SlashResponse::Applied {
+            markdown: "📋 Plan Mode **OFF**.".into(),
+            effects: vec![SlashEffect::PlanModeChanged { enabled: false }],
+        }
+    } else if trimmed == "list" {
+        let ws = req.workspace();
+        let plan_dir = ws.join(".agents").join("plans");
+        let mut entries = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(&plan_dir) {
+            for entry in rd.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    let first_line = std::fs::read_to_string(&path)
+                        .ok()
+                        .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
+                        .unwrap_or_default();
+                    entries.push(format!("- **{}**: {}", name, first_line));
+                }
+            }
+        }
+        if entries.is_empty() {
+            message("No saved plans found under `.agents/plans/`.")
+        } else {
+            message(format!("### Saved Plans\n\n{}", entries.join("\n")))
+        }
+    } else if let Some(show_arg) = trimmed.strip_prefix("show") {
+        let arg = show_arg.trim();
+        let ws = req.workspace();
+        let plan_dir = ws.join(".agents").join("plans");
+        let mut found_content = None;
+        if let Ok(rd) = std::fs::read_dir(&plan_dir) {
+            for entry in rd.flatten() {
+                let path = entry.path();
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if name.contains(arg) {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        found_content = Some((name, content));
+                        break;
+                    }
+                }
+            }
+        }
+        match found_content {
+            Some((name, content)) => message(format!("### Plan: {}\n\n{}", name, content)),
+            None => error(format!(
+                "No saved plan matching \"{}\" under `.agents/plans/`",
+                arg
+            )),
+        }
+    } else {
+        SlashResponse::ForwardToAgent {
+            prompt: trimmed.to_string(),
+            agent_mode: true,
+            plan_mode: true,
+        }
+    }
+}
+
 fn cmd_bool_toggle(
     rest: &str,
     command: &str,
@@ -462,8 +593,13 @@ fn cmd_rewind(req: &SlashRequest, rest: &str) -> SlashResponse {
                 cp.step, hash_short, cp.action, target
             ));
         }
-        md.push_str("\nUse `/rewind <step>` to restore your workspace to before that step.");
+        md.push_str("\nUse `/rewind <step>` to restore your workspace to before that step, or `/rewind undo` to restore from the latest rescue snapshot.");
         message(md)
+    } else if rest.trim().eq_ignore_ascii_case("undo") {
+        match crate::git::undo_rollback(&root) {
+            Ok(msg) => message(msg),
+            Err(err) => error(format!("Failed to undo rewind: {err}")),
+        }
     } else {
         match rest.trim().parse::<usize>() {
             Ok(step) => match crate::git::rollback_to_step(&root, chat_id, step) {
@@ -471,7 +607,7 @@ fn cmd_rewind(req: &SlashRequest, rest: &str) -> SlashResponse {
                 Err(err) => error(format!("Failed to rollback: {err}")),
             },
             Err(_) => error(format!(
-                "Invalid step number: \"{rest}\". Usage: /rewind <step>"
+                "Invalid step number: \"{rest}\". Usage: /rewind <step> or /rewind undo"
             )),
         }
     }
@@ -566,6 +702,748 @@ fn cmd_models(rest: &str, config: &mut MintConfig) -> SlashResponse {
     SlashResponse::Applied {
         // No Markdown body: the `provider_change` chip is the feedback on both
         // surfaces (see the `ProviderChanged` handling in each host).
+        markdown: String::new(),
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ProviderChanged { display },
+        ],
+    }
+}
+
+fn temperature_presets_choice(
+    command: String,
+    provider: &str,
+    model: &str,
+    config: &MintConfig,
+) -> SlashResponse {
+    let smart = config.resolved_temperature_for_model(provider, model);
+    SlashResponse::NeedsChoice {
+        command,
+        title: format!("Select temperature for {model}"),
+        options: vec![
+            SlashChoice {
+                label: format!("Auto (Smart Default: {smart:.2})"),
+                value: "default".into(),
+            },
+            SlashChoice {
+                label: "0.0 — Deterministic / Exact math & analysis".into(),
+                value: "0.0".into(),
+            },
+            SlashChoice {
+                label: "0.1 — Codestral / Strict code completion".into(),
+                value: "0.1".into(),
+            },
+            SlashChoice {
+                label: "0.2 — Standard coding & agentic tools".into(),
+                value: "0.2".into(),
+            },
+            SlashChoice {
+                label: "0.4 — Balanced coding & conversation".into(),
+                value: "0.4".into(),
+            },
+            SlashChoice {
+                label: "0.6 — DeepSeek / Reasoning default".into(),
+                value: "0.6".into(),
+            },
+            SlashChoice {
+                label: "0.8 — Creative reasoning & drafting".into(),
+                value: "0.8".into(),
+            },
+            SlashChoice {
+                label: "1.0 — Highly creative / brainstorming".into(),
+                value: "1.0".into(),
+            },
+        ],
+    }
+}
+
+fn cmd_temperature_status(config: &MintConfig) -> SlashResponse {
+    let active_provider = &config.ai_provider;
+    let active_model = config.active_model();
+    let resolved = config.resolved_temperature();
+
+    let active_status = if !config.is_temperature_supported() {
+        format!("Auto (Omitted — reasoning model `{active_model}` rejects temperature)")
+    } else if let Some(custom) = config.model_temperatures.get(active_model) {
+        format!("Custom `{custom:.2}` (effective: `{resolved:.2}`)")
+    } else if let Some(global) = config.temperature {
+        format!("Custom global `{global:.2}` (effective: `{resolved:.2}`)")
+    } else {
+        let model_lower = active_model.to_ascii_lowercase();
+        let prov_lower = active_provider.to_ascii_lowercase();
+        let is_reasoning = prov_lower == "deepseek"
+            || model_lower.contains("deepseek")
+            || model_lower.contains("qwq")
+            || model_lower.contains("thinking")
+            || model_lower.contains("reasoner")
+            || model_lower.contains("r1");
+        if is_reasoning {
+            format!(
+                "Auto `{resolved:.2}` (smart default for DeepSeek / Reasoning models to prevent loops)"
+            )
+        } else if model_lower.contains("codestral") {
+            format!("Auto `{resolved:.2}` (smart default for pure code completion)")
+        } else {
+            format!("Auto `{resolved:.2}` (smart default for coding & tool calling)")
+        }
+    };
+
+    let mut md = format!(
+        "🌡️ **Model Temperature Status**\n\n\
+         - **Active Provider**: `{active_provider}`\n\
+         - **Active Model**: `{active_model}`\n\
+         - **Effective Temperature**: {active_status}\n\n"
+    );
+
+    if config.model_temperatures.is_empty() {
+        md.push_str(
+            "*No custom per-model temperatures configured. All models use smart defaults.*\n\n",
+        );
+    } else {
+        md.push_str("#### Configured Per-Model Overrides\n\n");
+        md.push_str("| Model | Temperature |\n| :--- | :--- |\n");
+        let mut sorted: Vec<_> = config.model_temperatures.iter().collect();
+        sorted.sort_by_key(|(m, _)| (*m).to_ascii_lowercase());
+        for (m, t) in sorted {
+            md.push_str(&format!("| `{m}` | `{t:.2}` |\n"));
+        }
+        md.push('\n');
+    }
+
+    md.push_str(
+        "**Usage:**\n\
+         - `/temperature` — interactive provider & model picker\n\
+         - `/temperature <0.0-2.0>` — set temperature for active model\n\
+         - `/temperature <model> <0.0-2.0>` — set temperature for specific model\n\
+         - `/temperature default` — reset active model to smart default\n\
+         - `/temperature <model> default` — reset specific model",
+    );
+
+    message(md)
+}
+
+fn cmd_temperature(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    let raw = rest.trim();
+    if raw.is_empty() {
+        let active_provider = config.ai_provider.clone();
+        let active_model = config.active_model().to_string();
+        let active_resolved = config.resolved_temperature();
+        let is_custom =
+            config.model_temperatures.contains_key(&active_model) || config.temperature.is_some();
+        let current_tag = if is_custom {
+            format!("Custom: {active_resolved:.2}")
+        } else {
+            format!("Auto: {active_resolved:.2}")
+        };
+
+        let mut options = Vec::new();
+        // 1. Current active model shortcut
+        options.push(SlashChoice {
+            label: format!("Current: {active_provider}/{active_model} [{current_tag}]"),
+            value: format!("{active_provider} {active_model}"),
+        });
+
+        // 2. Providers list
+        let mut providers = config.available_providers();
+        if !providers.contains(&active_provider) && !active_provider.is_empty() {
+            providers.insert(0, active_provider.clone());
+        }
+        let standard_providers = [
+            "anthropic",
+            "openai",
+            "gemini",
+            "deepseek",
+            "groq",
+            "openrouter",
+            "ollama",
+        ];
+        for sp in standard_providers {
+            if !providers.contains(&sp.to_string()) {
+                providers.push(sp.to_string());
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        providers.retain(|p| seen.insert(p.clone()));
+
+        for p in providers {
+            options.push(SlashChoice {
+                label: format!("Provider: {p}"),
+                value: p,
+            });
+        }
+
+        return SlashResponse::NeedsChoice {
+            command: "/temperature".into(),
+            title: "Select AI provider or active model for temperature".into(),
+            options,
+        };
+    }
+
+    let tokens: Vec<&str> = raw.split_whitespace().collect();
+
+    if tokens.len() == 1 {
+        let arg = tokens[0];
+        if arg.eq_ignore_ascii_case("status") || arg.eq_ignore_ascii_case("list") {
+            return cmd_temperature_status(config);
+        }
+        if arg.eq_ignore_ascii_case("default")
+            || arg.eq_ignore_ascii_case("auto")
+            || arg.eq_ignore_ascii_case("reset")
+        {
+            let active_model = config.active_model().to_string();
+            config.set_model_temperature(&active_model, None);
+            config.temperature = None;
+            let resolved = config.resolved_temperature();
+            return SlashResponse::Applied {
+                markdown: format!(
+                    "🌡️ Temperature for **{active_model}** reset to **Auto** (smart default `{resolved:.2}`)."
+                ),
+                effects: vec![SlashEffect::ConfigChanged],
+            };
+        }
+        if let Ok(val) = arg.parse::<f64>() {
+            if (0.0..=2.0).contains(&val) {
+                let active_model = config.active_model().to_string();
+                config.set_model_temperature(&active_model, Some(val));
+                return SlashResponse::Applied {
+                    markdown: format!("🌡️ Temperature for **{active_model}** set to **{val:.2}**."),
+                    effects: vec![SlashEffect::ConfigChanged],
+                };
+            } else {
+                return error("Temperature must be between 0.0 and 2.0 (e.g. `/temperature 0.6`).");
+            }
+        }
+
+        // Check if arg is provider/model syntax (e.g. "deepseek/deepseek-chat")
+        if let Some((p, m)) = arg.split_once('/') {
+            if !p.is_empty() && !m.is_empty() {
+                return temperature_presets_choice(format!("/temperature {p} {m}"), p, m, config);
+            }
+        }
+
+        // Provider chosen — list models for this provider
+        let options = models::model_options_for_provider(config, arg);
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/temperature {arg}"),
+                title: format!("Select {arg} model for temperature"),
+                options: options
+                    .into_iter()
+                    .map(|m| {
+                        let label = match config.model_temperatures.get(&m) {
+                            Some(cust) => format!("{m} [Custom: {cust:.2}]"),
+                            None => {
+                                let smart = config.resolved_temperature_for_model(arg, &m);
+                                format!("{m} [Auto: {smart:.2}]")
+                            }
+                        };
+                        SlashChoice { label, value: m }
+                    })
+                    .collect(),
+            };
+        }
+
+        // Single argument that wasn't a provider with known models — treat as a model name
+        return temperature_presets_choice(
+            format!("/temperature {arg}"),
+            &config.ai_provider,
+            arg,
+            config,
+        );
+    }
+
+    if tokens.len() == 2 {
+        let t0 = tokens[0];
+        let t1 = tokens[1];
+
+        // Check if t1 is reset: e.g. `/temperature deepseek-chat default`
+        if t1.eq_ignore_ascii_case("default")
+            || t1.eq_ignore_ascii_case("auto")
+            || t1.eq_ignore_ascii_case("reset")
+        {
+            config.set_model_temperature(t0, None);
+            let resolved = config.resolved_temperature_for_model(&config.ai_provider, t0);
+            return SlashResponse::Applied {
+                markdown: format!(
+                    "🌡️ Temperature for **{t0}** reset to **Auto** (smart default `{resolved:.2}`)."
+                ),
+                effects: vec![SlashEffect::ConfigChanged],
+            };
+        }
+
+        // Check if t1 is a float: e.g. `/temperature deepseek-chat 0.65`
+        if let Ok(val) = t1.parse::<f64>() {
+            if (0.0..=2.0).contains(&val) {
+                config.set_model_temperature(t0, Some(val));
+                return SlashResponse::Applied {
+                    markdown: format!("🌡️ Temperature for **{t0}** set to **{val:.2}**."),
+                    effects: vec![SlashEffect::ConfigChanged],
+                };
+            } else {
+                return error("Temperature must be between 0.0 and 2.0 (e.g. `/temperature 0.6`).");
+            }
+        }
+
+        // t0 is provider, t1 is model: e.g. `/temperature deepseek deepseek-chat`
+        return temperature_presets_choice(format!("/temperature {t0} {t1}"), t0, t1, config);
+    }
+
+    // tokens.len() >= 3: e.g. `/temperature deepseek deepseek-chat 0.65` or `/temperature openrouter anthropic/claude-3.7-sonnet 0.2`
+    let provider = tokens[0];
+    let temp_str = tokens[tokens.len() - 1];
+    let model = tokens[1..tokens.len() - 1].join(" ");
+
+    if temp_str.eq_ignore_ascii_case("default")
+        || temp_str.eq_ignore_ascii_case("auto")
+        || temp_str.eq_ignore_ascii_case("reset")
+    {
+        config.set_model_temperature(&model, None);
+        let resolved = config.resolved_temperature_for_model(provider, &model);
+        return SlashResponse::Applied {
+            markdown: format!(
+                "🌡️ Temperature for **{model}** reset to **Auto** (smart default `{resolved:.2}`)."
+            ),
+            effects: vec![SlashEffect::ConfigChanged],
+        };
+    }
+
+    match temp_str.parse::<f64>() {
+        Ok(val) if (0.0..=2.0).contains(&val) => {
+            config.set_model_temperature(&model, Some(val));
+            SlashResponse::Applied {
+                markdown: format!("🌡️ Temperature for **{model}** set to **{val:.2}**."),
+                effects: vec![SlashEffect::ConfigChanged],
+            }
+        }
+        Ok(_) => error("Temperature must be between 0.0 and 2.0 (e.g. `/temperature 0.6`)."),
+        Err(_) => error(format!(
+            "Invalid temperature `{temp_str}`. Specify a number between 0.0 and 2.0, or `default`."
+        )),
+    }
+}
+
+async fn cmd_temperature_async(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    let tokens: Vec<&str> = rest.split_whitespace().collect();
+    if tokens.len() == 1 {
+        let arg = tokens[0];
+        if !arg.eq_ignore_ascii_case("status")
+            && !arg.eq_ignore_ascii_case("list")
+            && !arg.eq_ignore_ascii_case("default")
+            && !arg.eq_ignore_ascii_case("auto")
+            && !arg.eq_ignore_ascii_case("reset")
+            && arg.parse::<f64>().is_err()
+            && !arg.contains('/')
+        {
+            let options = models::model_options_for_provider_async(config, arg).await;
+            if !options.is_empty() {
+                return SlashResponse::NeedsChoice {
+                    command: format!("/temperature {arg}"),
+                    title: format!("Select {arg} model for temperature"),
+                    options: options
+                        .into_iter()
+                        .map(|m| {
+                            let label = match config.model_temperatures.get(&m) {
+                                Some(cust) => format!("{m} [Custom: {cust:.2}]"),
+                                None => {
+                                    let smart = config.resolved_temperature_for_model(arg, &m);
+                                    format!("{m} [Auto: {smart:.2}]")
+                                }
+                            };
+                            SlashChoice { label, value: m }
+                        })
+                        .collect(),
+                };
+            }
+        }
+    }
+    cmd_temperature(rest, config)
+}
+
+async fn cmd_models_async(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    if rest.is_empty() {
+        return cmd_models(rest, config);
+    }
+    // `/models <provider>` (optionally `<provider> <model>` or `<provider>/<model>`).
+    let (provider, model) = match rest.split_once(['/', ' ']) {
+        Some((p, m)) => (p.trim(), Some(m.trim()).filter(|m| !m.is_empty())),
+        None => (rest.trim(), None),
+    };
+
+    // Provider given but no model yet — offer the model picker using live fetch first.
+    if model.is_none() {
+        let options = models::model_options_for_provider_async(config, provider).await;
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/models {provider}"),
+                title: format!("Select {provider} model"),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    cmd_models(rest, config)
+}
+
+async fn cmd_image_provider_async(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    use crate::media::image_models;
+
+    let available_providers = vec![
+        "nanobanana",
+        "dalle",
+        "stability",
+        "ideogram",
+        "replicate",
+        "bfl",
+    ];
+
+    if rest.is_empty() {
+        return SlashResponse::NeedsChoice {
+            command: "/image-provider".into(),
+            title: "Select Image Generation provider".into(),
+            options: available_providers
+                .into_iter()
+                .map(|p| SlashChoice {
+                    label: image_models::image_provider_display_name(p),
+                    value: p.to_string(),
+                })
+                .collect(),
+        };
+    }
+
+    let (provider, model) = match rest.split_once(['/', ' ']) {
+        Some((p, m)) => (p.trim(), Some(m.trim()).filter(|m| !m.is_empty())),
+        None => (rest.trim(), None),
+    };
+
+    if model.is_none() {
+        let options = image_models::image_model_options_for_provider_async(config, provider).await;
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/image-provider {provider}"),
+                title: format!(
+                    "Select {} image model",
+                    image_models::image_provider_display_name(provider)
+                ),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    image_models::set_active_image_provider_model(config, provider, model);
+    let active_model = image_models::active_image_model_for_provider(config, provider);
+    let display = format!(
+        "{} • {}",
+        image_models::image_provider_display_name(provider),
+        active_model
+    );
+
+    SlashResponse::Applied {
+        markdown: String::new(),
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ProviderChanged { display },
+        ],
+    }
+}
+
+async fn cmd_image_models_async(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    use crate::media::image_models;
+
+    let trimmed = rest.trim();
+    let known_providers = [
+        "nanobanana",
+        "gemini",
+        "google",
+        "dalle",
+        "openai",
+        "stability",
+        "ideogram",
+        "replicate",
+        "bfl",
+        "flux",
+    ];
+
+    let (provider, model) = if trimmed.is_empty() {
+        let p = if config.image_gen_provider.is_empty() {
+            "nanobanana".to_string()
+        } else {
+            config.image_gen_provider.clone()
+        };
+        (p, None)
+    } else {
+        let (first_word, rem) = trimmed
+            .split_once(['/', ' '])
+            .map(|(p, m)| (p.trim(), Some(m.trim()).filter(|s| !s.is_empty())))
+            .unwrap_or((trimmed, None));
+
+        if known_providers.contains(&first_word.to_lowercase().as_str()) {
+            (first_word.to_string(), rem.map(|s| s.to_string()))
+        } else {
+            let p = if config.image_gen_provider.is_empty() {
+                "nanobanana".to_string()
+            } else {
+                config.image_gen_provider.clone()
+            };
+            (p, Some(trimmed.to_string()))
+        }
+    };
+
+    if model.is_none() {
+        let options = image_models::image_model_options_for_provider_async(config, &provider).await;
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/image-models {provider}"),
+                title: format!(
+                    "Select {} image model",
+                    image_models::image_provider_display_name(&provider)
+                ),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    let model_str = model.unwrap_or_default();
+    image_models::set_active_image_provider_model(config, &provider, Some(&model_str));
+    let display = format!(
+        "{} • {}",
+        image_models::image_provider_display_name(&provider),
+        model_str
+    );
+
+    SlashResponse::Applied {
+        markdown: String::new(),
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ProviderChanged { display },
+        ],
+    }
+}
+
+async fn cmd_video_provider_async(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    use crate::media::video_models;
+
+    let available_providers = vec!["veo"];
+
+    if rest.is_empty() {
+        return SlashResponse::NeedsChoice {
+            command: "/video-provider".into(),
+            title: "Select Video Generation provider".into(),
+            options: available_providers
+                .into_iter()
+                .map(|p| SlashChoice {
+                    label: video_models::video_provider_display_name(p),
+                    value: p.to_string(),
+                })
+                .collect(),
+        };
+    }
+
+    let (provider, model) = match rest.split_once(['/', ' ']) {
+        Some((p, m)) => (p.trim(), Some(m.trim()).filter(|m| !m.is_empty())),
+        None => (rest.trim(), None),
+    };
+
+    if model.is_none() {
+        let options = video_models::video_model_options_for_provider_async(config, provider).await;
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/video-provider {provider}"),
+                title: format!(
+                    "Select {} video model",
+                    video_models::video_provider_display_name(provider)
+                ),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    video_models::set_active_video_provider_model(config, provider, model);
+    let active_model = video_models::active_video_model_for_provider(config, provider);
+    let display = format!(
+        "{} • {}",
+        video_models::video_provider_display_name(provider),
+        active_model
+    );
+
+    SlashResponse::Applied {
+        markdown: String::new(),
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ProviderChanged { display },
+        ],
+    }
+}
+
+async fn cmd_video_models_async(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    use crate::media::video_models;
+
+    let trimmed = rest.trim();
+    let known_providers = ["veo", "google", "gemini"];
+
+    let (provider, model) = if trimmed.is_empty() {
+        let p = config
+            .extra
+            .get("videoGenProvider")
+            .and_then(|v| v.as_str())
+            .unwrap_or("veo")
+            .to_string();
+        (p, None)
+    } else {
+        let (first_word, rem) = trimmed
+            .split_once(['/', ' '])
+            .map(|(p, m)| (p.trim(), Some(m.trim()).filter(|s| !s.is_empty())))
+            .unwrap_or((trimmed, None));
+
+        if known_providers.contains(&first_word.to_lowercase().as_str()) {
+            let canonical_p = if first_word.eq_ignore_ascii_case("google")
+                || first_word.eq_ignore_ascii_case("gemini")
+            {
+                "veo".to_string()
+            } else {
+                first_word.to_string()
+            };
+            (canonical_p, rem.map(|s| s.to_string()))
+        } else {
+            let p = config
+                .extra
+                .get("videoGenProvider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("veo")
+                .to_string();
+            (p, Some(trimmed.to_string()))
+        }
+    };
+
+    if model.is_none() {
+        let options = video_models::video_model_options_for_provider_async(config, &provider).await;
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/video-models {provider}"),
+                title: format!(
+                    "Select {} video model",
+                    video_models::video_provider_display_name(&provider)
+                ),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    let model_str = model.unwrap_or_default();
+    video_models::set_active_video_provider_model(config, &provider, Some(&model_str));
+    let display = format!(
+        "{} • {}",
+        video_models::video_provider_display_name(&provider),
+        model_str
+    );
+
+    SlashResponse::Applied {
+        markdown: String::new(),
+        effects: vec![
+            SlashEffect::ConfigChanged,
+            SlashEffect::ProviderChanged { display },
+        ],
+    }
+}
+
+fn cmd_video_models_sync(rest: &str, config: &mut MintConfig) -> SlashResponse {
+    use crate::media::video_models;
+
+    let trimmed = rest.trim();
+    let known_providers = ["veo", "google", "gemini"];
+
+    let (provider, model) = if trimmed.is_empty() {
+        let p = config
+            .extra
+            .get("videoGenProvider")
+            .and_then(|v| v.as_str())
+            .unwrap_or("veo")
+            .to_string();
+        (p, None)
+    } else {
+        let (first_word, rem) = trimmed
+            .split_once(['/', ' '])
+            .map(|(p, m)| (p.trim(), Some(m.trim()).filter(|s| !s.is_empty())))
+            .unwrap_or((trimmed, None));
+
+        if known_providers.contains(&first_word.to_lowercase().as_str()) {
+            let canonical_p = if first_word.eq_ignore_ascii_case("google")
+                || first_word.eq_ignore_ascii_case("gemini")
+            {
+                "veo".to_string()
+            } else {
+                first_word.to_string()
+            };
+            (canonical_p, rem.map(|s| s.to_string()))
+        } else {
+            let p = config
+                .extra
+                .get("videoGenProvider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("veo")
+                .to_string();
+            (p, Some(trimmed.to_string()))
+        }
+    };
+
+    if model.is_none() {
+        let options = video_models::video_model_options_for_provider(config, &provider);
+        if !options.is_empty() {
+            return SlashResponse::NeedsChoice {
+                command: format!("/video-models {provider}"),
+                title: format!(
+                    "Select {} video model",
+                    video_models::video_provider_display_name(&provider)
+                ),
+                options: options
+                    .into_iter()
+                    .map(|m| SlashChoice {
+                        label: m.clone(),
+                        value: m,
+                    })
+                    .collect(),
+            };
+        }
+    }
+
+    let model_str = model.unwrap_or_default();
+    video_models::set_active_video_provider_model(config, &provider, Some(&model_str));
+    let display = format!(
+        "{} • {}",
+        video_models::video_provider_display_name(&provider),
+        model_str
+    );
+
+    SlashResponse::Applied {
         markdown: String::new(),
         effects: vec![
             SlashEffect::ConfigChanged,
@@ -1011,13 +1889,30 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
             tokens.retain(|t| *t != "--allow-all");
             let mut parts = tokens.into_iter();
             match (parts.next(), parts.next()) {
-                (Some(name), Some(command)) => {
-                    let server = crate::McpServer {
-                        command: command.to_string(),
-                        args: parts.map(str::to_string).collect(),
-                        env: Default::default(),
-                        icon: None,
-                        disabled: false,
+                (Some(name), Some(target)) => {
+                    let is_url = target.starts_with("http://") || target.starts_with("https://");
+                    let server = if is_url {
+                        crate::McpServer {
+                            command: String::new(),
+                            args: Vec::new(),
+                            env: Default::default(),
+                            icon: None,
+                            disabled: false,
+                            url: Some(target.to_string()),
+                            headers: None,
+                            transport: Some("sse".to_string()),
+                        }
+                    } else {
+                        crate::McpServer {
+                            command: target.to_string(),
+                            args: parts.map(str::to_string).collect(),
+                            env: Default::default(),
+                            icon: None,
+                            disabled: false,
+                            url: None,
+                            headers: None,
+                            transport: None,
+                        }
                     };
                     match crate::upsert_server_in(config, name, server) {
                         Ok(()) => {
@@ -1036,7 +1931,7 @@ fn cmd_mcp(rest: &str, config: &mut MintConfig) -> SlashResponse {
                         Err(e) => error(e),
                     }
                 }
-                _ => error("Usage: /mcp add <name> <command> [args…] [--allow-all]"),
+                _ => error("Usage: /mcp add <name> <command|url> [args…] [--allow-all]"),
             }
         }
 
@@ -1468,7 +2363,9 @@ mod tests {
     fn code_forwards_in_agent_mode() {
         let mut cfg = MintConfig::default();
         match execute(&req("/code fix the parser"), &mut cfg) {
-            SlashResponse::ForwardToAgent { prompt, agent_mode } => {
+            SlashResponse::ForwardToAgent {
+                prompt, agent_mode, ..
+            } => {
                 assert_eq!(prompt, "fix the parser");
                 assert!(agent_mode);
             }
@@ -1507,6 +2404,162 @@ mod tests {
                 assert!(markdown.contains("`/bg`")); // cli-only, present in the cli list
             }
             _ => panic!("expected Message"),
+        }
+    }
+
+    #[test]
+    fn plan_toggles_and_forwards_task() {
+        let mut cfg = MintConfig::default();
+        match execute(&req("/plan on"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::PlanModeChanged { enabled: true }));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+        match execute(&req("/plan off"), &mut cfg) {
+            SlashResponse::Applied { effects, .. } => {
+                assert!(effects.contains(&SlashEffect::PlanModeChanged { enabled: false }));
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+        match execute(&req("/plan refactor database"), &mut cfg) {
+            SlashResponse::ForwardToAgent {
+                prompt,
+                agent_mode,
+                plan_mode,
+            } => {
+                assert_eq!(prompt, "refactor database");
+                assert!(agent_mode);
+                assert!(plan_mode);
+            }
+            other => panic!(
+                "expected ForwardToAgent, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+    }
+
+    #[test]
+    fn temperature_slash_command_inspection_override_and_reset() {
+        let mut cfg = MintConfig {
+            ai_provider: "deepseek".into(),
+            deepseek_model: "deepseek-chat".into(),
+            ..MintConfig::default()
+        };
+
+        // 1. Bare /temperature returns NeedsChoice with provider & active model options
+        match execute(&req("/temperature"), &mut cfg) {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
+                assert_eq!(command, "/temperature");
+                assert!(options.iter().any(|o| o.label.contains("deepseek-chat")));
+                assert!(options.iter().any(|o| o.value == "deepseek"));
+            }
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+
+        // 2. /temperature deepseek returns NeedsChoice for models
+        match execute(&req("/temperature deepseek"), &mut cfg) {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
+                assert_eq!(command, "/temperature deepseek");
+                assert!(options.iter().any(|o| o.value == "deepseek-chat"));
+            }
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+
+        // 3. /temperature deepseek deepseek-chat returns NeedsChoice for presets
+        match execute(&req("/temperature deepseek deepseek-chat"), &mut cfg) {
+            SlashResponse::NeedsChoice {
+                command, options, ..
+            } => {
+                assert_eq!(command, "/temperature deepseek deepseek-chat");
+                assert!(options.iter().any(|o| o.value == "0.6"));
+                assert!(options.iter().any(|o| o.value == "default"));
+            }
+            other => panic!(
+                "expected NeedsChoice, got {:?}",
+                serde_json::to_value(other)
+            ),
+        }
+
+        // 4. Set explicit temperature via full path /temperature <provider> <model> <temp>
+        match execute(&req("/temperature deepseek deepseek-chat 0.65"), &mut cfg) {
+            SlashResponse::Applied { effects, markdown } => {
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+                assert!(markdown.contains("0.65"));
+                assert_eq!(cfg.model_temperatures.get("deepseek-chat"), Some(&0.65));
+                assert_eq!(cfg.resolved_temperature(), 0.65);
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 5. Direct float shorthand sets on active model
+        match execute(&req("/temperature 0.8"), &mut cfg) {
+            SlashResponse::Applied { effects, markdown } => {
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+                assert!(markdown.contains("0.80"));
+                assert_eq!(cfg.model_temperatures.get("deepseek-chat"), Some(&0.8));
+                assert_eq!(cfg.resolved_temperature(), 0.8);
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 6. Reset to default
+        match execute(&req("/temperature default"), &mut cfg) {
+            SlashResponse::Applied { effects, markdown } => {
+                assert!(effects.contains(&SlashEffect::ConfigChanged));
+                assert!(markdown.contains("Auto"));
+                assert_eq!(cfg.model_temperatures.get("deepseek-chat"), None);
+                assert_eq!(cfg.resolved_temperature(), 0.6);
+            }
+            other => panic!("expected Applied, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 7. Status inspection shows smart default 0.60
+        match execute(&req("/temperature status"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("0.60"));
+                assert!(markdown.contains("DeepSeek"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 8. Validation bounds
+        match execute(&req("/temperature 3.5"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("between 0.0 and 2.0"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 9. O1 model inspection shows Omitted in status
+        cfg.ai_provider = "openai".into();
+        cfg.openai_model = "o1-preview".into();
+        match execute(&req("/temperature status"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("Omitted"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
+        }
+
+        // 10. Codestral model inspection shows 0.10 in status
+        cfg.ai_provider = "huggingface".into();
+        cfg.hf_model = "mistralai/Codestral-22B-v0.1".into();
+        match execute(&req("/temperature status"), &mut cfg) {
+            SlashResponse::Message { markdown } => {
+                assert!(markdown.contains("0.10"));
+                assert!(markdown.contains("code completion"));
+            }
+            other => panic!("expected Message, got {:?}", serde_json::to_value(other)),
         }
     }
 }

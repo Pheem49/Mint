@@ -166,7 +166,9 @@ export const applyThemeStyles = (cfg: any): void => {
   document.documentElement.style.setProperty('--accent-glow', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`)
   document.documentElement.style.setProperty('--accent-subtle', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`)
   document.documentElement.style.setProperty('--accent-border', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3)`)
+  const chatTextColor = cfg.chatTextColor || systemTextColor
   document.documentElement.style.setProperty('--text-main', systemTextColor)
+  document.documentElement.style.setProperty('--text-chat', chatTextColor)
   document.documentElement.style.setProperty('--glass-blur', cfg.glassBlur || 'blur(16px)')
   document.body.style.fontFamily = cfg.fontFamily || "'Outfit', sans-serif"
   document.documentElement.style.fontSize = cfg.fontSize || '18px'

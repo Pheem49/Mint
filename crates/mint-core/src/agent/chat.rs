@@ -128,7 +128,7 @@ fn config_for_provider(config: &MintConfig, provider: &str) -> MintConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatRequest {
     pub message: String,
@@ -163,6 +163,10 @@ pub struct ChatRequest {
     /// function/tool-calling API. Ignored when `messages` is `None`.
     #[serde(default)]
     pub tools: Option<Vec<ToolSpec>>,
+    /// Optional per-request temperature override. When `None`, falls back to
+    /// `config.resolved_temperature()`.
+    #[serde(default)]
+    pub temperature: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -383,6 +387,10 @@ pub struct ChatResponse {
     /// "came back down from the model" half. See `input_tokens`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u32>,
+    /// Model reasoning / chain-of-thought tokens, when reported by reasoning models
+    /// (e.g. DeepSeek Reasoner, Claude 3.7 Thinking, Gemini Thinking, or <think> tags).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought: Option<String>,
 }
 
 /// Internal, provider-agnostic result of a single non-streaming provider call.
@@ -390,6 +398,7 @@ pub struct ChatResponse {
 struct ProviderReply {
     model: String,
     text: String,
+    thought: Option<String>,
     tool_calls: Option<Vec<ToolCall>>,
     stop_reason: Option<String>,
     /// Prompt/context tokens processed for this call, when the provider reports
@@ -427,6 +436,8 @@ pub enum ChatError {
     /// network link.
     #[error("no network connection to reach the provider")]
     NetworkUnavailable,
+    #[error("provider API error: {0}")]
+    Api(String),
 }
 
 pub async fn send_chat(
@@ -451,6 +462,7 @@ pub async fn send_chat(
         provider: provider.into(),
         model: reply.model,
         text: reply.text,
+        thought: reply.thought,
         fallback_provider: None,
         fallback_reason: None,
         tool_calls: reply.tool_calls,
@@ -492,6 +504,7 @@ where
         provider: provider.into(),
         model,
         text,
+        thought: None,
         fallback_provider: None,
         fallback_reason: None,
         tool_calls: None,
@@ -514,7 +527,10 @@ async fn call_gemini(
         format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent");
 
     let payload = if request.messages.is_some() {
-        gemini_native_payload(request)?
+        let mut p = gemini_native_payload(request)?;
+        let temp = effective_temperature(config, request);
+        p["generationConfig"] = json!({ "temperature": temp });
+        p
     } else {
         gemini_chat_payload(config, request)?
     };
@@ -655,6 +671,41 @@ fn gemini_native_part(
     })
 }
 
+/// Extracts `<think>...</think>` chain-of-thought blocks emitted by reasoning models
+/// (e.g. DeepSeek-R1, QwQ) when embedded directly into plain text content.
+/// Returns `(Option<thought>, remaining_text)`.
+fn extract_think_tag(text: &str) -> (Option<String>, String) {
+    if let Some(start) = text.find("<think>") {
+        if let Some(end) = text[start + 7..].find("</think>") {
+            let thought = text[start + 7..start + 7 + end].trim().to_string();
+            let mut remaining = text[..start].to_string();
+            remaining.push_str(&text[start + 7 + end + 8..]);
+            let cleaned = remaining.trim().to_string();
+            (
+                if thought.is_empty() {
+                    None
+                } else {
+                    Some(thought)
+                },
+                cleaned,
+            )
+        } else {
+            let thought = text[start + 7..].trim().to_string();
+            let cleaned = text[..start].trim().to_string();
+            (
+                if thought.is_empty() {
+                    None
+                } else {
+                    Some(thought)
+                },
+                cleaned,
+            )
+        }
+    } else {
+        (None, text.to_string())
+    }
+}
+
 /// Parses a Gemini `generateContent` response, collecting text parts and any
 /// `functionCall` parts into tool calls. Gemini doesn't assign call ids, so a
 /// stable per-response index (`call_0`, `call_1`, ...) is synthesized; this is
@@ -666,10 +717,19 @@ fn parse_gemini_reply(model: String, response: &Value) -> Result<ProviderReply, 
         .cloned()
         .unwrap_or_default();
     let mut text = String::new();
+    let mut thought_parts: Vec<&str> = Vec::new();
     let mut tool_calls = Vec::new();
     for (index, part) in parts.iter().enumerate() {
+        let is_thought = part
+            .get("thought")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         if let Some(t) = part["text"].as_str() {
-            text.push_str(t);
+            if is_thought {
+                thought_parts.push(t);
+            } else {
+                text.push_str(t);
+            }
         }
         if let Some(call) = part.get("functionCall") {
             tool_calls.push(ToolCall {
@@ -685,12 +745,40 @@ fn parse_gemini_reply(model: String, response: &Value) -> Result<ProviderReply, 
             });
         }
     }
+    let direct_thought = if !thought_parts.is_empty() {
+        Some(thought_parts.join("").trim().to_string()).filter(|s| !s.is_empty())
+    } else {
+        None
+    };
+    let (thought, text) = if direct_thought.is_none() {
+        extract_think_tag(&text)
+    } else {
+        (direct_thought, text)
+    };
     if text.is_empty() && tool_calls.is_empty() {
+        if let Some(th) = &thought {
+            return Ok(ProviderReply {
+                model,
+                text: th.clone(),
+                thought: Some(th.clone()),
+                tool_calls: None,
+                stop_reason: response["candidates"][0]["finishReason"]
+                    .as_str()
+                    .map(str::to_owned),
+                input_tokens: response["usageMetadata"]["promptTokenCount"]
+                    .as_u64()
+                    .map(|n| n as u32),
+                output_tokens: response["usageMetadata"]["candidatesTokenCount"]
+                    .as_u64()
+                    .map(|n| n as u32),
+            });
+        }
         return Err(ChatError::MissingResponseText);
     }
     Ok(ProviderReply {
         model,
         text,
+        thought,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: response["candidates"][0]["finishReason"]
             .as_str()
@@ -748,7 +836,7 @@ async fn call_openai(
         client
             .post(format!("{base_url}/chat/completions"))
             .bearer_auth(if local { "not-needed" } else { &api_key })
-            .json(&openai_chat_payload(&model, request, false)?),
+            .json(&openai_chat_payload(config, &model, request, false)?),
         &config.ai_provider,
     )
     .await?;
@@ -775,7 +863,12 @@ async fn send_openai_style_request(
     if response.status() == reqwest::StatusCode::PAYMENT_REQUIRED {
         return Err(ChatError::InsufficientBalance(provider.to_string()));
     }
-    Ok(response.error_for_status()?.json().await?)
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(ChatError::Api(format!("HTTP {status}: {body}")));
+    }
+    Ok(response.json().await?)
 }
 
 /// Parses an OpenAI Chat Completions-shaped response (`choices[0].message`),
@@ -785,7 +878,21 @@ async fn send_openai_style_request(
 /// and has its own parser below.
 fn parse_openai_style_reply(model: String, response: &Value) -> Result<ProviderReply, ChatError> {
     let message = &response["choices"][0]["message"];
-    let text = message["content"].as_str().unwrap_or_default().to_string();
+    let raw_text = message["content"].as_str().unwrap_or_default().to_string();
+    let direct_thought = message["reasoning_content"]
+        .as_str()
+        .or_else(|| message["reasoning"].as_str())
+        .or_else(|| message["thought"].as_str())
+        .or_else(|| message["thinking"].as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let (thought, text) = if direct_thought.is_none() {
+        extract_think_tag(&raw_text)
+    } else {
+        (direct_thought, raw_text)
+    };
+
     let tool_calls: Vec<ToolCall> = message["tool_calls"]
         .as_array()
         .map(|calls| {
@@ -808,11 +915,29 @@ fn parse_openai_style_reply(model: String, response: &Value) -> Result<ProviderR
         })
         .unwrap_or_default();
     if text.is_empty() && tool_calls.is_empty() {
+        if let Some(th) = &thought {
+            return Ok(ProviderReply {
+                model,
+                text: th.clone(),
+                thought: Some(th.clone()),
+                tool_calls: None,
+                stop_reason: response["choices"][0]["finish_reason"]
+                    .as_str()
+                    .map(str::to_owned),
+                input_tokens: response["usage"]["prompt_tokens"]
+                    .as_u64()
+                    .map(|n| n as u32),
+                output_tokens: response["usage"]["completion_tokens"]
+                    .as_u64()
+                    .map(|n| n as u32),
+            });
+        }
         return Err(ChatError::MissingResponseText);
     }
     Ok(ProviderReply {
         model,
         text,
+        thought,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: response["choices"][0]["finish_reason"]
             .as_str()
@@ -879,7 +1004,11 @@ async fn call_ollama(
     // Force the context window Mint plans against (`context_window_tokens`)
     // instead of leaving Ollama on its tiny ~4K default, which silently
     // truncates anything longer.
-    body["options"] = json!({ "num_ctx": config.ollama_num_ctx });
+    let temp = effective_temperature(config, request);
+    body["options"] = json!({
+        "num_ctx": config.ollama_num_ctx,
+        "temperature": temp,
+    });
     let response: Value = client
         .post(format!("{host}/api/chat"))
         .json(&body)
@@ -974,7 +1103,19 @@ fn ollama_native_messages(messages: &[ChatMessage]) -> Vec<Value> {
 /// (`{"choices": [{"message": {...}}]}`) that `parse_openai_style_reply` handles.
 fn parse_ollama_reply(model: String, response: &Value) -> Result<ProviderReply, ChatError> {
     let message = &response["message"];
-    let text = message["content"].as_str().unwrap_or_default().to_string();
+    let raw_text = message["content"].as_str().unwrap_or_default().to_string();
+    let direct_thought = message["thinking"]
+        .as_str()
+        .or_else(|| message["reasoning_content"].as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let (thought, text) = if direct_thought.is_none() {
+        extract_think_tag(&raw_text)
+    } else {
+        (direct_thought, raw_text)
+    };
+
     let tool_calls: Vec<ToolCall> = message["tool_calls"]
         .as_array()
         .map(|calls| {
@@ -1004,11 +1145,23 @@ fn parse_ollama_reply(model: String, response: &Value) -> Result<ProviderReply, 
         })
         .unwrap_or_default();
     if text.is_empty() && tool_calls.is_empty() {
+        if let Some(th) = &thought {
+            return Ok(ProviderReply {
+                model,
+                text: th.clone(),
+                thought: Some(th.clone()),
+                tool_calls: None,
+                stop_reason: None,
+                input_tokens: response["prompt_eval_count"].as_u64().map(|n| n as u32),
+                output_tokens: response["eval_count"].as_u64().map(|n| n as u32),
+            });
+        }
         return Err(ChatError::MissingResponseText);
     }
     Ok(ProviderReply {
         model,
         text,
+        thought,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: None,
         input_tokens: response["prompt_eval_count"].as_u64().map(|n| n as u32),
@@ -1024,7 +1177,7 @@ async fn call_anthropic(
     let api_key = provider_key(&config.anthropic_api_key, "ANTHROPIC_API_KEY");
     required_key("anthropic", &api_key)?;
     let model = config.anthropic_model.clone();
-    let payload = anthropic_chat_payload(&model, request, false)?;
+    let payload = anthropic_chat_payload(config, &model, request, false)?;
     let response: Value = client
         .post("https://api.anthropic.com/v1/messages")
         .header("x-api-key", api_key)
@@ -1044,17 +1197,20 @@ async fn call_anthropic(
 /// tool-calling; otherwise falls back to the single flat `message` field exactly
 /// as before (legacy JSON-prompt callers are unaffected).
 fn anthropic_chat_payload(
+    config: &MintConfig,
     model: &str,
     request: &ChatRequest,
     stream: bool,
 ) -> Result<Value, ChatError> {
     let system = anthropic_system_blocks(&request.system_instruction);
+    let temp = effective_temperature(config, request);
     let mut payload = if let Some(messages) = &request.messages {
         json!({
             "model": model,
             "max_tokens": 8192,
             "system": system,
             "messages": anthropic_messages(messages)?,
+            "temperature": temp,
         })
     } else {
         json!({
@@ -1064,7 +1220,8 @@ fn anthropic_chat_payload(
             "messages": [{
                 "role": "user",
                 "content": anthropic_message_content(&request.message, request.image_data_uri.as_deref())?,
-            }]
+            }],
+            "temperature": temp,
         })
     };
     if stream {
@@ -1219,12 +1376,18 @@ fn anthropic_content_block(block: &ContentBlock) -> Result<Value, ChatError> {
 fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderReply, ChatError> {
     let blocks = response["content"].as_array().cloned().unwrap_or_default();
     let mut text = String::new();
+    let mut thought_parts: Vec<&str> = Vec::new();
     let mut tool_calls = Vec::new();
     for block in &blocks {
         match block["type"].as_str() {
             Some("text") => {
                 if let Some(t) = block["text"].as_str() {
                     text.push_str(t);
+                }
+            }
+            Some("thinking") => {
+                if let Some(t) = block["thinking"].as_str() {
+                    thought_parts.push(t);
                 }
             }
             Some("tool_use") => {
@@ -1238,12 +1401,36 @@ fn parse_anthropic_reply(model: String, response: &Value) -> Result<ProviderRepl
             _ => {}
         }
     }
+    let direct_thought = if !thought_parts.is_empty() {
+        Some(thought_parts.join("").trim().to_string()).filter(|s| !s.is_empty())
+    } else {
+        None
+    };
+    let (thought, text) = if direct_thought.is_none() {
+        extract_think_tag(&text)
+    } else {
+        (direct_thought, text)
+    };
     if text.is_empty() && tool_calls.is_empty() {
+        if let Some(th) = &thought {
+            return Ok(ProviderReply {
+                model,
+                text: th.clone(),
+                thought: Some(th.clone()),
+                tool_calls: None,
+                stop_reason: response["stop_reason"].as_str().map(str::to_owned),
+                input_tokens: response["usage"]["input_tokens"].as_u64().map(|n| n as u32),
+                output_tokens: response["usage"]["output_tokens"]
+                    .as_u64()
+                    .map(|n| n as u32),
+            });
+        }
         return Err(ChatError::MissingResponseText);
     }
     Ok(ProviderReply {
         model,
         text,
+        thought,
         tool_calls: (!tool_calls.is_empty()).then_some(tool_calls),
         stop_reason: response["stop_reason"].as_str().map(str::to_owned),
         input_tokens: response["usage"]["input_tokens"].as_u64().map(|n| n as u32),
@@ -1275,7 +1462,7 @@ async fn call_huggingface(
         client
             .post("https://router.huggingface.co/v1/chat/completions")
             .bearer_auth(api_key)
-            .json(&openai_chat_payload(&model, request, false)?),
+            .json(&openai_chat_payload(config, &model, request, false)?),
         "huggingface",
     )
     .await?;
@@ -1356,10 +1543,14 @@ where
     let response = client
         .post(format!("{base_url}/chat/completions"))
         .bearer_auth(if local { "not-needed" } else { &api_key })
-        .json(&openai_chat_payload(&model, request, true)?)
+        .json(&openai_chat_payload(config, &model, request, true)?)
         .send()
-        .await?
-        .error_for_status()?;
+        .await?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(ChatError::Api(format!("HTTP {status}: {body}")));
+    }
     collect_stream(response, StreamFormat::OpenAi, on_chunk)
         .await
         .map(|text| (model, text))
@@ -1394,7 +1585,10 @@ where
                 user_message
             ],
             // See `call_ollama`: pin the window instead of Ollama's ~4K default.
-            "options": { "num_ctx": config.ollama_num_ctx }
+            "options": {
+                "num_ctx": config.ollama_num_ctx,
+                "temperature": effective_temperature(config, request),
+            }
         }))
         .send()
         .await?
@@ -1426,7 +1620,8 @@ where
             "max_tokens": 8192,
             "stream": true,
             "system": request.system_instruction,
-            "messages": [{ "role": "user", "content": request.message }]
+            "messages": [{ "role": "user", "content": request.message }],
+            "temperature": effective_temperature(config, request),
         }))
         .send()
         .await?
@@ -1454,7 +1649,7 @@ where
     let response = client
         .post("https://router.huggingface.co/v1/chat/completions")
         .bearer_auth(api_key)
-        .json(&openai_chat_payload(&model, request, true)?)
+        .json(&openai_chat_payload(config, &model, request, true)?)
         .send()
         .await?
         .error_for_status()?;
@@ -1571,7 +1766,7 @@ async fn call_custom_provider(
 
     let base_url = provider.base_url.trim_end_matches('/');
     let model = resolve_custom_model(config);
-    let payload = openai_chat_payload(&model, request, false)?;
+    let payload = openai_chat_payload(config, &model, request, false)?;
 
     let mut builder = client
         .post(format!("{base_url}/chat/completions"))
@@ -1606,7 +1801,7 @@ where
 
     let base_url = provider.base_url.trim_end_matches('/');
     let model = resolve_custom_model(config);
-    let payload = openai_chat_payload(&model, request, true)?;
+    let payload = openai_chat_payload(config, &model, request, true)?;
 
     let mut builder = client
         .post(format!("{base_url}/chat/completions"))
@@ -1713,12 +1908,17 @@ fn wants_agent_json(request: &ChatRequest) -> bool {
 }
 
 fn gemini_chat_payload(config: &MintConfig, request: &ChatRequest) -> Result<Value, ChatError> {
+    let temp = effective_temperature(config, request);
     let mut payload = json!({
         "systemInstruction": { "parts": [{ "text": request.system_instruction }] },
         "contents": [{ "role": "user", "parts": gemini_parts(request)? }]
     });
     if wants_agent_json(request) {
-        payload["generationConfig"] = gemini_agent_generation_config(config);
+        let mut gen_cfg = gemini_agent_generation_config(config);
+        gen_cfg["temperature"] = json!(temp);
+        payload["generationConfig"] = gen_cfg;
+    } else {
+        payload["generationConfig"] = json!({ "temperature": temp });
     }
     Ok(payload)
 }
@@ -1729,6 +1929,8 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
         "read_file",
         "search_code",
         "symbols",
+        "find_definition",
+        "find_references",
         "semantic_index",
         "semantic_search",
         "knowledge_search",
@@ -1755,6 +1957,9 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
         "mcp_tool",
         "run_shell",
         "verify",
+        "run_tests",
+        "run_typecheck",
+        "run_linter",
         "apply_patch",
         "write_file",
     ];
@@ -1829,7 +2034,16 @@ fn gemini_agent_generation_config(config: &MintConfig) -> Value {
     })
 }
 
+/// Resolves the effective sampling temperature for this request, prioritizing
+/// `request.temperature` if present, otherwise falling back to `config.resolved_temperature()`.
+pub(crate) fn effective_temperature(config: &MintConfig, request: &ChatRequest) -> f64 {
+    request
+        .temperature
+        .unwrap_or_else(|| config.resolved_temperature())
+}
+
 fn openai_chat_payload(
+    config: &MintConfig,
     model: &str,
     request: &ChatRequest,
     stream: bool,
@@ -1868,6 +2082,11 @@ fn openai_chat_payload(
         // `anthropic_chat_payload`/`stream_anthropic`.
         "max_tokens": 8192,
     });
+    // OpenAI reasoning models (o1, o3, etc.) reject explicit temperature parameter.
+    let is_reasoning_model = model.starts_with("o1") || model.starts_with("o3");
+    if !is_reasoning_model {
+        payload["temperature"] = json!(effective_temperature(config, request));
+    }
     if wants_agent_json(request) {
         payload["response_format"] = json!({ "type": "json_object" });
     }
@@ -2149,6 +2368,7 @@ mod tests {
             pinned_mcp_server: None,
             messages: None,
             tools: None,
+            temperature: None,
         };
 
         let error = require_supported_attachments("openai", &request).unwrap_err();
@@ -2197,6 +2417,7 @@ mod tests {
             pinned_mcp_server: None,
             messages: None,
             tools: None,
+            temperature: None,
         })
         .unwrap();
         assert_eq!(parts.len(), 3);
@@ -2231,6 +2452,7 @@ mod tests {
             pinned_mcp_server: None,
             messages: Some(messages),
             tools,
+            temperature: None,
         }
     }
 
@@ -2257,7 +2479,8 @@ mod tests {
             },
         ];
         let request = native_request(messages, Some(vec![sample_tool()]));
-        let payload = anthropic_chat_payload("claude-x", &request, false).unwrap();
+        let cfg = MintConfig::default();
+        let payload = anthropic_chat_payload(&cfg, "claude-x", &request, false).unwrap();
 
         assert_eq!(payload["system"][0]["text"], "You are Mint.");
         assert_eq!(payload["tools"][0]["name"], "read_file");
@@ -2274,7 +2497,8 @@ mod tests {
     #[test]
     fn anthropic_payload_marks_the_system_prompt_as_cacheable() {
         let request = native_request(vec![ChatMessage::text(ChatRole::User, "hi")], None);
-        let payload = anthropic_chat_payload("claude-x", &request, false).unwrap();
+        let cfg = MintConfig::default();
+        let payload = anthropic_chat_payload(&cfg, "claude-x", &request, false).unwrap();
 
         assert_eq!(payload["system"][0]["type"], "text");
         assert_eq!(payload["system"][0]["text"], "You are Mint.");
@@ -2285,7 +2509,8 @@ mod tests {
     fn anthropic_payload_omits_the_cache_breakpoint_for_an_empty_system_prompt() {
         let mut request = native_request(vec![ChatMessage::text(ChatRole::User, "hi")], None);
         request.system_instruction = String::new();
-        let payload = anthropic_chat_payload("claude-x", &request, false).unwrap();
+        let cfg = MintConfig::default();
+        let payload = anthropic_chat_payload(&cfg, "claude-x", &request, false).unwrap();
 
         // Falls back to the plain-string shape rather than an empty cacheable
         // block, matching the pre-caching behavior exactly for this case.
@@ -2303,7 +2528,8 @@ mod tests {
             vec![ChatMessage::text(ChatRole::User, "hi")],
             Some(vec![sample_tool(), second_tool]),
         );
-        let payload = anthropic_chat_payload("claude-x", &request, false).unwrap();
+        let cfg = MintConfig::default();
+        let payload = anthropic_chat_payload(&cfg, "claude-x", &request, false).unwrap();
 
         let tools = payload["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 2);
@@ -2321,7 +2547,8 @@ mod tests {
             ],
             None,
         );
-        let payload = anthropic_chat_payload("claude-x", &request, false).unwrap();
+        let cfg = MintConfig::default();
+        let payload = anthropic_chat_payload(&cfg, "claude-x", &request, false).unwrap();
         let messages = payload["messages"].as_array().unwrap();
         assert_eq!(messages.len(), 3);
         assert!(messages[0]["content"][0].get("cache_control").is_none());
@@ -2385,7 +2612,8 @@ mod tests {
             },
         ];
         let request = native_request(messages, Some(vec![sample_tool()]));
-        let payload = openai_chat_payload("gpt-x", &request, false).unwrap();
+        let cfg = MintConfig::default();
+        let payload = openai_chat_payload(&cfg, "gpt-x", &request, false).unwrap();
 
         assert_eq!(payload["tools"][0]["type"], "function");
         assert_eq!(payload["tools"][0]["function"]["name"], "read_file");
@@ -2444,6 +2672,7 @@ mod tests {
             pinned_mcp_server: None,
             messages: None,
             tools: None,
+            temperature: None,
         };
         assert!(require_supported_attachments("openai", &request).is_ok());
     }
@@ -2468,6 +2697,7 @@ mod tests {
             pinned_mcp_server: None,
             messages: None,
             tools: None,
+            temperature: None,
         };
         for provider in [
             "local_openai",
@@ -2953,6 +3183,179 @@ mod tests {
         assert_eq!(
             fallback_provider_order(&config),
             config.available_providers()
+        );
+    }
+
+    #[test]
+    fn openai_payload_includes_smart_temperature_for_deepseek_and_omits_for_o1() {
+        let request = native_request(vec![ChatMessage::text(ChatRole::User, "hi")], None);
+
+        // DeepSeek smart default is 0.6
+        let ds_config = MintConfig {
+            ai_provider: "deepseek".into(),
+            deepseek_model: "deepseek-chat".into(),
+            ..MintConfig::default()
+        };
+        let ds_payload = openai_chat_payload(&ds_config, "deepseek-chat", &request, false).unwrap();
+        assert_eq!(ds_payload["temperature"], 0.6);
+
+        // Standard OpenAI model default is 0.2
+        let openai_config = MintConfig {
+            ai_provider: "openai".into(),
+            openai_model: "gpt-4o".into(),
+            ..MintConfig::default()
+        };
+        let openai_payload =
+            openai_chat_payload(&openai_config, "gpt-4o", &request, false).unwrap();
+        assert_eq!(openai_payload["temperature"], 0.2);
+
+        // Reasoning models (o1, o3) omit temperature parameter
+        let o1_payload =
+            openai_chat_payload(&openai_config, "o1-preview", &request, false).unwrap();
+        assert!(o1_payload.get("temperature").is_none());
+
+        let o3_payload = openai_chat_payload(&openai_config, "o3-mini", &request, false).unwrap();
+        assert!(o3_payload.get("temperature").is_none());
+
+        // Explicit request temperature override
+        let mut override_req = request.clone();
+        override_req.temperature = Some(0.75);
+        let override_payload =
+            openai_chat_payload(&ds_config, "deepseek-chat", &override_req, false).unwrap();
+        assert_eq!(override_payload["temperature"], 0.75);
+    }
+
+    #[test]
+    fn anthropic_payload_includes_effective_temperature() {
+        let request = native_request(vec![ChatMessage::text(ChatRole::User, "hi")], None);
+        let config = MintConfig {
+            ai_provider: "anthropic".into(),
+            anthropic_model: "claude-sonnet-5".into(),
+            ..MintConfig::default()
+        };
+        let payload = anthropic_chat_payload(&config, "claude-sonnet-5", &request, false).unwrap();
+        assert_eq!(payload["temperature"], 0.2);
+    }
+
+    #[test]
+    fn parse_openai_style_reply_extracts_deepseek_reasoning_content() {
+        let response = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "Evaluating 15 + 6 * (8 - 3) - 14 / 2 step by step...",
+                    "tool_calls": [{
+                        "id": "call_calc_1",
+                        "type": "function",
+                        "function": {
+                            "name": "calculation",
+                            "arguments": "{\"expression\":\"15 + 6 * (8 - 3) - 14 / 2\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        });
+        let reply = parse_openai_style_reply("deepseek-reasoner".into(), &response).unwrap();
+        assert_eq!(reply.text, "");
+        assert_eq!(
+            reply.thought.as_deref(),
+            Some("Evaluating 15 + 6 * (8 - 3) - 14 / 2 step by step...")
+        );
+        let calls = reply.tool_calls.unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].name, "calculation");
+    }
+
+    #[test]
+    fn parse_openai_style_reply_extracts_openrouter_reasoning() {
+        let response = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "The answer is 38.",
+                    "reasoning": "First parentheses: 8 - 3 = 5..."
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        let reply = parse_openai_style_reply("deepseek/deepseek-r1".into(), &response).unwrap();
+        assert_eq!(reply.text, "The answer is 38.");
+        assert_eq!(
+            reply.thought.as_deref(),
+            Some("First parentheses: 8 - 3 = 5...")
+        );
+    }
+
+    #[test]
+    fn parse_openai_style_reply_extracts_think_tags() {
+        let response = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "<think>\nLet me solve this problem.\n</think>\nThe result is 42."
+                },
+                "finish_reason": "stop"
+            }]
+        });
+        let reply = parse_openai_style_reply("qwq-32b".into(), &response).unwrap();
+        assert_eq!(reply.text, "The result is 42.");
+        assert_eq!(reply.thought.as_deref(), Some("Let me solve this problem."));
+    }
+
+    #[test]
+    fn parse_gemini_reply_extracts_thought_parts() {
+        let response = json!({
+            "candidates": [{
+                "content": {
+                    "parts": [
+                        { "text": "Thinking through the formula...", "thought": true },
+                        { "text": "The answer is 38." }
+                    ]
+                },
+                "finishReason": "STOP"
+            }]
+        });
+        let reply = parse_gemini_reply("gemini-2.0-flash-thinking".into(), &response).unwrap();
+        assert_eq!(reply.text, "The answer is 38.");
+        assert_eq!(
+            reply.thought.as_deref(),
+            Some("Thinking through the formula...")
+        );
+    }
+
+    #[test]
+    fn parse_anthropic_reply_extracts_thinking_blocks() {
+        let response = json!({
+            "content": [
+                { "type": "thinking", "thinking": "Let's break down the arithmetic..." },
+                { "type": "text", "text": "The result is 38." }
+            ],
+            "stop_reason": "end_turn"
+        });
+        let reply = parse_anthropic_reply("claude-3-7-sonnet".into(), &response).unwrap();
+        assert_eq!(reply.text, "The result is 38.");
+        assert_eq!(
+            reply.thought.as_deref(),
+            Some("Let's break down the arithmetic...")
+        );
+    }
+
+    #[test]
+    fn parse_ollama_reply_extracts_thinking_field() {
+        let response = json!({
+            "message": {
+                "role": "assistant",
+                "content": "Result is 38.",
+                "thinking": "Ollama internal thinking trace..."
+            }
+        });
+        let reply = parse_ollama_reply("deepseek-r1:8b".into(), &response).unwrap();
+        assert_eq!(reply.text, "Result is 38.");
+        assert_eq!(
+            reply.thought.as_deref(),
+            Some("Ollama internal thinking trace...")
         );
     }
 }

@@ -44,6 +44,7 @@ export const DEFAULT_CATEGORY_MODELS: Record<string, string> = {
 
   // Video Generation Provider
   veo: 'veo-3.1-generate-preview',
+  veoModel: 'veo-3.1-generate-preview',
 }
 
 const MODEL_EVENT_NAME = 'mint:model-changed'

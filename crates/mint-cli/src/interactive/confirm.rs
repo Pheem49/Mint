@@ -28,7 +28,7 @@ fn confirm_scoped(
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
     use crossterm::tty::IsTty;
 
-    if !io::stdout().is_tty() || enable_raw_mode().is_err() {
+    if !io::stdout().is_tty() || !io::stdin().is_tty() || enable_raw_mode().is_err() {
         print!("  {} [y/N] ", clean_prompt);
         let _ = io::stdout().flush();
         let mut answer = String::new();
@@ -171,27 +171,49 @@ fn confirm_scoped(
         _ => Ok(false),
     }
 }
-/// second picker after the provider is chosen. Empty means no known list
-/// (e.g. `local_openai`), so `/models` skips straight to that provider's
-/// current/default model instead of showing an empty picker.
+/// Model options for a provider. Delegates to [`mint_core::slash::models::model_options_for_provider`].
+#[allow(dead_code)]
 pub fn model_options_for_provider(config: &mint_core::MintConfig, provider: &str) -> Vec<String> {
-    match provider {
-        "gemini" => onboard::GEMINI_MODEL_PRESETS,
-        "anthropic" => onboard::ANTHROPIC_MODEL_PRESETS,
-        "openai" => onboard::OPENAI_MODEL_PRESETS,
-        "openrouter" => onboard::OPENROUTER_MODEL_PRESETS,
-        "deepseek" => onboard::DEEPSEEK_MODEL_PRESETS,
-        "huggingface" => onboard::HUGGINGFACE_MODEL_PRESETS,
-        "ollama" => return onboard::installed_ollama_models(),
-        p if p.starts_with("custom:") => {
-            return config
-                .resolve_custom_provider(p)
-                .map(|cp| cp.models.iter().map(|m| m.model_id.clone()).collect())
-                .unwrap_or_default();
-        }
-        _ => &[],
+    mint_core::slash::models::model_options_for_provider(config, provider)
+}
+
+/// Like [`model_options_for_provider`] but tries the provider's live API first.
+#[allow(dead_code)]
+pub async fn model_options_for_provider_async(
+    config: &mint_core::MintConfig,
+    provider: &str,
+) -> Vec<String> {
+    mint_core::slash::models::model_options_for_provider_async(config, provider).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn confirm_session_approved_returns_true_immediately() {
+        SESSION_APPROVED.store(true, std::sync::atomic::Ordering::Relaxed);
+        let res = confirm("Test action [y/N]");
+        SESSION_APPROVED.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert!(res.unwrap());
     }
-    .iter()
-    .map(|s| s.to_string())
-    .collect()
+
+    #[test]
+    fn confirm_security_approved_returns_true_immediately() {
+        SECURITY_SESSION_APPROVED.store(true, std::sync::atomic::Ordering::Relaxed);
+        let res = confirm_security("Test sensitive action");
+        SECURITY_SESSION_APPROVED.store(false, std::sync::atomic::Ordering::Relaxed);
+        assert!(res.unwrap());
+    }
+
+    #[test]
+    fn model_options_for_standard_providers() {
+        let config = mint_core::MintConfig::default();
+        let gemini = model_options_for_provider(&config, "gemini");
+        assert!(!gemini.is_empty());
+        let anthropic = model_options_for_provider(&config, "anthropic");
+        assert!(!anthropic.is_empty());
+        let unknown = model_options_for_provider(&config, "unknown_provider");
+        assert!(unknown.is_empty());
+    }
 }
