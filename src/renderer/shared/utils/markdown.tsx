@@ -169,41 +169,7 @@ function flattenText(node: ReactNode): string {
   return ''
 }
 
-const BADGE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  green: { bg: 'rgba(16, 185, 129, 0.15)', text: '#34d399', border: 'rgba(16, 185, 129, 0.3)' },
-  blue: { bg: 'rgba(56, 189, 248, 0.15)', text: '#38bdf8', border: 'rgba(56, 189, 248, 0.3)' },
-  purple: { bg: 'rgba(168, 85, 247, 0.15)', text: '#c084fc', border: 'rgba(168, 85, 247, 0.3)' },
-  amber: { bg: 'rgba(245, 158, 11, 0.15)', text: '#fbbf24', border: 'rgba(245, 158, 11, 0.3)' },
-  red: { bg: 'rgba(239, 68, 68, 0.15)', text: '#f87171', border: 'rgba(239, 68, 68, 0.3)' },
-}
-
-function renderBadgeSpan(colorName: string | undefined, label: string, key: string): ReactNode {
-  const styleConf = BADGE_COLORS[(colorName || 'green').toLowerCase()] || BADGE_COLORS.green
-  return (
-    <span
-      key={key}
-      className="chat-inline-badge"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '1px 8px',
-        margin: '0 4px',
-        fontSize: '0.74rem',
-        fontWeight: 600,
-        borderRadius: '999px',
-        background: styleConf.bg,
-        color: styleConf.text,
-        border: `1px solid ${styleConf.border}`,
-        verticalAlign: 'baseline',
-        lineHeight: 1.4,
-      }}
-    >
-      {label}
-    </span>
-  )
-}
-
-/** Wraps bare "@mention" tokens and "[badge:color text]" tokens with styled spans. */
+/** Wraps bare "@mention" tokens with styled spans and strips any leftover "[badge:color text]" into plain natural text. */
 function highlightMentions(node: ReactNode, keyPrefix = 'm'): ReactNode {
   if (typeof node === 'string') {
     const parts = node.split(/(@[\w\-.\/]+|\[badge(?::[a-zA-Z]+)?\s+[^\]]+\])/g)
@@ -219,7 +185,8 @@ function highlightMentions(node: ReactNode, keyPrefix = 'm'): ReactNode {
         }
         const badgeMatch = part.match(/^\[badge(?::([a-zA-Z]+))?\s+([^\]]+)\]$/)
         if (badgeMatch) {
-          return renderBadgeSpan(badgeMatch[1], badgeMatch[2], `${keyPrefix}-${i}`)
+          // Render plain natural text without robotic badge frame/pill
+          return <Fragment key={`${keyPrefix}-${i}`}>{badgeMatch[2]}</Fragment>
         }
       }
       return part ? <Fragment key={`${keyPrefix}-t-${i}`}>{part}</Fragment> : null

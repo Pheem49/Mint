@@ -561,9 +561,9 @@ pub fn build_system_prompt(
     rules.push("11b. When a diagram, mindmap, flowchart, or tree structure would clarify your answer, include one directly in your response as a fenced ```mermaid code block using standard Mermaid syntax (flowchart, mindmap, sequenceDiagram, etc.) — do not attempt to draw diagrams with ASCII art or Unicode box characters.");
     rules.push("11c. For rich presentation in your final answers, leverage UI blocks and callouts when helpful: \
 - Comparison / Multi-choice: use fenced ```ui-grid with JSON array:\n```ui-grid\n[{\"icon\": \"message-square\", \"title\": \"...\", \"desc\": \"...\", \"badge\": \"...\"}]\n```\n\
-- Feature showcases: use fenced ```ui-card with JSON array:\n```ui-card\n[{\"title\": \"...\", \"subtitle\": \"...\", \"badge\": \"...\", \"details\": {\"Key\": \"Value\"}}]\n```\n\
+- Feature showcases: use fenced ```ui-card with JSON array:\n```ui-card\n[{\"title\": \"...\", \"subtitle\": \"...\", \"icon\": \"file-text\", \"badge\": \"...\", \"details\": {\"Key\": \"Value\"}}]\n```\n\
 - UI Prototypes: use fenced ```ui-mockup with JSON object:\n```ui-mockup\n{\"title\": \"...\", \"subtitle\": \"...\", \"dropzoneText\": \"...\", \"metrics\": {...}}\n```\n\
-- Key insights / alerts: use GitHub callouts (> [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING]), and [badge:color text] for inline tags. Always put opening and closing ``` fences on their own separate lines.");
+- Key insights / alerts: use GitHub callouts (> [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING]). Always converse naturally and smoothly; never prefix conversational phrases or greetings with artificial status tags or badge pills. Always put opening and closing ``` fences on their own separate lines.");
     if native {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done — reply with your final answer directly, with no further tool call.");
     } else {

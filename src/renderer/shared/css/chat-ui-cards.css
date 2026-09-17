@@ -35,7 +35,7 @@
 .chat-ui-feature-item {
   display: flex;
   flex-direction: column;
-  border-radius: 12px;
+  border-radius: 18px;
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   background: var(--panel-bg, rgba(24, 24, 28, 0.75));
   overflow: hidden;
@@ -59,7 +59,7 @@
 .chat-ui-feature-thumb {
   width: 90px;
   height: 80px;
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
   flex-shrink: 0;
   background: rgba(0, 0, 0, 0.3);
@@ -76,7 +76,7 @@
 .chat-ui-feature-icon-box {
   width: 36px;
   height: 36px;
-  border-radius: 9px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -171,8 +171,8 @@
 
 .chat-ui-feature-tag {
   font-size: 0.7rem;
-  padding: 2px 7px;
-  border-radius: 4px;
+  padding: 3px 9px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.05);
   color: var(--text-chat, var(--text-main, #94a3b8));
   opacity: 0.8;
@@ -184,8 +184,8 @@
    -------------------------------------------------------------------------- */
 .chat-ui-grid-wrapper {
   margin: 14px 0;
-  padding: 16px;
-  border-radius: 14px;
+  padding: 18px;
+  border-radius: 20px;
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   background: var(--panel-bg, rgba(22, 22, 26, 0.75));
   backdrop-filter: blur(12px);
@@ -223,7 +223,7 @@
   display: flex;
   flex-direction: column;
   padding: 14px;
-  border-radius: 10px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.07);
   transition: all 0.2s ease;
@@ -244,9 +244,9 @@
 }
 
 .chat-ui-grid-item-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -273,7 +273,7 @@
    -------------------------------------------------------------------------- */
 .chat-ui-mockup-container {
   margin: 18px 0;
-  border-radius: 16px;
+  border-radius: 22px;
   border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
   background: linear-gradient(180deg, rgba(28, 28, 34, 0.95) 0%, rgba(18, 18, 22, 0.98) 100%);
   box-shadow: 0 12px 36px -8px rgba(0, 0, 0, 0.4);
@@ -338,7 +338,7 @@
 
 .chat-ui-mockup-dropzone {
   padding: 24px 16px;
-  border-radius: 12px;
+  border-radius: 16px;
   border: 2px dashed rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.02);
   cursor: pointer;
@@ -384,10 +384,10 @@
 }
 
 .chat-ui-mockup-dropzone-btn {
-  padding: 6px 16px;
+  padding: 7px 18px;
   font-size: 0.8rem;
   font-weight: 600;
-  border-radius: 6px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-chat, var(--text-main, #f8fafc));
@@ -411,8 +411,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
-  border-radius: 8px;
+  padding: 9px 14px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
   font-size: 0.82rem;
@@ -427,8 +427,8 @@
   font-weight: 700;
   color: var(--accent, #38bdf8);
   background: color-mix(in srgb, var(--accent, #38bdf8) 12%, transparent);
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 3px 10px;
+  border-radius: 8px;
 }
 
 .chat-ui-mockup-options {
@@ -441,8 +441,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 9px 12px;
-  border-radius: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
   font-size: 0.82rem;

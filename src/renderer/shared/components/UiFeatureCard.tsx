@@ -1,44 +1,111 @@
 import React from 'react'
 import { resolveMediaUrl } from '../utils/markdown'
 import {
-  Sparkles,
-  ExternalLink,
-  Package,
-  Layers,
-  Folder,
-  FileText,
+  MessageSquare,
+  Mail,
+  Smartphone,
   Video,
-  Crop,
+  Database,
+  Code,
+  Terminal,
+  File,
+  FileText,
+  Folder,
+  Cpu,
+  Zap,
+  Sparkles,
+  Check,
+  AlertCircle,
+  Layers,
+  Palette,
+  Globe,
   Box,
-  HardDrive,
+  Package,
+  Crop,
   Shield,
+  Cloud,
+  Settings,
+  Download,
+  Upload,
+  Image,
+  Play,
+  Music,
+  HardDrive,
+  Sliders,
+  ExternalLink,
   Lock,
   CreditCard,
-  Zap,
-  Check,
+  UserCheck,
+  User,
+  Repeat,
+  AlertTriangle,
+  Key,
+  Clock,
   type LucideIcon,
 } from 'lucide-react'
 
 const ICON_MAP: Record<string, LucideIcon> = {
-  package: Package,
-  box: Box,
-  layers: Layers,
-  folder: Folder,
-  file: FileText,
-  'file-text': FileText,
+  'message-square': MessageSquare,
+  chat: MessageSquare,
+  mail: Mail,
+  email: Mail,
+  smartphone: Smartphone,
+  phone: Smartphone,
+  mobile: Smartphone,
   video: Video,
-  crop: Crop,
-  scan: Crop,
-  'hard-drive': HardDrive,
-  storage: HardDrive,
-  shield: Shield,
-  lock: Lock,
-  security: Shield,
-  'credit-card': CreditCard,
+  camera: Video,
+  database: Database,
+  db: Database,
+  code: Code,
+  terminal: Terminal,
+  file: File,
+  'file-text': FileText,
+  folder: Folder,
+  cpu: Cpu,
   zap: Zap,
   fast: Zap,
-  check: Check,
   sparkles: Sparkles,
+  check: Check,
+  'alert-circle': AlertCircle,
+  'alert-triangle': AlertTriangle,
+  warning: AlertTriangle,
+  lock: Lock,
+  security: Shield,
+  shield: Shield,
+  key: Key,
+  'credit-card': CreditCard,
+  payment: CreditCard,
+  user: User,
+  'user-check': UserCheck,
+  repeat: Repeat,
+  sync: Repeat,
+  clock: Clock,
+  time: Clock,
+  layers: Layers,
+  palette: Palette,
+  globe: Globe,
+  web: Globe,
+  box: Box,
+  package: Package,
+  crop: Crop,
+  scan: Crop,
+  cloud: Cloud,
+  settings: Settings,
+  download: Download,
+  upload: Upload,
+  image: Image,
+  play: Play,
+  music: Music,
+  'hard-drive': HardDrive,
+  storage: HardDrive,
+  sliders: Sliders,
+  filter: Sliders,
+}
+
+function resolveIcon(name?: string): LucideIcon {
+  if (!name) return Sparkles
+  const clean = name.toLowerCase().trim().replace(/_/g, '-')
+  return ICON_MAP[clean] || Sparkles
 }
 
 export interface UiFeatureItem {
@@ -97,7 +164,7 @@ export default function UiFeatureCard({ data }: { data: UiFeatureData | UiFeatur
 
       {items.map((item, idx) => {
         const badgeTheme = BADGE_THEMES[item.badgeColor || 'green'] || BADGE_THEMES.green
-        const IconComp = item.icon ? ICON_MAP[item.icon.toLowerCase()] || Sparkles : Sparkles
+        const IconComp = resolveIcon(item.icon)
         const resolvedThumb = item.thumbnail ? resolveMediaUrl(item.thumbnail) : null
 
         let normalizedDetails: Array<{ label: string; value: string }> = []
@@ -126,11 +193,11 @@ export default function UiFeatureCard({ data }: { data: UiFeatureData | UiFeatur
                     }}
                   />
                 </div>
-              ) : item.icon ? (
+              ) : (
                 <div className="chat-ui-feature-icon-box">
                   <IconComp size={20} strokeWidth={2.2} />
                 </div>
-              ) : null}
+              )}
 
               {/* Body Content */}
               <div className="chat-ui-feature-body">

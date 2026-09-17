@@ -74,19 +74,6 @@ button {
   margin: 0 2px;
 }
 
-.chat-inline-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 8px;
-  margin: 0 4px;
-  font-size: 0.74rem;
-  font-weight: 600;
-  border-radius: 999px;
-  vertical-align: baseline;
-  line-height: 1.4;
-  letter-spacing: 0.2px;
-}
-
 .chat-ui-grid-item:hover {
   transform: translateY(-2px);
   border-color: rgba(255, 255, 255, 0.16) !important;
@@ -103,7 +90,7 @@ button {
   flex-direction: column;
   background: var(--panel-soft, #121214);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-  border-radius: 9px;
+  border-radius: 16px;
   margin: 12px 0;
   overflow: hidden;
   box-shadow: var(--shadow-sm, 0 4px 16px rgba(0, 0, 0, 0.18));

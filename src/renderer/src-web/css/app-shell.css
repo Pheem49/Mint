@@ -46,13 +46,13 @@
      share the same corner radius. Sub-4px radii are left as raw px values
      where they appear — those are deliberate micro-details (e.g. a small
      square-ish status dot), not part of this scale. */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
-  --radius-3xl: 20px;
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-3xl: 24px;
   --radius-full: 999px;
 
   /* Elevation scale — border-first: most resting surfaces lean on --border
