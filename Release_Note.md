@@ -42,6 +42,34 @@ Streamlined AI reasoning / thinking display in the CLI to keep chat history clea
   - Intelligently distinguishes internal chain-of-thought (CoT) reasoning from actionable progress notes.
   - Deep multi-paragraph internal reasoning is collapsed into `  • Thought for Xs (Ctrl+T to view)`.
   - Concise progress notes and step-by-step narration (e.g. `เดี๋ยวจะลองเปิดอ่านไฟล์ Cargo.toml ดูก่อนนะคะ...`) are displayed directly on the timeline before each tool call for maximum visibility.
-  - Accumulates thoughts across all steps in a multi-step agent loop, allowing `Ctrl+T` to review the entire reasoning journey.
+
+## CLI Conversation Isolation & Interactive Session Resumption (`/resume`, `mint -r`, Claude Code Style)
+
+Overhauled session management in the CLI to give every conversation its own isolated lifecycle with Claude Code-style interactive session resuming across all 3 platforms:
+
+- **Isolated CLI Sessions & Auto-Titling**:
+  - Each CLI session now receives a unique, dedicated session ID (`cli::<short-uuid>`) rather than grouping all historical conversations into a single monolithic `"cli"` identifier.
+  - Automatically captures workspace directory (`workspace_path`), current git branch (`git_branch`), primary project language (`main_language`), message turn counts, and total payload bytes in SQLite.
+  - Automatically titles sessions according to the user's opening prompt (e.g. `> Scheduled Tasks bug`).
+  - Existing legacy CLI history in `"cli"` remains 100% preserved and accessible.
+- **Claude Code-Style Interactive Resume Picker (`resume_picker.rs`)**:
+  - Built an interactive Ratatui + Crossterm TUI picker mirroring Claude Code's session resume interface:
+    - **Strict CLI-Scoped Isolation**: Filters out general Web and Desktop conversations as well as background cron tasks, presenting only authentic CLI sessions in the terminal picker.
+    - **Live Search**: `[⌕ Search...]` box with instantaneous substring/fuzzy filtering across titles, branch names, and IDs.
+    - **Rich Session Cards**: 2-line cards displaying Title (`> Scheduled Tasks bug`) with relative timestamps, language tag, git branch, and total size (e.g. `2 weeks ago · Rust · 6.3MB`).
+    - **Cross-Project Navigation (`Ctrl+A`)**: Toggle between filtering by the current workspace versus browsing sessions across all projects on the system.
+    - **Branch Scoping (`Ctrl+B`)**: Quick-filter sessions to only those active on the current Git branch.
+    - **Session Quick Preview (`Space`)**: Pop-up drawer displaying recent user/assistant turns from the highlighted session without leaving the picker.
+    - **Inline Session Renaming (`Ctrl+R`)**: Change any session's title inline and persist it immediately to SQLite.
+    - **Unicode / UTF-8 Multi-Byte Safety**: Replaced unsafe byte slicing with codepoint-aware truncation (`truncate_utf8`) for message snippets and previews, ensuring flawless rendering for non-ASCII languages (Thai, Japanese, Chinese, emojis) without panicking.
+- **Dedicated CLI Flags & Subcommands**:
+  - `mint --resume` / `mint -r`: Opens the interactive session picker on CLI launch before entering the prompt loop.
+  - `mint resume [id]`: Direct subcommand to resume by ID or launch the picker.
+  - `/resume [id|query]`: Slash command in interactive chat to hot-swap sessions mid-conversation.
+  - **Exit Banner Resume Hint**: Upon exiting the interactive CLI session via `Ctrl+D`, `Ctrl+C`, or `/exit`, the closing banner displays the exact command to resume the session (`mint --resume <session_id>`), matching Claude Code's session exit experience.
+- **Platform Parity across CLI, Desktop, and Web**:
+  - Registered `/resume` in `slash-commands.json` for all three surfaces (`["cli", "web", "desktop"]`).
+  - Integrated `/resume` dispatch in `slashCommandProcessor.ts` and `MintDashboard.tsx` to hot-swap active conversations seamlessly on Desktop and Web.
+
 
 

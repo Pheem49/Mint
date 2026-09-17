@@ -99,6 +99,11 @@ pub enum Command {
         #[arg(long, default_value = "cli")]
         chat_id: String,
     },
+    /// Resume a previous conversation session, or open the interactive session picker.
+    Resume {
+        /// Optional session ID to resume directly (omitting opens the interactive picker).
+        id: Option<String>,
+    },
     /// Start the browser automation environment and enable browser actions.
     Auto,
     /// Launch the web UI and local API server.
@@ -273,6 +278,23 @@ pub async fn dispatch(cmd: Command, config: &mut MintConfig, cli: &crate::Cli) -
         Command::Agent { task } => agent::handle_agent(task).await,
         Command::Eval { suite, limit } => eval::handle_eval(suite, limit, config).await,
         Command::Rewind { step, chat_id } => agent::handle_rewind(step, chat_id),
+        Command::Resume { id } => {
+            mint_core::channels::start_channels();
+            mint_core::start_cron_scheduler();
+            let current_dir = std::env::current_dir()?;
+            let resume_id = match id {
+                Some(sid) => Some(sid),
+                None => crate::interactive::prompt_resume_session_picker(&current_dir, "")?,
+            };
+            crate::interactive::run_interactive_chat_with_session(
+                cli.model.clone(),
+                cli.fast,
+                cli.plan,
+                resume_id,
+            )
+            .await?;
+            Ok(())
+        }
         Command::Auto => agent::handle_auto().await,
         Command::Web { dev } => agent::handle_web(dev).await,
         Command::Api { port } => agent::handle_api(port).await,

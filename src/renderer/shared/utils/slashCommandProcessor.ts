@@ -8,7 +8,7 @@
 
 export interface SlashCommandExecutionResult {
   handled: boolean
-  action?: 'open_image_picker' | 'paste_image' | 'generate_veo' | 'system_message'
+  action?: 'open_image_picker' | 'paste_image' | 'generate_veo' | 'system_message' | 'resume_session'
   payload?: any
   systemText?: string
 }
@@ -38,6 +38,9 @@ export function executeSlashCommand(input: string): SlashCommandExecutionResult 
 
     case '/paste':
       return { handled: true, action: 'paste_image', payload: { prompt: rest } }
+
+    case '/resume':
+      return { handled: true, action: 'resume_session', payload: { query: rest } }
 
     case '/veo': {
       if (!rest) {

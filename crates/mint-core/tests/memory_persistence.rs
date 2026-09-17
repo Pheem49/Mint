@@ -480,3 +480,39 @@ fn does_not_create_empty_chat_session_until_first_message() {
     );
     assert_eq!(created.unwrap().title, "Hello Mint!");
 }
+
+#[test]
+fn test_cli_sessions_separate_and_metadata() {
+    let store = store("cli-sessions-separate");
+    let session_id = store
+        .create_cli_session(Some("/path/to/project"), Some("main"), Some("Rust"))
+        .unwrap();
+
+    assert!(session_id.starts_with("cli::"));
+
+    // Add an interaction to auto-title it
+    store
+        .add_interaction_for_chat(
+            &session_id,
+            "Fix background job bug",
+            "Bug fixed",
+            "openai",
+            "gpt-4",
+        )
+        .unwrap();
+
+    let sessions = store.list_chat_sessions().unwrap();
+    let session = sessions.iter().find(|s| s.id == session_id).expect("Session must exist");
+
+    assert_eq!(session.title, "Fix background job bug");
+    assert_eq!(session.kind, "cli");
+    assert_eq!(session.workspace_path.as_deref(), Some("/path/to/project"));
+    assert_eq!(session.git_branch.as_deref(), Some("main"));
+    assert_eq!(session.main_language.as_deref(), Some("Rust"));
+    assert_eq!(session.message_count, 1);
+    assert!(session.total_bytes > 0);
+
+    let preview = store.get_session_preview(&session_id, 5).unwrap();
+    assert_eq!(preview.len(), 1);
+    assert_eq!(preview[0].user_text, "Fix background job bug");
+}

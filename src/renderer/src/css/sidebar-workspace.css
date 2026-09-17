@@ -429,33 +429,28 @@
 }
 
 .sidebar-section {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   overflow: hidden;
   padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.035);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
   display: flex;
   flex-direction: column;
 }
 
-.sidebar-chat-list.sidebar-cli-list {
-  flex: 0 0 auto;
-}
-
-.sidebar-chat-list:not(.sidebar-cli-list) {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
 .sidebar-section-title {
-  padding: 0 10px 12px;
-  color: var(--text-muted);
-  font-size: 0.9rem;
+  padding: 8px 10px 6px;
+  color: var(--text-muted, #94a3b8);
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
 }
 
 .sidebar-subsection-title {
   padding-top: 14px;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
 }
 
 .sidebar-section-title.clickable {
@@ -469,27 +464,39 @@
 }
 
 .sidebar-project {
-  height: 32px;
+  height: 36px;
   display: flex;
   align-items: center;
   gap: 9px;
   padding: 0 10px;
-  color: var(--text-muted);
-  border-radius: 3px;
+  color: var(--text-muted, #94a3b8);
+  border-radius: 7px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   border: 0;
   background: transparent;
   width: 100%;
-  cursor: default;
+  cursor: pointer;
   text-align: left;
+  transition: background 0.14s ease, color 0.14s ease;
+  font-size: 0.89rem;
+  flex-shrink: 0;
 }
 
-.sidebar-chat-list {
-  display: grid;
-  gap: 0px;
-  max-height: 360px;
+.sidebar-chat-list.sidebar-cli-list {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sidebar-chat-list:not(.sidebar-cli-list) {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   overflow-y: auto;
   padding-right: 2px;
   scrollbar-color: color-mix(in srgb, var(--text-muted) 38%, transparent) transparent;
@@ -522,29 +529,31 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 0.89rem;
+  line-height: 1.45;
 }
 
 .sidebar-chat-delete {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   margin-left: 2px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-xs, 4px);
   color: var(--text-muted);
   opacity: 0;
   flex: 0 0 auto;
 }
 
 .sidebar-chat-edit {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-xs, 4px);
   color: var(--text-muted);
   opacity: 0;
   flex: 0 0 auto;
@@ -649,6 +658,14 @@
   bottom: 0;
   margin-left: 8px;
   min-width: 200px;
+}
+
+.sidebar-generating-text {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--accent, #10b981);
+  opacity: 0.85;
 }
 
 .mint-status-pill {

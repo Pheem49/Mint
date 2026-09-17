@@ -103,6 +103,9 @@ interface ChatPanelProps {
   onSetGeminiLiveVoice: (voice: string) => Promise<void>
   /** Web only — desktop's window has no mobile-width sidebar to toggle. */
   onToggleMobileSidebar?: () => void
+  isCliSession?: boolean
+  cliSessionId?: string
+  onBackToCode?: () => void
 }
 
 
@@ -155,6 +158,9 @@ export default function ChatPanel({
   onClearMessages,
   onSetGeminiLiveVoice,
   onToggleMobileSidebar,
+  isCliSession,
+  cliSessionId,
+  onBackToCode,
 }: ChatPanelProps) {
   const agentActivities = activitiesFrom(agentProgress)
   const activeFallbackNotice = fallbackNotice(streamedResponse)
@@ -1344,10 +1350,45 @@ export default function ChatPanel({
             </button>
           )}
           <div className="chat-header-title">
-            <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
-            <span>Mint Agent</span>
+            {isCliSession ? (
+              <div className="chat-header-breadcrumb">
+                {onBackToCode && (
+                  <button
+                    type="button"
+                    className="chat-header-back-btn"
+                    onClick={onBackToCode}
+                    title="Back to Code Sessions Hub"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M15 18l-6-6 6-6" />
+                    </svg>
+                    <span>Code</span>
+                  </button>
+                )}
+                <span className="chat-header-sep">/</span>
+                <span className="chat-header-session-tag" title={cliSessionId || 'CLI Session'}>
+                  <span>
+                    {cliSessionId ? (cliSessionId === 'cli' ? 'cli' : `cli::${cliSessionId.replace(/^cli::/, '').slice(0, 7)}`) : 'cli'}
+                  </span>
+                </span>
+              </div>
+            ) : (
+              <>
+                <img src={APP_ICON_PATH} alt="Logo" className="chat-header-logo" />
+                <span>Mint Agent</span>
+              </>
+            )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
             {activeArtifact && (
               <button
                 type="button"

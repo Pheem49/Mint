@@ -27,9 +27,15 @@ pub fn scoped_chat_id(chat_id: &str, _workspace_path: Option<&str>) -> String {
 /// (`"cli::subagent::<name>"`, or `"cli::<hash>::subagent::<name>"`) —
 /// those must keep behaving like a normal, deletable conversation exactly
 /// as they do today, unaffected by workspace scoping.
-fn is_cli_chat_id(chat_id: &str) -> bool {
+pub fn is_cli_chat_id(chat_id: &str) -> bool {
     chat_id == CHAT_CLI_ID
         || (chat_id.starts_with(&format!("{CHAT_CLI_ID}::")) && !chat_id.contains("::subagent::"))
+}
+
+pub fn generate_cli_session_id() -> String {
+    let raw_uuid = uuid::Uuid::new_v4().to_string();
+    let short_id = &raw_uuid.replace('-', "")[..12];
+    format!("cli::{short_id}")
 }
 
 /// The subagent name embedded in a chat id of the form
@@ -76,7 +82,7 @@ pub struct InteractionMemory {
     pub agent_activity: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatSession {
     pub id: String,
@@ -84,6 +90,16 @@ pub struct ChatSession {
     pub kind: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main_language: Option<String>,
+    #[serde(default)]
+    pub message_count: usize,
+    #[serde(default)]
+    pub total_bytes: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -286,29 +302,100 @@ impl MemoryStore {
         ensure_builtin_chat_sessions(&connection)?;
         let _ = connection.execute(
             "DELETE FROM chat_sessions
-             WHERE kind = 'conversation'
-               AND id != ?1
+             WHERE id != ?1
+               AND id != ?2
                AND id NOT LIKE 'cron::%'
                AND (SELECT COUNT(*) FROM interaction_memories WHERE interaction_memories.chat_id = chat_sessions.id) = 0",
-            params![DEFAULT_CONVERSATION_ID],
+            params![DEFAULT_CONVERSATION_ID, CHAT_CLI_ID],
         );
         let mut statement = connection.prepare(
-            "SELECT id, title, kind, created_at, updated_at
-             FROM chat_sessions
-             ORDER BY CASE WHEN id = ?1 THEN 0 ELSE 1 END, updated_at DESC",
+            "SELECT s.id, s.title, s.kind, s.created_at, s.updated_at,
+                    s.workspace_path, s.git_branch, s.main_language,
+                    COUNT(m.id) AS msg_count,
+                    COALESCE(SUM(LENGTH(m.user_text) + LENGTH(m.ai_text)), 0) AS total_bytes
+             FROM chat_sessions s
+             LEFT JOIN interaction_memories m ON m.chat_id = s.id
+             GROUP BY s.id
+             ORDER BY CASE WHEN s.id = ?1 THEN 0 ELSE 1 END, s.updated_at DESC",
         )?;
         let rows = statement.query_map(params![CHAT_CLI_ID], |row| {
             let created_raw: String = row.get(3)?;
             let updated_raw: String = row.get(4)?;
+            let msg_count: i64 = row.get(8)?;
+            let bytes: i64 = row.get(9)?;
             Ok(ChatSession {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 kind: row.get(2)?,
                 created_at: normalize_sqlite_utc_timestamp(&created_raw),
                 updated_at: normalize_sqlite_utc_timestamp(&updated_raw),
+                workspace_path: row.get(5)?,
+                git_branch: row.get(6)?,
+                main_language: row.get(7)?,
+                message_count: msg_count.max(0) as usize,
+                total_bytes: bytes.max(0) as usize,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn update_chat_session_metadata(
+        &self,
+        chat_id: &str,
+        workspace_path: Option<&str>,
+        git_branch: Option<&str>,
+        main_language: Option<&str>,
+    ) -> Result<(), MemoryError> {
+        let chat_id = normalized_chat_id(chat_id);
+        let connection = self.connection()?;
+        ensure_builtin_chat_sessions(&connection)?;
+        ensure_chat_session_row(&connection, &chat_id)?;
+        connection.execute(
+            "UPDATE chat_sessions
+             SET workspace_path = COALESCE(?2, workspace_path),
+                 git_branch = COALESCE(?3, git_branch),
+                 main_language = COALESCE(?4, main_language),
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?1",
+            params![chat_id, workspace_path, git_branch, main_language],
+        )?;
+        Ok(())
+    }
+
+    pub fn create_cli_session(
+        &self,
+        workspace_path: Option<&str>,
+        git_branch: Option<&str>,
+        main_language: Option<&str>,
+    ) -> Result<String, MemoryError> {
+        let session_id = generate_cli_session_id();
+        self.register_cli_session(&session_id, workspace_path, git_branch, main_language)?;
+        Ok(session_id)
+    }
+
+    pub fn register_cli_session(
+        &self,
+        session_id: &str,
+        workspace_path: Option<&str>,
+        git_branch: Option<&str>,
+        main_language: Option<&str>,
+    ) -> Result<(), MemoryError> {
+        let connection = self.connection()?;
+        ensure_builtin_chat_sessions(&connection)?;
+        connection.execute(
+            "INSERT OR IGNORE INTO chat_sessions (id, title, kind, workspace_path, git_branch, main_language)
+             VALUES (?1, 'New chat', 'cli', ?2, ?3, ?4)",
+            params![session_id, workspace_path, git_branch, main_language],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_session_preview(
+        &self,
+        chat_id: &str,
+        limit: usize,
+    ) -> Result<Vec<InteractionMemory>, MemoryError> {
+        self.recent_interactions_for_chat(chat_id, limit)
     }
 
     /// Registers a chat session with an explicit title/kind up front instead
@@ -361,7 +448,7 @@ impl MemoryStore {
 
     pub fn delete_chat_session(&self, chat_id: &str) -> Result<usize, MemoryError> {
         let chat_id = normalized_chat_id(chat_id);
-        if is_cli_chat_id(&chat_id) {
+        if chat_id == CHAT_CLI_ID {
             return Ok(0);
         }
         let connection = self.connection()?;
@@ -910,13 +997,16 @@ fn initialize(
            keywords TEXT DEFAULT '',
            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
          );
-         CREATE TABLE IF NOT EXISTS chat_sessions (
-           id TEXT PRIMARY KEY,
-           title TEXT NOT NULL DEFAULT 'New chat',
-           kind TEXT NOT NULL DEFAULT 'conversation',
-           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-         );
+          CREATE TABLE IF NOT EXISTS chat_sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT 'New chat',
+            kind TEXT NOT NULL DEFAULT 'conversation',
+            workspace_path TEXT DEFAULT NULL,
+            git_branch TEXT DEFAULT NULL,
+            main_language TEXT DEFAULT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
          CREATE TABLE IF NOT EXISTS learned_skills (
            id INTEGER PRIMARY KEY AUTOINCREMENT,
            name TEXT NOT NULL,
@@ -1012,6 +1102,24 @@ fn initialize(
         "chat_sessions",
         "kind",
         "TEXT NOT NULL DEFAULT 'conversation'",
+    )?;
+    ensure_column(
+        connection,
+        "chat_sessions",
+        "workspace_path",
+        "TEXT DEFAULT NULL",
+    )?;
+    ensure_column(
+        connection,
+        "chat_sessions",
+        "git_branch",
+        "TEXT DEFAULT NULL",
+    )?;
+    ensure_column(
+        connection,
+        "chat_sessions",
+        "main_language",
+        "TEXT DEFAULT NULL",
     )?;
     // `agent_id` scopes a fact to the subagent that produced it (NULL = shared /
     // user-authored); `embedding` is the on-device similarity vector used for
@@ -1267,8 +1375,10 @@ fn ensure_builtin_chat_sessions(connection: &Connection) -> Result<(), rusqlite:
 }
 
 fn ensure_chat_session_row(connection: &Connection, chat_id: &str) -> Result<(), rusqlite::Error> {
-    let (title, kind) = if is_cli_chat_id(chat_id) {
+    let (title, kind) = if chat_id == CHAT_CLI_ID {
         ("Chat CLI", "cli")
+    } else if is_cli_chat_id(chat_id) {
+        ("New chat", "cli")
     } else {
         ("New chat", "conversation")
     };

@@ -1,5 +1,5 @@
 use crate::background::{BackgroundJobs, JobStatus};
-use crate::{BLUE, DIM, ERROR, MINT, RESET, WARN};
+use crate::{BLUE, BOLD, DIM, ERROR, MINT, RESET, WARN};
 use crate::{agent, image};
 use anyhow::Result;
 use mint_core::{CHAT_CLI_ID, MemoryStore, MintConfig};
@@ -12,6 +12,7 @@ mod confirm;
 mod format;
 mod input_box;
 mod picker;
+mod resume_picker;
 mod slash_commands;
 mod thought_viewer;
 
@@ -20,8 +21,18 @@ pub use confirm::*;
 pub use format::*;
 pub use input_box::*;
 pub use picker::*;
+pub use resume_picker::*;
 pub use slash_commands::*;
 pub use thought_viewer::*;
+
+pub fn truncate_utf8(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let take_count = max_chars.saturating_sub(3).max(1);
+    let prefix: String = text.chars().take(take_count).collect();
+    format!("{prefix}...")
+}
 
 
 pub static SESSION_APPROVED: std::sync::atomic::AtomicBool =
@@ -35,6 +46,7 @@ pub static SECURITY_SESSION_APPROVED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 pub struct InteractiveSession {
+    pub chat_id: String,
     pub config: MintConfig,
     pub current_dir: PathBuf,
     pub fast_mode: bool,
@@ -267,6 +279,15 @@ pub async fn run_interactive_chat_with_options(
     fast_mode: bool,
     plan_mode: bool,
 ) -> Result<()> {
+    run_interactive_chat_with_session(model_override, fast_mode, plan_mode, None).await
+}
+
+pub async fn run_interactive_chat_with_session(
+    model_override: Option<String>,
+    fast_mode: bool,
+    plan_mode: bool,
+    resume_id: Option<String>,
+) -> Result<()> {
     let mut config = mint_core::load_config()?;
     if let Some(ref m) = model_override {
         crate::apply_temporary_model_override(&mut config, m);
@@ -274,19 +295,52 @@ pub async fn run_interactive_chat_with_options(
 
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
+    let chat_id = if let Some(rid) = resume_id {
+        let trimmed = rid.trim().to_string();
+        let candidate = if !trimmed.starts_with("cli::") && trimmed != mint_core::CHAT_CLI_ID {
+            format!("cli::{trimmed}")
+        } else {
+            trimmed.clone()
+        };
+        if let Ok(memory) = mint_core::MemoryStore::open_default()
+            && let Ok(sessions) = memory.list_chat_sessions()
+            && sessions.iter().any(|s| s.id == candidate)
+        {
+            candidate
+        } else {
+            trimmed
+        }
+    } else {
+        mint_core::generate_cli_session_id()
+    };
+
     // Notifies this prompt loop when web/desktop writes a message into the
-    // same, workspace-scoped "cli" conversation while this terminal is open
-    // — see live_sync's module docs for why this is DB polling rather than
-    // a server push.
+    // same conversation while this terminal is open
     mint_core::live_sync::start_live_sync_poller(mint_core::scoped_chat_id(
-        mint_core::CHAT_CLI_ID,
+        &chat_id,
         Some(&current_dir.to_string_lossy()),
     ));
 
     print_welcome_banner(&config);
+
+    if let Ok(memory) = mint_core::MemoryStore::open_default() {
+        let sessions = memory.list_chat_sessions().unwrap_or_default();
+        if let Some(target) = sessions.iter().find(|s| s.id == chat_id) {
+            println!("{MINT}●{RESET} Resumed session: {BOLD}{}{RESET} {DIM}({}){RESET}", target.title, target.id);
+            if let Ok(recent) = memory.get_session_preview(&chat_id, 2)
+                && let Some(last) = recent.first()
+            {
+                let snippet = truncate_utf8(&last.user_text, 60);
+                println!("  {DIM}Last turn: {snippet}{RESET}");
+            }
+            println!();
+        }
+    }
+
     println!("Type naturally or /help for commands. Ctrl+V pastes images. Ctrl+D exits.\n");
 
     let mut session = InteractiveSession {
+        chat_id,
         config,
         current_dir: current_dir.clone(),
         fast_mode,
@@ -450,6 +504,7 @@ pub async fn run_interactive_chat_with_options(
                             plan_mode: session.plan_mode,
                             queueing: true,
                             pinned_mcp_server: pinned_mcp_server.clone(),
+                            chat_id: Some(session.chat_id.clone()),
                         },
                     )
                     .await
@@ -491,6 +546,7 @@ pub async fn run_interactive_chat_with_options(
                         plan_mode: session.plan_mode,
                         queueing: true,
                         pinned_mcp_server: pinned_mcp_server.clone(),
+                        chat_id: Some(session.chat_id.clone()),
                     },
                 )
                 .await
@@ -521,6 +577,7 @@ pub async fn run_interactive_chat_with_options(
                 plan_mode: session.plan_mode,
                 queueing: true,
                 pinned_mcp_server: pinned_mcp_server.clone(),
+                chat_id: Some(session.chat_id.clone()),
             },
         )
         .await
@@ -547,6 +604,21 @@ pub fn print_exit_message(session: &InteractiveSession) {
         "{DIM}Workspace:{RESET} {}",
         format_path_with_tilde(&session.current_dir)
     );
+    let has_history = if let Ok(memory) = MemoryStore::open_default() {
+        memory
+            .recent_interactions_for_chat(&session.chat_id, 1)
+            .map(|rows| !rows.is_empty())
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
+    if has_history {
+        println!("\n{DIM}Resume this session with:{RESET}");
+        println!("{BOLD}mint --resume {}{RESET}\n", session.chat_id);
+    } else {
+        println!();
+    }
     println!("{DIM}Saved config stays available for the next Mint run.{RESET}");
     println!("{MINT}See you next time.{RESET}\n");
 }
@@ -591,4 +663,18 @@ pub fn load_all_available_skills(current_dir: &Path) -> Vec<mint_core::LearnedSk
         unique_skills.insert(skill.name.clone(), skill);
     }
     unique_skills.into_values().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_utf8_multibyte_safety() {
+        let thai_input = "'/home/pheem49/vscode/Project/Mint-CLI/Release_Note.md'สรุปไฟล์นี้ให้หน่อย";
+        for len in 1..=thai_input.chars().count() + 5 {
+            let truncated = truncate_utf8(thai_input, len);
+            assert!(!truncated.is_empty());
+        }
+    }
 }

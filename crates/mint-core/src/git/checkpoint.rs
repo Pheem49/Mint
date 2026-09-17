@@ -54,6 +54,46 @@ pub fn get_head_hash(root: &Path) -> Result<String, String> {
     }
 }
 
+pub fn get_current_branch(root: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(root)
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !branch.is_empty() && branch != "HEAD" {
+            return Some(branch);
+        }
+    }
+    None
+}
+
+pub fn detect_project_language(root: &Path) -> Option<String> {
+    if root.join("Cargo.toml").exists() {
+        return Some("Rust".to_string());
+    }
+    if root.join("tsconfig.json").exists() {
+        return Some("TypeScript".to_string());
+    }
+    if root.join("package.json").exists() {
+        return Some("JavaScript".to_string());
+    }
+    if root.join("pyproject.toml").exists()
+        || root.join("requirements.txt").exists()
+        || root.join("setup.py").exists()
+    {
+        return Some("Python".to_string());
+    }
+    if root.join("go.mod").exists() {
+        return Some("Go".to_string());
+    }
+    if root.join("pom.xml").exists() || root.join("build.gradle").exists() {
+        return Some("Java".to_string());
+    }
+    None
+}
+
 pub fn list_checkpoints(chat_id: &str) -> Vec<Checkpoint> {
     let Some(path) = checkpoint_file_for_chat(chat_id) else {
         return Vec::new();

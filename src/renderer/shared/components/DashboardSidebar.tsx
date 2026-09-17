@@ -3,7 +3,7 @@ import { renderSkillsSvgIcon, renderMcpHubSvgIcon, renderPluginsSvgIcon, renderS
 import { useAuthUser } from './AuthGate'
 import { APP_ICON_PATH } from '@/tauri'
 
-export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'veo' | 'skills' | 'mcp' | 'plugins' | 'cron' | 'link'
+export type DashboardView = 'chat' | 'pictures' | 'model' | 'workspace' | 'imagine' | 'veo' | 'skills' | 'mcp' | 'plugins' | 'cron' | 'link' | 'code'
 
 interface ChatSessionItem {
   id: string
@@ -174,12 +174,31 @@ export default function DashboardSidebar({
     onShowToast?.(next ? 'Enable model interaction ⦸' : 'Disable model interaction ⦸')
   }
 
-  const conversationSessions = chatSessions.filter((session) => session.kind !== 'cli' && session.id !== 'conversation-default')
-  const cliSession = chatSessions.find((session) => session.kind === 'cli' || session.id === 'cli') ?? {
-    id: 'cli',
-    title: 'cli',
-    kind: 'cli',
-  }
+  const conversationSessions = chatSessions.filter((session) => session.kind !== 'cli' && !session.id.startsWith('cli') && session.id !== 'conversation-default')
+  const cliSessions = chatSessions.filter((session) => session.kind === 'cli' || session.id.startsWith('cli'))
+
+  // Remember the last active CLI session so it remains pinned in the sidebar
+  // even when the user navigates away to a regular conversation!
+  const [pinnedCliId, setPinnedCliId] = useState<string | null>(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('mint_last_cli_session_id') : null
+  })
+
+  useEffect(() => {
+    if (activeConversationId.startsWith('cli') || activeConversationId === 'cli') {
+      setPinnedCliId(activeConversationId)
+      try {
+        localStorage.setItem('mint_last_cli_session_id', activeConversationId)
+      } catch {
+        // ignore
+      }
+    }
+  }, [activeConversationId])
+
+  const targetCliId = (activeConversationId.startsWith('cli') || activeConversationId === 'cli')
+    ? activeConversationId
+    : (pinnedCliId || cliSessions[0]?.id || null)
+
+  const pinnedCliSession = cliSessions.find((session) => session.id === targetCliId)
 
   return (
     <aside className={`workspace-sidebar ${isResizing ? 'is-resizing' : ''}`} ref={asideRef}>
@@ -413,27 +432,58 @@ export default function DashboardSidebar({
       )}
 
       <div className="sidebar-section">
-        <div className="sidebar-section-title">Conversation CLI</div>
+        <div className="sidebar-section-title">Code</div>
         <div className="sidebar-chat-list sidebar-cli-list">
           <button
-            className={`sidebar-project sidebar-chat-item ${cliSession.id === activeConversationId ? 'active' : ''}`}
-            onClick={() => onSelectConversation(cliSession.id)}
-            title={cliSession.title}
+            className={`sidebar-project sidebar-chat-item ${view === 'code' ? 'active' : ''}`}
+            onClick={() => onSetView('code')}
+            title="Code Sessions Hub"
           >
             <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 17l6-6-6-6"></path>
-                <path d="M12 19h8"></path>
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
               </svg>
             </span>
-            <span className="sidebar-chat-title">{cliSession.title || 'cli'}</span>
-            {cliSession.id === activeConversationId && (
-              <span className="mint-status-pill" data-state={sending ? "thinking" : "idle"}>
-                <span className="mint-status-dot" />
-                <span className="mint-status-label">{sending ? "Thinking" : "Idle"}</span>
-              </span>
-            )}
+            <span className="sidebar-chat-title">Code Hub</span>
+            <span
+              style={{
+                marginLeft: 'auto',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                padding: '1px 6px',
+                borderRadius: '10px',
+                background: 'rgba(255, 255, 255, 0.08)',
+                color: 'var(--text-muted, #94a3b8)',
+              }}
+            >
+              {cliSessions.length}
+            </span>
           </button>
+
+          {pinnedCliSession && (
+            <button
+              className={`sidebar-project sidebar-chat-item ${pinnedCliSession.id === activeConversationId ? 'active' : ''}`}
+              onClick={() => onSelectConversation(pinnedCliSession.id)}
+              title={pinnedCliSession.title || 'Terminal Session'}
+              style={{ paddingLeft: '16px' }}
+            >
+              <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', opacity: 0.85 }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 17l6-6-6-6"></path>
+                  <path d="M12 19h8"></path>
+                </svg>
+              </span>
+              <span className="sidebar-chat-title">
+                {pinnedCliSession.title && pinnedCliSession.title !== 'cli'
+                  ? pinnedCliSession.title
+                  : (pinnedCliSession.id === 'cli' ? 'Terminal Session' : `cli::${pinnedCliSession.id.replace(/^cli::/, '').slice(0, 7)}`)}
+              </span>
+              {pinnedCliSession.id === activeConversationId && sending && (
+                <span className="sidebar-generating-text">Thinking...</span>
+              )}
+            </button>
+          )}
         </div>
         <div className="sidebar-section-title sidebar-subsection-title">Conversations</div>
         <div className="sidebar-chat-list">
@@ -469,11 +519,8 @@ export default function DashboardSidebar({
               ) : (
                 <span className="sidebar-chat-title">{session.title || 'New chat'}</span>
               )}
-              {session.id === activeConversationId && (
-                <span className="mint-status-pill" data-state={sending ? "thinking" : "idle"}>
-                  <span className="mint-status-dot" />
-                  <span className="mint-status-label">{sending ? "Thinking" : "Idle"}</span>
-                </span>
+              {session.id === activeConversationId && sending && (
+                <span className="sidebar-generating-text">Thinking...</span>
               )}
               {editingSessionId !== session.id && (
                 <>

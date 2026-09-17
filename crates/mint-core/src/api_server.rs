@@ -288,6 +288,9 @@ pub async fn start_api_server(port: u16) -> Result<(), std::io::Error> {
                 && route != "/api/action"
                 && route != "/api/config"
                 && route != "/api/gemini-live"
+                && route != "/api/interactions"
+                && route != "/api/status"
+                && route != "/api/chat-sessions"
             {
                 log_api_req(method, route, "200 OK", Some(&auth_label));
             }

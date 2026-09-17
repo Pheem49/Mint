@@ -146,7 +146,8 @@ pub use mcp::{
 };
 pub use memory::{
     CHAT_CLI_ID, ChatSession, DEFAULT_CONVERSATION_ID, Fact, InteractionMemory, LearnedSkill,
-    MemoryError, MemoryStore, WorkspaceSession, memory_path, scoped_chat_id, subagent_name,
+    MemoryError, MemoryStore, WorkspaceSession, generate_cli_session_id, is_cli_chat_id,
+    memory_path, scoped_chat_id, subagent_name,
 };
 pub use mic_transcribe::{
     MicRecordingHandle, MicTranscribeError, start_recording, stop_recording, transcribe_recording,

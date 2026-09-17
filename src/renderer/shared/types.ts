@@ -97,6 +97,11 @@ export interface ChatSession {
   kind: string
   createdAt: string
   updatedAt: string
+  workspacePath?: string | null
+  gitBranch?: string | null
+  mainLanguage?: string | null
+  messageCount?: number
+  totalBytes?: number
 }
 
 export interface PictureEntry {

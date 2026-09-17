@@ -339,6 +339,7 @@ pub async fn handle_slash_command(
         "/plan"
             | "/thought"
             | "/think"
+            | "/resume"
             | "/bg"
             | "/jobs"
             | "/shells"
@@ -430,8 +431,71 @@ pub async fn handle_slash_command(
             Some(SlashResult::Handled)
         }
 
+        "/resume" => {
+            let target_session_id = if rest.is_empty() {
+                prompt_resume_session_picker(&session.current_dir, &session.chat_id).ok().flatten()
+            } else {
+                let trimmed = rest.trim();
+                let candidate = if !trimmed.starts_with("cli::") && trimmed != mint_core::CHAT_CLI_ID {
+                    format!("cli::{trimmed}")
+                } else {
+                    trimmed.to_string()
+                };
+                if let Ok(memory) = MemoryStore::open_default()
+                    && let Ok(sessions) = memory.list_chat_sessions()
+                    && sessions.iter().any(|s| s.id == candidate)
+                {
+                    Some(candidate)
+                } else {
+                    Some(trimmed.to_string())
+                }
+            };
+
+            if let Some(target_id) = target_session_id {
+                if target_id == session.chat_id {
+                    println!("\n{DIM}Already in session '{target_id}'.{RESET}\n");
+                } else {
+                    session.chat_id = target_id.clone();
+                    mint_core::live_sync::update_live_sync_chat_id(&session.chat_id);
+                    if let Ok(memory) = MemoryStore::open_default() {
+                        let sessions = memory.list_chat_sessions().unwrap_or_default();
+                        let title = sessions
+                            .iter()
+                            .find(|s| s.id == target_id)
+                            .map(|s| s.title.as_str())
+                            .unwrap_or("Conversation");
+                        println!("\n{MINT}●{RESET} Switched to session: {BOLD}{title}{RESET} {DIM}({target_id}){RESET}");
+                        if let Ok(recent) = memory.get_session_preview(&target_id, 2)
+                            && let Some(last) = recent.first()
+                        {
+                            let snippet = crate::interactive::truncate_utf8(&last.user_text, 80);
+                            println!("  {DIM}Last turn: {snippet}{RESET}");
+                        }
+                        println!();
+                    } else {
+                        println!("\n{MINT}●{RESET} Switched to session: {BOLD}{target_id}{RESET}\n");
+                    }
+                }
+            } else {
+                println!("{DIM}Cancelled.{RESET}\n");
+            }
+            Some(SlashResult::Handled)
+        }
+
         "/rewind" => {
-            let checkpoints = mint_core::git::list_checkpoints(mint_core::CHAT_CLI_ID);
+            let (target_rewind_chat_id, checkpoints) = {
+                let local_cps = mint_core::git::list_checkpoints(&session.chat_id);
+                if local_cps.is_empty() && session.chat_id != mint_core::CHAT_CLI_ID {
+                    let fallback_cps = mint_core::git::list_checkpoints(mint_core::CHAT_CLI_ID);
+                    if !fallback_cps.is_empty() {
+                        (mint_core::CHAT_CLI_ID.to_string(), fallback_cps)
+                    } else {
+                        (session.chat_id.clone(), local_cps)
+                    }
+                } else {
+                    (session.chat_id.clone(), local_cps)
+                }
+            };
             if rest.is_empty() {
                 if checkpoints.is_empty() {
                     println!("\n{DIM}No git checkpoints recorded for this CLI session yet.{RESET}");
@@ -474,7 +538,7 @@ pub async fn handle_slash_command(
                     Ok(step) => {
                         match mint_core::git::rollback_to_step(
                             &session.current_dir,
-                            mint_core::CHAT_CLI_ID,
+                            &target_rewind_chat_id,
                             step,
                         ) {
                             Ok(msg) => {
@@ -1607,8 +1671,8 @@ pub async fn handle_slash_command(
             if choice {
                 clear_last_thought();
                 if let Ok(memory) = MemoryStore::open_default() {
-                    match memory.clear_interactions() {
-                        Ok(count) => println!("{DIM}Cleared {count} interactions.{RESET}"),
+                    match memory.clear_interactions_for_chat(&session.chat_id) {
+                        Ok(count) => println!("{DIM}Cleared {count} interactions for session.{RESET}"),
                         Err(error) => println!("{ERROR}Memory error:{RESET} {error}"),
                     }
                 }
@@ -3512,7 +3576,7 @@ mod tests {
 
     /// Commands that are dispatched but deliberately left undocumented —
     /// shortcuts for another command's own token, not gaps in `SLASH_COMMANDS`.
-    const UNDOCUMENTED_ALIASES: &[&str] = &["/quit", "/reset", "/plugin", "/searchProvider"];
+    const UNDOCUMENTED_ALIASES: &[&str] = &["/quit", "/reset", "/plugin", "/searchProvider", "/think"];
 
     /// Regression guard for the exact bug that motivated `SLASH_COMMANDS`:
     /// `/edit-image`, `/gen-image`, `/shells`, and `/subagent` all worked but
@@ -3567,6 +3631,7 @@ mod tests {
     #[tokio::test]
     async fn core_slash_clear_clears_history() {
         let mut session = InteractiveSession {
+            chat_id: mint_core::CHAT_CLI_ID.to_string(),
             config: MintConfig::default(),
             current_dir: std::env::current_dir().unwrap(),
             fast_mode: false,
@@ -3584,6 +3649,7 @@ mod tests {
     #[tokio::test]
     async fn core_slash_fast_mode_toggle() {
         let mut session = InteractiveSession {
+            chat_id: mint_core::CHAT_CLI_ID.to_string(),
             config: MintConfig::default(),
             current_dir: std::env::current_dir().unwrap(),
             fast_mode: false,

@@ -58,6 +58,8 @@ pub struct AgentOptions {
     /// configured MCP server — set by an `@servername` mention in the typed
     /// query, mirroring the GUI composer's `@` mention picker.
     pub pinned_mcp_server: Option<String>,
+    /// Chat ID / session ID for this turn. Defaults to `CHAT_CLI_ID` if omitted.
+    pub chat_id: Option<String>,
 }
 
 pub async fn run_code_agent(task: &str, root: &Path, config: &MintConfig) -> Result<AgentResult> {
@@ -1079,6 +1081,8 @@ pub async fn run_code_agent_with_options(
         .ok()
         .and_then(|memory| memory.get_profile("name").ok().flatten());
 
+    let target_chat_id = options.chat_id.as_deref().unwrap_or(CHAT_CLI_ID);
+
     let agent_loop = orchestrate_agent_loop(
         config,
         task,
@@ -1086,7 +1090,7 @@ pub async fn run_code_agent_with_options(
         image_data_uri,
         None,
         video_data_uri,
-        Some(CHAT_CLI_ID),
+        Some(target_chat_id),
         None,
         user_name.as_deref(),
         options.pinned_mcp_server.as_deref(),

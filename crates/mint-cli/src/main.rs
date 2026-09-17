@@ -30,6 +30,7 @@ pub use interactive::{
 };
 
 pub const RESET: &str = "\x1b[0m";
+pub const BOLD: &str = "\x1b[1m";
 pub const MINT: &str = "\x1b[32m";
 pub const BLUE: &str = "\x1b[38;2;78;201;216m";
 pub const DIM: &str = "\x1b[90m";
@@ -51,11 +52,23 @@ pub(crate) async fn run_code_agent_with_saved_image(
     // land here; the caller is responsible for dispatching them. On error
     // the queue is dropped along with the interrupted turn.
     let queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    // The box's leftover, not-yet-submitted text (typed but no Enter yet) at
-    // the moment the turn ended — same idea as `queue` above, but for the one
-    // partial entry that was never confirmed, so the caller can hand it back
-    // as the next prompt's starting text instead of dropping it silently.
     let draft = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let target_chat_id = options
+        .chat_id
+        .clone()
+        .unwrap_or_else(|| mint_core::CHAT_CLI_ID.to_string());
+    if mint_core::is_cli_chat_id(&target_chat_id)
+        && let Ok(memory) = mint_core::MemoryStore::open_default()
+    {
+        let branch = mint_core::git::get_current_branch(current_dir);
+        let lang = mint_core::git::detect_project_language(current_dir);
+        let _ = memory.register_cli_session(
+            &target_chat_id,
+            Some(&current_dir.to_string_lossy()),
+            branch.as_deref(),
+            lang.as_deref(),
+        );
+    }
     let result = agent::run_code_agent_with_options(
         task,
         current_dir,
@@ -68,14 +81,13 @@ pub(crate) async fn run_code_agent_with_saved_image(
     )
     .await;
     result?;
-    // This turn just committed a row to the workspace-scoped "cli" chat_id
-    // (see `scoped_chat_id`) — raise live_sync's watermark past it so the
-    // next poll tick doesn't mistake the user's own just-sent message for
-    // one that arrived from another surface (web/desktop).
+    // This turn just committed a row to the session's chat_id
+    // — raise live_sync's watermark past it so the next poll tick doesn't mistake
+    // the user's own just-sent message for one that arrived from another surface.
     if let Ok(memory) = mint_core::MemoryStore::open_default()
         && let Ok(rows) = memory.recent_interactions_for_chat(
             &mint_core::scoped_chat_id(
-                mint_core::CHAT_CLI_ID,
+                &target_chat_id,
                 Some(&current_dir.to_string_lossy()),
             ),
             1,
@@ -160,6 +172,7 @@ pub(crate) async fn run_oneshot_agent_task(
         plan_mode,
         queueing: false,
         pinned_mcp_server,
+        chat_id: None,
     };
 
     let queue = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -254,6 +267,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub image: Option<PathBuf>,
 
+    /// Resume a previous conversation session, or open the interactive session picker
+    #[arg(short = 'r', long, global = true)]
+    pub resume: Option<Option<String>>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 
@@ -327,7 +344,22 @@ async fn main() -> Result<()> {
             } else {
                 mint_core::channels::start_channels();
                 mint_core::start_cron_scheduler();
-                run_interactive_chat_with_options(cli.model, cli.fast, cli.plan).await?;
+                let current_dir = std::env::current_dir()?;
+                let resume_id = if let Some(ref r_opt) = cli.resume {
+                    match r_opt {
+                        Some(id) => Some(id.clone()),
+                        None => interactive::prompt_resume_session_picker(&current_dir, "")?,
+                    }
+                } else {
+                    None
+                };
+                interactive::run_interactive_chat_with_session(
+                    cli.model,
+                    cli.fast,
+                    cli.plan,
+                    resume_id,
+                )
+                .await?;
             }
         }
         Some(cmd) => {

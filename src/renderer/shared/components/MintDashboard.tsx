@@ -1,4 +1,4 @@
-import { type ChangeEvent, type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react'
+import { type ChangeEvent, type CSSProperties, type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { mergeActivitySnapshots, trimAgentProgress } from '../agentProgress'
 import {
   clearChatHistory,
@@ -172,6 +172,10 @@ function isRootOrNewChatRoute(): boolean {
     target.includes('imagine') ||
     target.includes('veo-studio') ||
     target.includes('veo') ||
+    target.includes('code') ||
+    target === '/cli' ||
+    target === 'cli' ||
+    target.includes('cli-sessions') ||
     target.includes('settings')
   ) {
     return false
@@ -239,6 +243,7 @@ import ScheduledTasksView from './ScheduledTasksView'
 import LinkedFoldersView from './LinkedFoldersView'
 import McpServersView from './McpServersView'
 import PluginsView from './PluginsView'
+import CliSessionsView from './CliSessionsView'
 import { isSupportedDocument } from '../utils/documentTypes'
 import { useCompanionWidget } from '@/companionWidget'
 import {
@@ -272,6 +277,7 @@ function getInitialViewFromUrl(): DashboardView {
   if (target.includes('picture')) return 'pictures'
   if (target.includes('image-studio') || target.includes('imagine')) return 'imagine'
   if (target.includes('veo-studio') || target.includes('veo')) return 'veo'
+  if (target.includes('code') || target === '/cli' || target === 'cli' || target.includes('cli-sessions')) return 'code'
   return 'chat'
 }
 
@@ -282,6 +288,7 @@ function getCleanPathForView(v: string, activeId?: string): string {
   if (v === 'pictures') return '/pictures'
   if (v === 'imagine') return '/image-studio'
   if (v === 'veo' || v === 'veo_studio') return '/veo-studio'
+  if (v === 'code') return '/code'
   if (v === 'settings') return '/settings'
   if (activeId) return `/chat/${encodeURIComponent(activeId)}`
   return '/chat'
@@ -644,7 +651,7 @@ export default function MintDashboard() {
       } catch {
         // Best-effort — a transient fetch failure just waits for the next tick.
       }
-    }, 3000)
+    }, 6000)
     return () => window.clearInterval(interval)
   }, [view, conversationId, sending, workspacePath])
 
@@ -706,10 +713,27 @@ export default function MintDashboard() {
     setAgentActivitySnapshots((current) => mergeActivitySnapshots(current, reversed))
   }
 
-  async function refreshChatSessions() {
-    const sessions = await listChatSessions()
-    setChatSessions(sessions)
-  }
+  const refreshChatSessions = useCallback(async () => {
+    try {
+      const sessions = await listChatSessions()
+      setChatSessions((prev) => {
+        if (
+          prev.length === sessions.length &&
+          prev.every(
+            (s, i) =>
+              s.id === sessions[i]?.id &&
+              s.updatedAt === sessions[i]?.updatedAt &&
+              s.title === sessions[i]?.title
+          )
+        ) {
+          return prev
+        }
+        return sessions
+      })
+    } catch (e) {
+      console.error('Failed to refresh chat sessions:', e)
+    }
+  }, [])
 
   const [picturesRefreshing, setPicturesRefreshing] = useState(false)
 
@@ -1067,6 +1091,36 @@ export default function MintDashboard() {
           return
         } else if (slashResult.action === 'generate_veo') {
           changeView('veo')
+          return
+        } else if (slashResult.action === 'resume_session') {
+          const query = (slashResult.payload?.query || '').trim().toLowerCase()
+          const target = query
+            ? chatSessions.find((s) => s.id.toLowerCase() === query || s.id.toLowerCase().includes(query) || s.title.toLowerCase().includes(query))
+            : chatSessions.find((s) => s.id !== conversationId)
+          if (target) {
+            setConversationId(target.id)
+            const targetPath = getCleanPathForView('chat', target.id)
+            window.history.replaceState({}, '', targetPath)
+            const systemMsg = {
+              id: Date.now(),
+              userText: trimmed,
+              aiText: `🔄 Resumed session: **${target.title}** (\`${target.id}\`)`,
+              createdAt: new Date().toISOString(),
+              provider: 'system',
+              model: 'mint-cli',
+            }
+            setInteractions((prev) => [...prev, systemMsg])
+          } else {
+            const systemMsg = {
+              id: Date.now(),
+              userText: trimmed,
+              aiText: query ? `⚠️ No matching session found for "${query}".` : 'ℹ️ No other sessions found to resume.',
+              createdAt: new Date().toISOString(),
+              provider: 'system',
+              model: 'mint-cli',
+            }
+            setInteractions((prev) => [...prev, systemMsg])
+          }
           return
         }
 
@@ -1436,14 +1490,25 @@ export default function MintDashboard() {
   }
 
   async function deleteConversation(id: string) {
-    if (id === 'cli') return
+    if (id === 'cli') {
+      if (!window.confirm('Clear history for default CLI session? This cannot be undone.')) return
+      try {
+        await clearChatHistory('cli')
+        await refreshHistory()
+        await refreshChatSessions()
+        showToast('CLI session history cleared')
+      } catch (reason) {
+        setError(errorMessage(reason))
+      }
+      return
+    }
     const session = chatSessions.find((item) => item.id === id)
     const title = session?.title || 'this chat'
     if (!window.confirm(`Delete "${title}"? This will remove the conversation and its messages.`)) return
 
     try {
       await deleteChatSession(id)
-      const remaining = chatSessions.filter((item) => item.id !== id && item.kind !== 'cli' && item.id !== 'conversation-default')
+      const remaining = chatSessions.filter((item) => item.id !== id && item.kind !== 'cli' && !item.id.startsWith('cli') && item.id !== 'conversation-default')
       const nextActive = id === conversationId
         ? (remaining[0]?.id ?? createConversationId())
         : conversationId
@@ -1754,7 +1819,7 @@ export default function MintDashboard() {
           showWorkspaceTab={isDesktopApp}
           promoteMediaStudios={!isDesktopApp}
         />
-        <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspace' ? '' : 'model-hidden'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' || view === 'pictures' || view === 'imagine' || view === 'veo') ? { display: 'none' } : undefined}>
+        <main className={`assistant-workspace ${layoutPreset === 'chat-wide' ? 'layout-chat-wide' : 'layout-model-wide'} ${modelVisible || view === 'workspace' ? '' : 'model-hidden'} ${view === 'workspace' ? 'workspace-open' : ''}`} style={(view === 'skills' || view === 'mcp' || view === 'plugins' || view === 'cron' || view === 'link' || view === 'pictures' || view === 'imagine' || view === 'veo' || view === 'code') ? { display: 'none' } : undefined}>
           {proactiveSuggestion && (
             <div className="proactive-bar" style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100 }}>
               <div className="proactive-header">
@@ -1887,6 +1952,9 @@ export default function MintDashboard() {
             onCancelMessage={handleCancelMessage}
             onClearMessages={() => clearHistory('Clear history')}
             onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+            isCliSession={conversationId.startsWith('cli') || conversationId === 'cli'}
+            cliSessionId={conversationId.startsWith('cli') ? conversationId : undefined}
+            onBackToCode={() => changeView('code')}
           />
         </main>
         {view === 'skills' && (
@@ -1951,6 +2019,22 @@ export default function MintDashboard() {
               // Desktop: native Tauri picker. Web: asks `mint web` (same
               // machine) to open its own dialog via a loopback-gated route.
               selectFolder={selectLinkedFolderPath}
+            />
+          </div>
+        )}
+        {view === 'code' && (
+          <div style={{ flex: 1, overflowY: 'auto', background: 'transparent' }}>
+            <CliSessionsView
+              chatSessions={chatSessions}
+              activeConversationId={conversationId}
+              workspacePath={workspacePath}
+              onSelectSession={(id) => {
+                selectConversation(id)
+              }}
+              onDeleteSession={deleteConversation}
+              onRenameSession={renameConversation}
+              onRefreshSessions={refreshChatSessions}
+              onShowToast={showToast}
             />
           </div>
         )}
