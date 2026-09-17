@@ -13,6 +13,17 @@ import CalculationCard from '../components/CalculationCard'
 import ImageSearchCard from '../components/ImageSearchCard'
 import ImageGenCard from '../components/ImageGenCard'
 import MermaidCard from '../components/MermaidCard'
+import UiGridCard from '../components/UiGridCard'
+import UiFeatureCard from '../components/UiFeatureCard'
+import UiMockupWidget from '../components/UiMockupWidget'
+import {
+  Info,
+  Lightbulb,
+  AlertCircle,
+  AlertTriangle,
+  ShieldAlert,
+  type LucideIcon,
+} from 'lucide-react'
 
 /**
  * Unwraps Brave Search internal image proxy URLs (imgs.search.brave.com)
@@ -158,19 +169,66 @@ function flattenText(node: ReactNode): string {
   return ''
 }
 
-/** Wraps bare "@mention" tokens in plain-text children with a highlight span, without touching already-rendered elements (links, code, bold, ...). */
+const BADGE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
+  green: { bg: 'rgba(16, 185, 129, 0.15)', text: '#34d399', border: 'rgba(16, 185, 129, 0.3)' },
+  blue: { bg: 'rgba(56, 189, 248, 0.15)', text: '#38bdf8', border: 'rgba(56, 189, 248, 0.3)' },
+  purple: { bg: 'rgba(168, 85, 247, 0.15)', text: '#c084fc', border: 'rgba(168, 85, 247, 0.3)' },
+  amber: { bg: 'rgba(245, 158, 11, 0.15)', text: '#fbbf24', border: 'rgba(245, 158, 11, 0.3)' },
+  red: { bg: 'rgba(239, 68, 68, 0.15)', text: '#f87171', border: 'rgba(239, 68, 68, 0.3)' },
+}
+
+function renderBadgeSpan(colorName: string | undefined, label: string, key: string): ReactNode {
+  const styleConf = BADGE_COLORS[(colorName || 'green').toLowerCase()] || BADGE_COLORS.green
+  return (
+    <span
+      key={key}
+      className="chat-inline-badge"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '1px 8px',
+        margin: '0 4px',
+        fontSize: '0.74rem',
+        fontWeight: 600,
+        borderRadius: '999px',
+        background: styleConf.bg,
+        color: styleConf.text,
+        border: `1px solid ${styleConf.border}`,
+        verticalAlign: 'baseline',
+        lineHeight: 1.4,
+      }}
+    >
+      {label}
+    </span>
+  )
+}
+
+/** Wraps bare "@mention" tokens and "[badge:color text]" tokens with styled spans. */
 function highlightMentions(node: ReactNode, keyPrefix = 'm'): ReactNode {
   if (typeof node === 'string') {
-    const parts = node.split(/(@[\w\-.\/]+)/g)
+    const parts = node.split(/(@[\w\-.\/]+|\[badge(?::[a-zA-Z]+)?\s+[^\]]+\])/g)
     if (parts.length <= 1) return node
-    return parts.map((part, i) =>
-      i % 2 === 1
-        ? <span key={`${keyPrefix}-${i}`} className="chat-mention">{part}</span>
-        : part ? <Fragment key={`${keyPrefix}-t-${i}`}>{part}</Fragment> : null
-    )
+    return parts.map((part, i) => {
+      if (i % 2 === 1) {
+        if (part.startsWith('@')) {
+          return (
+            <span key={`${keyPrefix}-${i}`} className="chat-mention">
+              {part}
+            </span>
+          )
+        }
+        const badgeMatch = part.match(/^\[badge(?::([a-zA-Z]+))?\s+([^\]]+)\]$/)
+        if (badgeMatch) {
+          return renderBadgeSpan(badgeMatch[1], badgeMatch[2], `${keyPrefix}-${i}`)
+        }
+      }
+      return part ? <Fragment key={`${keyPrefix}-t-${i}`}>{part}</Fragment> : null
+    })
   }
   if (Array.isArray(node)) {
-    return node.map((child, i) => <Fragment key={`${keyPrefix}-${i}`}>{highlightMentions(child, `${keyPrefix}-${i}`)}</Fragment>)
+    return node.map((child, i) => (
+      <Fragment key={`${keyPrefix}-${i}`}>{highlightMentions(child, `${keyPrefix}-${i}`)}</Fragment>
+    ))
   }
   return node
 }
@@ -222,6 +280,24 @@ function trimListItemEdges(children: ReactNode): ReactNode {
   return arr
 }
 
+function parseJsonSafely(codeText: string): any {
+  if (!codeText || !codeText.trim()) return null
+  let cleaned = codeText.trim()
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\s*/, '').replace(/\s*```$/, '').trim()
+  }
+  try {
+    return JSON.parse(cleaned)
+  } catch {
+    try {
+      const trailingFixed = cleaned.replace(/,\s*([\]}])/g, '$1')
+      return JSON.parse(trailingFixed)
+    } catch {
+      return null
+    }
+  }
+}
+
 function renderCodeCard(lang: string, codeText: string): ReactNode {
   switch (lang) {
     case 'weather_json':
@@ -261,9 +337,121 @@ function renderCodeCard(lang: string, codeText: string): ReactNode {
       }
     case 'mermaid':
       return <MermaidCard code={codeText} />
+    case 'ui_grid':
+    case 'ui-grid':
+    case 'ui_grid_json':
+    case 'ui-grid-json': {
+      let clean = codeText.trim()
+      if (/^ui[-_]grid(?:[-_]json)?\s*/i.test(clean)) {
+        clean = clean.replace(/^ui[-_]grid(?:[-_]json)?\s*/i, '')
+      }
+      const parsed = parseJsonSafely(clean)
+      if (parsed) return <UiGridCard data={parsed} />
+      return <ChatCodeBlock code={codeText} language={lang} />
+    }
+    case 'ui_card':
+    case 'ui-card':
+    case 'ui_card_json':
+    case 'ui-card-json':
+    case 'ui_feature':
+    case 'ui-feature': {
+      let clean = codeText.trim()
+      if (/^ui[-_](?:card|feature)(?:[-_]json)?\s*/i.test(clean)) {
+        clean = clean.replace(/^ui[-_](?:card|feature)(?:[-_]json)?\s*/i, '')
+      }
+      const parsed = parseJsonSafely(clean)
+      if (parsed) return <UiFeatureCard data={parsed} />
+      return <ChatCodeBlock code={codeText} language={lang} />
+    }
+    case 'ui_mockup':
+    case 'ui-mockup':
+    case 'ui_mockup_json':
+    case 'ui-mockup-json': {
+      let clean = codeText.trim()
+      if (/^ui[-_]mockup(?:[-_]json)?\s*/i.test(clean)) {
+        clean = clean.replace(/^ui[-_]mockup(?:[-_]json)?\s*/i, '')
+      }
+      const parsed = parseJsonSafely(clean)
+      if (parsed) return <UiMockupWidget data={parsed} />
+      return <ChatCodeBlock code={codeText} language={lang} />
+    }
     default:
       return <ChatCodeBlock code={codeText} language={lang} />
   }
+}
+
+function stripAlertTag(node: ReactNode): ReactNode {
+  let done = false
+  function clean(item: ReactNode): ReactNode {
+    if (done || item == null) return item
+    if (typeof item === 'string') {
+      const match = item.match(/^\s*\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(?:\r?\n)?/i)
+      if (match) {
+        done = true
+        return item.slice(match[0].length)
+      }
+      return item
+    }
+    if (Array.isArray(item)) {
+      return item.map(clean).filter((v) => v !== '' && v != null)
+    }
+    if (isValidElement(item)) {
+      const props = item.props as { children?: ReactNode }
+      if (props.children) {
+        return cloneElement(item, {}, clean(props.children))
+      }
+    }
+    return item
+  }
+  return clean(node)
+}
+
+function renderAlertBox(type: string, children: ReactNode): ReactNode {
+  const config: { title: string; color: string; border: string; bg: string; borderSubtle: string; Icon: LucideIcon } = {
+    NOTE: { title: 'Note', color: '#38bdf8', border: '#38bdf8', bg: 'rgba(56, 189, 248, 0.08)', borderSubtle: 'rgba(56, 189, 248, 0.25)', Icon: Info },
+    TIP: { title: 'Tip', color: '#34d399', border: '#10b981', bg: 'rgba(16, 185, 129, 0.08)', borderSubtle: 'rgba(16, 185, 129, 0.25)', Icon: Lightbulb },
+    IMPORTANT: { title: 'Important', color: '#c084fc', border: '#a855f7', bg: 'rgba(168, 85, 247, 0.08)', borderSubtle: 'rgba(168, 85, 247, 0.25)', Icon: AlertCircle },
+    WARNING: { title: 'Warning', color: '#fbbf24', border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.08)', borderSubtle: 'rgba(245, 158, 11, 0.25)', Icon: AlertTriangle },
+    CAUTION: { title: 'Caution', color: '#f87171', border: '#ef4444', bg: 'rgba(239, 68, 68, 0.08)', borderSubtle: 'rgba(239, 68, 68, 0.25)', Icon: ShieldAlert },
+  }[type] || { title: 'Note', color: '#38bdf8', border: '#38bdf8', bg: 'rgba(56, 189, 248, 0.08)', borderSubtle: 'rgba(56, 189, 248, 0.25)', Icon: Info }
+
+  const IconComponent = config.Icon
+  return (
+    <div
+      className={`chat-callout-card chat-callout--${type.toLowerCase()}`}
+      style={{
+        margin: '14px 0',
+        padding: '12px 16px',
+        borderRadius: '10px',
+        borderLeft: `4px solid ${config.border}`,
+        borderTop: `1px solid ${config.borderSubtle}`,
+        borderRight: `1px solid ${config.borderSubtle}`,
+        borderBottom: `1px solid ${config.borderSubtle}`,
+        background: config.bg,
+        boxShadow: '0 2px 10px rgba(0, 0, 0, 0.15)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '6px',
+          color: config.color,
+          fontWeight: 700,
+          fontSize: '0.86rem',
+          letterSpacing: '0.3px',
+          textTransform: 'uppercase',
+        }}
+      >
+        <IconComponent size={16} strokeWidth={2.2} />
+        <span>{config.title}</span>
+      </div>
+      <div style={{ fontSize: '0.86rem', color: 'var(--text-chat, #cbd5e1)', lineHeight: 1.5 }}>
+        {children}
+      </div>
+    </div>
+  )
 }
 
 // `ol`/`ul` inject `ordered`/`index` onto their `li` children (via cloneElement below) so each
@@ -274,6 +462,10 @@ const mdComponents = {
     const text = flattenText(children).trim()
     if (EMOJI_HEADER_RE.test(text)) {
       return <div className="chat-heading chat-heading-3 chat-section-title">{children}</div>
+    }
+    const alertMatch = text.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i)
+    if (alertMatch) {
+      return renderAlertBox(alertMatch[1].toUpperCase(), stripAlertTag(children))
     }
     // A plain <div> (not <p>) so block-level media cards can nest inside safely.
     return <div className="chat-paragraph">{highlightMentions(children)}</div>
@@ -350,7 +542,26 @@ const mdComponents = {
     )
   },
   code({ children }) {
-    // Only reached for inline code — block code is intercepted by `pre` below.
+    // Detect single-line UI widgets parsed as inline code (e.g. `ui-card [...]` or ```ui-card [...]```)
+    const rawText = typeof children === 'string'
+      ? children
+      : Array.isArray(children) && children.every((c) => typeof c === 'string')
+        ? children.join('')
+        : ''
+    if (rawText) {
+      const trimmed = rawText.trim()
+      const match = trimmed.match(/^(ui[-_](?:card|grid|mockup|feature)(?:[-_]json)?)\s+([\s\S]+)$/i)
+      if (match) {
+        const lang = match[1].replace(/_/g, '-').toLowerCase()
+        const parsed = parseJsonSafely(match[2].trim())
+        if (parsed) {
+          if (lang.startsWith('ui-grid')) return <UiGridCard data={parsed} />
+          if (lang.startsWith('ui-card') || lang.startsWith('ui-feature')) return <UiFeatureCard data={parsed} />
+          if (lang.startsWith('ui-mockup')) return <UiMockupWidget data={parsed} />
+        }
+      }
+    }
+    // Only reached for regular inline code — block code is intercepted by `pre` below.
     return <code className="chat-inline-code">{children}</code>
   },
   pre({ node }) {
@@ -362,8 +573,40 @@ const mdComponents = {
         ? rawClassName.split(/\s+/)
         : []
     const langClass = classNames.find((c) => c.startsWith('language-'))
-    const lang = langClass ? langClass.slice('language-'.length) : 'plaintext'
-    const codeText = readHastText(codeNode).replace(/\n$/, '')
+    let lang = langClass ? langClass.slice('language-'.length) : 'plaintext'
+    let codeText = readHastText(codeNode).replace(/\n$/, '')
+
+    // Check if AST node has data.meta with arguments/json (e.g. ```ui-card [{"title": ...}]```)
+    const meta = (codeNode as any)?.data?.meta
+    if (typeof meta === 'string' && meta.trim()) {
+      const trimmedMeta = meta.trim()
+      if (!codeText.trim()) {
+        codeText = trimmedMeta
+      } else if (trimmedMeta.startsWith('[') || trimmedMeta.startsWith('{')) {
+        codeText = trimmedMeta + '\n' + codeText
+      }
+    }
+
+    // If lang has JSON attached (e.g. language-ui-card [{"title": ...}])
+    if (lang.includes('[') || lang.includes('{')) {
+      const splitIdx = lang.search(/[\s\[\{]/)
+      if (splitIdx > 0) {
+        const extractedLang = lang.slice(0, splitIdx)
+        const rest = lang.slice(splitIdx)
+        lang = extractedLang
+        codeText = (rest + ' ' + codeText).trim()
+      }
+    }
+
+    // If lang is plaintext or generic, but codeText starts with ui-card / ui-grid / ui-mockup
+    if (lang === 'plaintext' || !lang) {
+      const match = codeText.trim().match(/^(ui[-_](?:card|grid|mockup|feature)(?:[-_]json)?)\s+([\s\S]+)$/i)
+      if (match) {
+        lang = match[1].replace(/_/g, '-').toLowerCase()
+        codeText = match[2].trim()
+      }
+    }
+
     return renderCodeCard(lang, codeText)
   },
   table: ({ children }) => (
@@ -419,6 +662,31 @@ const mdComponents = {
       {highlightMentions(children)}
     </td>
   ),
+
+  blockquote: ({ children }) => {
+    const rawText = flattenText(children).trim()
+    const alertMatch = rawText.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i)
+
+    if (alertMatch) {
+      return renderAlertBox(alertMatch[1].toUpperCase(), stripAlertTag(children))
+    }
+
+    return (
+      <blockquote
+        style={{
+          margin: '12px 0',
+          padding: '8px 16px',
+          borderLeft: '3px solid var(--accent, #38bdf8)',
+          background: 'rgba(255, 255, 255, 0.02)',
+          borderRadius: '0 8px 8px 0',
+          color: 'var(--text-muted, #94a3b8)',
+          fontStyle: 'italic',
+        }}
+      >
+        {children}
+      </blockquote>
+    )
+  },
 }
 
 /** Normalizes non-standard list markers ("(1)", "[1]", "•") to plain GFM syntax so remark recognizes them as real lists. */

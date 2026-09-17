@@ -901,6 +901,25 @@ pub fn read_line_interactive(
                         input_chars.truncate(cursor_pos);
                         redraw!();
                     }
+                    KeyCode::Char('t') if ctrl => {
+                        if let Some(record) = get_last_thought() {
+                            clear_input_box(cursor_row);
+                            disable_raw_mode()?;
+                            let _ = show_thought_viewer(&record.thought, &record.elapsed_str);
+                            redraw_input_box(
+                                &input_chars,
+                                cursor_pos,
+                                placeholder,
+                                model,
+                                path_str,
+                                None,
+                                None,
+                                current_dir,
+                                &mut cursor_row,
+                            );
+                            enable_raw_mode()?;
+                        }
+                    }
                     KeyCode::Char(c) if input_chars.len() < 10000 => {
                         input_chars.insert(cursor_pos, c);
                         cursor_pos += 1;

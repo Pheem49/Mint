@@ -13,6 +13,7 @@ mod format;
 mod input_box;
 mod picker;
 mod slash_commands;
+mod thought_viewer;
 
 pub use commands::*;
 pub use confirm::*;
@@ -20,6 +21,8 @@ pub use format::*;
 pub use input_box::*;
 pub use picker::*;
 pub use slash_commands::*;
+pub use thought_viewer::*;
+
 
 pub static SESSION_APPROVED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);

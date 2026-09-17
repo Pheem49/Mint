@@ -945,19 +945,55 @@ pub(super) fn commit_activity_snapshot(status: &mut LiveStatus) -> bool {
     true
 }
 
-pub(super) fn print_timeline_note(status: &mut LiveStatus, thought: &str) {
+pub(super) fn is_internal_cot(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.starts_with("<think>") || trimmed.contains("</think>") {
+        return true;
+    }
+    let line_count = trimmed.lines().count();
+    let char_count = trimmed.chars().count();
+    if trimmed.contains("\n\n") || line_count > 2 || char_count > 180 {
+        return true;
+    }
+    let lower = trimmed.to_lowercase();
+    if lower.starts_with("the user ")
+        || lower.starts_with("let's think")
+        || lower.starts_with("let me analyze")
+        || lower.starts_with("per rule")
+        || lower.starts_with("note the ")
+        || lower.contains("thinking process:")
+    {
+        return true;
+    }
+    false
+}
+
+pub(super) fn print_timeline_note(status: &mut LiveStatus, thought: &str, elapsed: Duration) {
     let thought = thought.trim();
     if thought.is_empty() {
         return;
     }
-    let (tw, _) = markdown::terminal_size_or_default();
-    let width = tw as usize;
-    let options = textwrap::Options::new(width)
-        .initial_indent("  • ")
-        .subsequent_indent("    ")
-        .break_words(true);
-    let wrapped = textwrap::fill(thought, &options);
-    insert_permanent_lines(status, &[wrapped]);
+    let elapsed_str = crate::interactive::format_thought_elapsed(elapsed);
+    crate::interactive::append_thought(thought, &elapsed_str);
+
+    if is_internal_cot(thought) {
+        let summary = format!(
+            "\x1b[38;2;148;163;184m  • Thought for {elapsed_str}\x1b[0m \x1b[38;2;100;116;139m(Ctrl+T to view)\x1b[0m"
+        );
+        insert_permanent_lines(status, &[summary]);
+    } else {
+        let clean_note = thought
+            .strip_prefix("•")
+            .or_else(|| thought.strip_prefix("-"))
+            .unwrap_or(thought)
+            .trim();
+        let (tw, _) = markdown::terminal_size_or_default();
+        let width = (tw as usize).saturating_sub(4).max(20);
+        let options = textwrap::Options::new(width).break_words(true);
+        let wrapped = textwrap::fill(clean_note, &options);
+        let formatted = format!("\x1b[38;2;226;232;240m{}\x1b[0m", wrapped);
+        insert_permanent_lines(status, &[formatted]);
+    }
 }
 
 /// Inserts already ANSI-formatted `lines` as permanent content above the

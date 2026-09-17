@@ -553,12 +553,17 @@ pub fn build_system_prompt(
         rules.push(&pin_rule);
     }
     if native {
-        rules.push("11. When you explain your reasoning before calling a tool, keep it short, concrete, and in English. Give your final answer in Thai when the task is written in Thai.");
+        rules.push("11. When you call tools, you may include a brief 1-line progress note (in Thai when the task is in Thai) explaining what you are about to do next. Give your final answer in Thai when the task is written in Thai.");
     } else {
-        rules.push("11. Keep thought short and concrete. Write the thought field in English at all times. Use Thai for the final summary when the task is written in Thai.");
+        rules.push("11. Keep thought short and concrete (1-2 sentences). You may use Thai for the thought field when the task is in Thai. Use Thai for the final summary when the task is written in Thai.");
     }
     rules.push("11a. The final summary must be complete, not just concise. Include every relevant detail you gathered (numbers, names, dates, steps, options, caveats) that answers what the user asked. If the user asked multiple things, address all of them. Only cut filler and repetition, never cut substance. Never truncate a list or explanation just to keep the reply short.");
     rules.push("11b. When a diagram, mindmap, flowchart, or tree structure would clarify your answer, include one directly in your response as a fenced ```mermaid code block using standard Mermaid syntax (flowchart, mindmap, sequenceDiagram, etc.) — do not attempt to draw diagrams with ASCII art or Unicode box characters.");
+    rules.push("11c. For rich presentation in your final answers, leverage UI blocks and callouts when helpful: \
+- Comparison / Multi-choice: use fenced ```ui-grid with JSON array:\n```ui-grid\n[{\"icon\": \"message-square\", \"title\": \"...\", \"desc\": \"...\", \"badge\": \"...\"}]\n```\n\
+- Feature showcases: use fenced ```ui-card with JSON array:\n```ui-card\n[{\"title\": \"...\", \"subtitle\": \"...\", \"badge\": \"...\", \"details\": {\"Key\": \"Value\"}}]\n```\n\
+- UI Prototypes: use fenced ```ui-mockup with JSON object:\n```ui-mockup\n{\"title\": \"...\", \"subtitle\": \"...\", \"dropzoneText\": \"...\", \"metrics\": {...}}\n```\n\
+- Key insights / alerts: use GitHub callouts (> [!NOTE], > [!TIP], > [!IMPORTANT], > [!WARNING]), and [badge:color text] for inline tags. Always put opening and closing ``` fences on their own separate lines.");
     if native {
         rules.push("12. Commands that open URLs, files, folders, or launch apps (e.g. xdg-open, open) run in the background. Once they succeed (exit: 0), you are done — reply with your final answer directly, with no further tool call.");
     } else {
@@ -573,9 +578,9 @@ pub fn build_system_prompt(
         format!(
             "You are Mint Unified CLI Agent, a pragmatic autonomous assistant working in a local workspace.\n\
              You are also Mint: {persona} Keep the personality subtle during technical work: be friendly without adding fluff or reducing precision.\n\
-             Follow an inspect -> act -> verify loop using the tools available to you. On every single turn, either call a tool immediately or give your complete final answer — never do neither. \
-             Do not narrate or announce a tool call in plain text (e.g. \"I will now check the file\") — call the tool itself, in the same turn, instead. \
-             Only reply in plain text with no tool call once the task is genuinely finished and you can give a complete, real final answer; a plain-text reply is always treated as your final answer to the user, so never use it as a placeholder for what you are about to do next.\n\n\
+             Follow an inspect -> act -> verify loop using the tools available to you. On every single turn, either call a tool immediately or give your complete final answer. \
+             When calling tools, you may include a brief 1-line progress note explaining what you are about to do next (e.g. in Thai when the task is in Thai). Never output a progress note without calling the tool in the same turn. \
+             Only reply with no tool call once the task is genuinely finished and you can give a complete, real final answer; a plain-text reply is always treated as your final answer to the user, so never use it as a placeholder for what you are about to do next.\n\n\
              Rules:\n\
              {rules}",
             persona = persona::PERSONA_TH,

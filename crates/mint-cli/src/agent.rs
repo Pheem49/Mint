@@ -338,6 +338,7 @@ pub async fn run_code_agent_with_options(
     draft_out: Arc<Mutex<Option<String>>>,
 ) -> Result<AgentResult> {
     let started_at = Instant::now();
+    crate::interactive::clear_last_thought();
     let thinking_verb = random_thinking_verb();
     let approval_active = Arc::new(AtomicBool::new(false));
     let agent_done = Arc::new(AtomicBool::new(false));
@@ -708,7 +709,8 @@ pub async fn run_code_agent_with_options(
                     && let Ok(mut status) = progress_live_status.lock()
                 {
                     commit_activity_snapshot(&mut status);
-                    print_timeline_note(&mut status, &thought);
+                    let elapsed = started_at.elapsed();
+                    print_timeline_note(&mut status, &thought, elapsed);
                     status.thinking = None;
                     status.waiting_for_network = None;
                     render_live_status(&mut status);

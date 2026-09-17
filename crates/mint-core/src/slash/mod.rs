@@ -207,6 +207,10 @@ pub fn execute(req: &SlashRequest, config: &mut MintConfig) -> SlashResponse {
             markdown: "🧹 Conversation history cleared.".into(),
             effects: vec![SlashEffect::HistoryCleared],
         },
+        "/thought" | "/think" => SlashResponse::Applied {
+            markdown: "Thought process can be viewed in the collapsible **Thinking** accordion on Desktop & Web, or by pressing `Ctrl+T` / running `/thought` in the CLI.".into(),
+            effects: vec![],
+        },
 
         "/autoskill" => cmd_bool_toggle(
             rest,

@@ -1300,10 +1300,7 @@ where
                         .enumerate()
                         .map(|(index, call)| {
                             let thought = if index == 0 {
-                                match &response.thought {
-                                    Some(t) if !t.trim().is_empty() => t.trim().to_string(),
-                                    _ => response.text.trim().to_string(),
-                                }
+                                response.text.trim().to_string()
                             } else {
                                 String::new()
                             };
@@ -1439,6 +1436,16 @@ where
                 )
                 .await;
             } else {
+                if !fast_mode
+                    && response.tool_calls.as_ref().is_some_and(|calls| !calls.is_empty())
+                    && let Some(t) = &response.thought
+                    && !t.trim().is_empty()
+                {
+                    progress(AgentProgress::Thought {
+                        thought: t.trim().to_owned(),
+                    });
+                }
+
                 for (call_id, decision) in decisions {
                     if !fast_mode && !decision.thought.trim().is_empty() {
                         progress(AgentProgress::Thought {

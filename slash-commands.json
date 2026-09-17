@@ -11,6 +11,8 @@
   { "token": "/edit-image", "usage": "<prompt>", "description": "Edit attached image with prompt instruction", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/paste", "usage": "[prompt]", "description": "Attach image from clipboard", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "Ctrl+V", "usage": "", "description": "Paste clipboard image as [Image #1]", "surfaces": ["cli"] },
+  { "token": "Ctrl+T", "usage": "", "description": "View reasoning/thought process from last turn", "surfaces": ["cli"] },
+  { "token": "/thought", "usage": "", "description": "View reasoning/thought process from last turn", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "↑ / ↓", "usage": "", "description": "Recall previously submitted input", "surfaces": ["cli"] },
   { "token": "/learn", "usage": "<path>", "description": "Import a persistent .md or .txt skill", "category": "tools", "surfaces": ["cli", "web", "desktop"] },
   { "token": "/skill", "usage": "[list]", "description": "List skills (global/workspace/taught) — see also /skill add", "category": "tools", "surfaces": ["cli", "web", "desktop"] },

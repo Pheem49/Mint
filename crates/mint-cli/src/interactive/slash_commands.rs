@@ -337,6 +337,8 @@ pub async fn handle_slash_command(
     let is_cli_only_or_wizard = matches!(
         cmd,
         "/plan"
+            | "/thought"
+            | "/think"
             | "/bg"
             | "/jobs"
             | "/shells"
@@ -538,6 +540,15 @@ pub async fn handle_slash_command(
                     Some(SlashResult::Handled)
                 }
             }
+        }
+
+        "/thought" | "/think" => {
+            if let Some(record) = get_last_thought() {
+                let _ = show_thought_viewer(&record.thought, &record.elapsed_str);
+            } else {
+                println!("{DIM}No recent thought process recorded for this turn.{RESET}\n");
+            }
+            Some(SlashResult::Handled)
         }
 
         "/plan" if rest == "list" => {
@@ -1594,6 +1605,7 @@ pub async fn handle_slash_command(
             };
 
             if choice {
+                clear_last_thought();
                 if let Ok(memory) = MemoryStore::open_default() {
                     match memory.clear_interactions() {
                         Ok(count) => println!("{DIM}Cleared {count} interactions.{RESET}"),
