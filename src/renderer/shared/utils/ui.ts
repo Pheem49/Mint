@@ -170,7 +170,7 @@ export const applyThemeStyles = (cfg: any): void => {
   document.documentElement.style.setProperty('--text-main', systemTextColor)
   document.documentElement.style.setProperty('--text-chat', chatTextColor)
   document.documentElement.style.setProperty('--glass-blur', cfg.glassBlur || 'blur(16px)')
-  document.body.style.fontFamily = cfg.fontFamily || "'Outfit', sans-serif"
+  document.body.style.fontFamily = cfg.fontFamily || "'Prompt', 'Noto Sans Thai', 'Inter', sans-serif"
   document.documentElement.style.fontSize = cfg.fontSize || '18px'
 
   if (theme === 'custom') {

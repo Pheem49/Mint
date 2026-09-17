@@ -12,7 +12,7 @@ export const DEFAULT_CONFIG = {
   customBgEnd: '#1e1b4b',
   customPanelBg: '#1e293b',
   glassBlur: 'blur(16px)',
-  fontFamily: "'Outfit', sans-serif",
+  fontFamily: "'Prompt', 'Noto Sans Thai', 'Inter', sans-serif",
   fontSize: '18px',
   apiKey: '',
   aiProvider: 'gemini',
