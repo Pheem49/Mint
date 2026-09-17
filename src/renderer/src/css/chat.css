@@ -404,23 +404,23 @@
 
 .chat-heading {
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-main, #ffffff);
   margin-top: 16px;
   margin-bottom: 8px;
   line-height: 1.45;
   letter-spacing: -0.015em;
 }
 
-.chat-heading-1 { font-size: 1.3rem; color: #ffffff; }
+.chat-heading-1 { font-size: 1.3rem; color: var(--text-main, #ffffff); }
 
-.chat-heading-2 { font-size: 1.18rem; color: #ffffff; }
+.chat-heading-2 { font-size: 1.18rem; color: var(--text-main, #ffffff); }
 
-.chat-heading-3 { font-size: 1.06rem; color: #ffffff; }
+.chat-heading-3 { font-size: 1.06rem; color: var(--text-main, #ffffff); }
 
 .chat-section-title {
   font-size: 1.02rem;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-main, #ffffff);
   padding-bottom: 2px;
   margin-top: 14px;
   margin-bottom: 8px;
@@ -482,7 +482,7 @@
 
 .chat-bold-highlight {
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-chat, var(--text-main, inherit));
 }
 
 .chat-inline-code {
@@ -2843,7 +2843,7 @@ input:checked + .slider:before {
 
 .chat-provider-select option:checked {
   background: linear-gradient(var(--accent), var(--accent));
-  color: #ffffff;
+  color: var(--accent-contrast, #ffffff);
 }
 
 #mic-btn {
@@ -2904,7 +2904,7 @@ input:checked + .slider:before {
 
 #send-btn {
   background: linear-gradient(135deg, var(--accent), var(--accent-hover));
-  color: white;
+  color: var(--accent-contrast, #ffffff);
   box-shadow: var(--glow-accent-md);
 }
 
@@ -2943,16 +2943,17 @@ input:checked + .slider:before {
 /* Chat Bold Highlight styling */
 
 .chat-bold-highlight {
-  color: #38bdf8; /* Soft blue (sky-400) for default/dark theme */
+  color: var(--text-chat, var(--text-main, inherit));
   font-weight: 600;
 }
 
 [data-theme="light"] .chat-bold-highlight {
-  color: #0284c7; /* Sky-600 for light theme */
+  color: var(--text-chat, #0f172a);
 }
 
+[data-theme="dark"] .chat-bold-highlight,
 [data-theme="midnight"] .chat-bold-highlight {
-  color: #38bdf8; /* Sky-400 for midnight theme */
+  color: var(--text-chat, #ffffff);
 }
 
 /* System Event Divider with Pill */

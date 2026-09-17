@@ -24,7 +24,7 @@
     align-items: center;
     justify-content: center;
     background: var(--accent);
-    color: #ffffff;
+    color: var(--accent-contrast, #ffffff);
     font-size: 1.3rem;
     font-weight: 700;
     cursor: pointer;

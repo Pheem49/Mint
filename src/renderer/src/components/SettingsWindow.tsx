@@ -564,6 +564,12 @@ export default function SettingsWindow() {
     applyThemeStyles(updated)
   }
 
+  const updateFields = (patch: Partial<typeof DEFAULT_CONFIG>) => {
+    const updated = { ...config, ...patch }
+    setConfig(updated)
+    applyThemeStyles(updated)
+  }
+
   return (
     <div className="settings-container">
       <header className="settings-header drag-region">
@@ -703,6 +709,7 @@ export default function SettingsWindow() {
             <ThemeTab
               config={config}
               updateField={updateField}
+              updateFields={updateFields}
             />
           )}
 

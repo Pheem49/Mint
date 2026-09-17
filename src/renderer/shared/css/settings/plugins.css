@@ -158,7 +158,7 @@
 
 .plugin-tag.accent {
     background: var(--accent);
-    color: #fff;
+    color: var(--accent-contrast, #fff);
 }
 
 .plugin-tag.ok {
@@ -219,7 +219,7 @@
 
 .btn-icon.is-active {
     background: var(--accent);
-    color: #fff;
+    color: var(--accent-contrast, #fff);
 }
 
 .btn-icon.danger {

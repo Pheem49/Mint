@@ -1,5 +1,26 @@
 # Release Notes - Mint Agent v1.15.0
 
+## Theme Presets: 3 One-Click Visual Themes (Web & Desktop UI)
+
+Added ready-to-use **Theme Presets** to the **Settings > Appearance > Theme & UI** panel for Web and Desktop UI:
+
+1. **Dark Mint**: พื้นหลังสีดำ (`#0a0a0b`) · สีองค์ประกอบสีเขียว (`#10b981`) · สีตัวหนังสือสีขาว (`#ffffff`)
+2. **Light Mint**: พื้นหลังสีขาว (`#f8fafc`) · สีองค์ประกอบสีเขียว (`#10b981`) · สีตัวหนังสือสีดำ (`#000000` / `#0f172a`)
+3. **Dark Monochrome**: พื้นหลังสีดำ (`#0a0a0b`) · สีองค์ประกอบสีขาว (`#ffffff`) · สีตัวหนังสือสีขาว (`#ffffff`)
+
+- **Interactive Preset Grid**:
+  - Interactive cards featuring miniature preview windows showing simulated UI elements (window dots, accent pill badge, typography preview, and color swatch dots).
+  - One-click application updating theme, accent color, system text color, and chat text color simultaneously.
+  - Active checkmark badge and glowing border when the active settings match a preset.
+- **Dynamic Contrast & Light Mode Audits**:
+  - Automatically calculates `--accent-contrast` based on accent relative luminance, ensuring buttons and chips with white accent backgrounds (Preset 3) maintain dark, high-contrast text rather than white-on-white.
+  - Fixed hardcoded `#ffffff !important` on `.chat-bold-highlight` across Web and Desktop CSS, resolving invisible bold text in light mode.
+  - Fixed hardcoded `#ffffff` on `.chat-heading-1..3` and `.chat-section-title` in `chat.css` to use dynamic `var(--text-main)`.
+  - Refactored `.btn-secondary` in settings (`base.css`) from hardcoded `#252526` to `var(--surface-strong)` and `var(--text-main)`, allowing "Reset Defaults", "Set active", and secondary buttons to adapt cleanly to light backgrounds.
+  - Added dedicated light-theme styling for `.chat-inline-code` badges and code syntax highlight tokens.
+- **White Accent Support**:
+  - Added `#ffffff` directly to Accent Color swatches with high-contrast checkmarks.
+
 ## Next-Gen Rich Markdown System: UI Components, Concept Mockups & Callouts (Desktop, Web & CLI)
 
 Inspired by modern generative UI design, overhauled the markdown presentation pipeline across all 3 platforms (**Desktop UI**, **Web UI**, and **CLI**):

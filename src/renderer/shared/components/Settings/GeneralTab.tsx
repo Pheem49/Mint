@@ -413,7 +413,7 @@ export default function GeneralTab({
               }
 
               return (
-                <div className="setting-row stacked" style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '8px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                <div className="setting-row stacked" style={{ marginTop: '0.75rem', padding: '0.75rem', borderRadius: '8px', background: 'var(--surface-strong)', border: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
                     <label style={{ margin: 0, fontWeight: 600, display: 'flex', alignItems: 'baseline', gap: '0.45rem' }}>
                       <span>Model Temperature</span>
@@ -448,7 +448,7 @@ export default function GeneralTab({
                       step="0.05"
                       value={currentTemp}
                       onChange={(e) => handleChange(parseFloat(e.target.value))}
-                      style={{ flex: 1, accentColor: 'var(--accent-color, #10b981)', cursor: 'pointer' }}
+                      style={{ flex: 1, accentColor: 'var(--accent, #10b981)', cursor: 'pointer' }}
                     />
                     <span style={{ fontSize: '0.85rem', minWidth: '2.5rem', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
                       {currentTemp.toFixed(2)}

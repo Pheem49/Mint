@@ -283,9 +283,30 @@ button {
 }
 
 .chat-bold-highlight {
-  color: #ffffff !important;
+  color: var(--text-chat, var(--text-main, inherit));
   font-weight: 600;
 }
+
+[data-theme="light"] .chat-bold-highlight {
+  color: var(--text-chat, #0f172a);
+}
+
+[data-theme="dark"] .chat-bold-highlight,
+[data-theme="midnight"] .chat-bold-highlight {
+  color: var(--text-chat, #ffffff);
+}
+
+[data-theme="light"] .token-string { color: #047857; }
+[data-theme="light"] .token-flag { color: #b45309; }
+[data-theme="light"] .token-comment { color: #64748b; }
+[data-theme="light"] .token-number { color: #c2410c; }
+[data-theme="light"] .token-variable { color: #be185d; }
+[data-theme="light"] .token-property { color: #1d4ed8; }
+[data-theme="light"] .token-function { color: #0284c7; }
+[data-theme="light"] .token-type { color: #6d28d9; }
+[data-theme="light"] .token-boolean { color: #e11d48; }
+[data-theme="light"] .token-operator { color: #475569; }
+[data-theme="light"] .token-punctuation { color: #475569; }
 
 /* Tech Pill Inline Code (ChatGPT style) */
 .chat-inline-code {
@@ -300,6 +321,13 @@ button {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
   display: inline-block;
   vertical-align: baseline;
+}
+
+[data-theme="light"] .chat-inline-code {
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  color: var(--text-chat, #0f172a);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 /* Premium Table Styles for Chat Panel */

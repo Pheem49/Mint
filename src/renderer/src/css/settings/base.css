@@ -452,7 +452,7 @@ select option {
 
 select option:checked {
     background: linear-gradient(var(--accent), var(--accent)) !important;
-    color: #ffffff !important;
+    color: var(--accent-contrast, #ffffff) !important;
 }
 
 [data-theme="light"] select {
@@ -701,7 +701,7 @@ input:checked + .settings-toggle-slider::before {
 .btn-primary {
     border: 1px solid transparent;
     background: var(--accent);
-    color: #ffffff;
+    color: var(--accent-contrast, #ffffff);
     box-shadow: none;
 }
 
@@ -715,11 +715,12 @@ input:checked + .settings-toggle-slider::before {
 
 .btn-secondary {
     border: 1px solid var(--border);
-    background: #252526;
-    color: var(--text-soft);
+    background: var(--surface-strong);
+    color: var(--text-main);
 }
 
 .btn-secondary:hover {
+    background: var(--surface-hover);
     border-color: var(--border-strong);
     color: var(--text-main);
 }

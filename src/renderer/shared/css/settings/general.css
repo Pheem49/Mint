@@ -39,7 +39,7 @@
 .btn-connect {
     border: 1px solid transparent;
     background: var(--accent);
-    color: #ffffff;
+    color: var(--accent-contrast, #ffffff);
 }
 
 /* Provider Cards styling */

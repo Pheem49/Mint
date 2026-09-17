@@ -166,6 +166,8 @@ export const applyThemeStyles = (cfg: any): void => {
   document.documentElement.style.setProperty('--accent-glow', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.35)`)
   document.documentElement.style.setProperty('--accent-subtle', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.15)`)
   document.documentElement.style.setProperty('--accent-border', `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3)`)
+  const isLightAccent = (0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b) > 160
+  document.documentElement.style.setProperty('--accent-contrast', isLightAccent ? '#09090b' : '#ffffff')
   const chatTextColor = cfg.chatTextColor || systemTextColor
   document.documentElement.style.setProperty('--text-main', systemTextColor)
   document.documentElement.style.setProperty('--text-chat', chatTextColor)

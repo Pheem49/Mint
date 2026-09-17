@@ -1,12 +1,100 @@
 import React from 'react'
 import { DEFAULT_CONFIG } from '../../constants/config'
 
+interface ThemePreset {
+  id: string
+  name: string
+  description: string
+  theme: 'dark' | 'light' | 'midnight'
+  accentColor: string
+  systemTextColor: string
+  chatTextColor: string
+  bgPreview: string
+  panelPreview: string
+  accentPreview: string
+  textPreview: string
+}
+
+const THEME_PRESETS: ThemePreset[] = [
+  {
+    id: 'preset-dark-mint',
+    name: 'Dark Mint',
+    description: 'Black background · Green elements · White text',
+    theme: 'dark',
+    accentColor: '#10b981',
+    systemTextColor: '#ffffff',
+    chatTextColor: '#ffffff',
+    bgPreview: '#0a0a0b',
+    panelPreview: '#18181a',
+    accentPreview: '#10b981',
+    textPreview: '#ffffff',
+  },
+  {
+    id: 'preset-light-mint',
+    name: 'Light Mint',
+    description: 'White background · Green elements · Black text',
+    theme: 'light',
+    accentColor: '#10b981',
+    systemTextColor: '#000000',
+    chatTextColor: '#000000',
+    bgPreview: '#f8fafc',
+    panelPreview: '#ffffff',
+    accentPreview: '#10b981',
+    textPreview: '#0f172a',
+  },
+  {
+    id: 'preset-dark-mono',
+    name: 'Dark Monochrome',
+    description: 'Black background · White elements · White text',
+    theme: 'dark',
+    accentColor: '#ffffff',
+    systemTextColor: '#ffffff',
+    chatTextColor: '#ffffff',
+    bgPreview: '#0a0a0b',
+    panelPreview: '#18181a',
+    accentPreview: '#ffffff',
+    textPreview: '#ffffff',
+  },
+]
+
 interface ThemeTabProps {
   config: typeof DEFAULT_CONFIG
   updateField: (field: keyof typeof DEFAULT_CONFIG, value: any) => void
+  updateFields?: (fields: Partial<typeof DEFAULT_CONFIG>) => void
 }
 
-export default function ThemeTab({ config, updateField }: ThemeTabProps) {
+export default function ThemeTab({ config, updateField, updateFields }: ThemeTabProps) {
+  const isPresetActive = (preset: ThemePreset) => {
+    if (config.theme !== preset.theme) return false
+    if ((config.accentColor || '').toLowerCase() !== preset.accentColor.toLowerCase()) return false
+
+    const curText = (config.systemTextColor || '').toLowerCase()
+    if (preset.systemTextColor === '#ffffff') {
+      return curText === '#ffffff' || curText === '#f8fafc' || curText === ''
+    }
+    if (preset.systemTextColor === '#000000') {
+      return curText === '#000000' || curText === '#0f172a'
+    }
+    return curText === preset.systemTextColor.toLowerCase()
+  }
+
+  const handleApplyPreset = (preset: ThemePreset) => {
+    const patch = {
+      theme: preset.theme,
+      accentColor: preset.accentColor,
+      systemTextColor: preset.systemTextColor,
+      chatTextColor: preset.chatTextColor,
+    }
+    if (updateFields) {
+      updateFields(patch)
+    } else {
+      updateField('theme', preset.theme)
+      updateField('accentColor', preset.accentColor)
+      updateField('systemTextColor', preset.systemTextColor)
+      updateField('chatTextColor', preset.chatTextColor)
+    }
+  }
+
   return (
     <div className="tab-pane active">
       <section className="setting-section">
@@ -16,6 +104,104 @@ export default function ThemeTab({ config, updateField }: ThemeTabProps) {
             <h2 className="section-title">Theme</h2>
           </div>
         </div>
+
+        {/* Theme Presets */}
+        <div className="setting-row stacked">
+          <div className="theme-preset-header">
+            <div>
+              <label>Theme Presets</label>
+              <p className="hint">Select from 3 curated presets (Background · Elements · Typography)</p>
+            </div>
+          </div>
+          <div className="theme-preset-grid" role="radiogroup" aria-label="Theme Presets">
+            {THEME_PRESETS.map((preset, index) => {
+              const active = isPresetActive(preset)
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  className={`theme-preset-card ${active ? 'active' : ''}`}
+                  onClick={() => handleApplyPreset(preset)}
+                >
+                  <div
+                    className="theme-preset-preview"
+                    style={{ background: preset.bgPreview }}
+                  >
+                    <div
+                      className="preset-mini-window"
+                      style={{ background: preset.panelPreview }}
+                    >
+                      <div className="preset-mini-header">
+                        <span className="preset-mini-dot dot-red" />
+                        <span className="preset-mini-dot dot-yellow" />
+                        <span className="preset-mini-dot dot-green" />
+                        <span
+                          className="preset-mini-pill"
+                          style={{
+                            background: preset.accentPreview,
+                            color: preset.accentPreview === '#ffffff' ? '#0a0a0b' : '#ffffff',
+                          }}
+                        >
+                          Mint
+                        </span>
+                      </div>
+                      <div className="preset-mini-body">
+                        <div
+                          className="preset-mini-text"
+                          style={{ color: preset.textPreview }}
+                        >
+                          Aa
+                        </div>
+                        <div className="preset-mini-lines">
+                          <span
+                            className="preset-mini-line-main"
+                            style={{ background: preset.textPreview, opacity: 0.85 }}
+                          />
+                          <span
+                            className="preset-mini-line-accent"
+                            style={{ background: preset.accentPreview }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="theme-preset-meta">
+                    <div className="theme-preset-title-row">
+                      <span className="theme-preset-number">{index + 1}.</span>
+                      <span className="theme-preset-title">{preset.name}</span>
+                      {active && (
+                        <span className="theme-preset-active-check" title="Active preset">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                          </svg>
+                        </span>
+                      )}
+                    </div>
+                    <p className="theme-preset-desc">{preset.description}</p>
+                    <div className="theme-preset-swatches">
+                      <span className="preset-swatch-item" title="Background color">
+                        <span className="preset-swatch-circle" style={{ background: preset.bgPreview, border: '1px solid rgba(255,255,255,0.25)' }} />
+                        <span className="preset-swatch-label">Background</span>
+                      </span>
+                      <span className="preset-swatch-item" title="Elements color">
+                        <span className="preset-swatch-circle" style={{ background: preset.accentPreview, border: preset.accentPreview === '#ffffff' ? '1px solid rgba(0,0,0,0.2)' : 'none' }} />
+                        <span className="preset-swatch-label">Elements</span>
+                      </span>
+                      <span className="preset-swatch-item" title="Typography color">
+                        <span className="preset-swatch-circle" style={{ background: preset.textPreview, border: preset.textPreview === '#ffffff' ? '1px solid rgba(255,255,255,0.4)' : '1px solid rgba(0,0,0,0.2)' }} />
+                        <span className="preset-swatch-label">Text</span>
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
         <div className="setting-row stacked">
           <label>Appearance</label>
           <div className="theme-segmented" role="radiogroup" aria-label="Theme">
@@ -119,25 +305,33 @@ export default function ThemeTab({ config, updateField }: ThemeTabProps) {
           <div className="setting-row">
             <label>Accent Color</label>
             <div className="color-presets">
-              {['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899'].map(c => (
-                <button
-                  key={c}
-                  className="color-dot"
-                  style={{
-                    backgroundColor: c,
-                    border: config.accentColor === c ? '2px solid white' : '2px solid transparent',
-                    boxShadow: config.accentColor === c ? `0 0 10px ${c}` : 'none',
-                  }}
-                  onClick={() => updateField('accentColor', c)}
-                  aria-label={`Select accent color ${c}`}
-                >
-                  {config.accentColor === c && (
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12"></polyline>
-                    </svg>
-                  )}
-                </button>
-              ))}
+              {['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#ffffff'].map(c => {
+                const isSelected = (config.accentColor || '').toLowerCase() === c.toLowerCase()
+                const isWhite = c.toLowerCase() === '#ffffff'
+                return (
+                  <button
+                    key={c}
+                    className="color-dot"
+                    style={{
+                      backgroundColor: c,
+                      border: isSelected
+                        ? (isWhite ? '2px solid #10b981' : '2px solid white')
+                        : (isWhite ? '1px solid rgba(255, 255, 255, 0.35)' : '2px solid transparent'),
+                      boxShadow: isSelected
+                        ? (isWhite ? '0 0 10px rgba(255, 255, 255, 0.7)' : `0 0 10px ${c}`)
+                        : 'none',
+                    }}
+                    onClick={() => updateField('accentColor', c)}
+                    aria-label={`Select accent color ${c}`}
+                  >
+                    {isSelected && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isWhite ? '#09090b' : 'white'} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                      </svg>
+                    )}
+                  </button>
+                )
+              })}
             </div>
           </div>
           <div className="setting-row">
